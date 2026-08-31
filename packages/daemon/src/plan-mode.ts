@@ -312,6 +312,8 @@ const PLAN_ALWAYS_ALLOWED_TOOLS = new Set([
   ASK_TOOL_NAME,
   "inspect_image",
   "propose_plan",
+  "task_list",
+  "task_get",
 ]);
 const PLAN_JOB_OPS = new Set(["list", "wait"]);
 const PLAN_TODO_OPS = new Set(["view"]);
@@ -337,6 +339,10 @@ export function planModeRefusal(state: PlanState, toolName: string, input: unkno
       return "Plan mode: files are read-only; propose_plan is the only plan writer.";
     case "bash":
       return "Plan mode: Bash is unavailable to the model; use read, grep, find, or ls.";
+    case "task":
+    case "task_send":
+    case "task_cancel":
+      return "Plan mode: delegated coding tasks are observational until the plan is approved.";
     case "jobs":
       return selectorAllowed(input, "op", PLAN_JOB_OPS)
         ? null
@@ -366,7 +372,7 @@ export function planSections(book: PlanBook): string[] {
     sections.push([
       "# Plan mode",
       "You are planning, not doing: read, search, inspect, and think, but change nothing. Bash, generic file writes/edits, screenshots, memory writes, and every other mutation are blocked.",
-      "Use native read (including for character.md), grep, find, and ls for files; ask for decisions; and use only the observational forms of browser, desktop, jobs, todo, and image inspection tools.",
+      "Use native read (including for character.md), grep, find, and ls for files; ask for decisions; and use only the observational forms of browser, desktop, jobs, todo, task status, and image inspection tools.",
       "When the approach is clear, call propose_plan with a title and the complete plan in Markdown. It is the only plan writer. The owner approves or asks for revisions; approval ends plan mode.",
     ].join("\n"));
   } else if (state.plan) {

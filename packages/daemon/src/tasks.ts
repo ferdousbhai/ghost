@@ -11,6 +11,7 @@ export const TASK_RECORD_VERSION = 1;
 export const TASK_BINDING_VERSION = 1;
 export const TASKS_DIRNAME = ".tasks";
 export const MAX_TASK_TEXT = 32_768;
+export const MAX_TASK_AGENT = 256;
 export const MAX_TASK_RESULT = 65_536;
 export const MAX_TASK_EVENTS = 64;
 export const MAX_TASK_EVENT_MESSAGE = 1_024;
@@ -19,8 +20,8 @@ export type TaskState = "queued" | "starting" | "running" | "cancelling"
   | "completed" | "failed" | "cancelled" | "interrupted";
 export interface TaskBindingReceipt {
   version: 1;
-  root: string | null;
-  rootIdentity: string | null;
+  root: string;
+  rootIdentity: string;
   cwd: string;
   cwdIdentity: string;
   generation: number;
@@ -33,6 +34,7 @@ export interface TaskRecord {
   generation: number;
   parent: ConversationIdentity;
   harness: string;
+  agent: string | null;
   task: string;
   binding: TaskBindingReceipt;
   state: TaskState;
@@ -45,7 +47,7 @@ export interface TaskRecord {
   error: TaskFailure | null;
 }
 export interface TaskBindingAuthority {
-  revalidate(receipt: TaskBindingReceipt, signal: AbortSignal): Promise<TaskBindingReceipt>;
+  revalidate(receipt: TaskBindingReceipt, signal: AbortSignal, parent: ConversationIdentity): Promise<TaskBindingReceipt>;
 }
 export interface TaskAdapterControl { force(): Promise<void>; quiescence: Promise<void> }
 export interface TaskAdapterContext {
@@ -55,7 +57,7 @@ export interface TaskAdapterContext {
 }
 export interface TaskAdapterHandle { result: Promise<string>; followUp(message: string): Promise<void> }
 export interface TaskAdapter {
-  start(input: Readonly<{ id: string; task: string; cwd: string; binding: TaskBindingReceipt }>, context: TaskAdapterContext): Promise<TaskAdapterHandle>;
+  start(input: Readonly<{ id: string; task: string; agent: string | null; cwd: string; binding: TaskBindingReceipt }>, context: TaskAdapterContext): Promise<TaskAdapterHandle>;
 }
 
 const STATES = new Set<TaskState>(["queued", "starting", "running", "cancelling", "completed", "failed", "cancelled", "interrupted"]);
@@ -105,14 +107,13 @@ function validBinding(value: unknown): value is TaskBindingReceipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value as Record<string, unknown>;
   const valid = exactKeys(row, ["version", "root", "rootIdentity", "cwd", "cwdIdentity", "generation"])
-    && row.version === 1 && (row.root === null || typeof row.root === "string")
-    && (row.rootIdentity === null || typeof row.rootIdentity === "string")
+    && row.version === 1
+    && typeof row.root === "string" && row.root.length > 0 && row.root.length <= 4096
+    && Buffer.byteLength(row.root, "utf8") <= 4096 && isAbsolute(row.root) && resolve(row.root) === row.root
+    && typeof row.rootIdentity === "string" && row.rootIdentity.length > 0 && row.rootIdentity.length <= 256
     && typeof row.cwd === "string" && row.cwd.length <= 4096 && Buffer.byteLength(row.cwd, "utf8") <= 4096 && isAbsolute(row.cwd) && resolve(row.cwd) === row.cwd
     && typeof row.cwdIdentity === "string" && row.cwdIdentity.length > 0 && row.cwdIdentity.length <= 256
-    && Number.isSafeInteger(row.generation) && Number(row.generation) >= 0 && Number(row.generation) <= MAX_COUNTER
-    && ((row.root === null && row.rootIdentity === null)
-      || (typeof row.root === "string" && row.root.length <= 4096 && Buffer.byteLength(row.root, "utf8") <= 4096 && isAbsolute(row.root) && resolve(row.root) === row.root
-        && typeof row.rootIdentity === "string" && row.rootIdentity.length > 0 && row.rootIdentity.length <= 256));
+    && Number.isSafeInteger(row.generation) && Number(row.generation) >= 0 && Number(row.generation) <= MAX_COUNTER;
   return valid && cwdWithinRoot(row as unknown as TaskBindingReceipt);
 }
 function sameBinding(left: TaskBindingReceipt, right: TaskBindingReceipt): boolean {
@@ -120,7 +121,6 @@ function sameBinding(left: TaskBindingReceipt, right: TaskBindingReceipt): boole
     && left.cwd === right.cwd && left.cwdIdentity === right.cwdIdentity && left.generation === right.generation;
 }
 function cwdWithinRoot(binding: TaskBindingReceipt): boolean {
-  if (binding.root === null) return true;
   const child = relative(binding.root, binding.cwd);
   return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
@@ -131,13 +131,20 @@ function validParent(value: unknown): value is ConversationIdentity {
   const parsed = parseConversationIdentity(row.id);
   return !!parsed && parsed.conversationId === row.conversationId && parsed.runtime === row.runtime;
 }
+function sameParent(left: ConversationIdentity, right: ConversationIdentity): boolean {
+  return left.id === right.id
+    && left.runtime === right.runtime
+    && left.conversationId === right.conversationId;
+}
 function parseRecord(value: unknown): TaskRecord {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("invalid_task_record", "The task record is invalid.");
   const row = value as Record<string, unknown>;
-  const keys = ["version", "id", "generation", "parent", "harness", "task", "binding", "state", "createdAt", "updatedAt", "events", "eventCursor", "result", "resultTruncated", "error"];
+  const keys = ["version", "id", "generation", "parent", "harness", "agent", "task", "binding", "state", "createdAt", "updatedAt", "events", "eventCursor", "result", "resultTruncated", "error"];
   if (!exactKeys(row, keys) || row.version !== 1 || typeof row.id !== "string" || !ID.test(row.id)
     || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1 || Number(row.generation) > MAX_COUNTER || !validParent(row.parent)
     || typeof row.harness !== "string" || !HARNESS.test(row.harness)
+    || !(row.agent === null || (typeof row.agent === "string" && row.agent.length > 0
+      && row.agent.length <= MAX_TASK_AGENT && Buffer.byteLength(row.agent, "utf8") <= MAX_TASK_AGENT * 4))
     || typeof row.task !== "string" || row.task.length < 1 || row.task.length > MAX_TASK_TEXT
     || !validBinding(row.binding) || typeof row.state !== "string" || !STATES.has(row.state as TaskState)
     || !canonicalTimestamp(row.createdAt) || !canonicalTimestamp(row.updatedAt)
@@ -292,6 +299,8 @@ export class TaskController {
     return this.#initialization;
   }
   #ready(): void { if (!this.#initialized) fail("tasks_uninitialized", "Tasks are not initialized.", 503); }
+  get(id: string): Promise<TaskRecord> { this.#ready(); return this.store.read(id); }
+  list(): Promise<TaskRecord[]> { this.#ready(); return this.store.list(); }
   #actor<T>(id: string, action: () => Promise<T>): Promise<T> {
     const prior = this.#actors.get(id) ?? Promise.resolve(); const result = prior.catch(() => {}).then(action);
     const tail = result.then(() => undefined, () => undefined); this.#actors.set(id, tail);
@@ -307,13 +316,16 @@ export class TaskController {
     record.events.push({ sequence, at: highWaterTimestamp(record, this.now().toISOString()), code, message: safeText(message, MAX_TASK_EVENT_MESSAGE).text });
     if (record.events.length > MAX_TASK_EVENTS) { record.events.shift(); record.eventCursor.dropped += 1; }
   }
-  async start(input: { parent: ConversationIdentity; harness: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
+  async start(input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
     this.#ready(); if (this.#shuttingDown) fail("tasks_shutting_down", "Tasks are shutting down.", 503);
-    if (!validParent(input.parent) || !HARNESS.test(input.harness) || !input.task || input.task.length > MAX_TASK_TEXT || !validBinding(input.binding)) fail("invalid_task", "The task request is invalid.");
+    if (!validParent(input.parent) || !HARNESS.test(input.harness) || !input.task || input.task.length > MAX_TASK_TEXT
+      || (input.agent !== undefined && (!input.agent || input.agent.length > MAX_TASK_AGENT
+        || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4))
+      || !validBinding(input.binding)) fail("invalid_task", "The task request is invalid.");
     if (!this.adapters.has(input.harness)) fail("task_harness_unavailable", "That task harness is unavailable.", 409);
     const at = this.now().toISOString(); const id = `task-${randomUUID()}`;
     const expectedBinding = bindingCopy(input.binding);
-    const record: TaskRecord = { version: 1, id, generation: 1, parent: { ...input.parent }, harness: input.harness,
+    const record: TaskRecord = { version: 1, id, generation: 1, parent: { ...input.parent }, harness: input.harness, agent: input.agent ?? null,
       task: safeText(input.task, MAX_TASK_TEXT).text, binding: expectedBinding, state: "queued", createdAt: at, updatedAt: at,
       events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: null, resultTruncated: false, error: null };
     const abort = new AbortController();
@@ -341,7 +353,7 @@ export class TaskController {
       if (record.generation !== generation || record.state !== "starting") return;
       const expected = bindingCopy(record.binding);
       const authorityInput = bindingCopy(expected);
-      const authorityResult = await abortable(this.authority.revalidate(authorityInput, abort.signal), abort.signal);
+      const authorityResult = await abortable(this.authority.revalidate(authorityInput, abort.signal, { ...record.parent }), abort.signal);
       if (!validBinding(authorityResult)) throw new Error("binding changed");
       const binding = bindingCopy(authorityResult);
       if (!sameBinding(binding, expected)) throw new Error("binding changed");
@@ -353,7 +365,7 @@ export class TaskController {
         let control: TaskAdapterControl | undefined;
         let handle: Promise<TaskAdapterHandle>;
         try {
-          handle = Promise.resolve(adapter.start({ id, task: current.task, cwd: binding.cwd, binding: bindingCopy(binding) }, {
+          handle = Promise.resolve(adapter.start({ id, task: current.task, agent: current.agent, cwd: binding.cwd, binding: bindingCopy(binding) }, {
             signal: abort.signal,
             register(value) { if (control) throw new Error("control registered twice"); control = value; },
             emit: (event) => this.#emit(id, generation, event),
@@ -429,10 +441,13 @@ export class TaskController {
     void tail.finally(() => { if (this.#followUps.get(id) === tail) this.#followUps.delete(id); });
     return result;
   }
-  followUp(id: string, message: string): Promise<TaskRecord> {
+  followUp(id: string, message: string, parent?: ConversationIdentity): Promise<TaskRecord> {
     this.#ready(); return this.#serializeFollowUp(id, async () => {
       const admitted = await this.#actor(id, async () => {
         const row = await this.store.read(id);
+        if (parent && !sameParent(row.parent, parent)) {
+          fail("task_not_found", "Task not found.", 404);
+        }
         if (row.state !== "running" || !message || message.length > MAX_TASK_TEXT) fail("task_not_running", "Follow-up requires a running task.", 409);
         const live = this.#live.get(id);
         if (!live || live.generation !== row.generation) fail("task_not_running", "The native task is not running.", 409);
@@ -452,7 +467,13 @@ export class TaskController {
       return this.store.read(id);
     });
   }
-  cancel(id: string): Promise<TaskRecord> { this.#ready(); return this.#sharedStop(id, "cancelled"); }
+  async cancel(id: string, parent?: ConversationIdentity): Promise<TaskRecord> {
+    this.#ready();
+    if (parent && !sameParent((await this.store.read(id)).parent, parent)) {
+      fail("task_not_found", "Task not found.", 404);
+    }
+    return this.#sharedStop(id, "cancelled");
+  }
   #sharedStop(id: string, final: "cancelled" | "interrupted"): Promise<TaskRecord> {
     if (final === "interrupted" || !this.#stopTargets.has(id)) this.#stopTargets.set(id, final);
     const launch = this.#launches.get(id); launch?.abort.abort();

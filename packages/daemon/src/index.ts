@@ -61,6 +61,7 @@ export {
   resolveClaudeCodeExecutable,
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryFactory,
+  type ClaudePrincipalTaskContextFactory,
   type ClaudeCodeProbeOptions,
   type ClaudeCodeProbeResult,
   type ClaudeCodeRuntimeOptions,
@@ -455,6 +456,14 @@ export {
   type GenerateTitleInput,
 } from "./title.js";
 export {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_POLICY,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskContext,
+  type PrincipalTaskServices,
+} from "./principal-task-tools.js";
+export {
+  MAX_TASK_AGENT,
   MAX_TASK_EVENT_MESSAGE,
   MAX_TASK_EVENTS,
   MAX_TASK_RESULT,

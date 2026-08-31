@@ -208,7 +208,6 @@ function taskContext(): {
 function harness(
   mode: SdkMode,
   resistant = false,
-  agent?: string,
 ) {
   const fake = fakeClaude(resistant);
   const capturedOptions: ClaudeQueryOptions[] = [];
@@ -235,7 +234,6 @@ function harness(
       ANTHROPIC_API_KEY: "must-not-cross",
       SECRET_SENTINEL: "must-not-cross",
     },
-    ...(agent === undefined ? {} : { agent }),
   });
   return { adapter, fake, capturedOptions, messages, interrupts };
 }
@@ -268,10 +266,10 @@ async function waitForFile(path: string): Promise<void> {
 describe("Claude delegated task adapter", () => {
   it("uses only native defaults plus bypass mode and passes an opaque agent unchanged", async () => {
     const opaqueAgent = "owner-defined-agent";
-    const fixture = harness("complete", false, opaqueAgent);
+    const fixture = harness("complete");
     const context = taskContext();
     const handle = await fixture.adapter.start({
-      id: "task-1", task: "do the work", cwd: fixture.fake.root, binding,
+      id: "task-1", task: "do the work", agent: opaqueAgent, cwd: fixture.fake.root, binding,
     }, context.context);
     await expect(handle.result).resolves.toBe("safe answer");
 

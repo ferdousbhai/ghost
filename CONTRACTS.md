@@ -416,13 +416,17 @@ credential exception: portable files contain references rather than values.
 The one owner may delegate an independent task from a conversation. Each task
 is one mode-0600 atomic JSON record under the ghost home's mode-0700 `.tasks/`
 directory. Its API-facing shape is `{ version: 1, id, generation, parent,
-harness, task, binding, state, createdAt, updatedAt, events, eventCursor,
+harness, agent, task, binding, state, createdAt, updatedAt, events, eventCursor,
 result, resultTruncated, error }`. `parent` is the runtime-qualified
-conversation identity. `binding` is an exact `task-binding/v1` authority
+conversation identity. `agent` is null except for an optional, bounded opaque
+Claude Code agent name; Ghost passes it through without interpreting it.
+`binding` is an exact `task-binding/v1` authority
 receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
 The project-binding authority revalidates that opaque receipt with the task's
-abort signal immediately before native spawn. Root and cwd are canonical,
-byte-bounded, and cwd is lexically within a non-null root; receipt comparison
+runtime-qualified parent and abort signal immediately before native spawn. The
+receipt is minted only from that parent's current durable, trusted project
+binding; an unbound conversation cannot delegate coding work. Root and cwd are
+canonical, byte-bounded, and cwd is lexically within a non-null root; receipt comparison
 binds every path, identity, and generation field independent of JSON key order.
 A start snapshots that receipt before its first await. The authority and native
 adapter each receive a separate frozen copy, so in-place mutation cannot change
@@ -525,6 +529,34 @@ opaque SDK value and is neither parsed nor reimplemented by Ghost. Follow-ups
 are priority-now streaming user input. SDK stderr, assistant/tool/protocol
 frames, error detail, and usage remain native-only; only the verified native
 initialization and successful bounded terminal result affect task state.
+
+The principal Ghost, on either pi or Claude Code, may create and supervise
+these subordinate coding workers through exactly `task`, `task_list`,
+`task_get`, `task_send`, and `task_cancel`. Task ids are visible only to the
+runtime-qualified parent conversation that created them; the same raw
+conversation id on the other runtime is a different parent and receives a
+404. List and detail projections are bounded and omit binding identities and
+raw native protocol. `task` accepts a complete assignment, one of `pi`,
+`codex`, or `claude-code`, an optional cwd inside the parent's current trusted
+project, and an optional opaque agent only for Claude Code. The principal owns
+the outcome and chooses when to delegate, follow up, or cancel; the worker owns
+coding mechanics. Delegation is additive: it does not replace the Ghost's
+memory, Documents, planning/todo, continuity, schedules, communications,
+browser/computer/CLI, recap, queue, titles, or any other owner-agent behavior.
+In pi plan mode `task_list` and `task_get` remain observational; creation,
+follow-up, and cancellation are blocked.
+
+Task services attach to a session host once, before any pi or Claude session
+activity. Double or late attachment is rejected. A task controller is scoped
+to one ghost home and receives that ghost's project-binding authority before
+initialization; the principal tool mints the exact parent receipt at creation,
+and the controller revalidates it immediately before adapter spawn. Task-store
+attachment begins restart recovery for every existing ghost. Initialization is
+mandatory for every task operation but its failure cannot prevent the
+principal conversation from starting; a task boundary failure is surfaced by
+the task tool. The task
+layer and all native adapters remain forbidden from running Git worktree,
+staging, commit, or branch commands.
 
 ### Session capabilities
 

@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ConversationRuntime } from "./conversation-identity.js";
+import type { ConversationIdentity, ConversationRuntime } from "./conversation-identity.js";
 import { readDaemonControlFile } from "./control-file.js";
 import {
   descriptorPath,
@@ -29,6 +29,7 @@ import {
   writePiProjectSnapshot,
 } from "./project-snapshot.js";
 import { sessionFileNameFor } from "./session-files.js";
+import type { TaskBindingAuthority, TaskBindingReceipt } from "./tasks.js";
 
 export const PROJECT_BINDING_VERSION = 1;
 export const PROJECT_TRUST_VERSION = 1;
@@ -754,6 +755,87 @@ export class ProjectBindingStore {
       throw new GhostError("project_not_trusted", "Preview and confirm this project again before loading it.", 403);
     }
     return identity;
+  }
+
+  private async taskBinding(
+    sessionDir: string,
+    parent: ConversationIdentity,
+    requestedCwd: string | undefined,
+    signal: AbortSignal,
+  ): Promise<TaskBindingReceipt> {
+    signal.throwIfAborted();
+    const current = await this.read(
+      sessionDir,
+      parent.id,
+      parent.runtime,
+      parent.conversationId,
+    );
+    signal.throwIfAborted();
+    if (!current.root) {
+      throw new GhostError(
+        "task_project_required",
+        "Bind and trust a project on this conversation before delegating coding work.",
+        409,
+      );
+    }
+    const root = await this.assertTrusted(current.root);
+    signal.throwIfAborted();
+    const cwd = await this.resolveOperationalCwd(current, requestedCwd ?? current.cwd);
+    signal.throwIfAborted();
+    let cwdStats: import("node:fs").BigIntStats;
+    try {
+      cwdStats = await lstat(cwd, { bigint: true });
+      const confirmedCwd = await realpath(cwd);
+      const confirmedStats = await lstat(cwd, { bigint: true });
+      if (!cwdStats.isDirectory() || cwdStats.isSymbolicLink()
+        || confirmedCwd !== cwd
+        || !confirmedStats.isDirectory() || confirmedStats.isSymbolicLink()
+        || cwdStats.dev !== confirmedStats.dev || cwdStats.ino !== confirmedStats.ino) {
+        throw new Error("changed");
+      }
+    } catch {
+      throw new GhostError("invalid_project_path", "The requested working directory changed during admission.", 409);
+    }
+    signal.throwIfAborted();
+    return Object.freeze({
+      version: 1,
+      root: root.root,
+      rootIdentity: `${root.dev}:${root.ino}`,
+      cwd,
+      cwdIdentity: `${cwdStats.dev}:${cwdStats.ino}`,
+      generation: current.generation,
+    });
+  }
+
+  /** Mint the exact trusted project receipt a principal task persists. */
+  mintTaskBinding(
+    sessionDir: string,
+    parent: ConversationIdentity,
+    requestedCwd?: string,
+    signal = new AbortController().signal,
+  ): Promise<TaskBindingReceipt> {
+    return this.taskBinding(sessionDir, parent, requestedCwd, signal);
+  }
+
+  /** One parent-aware authority for every task record in a ghost home. */
+  taskBindingAuthority(sessionDir: string): TaskBindingAuthority {
+    return {
+      revalidate: async (receipt, signal, parent) => {
+        const current = await this.taskBinding(sessionDir, parent, receipt.cwd, signal);
+        if (current.root !== receipt.root
+          || current.rootIdentity !== receipt.rootIdentity
+          || current.cwd !== receipt.cwd
+          || current.cwdIdentity !== receipt.cwdIdentity
+          || current.generation !== receipt.generation) {
+          throw new GhostError(
+            "task_binding_changed",
+            "The conversation project changed before delegated work started.",
+            409,
+          );
+        }
+        return current;
+      },
+    };
   }
 
   async write(input: {

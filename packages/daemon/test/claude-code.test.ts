@@ -70,6 +70,15 @@ import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
+import type { TaskAdapter } from "../src/tasks.js";
+
+const claudeTaskServices = () => ({
+  adapters: new Map<string, TaskAdapter>([["claude-code", {
+    async start() {
+      throw new Error("inert Claude task adapter");
+    },
+  }]]),
+});
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -1173,6 +1182,32 @@ describe("Claude session sidecar confinement", () => {
 });
 
 describe("Claude Code native harness runtime", () => {
+  it("adds principal task tools and policy without changing native principal capabilities", async () => {
+    const { seenOptions, lifecycle } = setupClaudeHost();
+    host!.attachTaskServices(claudeTaskServices());
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "principal-delegation",
+      prompt,
+      emit: () => {},
+    });
+    await turn("first");
+    await turn("warm");
+    expect(lifecycle.queries).toBe(1);
+    const options = seenOptions[0];
+    expect(options?.tools).toEqual({ type: "preset", preset: "claude_code" });
+    expect(options?.permissionMode).toBe("bypassPermissions");
+    expect(options?.allowedTools).toEqual(expect.arrayContaining([
+      expect.stringMatching(/__task$/u),
+      expect.stringMatching(/__task_list$/u),
+      expect.stringMatching(/__task_get$/u),
+      expect.stringMatching(/__task_send$/u),
+      expect.stringMatching(/__task_cancel$/u),
+    ]));
+    expect(options?.allowedTools?.slice(-5).map((name) => name.split("__").at(-1)))
+      .toEqual(["task", "task_list", "task_get", "task_send", "task_cancel"]);
+    expect(JSON.stringify(options?.systemPrompt)).toContain("# Coding delegation");
+  });
+
   it("keeps wrapper-injected credentials beyond Ghost while using it for every CLI path", async () => {
     const wrapperRoot = mkdtempSync(join(tmpdir(), "ghost-owner-claude-wrapper-"));
     const wrapper = join(wrapperRoot, "claude-wrapper");

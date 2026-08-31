@@ -59,6 +59,7 @@ import {
   openRegularFileNoFollow,
   type GhostToolCapabilities,
   type AnyGhostToolDefinition,
+  type CollectedGhostExtension,
   type GhostToolContext,
   type GhostToolResult,
 } from "@ghost/extensions";
@@ -108,6 +109,12 @@ import {
 } from "./schedules.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
+import {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_POLICY,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskContext,
+} from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
@@ -1291,6 +1298,7 @@ async function buildPersona(
   homeDir: string,
   ghostName: string,
   scheduleUnitDir: string,
+  includeTaskDelegation: boolean,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -1311,6 +1319,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
@@ -1370,6 +1379,7 @@ async function buildMcpTools(
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
   sdk: ClaudeAgentSdkModule,
+  principalTasks?: PrincipalTaskContext,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
     { ...extensionOptions, ghostName },
@@ -1377,7 +1387,20 @@ async function buildMcpTools(
     CLAUDE_CODE_TOOL_CAPABILITIES,
   );
   const tools = await bridgeClaudeCodeTools(resolved, homeDir, sdk);
-  return { tools, names: resolved.toolNames };
+  if (!principalTasks) return { tools, names: resolved.toolNames };
+  const taskExtension = await collectGhostExtension(createPrincipalTaskTools(principalTasks));
+  return {
+    tools: [
+      ...tools,
+      ...bridgeCollectedClaudeCodeTools(
+        taskExtension,
+        PRINCIPAL_TASK_TOOL_NAMES,
+        { cwd: principalTasks.cwd },
+        sdk,
+      ),
+    ],
+    names: [...resolved.toolNames, ...PRINCIPAL_TASK_TOOL_NAMES],
+  };
 }
 
 export async function bridgeClaudeCodeTools(
@@ -1390,8 +1413,22 @@ export async function bridgeClaudeCodeTools(
   // tool context deliberately carries none.
   const definitions = (await collectGhostExtension(resolved.ghost)).tools;
   const context: GhostToolContext = { cwd: homeDir };
-  return resolved.toolNames.map((name): SdkMcpToolDefinition => {
-    const definition = definitions.get(name);
+  return bridgeCollectedClaudeCodeTools(
+    { tools: definitions },
+    resolved.toolNames,
+    context,
+    sdk,
+  );
+}
+
+function bridgeCollectedClaudeCodeTools(
+  extension: Pick<CollectedGhostExtension, "tools">,
+  names: readonly string[],
+  context: GhostToolContext,
+  sdk: ClaudeAgentSdkModule,
+): SdkMcpToolDefinition[] {
+  return names.map((name): SdkMcpToolDefinition => {
+    const definition = extension.tools.get(name);
     if (!definition) {
       throw new ClaudeCodeProcessError(
         `Ghost declared tool ${JSON.stringify(name)} but its extension did not register it.`,
@@ -1867,6 +1904,12 @@ interface ClaudeSessionPersona {
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
+export type ClaudePrincipalTaskContextFactory = (
+  ghostName: string,
+  conversationId: string,
+  cwd: string,
+) => Promise<PrincipalTaskContext>;
+
 /**
  * Everything a warm query cannot change after construction. Compared verbatim,
  * so anything added to `queryOptions` that the SDK fixes at startup belongs
@@ -1950,6 +1993,7 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly loadSdk: () => Promise<ClaudeAgentSdkModule>;
   private readonly hooks: GhostHookRunner;
+  private principalTaskContext: ClaudePrincipalTaskContextFactory | undefined;
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
@@ -2023,6 +2067,18 @@ export class ClaudeCodeRuntime {
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+  }
+
+  /** Install principal task tools before this runtime admits any conversation. */
+  attachPrincipalTaskTools(factory: ClaudePrincipalTaskContextFactory): void {
+    if (this.principalTaskContext) {
+      throw new Error("Principal task tools are already attached to Claude Code.");
+    }
+    if (this.disposed || this.busy.size > 0 || this.active.size > 0
+      || this.turns.size > 0 || this.warm.size > 0 || this.personas.size > 0) {
+      throw new Error("Principal task tools must be attached before Claude Code activity.");
+    }
+    this.principalTaskContext = factory;
   }
 
   invalidateAuthProbe(): void {
@@ -2300,11 +2356,16 @@ export class ClaudeCodeRuntime {
       }
       const sdk = await this.loadSdk();
       this.assertTurnAdmitted(options.signal);
+      const principalTasks = this.principalTaskContext
+        ? await this.principalTaskContext(ghost.name, conversationId, runtimeCwd)
+        : undefined;
+      this.assertTurnAdmitted(options.signal);
       const bridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
         sdk,
+        principalTasks,
       );
       this.assertTurnAdmitted(options.signal);
       try {
@@ -2726,6 +2787,7 @@ export class ClaudeCodeRuntime {
       home,
       ghostName,
       this.scheduleUnitDir,
+      this.principalTaskContext !== undefined,
       this.extensionOptions.documents,
     );
     // A turn racing another turn of the same conversation is already refused by

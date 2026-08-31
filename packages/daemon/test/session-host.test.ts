@@ -101,6 +101,15 @@ import {
   type MockProvider,
 } from "./helpers/mock-provider.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
+import type { TaskAdapter } from "../src/tasks.js";
+
+const inertTaskServices = () => ({
+  adapters: new Map<string, TaskAdapter>([["codex", {
+    async start() {
+      throw new Error("inert test adapter");
+    },
+  }]]),
+});
 
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
@@ -1828,6 +1837,56 @@ describe("SessionHost.open", () => {
     for (const name of ["ghost_browser", "ghost_desktop", "ghost_screen"]) {
       expect(handle.session.getToolDefinition(name), `${name} must be available`).toBeDefined();
     }
+  });
+
+  it("adds principal task tools without removing any existing Pi capability", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    host!.attachTaskServices(inertTaskServices());
+    expect(() => host!.attachTaskServices(inertTaskServices())).toThrow(/already attached/u);
+    const handle = await host!.open("casper", "delegation");
+    const names = handle.session.getActiveToolNames();
+    expect(names).toEqual(expect.arrayContaining([
+      ...PI_NATIVE_TOOL_NAMES,
+      "ask",
+      "jobs",
+      "todo",
+      "propose_plan",
+      "task",
+      "task_list",
+      "task_get",
+      "task_send",
+      "task_cancel",
+      "ghost_browser",
+      "ghost_desktop",
+      "ghost_screen",
+    ]));
+    expect(await modelSystemPrompt("delegation")).toContain("# Coding delegation");
+  });
+
+  it("refuses task-service attachment after session activity", async () => {
+    await setup([{ kind: "text", text: "hello" }]);
+    await host!.open("casper", "already-open");
+    expect(() => host!.attachTaskServices(inertTaskServices()))
+      .toThrow(/before session activity/u);
+  });
+
+  it("keeps the principal usable when its private task store is unsafe", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const taskDir = join(ghostPaths(dir).home, ".tasks");
+    mkdirSync(taskDir, { mode: 0o755 });
+    chmodSync(taskDir, 0o755);
+    host!.attachTaskServices(inertTaskServices());
+    const handle = await host!.open("casper", "unsafe-task-store");
+    expect(handle.session.getToolDefinition("read")).toBeDefined();
+    const list = handle.session.getToolDefinition("task_list");
+    expect(list).toBeDefined();
+    await expect(list!.execute(
+      "call",
+      {},
+      undefined,
+      undefined,
+      {} as never,
+    )).rejects.toMatchObject({ code: "unsafe_task_store" });
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {

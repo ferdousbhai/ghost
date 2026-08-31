@@ -164,6 +164,13 @@ import {
   type PlanState,
   type TodoPhase,
 } from "./plan-mode.js";
+import {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_POLICY,
+  type PrincipalTaskContext,
+  type PrincipalTaskServices,
+} from "./principal-task-tools.js";
+import { TaskController, TaskStore } from "./tasks.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
@@ -1559,6 +1566,10 @@ export class SessionHost {
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
   private maintenance: SessionConversationMaintenance | undefined;
+  private taskServices: PrincipalTaskServices | undefined;
+  private readonly taskControllers = new Map<string, Promise<TaskController>>();
+  private readonly taskControllerInstances = new Map<string, TaskController>();
+  private sessionActivityStarted = false;
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
   private readonly homeOperations: HomeOperationCoordinator;
@@ -1668,9 +1679,26 @@ export class SessionHost {
           throw new GhostError("ghost_busy", "Another whole-home move is already in progress.", 409);
         }
         this.homeMoveClaims.add(ghostName);
+        const taskController = this.taskControllerInstances.get(ghostName);
+        const pendingTaskController = this.taskControllers.get(ghostName);
+        const taskDrain = taskController
+          ? taskController.dispose().finally(() => {
+              if (this.taskControllerInstances.get(ghostName) === taskController) {
+                this.taskControllerInstances.delete(ghostName);
+                this.taskControllers.delete(ghostName);
+              }
+            })
+          : pendingTaskController
+            ? pendingTaskController.then((controller) => controller.dispose()).finally(() => {
+                if (this.taskControllers.get(ghostName) === pendingTaskController) {
+                  this.taskControllers.delete(ghostName);
+                  this.taskControllerInstances.delete(ghostName);
+                }
+              })
+            : Promise.resolve();
         let released = false;
         return {
-          drained: Promise.resolve(),
+          drained: taskDrain,
           release: () => {
             if (released) return;
             released = true;
@@ -1744,6 +1772,83 @@ export class SessionHost {
       throw new Error("Conversation maintenance is already attached.");
     }
     this.maintenance = maintenance;
+  }
+
+  /** Attach the native coding-worker boundary before any principal activity. */
+  attachTaskServices(services: PrincipalTaskServices): void {
+    if (this.taskServices) {
+      throw new Error("Principal task services are already attached.");
+    }
+    if (this.sessionActivityStarted
+      || this.sessions.size > 0
+      || this.opening.size > 0
+      || this.turnAdmissions.size > 0
+      || this.lifecycleAdmissions.size > 0) {
+      throw new Error("Principal task services must be attached before session activity.");
+    }
+    const adapters = new Map(services.adapters);
+    if (adapters.size === 0) {
+      throw new Error("Principal task services require at least one native adapter.");
+    }
+    this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
+      this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
+    this.taskServices = { adapters };
+    for (const ghost of this.registry.list()) {
+      void this.taskController(ghost.name).catch(() => {
+        // Task tools surface the typed store failure; principal startup remains available.
+      });
+    }
+  }
+
+  private taskController(ghostName: string): Promise<TaskController> {
+    if (this.ghostMoveReserved(ghostName)) {
+      throw new GhostError("ghost_busy", "Wait for this ghost's home move to finish.", 409);
+    }
+    const existing = this.taskControllers.get(ghostName);
+    if (existing) return existing;
+    const services = this.taskServices;
+    if (!services) {
+      throw new GhostError("tasks_unavailable", "Delegated coding tasks are unavailable.", 503);
+    }
+    const paths = ghostPaths(this.registry.get(ghostName).dir);
+    const controller = new TaskController(
+      new TaskStore(paths.home),
+      services.adapters,
+      this.projectBindings.taskBindingAuthority(paths.sessionDir),
+    );
+    const initialized = controller.initialize().then(() => {
+      this.taskControllerInstances.set(ghostName, controller);
+      return controller;
+    });
+    this.taskControllers.set(ghostName, initialized);
+    void initialized.catch(() => {
+      if (this.taskControllers.get(ghostName) === initialized) {
+        this.taskControllers.delete(ghostName);
+        this.taskControllerInstances.delete(ghostName);
+      }
+    });
+    return initialized;
+  }
+
+  private principalTaskContext(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    cwd: string,
+  ): Promise<PrincipalTaskContext> {
+    const parent = conversationIdentity(runtime, conversationId);
+    const paths = ghostPaths(this.registry.get(ghostName).dir);
+    return Promise.resolve({
+      controller: this.taskController(ghostName),
+      parent,
+      cwd,
+      mintBinding: (cwd, signal) => this.projectBindings.mintTaskBinding(
+        paths.sessionDir,
+        parent,
+        cwd,
+        signal,
+      ),
+    });
   }
 
   async withMaintenanceRuntime<T>(
@@ -1908,6 +2013,7 @@ export class SessionHost {
     ghostName: string,
     sessionId?: string | null,
   ): Promise<GhostSessionHandle> {
+    this.sessionActivityStarted = true;
     return this.openInternal(ghostName, sessionId, false);
   }
 
@@ -2725,6 +2831,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      ...(this.taskServices ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
@@ -2744,9 +2851,15 @@ export class SessionHost {
     // transcript, compaction, and any reader between turns see the ghost
     // rather than pi's default; the hook re-renders it before every turn.
     const ghostExtension = await collectGhostExtension(extensions.ghost);
+    const principalTaskExtension = this.taskServices
+      ? await collectGhostExtension(createPrincipalTaskTools(
+          await this.principalTaskContext(ghostName, "pi", sessionKey, runtimeCwd),
+        ))
+      : null;
     const personaSections = await renderPersonaPrompt(ghostExtension, { cwd: runtimeCwd });
     const extensionFactories: ExtensionFactory[] = [
       piExtensionFromGhost(ghostExtension, { dynamicSections: () => planSections(planBookRef.book) }),
+      ...(principalTaskExtension ? [piExtensionFromGhost(principalTaskExtension)] : []),
       ghostCompactionExtension,
     ];
     const planBookRef: { book: PlanBook } = { book: undefined as unknown as PlanBook };
@@ -4530,6 +4643,7 @@ export class SessionHost {
     ghostName: string,
     options: Pick<RunTurnOptions, "sessionId" | "prompt">,
   ): Promise<TurnAdmission> {
+    this.sessionActivityStarted = true;
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const admissionKey = this.keyOf(ghostName, conversationId);
     this.registry.get(ghostName);
@@ -7430,6 +7544,10 @@ export class SessionHost {
       Promise.resolve().then(() => this.liveVoice.disposeAll()),
       Promise.resolve().then(() => this.collaboration.disposeAll()),
       Promise.resolve().then(() => this.claudeCode.disposeAll()),
+      ...[...this.taskControllers.entries()].map(([ghostName, pending]) => {
+        const ready = this.taskControllerInstances.get(ghostName);
+        return ready ? ready.dispose() : pending.then((controller) => controller.dispose());
+      }),
     ];
     for (const hosted of this.sessions.values()) {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
@@ -7490,6 +7608,9 @@ export class SessionHost {
    */
   forceDisposeAll(): void {
     this.beginShutdown();
+    for (const controller of this.taskControllerInstances.values()) {
+      this.launchCleanupStep(undefined, "force native tasks", () => controller.forceAll());
+    }
     const hosted = [...new Set([
       ...this.sessions.values(),
       ...[...this.closing.values()].map(({ hosted: entry }) => entry),

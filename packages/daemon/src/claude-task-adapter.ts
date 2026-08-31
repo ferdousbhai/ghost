@@ -33,7 +33,6 @@ export interface ClaudeTaskAdapterOptions {
   catalog: ClaudeStartCatalog;
   sdkLoader: ClaudeAgentSdkLoader;
   environment?: Readonly<NodeJS.ProcessEnv>;
-  agent?: string;
 }
 
 interface PendingInput {
@@ -253,7 +252,6 @@ export class ClaudeTaskAdapter implements TaskAdapter {
   private readonly catalog: ClaudeStartCatalog;
   private readonly sdkLoader: ClaudeAgentSdkLoader;
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
-  private readonly agent: string | undefined;
 
   constructor(options: ClaudeTaskAdapterOptions) {
     if (!options?.catalog) throw new TypeError("Claude task adapter requires a native catalogue.");
@@ -266,13 +264,13 @@ export class ClaudeTaskAdapter implements TaskAdapter {
       "claude-native",
       options.environment ?? process.env,
     );
-    this.agent = options.agent;
   }
 
   start(
     input: Readonly<{
       id: string;
       task: string;
+      agent?: string | null;
       cwd: string;
       binding: TaskBindingReceipt;
     }>,
@@ -288,7 +286,7 @@ export class ClaudeTaskAdapter implements TaskAdapter {
   }
 
   private async startRegistered(
-    input: Readonly<{ task: string; cwd: string }>,
+    input: Readonly<{ task: string; agent?: string | null; cwd: string }>,
     lifecycle: ClaudeTaskLifecycle,
     channel: ClaudeTaskInput,
   ): Promise<TaskAdapterHandle> {
@@ -307,7 +305,7 @@ export class ClaudeTaskAdapter implements TaskAdapter {
   }
 
   private async openQuery(
-    input: Readonly<{ task: string; cwd: string }>,
+    input: Readonly<{ task: string; agent?: string | null; cwd: string }>,
     admitted: NativeHarnessProbeResult,
     sdk: ClaudeAgentSdkModule,
     lifecycle: ClaudeTaskLifecycle,
@@ -328,7 +326,7 @@ export class ClaudeTaskAdapter implements TaskAdapter {
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         spawnClaudeCodeProcess: lifecycle.spawnClaudeCodeProcess,
-        ...(this.agent === undefined ? {} : { agent: this.agent }),
+        ...(input.agent ? { agent: input.agent } : {}),
       };
       query = sdk.query({ prompt: channel, options });
       lifecycle.attach(query);

@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { conversationIdentity } from "../src/conversation-identity.js";
 import {
   PROJECT_TRUST_MAX_BYTES,
   PROJECT_TRUST_MAX_ROOTS,
@@ -126,6 +127,89 @@ function trustRowsForSerializedSize(
 }
 
 describe("ProjectBindingStore", () => {
+  it("mints and immediately revalidates an exact parent-qualified task binding", async () => {
+    const { sessionDir, project, store } = fixture();
+    const child = join(project, "pkg");
+    const linkedChild = join(project, "pkg-link");
+    mkdirSync(child);
+    symlinkSync(child, linkedChild, "dir");
+    const parent = conversationIdentity("pi", "task-binding");
+    const initial = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    const preview = await store.preview(parent.runtime, parent.conversationId, project);
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      cwd: child,
+      trustToken: preview.trustToken,
+      reason: "bound",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent, linkedChild);
+    expect(receipt).toMatchObject({
+      version: 1,
+      root: project,
+      cwd: child,
+      generation: 1,
+    });
+    expect(Object.isFrozen(receipt)).toBe(true);
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).resolves.toEqual(receipt);
+  });
+
+  it("rejects unbound, outside, replaced, and stale-generation task contexts", async () => {
+    const { root, sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("claude-code", "task-hostile");
+    await expect(store.mintTaskBinding(sessionDir, parent))
+      .rejects.toMatchObject({ code: "task_project_required" });
+    const initial = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    const child = join(project, "pkg");
+    const outside = join(root, "outside");
+    mkdirSync(child);
+    mkdirSync(outside);
+    const preview = await store.preview(parent.runtime, parent.conversationId, project);
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      cwd: child,
+      trustToken: preview.trustToken,
+      reason: "bound",
+    });
+    await expect(store.mintTaskBinding(sessionDir, parent, outside))
+      .rejects.toMatchObject({ code: "cwd_outside_project" });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    renameSync(child, `${child}-old`);
+    mkdirSync(child);
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+
+    renameSync(child, `${child}-replacement`);
+    renameSync(`${child}-old`, child);
+    const rebound = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    await store.writeOperationalCwd(
+      sessionDir,
+      parent.runtime,
+      parent.conversationId,
+      rebound,
+      project,
+    );
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+  });
+
   it("consults legacy cwd lazily only when no binding sidecar exists", async () => {
     const { ownerHome, sessionDir, project, store } = fixture();
     let legacyReads = 0;

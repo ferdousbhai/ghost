@@ -35,10 +35,18 @@ function runtime(options: { force?: () => Promise<void>; start?: (context: TaskA
   } };
   return { adapter, result, quiet, context: () => context };
 }
-async function start(controller: TaskController) { return controller.start({ parent, harness: "native", task: "inspect", binding }); }
+async function start(controller: TaskController, agent?: string) {
+  return controller.start({
+    parent,
+    harness: "native",
+    ...(agent === undefined ? {} : { agent }),
+    task: "inspect",
+    binding,
+  });
+}
 function record(state: TaskRecord["state"]): TaskRecord {
   const at = new Date().toISOString();
-  return { version: 1, id: `task-${randomUUID()}`, generation: 1, parent, harness: "native", task: "work", binding, state,
+  return { version: 1, id: `task-${randomUUID()}`, generation: 1, parent, harness: "native", agent: null, task: "work", binding, state,
     createdAt: at, updatedAt: at, events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: state === "completed" ? "done" : null,
     resultTruncated: false, error: state === "failed" || state === "interrupted" ? { code: "failed", message: "Safe failure." } : null };
 }
@@ -48,7 +56,9 @@ describe("durable task foundation", () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home); let received: unknown; const native = runtime();
     const controller = new TaskController(store, new Map([["native", { ...native.adapter, async start(input, context) { received = input; return native.adapter.start(input, context); } }]]), authority);
     await expect(start(controller)).rejects.toMatchObject({ code: "tasks_uninitialized" }); await controller.initialize();
-    const task = await start(controller); await eventually(store, task.id, "running"); expect(received).toMatchObject({ cwd: "/project/exact", binding });
+    const task = await start(controller, "owner-agent"); await eventually(store, task.id, "running");
+    expect(received).toMatchObject({ cwd: "/project/exact", binding, agent: "owner-agent" });
+    expect((await store.read(task.id)).agent).toBe("owner-agent");
     expect(await readFile(new URL("../src/tasks.ts", import.meta.url), "utf8")).not.toMatch(/node:child_process|\bgit\b/iu);
   });
 
@@ -62,6 +72,20 @@ describe("durable task foundation", () => {
     const first = await start(controller); const second = await start(controller);
     await eventually(store, first.id, "running"); await eventually(store, second.id, "running"); expect(executions).toHaveLength(2);
     for (const execution of executions) { execution.result.resolve("done"); execution.quiet.resolve(); }
+  });
+
+  it("keeps follow-up and cancellation within the qualified parent", async () => {
+    const native = runtime();
+    const { store, controller } = await fixture(native.adapter);
+    const task = await start(controller);
+    await eventually(store, task.id, "running");
+    const foreign = conversationIdentity("claude-code", parent.conversationId);
+    await expect(controller.followUp(task.id, "foreign", foreign))
+      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+    await expect(controller.cancel(task.id, foreign))
+      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+    expect((await store.read(task.id)).state).toBe("running");
+    await controller.cancel(task.id, parent);
   });
 
   it("shares initialization and never recovers a live task twice", async () => {

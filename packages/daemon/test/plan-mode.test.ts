@@ -88,7 +88,7 @@ describe("plan mode", () => {
     const idle = { planning: false };
     expect(planModeRefusal(idle, "write", { path: "/x" })).toBeNull();
 
-    for (const tool of ["read", "grep", "find", "ls", "ask", "inspect_image", "propose_plan"]) {
+    for (const tool of ["read", "grep", "find", "ls", "ask", "inspect_image", "propose_plan", "task_list", "task_get"]) {
       expect(planModeRefusal(planning, tool, {}), tool).toBeNull();
     }
     for (const op of ["list", "wait"]) {
@@ -123,6 +123,9 @@ describe("plan mode", () => {
       ["unknown_tool", {}],
       ["jobs", { op: "cancel" }],
       ["todo", { op: "init" }],
+      ["task", { harness: "codex", assignment: "implement" }],
+      ["task_send", { task_id: "task-1", message: "continue" }],
+      ["task_cancel", { task_id: "task-1" }],
       ["ghost_character", { action: "write" }],
       ...BROWSER_ACTIONS
         .filter((action) => !browserObservation.includes(action))
