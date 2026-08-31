@@ -503,6 +503,17 @@ Only the correlated command acknowledgements, `agent_settled`, and the bounded
 last assistant text affect task state; all other RPC event and tool payloads
 are discarded.
 
+The Codex delegated adapter runs the freshly admitted executable as an
+app-server over stdio in the exact cwd. It initializes one native thread with
+`approvalPolicy: "never"` and `sandbox: "danger-full-access"`, verifies that the
+app-server reports the same cwd and policy, and otherwise leaves native model,
+instructions, project discovery, skills, MCP, tools, and execution behavior
+unmodified. A running follow-up is `turn/steer` with the exact active turn id;
+cancellation sends one best-effort `turn/interrupt`. Only correlated responses,
+agent-message text, and the exact active `turn/completed` notification affect
+task state. Server-initiated requests fail closed because delegated work has no
+approval or elicitation UI; all other progress and tool payloads are discarded.
+
 ### Session capabilities
 
 Ghost is owner-local by default: the owner is the only local caller, and every

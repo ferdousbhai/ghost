@@ -148,6 +148,10 @@ export {
   type PiTaskAdapterOptions,
 } from "./pi-task-adapter.js";
 export {
+  CodexTaskAdapter,
+  type CodexTaskAdapterOptions,
+} from "./codex-task-adapter.js";
+export {
   readGhostHomeDigest,
   resolveGhostExtensions,
   type GhostExtensionOptions,
