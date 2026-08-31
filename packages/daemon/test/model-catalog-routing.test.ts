@@ -309,6 +309,25 @@ describe("ModelCatalog runtime lifecycle", () => {
     expect(close).toHaveBeenCalledTimes(1);
   });
 
+  it("rejects an invalid Claude harness route before opening the credential runtime", async () => {
+    const { catalog, close, createRuntime } = setupLifecycle();
+
+    await expect(catalog.setModelRoute(
+      "casper",
+      "chat_model",
+      "primary",
+      "claude-code",
+      "not-default",
+    )).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+    await expect(catalog.replaceModelFallbacks("casper", "chat_model", [{
+      provider: "claude-code",
+      id: "default",
+    }])).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+
+    expect(createRuntime).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["current model", (catalog: ModelCatalog) => catalog.getCurrent("casper"), "rename"],
     ["model listing", (catalog: ModelCatalog) => catalog.listModels("casper"), "delete"],

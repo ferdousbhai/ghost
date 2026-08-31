@@ -465,16 +465,8 @@ export class ModelCatalog {
     provider: string,
     id: string,
   ): CatalogModel {
-    if (provider === CLAUDE_CODE_PROVIDER_ID) {
-      if (role === "chat_model" && target === "primary" && id === CLAUDE_CODE_DEFAULT_MODEL_ID) {
-        return CLAUDE_CODE_MODEL;
-      }
-      throw new GhostError(
-        "unsupported_model_route",
-        "Claude Code can only be the primary chat model; it cannot be a role fallback.",
-        400,
-      );
-    }
+    const harness = this.validateHarnessRoute(role, target, provider, id);
+    if (harness) return harness;
     const model = runtime.getModel(provider, id);
     if (!model) {
       throw new GhostError(
@@ -493,6 +485,24 @@ export class ModelCatalog {
     return model;
   }
 
+  /** Validate Ghost-owned harness routes without opening pi's credential store. */
+  private validateHarnessRoute(
+    role: GhostModelRole,
+    target: ModelRouteTarget,
+    provider: string,
+    id: string,
+  ): CatalogModel | null {
+    if (provider !== CLAUDE_CODE_PROVIDER_ID) return null;
+    if (role === "chat_model" && target === "primary" && id === CLAUDE_CODE_DEFAULT_MODEL_ID) {
+      return CLAUDE_CODE_MODEL;
+    }
+    throw new GhostError(
+      "unsupported_model_route",
+      "Claude Code can only be the primary chat model; it cannot be a role fallback.",
+      400,
+    );
+  }
+
   async setModelRoute(
     ghostName: string,
     role: GhostModelRole,
@@ -500,6 +510,7 @@ export class ModelCatalog {
     provider: string,
     id: string,
   ): Promise<ModelRoutingView> {
+    this.validateHarnessRoute(role, target, provider, id);
     return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       const model = this.validateRoutingModel(runtime, role, target, provider, id);
       if (target === "primary") {
@@ -553,6 +564,9 @@ export class ModelCatalog {
     role: GhostModelRole,
     selections: readonly ModelRouteSelection[],
   ): Promise<ModelRoutingView> {
+    for (const selection of selections) {
+      this.validateHarnessRoute(role, "fallback", selection.provider, selection.id);
+    }
     return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       const file = this.readModelsFile(configDir, ghostName);
       const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
