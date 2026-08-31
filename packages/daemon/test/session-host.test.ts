@@ -60,10 +60,7 @@ import {
   type GhostModelDefinition,
   type GhostModelsFile,
 } from "../src/models.js";
-import {
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
-  GhostHookRunner,
-} from "../src/hooks.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import { LiveVoiceManager, type LiveVoiceStatus } from "../src/live-voice.js";
 import {
   CollaborationManager,
@@ -5044,6 +5041,7 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("awaits session_stop and sends only the current assistant pass", async () => {
+    const hookContinuationPasses = 12;
     const hooks = new GhostHookRunner();
     const active: boolean[] = [];
     const passes: unknown[][] = [];
@@ -5061,16 +5059,15 @@ describe("SessionHost.runTurn", () => {
         hookIdentities.push(`${event.runtime}:${event.conversation_runtime}:${event.conversation_id}`);
         active.push(event.stop_hook_active);
         passes.push(event.messages);
-        if (active.length <= GHOST_SESSION_STOP_CONTINUATION_CAP) {
+        if (active.length <= hookContinuationPasses) {
           return { decision: "block", reason: "Rewrite the answer without canned phrasing." };
         }
       });
     });
-    // The hook blocks every pass, so the cap ends the turn: one initial pass
-    // plus GHOST_SESSION_STOP_CONTINUATION_CAP continuations. Avoid the upstream
-    // canned-phrasing retry: this test owns the retry via Ghost's session_stop
-    // hook and must observe every pass itself.
-    const passCount = GHOST_SESSION_STOP_CONTINUATION_CAP + 1;
+    // The hook owns its stopping policy and may continue beyond Ghost's former
+    // host cap. Avoid the upstream canned-phrasing retry: this test owns the
+    // retry via Ghost's session_stop hook and must observe every pass itself.
+    const passCount = hookContinuationPasses + 1;
     const passTexts = [
       "The first answer circles around the point.",
       "Here is the direct answer.",

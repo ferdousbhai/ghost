@@ -1,7 +1,7 @@
 .pragma library
 
 const EVENT_ORDER = ["before_prompt", "session_stop", "conversation_idle"];
-const ROOT_KEYS = ["active", "events", "hooks", "sessionStopContinuationCap", "total"];
+const ROOT_KEYS = ["active", "events", "hooks", "total"];
 const EVENT_KEYS = ["count", "event"];
 const HOOK_KEYS = ["description", "event", "name", "source"];
 const IDLE_HOOK_KEYS = ["description", "event", "idleSeconds", "name", "source"];
@@ -44,10 +44,7 @@ function normalize(body) {
     if (!isObject(body) || !exactKeys(body, ROOT_KEYS)
             || typeof body.active !== "boolean"
             || !Number.isSafeInteger(body.total) || body.total < 0
-            || !Array.isArray(body.events) || !Array.isArray(body.hooks)
-            || !Number.isSafeInteger(body.sessionStopContinuationCap)
-            || body.sessionStopContinuationCap < 1
-            || body.sessionStopContinuationCap > 100) return null;
+            || !Array.isArray(body.events) || !Array.isArray(body.hooks)) return null;
 
     const counts = Object.create(null);
     let previousEventIndex = -1;
@@ -109,8 +106,7 @@ function normalize(body) {
         active: body.active,
         total: body.total,
         events,
-        hooks,
-        sessionStopContinuationCap: body.sessionStopContinuationCap
+        hooks
     };
 }
 
@@ -133,10 +129,9 @@ function duration(seconds) {
     return seconds + (seconds === 1 ? " second" : " seconds");
 }
 
-function trigger(event, cap, idleSeconds) {
+function trigger(event, idleSeconds) {
     if (event === "before_prompt") return "Before each owner prompt";
-    if (event === "session_stop") return "After each assistant pass · up to "
-        + cap + (cap === 1 ? " continuation" : " continuations");
+    if (event === "session_stop") return "After each assistant pass";
     if (event === "conversation_idle") return "After " + duration(idleSeconds)
         + " of conversation inactivity";
     return "";

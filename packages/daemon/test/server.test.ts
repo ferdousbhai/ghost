@@ -28,7 +28,6 @@ import {
   type ListeningServer,
   type ServerOptions,
 } from "../src/server.js";
-import { GHOST_SESSION_STOP_CONTINUATION_CAP } from "../src/hooks.js";
 import {
   SessionHost,
   sessionFileNameFor,
@@ -269,7 +268,6 @@ describe("GET /api/hooks", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
   });
 
@@ -294,7 +292,6 @@ describe("GET /api/hooks", () => {
           settingsKey: "memory_upkeep",
         },
       ],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     };
     const status = vi.fn(() => projection);
     Object.assign(projection as unknown as Record<string, unknown>, {
@@ -339,7 +336,6 @@ describe("GET /api/hooks", () => {
           settingsKey: "memory_upkeep",
         },
       ],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
     expect(status).toHaveBeenCalledTimes(1);
 
@@ -369,7 +365,6 @@ describe("GET /api/hooks", () => {
       total: 0,
       events: [],
       hooks: [],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     }));
     const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
     const response = await fetch(`${base}/api/hooks`, { method: "POST" });
@@ -387,7 +382,6 @@ describe("/api/hooks/config", () => {
     total: 0,
     events: [],
     hooks: [],
-    sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
   });
 
   it("is absent when the runner has no configuration file", async () => {

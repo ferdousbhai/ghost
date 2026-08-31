@@ -138,7 +138,6 @@ export {
   defaultGhostHooksPath,
   GHOST_CONVERSATION_IDLE_DELAY_MS,
   GHOST_HOOK_HANDLER_TIMEOUT_MS,
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
   ghostSessionStopContinuation,
   type GhostBeforePromptEvent,

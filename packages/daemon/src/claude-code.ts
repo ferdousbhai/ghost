@@ -74,11 +74,7 @@ import {
   requireRawConversationId,
 } from "./conversation-identity.js";
 import { captureClaudeCodeEnvironment } from "./env-scrub.js";
-import {
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
-  GhostHookRunner,
-  ghostSessionStopContinuation,
-} from "./hooks.js";
+import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
 import {
   resolveGhostExtensions,
   type GhostExtensionOptions,
@@ -2506,7 +2502,6 @@ export class ClaudeCodeRuntime {
 
       let prompt = options.prompt;
       let stopHookActive = false;
-      let continuationCount = 0;
       const identity = warmQueryIdentity({
         runtimeIdentity,
         cwd: runtimeCwd,
@@ -2614,7 +2609,7 @@ export class ClaudeCodeRuntime {
           this.assertTurnAdmitted(options.signal);
           live.input.push(
             prompt,
-            ...(continuationCount === 0 && beforePromptContext ? [beforePromptContext] : []),
+            ...(!stopHookActive && beforePromptContext ? [beforePromptContext] : []),
           );
           completed = await pumpClaudeTurn(live, onMessage);
           postQueryWorkPending = true;
@@ -2735,17 +2730,7 @@ export class ClaudeCodeRuntime {
           pendingTerminalResult = completed;
           break;
         }
-        if (continuationCount >= GHOST_SESSION_STOP_CONTINUATION_CAP) {
-          logger.warn("session_stop continuation cap reached", {
-            session: completed.session_id,
-            cap: GHOST_SESSION_STOP_CONTINUATION_CAP,
-          });
-          postQueryWorkPending = false;
-          pendingTerminalResult = completed;
-          break;
-        }
         adapter.recordUsage(completed);
-        continuationCount += 1;
         stopHookActive = true;
         prompt = additionalContext;
         postQueryWorkPending = false;

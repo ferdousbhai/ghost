@@ -149,9 +149,7 @@ try {
   });
   assert.equal(hooksResponse.status, 200);
   const hooks = await hooksResponse.json();
-  assert.deepEqual(Object.keys(hooks), [
-    "active", "total", "events", "hooks", "sessionStopContinuationCap",
-  ]);
+  assert.deepEqual(Object.keys(hooks), ["active", "total", "events", "hooks"]);
   assert.equal(hooks.active, true);
   assert.equal(hooks.total, 3);
   assert.deepEqual(hooks.events, [
@@ -160,7 +158,6 @@ try {
     { event: "conversation_idle", count: 1 },
   ]);
   assert.equal(hooks.hooks.length, hooks.total);
-  assert.equal(hooks.sessionStopContinuationCap, 10);
   assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "source", "name", "description"]);
   assert.deepEqual(Object.keys(hooks.hooks[2]), [
     "event", "source", "name", "description", "idleSeconds", "settingsKey",

@@ -815,7 +815,10 @@ commands. Every command dispatch owns its process tree and catches synchronous
 spawn failure, process-start error, and unexpected execution rejection at the
 awaited hook boundary. Those failures are generically logged and fail open for
 `before_prompt`, `session_stop`, and `conversation_idle`; they cannot fail an
-owner turn or expose the command/error payload.
+owner turn or expose the command/error payload. A blocking `session_stop`
+result starts another assistant pass with `stop_hook_active: true`; the hook
+owns and must bound that continuation policy, and accepting the stop ends the
+loop.
 
 The ordinary maintenance model receives only a close-neutralized untrusted
 transcript fence and four memory-only tools: list metadata, read one memory,
@@ -1047,8 +1050,8 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
 
 ### Routes
 
-- `GET /api/hooks` → `{ active, total, events, hooks,
-  sessionStopContinuationCap }` — authenticated, redacted hook diagnostics.
+- `GET /api/hooks` → `{ active, total, events, hooks }` — authenticated,
+  redacted hook diagnostics.
   `events` is the nonzero canonical-order list of `{ event, count }`; `hooks`
   has one canonical-order `{ event, source, name, description }` row per
   registration, where `event` is exactly `before_prompt`, `session_stop`, or
@@ -1079,10 +1082,7 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   includes its interval and persisted retry state refers to that identity.
   Today `memory_upkeep` is the one such key. The document is replaced whole,
   never patched per hook, because group and handler order is file order. An
-  edit made to the file outside this route still needs a daemon restart. `sessionStopContinuationCap` is an
-  integer in `1..100`, the daemon's consecutive hidden-continuation cap
-  (`GHOST_SESSION_STOP_CONTINUATION_CAP`, default 10); clients display it and
-  never assume its value.
+  edit made to the file outside this route still needs a daemon restart.
 - `GET  /api/ghosts` → `[{ name, dir, createdAt }]`
 - `POST /api/ghosts` `{ name }` → creates `~/ghosts/<name>/` with a seeded
   `character.md`. A spelling reserved by an in-flight whole-home rename or

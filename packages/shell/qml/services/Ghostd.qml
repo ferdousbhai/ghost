@@ -243,7 +243,6 @@ Singleton {
         root.activeHooks = [];
         root.hookEvents = [];
         root.activeHookCount = 0;
-        root.hookContinuationCap = 10;
         root.hooksLoaded = false;
         root.hooksStale = false;
         root.hooksError = "";
@@ -287,7 +286,6 @@ Singleton {
                     root.activeHooks = status.hooks;
                     root.hookEvents = status.events;
                     root.activeHookCount = status.total;
-                    root.hookContinuationCap = status.sessionStopContinuationCap;
                     root.hooksLoaded = true;
                     root.hooksStale = false;
                     root.hooksError = "";
@@ -770,7 +768,6 @@ Singleton {
     property var activeHooks: []
     property var hookEvents: []
     property int activeHookCount: 0
-    property int hookContinuationCap: 10
     property bool hooksLoading: false
     property bool hooksLoaded: false
     /** A failed refresh may retain the last exact successful projection. */

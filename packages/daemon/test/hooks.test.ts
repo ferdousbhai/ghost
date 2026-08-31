@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  GHOST_SESSION_STOP_CONTINUATION_CAP,
   GhostHookRunner,
   ghostSessionStopContinuation,
   type GhostBeforePromptEvent,
@@ -123,7 +122,6 @@ describe("GhostHookRunner", () => {
     const result = await runner.emitSessionStop(event());
     expect(calls).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
-    expect(GHOST_SESSION_STOP_CONTINUATION_CAP).toBe(10);
   });
 
   it("combines nonblocking before_prompt context without starting a continuation", async () => {
@@ -189,7 +187,6 @@ describe("GhostHookRunner", () => {
         description: "One memory write after idle.",
         idleSeconds: 60,
       }],
-      sessionStopContinuationCap: GHOST_SESSION_STOP_CONTINUATION_CAP,
     });
     expect(JSON.stringify(runner.status())).not.toMatch(/command|path|prompt|context|error/iu);
   });
