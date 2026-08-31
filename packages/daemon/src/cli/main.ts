@@ -45,7 +45,7 @@ const CLI_ARGS: ArgsSpec = {
     "keep",
     "no-turn",
   ],
-  value: ["ghost", "session", "message", "limit", "offset", "q"],
+  value: ["ghost", "session", "message", "limit", "offset", "q", "model"],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -203,7 +203,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "smoke",
-    usage: "smoke [--keep] [--no-turn] [--json] [-q]",
+    usage: "smoke [--model <provider/id>] [--keep] [--no-turn] [--json] [-q]",
     summary: "Exercise a throwaway daemon and ghost home.",
     example: "ghost smoke --no-turn --json",
     positionals: [0, 0],

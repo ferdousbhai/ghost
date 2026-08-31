@@ -48,10 +48,15 @@ ghost show -s cli-abc
 ghost ask -s cli-abc
 ghost watch
 ghost smoke --no-turn
+ghost smoke --model claude-code/default
 ```
 
-`ghost smoke` starts a scratch daemon and a scratch ghost. A real turn needs a
-provider signed in inside that scratch home, so CI uses `--no-turn`.
+`ghost smoke` starts a scratch daemon and a scratch ghost. `--no-turn` is the
+package/CI startup proof. A real smoke can select a runtime with `--model`; it
+checks three turns in one conversation, readable memory output, and persisted
+message accounting. Pi providers need credentials available to the scratch
+ghost, while `claude-code/default` uses the owner's external Claude Code
+authentication.
 
 `config.json` carries the same settings plus `compaction` and
 `askTimeoutSeconds`. Compaction is pi's native compaction: `enabled` defaults

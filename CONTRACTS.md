@@ -1033,6 +1033,18 @@ admission and stream opening to one keepalive interval; it clears that timer
 when the opening response arrives, so a working turn has no wall-clock cap. Its
 one token-refresh retry preserves the same opening budget.
 
+`ghost smoke` owns a throwaway daemon, ghost root, and XDG state tree. With
+`--no-turn` it proves only daemon startup and ghost creation. Otherwise it may
+first select `--model <provider/id>`, then runs three turns in one conversation:
+an initial reply, a context-preserving follow-up, and a memory write. Success
+requires that conversation to record at least six messages and the scratch
+home to list at least one readable memory slug with no skipped memory file.
+Before launching the scratch daemon, the CLI resolves an explicitly configured
+`GHOST_CLAUDE_BINARY` as the literal owner-wrapper boundary; when none is
+configured it invokes ordinary default Claude discovery, including mise
+unwrapping, and passes only the resulting executable path to the scratch
+daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
+
 ### Routes
 
 - `GET /api/hooks` → `{ active, total, events, hooks,

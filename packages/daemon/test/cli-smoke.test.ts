@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { smokeClaudeBinarySelection, smokeMemorySlugs } from "../src/cli/smoke.js";
 import { runCli } from "./helpers/cli.js";
 import { DaemonClient } from "../src/cli/client.js";
 import type { CliRuntime } from "../src/cli/types.js";
@@ -28,6 +29,40 @@ describe("ghost smoke", () => {
       { step: "turn", ok: true, detail: "skipped (--no-turn)" },
     ]);
   }, 20_000);
+
+  it("keeps absent Claude configuration on the default discovery path", () => {
+    expect(smokeClaudeBinarySelection({})).toBeUndefined();
+    expect(smokeClaudeBinarySelection({ GHOST_CLAUDE_BINARY: "  /owner/claude  " }))
+      .toBe("/owner/claude");
+  });
+
+  it.skipIf(process.platform === "win32")("reports an invalid requested runtime at the model step", async () => {
+    home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-test-"));
+    const result = await runCli([
+      "smoke",
+      "--model",
+      "claude-code/not-default",
+      "--no-turn",
+      "--json",
+    ], {
+      env: { ...process.env, GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}` },
+      home,
+    });
+
+    expect(result.code).toBe(1);
+    const rows = result.stdout.trim().split("\n").map((line) => JSON.parse(line));
+    expect(rows.slice(0, 2)).toEqual([
+      { step: "daemon", ok: true, detail: "ok" },
+      { step: "new probe", ok: true },
+    ]);
+    expect(rows[2]).toMatchObject({ step: "model", ok: false });
+    expect(rows[2]?.detail).toMatch(/not-default.*claude-code|claude-code.*not-default|unknown|invalid/i);
+  }, 20_000);
+
+  it("rejects a memory turn that wrote no readable memory slug", () => {
+    expect(() => smokeMemorySlugs(JSON.stringify({ memory: [], skipped: [] })))
+      .toThrow("memory turn wrote no readable memory");
+  });
 });
 
 describe("DaemonClient request budgets", () => {
