@@ -1,8 +1,8 @@
-# Vendored from omarchy-quattro-harness (https://github.com/fabiopauli/omarchy-quattro-harness)
+# Vendored from omarchy-quattro-harness at commit 5bc268d7558971fbbe4570f6c04cf62a67f93d42.
 # Original module: src/omaharness/inputs.py
 # Copyright (c) 2026 Fabio Pauli. Licensed under the MIT License.
-# See ghost_desktop_helper/_vendor/omaharness/LICENSE. Ghost additionally caps
-# repeated click injection at its public helper boundary.
+# See ghost_desktop_helper/_vendor/omaharness/LICENSE.
+# Modified by Ghost to cap repeated click injection at three clicks.
 
 """Focused input injection, wrapped so every call is bounded and diagnosable.
 

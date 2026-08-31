@@ -1,8 +1,8 @@
-# Vendored from omarchy-quattro-harness (https://github.com/fabiopauli/omarchy-quattro-harness)
+# Vendored from omarchy-quattro-harness at commit 5bc268d7558971fbbe4570f6c04cf62a67f93d42.
 # Original module: src/omaharness/session.py
 # Copyright (c) 2026 Fabio Pauli. Licensed under the MIT License.
-# See ghost_desktop_helper/_vendor/omaharness/LICENSE. Vendored UNMODIFIED
-# by the Ghost project for ghost-desktop-helper; only this header was added.
+# See ghost_desktop_helper/_vendor/omaharness/LICENSE.
+# Matches upstream after this six-line provenance header.
 
 """Session-lock detection and the single disruptive-operation lock.
 

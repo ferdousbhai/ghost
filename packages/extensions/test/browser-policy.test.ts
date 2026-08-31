@@ -35,7 +35,7 @@ describe("scheme policy", () => {
 
   it("refuses file URLs, which is the whole point of the gate", () => {
     expect(reason("file:///etc/passwd")).toMatch(/only opens http and https/i);
-    expect(reason("file:///home/dous/.ssh/id_ed25519")).toMatch(/Local files/i);
+    expect(reason("file:///home/owner/.ssh/id_ed25519")).toMatch(/Local files/i);
   });
 
   it("refuses the other schemes a model might reach for", () => {

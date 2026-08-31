@@ -83,14 +83,17 @@ SOFTWARE.
 ## omarchy-quattro-harness
 
 `packages/desktop-helper/src/ghost_desktop_helper/_vendor/omaharness/` is a
-minimal, unmodified,
-desktop-only vendor of
+minimal, desktop-only vendor of
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
-by Fabio Pauli. The vendored modules (`atspi`, `capture`, `dispatch`, `errors`,
-`headless`, `hypr`, `inputs`, `keys`, `process`, `session`, `toplevels`,
-`transaction`) carry a provenance header pointing back to their upstream path;
-only that header was added. The browser, CLI, desktop-orchestrator, knowledge,
-overlay, native-plugin, and XWayland modules are intentionally not vendored.
+by Fabio Pauli, pinned to upstream commit
+[`5bc268d7558971fbbe4570f6c04cf62a67f93d42`](https://github.com/fabiopauli/omarchy-quattro-harness/tree/5bc268d7558971fbbe4570f6c04cf62a67f93d42).
+After their six-line provenance headers, `atspi`, `capture`, `dispatch`,
+`errors`, `headless`, `hypr`, `keys`, `session`, `toplevels`, and `transaction`
+match that revision. Ghost modifies `__init__.py` to expose only the vendored
+error types, `inputs.py` to cap repeated click injection at three clicks, and
+`process.py` to bound combined captured child output. The browser, CLI,
+controls, desktop-orchestrator, knowledge, overlay, native-plugin, pointer, and
+XWayland modules are intentionally not vendored.
 See `packages/desktop-helper/src/ghost_desktop_helper/_vendor/omaharness/LICENSE`
 for the full text.
 

@@ -113,7 +113,7 @@ TestCase {
                 questions: [{
                     id: "q1",
                     header: "Danger",
-                    question: "Delete /home/dous/verygoodplugins and everything inside it?",
+                    question: "Delete /home/owner/plugins and everything inside it?",
                     options: [
                         { label: "Delete it" },
                         { label: "Leave it alone" }
@@ -228,7 +228,7 @@ TestCase {
     function test_askCardCarriesTheQuestionItself(): void {
         compare(
             ToolTrace.askPrompt(askActivity("cancelled")),
-            "Danger · Delete /home/dous/verygoodplugins and everything inside it?"
+            "Danger · Delete /home/owner/plugins and everything inside it?"
         );
     }
 
@@ -358,7 +358,7 @@ TestCase {
         );
         compare(
             ToolTrace.askPrompt(activity),
-            "Danger · Delete /home/dous/verygoodplugins and everything inside it?"
+            "Danger · Delete /home/owner/plugins and everything inside it?"
         );
         compare(
             ToolTrace.askDetail(activity),

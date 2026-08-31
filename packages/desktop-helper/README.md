@@ -225,13 +225,17 @@ address so the dispatcher runs but changes nothing).
 
 ## Attribution
 
-`src/ghost_desktop_helper/_vendor/omaharness/` is a minimal, unmodified,
-desktop-only vendor of
+`src/ghost_desktop_helper/_vendor/omaharness/` is a minimal, desktop-only
+vendor of
 [omarchy-quattro-harness](https://github.com/fabiopauli/omarchy-quattro-harness)
+at upstream commit
+[`5bc268d7558971fbbe4570f6c04cf62a67f93d42`](https://github.com/fabiopauli/omarchy-quattro-harness/tree/5bc268d7558971fbbe4570f6c04cf62a67f93d42)
 — Copyright (c) 2026 Fabio Pauli, MIT License (see
 `src/ghost_desktop_helper/_vendor/omaharness/LICENSE` and the repo-root
-`THIRD_PARTY_NOTICES.md`). The
-browser, CLI, desktop-orchestrator, knowledge, overlay, native-plugin, and
-XWayland modules are intentionally **not** vendored. The thin JSON bridge in
-`src/ghost_desktop_helper/` is original Ghost code (Apache-2.0, matching the
-workspace).
+`THIRD_PARTY_NOTICES.md`). Ten leaf modules match that revision after their
+provenance headers. Ghost modifies the private initializer, caps repeated click
+injection in `inputs.py`, and bounds captured child output in `process.py`. The
+browser, CLI, controls, desktop-orchestrator, knowledge, overlay, native-plugin,
+pointer, and XWayland modules are intentionally **not** vendored. The thin JSON
+bridge in `src/ghost_desktop_helper/` is original Ghost code (Apache-2.0,
+matching the workspace).

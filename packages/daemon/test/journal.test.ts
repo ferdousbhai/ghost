@@ -37,21 +37,21 @@ describe("journal records", () => {
 
   it("extracts identity while retaining every field in MESSAGE", () => {
     expect(encodeJournalRecord("info", "opened", {
-      ghost: "dous",
+      ghost: "test-ghost",
       conversationId: "chat-1",
       tools: 9,
     })).toEqual([
-      'MESSAGE=ghostd: opened {"ghost":"dous","conversationId":"chat-1","tools":9}',
+      'MESSAGE=ghostd: opened {"ghost":"test-ghost","conversationId":"chat-1","tools":9}',
       "PRIORITY=6",
       "SYSLOG_IDENTIFIER=ghostd",
-      "GHOST=dous",
+      "GHOST=test-ghost",
       "CONVERSATION=chat-1",
     ]);
   });
 
   it("prefers conversation over the conversationId alias", () => {
     expect(encodeJournalRecord("warn", "busy", {
-      ghost: "dous",
+      ghost: "test-ghost",
       conversation: "canonical",
       conversationId: "alias",
     })).toContain("CONVERSATION=canonical");
@@ -85,14 +85,14 @@ describe("journal records", () => {
     const records: LogRecord[] = [];
     const logger = createLogger("info", journalLogSink({ send }, (record) => records.push(record)));
 
-    logger.info("first", { ghost: "dous" });
-    logger.info("second", { ghost: "dous" });
+    logger.info("first", { ghost: "test-ghost" });
+    logger.info("second", { ghost: "test-ghost" });
 
     expect(send).toHaveBeenCalledTimes(1);
     expect(records).toEqual([
       { level: "warn", message: "systemd journal unavailable; logging to stderr" },
-      { level: "info", message: "first", fields: { ghost: "dous" } },
-      { level: "info", message: "second", fields: { ghost: "dous" } },
+      { level: "info", message: "first", fields: { ghost: "test-ghost" } },
+      { level: "info", message: "second", fields: { ghost: "test-ghost" } },
     ]);
   });
 

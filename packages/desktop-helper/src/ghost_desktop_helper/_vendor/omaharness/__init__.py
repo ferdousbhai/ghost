@@ -1,16 +1,11 @@
-# Vendored subset of omarchy-quattro-harness
-# (https://github.com/fabiopauli/omarchy-quattro-harness)
+# Vendored from omarchy-quattro-harness at commit
+# 5bc268d7558971fbbe4570f6c04cf62a67f93d42.
 # Copyright (c) 2026 Fabio Pauli. Licensed under the MIT License.
 # See ghost_desktop_helper/_vendor/omaharness/LICENSE for the full text.
 #
-# This is a MINIMAL, DESKTOP-ONLY vendor of the harness for the Ghost project's
-# ghost-desktop-helper. The upstream package's __init__ re-exports the browser,
-# desktop-orchestrator, and knowledge surfaces; none of those are vendored here
-# (Ghost has its own browser relay, and its own thin JSON bridge), so this
-# __init__ deliberately imports nothing but the shared error types. Every
-# vendored leaf module (dispatch, hypr, session, transaction, capture, headless,
-# toplevels, keys, inputs, atspi, process, errors) is imported directly by the
-# bridge, e.g. `from ghost_desktop_helper._vendor.omaharness import dispatch`.
+# This initializer is Ghost-modified. The upstream file re-exports browser,
+# desktop-orchestrator, and knowledge surfaces that are not vendored here, so
+# this private package exposes only the shared error types.
 """Vendored desktop craft from omarchy-quattro-harness (MIT, Fabio Pauli)."""
 
 from __future__ import annotations

@@ -79,8 +79,9 @@ extend-exclude = ["src/ghost_desktop_helper/_vendor"]
 
 [tool.ruff.lint]
 # Keep the first-party bridge and its tests on modern Python, import, bugbear,
-# exception-safety, annotation-marker, and builtin-shadowing rules. The
-# attributed upstream vendor remains byte-for-byte apart from its path header.
+# exception-safety, annotation-marker, and builtin-shadowing rules. Ten pinned
+# vendor modules match upstream after their headers; documented Ghost changes
+# to __init__.py, inputs.py, and process.py share the same private exclusion.
 select = ["A", "ANN", "B", "BLE", "E4", "E7", "E9", "F", "I", "UP"]
 # JSON values and injected desktop backends are intentionally dynamic. Strict
 # mypy still checks every explicit Any boundary and all first-party signatures.
@@ -100,7 +101,7 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-# The private vendor is checked by its upstream project; Ghost type-checks the
-# bridge against its public runtime surface without rewriting third-party code.
+# The private vendor retains upstream typing conventions. Ghost type-checks the
+# bridge against its runtime surface; helper tests cover its documented changes.
 module = ["ghost_desktop_helper._vendor.omaharness.*"]
 ignore_errors = true
