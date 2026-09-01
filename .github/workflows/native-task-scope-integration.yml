@@ -40,22 +40,45 @@ jobs:
           [[ "$systemd_version" =~ ^[0-9]+$ && "$systemd_version" -ge 254 ]]
           test_user=ghost-scope-ci
           test_uid=23456
+          runtime_unit="user-runtime-dir@$test_uid.service"
+          manager_unit="user@$test_uid.service"
+          diagnose_manager_failure() {
+            sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit" || true
+            sudo systemctl --no-pager show \
+              --property=LoadState \
+              --property=ActiveState \
+              --property=SubState \
+              --property=Result \
+              "$runtime_unit" "$manager_unit" || true
+            sudo journalctl --no-pager --lines=80 \
+              --unit "$runtime_unit" \
+              --unit "$manager_unit" || true
+          }
+          trap 'status=$?; if (( status != 0 )); then diagnose_manager_failure; fi; exit "$status"' EXIT
           printf 'test_user=%s\n' "$test_user" >> "$GITHUB_OUTPUT"
           printf 'test_uid=%s\n' "$test_uid" >> "$GITHUB_OUTPUT"
           printf 'owner_uid=%s\n' "$(id -u)" >> "$GITHUB_OUTPUT"
           printf 'bun=%s\n' "$(command -v bun)" >> "$GITHUB_OUTPUT"
           ! getent passwd "$test_user" >/dev/null
           ! getent passwd "$test_uid" >/dev/null
-          sudo useradd --uid "$test_uid" --create-home --shell /usr/sbin/nologin "$test_user"
+          [[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]
+          sudo useradd --uid "$test_uid" --user-group --create-home --shell /usr/sbin/nologin "$test_user"
+          [[ "$(id -u "$test_user")" == "$test_uid" ]]
           sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
+          sudo systemctl start "$runtime_unit"
+          sudo systemctl is-active --quiet "$runtime_unit"
+          [[ -d "/run/user/$test_uid" ]]
+          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]
           sudo loginctl enable-linger "$test_user"
-          sudo systemctl start "user@$test_uid.service"
-          for _ in $(seq 1 200); do
+          sudo systemctl start "$manager_unit"
+          sudo systemctl is-active --quiet "$manager_unit"
+          for _ in $(seq 1 300); do
             [[ -S "/run/user/$test_uid/bus" ]] && break
-            sleep 0.05
+            sleep 0.1
           done
           [[ -S "/run/user/$test_uid/bus" ]]
-          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]
+          [[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]
+          trap - EXIT
 
       - name: Exercise real receipt-bound scopes
         shell: bash
@@ -91,7 +114,8 @@ jobs:
           set -euo pipefail
           [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
           if getent passwd "$TEST_USER" >/dev/null; then
-            sudo systemctl stop "user@$TEST_UID.service" || true
             sudo loginctl disable-linger "$TEST_USER" || true
+            sudo systemctl stop "user@$TEST_UID.service" || true
+            sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true
             sudo userdel --remove "$TEST_USER"
           fi

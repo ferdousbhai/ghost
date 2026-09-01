@@ -50,9 +50,36 @@ expect_rejected opt-in \
 expect_rejected uid-guard \
   'test_uid=23456' \
   'test_uid="$(id -u)"'
+expect_rejected runtime-dir-start \
+  'sudo systemctl start "$runtime_unit"' \
+  ': "runtime directory unit not started"'
+expect_rejected runtime-dir-active \
+  'sudo systemctl is-active --quiet "$runtime_unit"' \
+  ': "runtime directory activity not checked"'
+expect_rejected manager-start \
+  'sudo systemctl start "$manager_unit"' \
+  ': "user manager not started"'
+expect_rejected startup-order \
+  $'          sudo systemctl start "$runtime_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"\n          [[ -d "/run/user/$test_uid" ]]\n          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]\n          sudo loginctl enable-linger "$test_user"\n          sudo systemctl start "$manager_unit"' \
+  $'          sudo systemctl start "$manager_unit"\n          sudo systemctl start "$runtime_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"\n          [[ -d "/run/user/$test_uid" ]]\n          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]\n          sudo loginctl enable-linger "$test_user"'
+expect_rejected bus-owner \
+  '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]' \
+  '[[ -S "/run/user/$test_uid/bus" ]]'
+expect_rejected diagnostic-status-scope \
+  'sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit"' \
+  'sudo systemctl --no-pager --full status'
+expect_rejected diagnostic-journal-scope \
+  $'            sudo journalctl --no-pager --lines=80 \\\n              --unit "$runtime_unit" \\\n              --unit "$manager_unit" || true' \
+  '            sudo journalctl --no-pager --lines=80 || true'
+expect_rejected diagnostic-journal-bound \
+  'sudo journalctl --no-pager --lines=80' \
+  'sudo journalctl --no-pager --lines=200'
 expect_rejected cleanup-condition \
   "if: always() && steps.manager.outputs.test_user != ''" \
   'if: always()'
+expect_rejected cleanup-runtime-dir \
+  'sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true' \
+  ': "runtime directory unit not stopped"'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'

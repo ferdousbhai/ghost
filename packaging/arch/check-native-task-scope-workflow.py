@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "c16f2d850a4d6f6a95c76c0c5e0971c86a043e6b778749b470521b4930f6d7ac"
+JOB_SHA256 = "6badcde9335a50bfa6d288fcd98181e4d530fdcfb7c8bcdc22dd9c4b61e6a87a"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -77,6 +77,22 @@ def sequence(node: Node | None, context: str) -> list[Node]:
     if not isinstance(node, SequenceNode):
         raise TypeError(f"{context} is not a sequence")
     return node.value
+
+
+def require_fragments(
+    source: str, fragments: list[str], context: str, failures: list[str]
+) -> None:
+    for fragment in fragments:
+        if source.count(fragment) != 1:
+            failures.append(f"{context} must contain exactly one {fragment!r}")
+
+
+def require_order(
+    source: str, fragments: list[str], context: str, failures: list[str]
+) -> None:
+    positions = [source.find(fragment) for fragment in fragments]
+    if -1 in positions or positions != sorted(positions):
+        failures.append(f"{context} command order changed")
 
 
 def errors(text: str) -> list[str]:
@@ -151,6 +167,81 @@ def errors(text: str) -> list[str]:
                 inputs.get("bun-version"), "bun version"
             ) != "1.3.14":
                 failures.append("Bun version changed")
+
+        manager = scalar(mapping(steps[3], "manager step").get("run"), "manager run")
+        exercise = scalar(mapping(steps[4], "exercise step").get("run"), "exercise run")
+        cleanup = scalar(mapping(steps[5], "cleanup step").get("run"), "cleanup run")
+        require_fragments(
+            manager,
+            [
+                'test_uid=23456',
+                'runtime_unit="user-runtime-dir@$test_uid.service"',
+                'manager_unit="user@$test_uid.service"',
+                '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
+                'sudo systemctl start "$runtime_unit"',
+                'sudo systemctl is-active --quiet "$runtime_unit"',
+                'sudo loginctl enable-linger "$test_user"',
+                'sudo systemctl start "$manager_unit"',
+                'sudo systemctl is-active --quiet "$manager_unit"',
+                '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]',
+                'sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit"',
+                'sudo journalctl --no-pager --lines=80',
+                '--unit "$runtime_unit"',
+                '--unit "$manager_unit"',
+            ],
+            "manager bootstrap",
+            failures,
+        )
+        require_order(
+            manager,
+            [
+                'sudo systemctl start "$runtime_unit"',
+                'sudo systemctl is-active --quiet "$runtime_unit"',
+                'sudo loginctl enable-linger "$test_user"',
+                'sudo systemctl start "$manager_unit"',
+                'sudo systemctl is-active --quiet "$manager_unit"',
+                '[[ -S "/run/user/$test_uid/bus" ]]',
+            ],
+            "manager bootstrap",
+            failures,
+        )
+        require_fragments(
+            exercise,
+            [
+                '[[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]',
+                'XDG_RUNTIME_DIR="/run/user/$TEST_UID"',
+                'DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus"',
+                'GITHUB_ACTIONS=true',
+                'GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1',
+                'GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID="$TEST_UID"',
+                'GHOST_NATIVE_TASK_SCOPE_OWNER_UID="$OWNER_UID"',
+            ],
+            "integration invocation",
+            failures,
+        )
+        require_fragments(
+            cleanup,
+            [
+                '[[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]',
+                'sudo systemctl stop "user@$TEST_UID.service"',
+                'sudo loginctl disable-linger "$TEST_USER"',
+                'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
+                'sudo userdel --remove "$TEST_USER"',
+            ],
+            "manager cleanup",
+            failures,
+        )
+        require_order(
+            cleanup,
+            [
+                'sudo loginctl disable-linger "$TEST_USER"',
+                'sudo systemctl stop "user@$TEST_UID.service"',
+                'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
+                'sudo userdel --remove "$TEST_USER"',
+            ],
+            "manager cleanup",
+            failures,
+        )
 
     if isinstance(job_node, MappingNode):
         source = text[job_node.start_mark.index : job_node.end_mark.index]

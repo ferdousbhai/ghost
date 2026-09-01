@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import {
   chmodSync,
   mkdirSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inspectNativeHarnessExecutable,
@@ -47,23 +48,32 @@ describe("native harness executable identity", () => {
     binaryName,
   }) => {
     const base = root();
-    const bin = join(base, "relative-bin");
-    mkdirSync(bin);
-    const executable = join(bin, binaryName);
+    const initialCwd = join(base, "initial");
+    const laterCwd = join(base, "later");
+    const initialBin = join(initialCwd, "bin");
+    const laterBin = join(laterCwd, "bin");
+    mkdirSync(initialBin, { recursive: true });
+    mkdirSync(laterBin, { recursive: true });
+    const executable = join(initialBin, binaryName);
+    const laterExecutable = join(laterBin, binaryName);
+    const probe = join(base, "resolve.ts");
     writeExecutable(executable);
-    const relativePath = relative(process.cwd(), bin);
-    const laterCwd = join(base, "project", "deeply", "nested");
-    mkdirSync(laterCwd, { recursive: true });
-
-    const result = await resolveNativeHarnessExecutable({
-      harness,
-      environment: { PATH: relativePath },
-      timeoutMs: 1_000,
-    });
+    writeExecutable(laterExecutable, "exit 23");
+    writeFileSync(probe, [
+      `import { resolveNativeHarnessExecutable } from ${JSON.stringify(new URL("../src/native-harness-identity.ts", import.meta.url).href)};`,
+      `const result = await resolveNativeHarnessExecutable({ harness: ${JSON.stringify(harness)}, environment: { PATH: "bin" }, timeoutMs: 1_000 });`,
+      "process.stdout.write(JSON.stringify(result));",
+    ].join("\n"));
+    const result = JSON.parse(execFileSync(process.execPath, [probe], {
+      cwd: initialCwd,
+      encoding: "utf8",
+    })) as Awaited<ReturnType<typeof resolveNativeHarnessExecutable>>;
 
     expect(result.path).toBe(executable);
     expect(result.literalBoundary).toBe(false);
-    expect(resolve(laterCwd, relativePath, binaryName)).not.toBe(result.path);
+    expect(resolve(laterCwd, "bin", binaryName)).toBe(laterExecutable);
+    expect(resolve(laterCwd, "bin", binaryName)).not.toBe(result.path);
+    expect(await inspectNativeHarnessExecutable(result.path, false)).toBe(result.identity);
   });
 
   it("unwraps only default mise launchers and honors an explicit wrapper literally", async () => {
