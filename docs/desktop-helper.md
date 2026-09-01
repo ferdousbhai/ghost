@@ -75,11 +75,11 @@ say why.
 
 Windows / desktop state
 - `see` `{ name? }` → windows matching (address, title, class, workspace, geometry, focused).
-- `state` → condensed clients + workspaces + activewindow (what `ghost_desktop` state returns today, but sourced here).
+- `state` → condensed clients + workspaces + activewindow (the same shape `ghost_desktop` state returns, sourced here).
 - `layers` → wlr-layer-shell surfaces with logical geometry + scale.
 - `toplevels` → `ext-foreign-toplevel-list-v1` list (background-capturable).
 
-Accessibility (the big gap we're closing — AT-SPI)
+Accessibility (AT-SPI)
 - `ax_query` `{ app?, role?, text?, attributes? }` → matching elements (role, name, text, bounds, actions, id/path). Unified GTK3/4 role vocabulary; refuse unknown roles and list valid ones.
 - `ax_roles` `{ app }` → available roles for an app.
 - `ax_perform` `{ ref, action }` → invoke a semantic action (press, click, expand, …). Returns honesty metadata.
@@ -116,7 +116,7 @@ Safety
 
 ## TS integration
 
-`ghost_desktop` (packages/extensions/src/extensions/hyprland.ts, renamed/expanded):
+`ghost_desktop` (packages/extensions/src/extensions/hyprland.ts):
 one enum-action tool — `state | see | layers | focus | workspace | key | type
 | click | drag | scroll | mouse_move | ax_query | ax_roles | ax_perform |
 ax_set | hit_test | notify`. `ax_*` + `hit_test` are the semantic path;
@@ -134,7 +134,6 @@ text-only one) — the ghost's "video understanding", since models have no nativ
 video input. Zero new dependency; bounded by a frame cap and a wall-clock
 budget, still exclusive-concurrency serialized.
 
-Helper discovery: the daemon locates/starts the sidecar (like it does nothing
-today — the extension spawns it lazily, one per daemon, reused); if PyGObject
-/ grim / wtype are missing, tools degrade with a clear "install X" error and
-`hello` reports it.
+Helper discovery: the extension spawns the sidecar lazily, one per daemon,
+reused across calls; if PyGObject / grim / wtype are missing, tools degrade
+with a clear "install X" error and `hello` reports it.

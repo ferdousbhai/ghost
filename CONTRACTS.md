@@ -46,7 +46,8 @@ The default root is `~/ghosts`; each direct child is one ghost:
   skills/<name>/SKILL.md
   agents/<name>.md
   commands/<name>.md
-  rules/  prompts/  tools/  hooks/
+  rules/  prompts/  hooks/
+  AGENTS.md  CLAUDE.md
   settings.yml
   models.json
   mcp.json
@@ -266,8 +267,9 @@ Obsidian during ordinary runtime work.
 ## Daemon HTTP API
 
 `ghostd` is the only session owner. All `/api/*` routes require the bearer token
-from Ghost's mode-0600 XDG-state token file, except explicitly public viewer
-assets and authenticated tailnet requests. Loopback CORS allows only the exact
+from Ghost's mode-0600 XDG-state token file, except `GET /api/relay/status`
+(deliberately open relay liveness; it carries no secret), explicitly public
+viewer assets, and authenticated tailnet requests. Loopback CORS allows only the exact
 HUD/client methods and headers. Errors are
 `{ "error": { "code": string, "message": string } }` with a meaningful HTTP
 status. Request bodies and control files are bounded before allocation.
@@ -280,9 +282,12 @@ Route parsing, validation, status codes, and reverse states are executable in
 [`server.ts`](packages/daemon/src/server.ts) and
 [`server.test.ts`](packages/daemon/test/server.test.ts). Stable route families:
 
+Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
+
 | Route | Contract |
 |---|---|
 | `GET /api/hooks` | Redacted hook status. |
+| `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/harnesses` | Bounded availability/authentication for native Pi, Codex, and Claude Code workers. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |

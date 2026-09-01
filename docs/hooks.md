@@ -66,7 +66,8 @@ Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
 replaces it; the shell's Hooks pane edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
 needs a restart. Groups and handlers run in file order.
-Configured command strings must be non-empty and contain no NUL byte.
+Configured command strings must be non-empty and contain no NUL byte, and a
+command's `timeout` (seconds) must be greater than 0 and at most 600.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins. `idleSeconds` is a safe integer from
 1 through 86400 and defaults to 60; fractional, zero, and out-of-range values
@@ -74,7 +75,8 @@ are rejected when configuration is loaded. Idle registrations keep independent
 deadlines: Ghost wakes at the earliest one and dispatches only the registrations
 then due. After restart it derives each remaining or overdue delay from the
 conversation's durable last-activity time. An optional `registrationId` on a
-`conversation_idle` command must match `[A-Za-z0-9][A-Za-z0-9._:-]*` and remain
+`conversation_idle` command must match `[A-Za-z0-9][A-Za-z0-9._:-]*`, be at
+most 128 characters, and remain
 stable when its delivery identity must survive configuration reordering;
 otherwise Ghost derives a stable identity from the admitted command fields.
 
@@ -307,8 +309,9 @@ durable cwd change.
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
 Event rows contain `{ event, count }`; hook rows
 contain `{ event, source, name, description }` plus `idleSeconds` only for an
-idle hook, where `source` is `builtin` for an in-process registration and
-`config` for a `hooks.json` command. Commands, source paths, arguments, prompts,
+idle hook and `settingsKey` only for a built-in row, where `source` is
+`builtin` for an in-process registration and `config` for a `hooks.json`
+command. Commands, source paths, arguments, prompts,
 injected context, errors, receipts, and scheduler state never cross that route.
 
 ## Editing
