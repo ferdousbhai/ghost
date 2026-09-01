@@ -95,29 +95,6 @@ export async function untrustedTextResult<TDetails extends object>(
 }
 
 
-export interface BudgetedText {
-  readonly text: string;
-  readonly truncated: boolean;
-  readonly totalLength: number;
-}
-
-/**
- * Cap a string to `maxChars`. Every string a ghost tool sends to the model —
- * a doc body, a search match line — passes through here, so no single call can
- * return an unbounded amount of text. Mirrors the browser tool's read budget.
- */
-export function budgeted(text: string, maxChars: number): BudgetedText {
-  const totalLength = text.length;
-  if (totalLength <= maxChars) return { text, truncated: false, totalLength };
-  return { text: text.slice(0, maxChars), truncated: true, totalLength };
-}
-
-export function budgetFooter(result: BudgetedText): string | null {
-  if (!result.truncated) return null;
-  return `(showing the first ${result.text.length} of ${result.totalLength} characters)`;
-}
-
-
 /**
  * The desktop extensions (screen, hyprland) reach the machine by running small
  * programs — `grim`, `hyprctl`, `notify-send`. They do it through `execFile`

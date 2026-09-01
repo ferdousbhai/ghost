@@ -263,7 +263,7 @@ export function projectJavascriptResult(result: BackendJavascriptResult): Bounde
     omitted: projected.omitted,
     shortened: projected.shortened + (type.truncated ? 1 : 0),
     replaced: projected.replaced + (type.replaced ? 1 : 0),
-    truncated: projected.truncated || type.truncated || type.replaced || type.omitted,
+    truncated: projected.truncated || type.truncated || type.replaced,
     bytes: projected.bytes,
   };
 }

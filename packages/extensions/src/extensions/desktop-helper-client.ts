@@ -854,10 +854,3 @@ export function getSharedDesktopHelper(
   if (!shared) shared = new DesktopHelperClient(options);
   return shared;
 }
-
-export async function resetSharedDesktopHelper(): Promise<void> {
-  if (shared) {
-    await shared.dispose();
-    shared = null;
-  }
-}

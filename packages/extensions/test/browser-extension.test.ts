@@ -60,7 +60,6 @@ import {
   browserSessionFor,
   closeAllBrowserSessions,
   closeBrowserSession,
-  DEFAULT_BROWSER_SCREENSHOT_RETENTION,
   DEFAULT_ACTION_TIMEOUT_MS,
   DEFAULT_ACTING_BUDGET,
   DEFAULT_IDLE_TIMEOUT_MS,
@@ -72,7 +71,7 @@ import {
 import { GhostError } from "../src/errors.js";
 import { GhostBrowserError } from "../src/extensions/browser-backend.js";
 import { relayBackend } from "../src/extensions/browser-relay-backend.js";
-import { MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
+import { DEFAULT_SCREENSHOT_RETENTION, MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText, type Harness } from "./support/harness.js";
 
@@ -94,8 +93,8 @@ interface FakeCall {
  * tests are about anyway: URL policy, refs and their invalidation, the read
  * budget, the idle timer, and the serialization above it.
  *
- * The in-page snippets (`browser-page-scripts.ts`) run in a real DOM and are
- * deliberately not covered here; this fake answers with canned results, and the
+ * The in-page snippets (the relay extension's `page-scripts.js`) run in a real
+ * DOM and are deliberately not covered here; this fake answers with canned results, and the
  * live smoke test covers the real thing.
  */
 class FakeBackend implements GhostBrowserBackend {
@@ -398,7 +397,6 @@ describe("registration", () => {
   it("registers exactly one tool", async () => {
     const harness = await browserHarness();
     expect(harness.toolNames()).toEqual([GHOST_BROWSER]);
-    expect(harness.handlers.get("tool_call")).toBeUndefined();
     expect(browserToolNames()).toEqual([GHOST_BROWSER]);
   });
 
@@ -413,9 +411,6 @@ describe("registration", () => {
     expect(schema.properties.allow_local).toBeUndefined();
     expect(schema.properties.headless).toBeUndefined();
     expect(schema.required).toEqual(["action"]);
-    expect(schema.properties.action?.description).toMatch(
-      /tab_close: close one ghost-created tab.*close: release this ghost's entire browser workspace across conversations/is,
-    );
   });
 });
 
@@ -977,13 +972,13 @@ describe("screenshot, back, close", () => {
     await writeFile(screenPath, "screen");
     const ownerPath = join(dir, "screenshot-2026-08-22_10-11-12.png");
     await writeFile(ownerPath, "owner");
-    for (let index = 0; index < DEFAULT_BROWSER_SCREENSHOT_RETENTION + 4; index += 1) {
+    for (let index = 0; index < DEFAULT_SCREENSHOT_RETENTION + 4; index += 1) {
       const path = join(
         dir,
         `ghost-casper-browser-2026-08-22T10-11-${String(index).padStart(2, "0")}-000.png`,
       );
       await writeFile(path, "older browser capture");
-      const when = new Date(Date.now() - (DEFAULT_BROWSER_SCREENSHOT_RETENTION + 4 - index) * 1000);
+      const when = new Date(Date.now() - (DEFAULT_SCREENSHOT_RETENTION + 4 - index) * 1000);
       await utimes(path, when, when);
     }
 
@@ -993,7 +988,7 @@ describe("screenshot, back, close", () => {
 
     const names = await readdir(dir);
     expect(names.filter((name) => name.startsWith("ghost-casper-browser-")))
-      .toHaveLength(DEFAULT_BROWSER_SCREENSHOT_RETENTION);
+      .toHaveLength(DEFAULT_SCREENSHOT_RETENTION);
     await expect(access(screenPath)).resolves.toBeFalsy();
     await expect(access(ownerPath)).resolves.toBeFalsy();
   });

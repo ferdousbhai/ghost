@@ -136,12 +136,9 @@ describe("character", () => {
     expect(await openGhostHome(fixture.root).readCharacter()).toBeNull();
   });
 
-  it("rejects an oversized direct write without replacing the character", async () => {
-    const before = await readFile(home.characterPath, "utf8");
-    await expect(home.writeCharacter({
-      body: "x".repeat(MAX_CHARACTER_BODY_LENGTH + 1),
-    })).rejects.toMatchObject({ code: "limit_exceeded" });
-    expect(await readFile(home.characterPath, "utf8")).toBe(before);
+  it("refuses to read an oversized character file", async () => {
+    await writeFile(home.characterPath, "x".repeat(MAX_CHARACTER_BODY_LENGTH + 1), "utf8");
+    await expect(home.readCharacter()).rejects.toMatchObject({ code: "limit_exceeded" });
   });
 });
 

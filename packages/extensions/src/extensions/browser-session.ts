@@ -49,8 +49,6 @@ import {
   writeScreenshotFile,
 } from "./screenshot-retention.js";
 
-export const DEFAULT_BROWSER_SCREENSHOT_RETENTION = DEFAULT_SCREENSHOT_RETENTION;
-
 export const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 10_000;
@@ -231,7 +229,6 @@ export class GhostBrowserSession {
   #activeAbort: AbortController | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
   #refs = new Map<string, PageElementMatch>();
-  #refPageUrl: string | undefined;
   #originUrl: string | undefined;
   #originHops = 0;
   #actingRemaining: number;
@@ -266,24 +263,8 @@ export class GhostBrowserSession {
     return this.backend.running;
   }
 
-  get refs(): ReadonlyMap<string, PageElementMatch> {
-    return this.#refs;
-  }
-
-  get refPageUrl(): string | undefined {
-    return this.#refPageUrl;
-  }
-
   get originUrl(): string | undefined {
     return this.#originUrl;
-  }
-
-  get originHops(): number {
-    return this.#originHops;
-  }
-
-  get actingRemaining(): number {
-    return this.#actingRemaining;
   }
 
 
@@ -372,7 +353,6 @@ export class GhostBrowserSession {
 
   #invalidateRefs(): void {
     this.#refs.clear();
-    this.#refPageUrl = undefined;
   }
 
   /**
@@ -540,7 +520,6 @@ export class GhostBrowserSession {
       matches.push(match);
     }
     this.#refs = new Map(matches.map((match) => [match.ref, match]));
-    this.#refPageUrl = page.url;
     this.#touchIdleTimer();
     return {
       matches,
@@ -644,7 +623,7 @@ export class GhostBrowserSession {
         );
         await pruneScreenshotFiles(
           directory,
-          DEFAULT_BROWSER_SCREENSHOT_RETENTION,
+          DEFAULT_SCREENSHOT_RETENTION,
           ghostScreenshotMatcher(ghostName, "browser"),
         );
         return {
@@ -1156,6 +1135,8 @@ export class GhostBrowserSession {
     );
   }
 
+  // close() has already clamped the timeout and wrapped the whole queued wait
+  // in withTimeout, so this only forwards the operation to the backend.
   async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
     this.#clearIdleTimer();
     this.#invalidateRefs();
@@ -1163,17 +1144,7 @@ export class GhostBrowserSession {
     this.#originUrl = undefined;
     this.#originHops = 0;
     this.#actingRemaining = this.#actingBudget;
-    const timeoutMs = Math.min(
-      options.timeoutMs ?? this.#closeTimeoutMs,
-      this.#closeTimeoutMs,
-    );
-    const operation = this.#timeout({ ...options, timeoutMs });
-    return withTimeout(
-      this.backend.close(operation),
-      timeoutMs,
-      "closing the browser",
-      options.signal,
-    );
+    return this.backend.close(this.#timeout(options));
   }
 }
 

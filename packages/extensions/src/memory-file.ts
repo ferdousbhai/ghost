@@ -45,7 +45,7 @@ export function coerceMemorySlug(name: string): string {
   return parseMemoryFileName(name.endsWith(".md") ? name : memoryFileName(name.trim()));
 }
 
-export function normalizeMemoryText(value: string): string {
+function normalizeMemoryText(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 

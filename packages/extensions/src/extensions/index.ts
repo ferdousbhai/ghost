@@ -32,22 +32,34 @@ export function createGhostExtension(
   };
 }
 
-export * from "./browser.js";
-export * from "./browser-relay-backend.js";
 export {
-  GhostBrowserError,
-  type BackendActionOptions,
-  type BackendBackResult,
-  type BackendReadResult,
-  type BackendScreenshotOptions,
-  type BackendScreenshotResult,
-  type BackendTarget,
-  type BackendTypeInput,
-  type BrowserFailure,
-  type PageSummary,
-} from "./browser-backend.js";
-export * from "./hyprland.js";
-export * from "./persona.js";
-export * from "./screen.js";
-export { untrustedTextResult } from "./shared.js";
-export * from "./shared.js";
+  browserSessionFor,
+  closeAllBrowserSessions,
+  closeBrowserSession,
+  createBrowserExtension,
+  GHOST_BROWSER,
+  type BrowserBackendFactory,
+} from "./browser.js";
+export {
+  RELAY_DISCONNECTED_MESSAGE,
+  RELAY_OPS,
+  RELAY_PATH,
+  RELAY_PROTOCOL_VERSION,
+  RELAY_SUBPROTOCOL,
+  RELAY_TOKEN_SUBPROTOCOL_PREFIX,
+  relayBackend,
+  type RelayOp,
+  type RelayReply,
+  type RelayRequestOptions,
+  type RelayTransport,
+} from "./browser-relay-backend.js";
+export type { BrowserFailure } from "./browser-backend.js";
+export { createScreenExtension, GHOST_SCREEN } from "./screen.js";
+export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
+export {
+  textResult,
+  untrustedTextResult,
+  type GhostToolCapabilities,
+  type GhostToolCapabilitiesResolver,
+  type GhostToolCapabilitiesSource,
+} from "./shared.js";

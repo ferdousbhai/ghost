@@ -16,24 +16,15 @@ import type {
 
 type AnyTool = AnyGhostToolDefinition;
 type AnyHandler = (event: any, ctx: GhostToolContext) => unknown;
-export interface ToolCallEventResult {
-  block?: boolean;
-  reason?: string;
-}
 
 export interface Harness {
   readonly tools: Map<string, AnyTool>;
-  readonly handlers: Map<string, AnyHandler[]>;
   toolNames(): string[];
   call(
     name: string,
     params?: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<GhostToolResult<any>>;
-  toolCall(
-    toolName: string,
-    input?: Record<string, unknown>,
-  ): Promise<ToolCallEventResult | undefined>;
   beforeAgentStart(incomingSystemPrompt?: string): Promise<string | undefined>;
 }
 
@@ -65,20 +56,11 @@ export async function loadExtension(
 
   return {
     tools,
-    handlers,
     toolNames: () => [...tools.keys()],
     async call(name, params = {}, signal) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return tool.execute(`call-${name}`, params, signal, undefined, ctx);
-    },
-    async toolCall(toolName, input = {}) {
-      const event = { type: "tool_call", toolCallId: "call-1", toolName, input };
-      for (const handler of handlers.get("tool_call") ?? []) {
-        const result = (await handler(event, ctx)) as ToolCallEventResult | undefined;
-        if (result?.block) return result;
-      }
-      return undefined;
+      return tool.execute(`call-${name}`, params, signal, ctx);
     },
     async beforeAgentStart(incomingSystemPrompt = "You are pi, a coding agent.") {
       let systemPrompt: string | undefined;

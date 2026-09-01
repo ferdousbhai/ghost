@@ -18,7 +18,6 @@ export {
   MEMORY_INDEX_MAX_ENTRIES,
   memoryFileName,
   memorySlugForText,
-  normalizeMemoryText,
   parseMemoryFile,
   parseMemoryFileName,
   REDACTED_MEMORY_SECRET,
@@ -70,8 +69,44 @@ export {
   type GhostSystemPromptInput,
 } from "./prompt.js";
 
-export * from "./extension-api.js";
+export {
+  collectGhostExtension,
+  type AnyGhostToolDefinition,
+  type CollectedGhostExtension,
+  type GhostExtensionFactory,
+  type GhostToolContext,
+  type GhostToolResult,
+} from "./extension-api.js";
 export { stringEnum } from "./tool-schema.js";
-export * from "./untrusted.js";
+export { fenceUntrusted } from "./untrusted.js";
 
-export * from "./extensions/index.js";
+export {
+  browserSessionFor,
+  closeAllBrowserSessions,
+  closeBrowserSession,
+  createBrowserExtension,
+  createGhostExtension,
+  createScreenExtension,
+  GHOST_BROWSER,
+  GHOST_SCREEN,
+  ghostToolNames,
+  MAX_SCREENSHOT_BYTES,
+  RELAY_DISCONNECTED_MESSAGE,
+  RELAY_OPS,
+  RELAY_PATH,
+  RELAY_PROTOCOL_VERSION,
+  RELAY_SUBPROTOCOL,
+  RELAY_TOKEN_SUBPROTOCOL_PREFIX,
+  relayBackend,
+  textResult,
+  untrustedTextResult,
+  type BrowserBackendFactory,
+  type BrowserFailure,
+  type GhostToolCapabilities,
+  type GhostToolCapabilitiesResolver,
+  type GhostToolCapabilitiesSource,
+  type RelayOp,
+  type RelayReply,
+  type RelayRequestOptions,
+  type RelayTransport,
+} from "./extensions/index.js";

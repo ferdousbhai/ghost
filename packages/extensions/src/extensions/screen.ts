@@ -32,7 +32,6 @@ import {
   ghostScreenshotMatcher,
   ghostScreenshotName,
   MAX_SCREENSHOT_BYTES,
-  pruneScreenshotDirectoryPath,
   pruneScreenshotFiles,
   resolveScreenshotDirectory,
   withScreenshotDirectory,
@@ -55,11 +54,6 @@ export type GhostImageContent = Extract<
   ElementOf<GhostToolResult<unknown>["content"]>,
   { type: "image" }
 >;
-
-export const GHOST_SCREEN_TOOL_NAMES = [GHOST_SCREEN] as const;
-
-/** Backwards-compatible name for the shared transport/disk/provider ceiling. */
-export const MAX_CAPTURE_BYTES = MAX_SCREENSHOT_BYTES;
 
 /**
  * Frame-sampling "watch" defaults. A model has no native video input, so the
@@ -124,18 +118,6 @@ export interface ScreenExtensionOptions extends GhostExtensionOptions {
 
 export function screenshotFileName(ghostName: string, now: Date = new Date()): string {
   return ghostScreenshotName(ghostName, "screen", now);
-}
-
-/**
- * Keep the newest `retention` captures. Runs after each capture, so the
- * directory is bounded even if the ghost never stops looking.
- */
-export async function pruneScreenshots(
-  dir: string,
-  retention: number,
-  ghostName: string,
-): Promise<string[]> {
-  return pruneScreenshotDirectoryPath(dir, retention, ghostScreenshotMatcher(ghostName, "screen"));
 }
 
 export function parseRegion(region: string): {
@@ -336,6 +318,23 @@ export function screenToolNames(): string[] {
   return [GHOST_SCREEN];
 }
 
+/**
+ * Two captures at once would race on the same directory and mean nothing; one
+ * at a time also keeps the shutter honest about what "now" was. The chain is
+ * module-level because the directory is the machine's one screenshot
+ * directory, shared by every ghost in the process.
+ */
+let captureChain: Promise<unknown> = Promise.resolve();
+
+function serializeCapture<T>(work: () => Promise<T>): Promise<T> {
+  const run = captureChain.then(work, work);
+  captureChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 function captureNote(meta: HelperCaptureResult): string {
   const note = honestyNote(meta);
   return note || "Background-safe.";
@@ -483,11 +482,11 @@ export async function buildWatchResult(
   }
   const note = watchNote(captures);
   const details = watchDetails(home, params, captures);
-  const oversize = captures.filter((c) => c.bytes > MAX_CAPTURE_BYTES);
+  const oversize = captures.filter((c) => c.bytes > MAX_SCREENSHOT_BYTES);
 
   if (vision) {
     const images = captures
-      .filter((c) => c.bytes <= MAX_CAPTURE_BYTES)
+      .filter((c) => c.bytes <= MAX_SCREENSHOT_BYTES)
       .map((c) => c.image);
     const intro =
       `Watched ${captures.length} frame(s) of ${targetLabel(params)}, in order `
@@ -583,10 +582,7 @@ export function createScreenExtension(
             + `Defaults to ${DEFAULT_WATCH_INTERVAL_MS}.`,
         })),
       }),
-      // Two captures at once would race on the same directory and mean nothing;
-      // one at a time also keeps the shutter honest about what "now" was.
-      ...({ concurrency: "exclusive" as const }),
-      execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+      execute: async (_toolCallId, params, signal, ctx) => serializeCapture(async () => {
         const home = resolveHome(options, ctx);
         const { vision } = resolveToolCapabilities(options, ctx);
         const captureOptions: CaptureViaHelperOptions = {
@@ -613,11 +609,11 @@ export function createScreenExtension(
         const relative = home.relative(capture.path);
         const note = captureNote(capture.meta);
 
-        if (capture.bytes > MAX_CAPTURE_BYTES) {
+        if (capture.bytes > MAX_SCREENSHOT_BYTES) {
           throw new GhostError(
             "limit_exceeded",
             `The capture is ${Math.round(capture.bytes / 1024)} KB, over the `
-            + `${Math.round(MAX_CAPTURE_BYTES / 1024)} KB limit. It is saved at `
+            + `${Math.round(MAX_SCREENSHOT_BYTES / 1024)} KB limit. It is saved at `
             + `${relative}; capture a smaller area with target "region" or a single `
             + "window with target window.",
             { path: relative, bytes: capture.bytes },
@@ -652,9 +648,7 @@ export function createScreenExtension(
           captureDetails(home, capture),
           "screen",
         );
-      },
+      }),
     });
   };
 }
-
-export default createScreenExtension();

@@ -32,7 +32,7 @@ import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import {
-  MAX_CAPTURE_BYTES,
+  MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
   type BrowserFailure,
   type RelayOp,
@@ -56,7 +56,7 @@ export const RELAY_CLOSE_TIMEOUT_MS = 1_000;
 export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
 export const RELAY_CLOSE_SHUTDOWN = 4000;
-export const MAX_RELAY_MESSAGE_BYTES = Math.ceil(MAX_CAPTURE_BYTES / 3) * 4
+export const MAX_RELAY_MESSAGE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
   + 256 * 1024;
 
 function rawDataBytes(data: RawData): number {

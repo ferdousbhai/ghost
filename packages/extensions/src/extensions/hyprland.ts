@@ -25,12 +25,6 @@ import {
 
 export const GHOST_DESKTOP = "ghost_desktop";
 
-export const GHOST_DESKTOP_TOOL_NAMES = [GHOST_DESKTOP] as const;
-/** Actions that only observe desktop state. */
-export const READ_ONLY_DESKTOP_ACTIONS: ReadonlySet<string> = new Set([
-  "state", "see", "layers", "ax_query", "ax_roles", "hit_test",
-]);
-
 export const NOTIFY_SEND_BINARY = "notify-send";
 
 export type DesktopAction =
@@ -718,7 +712,7 @@ export function createHyprlandExtension(
           description: "For notify: how loudly to interrupt. Defaults to normal.",
         })),
       }),
-      execute: async (_toolCallId, params, signal, _onUpdate, _ctx) => {
+      execute: async (_toolCallId, params, signal, _ctx) => {
         const opts = { signal: signal ?? undefined } as const;
 
         // Shared shapes: an invalid_format error tagged with the current action,
@@ -1079,13 +1073,10 @@ export function createHyprlandExtension(
             if ((params.x === undefined) !== (params.y === undefined)) {
               throw invalidFormat('action "scroll" needs both x and y for a pointer anchor.');
             }
-            if (
-              params.x !== undefined && params.y !== undefined
-              && (finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined)
-            ) {
-              throw invalidFormat('action "scroll" needs finite x and y coordinates.');
-            }
-            if (finiteNumber(params.x) !== undefined && finiteNumber(params.y) !== undefined) {
+            if (params.x !== undefined && params.y !== undefined) {
+              if (finiteNumber(params.x) === undefined || finiteNumber(params.y) === undefined) {
+                throw invalidFormat('action "scroll" needs finite x and y coordinates.');
+              }
               args["x"] = params.x;
               args["y"] = params.y;
               args["coordinate_space"] = params.coordinate_space ?? "screen";
@@ -1135,5 +1126,3 @@ export function createHyprlandExtension(
     });
   };
 }
-
-export default createHyprlandExtension();

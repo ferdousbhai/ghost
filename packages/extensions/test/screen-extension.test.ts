@@ -17,14 +17,17 @@ import {
   captureViaHelper,
   createScreenExtension,
   GHOST_SCREEN,
-  MAX_CAPTURE_BYTES,
   MAX_WATCH_FRAMES,
   MAX_WATCH_INTERVAL_MS,
   parseRegion,
-  pruneScreenshots,
   screenToolNames,
   screenshotFileName,
 } from "../src/extensions/screen.js";
+import {
+  ghostScreenshotMatcher,
+  MAX_SCREENSHOT_BYTES,
+  pruneScreenshotDirectoryPath,
+} from "../src/extensions/screenshot-retention.js";
 import { openGhostHome } from "../src/home.js";
 import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import {
@@ -186,7 +189,7 @@ describe("captureViaHelper", () => {
   });
 
   it("refuses an oversized sidecar payload before creating screenshot storage", async () => {
-    const oversized = Buffer.alloc(MAX_CAPTURE_BYTES + 1).toString("base64");
+    const oversized = Buffer.alloc(MAX_SCREENSHOT_BYTES + 1).toString("base64");
     await expect(captureViaHelper({
       helper: captureHelper({ png_base64: oversized }),
       home: openGhostHome(fixture.dir),
@@ -255,7 +258,7 @@ describe("retention", () => {
       const when = new Date(Date.now() - (25 - index) * 1000);
       await utimes(path, when, when);
     }
-    const deleted = await pruneScreenshots(dir, 20, "casper");
+    const deleted = await pruneScreenshotDirectoryPath(dir, 20, ghostScreenshotMatcher("casper", "screen"));
     expect(deleted).toHaveLength(5);
     expect((await readdir(dir)).filter((name) => name.startsWith("ghost-casper-screen-")).sort()[0])
       .toBe("ghost-casper-screen-2026-08-22T10-11-05-000.png");
@@ -287,7 +290,8 @@ describe("retention", () => {
     await mkdir(dir);
     await writeFile(target, "owner data");
     await symlink(target, join(dir, "ghost-casper-screen-2026-08-22T10-11-12-345.png"));
-    await expect(pruneScreenshots(dir, 0, "casper")).rejects.toThrowError(/not a regular file/);
+    await expect(pruneScreenshotDirectoryPath(dir, 0, ghostScreenshotMatcher("casper", "screen")))
+      .rejects.toThrowError(/not a regular file/);
     expect(await readFile(target, "utf8")).toBe("owner data");
   });
 });
@@ -336,6 +340,44 @@ describe("ghost_screen tool", () => {
       minimum: 0,
       maximum: MAX_WATCH_INTERVAL_MS,
     });
+  });
+
+  it("takes one capture at a time even when calls arrive together", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let firstCapture = true;
+    const helper = fakeHelper({
+      handle: (op) => {
+        if (op !== "capture") return {};
+        const mine = firstCapture;
+        firstCapture = false;
+        order.push(mine ? "start-1" : "start-2");
+        return (mine ? gate : Promise.resolve()).then(() => {
+          order.push(mine ? "end-1" : "end-2");
+          return {
+            png_base64: TINY_PNG_BASE64,
+            width: 1,
+            height: 1,
+            backend: "grim-foreign-toplevel",
+            background_safe: true,
+            interference: [],
+            warnings: [],
+          };
+        });
+      },
+    });
+    const { harness } = await harnessFor(VISION_CHAT, helper);
+    const first = harness.call(GHOST_SCREEN, { prompt: "first" });
+    const second = harness.call(GHOST_SCREEN, { prompt: "second" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // The second capture must not reach the helper while the first is open.
+    expect(order).toEqual(["start-1"]);
+    release();
+    await Promise.all([first, second]);
+    expect(order).toEqual(["start-1", "end-1", "start-2", "end-2"]);
   });
 
   it("returns the image itself when the chat model can see", async () => {

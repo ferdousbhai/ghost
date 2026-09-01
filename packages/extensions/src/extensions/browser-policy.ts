@@ -432,45 +432,6 @@ export async function checkNetworkUrl(
  */
 
 /**
- * Operations that only observe the page. Unrestricted — reading an attacker's
- * page cannot, by itself, act with the owner's authority.
- */
-export const OBSERVING_ACTIONS = new Set([
-  "open",
-  "read",
-  "find",
-  "screenshot",
-  "back",
-  "forward",
-  "scroll",
-  "console",
-  "network",
-  "resize",
-  "tabs",
-  "close",
-]);
-
-/**
- * Operations that mutate the page with the owner's authority: click a control,
- * type into / submit a field, drag, press keys, upload a file, or run script.
- * `javascript` is here because a page script can click, submit, and read
- * credentials all at once — it is the sharpest of them, and the provenance gate
- * governs it exactly like a click.
- */
-export const ACTING_ACTIONS = new Set([
-  "click",
-  "type",
-  "drag",
-  "key",
-  "upload",
-  "javascript",
-]);
-
-export function isActingAction(action: string): boolean {
-  return ACTING_ACTIONS.has(action);
-}
-
-/**
  * The registrable domain of a hostname — the identity a same-site check turns
  * on. Bare IPs (v4 or bracketed v6) are their own identity.
  */

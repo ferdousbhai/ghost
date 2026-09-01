@@ -28,12 +28,6 @@ import {
 
 export const GHOST_BROWSER = "ghost_browser";
 
-export const GHOST_BROWSER_TOOL_NAMES = [GHOST_BROWSER] as const;
-/** Non-persisting observation/navigation admitted by the model plan boundary. */
-export const READ_ONLY_BROWSER_ACTIONS: ReadonlySet<string> = new Set([
-  "open", "read", "find", "back", "forward", "scroll", "console", "network", "tabs", "tab_switch",
-]);
-
 export function browserToolNames(): string[] {
   return [GHOST_BROWSER];
 }
@@ -307,7 +301,7 @@ export function createBrowserExtension(
           maximum: MAX_TIMEOUT_MS,
         })),
       }),
-      execute: async (_toolCallId, params, signal, _onUpdate, ctx) => {
+      execute: async (_toolCallId, params, signal, ctx) => {
         const session = sessionFor(ctx);
         const operation = {
           ...(params.timeout_ms === undefined ? {} : { timeoutMs: params.timeout_ms }),
@@ -790,8 +784,6 @@ export function createBrowserExtension(
   };
 }
 
-export {
-} from "./browser-backend.js";
 export {
   browserSessionFor,
   closeAllBrowserSessions,

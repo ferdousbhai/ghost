@@ -208,16 +208,6 @@ async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>):
   }
 }
 
-async function exists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -309,7 +299,7 @@ async function readPinnedMemoryTextFile(
   try {
     const before = await file.stat({ bigint: true });
     if (!before.isFile()) throw invalidMemoryBytes(path, "is not a regular file");
-    if (before.size < 0n || before.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
+    if (before.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
       throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
     }
     await probe?.("opened", path);
@@ -489,10 +479,6 @@ export class GhostHome {
       : absolutePath;
   }
 
-  exists(): Promise<boolean> {
-    return exists(this.dir);
-  }
-
   async ensure(): Promise<void> {
     await withFileMutationQueue(this.dir, async () => {
       await mkdir(this.dir, { recursive: true });
@@ -543,21 +529,6 @@ export class GhostHome {
       body,
     };
   }
-
-  async writeCharacter(input: { body: string }): Promise<void> {
-    if (input.body.length > MAX_CHARACTER_BODY_LENGTH) {
-      throw new GhostError(
-        "limit_exceeded",
-        `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
-        + `that body is ${input.body.length}. Nothing was written.`,
-        { length: input.body.length, limit: MAX_CHARACTER_BODY_LENGTH },
-      );
-    }
-    await withFileMutationQueue(this.characterPath, async () => {
-      await atomicWriteFile(this.dir, this.characterPath, input.body);
-    });
-  }
-
 
   async listMemory(): Promise<MemoryListing> {
     const dir = this.memoryDir;
@@ -817,56 +788,58 @@ export class GhostHome {
     const slug = coerceMemorySlug(inputName);
     const name = memoryFileName(slug);
     const dir = this.memoryDir;
-    resolveWithin(dir, name, "Memory file");
     return withFileMutationQueue(dir, async () => {
       const directory = await openConfinedDirectory(this.dir, dir, {
         label: "Memory path",
       });
-      const trashDirectory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
-        create: true,
-        label: "Memory trash path",
-      });
       try {
-        return await withDescriptorLock(directory, async () => {
-          const path = `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`;
-          const before = (await readPinnedMemoryTextFile(
-            directory,
-            name,
-            path,
-            this.#memoryReadProbe,
-          ))?.text;
-          if (before === undefined) {
-            throw new GhostError(
-              "not_found",
-              `No memory file named ${name}.`,
-              { name },
-            );
-          }
-          assertAdmittedMemorySource(before, path);
-          const trashName = await collisionFreeMemoryTrashName(trashDirectory, slug);
-          const trash = `${MEMORY_TRASH_DIRNAME}/${trashName}` as `.trash/${string}.md`;
-          const intent: MemoryDeleteIntent = {
-            id: randomUUID(),
-            path,
-            before,
-            beforeSha256: sha256(before),
-            trash,
-          };
-          await beforeDelete(intent);
-          await rename(
-            descriptorPath(directory, name),
-            descriptorPath(trashDirectory, trashName),
-          );
-          await directory.sync();
-          await trashDirectory.sync();
-          return {
-            deleted: { slug, path, trash },
-            receipt: { ...intent, operation: "deleted" },
-          };
+        const trashDirectory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
+          create: true,
+          label: "Memory trash path",
         });
+        try {
+          return await withDescriptorLock(directory, async () => {
+            const path = `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`;
+            const before = (await readPinnedMemoryTextFile(
+              directory,
+              name,
+              path,
+              this.#memoryReadProbe,
+            ))?.text;
+            if (before === undefined) {
+              throw new GhostError(
+                "not_found",
+                `No memory file named ${name}.`,
+                { name },
+              );
+            }
+            assertAdmittedMemorySource(before, path);
+            const trashName = await collisionFreeMemoryTrashName(trashDirectory, slug);
+            const trash = `${MEMORY_TRASH_DIRNAME}/${trashName}` as `.trash/${string}.md`;
+            const intent: MemoryDeleteIntent = {
+              id: randomUUID(),
+              path,
+              before,
+              beforeSha256: sha256(before),
+              trash,
+            };
+            await beforeDelete(intent);
+            await rename(
+              descriptorPath(directory, name),
+              descriptorPath(trashDirectory, trashName),
+            );
+            await directory.sync();
+            await trashDirectory.sync();
+            return {
+              deleted: { slug, path, trash },
+              receipt: { ...intent, operation: "deleted" },
+            };
+          });
+        } finally {
+          await trashDirectory.close();
+        }
       } finally {
         await directory.close();
-        await trashDirectory.close();
       }
     });
   }
@@ -878,7 +851,6 @@ export class GhostHome {
     }
     const name = trashPath.slice(prefix.length);
     parseMemoryTrashFileName(name);
-    resolveWithin(this.memoryTrashDir, name, "Memory trash file");
     let directory: FileHandle;
     try {
       directory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {

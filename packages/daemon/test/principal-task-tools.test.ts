@@ -108,7 +108,7 @@ async function call(
   const extension = await tools(context);
   const tool = extension.tools.get(name);
   if (!tool) throw new Error(`missing ${name}`);
-  return tool.execute("call-1", input as never, signal, undefined, { cwd: binding.cwd });
+  return tool.execute("call-1", input as never, signal, { cwd: binding.cwd });
 }
 
 describe("principal task tools", () => {

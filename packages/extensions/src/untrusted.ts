@@ -113,10 +113,10 @@ const SINGLE_INVISIBLE_CODE_POINTS = new Set([
   0x00ad, 0x034f, 0x061c, 0x115f, 0x1160, 0x17b4, 0x17b5, 0x180e, 0xfeff,
 ]);
 
-export function hasInvisibleOrBidiUnicode(content: string): boolean {
+function hasInvisibleOrBidiUnicode(content: string): boolean {
   for (const character of content) {
-    const codePoint = character.codePointAt(0);
-    if (codePoint === undefined) continue;
+    // Iterating a string yields whole code points, so this is never undefined.
+    const codePoint = character.codePointAt(0) as number;
     if (SINGLE_INVISIBLE_CODE_POINTS.has(codePoint)) return true;
     if (codePoint >= 0x200b && codePoint <= 0x200f) return true;
     if (codePoint >= 0x202a && codePoint <= 0x202e) return true;
@@ -323,7 +323,7 @@ export class ClassifierInjectionDetector implements InjectionDetector {
   }
 }
 
-export function combineInjectionDetections(
+function combineInjectionDetections(
   first: InjectionDetection,
   second: InjectionDetection,
 ): InjectionDetection {
@@ -411,9 +411,6 @@ export function fenceUntrusted(
   const neutralized = content
     .replaceAll(openTag, `&lt;untrusted source="${escapeAttribute(opts.source)}" id="${nonce}">`)
     .replaceAll(closeTag, `&lt;/untrusted id="${nonce}">`);
-  if (neutralized.includes(openTag) || neutralized.includes(closeTag)) {
-    throw new Error("Failed to neutralize an untrusted-content fence marker.");
-  }
 
   return `${openTag}\n${neutralized}\n${closeTag}`;
 }

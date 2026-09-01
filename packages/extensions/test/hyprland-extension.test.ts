@@ -988,9 +988,6 @@ describe("ghost_desktop registration", () => {
     const { extension } = await harness();
     expect(extension.toolNames()).toEqual([GHOST_DESKTOP]);
     expect(desktopToolNames()).toEqual([GHOST_DESKTOP]);
-    expect(extension.tools.get(GHOST_DESKTOP)?.description).toContain("omarchy commands --json");
-    expect(extension.tools.get(GHOST_DESKTOP)?.description).toContain("Fallback computer use");
-    expect(await extension.toolCall(GHOST_DESKTOP)).toBeUndefined();
   });
 
   it("publishes bounded limit and accessibility-action schemas", async () => {

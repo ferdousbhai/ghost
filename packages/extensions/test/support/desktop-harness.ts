@@ -23,7 +23,6 @@ import type {
   GhostToolModel,
   GhostToolResult,
 } from "../../src/extension-api.js";
-import type { ToolCallEventResult } from "./harness.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
 import {
@@ -172,10 +171,6 @@ export interface DesktopHarness {
   activeTools: string[];
   toolNames(): string[];
   call(name: string, params?: Record<string, unknown>): Promise<GhostToolResult<any>>;
-  toolCall(
-    toolName: string,
-    input?: Record<string, unknown>,
-  ): Promise<ToolCallEventResult | undefined>;
   transformContext(messages: unknown[]): Promise<unknown[]>;
   sessionStart(): Promise<void>;
   beforeAgentStart(): Promise<void>;
@@ -196,15 +191,7 @@ export async function loadExtensionWith(
     async call(name, params = {}) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return tool.execute(`call-${name}`, params, undefined, undefined, ctx);
-    },
-    async toolCall(toolName, input = {}) {
-      const event = { type: "tool_call", toolCallId: "call-1", toolName, input };
-      for (const handler of handlers.get("tool_call") ?? []) {
-        const result = (await handler(event, ctx)) as ToolCallEventResult | undefined;
-        if (result?.block) return result;
-      }
-      return undefined;
+      return tool.execute(`call-${name}`, params, undefined, ctx);
     },
     async transformContext(messages) {
       let current = messages;

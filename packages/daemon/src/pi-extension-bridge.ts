@@ -43,8 +43,8 @@ export function piExtensionFromGhost(
         label: tool.label,
         description: tool.description,
         parameters: tool.parameters,
-        execute: (toolCallId, params, signal, onUpdate, ctx) =>
-          tool.execute(toolCallId, params as never, signal, onUpdate, ghostToolContextFromPi(ctx)),
+        execute: (toolCallId, params, signal, _onUpdate, ctx) =>
+          tool.execute(toolCallId, params as never, signal, ghostToolContextFromPi(ctx)),
       });
     }
     if (extension.beforeAgentStart.length === 0) return;

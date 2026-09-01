@@ -3,7 +3,6 @@ import {
   checkActingScope,
   checkNetworkUrl,
   checkUrl,
-  isActingAction,
   isLocalHostname,
   isPublicInternetAddress,
   registrableDomain,
@@ -255,19 +254,6 @@ describe("registrable domain", () => {
   it("separates sites that only share a prefix", () => {
     expect(registrableDomain("attacker.test")).not.toBe(registrableDomain("example.com"));
     expect(registrableDomain("evil-example.com")).not.toBe(registrableDomain("example.com"));
-  });
-});
-
-describe("acting classification", () => {
-  it("names click and type as the consequential actions", () => {
-    expect(isActingAction("click")).toBe(true);
-    expect(isActingAction("type")).toBe(true);
-  });
-
-  it("leaves observing actions unrestricted", () => {
-    for (const observing of ["open", "read", "find", "screenshot", "back", "close"]) {
-      expect(isActingAction(observing)).toBe(false);
-    }
   });
 });
 

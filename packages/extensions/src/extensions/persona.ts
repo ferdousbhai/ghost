@@ -39,5 +39,3 @@ export function createPersonaExtension(
     });
   };
 }
-
-export default createPersonaExtension();

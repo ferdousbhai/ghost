@@ -41,10 +41,6 @@ export interface GhostToolContext {
   readonly model?: GhostToolModel | undefined;
 }
 
-export type GhostToolUpdate<TDetails = unknown> = (
-  partial: GhostToolResult<TDetails>,
-) => void;
-
 export interface GhostToolDefinition<
   TParams extends TSchema = TSchema,
   TDetails = unknown,
@@ -61,7 +57,6 @@ export interface GhostToolDefinition<
     toolCallId: string,
     params: Static<TParams>,
     signal: AbortSignal | undefined,
-    onUpdate: GhostToolUpdate<TDetails> | undefined,
     ctx: GhostToolContext,
   ): Promise<GhostToolResult<TDetails>>;
 }
@@ -88,8 +83,8 @@ export type GhostBeforeAgentStartHandler = (
   | void;
 
 export interface GhostExtensionAPI {
-  registerTool<TParams extends TSchema, TDetails>(
-    definition: GhostToolDefinition<TParams, TDetails>,
+  registerTool<TParams extends TSchema>(
+    definition: GhostToolDefinition<TParams>,
   ): void;
   on(event: "before_agent_start", handler: GhostBeforeAgentStartHandler): void;
 }
