@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "b249e4abb3971bed045a15625b85cb3aaf10588c98ab74dfa192db4fa9e79ae6"
+JOB_SHA256 = "2e53646bfc2f387ba68acd1ae9a9c6b6b13b9425612f1b52d6e06a4e76a65c28"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -177,7 +177,17 @@ def errors(text: str) -> list[str]:
                 'test_uid=23456',
                 'runtime_unit="user-runtime-dir@$test_uid.service"',
                 'manager_unit="user@$test_uid.service"',
+                'override_file="$override_dir/ghost-ci-environment.conf"',
                 '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
+                '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
+                'sudo install -d -m755 -- "$override_dir"',
+                'Environment=HOME=/home/$test_user',
+                'Environment=USER=$test_user',
+                'Environment=LOGNAME=$test_user',
+                'Environment=XDG_RUNTIME_DIR=/run/user/$test_uid',
+                'Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus',
+                'sudo chmod 644 "$override_file"',
+                'sudo systemctl daemon-reload',
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
@@ -194,6 +204,9 @@ def errors(text: str) -> list[str]:
         require_order(
             manager,
             [
+                'sudo install -d -m755 -- "$override_dir"',
+                'sudo chmod 644 "$override_file"',
+                'sudo systemctl daemon-reload',
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
@@ -221,9 +234,13 @@ def errors(text: str) -> list[str]:
             cleanup,
             [
                 '[[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]',
+                '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
                 'sudo systemctl stop "user@$TEST_UID.service"',
                 'sudo loginctl disable-linger "$TEST_USER"',
                 'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
+                'sudo unlink -- "$override_file"',
+                'sudo rmdir -- "$override_dir"',
+                'sudo systemctl daemon-reload',
                 'sudo userdel --remove "$TEST_USER"',
             ],
             "manager cleanup",
@@ -235,6 +252,9 @@ def errors(text: str) -> list[str]:
                 'sudo loginctl disable-linger "$TEST_USER"',
                 'sudo systemctl stop "user@$TEST_UID.service"',
                 'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
+                'sudo unlink -- "$override_file"',
+                'sudo rmdir -- "$override_dir"',
+                'sudo systemctl daemon-reload',
                 'sudo userdel --remove "$TEST_USER"',
             ],
             "manager cleanup",

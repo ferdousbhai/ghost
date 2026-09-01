@@ -50,6 +50,12 @@ expect_rejected opt-in \
 expect_rejected uid-guard \
   'test_uid=23456' \
   'test_uid="$(id -u)"'
+expect_rejected manager-xdg-override \
+  '"Environment=XDG_RUNTIME_DIR=/run/user/$test_uid"' \
+  '"Environment=XDG_RUNTIME_DIR=/run/user/1001"'
+expect_rejected manager-bus-override \
+  '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus"' \
+  '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus"'
 expect_rejected runtime-dir-start \
   'sudo systemctl start "$runtime_unit" "$manager_unit"' \
   'sudo systemctl start "$manager_unit"'
@@ -80,6 +86,9 @@ expect_rejected cleanup-condition \
 expect_rejected cleanup-runtime-dir \
   'sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true' \
   ': "runtime directory unit not stopped"'
+expect_rejected cleanup-override \
+  'sudo unlink -- "$override_file" || true' \
+  ': "ephemeral manager override not removed"'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'

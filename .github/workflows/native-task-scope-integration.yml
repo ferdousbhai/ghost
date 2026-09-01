@@ -42,6 +42,8 @@ jobs:
           test_uid=23456
           runtime_unit="user-runtime-dir@$test_uid.service"
           manager_unit="user@$test_uid.service"
+          override_dir="/run/systemd/system/$manager_unit.d"
+          override_file="$override_dir/ghost-ci-environment.conf"
           diagnose_manager_failure() {
             sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit" || true
             sudo systemctl --no-pager show \
@@ -65,6 +67,18 @@ jobs:
           sudo useradd --uid "$test_uid" --user-group --create-home --shell /bin/bash "$test_user"
           [[ "$(id -u "$test_user")" == "$test_uid" ]]
           sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
+          [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
+          sudo install -d -m755 -- "$override_dir"
+          printf '%s\n' \
+            '[Service]' \
+            "Environment=HOME=/home/$test_user" \
+            "Environment=USER=$test_user" \
+            "Environment=LOGNAME=$test_user" \
+            "Environment=XDG_RUNTIME_DIR=/run/user/$test_uid" \
+            "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus" \
+            | sudo tee "$override_file" >/dev/null
+          sudo chmod 644 "$override_file"
+          sudo systemctl daemon-reload
           sudo systemctl start "$runtime_unit" "$manager_unit"
           sudo systemctl is-active --quiet "$runtime_unit"
           sudo systemctl is-active --quiet "$manager_unit"
@@ -112,9 +126,15 @@ jobs:
         run: |
           set -euo pipefail
           [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
+          override_dir="/run/systemd/system/user@$TEST_UID.service.d"
+          override_file="$override_dir/ghost-ci-environment.conf"
+          [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
           if getent passwd "$TEST_USER" >/dev/null; then
             sudo loginctl disable-linger "$TEST_USER" || true
             sudo systemctl stop "user@$TEST_UID.service" || true
             sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true
+            sudo unlink -- "$override_file" || true
+            sudo rmdir -- "$override_dir" || true
+            sudo systemctl daemon-reload
             sudo userdel --remove "$TEST_USER"
           fi
