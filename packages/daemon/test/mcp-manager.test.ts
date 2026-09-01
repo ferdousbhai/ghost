@@ -202,14 +202,14 @@ describe("mcp.json writer", () => {
     await expect(addMCPServer(path, "bad/name", { type: "stdio", command: "x" })).rejects.toThrow(/Server name/);
     await expect(addMCPServer(path, "nourl", { type: "http" } as MCPServerConfig)).rejects.toThrow(/Invalid server config/);
     await updateMCPServer(path, "one", { type: "stdio", command: "one", enabled: false });
-    expect((await readMCPConfigFile(path)).mcpServers).toEqual({ one: { type: "stdio", command: "one", enabled: false } });
+    expect(readMCPConfigFile(path).mcpServers).toEqual({ one: { type: "stdio", command: "one", enabled: false } });
 
     await expect(removeMCPServer(path, "toString")).rejects.toThrow(/not found/);
     await removeMCPServer(path, "one");
-    expect((await readMCPConfigFile(path)).mcpServers).toEqual({});
+    expect(readMCPConfigFile(path).mcpServers).toEqual({});
 
     writeFileSync(path, "{ not json");
-    await expect(readMCPConfigFile(path)).rejects.toThrow();
+    expect(() => readMCPConfigFile(path)).toThrow();
   });
 
   it("recovers an interrupted portable CAS before ordinary update and remove mutations", async () => {
@@ -228,7 +228,7 @@ describe("mcp.json writer", () => {
     await updateMCPServer(path, "retained", { type: "stdio", command: "after" });
     await removeMCPServer(path, "removed");
 
-    expect(await readMCPConfigFile(path)).toEqual({
+    expect(readMCPConfigFile(path)).toEqual({
       mcpServers: { retained: { type: "stdio", command: "after" } },
       futureSetting: { retained: true },
     });

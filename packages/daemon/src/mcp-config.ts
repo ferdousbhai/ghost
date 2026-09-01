@@ -124,10 +124,10 @@ export function expandEnvVarsDeep<T>(value: T, extraEnv?: Record<string, string>
   return value;
 }
 
-export async function readMCPConfigFile(
+export function readMCPConfigFile(
   filePath: string,
   probe?: PrivateReadProbe,
-): Promise<MCPConfigFile> {
+): MCPConfigFile {
   let text: string;
   try {
     text = readPrivateFileText(filePath, probe);
@@ -197,7 +197,7 @@ async function putServer(
   const errors = validateServerConfig(name, config);
   if (errors.length > 0) throw new Error(`Invalid server config: ${errors.join("; ")}`);
   return serializeByKey(fileLocks, filePath, () => withAsyncMCPConfigWriteLock(filePath, async () => {
-    const existing = await readMCPConfigFile(filePath, options.readProbe);
+    const existing = readMCPConfigFile(filePath, options.readProbe);
     if (mustBeNew && Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" already exists in ${filePath}`);
     }
@@ -229,7 +229,7 @@ export function removeMCPServer(
   options: MCPConfigMutationOptions = {},
 ): Promise<void> {
   return serializeByKey(fileLocks, filePath, () => withAsyncMCPConfigWriteLock(filePath, async () => {
-    const existing = await readMCPConfigFile(filePath, options.readProbe);
+    const existing = readMCPConfigFile(filePath, options.readProbe);
     if (!Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" not found in ${filePath}`);
     }

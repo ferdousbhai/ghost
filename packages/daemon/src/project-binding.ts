@@ -931,7 +931,7 @@ export class ProjectBindingStore {
     runtime: ConversationRuntime,
     conversationId: string,
     path: string,
-    scope = "",
+    scope: string,
   ): Promise<ProjectPreview> {
     const now = this.now();
     for (const [token, preview] of this.previews) {
@@ -1069,7 +1069,7 @@ export class ProjectBindingStore {
   }
 
   /** One parent-aware authority for every task record in a ghost home. */
-  taskBindingAuthority(sessionDir: string, scope = ""): TaskBindingAuthority {
+  taskBindingAuthority(sessionDir: string, scope: string): TaskBindingAuthority {
     const validate = async (
       receipt: TaskBindingReceipt,
       signal: AbortSignal,

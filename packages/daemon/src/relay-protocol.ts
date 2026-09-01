@@ -88,23 +88,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Frames are small — except a full-page screenshot, which travels base64 and is
- * the reason this is measured in megabytes rather than kilobytes.
- */
-export const MAX_FRAME_BYTES = 32 * 1024 * 1024;
-
-/**
- * Parse one text frame from the extension.
+ * Parse one text frame from the extension. Frame size is bounded upstream by
+ * the ws transport's maxPayload, so no size check happens here.
  *
  * Every rejection is a *reason string* rather than a throw: the caller's only
  * sane response is to log it and drop the frame, and a socket that throws its way
  * out of a message handler takes the connection with it.
  */
 export function parseClientFrame(raw: string): ParsedClientFrame {
-  const bytes = Buffer.byteLength(raw, "utf8");
-  if (bytes > MAX_FRAME_BYTES) {
-    return { ok: false, reason: `frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES} cap` };
-  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);

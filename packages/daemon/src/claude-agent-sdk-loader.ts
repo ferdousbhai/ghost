@@ -92,10 +92,6 @@ function awaitSdkLoad(
       rejectLoad(sdkLoadAborted());
     };
     signal.addEventListener("abort", aborted, { once: true });
-    if (signal.aborted) {
-      aborted();
-      return;
-    }
     pending.then(
       (sdk) => { signal.removeEventListener("abort", aborted); resolveLoad(sdk); },
       (error: unknown) => { signal.removeEventListener("abort", aborted); rejectLoad(error); },

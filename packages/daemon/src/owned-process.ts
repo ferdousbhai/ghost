@@ -129,7 +129,6 @@ export async function runOwnedCommand(
   if (!/^ghost-[a-z0-9-]+-$/u.test(scratchPrefix)) {
     throw new RangeError("Owned command scratch prefix is invalid.");
   }
-  if (options.signal?.aborted) throw new OwnedProcessError("Owned probe was aborted.");
   const scratch = await mkdtemp(join(tmpdir(), scratchPrefix));
   await chmod(scratch, 0o700);
   try {
@@ -208,7 +207,6 @@ async function runOwnedCommandInDirectory(
   });
   const onAbort = () => complete({ kind: "abort" });
   options.signal?.addEventListener("abort", onAbort, { once: true });
-  if (options.signal?.aborted) complete({ kind: "abort" });
   if (options.stdin !== undefined) {
     child.stdin?.on("error", () => undefined);
     child.stdin?.end(options.stdin);

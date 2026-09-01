@@ -349,7 +349,6 @@ export {
   authorizeRelayUpgrade,
   encodeServerFrame,
   isRelayOp,
-  MAX_FRAME_BYTES,
   parseClientFrame,
   RELAY_OPS,
   RELAY_PATH,

@@ -683,7 +683,6 @@ export class ModelCatalog {
         this.claudeCodeStatus(),
       ]);
       return this.resolveCurrent(
-        runtime,
         this.readModelsFile(configDir, ghostName),
         available,
         claudeCodeAvailability(claudeStatus),
@@ -691,17 +690,14 @@ export class ModelCatalog {
     });
   }
 
-  private async resolveCurrent(
-    runtime: ModelCatalogRuntime,
+  private resolveCurrent(
     file: GhostModelsFile | null,
-    availableModels?: readonly Model<Api>[],
-    claudeCodeAvailabilitySnapshot?: ClaudeCodeAvailability,
-  ): Promise<CurrentModel> {
+    availableModels: readonly Model<Api>[],
+    claudeCode: ClaudeCodeAvailability,
+  ): CurrentModel {
     const role = file?.roles?.chat_model;
     if (role?.provider && role.modelId) {
       if (role.provider === CLAUDE_CODE_PROVIDER_ID) {
-        const claudeCode = claudeCodeAvailabilitySnapshot
-          ?? claudeCodeAvailability(await this.claudeCodeStatus());
         const resolved = role.modelId === CLAUDE_CODE_DEFAULT_MODEL_ID;
         return {
           current: {
@@ -717,16 +713,14 @@ export class ModelCatalog {
           source: "role",
         };
       }
-      const available = availableModels ?? await runtime.getAvailable();
-      const model = resolveChatModel(role, available);
+      const model = resolveChatModel(role, availableModels);
       if (model?.provider === role.provider && model.id === role.modelId) {
         return { current: modelView(model), source: "role" };
       }
       if (model) return { current: modelView(model), source: "default" };
       return { current: null, source: "none" };
     }
-    const available = availableModels ?? await runtime.getAvailable();
-    const model = resolveChatModel(resolveChatModelRef(file), available);
+    const model = resolveChatModel(resolveChatModelRef(file), availableModels);
     if (model) return { current: modelView(model), source: "default" };
     return { current: null, source: "none" };
   }
@@ -759,7 +753,7 @@ export class ModelCatalog {
       this.claudeCodeStatus(),
     ]);
     const claudeCode = claudeCodeAvailability(claudeStatus);
-    const current = await this.resolveCurrent(runtime, file, available, claudeCode);
+    const current = this.resolveCurrent(file, available, claudeCode);
     const piSource = scope === "catalog"
       ? runtime.getModels(providerFilter)
       : providerFilter

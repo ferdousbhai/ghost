@@ -1606,7 +1606,6 @@ function bridgeCollectedClaudeCodeTools(
             randomUUID(),
             args as never,
             signalFromToolExtra(extra),
-            undefined,
             context,
           );
           return { content: mcpContent(result) };
@@ -2877,11 +2876,10 @@ export class ClaudeCodeRuntime {
           }
           let exited: Promise<void>;
           try {
-            exited = this.observeQueryExit
-              ? Promise.resolve(this.observeQueryExit(created))
-              : processExit?.exited ?? Promise.reject(new ClaudeCodeProcessError(
-                "Claude Code did not install its subprocess exit boundary.",
-              ));
+            // processExit is defined exactly when observeQueryExit is not.
+            exited = processExit
+              ? processExit.exited
+              : Promise.resolve(this.observeQueryExit?.(created));
           } catch (cause) {
             exited = Promise.reject(cause);
           }

@@ -14,7 +14,6 @@ import {
   authorizeRelayUpgrade,
   encodeServerFrame,
   isRelayOp,
-  MAX_FRAME_BYTES,
   parseClientFrame,
   RELAY_OPS,
   RELAY_PATH,
@@ -113,28 +112,6 @@ describe("client frames", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.reason).toContain(reason);
-  });
-
-  it.each([
-    ["ASCII", "x", MAX_FRAME_BYTES],
-    ["multibyte", "é", MAX_FRAME_BYTES / 2],
-  ])("measures %s frames in UTF-8 bytes at the exact cap", (_kind, unit, count) => {
-    const boundary = unit.repeat(count);
-    expect(Buffer.byteLength(boundary, "utf8")).toBe(MAX_FRAME_BYTES);
-    expect(parseClientFrame(boundary)).toEqual({ ok: false, reason: "not JSON" });
-
-    const oversized = boundary + unit;
-    const bytes = Buffer.byteLength(oversized, "utf8");
-    expect(parseClientFrame(oversized)).toEqual({
-      ok: false,
-      reason: `frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES} cap`,
-    });
-  });
-
-  it("leaves room for a full-page screenshot, which is the big frame", () => {
-    // base64 of a large PNG; anything under a few MB would silently break
-    // `screenshot` on a tall page.
-    expect(MAX_FRAME_BYTES).toBeGreaterThanOrEqual(16 * 1024 * 1024);
   });
 
   it("encodes server frames as one JSON object per message", () => {

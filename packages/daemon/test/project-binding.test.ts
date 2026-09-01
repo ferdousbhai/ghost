@@ -209,7 +209,7 @@ describe("ProjectBindingStore", () => {
       generation: 1,
     });
     expect(Object.isFrozen(receipt)).toBe(true);
-    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+    await expect(store.taskBindingAuthority(sessionDir, "casper").revalidate(
       receipt,
       new AbortController().signal,
       parent,
@@ -529,7 +529,7 @@ describe("ProjectBindingStore", () => {
     const receipt = await store.mintTaskBinding(sessionDir, parent);
     renameSync(child, `${child}-old`);
     mkdirSync(child);
-    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+    await expect(store.taskBindingAuthority(sessionDir, "casper").revalidate(
       receipt,
       new AbortController().signal,
       parent,
@@ -545,7 +545,7 @@ describe("ProjectBindingStore", () => {
       rebound,
       project,
     );
-    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+    await expect(store.taskBindingAuthority(sessionDir, "casper").revalidate(
       receipt,
       new AbortController().signal,
       parent,
