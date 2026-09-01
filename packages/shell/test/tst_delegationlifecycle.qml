@@ -238,6 +238,15 @@ TestCase {
         compare(Ghostd.delegatedTasks[0].state, "cancelled");
     }
 
+    function test_equalTimestampActiveResponsesNeverMoveBackward(): void {
+        loadTasks();
+        Ghostd.selectedDelegatedTask = task({}, true);
+        Ghostd.fetchDelegatedTask(task().id, true);
+        requests[1].complete(200, task({ state: "starting" }, true));
+        compare(Ghostd.selectedDelegatedTask.state, "running");
+        compare(Ghostd.delegatedTasks[0].state, "running");
+    }
+
     function test_taskMutationResponseMustMatchRequestedTask(): void {
         loadTasks();
         Ghostd.selectedDelegatedTask = task();

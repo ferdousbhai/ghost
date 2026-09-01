@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { REDACTED_MEMORY_SECRET } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
+import { inspectNativeHarnessExecutable } from "../src/native-harness-identity.js";
+import type { NativeTaskScopeManager } from "../src/native-task-scope.js";
 import { MAX_TASK_EVENT_MESSAGE, MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingAuthority, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
 import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
@@ -119,6 +121,12 @@ describe("durable task foundation", () => {
   it.each(["zero", "twice", "thenable"] as const)(
     "rejects a %s-use native launch callback before task publication",
     async (kind) => {
+      const executable = "/usr/bin/true";
+      const executableEvidence = {
+        path: executable,
+        identity: await inspectNativeHarnessExecutable(executable, true),
+        literalBoundary: true,
+      };
       const adapter: TaskAdapter = {
         async start(input, context) {
           const quiet = Promise.withResolvers<void>();
@@ -129,17 +137,17 @@ describe("durable task foundation", () => {
             },
             quiescence: quiet.promise,
           });
-          await context.launchNative((spawn) => {
+          await context.launchNative([executableEvidence], (spawn) => {
             if (kind === "zero") return "no spawn";
             spawn({
-              executable: "/usr/bin/true",
+              executable,
               args: [],
               cwd: input.cwd,
               environment: { PATH: "/usr/bin:/bin" },
             });
             if (kind === "twice") {
               spawn({
-                executable: "/usr/bin/true",
+                executable,
                 args: [],
                 cwd: input.cwd,
                 environment: { PATH: "/usr/bin:/bin" },
@@ -151,7 +159,7 @@ describe("durable task foundation", () => {
         },
       };
       const { home, store, controller } = await fixture(adapter);
-      const admitted = await controller.start({
+      const task = await controller.start({
         parent,
         harness: "native",
         task: "inspect launch capability",
@@ -163,9 +171,106 @@ describe("durable task foundation", () => {
           cwdIdentity: "test-cwd",
         },
       });
-      await expect(eventually(store, admitted.id, "failed")).resolves.toMatchObject({
+      await expect(eventually(store, task.id, "failed")).resolves.toMatchObject({
         error: { code: "task_failed" },
       });
+    },
+  );
+
+  it.each([
+    ["Pi executable", ["pi"], 0, 0],
+    ["Codex executable", ["codex"], 0, 0],
+    ["Claude native executable", ["claude"], 0, 0],
+    ["Claude script", ["claude.mjs", "bun"], 0, 1],
+    ["Claude Bun interpreter", ["claude.mjs", "bun"], 1, 1],
+  ] as const)(
+    "rejects a replaced %s after binding admission without spawning",
+    async (_label, names, replacementIndex, spawnIndex) => {
+      const home = await mkdtemp(join(tmpdir(), "ghost-task-executable-"));
+      await chmod(home, 0o700);
+      const paths = names.map((name) => join(home, name));
+      for (const path of paths) await writeFile(path, "#!/bin/sh\nexit 0\n", { mode: 0o700 });
+      const executables = await Promise.all(paths.map(async (path) => ({
+        path,
+        identity: await inspectNativeHarnessExecutable(path, true),
+        literalBoundary: true,
+      })));
+      const entered = deferred<void>();
+      const release = deferred<void>();
+      const bindingAuthority: TaskBindingAuthority = {
+        async revalidate(receipt) { return receipt; },
+        async launchNative(receipt, _signal, _parent, launch) {
+          entered.resolve();
+          await release.promise;
+          return launch(receipt);
+        },
+      };
+      let spawns = 0;
+      let confirmations = 0;
+      const manager: NativeTaskScopeManager = {
+        async reserve(taskId) {
+          return {
+            unit: `ghost-${taskId}.scope`,
+            spawn() {
+              spawns += 1;
+              throw new Error("replacement reached scope spawn");
+            },
+            async stopAndConfirm() { confirmations += 1; },
+          };
+        },
+        async stopAndConfirm() { confirmations += 1; },
+        async recoverAndConfirm() { confirmations += 1; },
+      };
+      const adapter: TaskAdapter = {
+        async start(input, context) {
+          const quiet = deferred<void>();
+          context.register({
+            async force() {
+              await context.stopNative();
+              quiet.resolve();
+            },
+            quiescence: quiet.promise,
+          });
+          await context.launchNative(executables, (spawn) => spawn({
+            executable: paths[spawnIndex]!,
+            args: [],
+            cwd: input.cwd,
+            environment: { PATH: "/usr/bin:/bin" },
+          }));
+          return { result: new Promise<string>(() => undefined), async followUp() {} };
+        },
+      };
+      const store = trackedStore(home);
+      const controller = new TaskController(
+        store,
+        new Map([["native", adapter]]),
+        bindingAuthority,
+        manager,
+      );
+      await controller.initialize();
+      const task = await controller.start({
+        parent,
+        harness: "native",
+        task: "reject replaced executable",
+        binding: {
+          ...binding,
+          root: home,
+          rootIdentity: "test-root",
+          cwd: home,
+          cwdIdentity: "test-cwd",
+        },
+      });
+      await entered.promise;
+      const replacement = join(home, `replacement-${replacementIndex}`);
+      await writeFile(replacement, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
+      await rename(replacement, paths[replacementIndex]!);
+      release.resolve();
+
+      await expect(eventually(store, task.id, "failed")).resolves.toMatchObject({
+        error: { code: "task_failed" },
+      });
+      expect(spawns).toBe(0);
+      expect(confirmations).toBeGreaterThan(0);
     },
   );
 
@@ -178,6 +283,17 @@ describe("durable task foundation", () => {
     await expect(controller.start({
       parent, harness: "native", agent: "claude-only", task: "work", binding,
     })).rejects.toMatchObject({ code: "invalid_task" });
+    for (const agent of [
+      " \n\t ",
+      "reviewer\nname",
+      "sk-abcdefgh",
+      "[REDACTED_SECRET]",
+      "-----BEGIN PRIVATE KEY-----",
+    ]) {
+      await expect(controller.start({
+        parent, harness: "claude-code", agent, task: "work", binding,
+      })).rejects.toMatchObject({ code: "invalid_task" });
+    }
     expect(await store.list()).toEqual([]);
   });
 
@@ -500,18 +616,31 @@ describe("durable task foundation", () => {
     expect((await cancelled).state).toBe("interrupted"); await shutdown; expect((await store.read(task.id)).state).toBe("interrupted");
   });
 
-  it("clamps task, event, and recovery timestamps to a monotonic high-water mark", async () => {
+  it("strictly advances task, event, and recovery timestamps under a backward clock", async () => {
     let clock = Date.parse("2030-01-01T00:00:10.000Z"); const now = () => { clock -= 1_000; return new Date(clock); }; const native = runtime();
-    const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const store = trackedStore(home);
+    const writes: Array<Pick<TaskRecord, "id" | "state" | "updatedAt">> = [];
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    class RecordingStore extends TaskStore {
+      override async write(row: TaskRecord): Promise<void> {
+        writes.push({ id: row.id, state: row.state, updatedAt: row.updatedAt });
+        await super.write(row);
+      }
+    }
+    const store = new RecordingStore(home); stores.push(store);
     const controller = new TaskController(store, new Map([["native", native.adapter]]), authority, fakeTaskScopeManager(), now); await controller.initialize();
     const task = await start(controller); await eventually(store, task.id, "running"); await native.context().emit({ code: "progress", message: "one" });
     native.result.resolve("done"); native.quiet.resolve(); const completed = await eventually(store, task.id, "completed");
-    expect(Date.parse(completed.updatedAt)).toBeGreaterThanOrEqual(Date.parse(completed.createdAt));
-    expect(completed.events.every((event, index) => index === 0 || event.at >= completed.events[index - 1]!.at)).toBe(true);
+    const taskTimes = writes.filter((row) => row.id === task.id)
+      .map((row) => Date.parse(row.updatedAt));
+    expect(taskTimes.every((time, index) => index === 0 || time > taskTimes[index - 1]!))
+      .toBe(true);
+    expect(completed.events.every((event, index) => index === 0
+      ? Date.parse(event.at) > Date.parse(completed.createdAt)
+      : event.at > completed.events[index - 1]!.at)).toBe(true);
 
     const pending = record("running"); pending.createdAt = "2040-01-01T00:00:00.000Z"; pending.updatedAt = "2040-01-01T00:00:05.000Z"; await store.write(pending);
     const recovery = new TaskController(store, new Map(), authority, fakeTaskScopeManager(), () => new Date("2020-01-01T00:00:00.000Z"));
-    const recovered = await recovery.initialize(); expect(recovered.find((row) => row.id === pending.id)?.updatedAt).toBe("2040-01-01T00:00:05.000Z");
+    const recovered = await recovery.initialize(); expect(recovered.find((row) => row.id === pending.id)?.updatedAt).toBe("2040-01-01T00:00:05.001Z");
   });
 
   it("recovers every nonterminal state with a generation fence and skips unrelated names", async () => {
@@ -764,6 +893,7 @@ describe("durable task foundation", () => {
     await writeFile(path, JSON.stringify(reversed), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
     await writeFile(path, JSON.stringify({ ...row, task: " \n\t " }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
     await writeFile(path, JSON.stringify({ ...row, agent: "claude-only" }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
+    await writeFile(path, JSON.stringify({ ...row, harness: "claude-code", agent: "token=private-value" }), { mode: 0o600 }); await expect(store.read(row.id)).rejects.toMatchObject({ code: "invalid_task_record" });
     for (const invalidOwnership of [
       undefined,
       { ...row.ownership, nonce: "A".repeat(32) },

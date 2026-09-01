@@ -6,6 +6,10 @@ import type { ConversationIdentity } from "./conversation-identity.js";
 import { parseConversationIdentity } from "./conversation-identity.js";
 import { GhostError } from "./ghosts.js";
 import {
+  assertNativeHarnessExecutableSync,
+  type NativeHarnessExecutable,
+} from "./native-harness-identity.js";
+import {
   createNativeTaskOwnershipReceipt,
   isNativeTaskOwnershipReceipt,
   NativeTaskOwnershipError,
@@ -64,13 +68,17 @@ export interface TaskBindingAuthority {
     launch: (confirmed: Readonly<TaskBindingReceipt>) => T,
   ): Promise<T>;
 }
+export type NativeTaskExecutableEvidence = readonly NativeHarnessExecutable[];
 export type NativeTaskSpawner = (
   input: NativeTaskScopeLaunch,
 ) => ReturnType<import("./native-task-scope.js").NativeTaskScope["spawn"]>;
 export interface TaskAdapterControl { force(): Promise<void>; quiescence: Promise<void> }
 export interface TaskAdapterContext {
   signal: AbortSignal;
-  launchNative<T>(launch: (spawn: NativeTaskSpawner) => T): Promise<T>;
+  launchNative<T>(
+    executables: NativeTaskExecutableEvidence,
+    launch: (spawn: NativeTaskSpawner) => T,
+  ): Promise<T>;
   stopNative(): Promise<void>;
   register(control: TaskAdapterControl): void;
   emit(event: Readonly<{ code: string; message: string }>): Promise<void>;
@@ -119,6 +127,16 @@ function safeText(value: string, maximum: number): { text: string; truncated: bo
   );
   return { text: redacted.slice(0, maximum), truncated: value.length > maximum || redacted.length > maximum };
 }
+export function isValidTaskAgent(value: unknown): value is string {
+  return typeof value === "string"
+    && value.trim() !== ""
+    && value.length <= MAX_TASK_AGENT
+    && Buffer.byteLength(value, "utf8") <= MAX_TASK_AGENT * 4
+    && !/\p{Cc}/u.test(value)
+    && !value.includes(REDACTED_MEMORY_SECRET)
+    && !/-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----/u.test(value)
+    && redactMemorySecrets(value) === value;
+}
 function bindingCopy(value: TaskBindingReceipt): Readonly<TaskBindingReceipt> {
   return Object.freeze({
     version: value.version,
@@ -134,6 +152,35 @@ function ownershipCopy(
 ): Readonly<NativeTaskOwnershipReceipt> {
   return Object.freeze({ version: value.version, kind: value.kind, nonce: value.nonce });
 }
+function executableEvidenceCopy(
+  value: NativeTaskExecutableEvidence,
+): NativeTaskExecutableEvidence {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    throw new Error("invalid native executable evidence");
+  }
+  const paths = new Set<string>();
+  const executables = value.map((executable) => {
+    if (!executable || typeof executable !== "object"
+      || Object.keys(executable).sort().join("\0") !== [
+        "identity", "literalBoundary", "path",
+      ].join("\0")
+      || typeof executable.path !== "string"
+      || !isAbsolute(executable.path)
+      || resolve(executable.path) !== executable.path
+      || !/^[0-9a-f]{64}$/u.test(executable.identity)
+      || typeof executable.literalBoundary !== "boolean"
+      || paths.has(executable.path)) {
+      throw new Error("invalid native executable evidence");
+    }
+    paths.add(executable.path);
+    return Object.freeze({
+      path: executable.path,
+      identity: executable.identity,
+      literalBoundary: executable.literalBoundary,
+    });
+  });
+  return Object.freeze(executables);
+}
 function sameOwnership(
   left: NativeTaskOwnershipReceipt,
   right: NativeTaskOwnershipReceipt,
@@ -142,9 +189,18 @@ function sameOwnership(
     && left.kind === right.kind
     && left.nonce === right.nonce;
 }
-function highWaterTimestamp(record: Pick<TaskRecord, "createdAt" | "updatedAt" | "events">, proposed: string): string {
+function nextMutationTimestamp(record: Pick<TaskRecord, "createdAt" | "updatedAt" | "events">, proposed: string): string {
   const latestEvent = record.events.at(-1)?.at ?? record.createdAt;
-  return new Date(Math.max(Date.parse(record.createdAt), Date.parse(record.updatedAt), Date.parse(latestEvent), Date.parse(proposed))).toISOString();
+  const prior = Math.max(
+    Date.parse(record.createdAt),
+    Date.parse(record.updatedAt),
+    Date.parse(latestEvent),
+  );
+  const next = Math.max(Date.parse(proposed), prior + 1);
+  if (!Number.isFinite(next) || next > 8_640_000_000_000_000) {
+    fail("task_timestamp_exhausted", "The task timestamp cannot advance safely.", 500);
+  }
+  return new Date(next).toISOString();
 }
 function exactKeys(value: Record<string, unknown>, keys: string[]): boolean {
   return Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
@@ -190,8 +246,7 @@ function parseRecord(value: unknown): TaskRecord {
     || typeof row.id !== "string" || !ID.test(row.id)
     || !Number.isSafeInteger(row.generation) || Number(row.generation) < 1 || Number(row.generation) > MAX_COUNTER || !validParent(row.parent)
     || typeof row.harness !== "string" || !HARNESS.test(row.harness)
-    || !(row.agent === null || (typeof row.agent === "string" && row.agent.length > 0
-      && row.agent.length <= MAX_TASK_AGENT && Buffer.byteLength(row.agent, "utf8") <= MAX_TASK_AGENT * 4))
+    || !(row.agent === null || isValidTaskAgent(row.agent))
     || (row.agent !== null && row.harness !== "claude-code")
     || typeof row.task !== "string" || row.task.trim() === "" || row.task.length > MAX_TASK_TEXT
     || !validBinding(row.binding) || !isNativeTaskOwnershipReceipt(row.ownership)
@@ -363,7 +418,7 @@ export class TaskStore {
       await quiesce(record.id, ownershipCopy(record.ownership));
       record.generation += 1;
       record.state = "interrupted";
-      record.updatedAt = highWaterTimestamp(record, at);
+      record.updatedAt = nextMutationTimestamp(record, at);
       record.result = null;
       record.resultTruncated = false;
       record.error = {
@@ -482,11 +537,11 @@ export class TaskController {
   async #update(id: string, change: (record: TaskRecord) => boolean): Promise<TaskRecord> {
     const record = await this.store.read(id);
     if (!change(record)) return record;
-    record.updatedAt = highWaterTimestamp(record, this.now().toISOString()); await this.store.write(record); return record;
+    record.updatedAt = nextMutationTimestamp(record, this.now().toISOString()); await this.store.write(record); return record;
   }
   #appendEvent(record: TaskRecord, code: string, message: string): void {
     const sequence = record.eventCursor.nextSequence++;
-    record.events.push({ sequence, at: highWaterTimestamp(record, this.now().toISOString()), code, message: safeText(message, MAX_TASK_EVENT_MESSAGE).text });
+    record.events.push({ sequence, at: nextMutationTimestamp(record, this.now().toISOString()), code, message: safeText(message, MAX_TASK_EVENT_MESSAGE).text });
     if (record.events.length > MAX_TASK_EVENTS) { record.events.shift(); record.eventCursor.dropped += 1; }
   }
   async start(input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
@@ -495,9 +550,7 @@ export class TaskController {
       || !HARNESS.test(input.harness) || typeof input.task !== "string"
       || input.task.trim() === "" || input.task.length > MAX_TASK_TEXT
       || (input.agent !== undefined && (input.harness !== "claude-code"
-        || typeof input.agent !== "string" || input.agent.length < 1
-        || input.agent.length > MAX_TASK_AGENT
-        || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4))
+        || !isValidTaskAgent(input.agent)))
       || !validBinding(input.binding)) fail("invalid_task", "The task request is invalid.");
     if (!this.adapters.has(input.harness)) fail("task_harness_unavailable", "That task harness is unavailable.", 409);
     const at = this.now().toISOString(); const id = `task-${randomUUID()}`;
@@ -572,9 +625,13 @@ export class TaskController {
           let launchUsed = false;
           handle = Promise.resolve(adapter.start({ id, task: current.task, agent: current.agent, cwd: binding.cwd, binding: bindingCopy(binding) }, {
             signal: abort.signal,
-            launchNative: async <T>(launch: (spawn: NativeTaskSpawner) => T): Promise<T> => {
+            launchNative: async <T>(
+              executables: NativeTaskExecutableEvidence,
+              launch: (spawn: NativeTaskSpawner) => T,
+            ): Promise<T> => {
               if (launchUsed) throw new Error("native launch capability already used");
               launchUsed = true;
+              const evidence = executableEvidenceCopy(executables);
               return this.authority.launchNative(
                 bindingCopy(binding),
                 abort.signal,
@@ -588,6 +645,12 @@ export class TaskController {
                       throw new Error("invalid native launch");
                     }
                     spawnCount += 1;
+                    if (!evidence.some((executable) => executable.path === input.executable)) {
+                      throw new Error("native launch executable was not admitted");
+                    }
+                    for (const executable of evidence) {
+                      assertNativeHarnessExecutableSync(executable);
+                    }
                     return scope.spawn(input);
                   };
                   let result: T;

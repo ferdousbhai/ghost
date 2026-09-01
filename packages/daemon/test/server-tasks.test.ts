@@ -245,6 +245,17 @@ describe("delegated task API", () => {
       method: "POST",
       body: JSON.stringify({ harness: "pi", assignment: "work", agent: "claude-only" }),
     })).status).toBe(400);
+    for (const agent of [
+      " \n\t ",
+      "reviewer\nname",
+      "Bearer private-token-value",
+      "[REDACTED_SECRET]",
+    ]) {
+      expect((await request(collection, {
+        method: "POST",
+        body: JSON.stringify({ harness: "claude-code", assignment: "work", agent }),
+      })).status).toBe(400);
+    }
     expect(createTask).not.toHaveBeenCalled();
 
     expect((await request(`${collection}/${TASK_ID}/send`, {

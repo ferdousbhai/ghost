@@ -421,7 +421,10 @@ directory. Its exact durable shape is `{ version: 2, id, generation, parent,
 harness, agent, task, binding, ownership, state, createdAt, updatedAt, events,
 eventCursor, result, resultTruncated, error }`. `parent` is the runtime-qualified
 conversation identity. `agent` is null except for an optional, bounded opaque
-Claude Code agent name; Ghost passes it through without interpreting it.
+Claude Code agent name. Ghost passes an accepted value through without
+interpreting or rewriting it, but rejects whitespace-only values, control
+text, private-key markers, the public redaction marker, and recognized
+credential patterns before persistence or projection.
 The assignment and every follow-up are bounded strings containing at least one
 non-whitespace character. These invariants and the Claude-only agent rule are
 enforced by the durable parser/controller as well as by each public caller.
@@ -435,7 +438,14 @@ publication, cwd change, revoke, and removal. Slow catalogue, SDK, version, and
 authentication work occurs before that lease; systemd reservation and cleanup
 occur outside it. The adapter receives a one-shot launch capability rather than
 the native scope: its callback must synchronously invoke exactly one spawn with
-the receipt's exact cwd and may not return a thenable. Same-parent launch
+the receipt's exact cwd and may not return a thenable. The adapter also carries
+the private executable admission evidence into that capability: Pi and Codex
+carry their exact executable; native Claude carries its executable; script
+Claude carries both its script and the admitted absolute Bun. The one-shot
+spawner synchronously re-fingerprints every carried path as its last operation
+inside the binding lease immediately before `scope.spawn`, with no await
+between identity validation and the spawn call. A changed or incomplete
+evidence set fails and quiesces without spawning. Same-parent launch
 callbacks therefore serialize only across the synchronous process boundary;
 unrelated parents and all work after spawn remain unthrottled. If spawn wins,
 the old admitted worker continues and the mutation publishes afterward; if the
@@ -477,8 +487,11 @@ that arbitrary prose can be proven secret-free. Results are bounded. Event
 sequence numbers are monotonic and never renumbered: retained event index `i`
 has sequence `eventCursor.dropped + i + 1`. `eventCursor` reports the next
 sequence and the exact number dropped from the bounded history.
-All record and event timestamps use the record's monotonic high-water mark when
-the machine clock moves backwards; recovery never decreases it.
+Every durable mutation advances `updatedAt` by at least one millisecond beyond
+the record's prior `updatedAt` and latest event even when the machine clock is
+frozen or moves backwards. Each appended event likewise advances beyond the
+prior record/event high-water mark; the enclosing record publication advances
+again. Recovery strictly advances rather than preserving an equal timestamp.
 
 There is no task concurrency limit or daemon-owned queue policy: every accepted
 task starts independently. A follow-up is accepted only while `running`, and
@@ -615,7 +628,9 @@ literal command at the scope boundary. Version and authentication probes use
 that same absolute Bun-plus-script launch plan. Bun is captured before either
 probe; the script and Bun filesystem identities are bound into private
 admission evidence and both are revalidated between probe phases and
-immediately before the synchronous SDK query/spawn boundary. Other paths must
+immediately before the synchronous SDK query/spawn boundary. The task launch
+capability performs one final synchronous check of both paths immediately
+before its systemd-scope spawn. Other paths must
 remain the exact admitted command with no interpreter; `node`, `deno`, PATH
 lookup, a different script, or any other transform fails before launch. It
 leaves native filesystem settings, CLAUDE.md, skills, agents,
@@ -623,7 +638,8 @@ hooks, plugins, MCP servers, model selection, tools, persistence, and subagent
 behavior intact. Its only execution-policy override is
 `permissionMode: "bypassPermissions"` with the SDK's required explicit
 dangerous-skip acknowledgement. An optional configured native agent name is an
-opaque SDK value and is neither parsed nor reimplemented by Ghost. Follow-ups
+opaque SDK value and is neither parsed nor reimplemented by Ghost after the
+shared bounded/control/credential-pattern admission check. Follow-ups
 are priority-now streaming user input. SDK stderr, assistant/tool/protocol
 frames, error detail, and usage remain native-only; only the verified native
 initialization and successful bounded terminal result affect task state.
@@ -717,8 +733,9 @@ adopted. Starting any mutation increments a cross-operation read generation,
 retires pending list/detail reads, and blocks new reads until the mutation
 settles, so an older `running` projection cannot overwrite a confirmed terminal
 response. Accepted list and detail snapshots are also merged per task by
-canonical `updatedAt`; a terminal snapshot is monotonic and can never be
-revived by an active snapshot in either response order. Creation is enabled only when that same conversation has a current
+canonical `updatedAt`; equal-timestamp snapshots also retain the furthest
+durable state, and a terminal snapshot is monotonic and can never be revived by
+an active snapshot in either response order. Creation is enabled only when that same conversation has a current
 non-null trusted project binding, and it sends the binding's exact cwd; the HUD
 cannot create from unbound Home context or type an arbitrary cwd. It shows the
 bounded assignment preview, cwd, state, recent structured events, and result

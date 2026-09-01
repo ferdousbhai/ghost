@@ -184,7 +184,12 @@ class ClaudeTaskLifecycle {
   }
 
   async launchQuery(create: () => Query): Promise<Query> {
-    return this.launchNative((spawn) => {
+    const admission = this.admission;
+    if (!admission) throw failure();
+    const executableEvidence = admission.interpreter
+      ? [admission.executable, admission.interpreter]
+      : [admission.executable];
+    return this.launchNative(executableEvidence, (spawn) => {
       if (this.nativeSpawner) throw failure();
       this.nativeSpawner = spawn;
       try {

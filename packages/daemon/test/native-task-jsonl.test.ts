@@ -47,7 +47,7 @@ function context(controller = new AbortController()): {
     controller,
     context: {
       signal: controller.signal,
-      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      async launchNative(_executables, launch) { return launch((input) => scope.spawn(input)); },
       stopNative: () => scope.stopAndConfirm(),
       register(control) {
         if (registered) throw new Error("duplicate control");
@@ -100,6 +100,7 @@ setInterval(() => {}, 1000);
 
     processBoundary.start({
       executable: path,
+      executableEvidence: [{ path, identity: "0".repeat(64), literalBoundary: true }],
       args: [],
       cwd: root,
       environment: { PATH: process.env.PATH },
@@ -125,6 +126,7 @@ setInterval(() => {}, 1000);
     const processBoundary = new NativeTaskJsonlProcess(fixture.context);
     processBoundary.start({
       executable: path,
+      executableEvidence: [{ path, identity: "0".repeat(64), literalBoundary: true }],
       args: [],
       cwd: root,
       environment: { PATH: process.env.PATH, PID_FILE: pidFile },
@@ -161,6 +163,7 @@ writeFileSync(process.env.MARKER, "spawned");
 
     await expect(processBoundary.start({
       executable: path,
+      executableEvidence: [{ path, identity: "0".repeat(64), literalBoundary: true }],
       args: [],
       cwd: root,
       environment: { PATH: process.env.PATH, MARKER: marker },

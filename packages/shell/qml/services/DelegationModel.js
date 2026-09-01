@@ -13,6 +13,16 @@ const STATES = [
 ];
 const ACTIVE_STATES = ["queued", "starting", "running", "cancelling"];
 const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted"];
+const STATE_PROGRESS = {
+    queued: 0,
+    starting: 1,
+    running: 2,
+    cancelling: 3,
+    completed: 4,
+    failed: 4,
+    cancelled: 4,
+    interrupted: 4
+};
 const TASK_KEYS = [
     "id", "harness", "agent", "cwd", "state", "createdAt", "updatedAt",
     "taskPreview", "taskTruncated", "resultPreview", "resultTruncated", "error"
@@ -218,6 +228,7 @@ function mergeTask(current, incoming) {
     if (incomingTime < currentTime) return current;
     if (incomingTime === currentTime) {
         if (currentTerminal && !incomingTerminal) return current;
+        if (STATE_PROGRESS[incoming.state] < STATE_PROGRESS[current.state]) return current;
         // Detail carries bounded events that a list row deliberately omits.
         if (Array.isArray(current.events) && current.events.length > 0
                 && (!Array.isArray(incoming.events) || incoming.events.length === 0))

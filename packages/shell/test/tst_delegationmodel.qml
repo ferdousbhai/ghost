@@ -135,5 +135,9 @@ TestCase {
         }), false);
         compare(DelegationModel.mergeTask(newerRunning, running).updatedAt,
             "2026-08-31T10:00:02.000Z");
+
+        const starting = DelegationModel.task(task({ state: "starting" }), false);
+        compare(DelegationModel.mergeTask(running, starting).state, "running");
+        compare(DelegationModel.mergeTask(starting, running).state, "running");
     }
 }

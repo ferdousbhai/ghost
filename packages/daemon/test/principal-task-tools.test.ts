@@ -186,6 +186,18 @@ describe("principal task tools", () => {
       assignment: "Work.",
       agent: "not-for-pi",
     })).rejects.toMatchObject({ code: "invalid_task_agent" });
+    for (const agent of [
+      " \n\t ",
+      "reviewer\nname",
+      "ghp_abcdefghijk",
+      "[REDACTED_SECRET]",
+    ]) {
+      await expect(call(current.context, "task", {
+        harness: "claude-code",
+        assignment: "Work.",
+        agent,
+      })).rejects.toMatchObject({ code: "invalid_task_agent" });
+    }
     expect(current.mintBinding).not.toHaveBeenCalled();
     expect(current.start).not.toHaveBeenCalled();
     current.list.mockRejectedValueOnce(new Error("PRIVATE_RAW_STORE_FAILURE"));

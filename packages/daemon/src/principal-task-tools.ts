@@ -10,6 +10,7 @@ import type { NativeTaskScopeManager } from "./native-task-scope.js";
 import {
   MAX_TASK_AGENT,
   MAX_TASK_TEXT,
+  isValidTaskAgent,
   type TaskBindingReceipt,
   type TaskAdapter,
   type TaskController,
@@ -154,7 +155,8 @@ export function createPrincipalTaskTools(context: PrincipalTaskContext): GhostEx
         if (params.assignment.trim() === "") {
           throw new GhostError("invalid_task", "The task assignment is invalid.", 400);
         }
-        if (params.agent !== undefined && params.harness !== "claude-code") {
+        if (params.agent !== undefined
+          && (params.harness !== "claude-code" || !isValidTaskAgent(params.agent))) {
           throw new GhostError(
             "invalid_task_agent",
             "An agent may be selected only for a Claude Code task.",

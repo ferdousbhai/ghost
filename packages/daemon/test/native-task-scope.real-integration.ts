@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversationIdentity } from "../src/conversation-identity.js";
+import { resolveNativeHarnessExecutable } from "../src/native-harness-identity.js";
 import {
   captureNativeTaskControlEnvironment,
   nativeTaskScopeDescription,
@@ -462,6 +463,12 @@ async function proveImmediateCancellation(
   delayedLauncher: string,
   ownedUnits: Set<string>,
 ): Promise<void> {
+  const python = await resolveNativeHarnessExecutable({
+    harness: "pi",
+    explicitBinary: "/usr/bin/python3",
+    environment: taskEnvironment(),
+    timeoutMs: 10_000,
+  });
   const registrationSpawned = Promise.withResolvers<void>();
   const manager = new SystemdNativeTaskScopeManager({
     controlEnvironment: process.env,
@@ -486,7 +493,7 @@ async function proveImmediateCancellation(
         return stopping;
       };
       context.register({ force: stop, quiescence: quiet.promise });
-      return context.launchNative((spawn) => spawn({
+      return context.launchNative([python], (spawn) => spawn({
           executable: "/usr/bin/python3",
           args: [
             "-c",

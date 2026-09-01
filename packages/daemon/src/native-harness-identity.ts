@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
+import {
+  accessSync,
+  constants as fsConstants,
+  lstatSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
 import {
   access,
   lstat,
@@ -73,6 +79,22 @@ function executableStatIdentity(value: BigintExecutableStat): readonly string[] 
     value.mtimeNs.toString(),
     value.ctimeNs.toString(),
   ];
+}
+
+function executableIdentity(
+  binaryPath: string,
+  literalBoundary: boolean,
+  boundary: BigintExecutableStat,
+  targetPath: string,
+  target: BigintExecutableStat,
+): string {
+  return createHash("sha256").update(JSON.stringify([
+    literalBoundary,
+    binaryPath,
+    executableStatIdentity(boundary),
+    targetPath,
+    executableStatIdentity(target),
+  ])).digest("hex");
 }
 
 async function executableCandidate(
@@ -184,13 +206,39 @@ export async function inspectNativeHarnessExecutable(
   }
   await access(binaryPath, fsConstants.X_OK);
   assertProbeActive(signal);
-  return createHash("sha256").update(JSON.stringify([
-    literalBoundary,
-    binaryPath,
-    executableStatIdentity(boundary),
-    targetPath,
-    executableStatIdentity(target),
-  ])).digest("hex");
+  return executableIdentity(binaryPath, literalBoundary, boundary, targetPath, target);
+}
+
+/** Final synchronous pathname check used immediately at the native spawn boundary. */
+export function inspectNativeHarnessExecutableSync(
+  binaryPath: string,
+  literalBoundary: boolean,
+): string {
+  if (!isAbsolute(binaryPath)) {
+    throw new NativeHarnessIdentityError("Native harness executable is not absolute.");
+  }
+  const boundary = lstatSync(binaryPath, { bigint: true });
+  if (!boundary.isFile() && !boundary.isSymbolicLink()) {
+    throw new NativeHarnessIdentityError("Native harness boundary is not a file or link.");
+  }
+  const targetPath = realpathSync(binaryPath);
+  const target = statSync(targetPath, { bigint: true });
+  if (!target.isFile()) {
+    throw new NativeHarnessIdentityError("Native harness target is not a regular file.");
+  }
+  accessSync(binaryPath, fsConstants.X_OK);
+  return executableIdentity(binaryPath, literalBoundary, boundary, targetPath, target);
+}
+
+export function assertNativeHarnessExecutableSync(
+  executable: NativeHarnessExecutable,
+): void {
+  if (inspectNativeHarnessExecutableSync(
+    executable.path,
+    executable.literalBoundary,
+  ) !== executable.identity) {
+    throw new NativeHarnessIdentityError("Native harness executable changed before launch.");
+  }
 }
 
 export async function resolveNativeHarnessExecutable(

@@ -932,6 +932,13 @@ describe("SessionHost delegated task composition", () => {
       assignment: "work",
       agent: "claude-only",
     }, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_task_agent" });
+    for (const agent of [" \n\t ", "bad\u0000agent", "token=private-value", "[REDACTED_SECRET]"]) {
+      await expect(host!.createTask("casper", parent, {
+        harness: "claude-code",
+        assignment: "work",
+        agent,
+      }, new AbortController().signal)).rejects.toMatchObject({ code: "invalid_task_agent" });
+    }
     expect(await host!.listTasks("casper", parent)).toEqual([]);
 
     const admitted = await host!.createTask("casper", parent, {
@@ -1001,7 +1008,11 @@ describe("SessionHost delegated task composition", () => {
         });
         catalogueEntered.resolve();
         await catalogueRelease.promise;
-        await context.launchNative((spawn) => {
+        await context.launchNative([{
+          path: "/bin/sh",
+          identity: "0".repeat(64),
+          literalBoundary: true,
+        }], (spawn) => {
           spawnedCwd = input.cwd;
           return spawn({
             executable: "/bin/sh",

@@ -138,6 +138,7 @@ export class PiTaskAdapter implements TaskAdapter {
         if (admitted.id !== "pi") throw failure();
         await processBoundary.start({
           executable: admitted.executable.path,
+          executableEvidence: [admitted.executable],
           args: ["--mode", "rpc", "--approve"],
           cwd: input.cwd,
           environment: this.environment,

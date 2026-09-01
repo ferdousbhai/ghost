@@ -12,6 +12,7 @@ import { join, relative, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inspectNativeHarnessExecutable,
+  inspectNativeHarnessExecutableSync,
   resolveNativeHarnessExecutable,
   type NativeHarnessId,
 } from "../src/native-harness-identity.js";
@@ -103,6 +104,7 @@ describe("native harness executable identity", () => {
     symlinkSync(first, wrapper);
 
     const before = await inspectNativeHarnessExecutable(wrapper, true);
+    expect(inspectNativeHarnessExecutableSync(wrapper, true)).toBe(before);
     unlinkSync(wrapper);
     symlinkSync(second, wrapper);
     const retargeted = await inspectNativeHarnessExecutable(wrapper, true);

@@ -52,7 +52,7 @@ import {
   taskProjection,
 } from "./principal-task-tools.js";
 import type { SessionHost } from "./session-host.js";
-import { MAX_TASK_AGENT, MAX_TASK_TEXT } from "./tasks.js";
+import { isValidTaskAgent, MAX_TASK_TEXT } from "./tasks.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -1845,9 +1845,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"cwd" is not a bounded non-empty string.');
       return;
     }
-    if (agent !== undefined && (harness !== "claude-code" || typeof agent !== "string"
-      || agent.length < 1 || agent.length > MAX_TASK_AGENT
-      || Buffer.byteLength(agent, "utf8") > MAX_TASK_AGENT * 4)) {
+    if (agent !== undefined && (harness !== "claude-code" || !isValidTaskAgent(agent))) {
       errorResponse(response, 400, "invalid_request", '"agent" is accepted only for Claude Code.');
       return;
     }

@@ -175,8 +175,8 @@ import {
 } from "./principal-task-tools.js";
 import {
   inspectTaskRecordFile,
+  isValidTaskAgent,
   isTerminalTaskState,
-  MAX_TASK_AGENT,
   MAX_TASK_TEXT,
   TASKS_DIRNAME,
   TaskController,
@@ -2147,9 +2147,7 @@ export class SessionHost {
         }
         if (input.agent !== undefined
           && (input.harness !== "claude-code"
-            || input.agent.length < 1
-            || input.agent.length > MAX_TASK_AGENT
-            || Buffer.byteLength(input.agent, "utf8") > MAX_TASK_AGENT * 4)) {
+            || !isValidTaskAgent(input.agent))) {
           throw new GhostError(
             "invalid_task_agent",
             "An agent may be selected only for a Claude Code task.",

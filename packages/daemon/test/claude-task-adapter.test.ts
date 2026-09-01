@@ -203,14 +203,19 @@ function fakeSdk(input: {
 function taskContext(): {
   context: TaskAdapterContext;
   control(): TaskAdapterControl;
+  evidence(): readonly string[];
 } {
   const controller = new AbortController();
   let registered: TaskAdapterControl | undefined;
+  let evidence: readonly string[] = [];
   const scope = directTaskScope();
   return {
     context: {
       signal: controller.signal,
-      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      async launchNative(executables, launch) {
+        evidence = executables.map((row) => row.path);
+        return launch((input) => scope.spawn(input));
+      },
       stopNative: () => scope.stopAndConfirm(),
       register(control) { registered = control; },
       async emit() {},
@@ -219,6 +224,7 @@ function taskContext(): {
       if (!registered) throw new Error("missing control");
       return registered;
     },
+    evidence: () => evidence,
   };
 }
 
@@ -315,6 +321,7 @@ describe("Claude delegated task adapter", () => {
     expect(fixture.messages[0]?.priority).toBe("now");
     const spawned = JSON.parse(readFileSync(fixture.fake.log, "utf8"));
     expect(spawned).toMatchObject({ args: ["--sdk-native"], cwd: fixture.fake.root });
+    expect(context.evidence()).toEqual([fixture.fake.path]);
   });
 
   it("matches the pinned SDK's exact Bun script-wrapper transform", () => {
@@ -348,6 +355,7 @@ describe("Claude delegated task adapter", () => {
         cwd: fixture.fake.root,
         runtime: process.execPath,
       });
+      expect(context.evidence()).toEqual([fixture.fake.path, process.execPath]);
     },
   );
 

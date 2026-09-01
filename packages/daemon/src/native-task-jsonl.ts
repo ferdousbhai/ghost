@@ -1,4 +1,5 @@
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
+import type { NativeHarnessExecutable } from "./native-harness-identity.js";
 import type { TaskAdapterContext } from "./tasks.js";
 
 export const NATIVE_TASK_JSONL_MAX_FRAME_BYTES = 256 * 1024;
@@ -83,6 +84,7 @@ export class NativeTaskJsonlProcess {
 
   async start(input: Readonly<{
     executable: string;
+    executableEvidence: readonly NativeHarnessExecutable[];
     args: readonly string[];
     cwd: string;
     environment: Readonly<NodeJS.ProcessEnv>;
@@ -94,7 +96,7 @@ export class NativeTaskJsonlProcess {
     this.started = true;
     let child: ChildProcess;
     try {
-      child = await this.launchNative((spawn) => spawn({
+      child = await this.launchNative(input.executableEvidence, (spawn) => spawn({
         executable: input.executable,
         args: input.args,
         cwd: input.cwd,

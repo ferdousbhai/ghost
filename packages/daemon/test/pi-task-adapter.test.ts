@@ -99,15 +99,20 @@ function taskContext(): {
   context: TaskAdapterContext;
   control(): TaskAdapterControl;
   controller: AbortController;
+  evidence(): readonly string[];
 } {
   const controller = new AbortController();
   let registered: TaskAdapterControl | undefined;
+  let evidence: readonly string[] = [];
   const scope = directTaskScope();
   return {
     controller,
     context: {
       signal: controller.signal,
-      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      async launchNative(executables, launch) {
+        evidence = executables.map((row) => row.path);
+        return launch((input) => scope.spawn(input));
+      },
       stopNative: () => scope.stopAndConfirm(),
       register(control) { registered = control; },
       async emit() {},
@@ -116,6 +121,7 @@ function taskContext(): {
       if (!registered) throw new Error("missing control");
       return registered;
     },
+    evidence: () => evidence,
   };
 }
 
@@ -217,6 +223,7 @@ describe("Pi delegated task adapter", () => {
     await expect(handle.result).resolves.toBe("safe answer");
     const start = rows(fake.log)[0] as { args: string[]; cwd: string; env: NodeJS.ProcessEnv };
     expect(start.args).toEqual(["--mode", "rpc", "--approve"]);
+    expect(context.evidence()).toEqual([fake.path]);
     expect(start.cwd).toBe(fake.root);
     expect(start.env.PI_CODING_AGENT_DIR).toBe(join(fake.root, "pi-home"));
     expect(start.env.ANTHROPIC_API_KEY).toBeUndefined();

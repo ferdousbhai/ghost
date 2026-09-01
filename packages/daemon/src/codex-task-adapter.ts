@@ -200,6 +200,7 @@ export class CodexTaskAdapter implements TaskAdapter {
         if (admitted.id !== "codex") throw failure();
         await processBoundary.start({
           executable: admitted.executable.path,
+          executableEvidence: [admitted.executable],
           args: ["app-server", "--listen", "stdio://"],
           cwd: input.cwd,
           environment: this.environment,
