@@ -477,6 +477,7 @@ function storedClaudeV3(input: {
   root: string;
   cwd?: string;
   mcpServers: Record<string, unknown>;
+  mcpResources?: unknown;
   instruction?: string;
   declarative?: Record<string, unknown>;
 }): string {
@@ -505,6 +506,7 @@ function storedClaudeV3(input: {
         commands: [],
       },
       mcpServers: input.mcpServers,
+      ...(input.mcpResources !== undefined ? { mcpResources: input.mcpResources } : {}),
       resourceWarnings: [],
       mcpWarnings: [],
     },
@@ -1259,6 +1261,43 @@ describe("Claude session sidecar confinement", () => {
 });
 
 describe("Claude Code native harness runtime", () => {
+  it("exposes only the resource snapshot of a live warm query", async () => {
+    setupClaudeHost({
+      machineSkill: {
+        name: "obsidian-cli",
+        description: "Use the official Obsidian CLI.",
+        body: "Use obsidian for shared notes.",
+      },
+    });
+    const conversationId = "resource-snapshot";
+
+    await expect(host!.admittedResources("casper", conversationId, "claude-code"))
+      .rejects.toMatchObject({ code: "session_resources_unavailable", status: 409 });
+    await host!.runTurn("casper", {
+      sessionId: conversationId,
+      prompt: "Start the native session.",
+      emit: () => {},
+    });
+
+    expect(await host!.admittedResources("casper", conversationId, "claude-code"))
+      .toMatchObject({
+        runtime: "claude-code",
+        obsidian: {
+          path: join(temp!.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
+          status: "admitted",
+        },
+        skills: [expect.objectContaining({
+          name: "obsidian-cli",
+          source: "machine",
+          status: "admitted",
+        })],
+      });
+
+    await host!.close("casper", conversationId);
+    await expect(host!.admittedResources("casper", conversationId, "claude-code"))
+      .rejects.toMatchObject({ code: "session_resources_unavailable", status: 409 });
+  });
+
   it("adds principal task tools and policy without changing native principal capabilities", async () => {
     const { seenOptions, lifecycle } = setupClaudeHost();
     host!.attachTaskServices(claudeTaskServices());
@@ -2704,7 +2743,8 @@ fi
     const { paths, seenOptions } = setupClaudeHost();
     const disabledProject = join(temp!.root, "claude-disabled-only-mcp");
     mkdirSync(join(disabledProject, ".omp"), { recursive: true });
-    writeFileSync(join(disabledProject, ".omp", "mcp.json"), JSON.stringify({
+    const disabledMcpPath = join(disabledProject, ".omp", ".mcp.json");
+    writeFileSync(disabledMcpPath, JSON.stringify({
       mcpServers: {
         disabled_only: {
           enabled: false,
@@ -2748,8 +2788,25 @@ fi
       claudeSessionMetadataPath(paths.sessionDir, "disabled-only-mcp"),
       "utf8",
     ))).toMatchObject({
-      projectSnapshot: { mcpServers: {}, mcpWarnings: [] },
+      projectSnapshot: {
+        mcpServers: {},
+        mcpWarnings: [],
+        mcpResources: [expect.objectContaining({
+          name: "disabled_only",
+          path: disabledMcpPath,
+          status: "disabled",
+        })],
+      },
     });
+    expect(await host!.admittedResources("casper", "disabled-only-mcp", "claude-code"))
+      .toMatchObject({
+        mcpServers: [expect.objectContaining({
+          name: "disabled_only",
+          path: disabledMcpPath,
+          enabled: false,
+          status: "disabled",
+        })],
+      });
 
     const mixedProject = join(temp!.root, "claude-mixed-mcp");
     mkdirSync(join(mixedProject, ".omp"), { recursive: true });
@@ -2792,12 +2849,24 @@ fi
       claudeSessionMetadataPath(paths.sessionDir, "mixed-mcp"),
       "utf8",
     )) as {
-      projectSnapshot: { mcpServers: Record<string, unknown>; mcpWarnings: string[] };
+      projectSnapshot: {
+        mcpServers: Record<string, unknown>;
+        mcpWarnings: string[];
+        mcpResources: Array<{ name: string; status: string; reason?: string }>;
+      };
     };
     expect(Object.hasOwn(mixedStored.projectSnapshot.mcpServers, "valid_row")).toBe(true);
     expect(Object.hasOwn(mixedStored.projectSnapshot.mcpServers, "malformed_row")).toBe(false);
     expect(mixedStored.projectSnapshot.mcpWarnings)
       .toContainEqual(expect.stringContaining("malformed_row"));
+    expect(mixedStored.projectSnapshot.mcpResources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "valid_row", status: "admitted" }),
+      expect.objectContaining({
+        name: "malformed_row",
+        status: "skipped",
+        reason: expect.any(String),
+      }),
+    ]));
     expect(await host!.getProject("casper", "mixed-mcp", "claude-code"))
       .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
   });
@@ -3295,6 +3364,27 @@ fi
       })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
       expect(events).toEqual([]);
     }
+
+    const inconsistentId = "inconsistent-mcp-resources";
+    const inconsistentSidecar = claudeSessionMetadataPath(paths.sessionDir, inconsistentId);
+    writeFileSync(inconsistentSidecar, storedClaudeV3({
+      conversationId: inconsistentId,
+      root: project,
+      mcpServers: {
+        safe: { type: "stdio", command: process.execPath, alwaysLoad: true },
+      },
+      mcpResources: [{
+        name: "safe",
+        path: join(project, ".omp", "mcp.json"),
+        status: "disabled",
+        reason: "Contradicts the executable snapshot.",
+      }],
+    }), { mode: 0o600 });
+    await expect(host!.runTurn("casper", {
+      sessionId: inconsistentId,
+      prompt: "must reject inconsistent admission metadata",
+      emit: () => {},
+    })).rejects.toMatchObject({ code: "claude_session_invalid", status: 500 });
 
     expect(lifecycle.queries).toBe(0);
     expect(await host!.listSessions("casper")).toEqual([]);

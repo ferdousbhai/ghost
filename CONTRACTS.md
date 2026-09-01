@@ -267,6 +267,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 | `GET\|PUT\|DELETE /sessions/:id/project…` | Read, preview, bind/reload/unbind, or abandon an unpublished trusted-project draft. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
+| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips, and standard Obsidian-skill readiness. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
 | `POST /sessions/:id/recap` | Non-persisted bounded Pi recap; failure returns `recap:null`. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |

@@ -135,7 +135,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "delegation", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "memory", "commands", "delegation", "hooks", "resources", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -151,6 +151,8 @@ FloatingWindow {
             Ghostd.fetchDelegatedTasks(false);
         } else if (section === "hooks") {
             Ghostd.fetchHooks(false);
+        } else if (section === "resources") {
+            Ghostd.fetchSessionResources(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
         } else if (section === "connect") {
@@ -1150,6 +1152,14 @@ FloatingWindow {
             HooksBrowser {
                 id: hooksBrowser
                 visible: hud.currentSection === "hooks"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+            }
+
+            SessionResources {
+                id: sessionResources
+                visible: hud.currentSection === "resources"
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true

@@ -130,6 +130,15 @@ import {
   renderClaudeDeclarativePrompt,
   type DeclarativePromptSnapshot,
 } from "./declarative-snapshot.js";
+import { parseFrontmatter } from "./declarative-types.js";
+import {
+  buildSessionResourceView,
+  projectSessionSkillGroup,
+  type SessionMcpView,
+  type SessionResourceDiagnostic,
+  type SessionResourceView,
+  type SessionSkillGroup,
+} from "./session-resources.js";
 
 export const CLAUDE_CODE_PROVIDER_ID = "claude-code";
 export const CLAUDE_CODE_DEFAULT_MODEL_ID = "default";
@@ -214,8 +223,16 @@ export interface ClaudePersistedProjectSnapshot {
   identity?: ProjectFilesystemIdentity;
   declarative: DeclarativePromptSnapshot;
   mcpServers: Record<string, ClaudeMcpServerConfig>;
+  mcpResources?: ClaudeMcpResourceSnapshot[];
   resourceWarnings: string[];
   mcpWarnings: string[];
+}
+
+export interface ClaudeMcpResourceSnapshot {
+  name: string;
+  path: string;
+  status: "admitted" | "skipped" | "disabled";
+  reason?: string;
 }
 
 function mcpServerRecord<T>(
@@ -1004,10 +1021,12 @@ const CLAUDE_PROJECT_SNAPSHOT_FIELDS = new Set([
   "identity",
   "declarative",
   "mcpServers",
+  "mcpResources",
   "resourceWarnings",
   "mcpWarnings",
 ]);
 const CLAUDE_PROJECT_IDENTITY_FIELDS = new Set(["dev", "ino"]);
+const CLAUDE_MCP_RESOURCE_FIELDS = new Set(["name", "path", "status", "reason"]);
 const CLAUDE_DECLARATIVE_FIELDS = new Set([
   "instructions",
   "skills",
@@ -1152,6 +1171,36 @@ function exactIsoTimestamp(value: unknown): value is string {
   return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
 }
 
+function validClaudeMcpResources(
+  resources: unknown,
+  root: string | null,
+  servers: Record<string, ClaudeMcpServerConfig>,
+): resources is ClaudeMcpResourceSnapshot[] | undefined {
+  if (resources === undefined) return true;
+  if (!Array.isArray(resources)) return false;
+  const admittedNames = new Set(Object.keys(servers));
+  if (root === null) return resources.length === 0 && admittedNames.size === 0;
+  const sourcePaths = new Set([
+    join(root, ".omp", "mcp.json"),
+    join(root, ".omp", ".mcp.json"),
+  ]);
+  const resourceNames = new Set<string>();
+  for (const resource of resources) {
+    const row = objectRecord(resource);
+    if (!row || !hasOnlyFields(row, CLAUDE_MCP_RESOURCE_FIELDS)
+      || typeof row.name !== "string" || validateServerName(row.name) !== undefined
+      || resourceNames.has(row.name)
+      || typeof row.path !== "string" || !sourcePaths.has(row.path)
+      || (row.status !== "admitted" && row.status !== "skipped" && row.status !== "disabled")
+      || (row.reason !== undefined && typeof row.reason !== "string")
+      || (row.status === "admitted") !== admittedNames.has(row.name)) {
+      return false;
+    }
+    resourceNames.add(row.name);
+  }
+  return [...admittedNames].every((name) => resourceNames.has(name));
+}
+
 function validPersistedProjectSnapshot(value: unknown): value is ClaudePersistedProjectSnapshot {
   const record = objectRecord(value);
   if (!record || !hasOnlyFields(record, CLAUDE_PROJECT_SNAPSHOT_FIELDS)) return false;
@@ -1174,9 +1223,17 @@ function validPersistedProjectSnapshot(value: unknown): value is ClaudePersisted
     && validPersistedClaudeMcpConfig(config))) {
     return false;
   }
+  if (!validClaudeMcpResources(
+    snapshot.mcpResources,
+    snapshot.root,
+    snapshot.mcpServers,
+  )) {
+    return false;
+  }
   if (snapshot.root === null) {
     return snapshot.identity === undefined
       && Object.keys(snapshot.mcpServers).length === 0
+      && (snapshot.mcpResources === undefined || snapshot.mcpResources.length === 0)
       && snapshot.resourceWarnings.length === 0
       && snapshot.mcpWarnings.length === 0;
   }
@@ -1660,15 +1717,22 @@ function pathWithin(root: string, candidate: string): boolean {
 
 function projectMcpServers(
   effective: EffectiveProjectMcpRead,
+  root: string,
 ): {
   servers: Record<string, ClaudeMcpServerConfig>;
   warnings: string[];
+  resources: ClaudeMcpResourceSnapshot[];
 } {
   const entries: Array<[string, ClaudeMcpServerConfig]> = [];
   const warnings: string[] = [];
+  const rejectionReasons = new Map<string, string>();
+  const reject = (name: string, reason: string): void => {
+    warnings.push(`${name}: ${reason}`);
+    rejectionReasons.set(name, reason);
+  };
   for (const server of effective.servers) {
     if (server.errors.length > 0) {
-      warnings.push(`${server.name}: ${server.errors.join("; ")}`);
+      reject(server.name, server.errors.join("; "));
       continue;
     }
     const config = server.config as OmpMcpServerConfig;
@@ -1683,8 +1747,9 @@ function projectMcpServers(
       );
     }
     if (config.timeout !== undefined && config.timeout < 1_000) {
-      warnings.push(
-        `${server.name}: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.`,
+      reject(
+        server.name,
+        "row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.",
       );
       continue;
     }
@@ -1692,8 +1757,9 @@ function projectMcpServers(
     if (type === "stdio") {
       const stdio = config as OmpMcpStdioServerConfig;
       if (stdio.cwd) {
-        warnings.push(
-          `${server.name}: row rejected because Claude project MCP does not support an explicit cwd.`,
+        reject(
+          server.name,
+          "row rejected because Claude project MCP does not support an explicit cwd.",
         );
         continue;
       }
@@ -1718,9 +1784,39 @@ function projectMcpServers(
       }]);
       continue;
     }
-    warnings.push(`${server.name}: unsupported MCP transport ${String(type)}.`);
+    reject(server.name, `unsupported MCP transport ${String(type)}.`);
   }
-  return { servers: mcpServerRecord(entries), warnings };
+  const admitted = new Set(entries.map(([name]) => name));
+  const skipped = new Map(effective.skipped.flatMap((diagnostic) => {
+    const marker = "#mcpServers.";
+    const index = diagnostic.path.indexOf(marker);
+    const name = index < 0 ? "" : diagnostic.path.slice(index + marker.length);
+    return name ? [[name, diagnostic] as const] : [];
+  }));
+  const resources = effective.claimedNames.map((name): ClaudeMcpResourceSnapshot => {
+    const server = effective.servers.find((candidate) => candidate.name === name);
+    const disabled = effective.disabled?.find((candidate) => candidate.name === name);
+    const diagnostic = skipped.get(name);
+    const diagnosticPath = diagnostic?.path.split("#", 1)[0];
+    const path = server?.source.absolutePath ?? disabled?.source.absolutePath
+      ?? (diagnosticPath ? resolve(root, diagnosticPath) : join(root, ".omp", "mcp.json"));
+    if (admitted.has(name)) return { name, path, status: "admitted" };
+    if (disabled) {
+      return {
+        name,
+        path,
+        status: "disabled",
+        reason: "Disabled in the admitted configuration.",
+      };
+    }
+    return {
+      name,
+      path,
+      status: "skipped",
+      reason: rejectionReasons.get(name) ?? diagnostic?.reason ?? "The server was not admitted.",
+    };
+  });
+  return { servers: mcpServerRecord(entries), warnings, resources };
 }
 
 function internalMcpServerName(
@@ -1739,6 +1835,13 @@ function containsEnvironmentExpansion(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsEnvironmentExpansion);
   if (!value || typeof value !== "object") return false;
   return Object.values(value as Record<string, unknown>).some(containsEnvironmentExpansion);
+}
+
+function projectMcpWarningPath(root: string | null, warning: string, fallback: string): string {
+  if (!root) return fallback;
+  const relativePath = [".omp/mcp.json", ".omp/.mcp.json"]
+    .find((candidate) => warning.startsWith(candidate));
+  return relativePath ? resolve(root, relativePath) : fallback;
 }
 
 function nonEmptyRecord(value: unknown): boolean {
@@ -1787,13 +1890,14 @@ async function loadClaudeProjectSnapshot(
     level: "project",
     expectedIdentity: identity,
   });
-  const approvedMcp = projectMcpServers(snapshot.mcp);
+  const approvedMcp = projectMcpServers(snapshot.mcp, root);
   const mcpWarningSet = new Set(snapshot.mcpWarnings);
   return {
     root,
     identity: { dev: identity.dev, ino: identity.ino },
     declarative: declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([snapshot])),
     mcpServers: approvedMcp.servers,
+    mcpResources: approvedMcp.resources,
     resourceWarnings: snapshot.warnings.filter((warning) => !mcpWarningSet.has(warning)),
     mcpWarnings: [...snapshot.mcpWarnings, ...approvedMcp.warnings],
   };
@@ -1804,16 +1908,33 @@ function withRepresentableClaudeMcpTimeouts(
 ): ClaudePersistedProjectSnapshot {
   const entries: Array<[string, ClaudeMcpServerConfig]> = [];
   const mcpWarnings = [...snapshot.mcpWarnings];
+  const resources = snapshot.mcpResources
+    ? snapshot.mcpResources.map((resource) => ({ ...resource }))
+    : Object.keys(snapshot.mcpServers).map((name): ClaudeMcpResourceSnapshot => ({
+        name,
+        path: snapshot.root ? join(snapshot.root, ".omp", "mcp.json") : "",
+        status: "admitted",
+      }));
   for (const [name, config] of Object.entries(snapshot.mcpServers)) {
     const timeout = "timeout" in config ? config.timeout : undefined;
     if (timeout !== undefined && timeout < 1_000) {
       const warning = `${name}: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.`;
       if (!mcpWarnings.includes(warning)) mcpWarnings.push(warning);
+      const resource = resources.find((candidate) => candidate.name === name);
+      if (resource) {
+        resource.status = "skipped";
+        resource.reason = warning.slice(name.length + 2);
+      }
       continue;
     }
     entries.push([name, config]);
   }
-  return { ...snapshot, mcpServers: mcpServerRecord(entries), mcpWarnings };
+  return {
+    ...snapshot,
+    mcpServers: mcpServerRecord(entries),
+    ...(snapshot.root ? { mcpResources: resources } : {}),
+    mcpWarnings,
+  };
 }
 
 function requireMatchingClaudeProjectSnapshot(
@@ -2019,6 +2140,7 @@ interface WarmClaudeQuery {
   readonly exited: Promise<void>;
   readonly terminateProcessGroup: () => void;
   readonly principalTasks?: ClaudePrincipalTaskContextLease;
+  readonly resources: SessionResourceView;
   projectMcpFailed: boolean;
 }
 
@@ -2224,6 +2346,11 @@ export class ClaudeCodeRuntime {
 
   isBusy(ghostName: string, conversationId: string): boolean {
     return this.busy.has(JSON.stringify([ghostName, conversationId]));
+  }
+
+  sessionResources(ghostName: string, conversationId: string): SessionResourceView | null {
+    requireRawConversationId(conversationId);
+    return this.warm.get(JSON.stringify([ghostName, conversationId]))?.resources ?? null;
   }
 
   /** Cwd/rebind defaults derived solely from durable Claude resume metadata. */
@@ -2451,6 +2578,80 @@ export class ClaudeCodeRuntime {
         });
       }
       const configuredProjectMcp = Object.keys(approvedProject.mcpServers);
+      const projectMcpPath = approvedProject.root
+        ? join(approvedProject.root, ".omp", "mcp.json")
+        : runtimeCwd;
+      const mcpServers: SessionMcpView[] = (approvedProject.mcpResources
+        ?? configuredProjectMcp.map((name): ClaudeMcpResourceSnapshot => ({
+          name,
+          path: projectMcpPath,
+          status: "admitted",
+        }))).map((resource) => ({
+          name: resource.name,
+          path: resource.path,
+          source: "project",
+          precedence: 2,
+          enabled: resource.status === "admitted",
+          status: resource.status,
+          ...(resource.reason ? { reason: resource.reason } : {}),
+        }));
+      const mcpDiagnostics: SessionResourceDiagnostic[] = approvedProject.mcpWarnings
+        .filter((warning) => !mcpServers.some((server) =>
+          server.status === "skipped" && warning.startsWith(`${server.name}: `)))
+        .map((reason) => ({
+          source: "project",
+          path: projectMcpWarningPath(approvedProject.root, reason, projectMcpPath),
+          reason,
+        }));
+      const skillGroups: SessionSkillGroup[] = [
+        ...(machineSkills
+          ? [projectSessionSkillGroup(
+              "machine",
+              0,
+              machineSkills,
+              machineSkills.skillDiagnostics.map((diagnostic) => ({
+                source: "machine" as const,
+                ...diagnostic,
+              })),
+            )]
+          : []),
+        projectSessionSkillGroup("ghost", 1, ghostDeclarative),
+        ...(approvedProject.root
+          ? [{
+              source: "project" as const,
+              precedence: 2,
+              skills: approvedProject.declarative.skills.map((skill) => {
+                const { frontmatter } = parseFrontmatter(skill.content);
+                return {
+                  name: skill.name,
+                  path: skill.path,
+                  ...(typeof frontmatter.description === "string"
+                    ? { description: frontmatter.description }
+                    : {}),
+                  hidden: frontmatter["disable-model-invocation"] === true,
+                };
+              }),
+              diagnostics: approvedProject.resourceWarnings.map((reason) => ({
+                source: "project" as const,
+                reason,
+              })),
+            }]
+          : []),
+      ];
+      const obsidianSkillPath = join(
+        this.ownerHome,
+        ".agents",
+        "skills",
+        "obsidian-cli",
+        "SKILL.md",
+      );
+      const resources = buildSessionResourceView({
+        runtime: "claude-code",
+        skillGroups,
+        obsidian: { path: obsidianSkillPath, installed: existsSync(obsidianSkillPath) },
+        mcpServers,
+        mcpDiagnostics,
+      });
       const publishProjectMcpStatus = async (failed: boolean): Promise<void> => {
         if (!project.reportStatus || !project.root) return;
         await project.reportStatus({
@@ -2634,6 +2835,7 @@ export class ClaudeCodeRuntime {
             exited,
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
             ...(principalTasks ? { principalTasks } : {}),
+            resources,
             projectMcpFailed: false,
           };
           this.warm.set(key, warm);

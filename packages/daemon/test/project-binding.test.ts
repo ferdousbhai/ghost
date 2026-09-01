@@ -1523,7 +1523,7 @@ describe("ProjectBindingStore", () => {
       expect(snapshot.rules).toEqual([]);
       expect(snapshot.promptTemplates).toEqual([]);
       expect(snapshot.slashCommands).toEqual([]);
-      expect(snapshot.mcp).toEqual({ claimedNames: [], servers: [], skipped: [] });
+      expect(snapshot.mcp).toEqual({ claimedNames: [], disabled: [], servers: [], skipped: [] });
       expect(opened.some((path) => path.includes(provider))).toBe(false);
     },
   );

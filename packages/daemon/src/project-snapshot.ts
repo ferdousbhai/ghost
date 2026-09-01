@@ -179,7 +179,22 @@ function mcp(value: unknown, root: string): boolean {
   if (!Array.isArray(row?.claimedNames)
     || !row.claimedNames.every((name) => typeof name === "string")
     || new Set(row.claimedNames).size !== row.claimedNames.length
-    || !Array.isArray(row.servers) || !Array.isArray(row.skipped)) return false;
+    || !Array.isArray(row.servers) || !Array.isArray(row.skipped)
+    || (row.disabled !== undefined && !Array.isArray(row.disabled))) return false;
+  for (const disabledValue of row.disabled ?? []) {
+    const disabled = record(disabledValue);
+    const sourceRow = record(disabled?.source);
+    const relativePath = sourceRow?.kind === "canonical"
+      ? ".omp/mcp.json"
+      : sourceRow?.kind === "legacy" ? ".omp/.mcp.json" : null;
+    if (typeof disabled?.name !== "string"
+      || !(row.claimedNames as string[]).includes(disabled.name)
+      || !sourceRow || !relativePath
+      || sourceRow.relativePath !== relativePath
+      || sourceRow.absolutePath !== join(root, ...relativePath.split("/"))) {
+      return false;
+    }
+  }
   for (const serverValue of row.servers) {
     const server = record(serverValue);
     const config = server?.config;

@@ -224,6 +224,64 @@ const MOCK_COMMANDS = [
   },
 ];
 
+const MOCK_SESSION_RESOURCES = {
+  runtime: "pi",
+  obsidian: {
+    path: "/tmp/ghost-shell-preview/.agents/skills/obsidian-cli/SKILL.md",
+    status: "admitted",
+  },
+  skills: [
+    {
+      name: "obsidian-cli",
+      path: "/tmp/ghost-shell-preview/.agents/skills/obsidian-cli/SKILL.md",
+      description: "Use the official Obsidian CLI.",
+      source: "machine",
+      precedence: 0,
+      status: "admitted",
+    },
+    {
+      name: "research",
+      path: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
+      source: "ghost",
+      precedence: 1,
+      status: "shadowed",
+      shadowedBy: "/tmp/ghost-shell-preview/project/.omp/skills/research/SKILL.md",
+    },
+    {
+      name: "research",
+      path: "/tmp/ghost-shell-preview/project/.omp/skills/research/SKILL.md",
+      source: "project",
+      precedence: 2,
+      status: "admitted",
+    },
+  ],
+  diagnostics: [{
+    source: "machine",
+    path: "/tmp/ghost-shell-preview/.agents/skills/old-skill/SKILL.md",
+    reason: "Skill name does not match its directory.",
+  }],
+  mcpServers: [
+    {
+      name: "local-files",
+      path: "/tmp/ghost-shell-preview/ghosts/casper/mcp.json",
+      source: "ghost",
+      precedence: 1,
+      enabled: true,
+      status: "admitted",
+    },
+    {
+      name: "legacy-events",
+      path: "/tmp/ghost-shell-preview/ghosts/casper/mcp.json",
+      source: "ghost",
+      precedence: 1,
+      enabled: false,
+      status: "disabled",
+      reason: "Disabled in the admitted configuration.",
+    },
+  ],
+  mcpDiagnostics: [],
+};
+
 // Raw values stay only in the mock's in-memory store. `mcpSnapshot` mirrors the
 // real daemon's sanitized GET response, including names/counts but never the
 // argument, environment, header, OAuth, or URL-query values themselves.
@@ -2506,6 +2564,11 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 409, { error: { code: "not_supported", message: "Claude Code does not support Ghost's command catalog" } });
     }
     return json(res, 200, { commands: MOCK_COMMANDS });
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "resources" && req.method === "GET") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    return json(res, 200, { ...MOCK_SESSION_RESOURCES, runtime: conversation.runtime });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "recap" && req.method === "POST") {
     await readBody(req).catch(() => ({}));

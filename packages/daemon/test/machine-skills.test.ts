@@ -98,4 +98,22 @@ describe("machine skills", () => {
     roots.push(ownerHome);
     await expect(loadMachineSkills(ownerHome)).resolves.toBeNull();
   });
+
+  it("retains diagnostics when a configured machine root admits no skills", async () => {
+    const ownerHome = mkdtempSync(join(tmpdir(), "ghost-invalid-machine-skills-"));
+    roots.push(ownerHome);
+    const invalid = join(ownerHome, ".agents", "skills", "obsidian-cli");
+    mkdirSync(invalid, { recursive: true });
+    writeFileSync(join(invalid, "SKILL.md"), "not valid skill frontmatter\n");
+
+    const snapshot = await loadMachineSkills(ownerHome);
+
+    expect(snapshot?.skills).toEqual([]);
+    expect(snapshot?.skillDiagnostics).toEqual([
+      expect.objectContaining({
+        path: join(invalid, "SKILL.md"),
+        reason: expect.any(String),
+      }),
+    ]);
+  });
 });

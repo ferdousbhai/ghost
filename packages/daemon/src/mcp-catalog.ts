@@ -146,8 +146,15 @@ export interface EffectiveProjectMcpServer {
   errors: string[];
 }
 
+export interface EffectiveProjectMcpDisabled {
+  name: string;
+  source: ProjectMcpConfigSource;
+}
+
 export interface EffectiveProjectMcpRead {
   claimedNames: string[];
+  /** Optional because released Pi snapshots predate disabled-row diagnostics. */
+  disabled?: EffectiveProjectMcpDisabled[];
   servers: EffectiveProjectMcpServer[];
   skipped: McpCatalogSkipped[];
 }
@@ -328,6 +335,7 @@ function parseProjectMcpInputs(
   const claimed = new Set<string>();
   const claimedNames: string[] = [];
   const configured: EffectiveProjectMcpServer[] = [];
+  const disabled: EffectiveProjectMcpDisabled[] = [];
   const servers: EffectiveProjectMcpServer[] = [];
   const skipped: McpCatalogSkipped[] = [];
 
@@ -374,13 +382,16 @@ function parseProjectMcpInputs(
         });
         continue;
       }
-      if ((config as MCPServerConfig).enabled === false) continue;
+      if ((config as MCPServerConfig).enabled === false) {
+        disabled.push({ name, source: input.source });
+        continue;
+      }
       servers.push(server);
     }
   }
 
   return {
-    effective: { claimedNames, servers, skipped },
+    effective: { claimedNames, disabled, servers, skipped },
     configured,
   };
 }

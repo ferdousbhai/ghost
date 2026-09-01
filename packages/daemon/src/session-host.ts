@@ -205,6 +205,14 @@ import {
   readEffectiveProjectMcp,
   type EffectiveProjectMcpRead,
 } from "./mcp-catalog.js";
+import {
+  buildSessionResourceView,
+  projectSessionSkillGroup,
+  replaceSessionMcpView,
+  type SessionMcpGroup,
+  type SessionResourceView,
+  type SessionSkillGroup,
+} from "./session-resources.js";
 import { resolveMcpServerSecrets, type SecretResolver } from "./secret-resolution.js";
 import {
   projectBindingPath,
@@ -788,6 +796,7 @@ interface HostedRecap {
 
 interface HostedSession extends GhostSessionHandle {
   logger: Logger;
+  resources: SessionResourceView;
   project: ProjectBindingState;
   projectSnapshot: ProjectDeclarativeSnapshot | null;
   toolCwds: Map<string, string>;
@@ -1587,7 +1596,12 @@ async function connectGhostProjectMCP(
     project?: { root: string; mcp: EffectiveProjectMcpRead };
   },
   logger: Logger,
-): Promise<{ result: ProjectMcpConnectionResult; configs: Map<string, MCPServerConfig>; sources: Map<string, McpSource> }> {
+): Promise<{
+  result: ProjectMcpConnectionResult;
+  configs: Map<string, MCPServerConfig>;
+  sources: Map<string, McpSource>;
+  admission: SessionMcpGroup[];
+}> {
   const configs = new Map<string, MCPServerConfig>();
   const sources = new Map<string, McpSource>();
   let projectRejected = 0;
@@ -1601,6 +1615,12 @@ async function connectGhostProjectMCP(
       ? [{ root: input.project.root, project: true, effective: input.project.mcp }]
       : []),
   ];
+  const admission: SessionMcpGroup[] = roots.map(({ root, project, effective }) => ({
+    source: project ? "project" : "ghost",
+    precedence: project ? 2 : 1,
+    root,
+    effective,
+  }));
   for (const sourceRoot of roots) {
     const { root, project: isActiveProject, effective } = sourceRoot;
     // A later project row claims precedence before admission. Disabled and
@@ -1639,7 +1659,12 @@ async function connectGhostProjectMCP(
   }
 
   if (configs.size === 0) {
-    return { result: summarizeProjectMcpConnection(sources, new Map(), projectRejected), configs, sources };
+    return {
+      result: summarizeProjectMcpConnection(sources, new Map(), projectRejected),
+      configs,
+      sources,
+      admission,
+    };
   }
   try {
     const connected = await manager.connectServers(Object.fromEntries(configs));
@@ -1650,7 +1675,12 @@ async function connectGhostProjectMCP(
         code: error,
       });
     }
-    return { result: summarizeProjectMcpConnection(sources, connected.errors, projectRejected), configs, sources };
+    return {
+      result: summarizeProjectMcpConnection(sources, connected.errors, projectRejected),
+      configs,
+      sources,
+      admission,
+    };
   } catch {
     logger.error("project MCP failed to load", {
       path: input.project ? join(input.project.root, ".omp") : input.ghostRoot,
@@ -1664,6 +1694,7 @@ async function connectGhostProjectMCP(
       },
       configs,
       sources,
+      admission,
     };
   }
 }
@@ -2719,6 +2750,41 @@ export class SessionHost {
     }
   }
 
+  async admittedResources(
+    ghostName: string,
+    sessionId?: string | null,
+    runtime: ConversationRuntime = "pi",
+  ): Promise<SessionResourceView> {
+    this.registry.get(ghostName);
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
+    if (runtime === "claude-code") {
+      const resources = this.claudeCode.sessionResources(ghostName, conversationId);
+      if (!resources) {
+        throw new GhostError(
+          "session_resources_unavailable",
+          "Claude Code resource admission is available only while this conversation has a live warm query.",
+          409,
+        );
+      }
+      return structuredClone(resources);
+    }
+    assertPiConversation(runtime, "Session resources");
+    this.assertPiRuntime(ghostName, "Session resources");
+    const existing = this.sessions.get(this.keyOf(ghostName, conversationId));
+    if (existing) return structuredClone(existing.resources);
+    const hosted = await this.idleHostedSession(
+      ghostName,
+      conversationId,
+      "Wait for this conversation to finish before inspecting its resources.",
+      true,
+    );
+    try {
+      return structuredClone(hosted.resources);
+    } finally {
+      await this.releaseSessionClaim(hosted, ghostName);
+    }
+  }
+
   private assertPiRuntime(ghostName: string, feature: string): Ghost {
     const ghost = this.registry.get(ghostName);
     try {
@@ -3375,6 +3441,23 @@ export class SessionHost {
       ghostSnapshot,
       ...(projectSnapshot ? [projectSnapshot] : []),
     ];
+    const skillGroups: SessionSkillGroup[] = [
+      ...(machineSkills
+        ? [projectSessionSkillGroup(
+            "machine",
+            0,
+            machineSkills,
+            machineSkills.skillDiagnostics.map((diagnostic) => ({
+              source: "machine" as const,
+              ...diagnostic,
+            })),
+          )]
+        : []),
+      projectSessionSkillGroup("ghost", 1, ghostSnapshot),
+      ...(projectSnapshot
+        ? [projectSessionSkillGroup("project", 2, projectSnapshot)]
+        : []),
+    ];
     const effectiveDeclarative = mergeProjectDeclarativeSnapshots(rootSnapshots);
     const fileCommands: GhostFileCommand[] = [
       ...effectiveDeclarative.slashCommands,
@@ -3445,6 +3528,22 @@ export class SessionHost {
       },
       logger,
     );
+    const obsidianSkillPath = join(
+      this.ownerHome,
+      ".agents",
+      "skills",
+      "obsidian-cli",
+      "SKILL.md",
+    );
+    const resources = buildSessionResourceView({
+      runtime: "pi",
+      skillGroups,
+      obsidian: {
+        path: obsidianSkillPath,
+        installed: existsSync(obsidianSkillPath),
+      },
+      mcpGroups: mcpResult.admission,
+    });
     mcp = { manager, configs: mcpResult.configs, sources: mcpResult.sources };
     await this.sessionStartupProbe("mcp", modelRuntime);
     if (project.root) {
@@ -3585,6 +3684,7 @@ export class SessionHost {
 
     const hosted: HostedSession = {
       logger,
+      resources,
       ghost,
       sessionKey: key,
       session,
@@ -4041,6 +4141,7 @@ export class SessionHost {
         hosted.logger,
       );
       await this.replaceHostedMcpManager(hosted, candidate, connected.configs, connected.sources);
+      hosted.resources = replaceSessionMcpView(hosted.resources, connected.admission);
       await this.updateHostedProjectMcpStatus(hosted, connected.result);
     });
     const tracked = reload.finally(() => {

@@ -682,6 +682,7 @@ Singleton {
                     root.projectNotice = action === "bind" ? "Project selected."
                         : (action === "reload" ? "Project resources reloaded."
                             : "This conversation now uses Home.");
+                    root.clearSessionResources();
                     root.projectMutationFinished(action, true);
                 } catch (error) {
                     if (root.projectError === "")
@@ -808,6 +809,14 @@ Singleton {
     property string commandsError: ""
     property string commandsGhost: ""
     property string commandsSessionId: ""
+
+    // Exact resources admitted to one principal conversation. Paths are
+    // owner-only, so this state is never reused by the remote viewer.
+    property var sessionResources: null
+    property bool sessionResourcesLoading: false
+    property string sessionResourcesError: ""
+    property string sessionResourcesGhost: ""
+    property string sessionResourcesSessionId: ""
 
     // Native coding workers are visible beside (not in place of) the owner
     // conversation. Catalogue state is machine-wide; task state is stamped to
@@ -1025,6 +1034,9 @@ Singleton {
     property var projectAbandonRequest: null
     property var pendingProjectReplacement: null
     property var commandsRequest: null
+    property var sessionResourcesRequest: null
+    /** Test seam; production constructs the native resource-snapshot XHR. */
+    property var sessionResourcesRequestFactory: null
     property var delegationRequestFactory: null
     property var nativeHarnessesRequest: null
     property var delegatedTasksRequest: null
@@ -1363,6 +1375,7 @@ Singleton {
         root.clearTranscript();
         root.clearGreeting();
         root.clearCommands();
+        root.clearSessionResources();
         root.clearProject();
         root.clearMcp();
         root.clearConnect();
@@ -1602,6 +1615,7 @@ Singleton {
         root.clearGreeting();
         root.clearMemory();
         root.clearCommands();
+        root.clearSessionResources();
         root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
@@ -1634,6 +1648,7 @@ Singleton {
         root.clearGreeting();
         root.clearMemory();
         root.clearCommands();
+        root.clearSessionResources();
         root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
@@ -1741,6 +1756,7 @@ Singleton {
         const target = root.ensureTurnState(ghost, id, state.conversationId, runtime);
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearSessionResources();
         root.clearConnect();
         root.fetchProject(false, false);
         return target;
@@ -2240,6 +2256,124 @@ Singleton {
         root.commandsSessionId = "";
     }
 
+    function clearSessionResources(): void {
+        const request = root.sessionResourcesRequest;
+        root.sessionResourcesRequest = null;
+        root.sessionResources = null;
+        root.sessionResourcesLoading = false;
+        root.sessionResourcesError = "";
+        root.sessionResourcesGhost = "";
+        root.sessionResourcesSessionId = "";
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function validSessionResourceRow(row: var, mcp: bool): bool {
+        const sources = mcp ? ["ghost", "project"] : ["machine", "ghost", "project"];
+        const statuses = mcp
+            ? ["admitted", "shadowed", "skipped", "disabled"]
+            : ["admitted", "shadowed", "skipped"];
+        if (!row || typeof row !== "object" || Array.isArray(row)
+                || typeof row.name !== "string" || row.name === ""
+                || typeof row.path !== "string"
+                || sources.indexOf(row.source) < 0
+                || typeof row.precedence !== "number" || !Number.isFinite(row.precedence)
+                || statuses.indexOf(row.status) < 0
+                || (row.description !== undefined && typeof row.description !== "string")
+                || (row.reason !== undefined && typeof row.reason !== "string")
+                || (row.shadowedBy !== undefined && typeof row.shadowedBy !== "string"))
+            return false;
+        return !mcp || typeof row.enabled === "boolean";
+    }
+
+    function validSessionResourceDiagnostic(row: var): bool {
+        return row && typeof row === "object" && !Array.isArray(row)
+            && ["machine", "ghost", "project"].indexOf(row.source) >= 0
+            && typeof row.reason === "string"
+            && (row.path === undefined || typeof row.path === "string")
+            && (row.shadowedBy === undefined || typeof row.shadowedBy === "string");
+    }
+
+    function applySessionResources(body: var, ghost: string, sessionId: string): bool {
+        const identity = root.conversationIdentity(sessionId);
+        if (!body || typeof body !== "object" || Array.isArray(body)
+                || ["pi", "claude-code"].indexOf(body.runtime) < 0
+                || !identity || body.runtime !== identity.runtime
+                || !Array.isArray(body.skills)
+                || !body.skills.every(function (row) {
+                    return root.validSessionResourceRow(row, false);
+                })
+                || !Array.isArray(body.mcpServers)
+                || !body.mcpServers.every(function (row) {
+                    return root.validSessionResourceRow(row, true);
+                })
+                || !Array.isArray(body.diagnostics)
+                || !body.diagnostics.every(function (row) {
+                    return root.validSessionResourceDiagnostic(row);
+                })
+                || !Array.isArray(body.mcpDiagnostics)
+                || !body.mcpDiagnostics.every(function (row) {
+                    return root.validSessionResourceDiagnostic(row);
+                })
+                || !body.obsidian || typeof body.obsidian !== "object"
+                || typeof body.obsidian.path !== "string"
+                || ["admitted", "shadowed", "skipped", "missing"]
+                    .indexOf(body.obsidian.status) < 0
+                || (body.obsidian.reason !== undefined
+                    && typeof body.obsidian.reason !== "string"))
+            return false;
+        root.sessionResources = body;
+        root.sessionResourcesGhost = ghost;
+        root.sessionResourcesSessionId = sessionId;
+        return true;
+    }
+
+    function fetchSessionResources(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearSessionResources();
+            return;
+        }
+        const sessionId = root.ensureSession(ghost);
+        if (!force && root.sessionResourcesGhost === ghost
+                && root.sessionResourcesSessionId === sessionId) return;
+        const previous = root.sessionResourcesRequest;
+        root.sessionResourcesRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+
+        const xhr = root.sessionResourcesRequestFactory
+            ? root.sessionResourcesRequestFactory() : new XMLHttpRequest();
+        root.sessionResourcesRequest = xhr;
+        root.sessionResources = null;
+        root.sessionResourcesLoading = true;
+        root.sessionResourcesError = "";
+        root.sessionResourcesGhost = ghost;
+        root.sessionResourcesSessionId = sessionId;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.sessionResourcesRequest) return;
+            root.sessionResourcesRequest = null;
+            root.sessionResourcesLoading = false;
+            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
+            if (xhr.status === 200) {
+                try {
+                    if (!root.applySessionResources(JSON.parse(xhr.responseText), ghost, sessionId))
+                        throw new Error("invalid resource snapshot");
+                    root.sessionResourcesError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.sessionResources = null;
+                    root.sessionResourcesError = "ghostd sent a malformed resource snapshot";
+                }
+            } else {
+                root.sessionResources = null;
+                root.sessionResourcesError = root.errorCode(xhr) === "session_resources_unavailable"
+                    ? "Send a message to start Claude Code, then refresh."
+                    : root.describeError(xhr, "GET session resources");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/resources", ({}), null);
+    }
+
     /**
      * Discover Ghost's effective slash commands for the active conversation.
      * `ensureSession` may mint the id for a blank chat, but the daemon still
@@ -2689,6 +2823,7 @@ Singleton {
                     root.mcpNotice = action === "delete" ? "Server deleted."
                         : (action === "toggle" ? "Server state updated."
                             : (action === "add" ? "Server added." : "Server updated."));
+                    root.clearSessionResources();
                     root.reachable = true;
                     root.mcpMutationFinished(action, server, true);
                 } catch (error) {
@@ -3328,6 +3463,7 @@ Singleton {
         root.ensureTurnState(ghost, id, conversationId, runtime);
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearSessionResources();
         root.clearProject();
         root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
@@ -3393,6 +3529,7 @@ Singleton {
                         root.currentSessionId = "";
                         root.clearTurnProjection();
                         root.clearCommands();
+                        root.clearSessionResources();
                         root.clearProject();
                         root.clearConnect();
                         root.clearGreeting();
@@ -3539,6 +3676,7 @@ Singleton {
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
         root.clearCommands();
+        root.clearSessionResources();
         // Opening the selected title reaches here without changing its identity.
         root.clearWork();
         root.clearConnect();

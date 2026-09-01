@@ -1126,6 +1126,73 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
   });
 });
 
+describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
+  it("serves the immutable Pi admission snapshot and enforces GET", async () => {
+    const base = await serve();
+    const skillDirectory = join(
+      temp!.ownerHome,
+      ".agents",
+      "skills",
+      "obsidian-cli",
+    );
+    const skillPath = join(skillDirectory, "SKILL.md");
+    mkdirSync(skillDirectory, { recursive: true });
+    writeFileSync(
+      skillPath,
+      "---\nname: obsidian-cli\ndescription: Use the official Obsidian CLI.\n---\n",
+    );
+    writeFileSync(
+      join(temp!.root, "casper", "mcp.json"),
+      JSON.stringify({
+        mcpServers: {
+          disabled: { type: "stdio", command: "never-start", enabled: false },
+          broken: { type: "stdio" },
+        },
+      }),
+    );
+    const url = `${base}/api/ghosts/casper/sessions/${piSegment("conv-resources")}/resources`;
+
+    const response = await fetch(url);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      runtime: "pi",
+      obsidian: { path: skillPath, status: "admitted" },
+      skills: [expect.objectContaining({
+        name: "obsidian-cli",
+        source: "machine",
+        precedence: 0,
+        status: "admitted",
+      })],
+      mcpServers: expect.arrayContaining([
+        expect.objectContaining({ name: "disabled", enabled: false, status: "disabled" }),
+        expect.objectContaining({
+          name: "broken",
+          enabled: false,
+          status: "skipped",
+          reason: expect.any(String),
+        }),
+      ]),
+    });
+    expect((await fetch(url, { method: "POST" })).status).toBe(405);
+  });
+
+  it("reports a cold Claude query as unavailable instead of reconstructing it", async () => {
+    const base = await serve();
+    setChatModelRole(ghostPaths(join(temp!.root, "casper")).home, "claude-code", "default");
+    const id = encodeURIComponent("claude-code:conv-resources");
+
+    const response = await fetch(
+      `${base}/api/ghosts/casper/sessions/${id}/resources`,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: "session_resources_unavailable" },
+    });
+  });
+});
+
 describe("POST /api/ghosts/:name/sessions/:id/recap", () => {
   it("returns a non-persisted Pi recap and enforces the route boundary", async () => {
     const base = await serve([

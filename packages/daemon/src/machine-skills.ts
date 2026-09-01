@@ -45,6 +45,16 @@ export interface MachineSkillOptions {
   paths?: readonly string[];
 }
 
+export interface MachineSkillDiagnostic {
+  path?: string;
+  reason: string;
+  shadowedBy?: string;
+}
+
+export interface MachineSkillSnapshot extends ProjectDeclarativeSnapshot {
+  skillDiagnostics: MachineSkillDiagnostic[];
+}
+
 /** The standard owner-trusted machine roots shared by agent skill installers. */
 export function machineSkillPaths(
   ownerHome: string,
@@ -65,7 +75,7 @@ function diagnosticMessage(diagnostic: ReturnType<typeof loadSkills>["diagnostic
 export async function loadMachineSkills(
   ownerHome: string,
   options: MachineSkillOptions = {},
-): Promise<ProjectDeclarativeSnapshot | null> {
+): Promise<MachineSkillSnapshot | null> {
   const paths = machineSkillPaths(ownerHome, options).filter((path) => existsSync(path));
   if (paths.length === 0) return null;
   const loaded = loadSkills({
@@ -74,6 +84,15 @@ export async function loadMachineSkills(
     skillPaths: paths,
     includeDefaults: false,
   });
+  const skillDiagnostics = loaded.diagnostics.map((diagnostic): MachineSkillDiagnostic => ({
+    ...(diagnostic.path || diagnostic.collision?.loserPath
+      ? { path: diagnostic.path ?? diagnostic.collision?.loserPath }
+      : {}),
+    reason: diagnostic.message,
+    ...(diagnostic.collision?.winnerPath
+      ? { shadowedBy: diagnostic.collision.winnerPath }
+      : {}),
+  }));
   const warnings = loaded.diagnostics.map(diagnosticMessage);
   const skills = loaded.skills.flatMap((skill) => {
     try {
@@ -93,18 +112,19 @@ export async function loadMachineSkills(
         },
       }];
     } catch (error) {
-      warnings.push(`${skill.filePath}: ${error instanceof Error ? error.message : String(error)}`);
+      const reason = error instanceof Error ? error.message : String(error);
+      warnings.push(`${skill.filePath}: ${reason}`);
+      skillDiagnostics.push({ path: skill.filePath, reason });
       return [];
     }
   });
-  if (skills.length === 0) return null;
   return {
     contextFiles: [],
     skills,
     rules: [],
     promptTemplates: [],
     slashCommands: [],
-    mcp: { claimedNames: [], servers: [], skipped: [] },
+    mcp: { claimedNames: [], disabled: [], servers: [], skipped: [] },
     mcpWarnings: [],
     resources: {
       instructions: 0,
@@ -117,6 +137,7 @@ export async function loadMachineSkills(
       ignoredExecutable: 0,
     },
     warnings,
+    skillDiagnostics,
     truncated: false,
   };
 }

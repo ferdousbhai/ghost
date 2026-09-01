@@ -141,6 +141,17 @@ describe("tailnet identity", () => {
       .toEqual({ login: null, role: "owner" });
   });
 
+  it("keeps local resource paths owner-only even though the route is read-only", async () => {
+    const base = await serve();
+    const response = await fetch(
+      `${base}/api/ghosts/casper/sessions/${encodeURIComponent("pi:resources")}/resources`,
+      { headers: asTailnet("guest@example.com") },
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "owner_only" } });
+  });
+
   it("honours guests: none and a configured owner login", async () => {
     const base = await serve({ guests: "none", owner: "guest@example.com" });
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).status).toBe(401);

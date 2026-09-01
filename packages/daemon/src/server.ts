@@ -828,6 +828,22 @@ export function createDaemonServer(options: ServerOptions): Server {
     });
   };
 
+  const handleSessionResources = async (
+    ghostName: string,
+    conversation: ConversationIdentity,
+    response: ServerResponse,
+  ): Promise<void> => {
+    jsonResponse(
+      response,
+      200,
+      await options.host.admittedResources(
+        ghostName,
+        conversation.conversationId,
+        conversation.runtime,
+      ),
+    );
+  };
+
   const handleRecap = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -2236,6 +2252,26 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleSessionCommands(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "resources") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          if (admission.identity?.role === "guest") {
+            errorResponse(
+              response,
+              403,
+              "owner_only",
+              "Session resource paths are visible only to the owner.",
+            );
+            return;
+          }
+          return await handleSessionResources(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
             response,

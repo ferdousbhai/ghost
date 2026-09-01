@@ -27,6 +27,7 @@ ProjectChip 1.0 ProjectChip.qml
 QueueLine 1.0 QueueLine.qml
 RemoteAccess 1.0 RemoteAccess.qml
 Roster 1.0 Roster.qml
+SessionResources 1.0 SessionResources.qml
 SpectralOrb 1.0 SpectralOrb.qml
 ToolCard 1.0 ToolCard.qml
 WorkStrip 1.0 WorkStrip.qml
