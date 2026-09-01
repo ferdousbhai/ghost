@@ -57,7 +57,7 @@ describe("machine skills", () => {
 
     const snapshot = await loadMachineSkills(ownerHome);
 
-    expect(snapshot?.skills.map((skill) => skill.name).sort()).toEqual([
+    expect(snapshot?.skills.map((skill) => skill.name)).toEqual([
       "ambient",
       "diagnose-crash",
       "obsidian-cli",

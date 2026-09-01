@@ -75,8 +75,8 @@ Timers only fire while the owner is logged in, because the daemon runs with thei
 
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
-- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 - obsidian-cli: Official Obsidian CLI skill. (<owner-home>/.agents/skills/obsidian-cli/SKILL.md)
+- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 
 ------------------------------------------------------------------------------
 [turn 1: provider round-trips]
@@ -181,8 +181,8 @@ Timers only fire while the owner is logged in, because the daemon runs with thei
 
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
-- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 - obsidian-cli: Official Obsidian CLI skill. (<owner-home>/.agents/skills/obsidian-cli/SKILL.md)
+- omarchy: Control this Omarchy laptop through its CLI. (<owner-home>/.agents/skills/omarchy/SKILL.md)
 
 ------------------------------------------------------------------------------
 [turn 2: provider round-trips]

@@ -71,6 +71,11 @@ function diagnosticMessage(diagnostic: ReturnType<typeof loadSkills>["diagnostic
   return [diagnostic.path, diagnostic.message].filter(Boolean).join(": ");
 }
 
+function compareSkillName(left: { name: string }, right: { name: string }): number {
+  if (left.name === right.name) return 0;
+  return left.name < right.name ? -1 : 1;
+}
+
 /** Snapshot every skill pi admits from the owner-trusted machine paths. */
 export async function loadMachineSkills(
   ownerHome: string,
@@ -94,7 +99,7 @@ export async function loadMachineSkills(
       : {}),
   }));
   const warnings = loaded.diagnostics.map(diagnosticMessage);
-  const skills = loaded.skills.flatMap((skill) => {
+  const skills = [...loaded.skills].sort(compareSkillName).flatMap((skill) => {
     try {
       return [{
         name: skill.name,
