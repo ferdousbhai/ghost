@@ -28,6 +28,14 @@ function quoted(value) {
     return "“" + compact(value, 80) + "”";
 }
 
+/**
+ * The file a call names, whichever harness asked for it. pi's native tools take
+ * `path`; Claude Code's take `file_path`. Same file, same sentence.
+ */
+function pathArgument(activity) {
+    return argument(activity, "path") || argument(activity, "file_path");
+}
+
 function isAsk(activity) {
     return String(activity.name || "") === "ask";
 }
@@ -218,8 +226,11 @@ function fileTarget(activity) {
     switch (String(activity.name || "")) {
     case "write":
     case "edit":
-        // Pi's native file tools take `path`; some providers emit `file_path`.
-        return argument(activity, "path") || argument(activity, "file_path");
+    case "Write":
+    case "Edit":
+        return pathArgument(activity);
+    case "NotebookEdit":
+        return argument(activity, "notebook_path");
     // Historical transcripts keep the old tool name and target retired
     // per-ghost files. They are never shared Documents paths.
     case "ghost_notes_write": {
@@ -238,6 +249,9 @@ function fileBase(activity) {
     switch (String(activity.name || "")) {
     case "write":
     case "edit":
+    case "Write":
+    case "Edit":
+    case "NotebookEdit":
         return "cwd";
     case "ghost_notes_write":
         return "ghost";
@@ -308,23 +322,89 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
             ? (completed ? "Updated " : "Updating ") + path
             : (completed ? "Saved a document" : "Saving a document");
     }
-    // Pi's native file tools. A session writes docs and memory through
-    // these rather than the ghost_* ones, so without them a restored transcript
-    // shows nothing where the ghost changed a file.
-    case "write": {
+    // The harnesses' own file, shell, and search tools. A session does most of
+    // its work through these rather than the ghost_* ones, so without them a
+    // turn shows nothing where the ghost read, changed, or searched anything.
+    // pi names them in lower case and takes `path`; Claude Code capitalises and
+    // takes `file_path`. The work is the same, so the sentence is too.
+    case "write":
+    case "Write": {
         const written = preparedFileTarget === undefined
             ? fileTarget(activity) : preparedFileTarget;
         return written !== ""
             ? (completed ? "Wrote " : "Writing ") + written
             : (completed ? "Wrote a file" : "Writing a file");
     }
-    case "edit": {
+    case "edit":
+    case "Edit":
+    case "NotebookEdit": {
         const written = preparedFileTarget === undefined
             ? fileTarget(activity) : preparedFileTarget;
         return written !== ""
             ? (completed ? "Edited " : "Editing ") + written
             : (completed ? "Edited a file" : "Editing a file");
     }
+    case "read":
+    case "Read": {
+        const target = pathArgument(activity);
+        return target !== ""
+            ? (completed ? "Read " : "Reading ") + target
+            : (completed ? "Read a file" : "Reading a file");
+    }
+    case "ls": {
+        const dir = argument(activity, "path");
+        return dir !== ""
+            ? (completed ? "Listed " : "Listing ") + dir
+            : (completed ? "Listed a directory" : "Listing a directory");
+    }
+    case "bash":
+    case "Bash": {
+        const command = argument(activity, "command");
+        return command !== ""
+            ? (completed ? "Ran " : "Running ") + compact(command, 80)
+            : (completed ? "Ran a command" : "Running a command");
+    }
+    case "BashOutput":
+        return completed
+            ? "Checked on a running command"
+            : "Checking on a running command";
+    case "KillShell":
+        return completed ? "Stopped a running command" : "Stopping a running command";
+    case "grep":
+    case "Grep": {
+        const pattern = argument(activity, "pattern");
+        return pattern !== ""
+            ? (completed ? "Searched for " : "Searching for ") + quoted(pattern)
+            : (completed ? "Searched the files" : "Searching the files");
+    }
+    case "find":
+    case "Glob": {
+        const pattern = argument(activity, "pattern");
+        return pattern !== ""
+            ? (completed ? "Looked for files matching " : "Looking for files matching ")
+                + quoted(pattern)
+            : (completed ? "Looked for files" : "Looking for files");
+    }
+    case "WebFetch": {
+        const url = argument(activity, "url");
+        return url !== ""
+            ? (completed ? "Read " : "Reading ") + url
+            : (completed ? "Read a page" : "Reading a page");
+    }
+    case "WebSearch": {
+        const query = argument(activity, "query");
+        return query !== ""
+            ? (completed ? "Searched the web for " : "Searching the web for ") + quoted(query)
+            : (completed ? "Searched the web" : "Searching the web");
+    }
+    case "Task": {
+        const description = argument(activity, "description");
+        return description !== ""
+            ? (completed ? "Delegated " : "Delegating ") + compact(description, 80)
+            : (completed ? "Delegated a task" : "Delegating a task");
+    }
+    case "TodoWrite":
+        return completed ? "Updated its plan" : "Updating its plan";
     case "ghost_memory_list":
     case "list_memory":
         return completed
@@ -392,10 +472,30 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
     }
 }
 
+/**
+ * Tools whose result is the work itself rather than an account of it: a file's
+ * bytes, a page's text, a directory's entries. Both runtimes put that result on
+ * the wire as `summary`, and 180 characters of it says less than "Read
+ * src/foo.ts" does. A failure is the exception — its text is the only thing
+ * that explains what went wrong.
+ */
+function resultIsRawContent(activity) {
+    switch (String(activity.name || "")) {
+    case "read":
+    case "Read":
+    case "ls":
+    case "WebFetch":
+        return true;
+    default:
+        return false;
+    }
+}
+
 function text(activity, completed, failed, expanded, preparedAsk, preparedFileTarget) {
     activity = fields(activity);
     const limit = expanded ? 1200 : 180;
-    const summary = compact(activity.summary || "", limit);
+    const summary = !failed && resultIsRawContent(activity)
+        ? "" : compact(activity.summary || "", limit);
     const intent = compact(activity.intent || "", limit);
     const base = summary || intent
         || fallback(activity, completed, failed, preparedAsk, preparedFileTarget);
@@ -418,7 +518,10 @@ function input(activity) {
         if (isAsk(activity)) return "";
         return questions.length + (questions.length === 1 ? " question" : " questions");
     }
-    const keys = ["query", "path", "name", "url", "action", "prompt", "source"];
+    const keys = [
+        "query", "path", "file_path", "notebook_path", "command", "pattern",
+        "name", "url", "action", "description", "prompt", "source",
+    ];
     for (const key of keys) {
         if (typeof args[key] === "string" && args[key].trim() !== "")
             return compact(args[key], 150);

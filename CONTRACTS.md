@@ -2438,7 +2438,7 @@ not coupled to that release identity.
   executable must not populate pi's cache by downloading them during a
   plan-mode read.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
-  branching UI, live tool cards, and summoning indicator.
+  branching UI, live tool cards, and the activity line.
 - `packages/chromium-extension` — the browser relay, driving tabs of the
   browser the user is already signed into. One extension serves every ghost and
   conversation over one socket. The daemon deliberately has one browser

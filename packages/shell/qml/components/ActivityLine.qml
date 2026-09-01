@@ -1,41 +1,62 @@
-// SummoningIndicator — state-aware copy and the layered orb recovered from
-// summon-ghost. Tool activity wins over thinking; copy rotates every 3s.
+// ActivityLine — what the ghost is doing right now, beside the orb.
 //
-// This is also where the ghost's own narration lands. When a turn opens with
-// "Checking your Dropbox for the invoice" before reaching for a tool, that line
-// is status rather than reply (TurnBlocks.js makes the call) and it belongs
-// here, beside the orb, for exactly as long as it is true. Real words outrank
-// the spectral phrases, which stay for the silences: thinking, a tool call the
-// ghost did not announce, the gap between blocks.
+// This line reports; it does not perform. Its predecessor rotated invented
+// spectral phrases every three seconds ("Coaxing the haunted mist") because it
+// had nothing real to say: `activity` clears between every tool lifecycle
+// event, so the copy needed a held key and a beat just to stop flickering. Both
+// runtimes now bracket every call with tool execution events, so there is a
+// real sentence available for almost every moment of a turn — and a real one
+// outranks any invented one.
+//
+// The ladder, in order: the ghost's own narration when it announced itself
+// ("Checking your Dropbox for the invoice" — TurnBlocks.js makes that call),
+// then the tool call that is running, rendered by the same ToolTrace the
+// transcript cards use, then the plain state the runtime reported. Nothing
+// rotates: a line changes when the work changes, and the ellipsis is what says
+// it is still going.
 import QtQuick
 import qs.services
+import "ToolTrace.js" as ToolTrace
 
 Item {
     id: root
 
     readonly property bool failing: !Ghostd.streaming && Ghostd.lastError !== ""
-    readonly property string stateKey: Ghostd.activity !== "" ? Ghostd.activity : "thinking"
-    /**
-     * The state the copy is currently drawn from, which trails `stateKey` by up
-     * to one beat. Ghostd's `activity` clears to "" between every tool
-     * lifecycle event — call start, call end, execution start, execution end —
-     * so a single tool call alone flips `stateKey` four times, and adopting
-     * each flip on sight is what made the phrases flicker past far faster than
-     * the 3s they were written for. The beat below is the only thing allowed
-     * to change what this line says.
-     */
-    property string heldKey: "thinking"
-    property int phraseIndex: 0
     property int ellipsisStep: 0
-    readonly property var phrases: root.phrasesFor(root.heldKey)
-    readonly property string narration: Ghostd.statusText
-    readonly property string phrase: root.narration !== "" ? root.narration
-        : (root.phrases && root.phrases.length > 0
-            ? root.phrases[root.phraseIndex % root.phrases.length] : "")
 
-    function adopt(fresh: bool): void {
-        root.heldKey = root.stateKey;
-        root.phraseIndex = root.randomPhrase(fresh ? -1 : root.phraseIndex);
+    /**
+     * The call the ghost is inside of, or null between calls. Parallel calls
+     * settle in any order, so the most recently opened one is the one this
+     * line follows.
+     */
+    readonly property var liveTool: {
+        const activities = Ghostd.toolActivities;
+        for (let i = activities.length - 1; i >= 0; i--) {
+            const status = activities[i].status;
+            if (status !== "complete" && status !== "failed") return activities[i];
+        }
+        return null;
+    }
+    readonly property string narration: Ghostd.statusText
+    readonly property string toolLine: root.liveTool
+        ? ToolTrace.text(root.liveTool, false, false, false) : ""
+    readonly property string phrase: root.narration !== "" ? root.narration
+        : root.toolLine !== "" ? root.toolLine
+        : root.stateLine(Ghostd.activity)
+
+    /**
+     * The runtime's own word for a turn that is not inside a tool call. A tool
+     * name arriving here is not repeated — {@link toolLine} already said it,
+     * with the arguments that make it mean something.
+     */
+    function stateLine(activity: string): string {
+        if (activity.startsWith("switching model · "))
+            return "Switching to " + activity.slice("switching model · ".length);
+        if (activity.startsWith("using fallback · "))
+            return "Falling back to " + activity.slice("using fallback · ".length);
+        if (activity === "thinking") return "Thinking";
+        if (activity === "waiting for ghostd") return "Waiting for ghostd";
+        return "Working";
     }
 
     // The web original whispered its phrases in slate-300 at 80%. Light mode has
@@ -47,86 +68,9 @@ Item {
     visible: Ghostd.streaming || root.failing
     clip: false
 
-    function randomPhrase(current: int): int {
-        if (!root.phrases || root.phrases.length <= 1) return 0;
-        let next = Math.floor(Math.random() * root.phrases.length);
-        if (next === current) next = (next + 1) % root.phrases.length;
-        return next;
-    }
-
-    function phrasesFor(state: string): var {
-        const copy = {
-            thinking: [
-                "Weighing the haunted question", "Threading the ghost thought",
-                "Reading the shadow veil", "Clearing the spectral fog",
-                "Tracing the phantom logic", "Polishing the spirit reply"
-            ],
-            ask: [
-                "Asking the ghost keeper", "Passing the haunted question",
-                "Opening the séance door", "Waiting for the phantom voice"
-            ],
-            ghost_browser: [
-                "Scrying the live web", "Following fresh omens",
-                "Peering past the veil", "Gathering spectral whispers"
-            ],
-            ghost_memory_list: [
-                "Opening the spirit memory", "Sorting the spectral echoes",
-                "Following remembered threads"
-            ],
-            ghost_memory_read: [
-                "Recalling a spectral echo", "Reading the haunted memory",
-                "Following an old ghost thread"
-            ],
-            inspect_image: [
-                "Peering through the spectral lens", "Reading the haunted image",
-                "Tracing shapes beyond the veil"
-            ],
-            // Ghost's own pre-OMP name for the same work; kept so historical
-            // transcripts still replay with flavour.
-            look_at_image: [
-                "Peering through the spectral lens", "Reading the haunted image",
-                "Tracing shapes beyond the veil"
-            ],
-        };
-        if (state.startsWith("switching model") || state.startsWith("using fallback")) {
-            return [
-                "Crossing to a steadier spirit",
-                "Calling the next spectral voice",
-                "Reweaving the model thread"
-            ];
-        }
-        return copy[state] || [
-            "Summoning the ghost spark", "Gathering the spectral thread",
-            "Coaxing the haunted mist", "Finding the veil glow",
-            "Shaping the spirit reply", "Crossing the phantom veil"
-        ];
-    }
-
-    // A turn opens on a phrase of its own rather than finishing the last one,
-    // and the ghost's own words giving way to invented ones is a real change of
-    // state, not a beat.
-    onNarrationChanged: if (root.narration === "" && Ghostd.streaming) root.adopt(false)
-
-    Connections {
-        target: Ghostd
-        function onStreamingChanged(): void {
-            if (Ghostd.streaming) root.adopt(true);
-        }
-    }
-
-    // Real words hold the line until they stop being true; only invented ones
-    // need rotating to stay alive. Stopping the beat also restarts its interval,
-    // so the phrase that follows a narration gets its full 3s.
-    Timer {
-        interval: 3000
-        repeat: true
-        running: Ghostd.streaming && root.narration === ""
-        onTriggered: root.adopt(false)
-    }
-
-    // The dots keep their own faster clock: the phrase says what is happening,
-    // these say it is still happening. TurnBlocks strips a narration's trailing
-    // stop so the ghost's own sentence does not end up with four of them.
+    // The phrase says what is happening; these say it is still happening.
+    // TurnBlocks strips a narration's trailing stop so the ghost's own sentence
+    // does not end up with four of them.
     Timer {
         interval: 430
         repeat: true

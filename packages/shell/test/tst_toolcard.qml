@@ -368,6 +368,49 @@ TestCase {
         compare(ToolTrace.input(activity), "");
     }
 
+    // The harnesses do most of their work through their own coding tools. Both
+    // spellings of the same job read as one sentence, so a turn never goes
+    // silent just because Claude Code capitalises what pi does not.
+    function test_bothHarnessesDescribeTheSameWork(): void {
+        function trace(name, args, completed) {
+            return ToolTrace.text(
+                { name: name, status: "running", arguments: args, intent: "", summary: "" },
+                completed === true, false, false);
+        }
+        compare(trace("read", { path: "docs/design.md" }), "Reading docs/design.md");
+        compare(trace("Read", { file_path: "docs/design.md" }), "Reading docs/design.md");
+        compare(trace("Read", { file_path: "docs/design.md" }, true), "Read docs/design.md");
+        compare(trace("bash", { command: "pnpm test" }), "Running pnpm test");
+        compare(trace("Bash", { command: "pnpm test" }), "Running pnpm test");
+        compare(trace("grep", { pattern: "retry" }), "Searching for “retry”");
+        compare(trace("Grep", { pattern: "retry" }), "Searching for “retry”");
+        compare(trace("find", { pattern: "*.qml" }), "Looking for files matching “*.qml”");
+        compare(trace("Glob", { pattern: "*.qml" }), "Looking for files matching “*.qml”");
+        compare(trace("Write", { file_path: "notes.md" }), "Writing notes.md");
+        compare(trace("Edit", { file_path: "notes.md" }), "Editing notes.md");
+        compare(trace("WebSearch", { query: "train times" }), "Searching the web for “train times”");
+        compare(trace("TodoWrite", ({})), "Updating its plan");
+        // A Claude writer earns the same workbench chip pi's does.
+        compare(ToolTrace.fileTarget({ name: "Edit", arguments: { file_path: "notes.md" } }),
+            "notes.md");
+        compare(ToolTrace.fileBase({ name: "Edit", arguments: { file_path: "notes.md" } }), "cwd");
+    }
+
+    // A file's own bytes coming back as the "summary" says less than the
+    // sentence naming the file. A failure still speaks for itself.
+    function test_rawContentNeverOutranksTheSentence(): void {
+        const read = {
+            name: "Read",
+            status: "complete",
+            arguments: { file_path: "docs/design.md" },
+            intent: "",
+            summary: "# design\nthe whole file, verbatim"
+        };
+        compare(ToolTrace.text(read, true, false, false), "Read docs/design.md");
+        const failed = Object.assign({}, read, { summary: "docs/design.md does not exist" });
+        compare(ToolTrace.text(failed, false, true, false), "docs/design.md does not exist");
+    }
+
     function test_unknownCallStaysOutOfTheTranscript(): void {
         const activity = {
             name: "internal_operation",

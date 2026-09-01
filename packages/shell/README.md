@@ -129,8 +129,11 @@ the final text line. There is no sibling navigator: the fork is another thread
 in the sidebar. Historical ask cards can still be re-answered to create a
 sibling branch and resume generation from it.
 
-The activity line uses the recovered summon-ghost spectral orb and rotating,
-tool-aware summoning copy. The QML port traces to summon-ghost commit
+The activity line uses the recovered summon-ghost spectral orb and says what
+the ghost is actually doing: the call it is inside of, named through the same
+`ToolTrace` the transcript cards use, and the plain state the runtime reported
+between calls. It invents nothing and rotates nothing — a line changes when the
+work changes. The QML port traces to summon-ghost commit
 `be07ca78c95fe38dae105866f7543283f483443b` (the mature glow-clipping fix).
 Its aura is deliberately unclipped, the line keeps a stable height, and motion
 can be disabled with `GHOST_REDUCE_MOTION=1`.
