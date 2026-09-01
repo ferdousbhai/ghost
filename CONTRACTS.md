@@ -254,7 +254,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT\|DELETE /api/ghosts/:name/memory` | List, write, or trash private memory. |
 | `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
-| `GET /api/ghosts/:name/models` | Paginated available/catalog model rows. |
+| `GET /api/ghosts/:name/models` | Paginated available/catalog model rows; `q` is at most 256 characters. |
 | `GET\|PUT /api/ghosts/:name/model-routing` | Read or replace role primaries/fallbacks. |
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and accounts. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. |

@@ -21,7 +21,11 @@ import {
   type ModelCatalogRuntime,
 } from "../src/model-catalog.js";
 import { readGhostModels, setChatModelRole, writeGhostModels } from "../src/models.js";
-import { startDaemonServer, type ListeningServer } from "../src/server.js";
+import {
+  MAX_MODEL_QUERY_LENGTH,
+  startDaemonServer,
+  type ListeningServer,
+} from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import {
   makeFakeCatalogRuntime,
@@ -519,6 +523,27 @@ describe("GET /api/ghosts/:name/models?scope=catalog", () => {
     expect((byId.body.models as Array<Record<string, unknown>>)[0]).toMatchObject({ id: "gpt-5-mini" });
     const byName = await getJson(`${base}/api/ghosts/casper/models?scope=catalog&q=opus`);
     expect((byName.body.models as Array<Record<string, unknown>>)[0]).toMatchObject({ id: "claude-opus-4" });
+  });
+
+  it("accepts q at its boundary and rejects a longer query", async () => {
+    const base = await serve({ credentialed: ["openai-codex"] });
+    const boundary = await getJson(
+      `${base}/api/ghosts/casper/models?scope=catalog&q=${"a".repeat(MAX_MODEL_QUERY_LENGTH)}`,
+    );
+    expect(boundary.status).toBe(200);
+
+    const oversized = await getJson(
+      `${base}/api/ghosts/casper/models?scope=catalog&q=${"a".repeat(MAX_MODEL_QUERY_LENGTH + 1)}`,
+    );
+    expect(oversized).toMatchObject({
+      status: 400,
+      body: {
+        error: {
+          code: "invalid_request",
+          message: `"q" must be at most ${MAX_MODEL_QUERY_LENGTH} characters.`,
+        },
+      },
+    });
   });
 
   it("paginates and caps a large catalogue", async () => {

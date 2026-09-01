@@ -115,6 +115,7 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+export const MAX_MODEL_QUERY_LENGTH = 256;
 /**
  * A conversation name is a label in a sidebar, not a description. The cap is
  * generous for a sentence and short enough to stay a label.
@@ -1245,6 +1246,15 @@ export function createDaemonServer(options: ServerOptions): Server {
     const provider = url.searchParams.get("provider");
     if (provider) query.provider = provider;
     const q = url.searchParams.get("q");
+    if (q !== null && q.length > MAX_MODEL_QUERY_LENGTH) {
+      errorResponse(
+        response,
+        400,
+        "invalid_request",
+        `"q" must be at most ${MAX_MODEL_QUERY_LENGTH} characters.`,
+      );
+      return;
+    }
     if (q) query.q = q;
     const limit = url.searchParams.get("limit");
     if (limit !== null) {
