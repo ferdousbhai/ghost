@@ -428,8 +428,19 @@ enforced by the durable parser/controller as well as by each public caller.
 `binding` is an exact `task-binding/v1` authority
 receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
 The project-binding authority revalidates that opaque receipt with the task's
-runtime-qualified parent and abort signal immediately before native spawn. The
-receipt is minted only from that parent's current durable, trusted project
+runtime-qualified parent and abort signal immediately before native spawn. One
+abortable mutex keyed by the exact runtime-qualified binding path serializes
+the final disk revalidation and one synchronous native spawn with binding
+publication, cwd change, revoke, and removal. Slow catalogue, SDK, version, and
+authentication work occurs before that lease; systemd reservation and cleanup
+occur outside it. The adapter receives a one-shot launch capability rather than
+the native scope: its callback must synchronously invoke exactly one spawn with
+the receipt's exact cwd and may not return a thenable. Same-parent launch
+callbacks therefore serialize only across the synchronous process boundary;
+unrelated parents and all work after spawn remain unthrottled. If spawn wins,
+the old admitted worker continues and the mutation publishes afterward; if the
+mutation wins, final revalidation rejects the stale worker without spawning.
+The receipt is minted only from that parent's current durable, trusted project
 binding; an unbound conversation cannot delegate coding work. Root and cwd are
 canonical, byte-bounded, and cwd is lexically within a non-null root; receipt comparison
 binds every path, identity, and generation field independent of JSON key order.
@@ -601,8 +612,9 @@ path ending in the pinned SDK's lowercase `.js`, `.mjs`, `.tsx`, `.ts`, or
 `bun` with that exact path as argument zero and no Ghost-supplied executable
 arguments; Ghost substitutes the canonical absolute `process.execPath` for the
 literal command at the scope boundary. Version and authentication probes use
-that same absolute Bun-plus-script launch plan. The script and Bun filesystem
-identities are bound into private admission evidence and both are revalidated
+that same absolute Bun-plus-script launch plan. Bun is captured before either
+probe; the script and Bun filesystem identities are bound into private
+admission evidence and both are revalidated between probe phases and
 immediately before the synchronous SDK query/spawn boundary. Other paths must
 remain the exact admitted command with no interpreter; `node`, `deno`, PATH
 lookup, a different script, or any other transform fails before launch. It
@@ -638,14 +650,17 @@ to one ghost home and receives that ghost's project-binding authority before
 initialization; the principal tool mints the exact parent receipt at creation,
 and the controller revalidates it immediately before adapter spawn. Task-store
 attachment begins restart recovery for every existing ghost. The attempts run
-independently and ghostd waits for all of them to settle before it starts
-listening; one ghost's failure cannot skip another ghost's cleanup and is not a
+independently and ghostd waits for all attempts to settle before it starts
+listening; an unavailable ghost task store or unconfirmed scope settles as
+that ghost's bounded failure, cannot skip another ghost's cleanup, and is not a
 daemon- or principal-startup failure. Each outcome is logged only as bounded
 per-ghost availability, without task, receipt, scope, or storage detail.
 Initialization is mandatory for every task operation. A failed controller
-closes its task-store descriptors before it becomes retryable; a later task
-operation retries initialization, and an operation whose retry still fails
-receives only generic `503 tasks_unavailable`. Principal conversation activity
+closes its task-store descriptors before it becomes retryable. If that close
+cannot be confirmed, the controller is poisoned and retained: repeated task
+operations return only generic `503 tasks_unavailable`, no second store is
+opened, and a whole-home move fails until disposal succeeds. A normally closed
+failure may be retried by a later task operation. Principal conversation activity
 remains available throughout. The task
 layer and all native adapters remain forbidden from running Git worktree,
 staging, commit, or branch commands.
@@ -701,7 +716,9 @@ retire stale list, detail, and mutation requests before their response can be
 adopted. Starting any mutation increments a cross-operation read generation,
 retires pending list/detail reads, and blocks new reads until the mutation
 settles, so an older `running` projection cannot overwrite a confirmed terminal
-response. Creation is enabled only when that same conversation has a current
+response. Accepted list and detail snapshots are also merged per task by
+canonical `updatedAt`; a terminal snapshot is monotonic and can never be
+revived by an active snapshot in either response order. Creation is enabled only when that same conversation has a current
 non-null trusted project binding, and it sends the binding's exact cwd; the HUD
 cannot create from unbound Home context or type an arbitrary cwd. It shows the
 bounded assignment preview, cwd, state, recent structured events, and result

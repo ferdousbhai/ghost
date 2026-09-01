@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { REDACTED_MEMORY_SECRET } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
-import { MAX_TASK_EVENT_MESSAGE, MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
+import { MAX_TASK_EVENT_MESSAGE, MAX_TASK_RESULT, TaskController, TaskStore, type TaskAdapter, type TaskAdapterContext, type TaskAdapterHandle, type TaskBindingAuthority, type TaskBindingReceipt, type TaskRecord } from "../src/tasks.js";
 import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 function deferred<T>() {
@@ -19,13 +19,33 @@ const ownership = {
   kind: "systemd-scope",
   nonce: "11111111111111111111111111111111",
 } as const;
-const authority = { async revalidate(receipt: TaskBindingReceipt) { return receipt; } };
+function authorityFrom(
+  revalidate: TaskBindingAuthority["revalidate"],
+): TaskBindingAuthority {
+  return {
+    revalidate,
+    async launchNative(receipt, signal, parent, launch) {
+      return launch(await revalidate(receipt, signal, parent));
+    },
+  };
+}
+const authority = authorityFrom(async (receipt: TaskBindingReceipt) => receipt);
 const stores: TaskStore[] = [];
 function trackedStore(home: string): TaskStore { const store = new TaskStore(home); stores.push(store); return store; }
 afterEach(async () => { await Promise.all(stores.splice(0).map((store) => store.dispose())); });
 
 async function eventually(store: TaskStore, id: string, state: TaskRecord["state"]): Promise<TaskRecord> {
-  for (let attempt = 0; attempt < 100; attempt += 1) { const row = await store.read(id); if (row.state === state) return row; await new Promise((done) => setTimeout(done, 2)); }
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      const row = await store.read(id);
+      if (row.state === state) return row;
+    } catch (error) {
+      const changed = error as { code?: string; message?: string };
+      if (changed.code !== "unsafe_task_record"
+        || changed.message !== "The task record changed.") throw error;
+    }
+    await new Promise((done) => setTimeout(done, 2));
+  }
   throw new Error(`${id} did not reach ${state}`);
 }
 async function readPersistedTask(home: string, id: string): Promise<TaskRecord> {
@@ -33,9 +53,12 @@ async function readPersistedTask(home: string, id: string): Promise<TaskRecord> 
   await reader.initialize();
   try { return await reader.read(id); } finally { await reader.dispose(); }
 }
-async function fixture(adapter: TaskAdapter, bindingAuthority = authority) {
+async function fixture(
+  adapter: TaskAdapter,
+  bindingAuthority: Pick<TaskBindingAuthority, "revalidate"> = authority,
+) {
   const home = await mkdtemp(join(tmpdir(), "ghost-task-")); await chmod(home, 0o700);
-  const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), bindingAuthority, fakeTaskScopeManager()); await controller.initialize();
+  const store = trackedStore(home); const controller = new TaskController(store, new Map([["native", adapter]]), authorityFrom(bindingAuthority.revalidate), fakeTaskScopeManager()); await controller.initialize();
   return { home, store, controller };
 }
 function runtime(options: { force?: () => Promise<void>; start?: (context: TaskAdapterContext) => void } = {}) {
@@ -92,6 +115,59 @@ describe("durable task foundation", () => {
     await eventually(store, first.id, "running"); await eventually(store, second.id, "running"); expect(executions).toHaveLength(2);
     for (const execution of executions) { execution.result.resolve("done"); execution.quiet.resolve(); }
   });
+
+  it.each(["zero", "twice", "thenable"] as const)(
+    "rejects a %s-use native launch callback before task publication",
+    async (kind) => {
+      const adapter: TaskAdapter = {
+        async start(input, context) {
+          const quiet = Promise.withResolvers<void>();
+          context.register({
+            async force() {
+              await context.stopNative();
+              quiet.resolve();
+            },
+            quiescence: quiet.promise,
+          });
+          await context.launchNative((spawn) => {
+            if (kind === "zero") return "no spawn";
+            spawn({
+              executable: "/usr/bin/true",
+              args: [],
+              cwd: input.cwd,
+              environment: { PATH: "/usr/bin:/bin" },
+            });
+            if (kind === "twice") {
+              spawn({
+                executable: "/usr/bin/true",
+                args: [],
+                cwd: input.cwd,
+                environment: { PATH: "/usr/bin:/bin" },
+              });
+            }
+            return kind === "thenable" ? Promise.resolve("late") : "spawned";
+          });
+          return { result: new Promise<string>(() => undefined), async followUp() {} };
+        },
+      };
+      const { home, store, controller } = await fixture(adapter);
+      const admitted = await controller.start({
+        parent,
+        harness: "native",
+        task: "inspect launch capability",
+        binding: {
+          ...binding,
+          root: home,
+          rootIdentity: "test-root",
+          cwd: home,
+          cwdIdentity: "test-cwd",
+        },
+      });
+      await expect(eventually(store, admitted.id, "failed")).resolves.toMatchObject({
+        error: { code: "task_failed" },
+      });
+    },
+  );
 
   it("rejects blank work and non-Claude agents at the durable boundary", async () => {
     const native = runtime();
@@ -525,6 +601,41 @@ describe("durable task foundation", () => {
     ]);
   });
 
+  it("poisons initialization until a failed store close is retried successfully", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    let allowClose = false;
+    let closes = 0;
+    class PoisonedStore extends TaskStore {
+      override async initialize(): Promise<void> {
+        throw new Error("injected initialization failure");
+      }
+      override async dispose(): Promise<void> {
+        closes += 1;
+        if (!allowClose) throw new Error("injected close failure");
+        await super.dispose();
+      }
+    }
+    const store = new PoisonedStore(home);
+    stores.push(store);
+    const controller = new TaskController(
+      store,
+      new Map(),
+      authority,
+      fakeTaskScopeManager(),
+    );
+    const initialization = controller.initialize();
+    await expect(initialization).rejects.toMatchObject({
+      _tag: "TaskControllerPoisonedError",
+    });
+    expect(controller.poisoned).toBe(true);
+    expect(controller.initialize()).toBe(initialization);
+    expect(closes).toBe(1);
+    allowClose = true;
+    await controller.dispose();
+    expect(controller.poisoned).toBe(false);
+    expect(closes).toBe(2);
+  });
+
   it("does not admit a retry when task-store disposal is unconfirmed", async () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
     const seed = trackedStore(home);
@@ -548,7 +659,7 @@ describe("durable task foundation", () => {
     const controller = new TaskController(store, new Map(), authority, nativeOwnership);
 
     const first = controller.initialize();
-    await expect(first).rejects.toBeInstanceOf(AggregateError);
+    await expect(first).rejects.toMatchObject({ _tag: "TaskControllerPoisonedError" });
     expect(controller.initialize()).toBe(first);
     expect(store.attempts).toBe(1);
   });

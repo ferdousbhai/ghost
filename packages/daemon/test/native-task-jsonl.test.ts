@@ -42,11 +42,13 @@ function context(controller = new AbortController()): {
   controller: AbortController;
 } {
   let registered: TaskAdapterControl | undefined;
+  const scope = directTaskScope();
   return {
     controller,
     context: {
       signal: controller.signal,
-      scope: directTaskScope(),
+      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      stopNative: () => scope.stopAndConfirm(),
       register(control) {
         if (registered) throw new Error("duplicate control");
         registered = control;
@@ -157,12 +159,12 @@ writeFileSync(process.env.MARKER, "spawned");
     });
     unrelated.push(other);
 
-    expect(() => processBoundary.start({
+    await expect(processBoundary.start({
       executable: path,
       args: [],
       cwd: root,
       environment: { PATH: process.env.PATH, MARKER: marker },
-    })).toThrow("Native task process failed.");
+    })).rejects.toThrow("Native task process failed.");
     await fixture.control().quiescence;
     expect(existsSync(marker)).toBe(false);
     expect(other.pid === undefined ? false : pidExists(other.pid)).toBe(true);

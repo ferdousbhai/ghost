@@ -117,4 +117,23 @@ TestCase {
         compare(DelegationModel.task(reversed, true), null);
         compare(DelegationModel.task(task({ state: "waiting" }), false), null);
     }
+
+    function test_snapshotMergeNeverRevivesTerminalOrMovesBackward(): void {
+        const running = DelegationModel.task(task(), false);
+        const completed = DelegationModel.task(task({
+            state: "completed",
+            resultPreview: "Done.",
+            updatedAt: "2026-08-31T10:00:03.000Z"
+        }), false);
+        verify(running !== null);
+        verify(completed !== null);
+        compare(DelegationModel.mergeTask(completed, running).state, "completed");
+        compare(DelegationModel.mergeTask(running, completed).state, "completed");
+
+        const newerRunning = DelegationModel.task(task({
+            updatedAt: "2026-08-31T10:00:02.000Z"
+        }), false);
+        compare(DelegationModel.mergeTask(newerRunning, running).updatedAt,
+            "2026-08-31T10:00:02.000Z");
+    }
 }

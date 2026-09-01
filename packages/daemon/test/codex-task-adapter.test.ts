@@ -120,10 +120,12 @@ function taskContext(): {
 } {
   const controller = new AbortController();
   let registered: TaskAdapterControl | undefined;
+  const scope = directTaskScope();
   return {
     context: {
       signal: controller.signal,
-      scope: directTaskScope(),
+      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      stopNative: () => scope.stopAndConfirm(),
       register(control) { registered = control; },
       async emit() {},
     },

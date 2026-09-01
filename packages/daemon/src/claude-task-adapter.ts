@@ -12,16 +12,15 @@ import {
   type ClaudeAgentSdkModule,
 } from "./claude-agent-sdk-loader.js";
 import { captureNativeHarnessEnvironment } from "./env-scrub.js";
-import {
-  claudeNativeSdkScriptLaunch,
-  type NativeHarnessProbeResult,
-} from "./native-harness-catalog.js";
+import type { NativeHarnessProbeResult } from "./native-harness-catalog.js";
+import { claudeSdkSpawnLaunch } from "./claude-sdk-launch.js";
 import { NativeTaskProcessError } from "./native-task-jsonl.js";
 import type {
   TaskAdapter,
   TaskAdapterContext,
   TaskAdapterHandle,
   TaskBindingReceipt,
+  NativeTaskSpawner,
 } from "./tasks.js";
 
 const MAX_CLAUDE_INPUT_QUEUE = 32;
@@ -138,7 +137,9 @@ class ClaudeTaskLifecycle {
   private readonly quiet = deferred<void>();
   private readonly cwd: string;
   private readonly input: ClaudeTaskInput;
-  private readonly scope: TaskAdapterContext["scope"];
+  private readonly launchNative: TaskAdapterContext["launchNative"];
+  private readonly stopNative: TaskAdapterContext["stopNative"];
+  private nativeSpawner: NativeTaskSpawner | undefined;
   private admission: NativeHarnessProbeResult | undefined;
   private query: Query | undefined;
   private child: ChildProcess | undefined;
@@ -153,7 +154,8 @@ class ClaudeTaskLifecycle {
   ) {
     this.input = input;
     this.cwd = cwd;
-    this.scope = context.scope;
+    this.launchNative = context.launchNative;
+    this.stopNative = context.stopNative;
     this.signal = this.abortController.signal;
     this.quiescence = this.quiet.promise;
     this.spawnClaudeCodeProcess = (options) => this.spawn(options);
@@ -179,6 +181,20 @@ class ClaudeTaskLifecycle {
   attach(query: Query): void {
     if (this.query || this.signal.aborted) throw failure();
     this.query = query;
+  }
+
+  async launchQuery(create: () => Query): Promise<Query> {
+    return this.launchNative((spawn) => {
+      if (this.nativeSpawner) throw failure();
+      this.nativeSpawner = spawn;
+      try {
+        const query = create();
+        if (!this.spawned) throw failure();
+        return query;
+      } finally {
+        this.nativeSpawner = undefined;
+      }
+    });
   }
 
   force(): Promise<void> {
@@ -212,21 +228,25 @@ class ClaudeTaskLifecycle {
       || process.platform !== "linux") {
       throw failure();
     }
-    const script = claudeNativeSdkScriptLaunch(this.admission.executable.path);
-    const validDirect = script === undefined
-      && options.command === this.admission.executable.path
-      && this.admission.interpreter === undefined;
-    const validScript = script !== undefined
-      && options.command === script.command
-      && options.args[0] === this.admission.executable.path
-      && this.admission.interpreter?.path === script.executable;
-    if (!validDirect && !validScript) throw failure();
+    let launch: ReturnType<typeof claudeSdkSpawnLaunch>;
+    try {
+      launch = claudeSdkSpawnLaunch(
+        this.admission.executable,
+        this.admission.interpreter,
+        options,
+        this.cwd,
+      );
+    } catch {
+      throw failure();
+    }
     this.spawned = true;
     let child: ChildProcess;
     try {
-      child = this.scope.spawn({
-        executable: script?.executable ?? options.command,
-        args: options.args,
+      const spawn = this.nativeSpawner;
+      if (!spawn) throw failure();
+      child = spawn({
+        executable: launch.executable,
+        args: launch.args,
         cwd: options.cwd,
         environment: options.env,
         signal: options.signal,
@@ -247,7 +267,7 @@ class ClaudeTaskLifecycle {
     const child = this.child;
     this.teardown = (async () => {
       try {
-        await this.scope.stopAndConfirm();
+        await this.stopNative();
       } catch {
         throw failure();
       } finally {
@@ -342,7 +362,7 @@ export class ClaudeTaskAdapter implements TaskAdapter {
         spawnClaudeCodeProcess: lifecycle.spawnClaudeCodeProcess,
         ...(input.agent ? { agent: input.agent } : {}),
       };
-      query = sdk.query({ prompt: channel, options });
+      query = await lifecycle.launchQuery(() => sdk.query({ prompt: channel, options }));
       lifecycle.attach(query);
     } catch {
       try { query?.close(); } catch { /* exact scope teardown remains authoritative */ }

@@ -14,6 +14,7 @@ import {
   type TaskAdapter,
   type TaskController,
   type TaskRecord,
+  type TaskStore,
 } from "./tasks.js";
 
 export const MAX_LISTED_TASKS = 20;
@@ -48,6 +49,7 @@ export interface PrincipalTaskContext {
 export interface PrincipalTaskServices {
   adapters: ReadonlyMap<string, TaskAdapter>;
   ownership: NativeTaskScopeManager;
+  createStore?(home: string): TaskStore;
 }
 
 function sameParent(left: ConversationIdentity, right: ConversationIdentity): boolean {

@@ -198,7 +198,7 @@ export class CodexTaskAdapter implements TaskAdapter {
       try {
         const admitted = await this.catalog.readForStart("codex", processBoundary.signal);
         if (admitted.id !== "codex") throw failure();
-        processBoundary.start({
+        await processBoundary.start({
           executable: admitted.executable.path,
           args: ["app-server", "--listen", "stdio://"],
           cwd: input.cwd,

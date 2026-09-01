@@ -462,6 +462,33 @@ describe("native harness probes", () => {
     );
   });
 
+  it("rejects exact Bun rotation between script version and auth probes", async () => {
+    const base = root();
+    const { binary } = fakeClaude(base, ".mjs");
+    const sdkLoader = validClaudeAgentSdkLoader();
+    let bunInspections = 0;
+    let authReads = 0;
+    const probe = new ClaudeNativeHarnessProbe({
+      sdkLoader,
+      binaryPath: binary,
+      resolveExecutable: async () => binary,
+      inspectExecutable: async (path) => {
+        if (path === process.execPath) return `bun-${++bunInspections}`;
+        return "script-stable";
+      },
+      readVersion: async () => "2.1.251",
+      readAuthStatus: async () => {
+        authReads += 1;
+        return { loggedIn: true };
+      },
+    });
+
+    await expect(probe.readFresh(new AbortController().signal)).rejects.toThrow(
+      "interpreter changed between probes",
+    );
+    expect(authReads).toBe(0);
+  });
+
   it("makes the principal SDK loader mandatory for production construction", () => {
     expect(() => new ClaudeNativeHarnessProbe({} as never)).toThrow(
       "requires the principal SDK loader",

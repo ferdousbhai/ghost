@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationIdentity } from "../src/conversation-identity.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { homeOperationsFor } from "../src/home-operations.js";
 import { createLogger, type LogRecord } from "../src/log.js";
 import { ProjectBindingStore } from "../src/project-binding.js";
 import {
@@ -245,6 +246,49 @@ describe("SessionHost delegated task composition", () => {
       code: "daemon_restarted",
       message: "The daemon restarted before the task became quiescent.",
     });
+  });
+
+  it("retains a poisoned controller until its store can be confirmed closed", async () => {
+    const { home } = setup();
+    let constructions = 0;
+    let disposals = 0;
+    let allowClose = false;
+    class PoisonedStore extends TaskStore {
+      override async initialize(): Promise<void> {
+        throw new Error("injected initialization failure");
+      }
+      override async dispose(): Promise<void> {
+        disposals += 1;
+        if (!allowClose) throw new Error("injected close failure");
+        await super.dispose();
+      }
+    }
+    host!.attachTaskServices({
+      adapters: new Map([["pi", controlledAdapter().adapter]]),
+      ownership: fakeTaskScopeManager(),
+      createStore: (storeHome) => {
+        constructions += 1;
+        return new PoisonedStore(storeHome);
+      },
+    });
+    await host!.restoreTaskServices();
+    const parent = conversationIdentity("pi", "poisoned-controller");
+    const missing = "task-11111111-1111-4111-8111-111111111111";
+    await expect(host!.task("casper", parent, missing)).rejects.toMatchObject({
+      code: "tasks_unavailable",
+    });
+    await expect(host!.task("casper", parent, missing)).rejects.toMatchObject({
+      code: "tasks_unavailable",
+    });
+    expect(constructions).toBe(1);
+    expect(disposals).toBe(1);
+
+    await expect(homeOperationsFor(temp!.registry).reserveMove("casper"))
+      .rejects.toBeInstanceOf(Error);
+    expect(existsSync(home)).toBe(true);
+    expect(constructions).toBe(1);
+    expect(disposals).toBe(2);
+    allowClose = true;
   });
 
   it("isolates boot recovery failures, starts the principal, and retries that ghost", async () => {
@@ -921,6 +965,81 @@ describe("SessionHost delegated task composition", () => {
     await expect(host!.cancelTask("casper", parent, admitted.id))
       .resolves.toMatchObject({ state: "cancelled" });
     expect(controlled.force).toHaveBeenCalledOnce();
+  });
+
+  it("revalidates a project rebind after catalogue work and before native spawn", async () => {
+    const { home, ownerHome } = setup();
+    const project = join(ownerHome, "lease-project");
+    const original = join(project, "original");
+    const rebound = join(project, "rebound");
+    mkdirSync(original, { recursive: true });
+    mkdirSync(rebound);
+    const parent = conversationIdentity("pi", "launch-lease-rebind");
+    writeConversation(home, parent.conversationId);
+    const preview = await host!.previewProject(
+      "casper", parent.conversationId, parent.runtime, project,
+    );
+    await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+      root: project,
+      cwd: original,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    const catalogueEntered = Promise.withResolvers<void>();
+    const catalogueRelease = Promise.withResolvers<void>();
+    let spawnedCwd: string | undefined;
+    const adapter: TaskAdapter = {
+      async start(input, context) {
+        const quiet = Promise.withResolvers<void>();
+        context.register({
+          async force() {
+            await context.stopNative();
+            quiet.resolve();
+          },
+          quiescence: quiet.promise,
+        });
+        catalogueEntered.resolve();
+        await catalogueRelease.promise;
+        await context.launchNative((spawn) => {
+          spawnedCwd = input.cwd;
+          return spawn({
+            executable: "/bin/sh",
+            args: ["-c", "while :; do sleep 10; done"],
+            cwd: input.cwd,
+            environment: { PATH: "/usr/bin:/bin" },
+          });
+        });
+        return { result: new Promise<string>(() => undefined), async followUp() {} };
+      },
+    };
+    host!.attachTaskServices({
+      adapters: new Map([["pi", adapter]]),
+      ownership: fakeTaskScopeManager(),
+    });
+    await host!.restoreTaskServices();
+    const admitted = await host!.createTask("casper", parent, {
+      harness: "pi",
+      assignment: "Pause after the slow catalogue probe.",
+    }, new AbortController().signal);
+    await catalogueEntered.promise;
+
+    const nextPreview = await host!.previewProject(
+      "casper", parent.conversationId, parent.runtime, project,
+    );
+    await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+      root: project,
+      cwd: rebound,
+      trustToken: nextPreview.trustToken,
+      expectedGeneration: 1,
+    });
+    catalogueRelease.resolve();
+    const failed = await waitFor(
+      () => host!.task("casper", parent, admitted.id),
+      (record) => record.state === "failed",
+    );
+    expect(failed.error).toMatchObject({ code: "task_failed" });
+    expect(spawnedCwd).toBeUndefined();
   });
 
   it("does not finish forced daemon shutdown before native quiescence", async () => {

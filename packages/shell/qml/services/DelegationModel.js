@@ -12,6 +12,7 @@ const STATES = [
     "completed", "failed", "cancelled", "interrupted"
 ];
 const ACTIVE_STATES = ["queued", "starting", "running", "cancelling"];
+const TERMINAL_STATES = ["completed", "failed", "cancelled", "interrupted"];
 const TASK_KEYS = [
     "id", "harness", "agent", "cwd", "state", "createdAt", "updatedAt",
     "taskPreview", "taskTruncated", "resultPreview", "resultTruncated", "error"
@@ -202,6 +203,27 @@ function stateLabel(state) {
 
 function active(state) {
     return ACTIVE_STATES.indexOf(state) >= 0;
+}
+
+// Polls and mutation responses can cross in either order. Once a task is
+// terminal, or a newer snapshot has landed, an older transport response may
+// add no information and must not revive its controls.
+function mergeTask(current, incoming) {
+    if (!current || current.id !== incoming.id) return incoming;
+    const currentTerminal = TERMINAL_STATES.indexOf(current.state) >= 0;
+    const incomingTerminal = TERMINAL_STATES.indexOf(incoming.state) >= 0;
+    if (currentTerminal && !incomingTerminal) return current;
+    const currentTime = Date.parse(current.updatedAt);
+    const incomingTime = Date.parse(incoming.updatedAt);
+    if (incomingTime < currentTime) return current;
+    if (incomingTime === currentTime) {
+        if (currentTerminal && !incomingTerminal) return current;
+        // Detail carries bounded events that a list row deliberately omits.
+        if (Array.isArray(current.events) && current.events.length > 0
+                && (!Array.isArray(incoming.events) || incoming.events.length === 0))
+            return current;
+    }
+    return incoming;
 }
 
 function summary(row) {

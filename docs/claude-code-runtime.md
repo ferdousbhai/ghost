@@ -101,8 +101,12 @@ the owner-facing Ghost; delegated Claude is a subordinate native coding worker:
 | auto-memory and persistence | auto-memory disabled; Ghost keeps its Claude sidecar, transcript continuity, and one warm query | native defaults remain enabled, including native persistence; Ghost retains only the bounded durable task record and does not resume the worker |
 | process ownership | warm SDK child and descendants use the principal process-group retirement boundary | one receipt-bound transient systemd user scope derived from the durable task id; task completion waits for confirmed scope inactivity |
 
-Both paths load the same pinned SDK and admit the same installed executable,
-but restrictions documented for the principal must not be projected onto a
+Both paths load the same pinned SDK and admit the same installed executable.
+For the SDK's lowercase JavaScript/TypeScript executable suffixes, both also
+bind Ghost's canonical Bun identity, require the SDK's literal `bun` plus exact
+script transform, execute the admitted absolute Bun, and retire or reject work
+when either identity changes. Otherwise the admitted executable remains the
+direct command. Restrictions documented for the principal must not be projected onto a
 delegated worker, and native worker defaults must not expand the principal.
 
 For each turn Ghost:

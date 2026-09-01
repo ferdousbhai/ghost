@@ -205,6 +205,39 @@ TestCase {
         compare(Ghostd.delegatedTasks[0].state, "cancelled");
     }
 
+    function test_listAndDetailResponsesMergeTerminalStateInEitherOrder(): void {
+        loadTasks();
+        Ghostd.selectedDelegatedTask = task({}, true);
+        Ghostd.fetchDelegatedTask(task().id, true);
+        const detail = requests[1];
+        Ghostd.fetchDelegatedTasks(true);
+        const listing = requests[2];
+        detail.complete(200, task({
+            state: "completed",
+            resultPreview: "Done.",
+            updatedAt: "2026-08-31T10:00:03.000Z"
+        }, true));
+        listing.complete(200, {
+            tasks: [task()], shown: 1, total: 1
+        });
+        compare(Ghostd.selectedDelegatedTask.state, "completed");
+        compare(Ghostd.delegatedTasks[0].state, "completed");
+
+        Ghostd.fetchDelegatedTasks(true);
+        requests[3].complete(200, {
+            tasks: [task({
+                state: "cancelled",
+                updatedAt: "2026-08-31T10:00:04.000Z"
+            })], shown: 1, total: 1
+        });
+        Ghostd.fetchDelegatedTask(task().id, true);
+        requests[4].complete(200, task({
+            updatedAt: "2026-08-31T10:00:02.000Z"
+        }, true));
+        compare(Ghostd.selectedDelegatedTask.state, "cancelled");
+        compare(Ghostd.delegatedTasks[0].state, "cancelled");
+    }
+
     function test_taskMutationResponseMustMatchRequestedTask(): void {
         loadTasks();
         Ghostd.selectedDelegatedTask = task();

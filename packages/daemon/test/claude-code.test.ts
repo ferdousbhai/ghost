@@ -278,8 +278,10 @@ function setupClaudeHost(options: {
   useSdkSpawnExitBoundary?: boolean;
   browserSessionClose?: SessionHostOptions["browserSessionClose"];
   scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
+  prepare?: (fixture: NonNullable<typeof temp>) => void;
 } = {}) {
   temp = makeTempGhosts();
+  options.prepare?.(temp);
   const dir = seedGhost(temp.root, {
     name: "casper",
     character: "# Casper\n\nYou are Casper, a letterpress printer.\n",
@@ -4046,6 +4048,36 @@ fi
     expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
   });
 
+  it("retires warm script state when the admitted Bun identity changes", async () => {
+    const binaryPath = "/admitted/claude.mjs";
+    let bunIdentity = "bun-v1";
+    const probe = new ClaudeCodeProbe({
+      binaryPath,
+      readVersion: readSupportedClaudeVersion,
+      resolveExecutable: async () => binaryPath,
+      inspectExecutable: async (path) => path === process.execPath
+        ? bunIdentity
+        : "script-v1",
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+    });
+    const { lifecycle } = setupClaudeHost({ probe });
+    const turn = (prompt: string) => host!.runTurn("casper", {
+      sessionId: "bun-replaced-in-place",
+      prompt,
+      emit: () => {},
+    });
+
+    await turn("first");
+    bunIdentity = "bun-v2";
+    await turn("after Bun replacement");
+
+    expect(lifecycle).toMatchObject({ queries: 2, closed: 1 });
+  });
+
   it("retires warm state when the validated CLI version changes", async () => {
     let cliVersion = CLAUDE_CODE_MINIMUM_VERSION;
     const probe = new ClaudeCodeProbe({
@@ -4099,7 +4131,7 @@ fi
     expect(lifecycle.queries).toBe(0);
     expect(events.at(-1)).toMatchObject({
       type: "error",
-      errorMessage: expect.stringContaining("changed after authentication"),
+      errorMessage: expect.stringContaining("changed"),
     });
   });
 
@@ -4675,13 +4707,76 @@ fi
     expect(temp!.registry.list().map((ghost) => ghost.name)).toContain("wisp");
   });
 
+  it.each([".js", ".mjs", ".tsx", ".ts", ".jsx"])(
+    "uses the pinned SDK's exact Bun transform for a principal %s script",
+    async (suffix) => {
+      let script = "";
+      let marker = "";
+      setupClaudeHost({
+        prepare: (fixture) => {
+          script = join(fixture.ownerHome, `principal-claude${suffix}`);
+          marker = join(fixture.ownerHome, `principal-claude${suffix}.started`);
+          writeFileSync(script, "await Bun.write(process.env.MARKER, 'started'); setInterval(() => {}, 1000);", {
+            mode: 0o700,
+          });
+        },
+        get binaryPath() { return script; },
+        useSdkSpawnExitBoundary: true,
+        createQuery: (input, state) => {
+          const sessionId = input.options.sessionId ?? input.options.resume;
+          if (!sessionId) throw new Error("test query received no session id");
+          const spawnProcess = input.options.spawnClaudeCodeProcess;
+          if (!spawnProcess) throw new Error("SDK spawn boundary was not installed");
+          spawnProcess({
+            command: "bun",
+            args: [script, "--sdk-native"],
+            cwd: temp!.ownerHome,
+            env: { HOME: temp!.ownerHome, PATH: "/usr/bin:/bin", MARKER: marker },
+            signal: input.options.abortController!.signal,
+          });
+          return fakeQuery(
+            responseMessages(sessionId, "principal script started"),
+            state,
+            input.prompt,
+          );
+        },
+      });
+
+      await host!.runTurn("casper", {
+        sessionId: `principal-script-${suffix.slice(1)}`,
+        prompt: "start",
+        emit: () => {},
+      });
+      await vi.waitFor(() => expect(existsSync(marker)).toBe(true));
+      await host!.close("casper", `principal-script-${suffix.slice(1)}`);
+    },
+  );
+
   it("TERM-cleans the native CLI and KILLs an orphan-resistant Bash descendant", async () => {
     let wrapper = "";
-    let native = "";
     let pids = "";
     let cleanup = "";
     const { lifecycle } = setupClaudeHost({
+      prepare: (fixture) => {
+        wrapper = join(fixture.ownerHome, "claude-owned-wrapper");
+        const native = join(fixture.ownerHome, "claude-owned-native");
+        pids = join(fixture.ownerHome, "claude-owned-pids");
+        cleanup = join(fixture.ownerHome, "claude-owned-cleanup");
+        writeFileSync(wrapper, `#!/bin/sh\nexec '${native}' "$@"\n`, { mode: 0o700 });
+        writeFileSync(
+          native,
+          `#!/bin/sh
+trap 'printf normal-cleanup > "${cleanup}"; exit 0' TERM
+/bin/sh -c 'trap "" TERM; while :; do /bin/sleep 10; done' &
+descendant=$!
+printf '%s %s' "$$" "$descendant" > "${pids}"
+while :; do /bin/sleep 10; done
+`,
+          { mode: 0o700 },
+        );
+      },
       useSdkSpawnExitBoundary: true,
+      get binaryPath() { return wrapper; },
       createQuery: (input, state) => {
         const sessionId = input.options.sessionId ?? input.options.resume;
         if (!sessionId) throw new Error("test query received no session id");
@@ -4701,22 +4796,6 @@ fi
         );
       },
     });
-    wrapper = join(temp!.ownerHome, "claude-owned-wrapper");
-    native = join(temp!.ownerHome, "claude-owned-native");
-    pids = join(temp!.ownerHome, "claude-owned-pids");
-    cleanup = join(temp!.ownerHome, "claude-owned-cleanup");
-    writeFileSync(wrapper, `#!/bin/sh\nexec '${native}' "$@"\n`, { mode: 0o700 });
-    writeFileSync(
-      native,
-      `#!/bin/sh
-trap 'printf normal-cleanup > "${cleanup}"; exit 0' TERM
-/bin/sh -c 'trap "" TERM; while :; do /bin/sleep 10; done' &
-descendant=$!
-printf '%s %s' "$$" "$descendant" > "${pids}"
-while :; do /bin/sleep 10; done
-`,
-      { mode: 0o700 },
-    );
     await host!.runTurn("casper", {
       sessionId: "owned-process-group",
       prompt: "start native work",

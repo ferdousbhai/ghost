@@ -47,7 +47,8 @@ export class NativeTaskJsonlProcess {
 
   private readonly abortController = new AbortController();
   private readonly beforeForce: () => void;
-  private readonly scope: TaskAdapterContext["scope"];
+  private readonly launchNative: TaskAdapterContext["launchNative"];
+  private readonly stopNative: TaskAdapterContext["stopNative"];
   private readonly quiet = deferred<void>();
   private readonly queued: JsonObject[] = [];
   private readonly readers: Array<{
@@ -65,7 +66,8 @@ export class NativeTaskJsonlProcess {
     this.signal = this.abortController.signal;
     this.quiescence = this.quiet.promise;
     this.beforeForce = options.beforeForce ?? (() => undefined);
-    this.scope = context.scope;
+    this.launchNative = context.launchNative;
+    this.stopNative = context.stopNative;
     context.register({
       force: () => this.force(),
       quiescence: this.quiescence,
@@ -79,12 +81,12 @@ export class NativeTaskJsonlProcess {
     );
   }
 
-  start(input: Readonly<{
+  async start(input: Readonly<{
     executable: string;
     args: readonly string[];
     cwd: string;
     environment: Readonly<NodeJS.ProcessEnv>;
-  }>): void {
+  }>): Promise<void> {
     if (this.started || this.signal.aborted || this.teardown) throw genericFailure();
     if (process.platform !== "linux") {
       throw new NativeTaskProcessError("Native delegated tasks require Linux systemd scopes.");
@@ -92,14 +94,14 @@ export class NativeTaskJsonlProcess {
     this.started = true;
     let child: ChildProcess;
     try {
-      child = this.scope.spawn({
+      child = await this.launchNative((spawn) => spawn({
         executable: input.executable,
         args: input.args,
         cwd: input.cwd,
         environment: input.environment,
         signal: this.signal,
         stderr: "pipe",
-      });
+      }));
     } catch {
       this.fail();
       throw genericFailure();
@@ -228,7 +230,7 @@ export class NativeTaskJsonlProcess {
     const child = this.child;
     this.teardown = (async () => {
       try {
-        await this.scope.stopAndConfirm();
+        await this.stopNative();
       } catch {
         throw genericFailure();
       } finally {

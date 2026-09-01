@@ -77,7 +77,12 @@ import {
   inspectNativeHarnessExecutable,
   NativeHarnessIdentityError,
   resolveNativeHarnessExecutable,
+  type NativeHarnessExecutable,
 } from "./native-harness-identity.js";
+import {
+  claudeSdkScriptLaunch,
+  claudeSdkSpawnLaunch,
+} from "./claude-sdk-launch.js";
 import {
   ownedProcessGroupExists,
   runOwnedCommand,
@@ -253,6 +258,7 @@ export type ClaudeCodeQueryExitObserver = (query: Query) => Promise<void>;
 export interface ClaudeCodeProbeResult {
   binaryPath: string;
   executableIdentity: string;
+  interpreter?: NativeHarnessExecutable;
   cliVersion: string;
   authStatus: ClaudeCodeAuthStatus;
 }
@@ -278,11 +284,13 @@ export interface ClaudeCodeProbeOptions {
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
     signal?: AbortSignal,
+    launch?: ClaudeCodeCommandLaunch,
   ) => Promise<string>;
   readAuthStatus?: (
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
     signal?: AbortSignal,
+    launch?: ClaudeCodeCommandLaunch,
   ) => Promise<ClaudeCodeAuthStatus>;
   loadSdk?: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>;
 }
@@ -579,10 +587,12 @@ function claudeCodeRuntimeIdentity(
   executableIdentity: string,
   cliVersion: string,
   status: ClaudeCodeAuthStatus,
+  interpreter?: NativeHarnessExecutable,
 ): string {
   return JSON.stringify([
     binaryPath,
     executableIdentity,
+    interpreter?.identity ?? null,
     cliVersion,
     claudeCodeAuthenticationIdentity(status),
   ]);
@@ -634,10 +644,16 @@ export class ClaudeCodeProbe {
     this.resolveExecutable = options.resolveExecutable ?? ((binaryPath, environment, signal) =>
       resolveClaudeCodeExecutable(binaryPath, environment, signal ? { signal } : {}));
     this.inspectExecutable = options.inspectExecutable ?? inspectClaudeCodeExecutable;
-    this.readVersion = options.readVersion ?? ((binaryPath, environment, signal) =>
-      readClaudeCodeVersion(binaryPath, environment, signal ? { signal } : {}));
-    this.readAuthStatus = options.readAuthStatus ?? ((binaryPath, environment, signal) =>
-      readClaudeCodeAuthStatus(binaryPath, environment, signal ? { signal } : {}));
+    this.readVersion = options.readVersion ?? ((binaryPath, environment, signal, launch) =>
+      readClaudeCodeVersion(binaryPath, environment, {
+        ...(signal ? { signal } : {}),
+        ...(launch ? { launch } : {}),
+      }));
+    this.readAuthStatus = options.readAuthStatus ?? ((binaryPath, environment, signal, launch) =>
+      readClaudeCodeAuthStatus(binaryPath, environment, {
+        ...(signal ? { signal } : {}),
+        ...(launch ? { launch } : {}),
+      }));
     this.loadSdk = options.loadSdk;
   }
 
@@ -683,6 +699,16 @@ export class ClaudeCodeProbe {
   }
 
   async assertExecutable(result: ClaudeCodeProbeResult, signal?: AbortSignal): Promise<void> {
+    if (result.interpreter) {
+      const interpreter = await this.inspectExecutable(
+        result.interpreter.path,
+        true,
+        signal,
+      );
+      if (interpreter !== result.interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed after authentication.");
+      }
+    }
     const current = await this.inspectExecutable(
       result.binaryPath,
       this.binaryPath !== undefined,
@@ -726,10 +752,48 @@ export class ClaudeCodeProbe {
       signal,
     );
     this.assertProbeActive(signal);
-    const cliVersion = await this.readVersion(binaryPath, this.environment, signal);
+    const scriptLaunch = claudeSdkScriptLaunch(binaryPath);
+    const interpreter = scriptLaunch
+      ? Object.freeze({
+          path: scriptLaunch.executable,
+          identity: await this.inspectExecutable(scriptLaunch.executable, true, signal),
+          literalBoundary: true,
+        })
+      : undefined;
     this.assertProbeActive(signal);
-    const authStatus = await this.readAuthStatus(binaryPath, this.environment, signal);
+    const cliVersion = await this.readVersion(binaryPath, this.environment, signal, scriptLaunch);
     this.assertProbeActive(signal);
+    if (interpreter) {
+      const phaseInterpreter = await this.inspectExecutable(
+        interpreter.path,
+        true,
+        signal,
+      );
+      if (phaseInterpreter !== interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed between probes.");
+      }
+    }
+    const phaseExecutable = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    if (phaseExecutable !== executableIdentity) {
+      throw new ClaudeCodeProcessError("Claude Code executable changed between probes.");
+    }
+    this.assertProbeActive(signal);
+    const authStatus = await this.readAuthStatus(binaryPath, this.environment, signal, scriptLaunch);
+    this.assertProbeActive(signal);
+    if (interpreter) {
+      const confirmedInterpreter = await this.inspectExecutable(
+        interpreter.path,
+        true,
+        signal,
+      );
+      if (confirmedInterpreter !== interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed during authentication.");
+      }
+    }
     const confirmedIdentity = await this.inspectExecutable(
       binaryPath,
       this.binaryPath !== undefined,
@@ -739,7 +803,13 @@ export class ClaudeCodeProbe {
     if (confirmedIdentity !== executableIdentity) {
       throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
     }
-    return { binaryPath, executableIdentity, cliVersion, authStatus };
+    return {
+      binaryPath,
+      executableIdentity,
+      cliVersion,
+      authStatus,
+      ...(interpreter ? { interpreter } : {}),
+    };
   }
 
   private assertProbeActive(signal: AbortSignal | undefined): void {
@@ -2266,6 +2336,7 @@ export class ClaudeCodeRuntime {
         executableIdentity,
         cliVersion,
         auth,
+        probed.interpreter,
       );
       const authenticatedWarm = this.warm.get(key);
       const stableAccount = /^[0-9a-f]{64}$/u.test(auth.accountFingerprint ?? "");
@@ -2436,6 +2507,29 @@ export class ClaudeCodeRuntime {
           const abortController = new AbortController();
           const input = claudeInputChannel();
           const processExit = this.observeQueryExit ? undefined : claudeProcessExitBoundary();
+          if (processExit) {
+            await this.probe.assertExecutable(probed, options.signal);
+            this.assertTurnAdmitted(options.signal);
+          }
+          const spawnClaudeCodeProcess = processExit
+            ? (spawnOptions: ClaudeSpawnOptions): ClaudeSpawnedProcess => {
+                const launch = claudeSdkSpawnLaunch(
+                  {
+                    path: binaryPath,
+                    identity: executableIdentity,
+                    literalBoundary: true,
+                  },
+                  probed.interpreter,
+                  spawnOptions,
+                  runtimeCwd,
+                );
+                return processExit.spawn({
+                  ...spawnOptions,
+                  command: launch.executable,
+                  args: [...launch.args],
+                });
+              }
+            : undefined;
           const sdkOptions = queryOptions({
             sdk,
             binaryPath,
@@ -2451,7 +2545,7 @@ export class ClaudeCodeRuntime {
             internalMcpServerName: sdkMcpServerName,
             projectMcpServers: approvedProject.mcpServers,
             environment: this.environment,
-            ...(processExit ? { spawnClaudeCodeProcess: processExit.spawn } : {}),
+            ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
           });
           let created: Query;
           try {

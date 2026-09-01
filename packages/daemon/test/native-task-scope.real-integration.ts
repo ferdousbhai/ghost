@@ -437,7 +437,10 @@ async function proveCrashRecovery(
   const controller = new TaskController(
     store,
     new Map(),
-    { async revalidate(value) { return value; } },
+    {
+      async revalidate(value) { return value; },
+      async launchNative(value, _signal, _parent, launch) { return launch(value); },
+    },
     recoveryManager,
   );
   await controller.initialize();
@@ -475,7 +478,7 @@ async function proveImmediateCancellation(
       const quiet = Promise.withResolvers<void>();
       let stopping: Promise<void> | undefined;
       const stop = () => {
-        stopping ??= context.scope.stopAndConfirm()
+        stopping ??= context.stopNative()
           .then(quiet.resolve, (error) => {
             quiet.reject(error);
             throw error;
@@ -483,16 +486,15 @@ async function proveImmediateCancellation(
         return stopping;
       };
       context.register({ force: stop, quiescence: quiet.promise });
-      context.scope.spawn({
-        executable: "/usr/bin/python3",
-        args: [
-          "-c",
-          "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
-        ],
-        cwd: root,
-        environment: taskEnvironment(),
-      });
-      return Promise.resolve({ result: never, async followUp() {} });
+      return context.launchNative((spawn) => spawn({
+          executable: "/usr/bin/python3",
+          args: [
+            "-c",
+            "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
+          ],
+          cwd: root,
+          environment: taskEnvironment(),
+        })).then(() => ({ result: never, async followUp() {} }));
     },
   };
   const ghostHome = join(root, "cancel-home");
@@ -501,7 +503,10 @@ async function proveImmediateCancellation(
   const controller = new TaskController(
     store,
     new Map([["integration", adapter]]),
-    { async revalidate(value) { return value; } },
+    {
+      async revalidate(value) { return value; },
+      async launchNative(value, _signal, _parent, launch) { return launch(value); },
+    },
     manager,
   );
   await controller.initialize();

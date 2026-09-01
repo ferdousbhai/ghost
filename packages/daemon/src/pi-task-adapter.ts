@@ -136,7 +136,7 @@ export class PiTaskAdapter implements TaskAdapter {
       try {
         const admitted = await this.catalog.readForStart("pi", processBoundary.signal);
         if (admitted.id !== "pi") throw failure();
-        processBoundary.start({
+        await processBoundary.start({
           executable: admitted.executable.path,
           args: ["--mode", "rpc", "--approve"],
           cwd: input.cwd,

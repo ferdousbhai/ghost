@@ -2436,10 +2436,22 @@ Singleton {
                 try {
                     const listing = DelegationModel.listing(JSON.parse(xhr.responseText));
                     if (listing === null) throw new Error("invalid task list");
-                    root.delegatedTasks = listing.tasks;
+                    root.delegatedTasks = listing.tasks.map(function (task) {
+                        const current = root.delegatedTasks.find(function (row) {
+                            return row.id === task.id;
+                        });
+                        return DelegationModel.mergeTask(current, task);
+                    });
                     root.delegatedTasksLoaded = true;
                     root.delegatedTasksError = "";
                     root.reachable = true;
+                    if (root.selectedDelegatedTask) {
+                        const selectedRow = root.delegatedTasks.find(function (task) {
+                            return task.id === root.selectedDelegatedTask.id;
+                        });
+                        if (selectedRow) root.selectedDelegatedTask = DelegationModel.mergeTask(
+                            root.selectedDelegatedTask, selectedRow);
+                    }
                     if (root.selectedDelegatedTask
                             && !listing.tasks.some(function (task) {
                                 return task.id === root.selectedDelegatedTask.id;
@@ -2479,8 +2491,10 @@ Singleton {
                 try {
                     const task = DelegationModel.task(JSON.parse(xhr.responseText), true);
                     if (task === null || task.id !== taskId) throw new Error("invalid task");
-                    root.selectedDelegatedTask = task;
-                    root.replaceDelegatedTask(task);
+                    const accepted = DelegationModel.mergeTask(
+                        root.selectedDelegatedTask, task);
+                    root.selectedDelegatedTask = accepted;
+                    root.replaceDelegatedTask(accepted);
                     root.delegatedTasksError = "";
                     root.reachable = true;
                 } catch (error) {
@@ -2500,7 +2514,7 @@ Singleton {
         const rows = root.delegatedTasks.map(function (row) {
             if (row.id !== task.id) return row;
             found = true;
-            return task;
+            return DelegationModel.mergeTask(row, task);
         });
         if (!found) rows.unshift(task);
         root.delegatedTasks = rows.slice(0, 20);
@@ -2531,8 +2545,10 @@ Singleton {
                     if (task === null || (expectedTaskId !== ""
                             && task.id !== expectedTaskId))
                         throw new Error("invalid task");
-                    root.selectedDelegatedTask = task;
-                    root.replaceDelegatedTask(task);
+                    const accepted = DelegationModel.mergeTask(
+                        root.selectedDelegatedTask, task);
+                    root.selectedDelegatedTask = accepted;
+                    root.replaceDelegatedTask(accepted);
                     root.delegatedTaskNotice = notice;
                     root.delegatedTasksError = "";
                     root.reachable = true;

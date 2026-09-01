@@ -180,6 +180,7 @@ import {
   MAX_TASK_TEXT,
   TASKS_DIRNAME,
   TaskController,
+  TaskControllerPoisonedError,
   TaskStore,
   type TaskRecord,
 } from "./tasks.js";
@@ -1817,14 +1818,14 @@ export class SessionHost {
         const taskController = this.taskControllerInstances.get(ghostName);
         const pendingTaskController = this.taskControllers.get(ghostName);
         const taskDrain = taskController
-          ? taskController.dispose().finally(() => {
+          ? taskController.dispose().then(() => {
               if (this.taskControllerInstances.get(ghostName) === taskController) {
                 this.taskControllerInstances.delete(ghostName);
                 this.taskControllers.delete(ghostName);
               }
             })
           : pendingTaskController
-            ? pendingTaskController.then((controller) => controller.dispose()).finally(() => {
+            ? pendingTaskController.then((controller) => controller.dispose()).then(() => {
                 if (this.taskControllers.get(ghostName) === pendingTaskController) {
                   this.taskControllers.delete(ghostName);
                   this.taskControllerInstances.delete(ghostName);
@@ -1930,7 +1931,11 @@ export class SessionHost {
     }
     this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
       this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
-    this.taskServices = { adapters, ownership: services.ownership };
+    this.taskServices = {
+      adapters,
+      ownership: services.ownership,
+      ...(services.createStore ? { createStore: services.createStore } : {}),
+    };
     const recoveries = this.registry.list().map(async (ghost) => {
       try {
         await this.taskController(ghost.name);
@@ -1967,9 +1972,9 @@ export class SessionHost {
     }
     const paths = ghostPaths(this.registry.get(ghostName).dir);
     const controller = new TaskController(
-      new TaskStore(paths.home),
+      services.createStore?.(paths.home) ?? new TaskStore(paths.home),
       services.adapters,
-      this.projectBindings.taskBindingAuthority(paths.sessionDir),
+      this.projectBindings.taskBindingAuthority(paths.sessionDir, ghostName),
       services.ownership,
     );
     const initialized = controller.initialize().then(
@@ -1977,7 +1982,10 @@ export class SessionHost {
         this.taskControllerInstances.set(ghostName, controller);
         return controller;
       },
-      () => {
+      (error) => {
+        if (error instanceof TaskControllerPoisonedError) {
+          this.taskControllerInstances.set(ghostName, controller);
+        }
         throw new GhostError(
           "tasks_unavailable",
           "Delegated coding tasks are unavailable.",
@@ -1987,7 +1995,7 @@ export class SessionHost {
     );
     this.taskControllers.set(ghostName, initialized);
     void initialized.catch(() => {
-      if (this.taskControllers.get(ghostName) === initialized) {
+      if (this.taskControllers.get(ghostName) === initialized && !controller.poisoned) {
         this.taskControllers.delete(ghostName);
         this.taskControllerInstances.delete(ghostName);
       }
@@ -3077,7 +3085,7 @@ export class SessionHost {
       const receipt = draftAbandonReceiptPath(sessionDir, runtime, conversationId);
       const markerExists = await transactionMarkerEntryExists(marker);
       if (!markerExists && await transactionMarkerEntryExists(receipt)) {
-        this.projectBindings.revoke(ghostName, runtime, conversationId);
+        await this.projectBindings.revoke(sessionDir, ghostName, runtime, conversationId);
         return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: false };
       }
 
@@ -3120,7 +3128,7 @@ export class SessionHost {
         };
         await writeTransaction(marker, record);
       }
-      this.projectBindings.revoke(ghostName, runtime, conversationId);
+      await this.projectBindings.revoke(sessionDir, ghostName, runtime, conversationId);
       await this.finishDraftAbandon(sessionDir, marker, receipt, record);
       await this.announceConversationUpdated(ghostName, runtime, conversationId, "project");
       return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: true };
@@ -7497,7 +7505,7 @@ export class SessionHost {
       }
       const resumingDeletion = deleteState === "present";
       if (resumingDeletion) maintenanceDeleteOutcome = "recovery-pending";
-      this.projectBindings.revoke(ghostName, runtime, id);
+      await this.projectBindings.revoke(paths.sessionDir, ghostName, runtime, id);
       if (!resumingDeletion) {
         mkdirSync(paths.sessionDir, { recursive: true });
         try {
@@ -7693,7 +7701,7 @@ export class SessionHost {
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      this.projectBindings.revokeScope(ghost.name);
+      await this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost, "deleted");
       const trashed = this.registry.trash(ghost.name);
@@ -7737,7 +7745,7 @@ export class SessionHost {
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      this.projectBindings.revokeScope(ghost.name);
+      await this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
       await this.quiesceGhost(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
@@ -8125,7 +8133,16 @@ export class SessionHost {
     // owner gets a chance to capture another home path.
     const maintenanceDrain = this.maintenance?.beginShutdown();
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
-    const firstTaskControllers = [...this.taskControllers.values()];
+    const taskControllerPromises = (): Promise<TaskController>[] => [
+      ...[...this.taskControllers].flatMap(([ghostName, pending]) => {
+        const retained = this.taskControllerInstances.get(ghostName);
+        return [retained ? Promise.resolve(retained) : pending];
+      }),
+      ...[...this.taskControllerInstances]
+        .filter(([ghostName]) => !this.taskControllers.has(ghostName))
+        .map(([, controller]) => Promise.resolve(controller)),
+    ];
+    const firstTaskControllers = taskControllerPromises();
     const admittedTaskCreations = [...this.taskAdmissions];
     const disposedTaskControllers = new Set<TaskController>();
     const disposeTaskController = async (pending: Promise<TaskController>): Promise<void> => {
@@ -8137,7 +8154,7 @@ export class SessionHost {
     const firstTaskShutdowns = firstTaskControllers.map(disposeTaskController);
     this.nativeTaskShutdown = (async () => {
       await Promise.allSettled(admittedTaskCreations);
-      const secondTaskControllers = [...this.taskControllers.values()];
+      const secondTaskControllers = taskControllerPromises();
       const results = await Promise.allSettled([
         ...firstTaskShutdowns,
         ...secondTaskControllers.map(disposeTaskController),

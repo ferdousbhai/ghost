@@ -9,7 +9,7 @@ import {
   createNativeTaskOwnershipReceipt,
   isNativeTaskOwnershipReceipt,
   NativeTaskOwnershipError,
-  type NativeTaskScope,
+  type NativeTaskScopeLaunch,
   type NativeTaskScopeManager,
   type NativeTaskOwnershipReceipt,
 } from "./native-task-scope.js";
@@ -57,17 +57,35 @@ export interface TaskRecord {
 }
 export interface TaskBindingAuthority {
   revalidate(receipt: TaskBindingReceipt, signal: AbortSignal, parent: ConversationIdentity): Promise<TaskBindingReceipt>;
+  launchNative<T>(
+    receipt: TaskBindingReceipt,
+    signal: AbortSignal,
+    parent: ConversationIdentity,
+    launch: (confirmed: Readonly<TaskBindingReceipt>) => T,
+  ): Promise<T>;
 }
+export type NativeTaskSpawner = (
+  input: NativeTaskScopeLaunch,
+) => ReturnType<import("./native-task-scope.js").NativeTaskScope["spawn"]>;
 export interface TaskAdapterControl { force(): Promise<void>; quiescence: Promise<void> }
 export interface TaskAdapterContext {
   signal: AbortSignal;
-  scope: NativeTaskScope;
+  launchNative<T>(launch: (spawn: NativeTaskSpawner) => T): Promise<T>;
+  stopNative(): Promise<void>;
   register(control: TaskAdapterControl): void;
   emit(event: Readonly<{ code: string; message: string }>): Promise<void>;
 }
 export interface TaskAdapterHandle { result: Promise<string>; followUp(message: string): Promise<void> }
 export interface TaskAdapter {
   start(input: Readonly<{ id: string; task: string; agent: string | null; cwd: string; binding: TaskBindingReceipt }>, context: TaskAdapterContext): Promise<TaskAdapterHandle>;
+}
+
+export class TaskControllerPoisonedError extends Error {
+  readonly _tag = "TaskControllerPoisonedError";
+  constructor(cause: unknown) {
+    super("Task controller storage could not be closed after initialization failed.", { cause });
+    this.name = "TaskControllerPoisonedError";
+  }
 }
 
 const STATES = new Set<TaskState>(["queued", "starting", "running", "cancelling", "completed", "failed", "cancelled", "interrupted"]);
@@ -404,6 +422,7 @@ export class TaskController {
   readonly #controlCleanups = new WeakMap<TaskAdapterControl, Promise<void>>();
   #initialization?: Promise<TaskRecord[]>;
   #initialized = false;
+  #poisoned = false;
   #shuttingDown = false;
   constructor(
     readonly store: TaskStore,
@@ -431,10 +450,11 @@ export class TaskController {
           await this.store.dispose();
           retryable = true;
         } catch (disposeError) {
-          failure = new AggregateError(
+          this.#poisoned = true;
+          failure = new TaskControllerPoisonedError(new AggregateError(
             [error, disposeError],
             "Task initialization and store disposal both failed.",
-          );
+          ));
         }
         throw failure;
       }
@@ -450,6 +470,7 @@ export class TaskController {
     });
     return initialization;
   }
+  get poisoned(): boolean { return this.#poisoned; }
   #ready(): void { if (!this.#initialized) fail("tasks_uninitialized", "Tasks are not initialized.", 503); }
   get(id: string): Promise<TaskRecord> { this.#ready(); return this.store.read(id); }
   list(): Promise<TaskRecord[]> { this.#ready(); return this.store.list(); }
@@ -548,9 +569,43 @@ export class TaskController {
         let control: TaskAdapterControl | undefined;
         let handle: Promise<TaskAdapterHandle>;
         try {
+          let launchUsed = false;
           handle = Promise.resolve(adapter.start({ id, task: current.task, agent: current.agent, cwd: binding.cwd, binding: bindingCopy(binding) }, {
             signal: abort.signal,
-            scope,
+            launchNative: async <T>(launch: (spawn: NativeTaskSpawner) => T): Promise<T> => {
+              if (launchUsed) throw new Error("native launch capability already used");
+              launchUsed = true;
+              return this.authority.launchNative(
+                bindingCopy(binding),
+                abort.signal,
+                { ...current.parent },
+                (confirmed) => {
+                  if (!sameBinding(confirmed, binding)) throw new Error("binding changed");
+                  let active = true;
+                  let spawnCount = 0;
+                  const spawn: NativeTaskSpawner = (input) => {
+                    if (!active || spawnCount !== 0 || input.cwd !== confirmed.cwd) {
+                      throw new Error("invalid native launch");
+                    }
+                    spawnCount += 1;
+                    return scope.spawn(input);
+                  };
+                  let result: T;
+                  try {
+                    result = launch(spawn);
+                  } finally {
+                    active = false;
+                  }
+                  if (spawnCount !== 1
+                    || (typeof result === "object" && result !== null
+                      && "then" in result && typeof result.then === "function")) {
+                    throw new Error("native launch must synchronously spawn exactly once");
+                  }
+                  return result;
+                },
+              );
+            },
+            stopNative: () => scope.stopAndConfirm(),
             register(value) { if (control) throw new Error("control registered twice"); control = value; },
             emit: (event) => this.#emit(id, generation, event),
           }));
@@ -858,6 +913,13 @@ export class TaskController {
       this.#sharedStop(id, ownership, "interrupted")));
   }
   async dispose(): Promise<void> {
+    if (this.#poisoned) {
+      await this.store.dispose();
+      this.#poisoned = false;
+      this.#initialized = false;
+      this.#initialization = undefined;
+      return;
+    }
     await this.beginShutdown(); await this.forceAll(); await this.store.dispose(); this.#initialized = false; this.#initialization = undefined;
   }
 }

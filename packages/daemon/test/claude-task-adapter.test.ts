@@ -122,18 +122,18 @@ function fakeSdk(input: {
       input.capturedOptions.push(options);
       const closed = deferred<void>();
       const iterator = prompt[Symbol.asyncIterator]();
+      options.spawnClaudeCodeProcess({
+        command: input.mode === "wrong-command"
+          ? "node"
+          : input.script ? "bun" : input.executable,
+        args: input.mode === "wrong-script"
+          ? [join(dirname(input.executable), "other.mjs"), "--sdk-native"]
+          : input.script ? [input.executable, "--sdk-native"] : ["--sdk-native"],
+        cwd: input.mode === "wrong-spawn" ? "/wrong" : input.cwd,
+        env: options.env ?? {},
+        signal: options.abortController?.signal ?? new AbortController().signal,
+      });
       const run = async function* (): AsyncGenerator<SDKMessage> {
-        options.spawnClaudeCodeProcess?.({
-          command: input.mode === "wrong-command"
-            ? "node"
-            : input.script ? "bun" : input.executable,
-          args: input.mode === "wrong-script"
-            ? [join(dirname(input.executable), "other.mjs"), "--sdk-native"]
-            : input.script ? [input.executable, "--sdk-native"] : ["--sdk-native"],
-          cwd: input.mode === "wrong-spawn" ? "/wrong" : input.cwd,
-          env: options.env ?? {},
-          signal: options.abortController?.signal ?? new AbortController().signal,
-        });
         const spawnRecord = join(input.cwd, "spawn.json");
         for (let attempt = 0; attempt < 200 && !existsSync(spawnRecord); attempt += 1) {
           await new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -206,10 +206,12 @@ function taskContext(): {
 } {
   const controller = new AbortController();
   let registered: TaskAdapterControl | undefined;
+  const scope = directTaskScope();
   return {
     context: {
       signal: controller.signal,
-      scope: directTaskScope(),
+      async launchNative(launch) { return launch((input) => scope.spawn(input)); },
+      stopNative: () => scope.stopAndConfirm(),
       register(control) { registered = control; },
       async emit() {},
     },

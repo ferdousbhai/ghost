@@ -1,10 +1,6 @@
 import { createHash } from "node:crypto";
-import { isAbsolute } from "node:path";
 import {
   ClaudeCodeProbe,
-  readClaudeCodeAuthStatus,
-  readClaudeCodeVersion,
-  type ClaudeCodeCommandLaunch,
   type ClaudeCodeProbeOptions,
 } from "./claude-code.js";
 import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
@@ -16,13 +12,16 @@ import {
   type NativeHarnessId,
 } from "./native-harness-identity.js";
 import { runOwnedCommand } from "./owned-process.js";
+import {
+  claudeSdkScriptLaunch,
+  isClaudeSdkScriptExecutable as isClaudeSdkScriptPath,
+} from "./claude-sdk-launch.js";
 
 export const CODEX_BINARY_ENV = "GHOST_CODEX_BINARY";
 export const PI_BINARY_ENV = "GHOST_PI_BINARY";
 export const NATIVE_HARNESS_CATALOG_TTL_MS = 5_000;
 export const MAX_NATIVE_HARNESS_CATALOG_TTL_MS = 30_000;
 export const NATIVE_HARNESS_PROBE_TIMEOUT_MS = 10_000;
-const CLAUDE_SDK_SCRIPT_SUFFIXES = [".js", ".mjs", ".tsx", ".ts", ".jsx"] as const;
 
 export type NativeHarnessAuthentication = "authenticated" | "logged_out" | "unknown";
 export type NativeHarnessAvailability = "available" | "unavailable";
@@ -107,46 +106,13 @@ function frozenProbeResult(
 }
 
 export function isClaudeSdkScriptExecutable(path: string): boolean {
-  return CLAUDE_SDK_SCRIPT_SUFFIXES.some((suffix) => path.endsWith(suffix));
+  return isClaudeSdkScriptPath(path);
 }
 
 export function claudeNativeSdkScriptLaunch(
   path: string,
-): (ClaudeCodeCommandLaunch & { command: "bun" }) | undefined {
-  if (!isClaudeSdkScriptExecutable(path)) return undefined;
-  if (!(process.versions as NodeJS.ProcessVersions & { bun?: string }).bun
-    || !isAbsolute(process.execPath)) {
-    throw new Error("Claude native script wrappers require Ghost's exact Bun runtime.");
-  }
-  return Object.freeze({
-    command: "bun",
-    executable: process.execPath,
-    prefixArguments: Object.freeze([path]),
-  });
-}
-
-function readClaudeNativeVersion(
-  path: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  signal?: AbortSignal,
-): Promise<string> {
-  const launch = claudeNativeSdkScriptLaunch(path);
-  return readClaudeCodeVersion(path, environment, {
-    ...(signal ? { signal } : {}),
-    ...(launch ? { launch } : {}),
-  });
-}
-
-function readClaudeNativeAuthStatus(
-  path: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  signal?: AbortSignal,
-) {
-  const launch = claudeNativeSdkScriptLaunch(path);
-  return readClaudeCodeAuthStatus(path, environment, {
-    ...(signal ? { signal } : {}),
-    ...(launch ? { launch } : {}),
-  });
+): ReturnType<typeof claudeSdkScriptLaunch> {
+  return claudeSdkScriptLaunch(path);
 }
 
 function assertProbeActive(signal: AbortSignal | undefined): void {
@@ -201,8 +167,6 @@ export class ClaudeNativeHarnessProbe implements NativeHarnessFreshProbe {
       binaryPath: binaryPath ?? null,
       environmentProfile: "native",
       loadSdk: (signal) => sdkLoader.load(signal),
-      readVersion: probeOptions.readVersion ?? readClaudeNativeVersion,
-      readAuthStatus: probeOptions.readAuthStatus ?? readClaudeNativeAuthStatus,
     });
   }
 
@@ -214,18 +178,7 @@ export class ClaudeNativeHarnessProbe implements NativeHarnessFreshProbe {
       identity: result.executableIdentity,
       literalBoundary: this.literalBoundary,
     });
-    const scriptLaunch = claudeNativeSdkScriptLaunch(executable.path);
-    const interpreter = scriptLaunch
-      ? Object.freeze({
-          path: scriptLaunch.executable,
-          identity: await inspectNativeHarnessExecutable(
-            scriptLaunch.executable,
-            true,
-            signal,
-          ),
-          literalBoundary: true,
-        })
-      : undefined;
+    const interpreter = result.interpreter;
     assertProbeActive(signal);
     const authentication = result.authStatus.loggedIn ? "authenticated" : "logged_out";
     return frozenProbeResult(
@@ -577,9 +530,10 @@ export class NativeHarnessCatalog {
     const scriptLaunch = result.id === "claude-code"
       ? claudeNativeSdkScriptLaunch(result.executable.path)
       : undefined;
-    if ((scriptLaunch !== undefined) !== (result.interpreter !== undefined)
-      || (scriptLaunch && (result.interpreter?.path !== scriptLaunch.executable
-        || result.interpreter.literalBoundary !== true))) {
+    const interpreter = result.interpreter;
+    if ((scriptLaunch !== undefined) !== (interpreter !== undefined)
+      || (scriptLaunch && interpreter && (interpreter.path !== scriptLaunch.executable
+        || interpreter.literalBoundary !== true))) {
       throw new Error("Native harness launch evidence is incomplete.");
     }
     if (result.interpreter) await revalidateExecutable(result.interpreter, signal);
