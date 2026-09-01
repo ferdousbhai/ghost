@@ -34,9 +34,10 @@ Detailed external protocols have one home:
 
 Character and private memory live in the ghost home. Owner-visible knowledge,
 notes, plans, and tasks live in the Obsidian vault selected by Obsidian. Both
-runtimes use the official `obsidian` CLI and linked upstream skill exclusively;
-the daemon has no Documents index, vault-path resolver, notes API, plan mode, or
-todo store. Active background jobs remain conversation runtime state.
+runtimes use the official `obsidian` CLI and the upstream skill admitted through
+normal machine-skill discovery. The daemon has no Documents index, vault-path
+resolver, notes API, plan mode, or todo store. Active background jobs remain
+conversation runtime state.
 
 ## Local development
 

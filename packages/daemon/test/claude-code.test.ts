@@ -1697,7 +1697,13 @@ fi
   });
 
   it("shares the owner Obsidian contract while keeping two ghosts' memories private", async () => {
-    const { paths, seenOptions } = setupClaudeHost();
+    const { paths, seenOptions } = setupClaudeHost({
+      machineSkill: {
+        name: "obsidian-cli",
+        description: "Official Obsidian CLI skill.",
+        body: "Use obsidian.",
+      },
+    });
     writeFileSync(
       join(paths.home, "memory", "casper-private.md"),
       "Casper keeps this private.\n",
@@ -1724,8 +1730,9 @@ fi
     });
 
     expect(seenOptions).toHaveLength(2);
-    const [casperPrompt, minaPrompt] = seenOptions.map(({ systemPrompt }) =>
-      JSON.stringify(systemPrompt));
+    const prompts = seenOptions.map(({ systemPrompt }) => JSON.stringify(systemPrompt));
+    const casperPrompt = prompts[0] ?? "";
+    const minaPrompt = prompts[1] ?? "";
     const sharedSkill = join(
       temp!.ownerHome,
       ".agents",
@@ -1737,6 +1744,7 @@ fi
       expect(prompt).toContain("## Shared Obsidian");
       expect(prompt).toContain(sharedSkill);
       expect(prompt).toContain("Use the CLI-selected current vault by default");
+      expect(prompt.split(sharedSkill)).toHaveLength(2);
     }
     expect(casperPrompt).toContain("casper-private");
     expect(casperPrompt).not.toContain("mina-private");
@@ -1806,9 +1814,7 @@ fi
     ) throw new Error("Claude Code did not receive Ghost's appended persona.");
     const appended = systemPrompt.append;
     expect(appended).toContain("## Shared Obsidian");
-    expect(appended).toContain(
-      join(temp!.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
-    );
+    expect(appended).not.toContain(".agents/skills/obsidian-cli/SKILL.md");
     expect(appended).toContain("Never infer or scan for a vault path");
     expect(appended).toContain("do not fall back to direct vault-file access");
     expect(appended).toContain(scheduleUnitDir);

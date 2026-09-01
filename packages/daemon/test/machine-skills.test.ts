@@ -11,8 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   loadMachineSkills,
   machineSkillPaths,
-  obsidianCliSkillPath,
-  renderSharedObsidianPolicy,
+  SHARED_OBSIDIAN_POLICY,
 } from "../src/machine-skills.js";
 
 const roots: string[] = [];
@@ -30,24 +29,12 @@ function writeSkill(path: string, name: string, description: string): void {
 }
 
 describe("machine skills", () => {
-  it("links the official Obsidian CLI skill and keeps vault access on the CLI", () => {
-    const ownerHome = "/home/owner";
-    const skillPath = join(
-      ownerHome,
-      ".agents",
-      "skills",
-      "obsidian-cli",
-      "SKILL.md",
-    );
-
-    expect(obsidianCliSkillPath(ownerHome)).toBe(skillPath);
-    const policy = renderSharedObsidianPolicy(ownerHome);
-    expect(policy).toContain(
-      `[obsidian-cli skill](<${skillPath}>)`,
-    );
-    expect(policy).toContain("shared by every ghost on this machine");
-    expect(policy).toContain("Never infer or scan for a vault path");
-    expect(policy).toContain("do not fall back to direct vault-file access");
+  it("keeps shared-state policy separate from normal machine-skill discovery", () => {
+    expect(SHARED_OBSIDIAN_POLICY).toContain("shared by every ghost on this machine");
+    expect(SHARED_OBSIDIAN_POLICY).toContain("Never infer or scan for a vault path");
+    expect(SHARED_OBSIDIAN_POLICY).toContain("do not fall back to direct vault-file access");
+    expect(SHARED_OBSIDIAN_POLICY).not.toContain("SKILL.md");
+    expect(SHARED_OBSIDIAN_POLICY).not.toContain(".agents/skills");
   });
 
   it("admits ambient skills without a name allowlist and follows standard symlinks", async () => {
@@ -56,6 +43,11 @@ describe("machine skills", () => {
     roots.push(ownerHome, managed);
     const agentsSkills = join(ownerHome, ".agents", "skills");
     const piSkills = join(ownerHome, ".pi", "agent", "skills");
+    writeSkill(
+      join(agentsSkills, "obsidian-cli"),
+      "obsidian-cli",
+      "Official Obsidian CLI skill.",
+    );
     writeSkill(join(agentsSkills, "ambient"), "ambient", "An owner-installed ambient skill.");
     writeSkill(join(managed, "omarchy"), "omarchy", "The managed Omarchy CLI skill.");
     writeSkill(join(managed, "diagnose-crash"), "diagnose-crash", "Diagnose a system crash.");
@@ -68,6 +60,7 @@ describe("machine skills", () => {
     expect(snapshot?.skills.map((skill) => skill.name).sort()).toEqual([
       "ambient",
       "diagnose-crash",
+      "obsidian-cli",
       "omarchy",
     ]);
     expect(snapshot?.skills.find((skill) => skill.name === "omarchy")?.filePath)

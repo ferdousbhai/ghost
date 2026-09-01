@@ -17,7 +17,7 @@ Durable state has three scopes:
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in an
   Obsidian vault selected by Obsidian. Every ghost accesses it exclusively with
-  the official Obsidian CLI and the linked upstream `obsidian-cli` skill.
+  the official Obsidian CLI and the upstream `obsidian-cli` machine skill.
 - **External:** trusted projects, browser downloads, screenshots, systemd user
   timers, and Secret Service credentials stay in the machine facility that owns
   them.
@@ -147,10 +147,11 @@ allowlists, and recovery state machines live beside their focused tests in
 
 Both runtimes receive the same Ghost character, private memory index, first
 meeting policy, Omarchy computer-use policy, scheduled-work policy, and shared
-Obsidian policy. The prompt links
-`/owner/.agents/skills/obsidian-cli/SKILL.md`; the runtime resolves `/owner` to
-the actual owner home. Obsidian content is fetched only when relevant through
-`obsidian`, never injected automatically at session start.
+Obsidian policy. Normal machine-skill discovery admits the owner-installed
+`obsidian-cli` skill into each runtime's standard skill index; the shared-state
+policy does not duplicate its path or contents. Obsidian content is fetched
+only when relevant through `obsidian`, never injected automatically at session
+start.
 
 The operational cwd defaults to the owner home and may be rebound to one
 trusted project. Ghost home remains a separately named private resource root.

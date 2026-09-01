@@ -103,12 +103,12 @@ snapshot, credential-free project MCP, and its in-process tools. Executable
 project hooks/plugins/tools, LSP, and project agent definitions remain disabled
 pending the isolation boundary in #31.
 
-The shared prompt links
-`~/.agents/skills/obsidian-cli/SKILL.md`. Claude uses `obsidian` exclusively,
-with the current CLI vault by default or `vault=<name>` when the owner names
-one. It never scans for a vault, assumes `~/Documents`, or edits vault files
-directly. Missing skill/CLI/application readiness is reported as incomplete
-setup.
+Normal machine-skill discovery admits the owner-installed `obsidian-cli` skill
+into Claude's standard skill index. The shared policy does not inject a second
+link. Claude uses `obsidian` exclusively, with the current CLI vault by default
+or `vault=<name>` when the owner names one. It never scans for a vault, assumes
+`~/Documents`, or edits vault files directly. Missing
+skill/CLI/application readiness is reported as incomplete setup.
 
 ## Environment and credential isolation
 

@@ -64,10 +64,12 @@ Under the current release hold, there is no supported end-user Omarchy install
 flow. #54 must make that flow perform and verify these owner-level steps before
 it can become supported.
 
-Ghost's prompt links `~/.agents/skills/obsidian-cli/SKILL.md` directly. Every
-vault operation uses `obsidian`; Ghost never scans for `.obsidian`, assumes a
-vault under `~/Documents`, or falls back to editing vault files. Removing Ghost
-does not remove the owner-installed skill or any vault data.
+Normal machine-skill discovery admits
+`~/.agents/skills/obsidian-cli/SKILL.md`; the shared-state policy does not add a
+second link. Every vault operation uses `obsidian`; Ghost never scans for
+`.obsidian`, assumes a vault under `~/Documents`, or falls back to editing vault
+files. Removing Ghost does not remove the owner-installed skill or any vault
+data.
 
 ## Optional CLI integrations
 

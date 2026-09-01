@@ -19,8 +19,8 @@ per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The
 optional Claude Code runtime retains Claude's native subagents. Ghost replaces
 pi's coding-oriented system prompt with its character and bounded private
-memory index, plus an explicit link to the owner-installed `obsidian-cli`
-skill. Both runtimes use Obsidian's CLI-selected vault as
+memory index, plus the owner-installed `obsidian-cli` skill through normal
+machine-skill discovery. Both runtimes use Obsidian's CLI-selected vault as
 owner-visible persistent state shared by every ghost; they never infer that the
 vault is `~/Documents` or access it as raw files. Claude keeps its native preset
 and receives the same Ghost-owned context as an append. Browser and desktop

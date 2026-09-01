@@ -29,9 +29,10 @@ than becoming parallel Ghost frameworks.
   ghost-private. Owner-visible knowledge, preferences, decisions, notes, plans,
   and tasks are shared through Obsidian. Projects and machine artifacts remain
   owned by their native facility.
-- **Obsidian owns shared state.** Ghost links the upstream `obsidian-cli` skill
-  and uses the official CLI exclusively. It has no notes database, task store,
-  plan mode, Documents index, vault-path convention, or raw vault-file adapter.
+- **Obsidian owns shared state.** Ghost admits the upstream `obsidian-cli`
+  through normal machine-skill discovery and uses the official CLI exclusively.
+  It has no notes database, task store, plan mode, Documents index, vault-path
+  convention, or raw vault-file adapter.
 - **Files over an application database.** Personas and inspectable policy stay
   greppable and backup-friendly. Derived runtime state is isolated under
   `.pi/`; credential values live only in Linux Secret Service.

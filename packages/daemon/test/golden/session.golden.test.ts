@@ -88,12 +88,17 @@ describe("golden: session", () => {
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
     const machineSkills = join(temp.ownerHome, ".agents", "skills");
-    const omarchySkill = join(machineSkills, "omarchy");
-    mkdirSync(omarchySkill, { recursive: true });
-    writeFileSync(
-      join(omarchySkill, "SKILL.md"),
-      "---\nname: omarchy\ndescription: Control this Omarchy laptop through its CLI.\n---\n\nUse the stable CLI routes.\n",
-    );
+    for (const [name, description, body] of [
+      ["obsidian-cli", "Official Obsidian CLI skill.", "Use obsidian."],
+      ["omarchy", "Control this Omarchy laptop through its CLI.", "Use the stable CLI routes."],
+    ] as const) {
+      const skill = join(machineSkills, name);
+      mkdirSync(skill, { recursive: true });
+      writeFileSync(
+        join(skill, "SKILL.md"),
+        `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`,
+      );
+    }
     const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
     host = new SessionHost({
       registry: temp.registry,

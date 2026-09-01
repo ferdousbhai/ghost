@@ -6753,6 +6753,18 @@ describe("multi-ghost", () => {
       for (const [dir, shellPath] of [[casper, "/bin/bash"], [mina, "/bin/sh"]] as const) {
         writeFileSync(ghostPaths(dir).settingsFile, `shellPath: ${shellPath}\n`);
       }
+      const obsidianSkill = join(
+        temp.ownerHome,
+        ".agents",
+        "skills",
+        "obsidian-cli",
+      );
+      mkdirSync(obsidianSkill, { recursive: true });
+      writeFileSync(
+        join(obsidianSkill, "SKILL.md"),
+        "---\nname: obsidian-cli\ndescription: Official Obsidian CLI skill.\n---\n\nUse obsidian.\n",
+        "utf8",
+      );
       host = new SessionHost({
         registry: temp.registry,
         ownerHome: temp.ownerHome,
@@ -6771,18 +6783,20 @@ describe("multi-ghost", () => {
         expect(readdirSync(paths.sessionDir).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
         expect(readFileSync(join(dir, "memory", "asked-who-i-am.md"), "utf8")).toContain(expected);
       }
-      // Personas did not cross: each provider request carried one ghost's prompt.
+      // Personas did not cross: each initial provider request carried one ghost's prompt.
       const systems = [...provider.requests, ...minaProvider.requests]
-        .map((request) => request.system);
+        .map((request) => request.system)
+        .filter((system) => system.includes("set type") || system.includes("keep bees"));
       expect(systems.some((system) => system.includes("set type"))).toBe(true);
       expect(systems.some((system) => system.includes("keep bees"))).toBe(true);
       for (const system of systems) {
         expect(system.includes("set type") && system.includes("keep bees")).toBe(false);
         expect(system).toContain("## Shared Obsidian");
         expect(system).toContain(
-          join(temp.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
+          join(obsidianSkill, "SKILL.md"),
         );
         expect(system).toContain("Use the CLI-selected current vault by default");
+        expect(system.split(join(obsidianSkill, "SKILL.md"))).toHaveLength(2);
       }
       expect(provider.requests[0]?.system).toContain("casper-private");
       expect(provider.requests[0]?.system).not.toContain("mina-private");
