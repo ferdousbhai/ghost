@@ -94,6 +94,23 @@ bash "$script_dir/test-ci-dependencies.sh"
 bash "$script_dir/test-accept-obsidian.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
+python "$source_root/packaging/release/test-public-candidate.py"
+python "$script_dir/test-seal-regular-inputs.py"
+bash "$source_root/packaging/omarchy/test-contribution.sh"
+
+# Every packaging test suite must be invoked by some other packaging or CI
+# file; an unreferenced test-* file is a suite that silently never runs.
+while IFS= read -r suite; do
+  name="$(basename -- "$suite")"
+  if ! grep -rFq --exclude="$name" --exclude-dir=__pycache__ \
+    --exclude='README.md' "$name" \
+    "$source_root/packaging" "$source_root/.github"; then
+    printf 'orphaned packaging test suite: %s is referenced nowhere\n' \
+      "$suite" >&2
+    exit 1
+  fi
+done < <(find "$source_root/packaging" -name __pycache__ -prune \
+  -o -name 'test-*' -type f -print | sort)
 
 rg -q 'rg[[:space:]]+-l' \
   "$source_root/packages/shell/dev/test.sh"

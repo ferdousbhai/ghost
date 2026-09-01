@@ -118,12 +118,19 @@ tasks_output="$(run_obsidian tasks "path=$note_path" todo format=json 2>&1)"
   exit 1
 }
 
+# The note is already gone here, so do not hard-pin the CLI's exact error
+# sentence: a rephrased "not found" message must not fail the run after the
+# permanent delete. The marker's absence is the real deletion proof.
 run_obsidian delete "path=$note_path" permanent >/dev/null
 deleted="$(run_obsidian read "path=$note_path" 2>&1)" || true
-[[ "$deleted" == "$not_found" ]] || {
-  printf 'Obsidian CLI acceptance note still resolves after deletion\n' >&2
+if [[ "${deleted,,}" != *"not found"* ]]; then
+  if [[ "$deleted" == *"$marker"* ]]; then
+    printf 'Obsidian CLI acceptance note still resolves after deletion\n' >&2
+  else
+    printf 'unexpected post-delete read result: %s\n' "$deleted" >&2
+  fi
   exit 1
-}
+fi
 created=false
 trap - EXIT
 
