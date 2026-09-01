@@ -150,10 +150,6 @@ export interface GhostModelsFile {
   [key: string]: unknown;
 }
 
-export function ghostModelSelector(binding: GhostModelRoleBinding): string {
-  return `${binding.provider}/${binding.modelId}`;
-}
-
 export const MODELS_FILENAME = "models.json";
 export const AUTH_FILENAME = "auth.json";
 const MODELS_LOCK_SUFFIX = ".lock";

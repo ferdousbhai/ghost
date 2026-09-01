@@ -196,28 +196,6 @@ export async function resolveAskUserQuestion(
   };
 }
 
-/**
- * Ask the owner one broker-native question. Used by non-model product flows;
- * resolves `undefined` when they choose to chat instead.
- */
-export async function askOwner(
-  broker: AskBroker,
-  question: AskQuestion,
-  options: AskOpenOptions,
-): Promise<AskResultItem | undefined> {
-  const answer = await broker.open([question], options);
-  if (!answer) throw new AskCancelledError();
-  if (answer.kind === "chat") return undefined;
-  const result = answer.results[0];
-  const unanswered = result
-    && !result.timedOut
-    && !result.multi
-    && result.selectedOptions.length === 0
-    && result.customInput === undefined;
-  if (!result || unanswered) throw new AskCancelledError();
-  return result;
-}
-
 export interface AskToolOptions {
   broker: AskBroker;
   /** Milliseconds until an unanswered ask settles; 0 waits forever. */

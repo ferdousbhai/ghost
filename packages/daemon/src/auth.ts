@@ -179,10 +179,9 @@ export interface LoginManagerOptions {
   registry: GhostRegistry;
   homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
-  offline?: boolean;
   loginTtlMs?: number;
   retainSettledMs?: number;
-  createRuntime?: (input: { authPath: string; modelsPath: string; offline: boolean }) => Promise<LoginRuntime>;
+  createRuntime?: (input: { authPath: string; modelsPath: string }) => Promise<LoginRuntime>;
   onLoginSucceeded?: (ghostName: string, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
@@ -196,7 +195,6 @@ export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Cla
 async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
-  offline: boolean;
 }): Promise<LoginRuntime> {
   // allowModelNetwork is false either way: it gates only catalog refresh, not
   // the provider's own OAuth HTTP, so a login works offline. create() still
@@ -324,7 +322,6 @@ export class LoginManager {
   private readonly registry: GhostRegistry;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly logger: Logger;
-  private readonly offline: boolean;
   private readonly loginTtlMs: number;
   private readonly retainSettledMs: number;
   private readonly createRuntime: NonNullable<LoginManagerOptions["createRuntime"]>;
@@ -339,7 +336,6 @@ export class LoginManager {
     this.registry = options.registry;
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.logger = options.logger ?? silentLogger;
-    this.offline = options.offline ?? false;
     this.loginTtlMs = options.loginTtlMs ?? DEFAULT_LOGIN_TTL_MS;
     this.retainSettledMs = options.retainSettledMs ?? DEFAULT_RETAIN_SETTLED_MS;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
@@ -352,7 +348,6 @@ export class LoginManager {
     return this.createRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
-      offline: this.offline,
     });
   }
 

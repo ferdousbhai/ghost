@@ -2,8 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname } from "node:path";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
@@ -12,15 +11,6 @@ import { serializeByKey } from "./promise-chain.js";
 export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 export const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
-
-export function defaultGhostHooksPath(
-  env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
-): string {
-  const configured = env.XDG_CONFIG_HOME?.trim();
-  const configHome = configured && isAbsolute(configured) ? configured : join(home, ".config");
-  return join(configHome, "ghost", "hooks.json");
-}
 
 interface GhostHookEventBase {
   session_id: string;

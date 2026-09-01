@@ -518,7 +518,7 @@ export interface TitleConfig {
   scheduleTimeout?: (callback: () => void, timeoutMs: number) => TitleTimeoutTimer;
 }
 
-export const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
+const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
 
 const defaultTitleGenerator: TitleGenerator = async ({ runtime, configDir, firstPrompt, signal }) => {
   let ref = null;
@@ -576,8 +576,8 @@ export interface SessionRetentionConfig {
 }
 
 export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000;
-export const DEFAULT_MAX_CACHED_SESSIONS = 24;
-export const DEFAULT_SESSION_SWEEP_INTERVAL_MS = 60_000;
+const DEFAULT_MAX_CACHED_SESSIONS = 24;
+const DEFAULT_SESSION_SWEEP_INTERVAL_MS = 60_000;
 
 function scheduleSessionRetention(
   callback: () => void,
@@ -845,7 +845,6 @@ interface HostedSession extends GhostSessionHandle {
   modelRuntime: GhostPiRuntime;
   /** The ghost's own settings.yml, read when the session opened. */
   settings: GhostSettings;
-  /** A `!cd` moved the working directory; the session reopens on release. */
   /**
    * Set when a model switch arrived during a turn or live voice. The model is
    * rebound after that exclusive owner releases the AgentSession.
@@ -6201,23 +6200,21 @@ export class SessionHost {
 
     const hosted = this.sessions.get(key);
     const project = hosted?.project ?? await this.projectStateLeased(ghostName, "pi", id);
+    // A manager opened for this write alone is simply dropped afterwards; the
+    // live session keeps its own, and the next turn re-opens an idle
+    // conversation.
     const manager = hosted?.session.sessionManager ?? SessionManager.open(
       sessionFile,
       paths.sessionDir,
       project.cwd,
     );
-    try {
-      const stored = this.applySessionName(hosted?.session, manager, title);
-      (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
-        session: id,
-        title: stored,
-      });
-      await this.announceConversationUpdated(ghostName, "pi", id);
-      return stored;
-    } finally {
-      // A manager opened for this write alone is dropped here; the live
-      // session keeps its own, and the next turn re-opens an idle conversation.
-    }
+    const stored = this.applySessionName(hosted?.session, manager, title);
+    (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
+      session: id,
+      title: stored,
+    });
+    await this.announceConversationUpdated(ghostName, "pi", id);
+    return stored;
   }
 
   /**

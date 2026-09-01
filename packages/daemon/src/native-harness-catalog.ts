@@ -14,7 +14,6 @@ import {
 import { runOwnedCommand } from "./owned-process.js";
 import {
   claudeSdkScriptLaunch,
-  isClaudeSdkScriptExecutable as isClaudeSdkScriptPath,
 } from "./claude-sdk-launch.js";
 
 export const CODEX_BINARY_ENV = "GHOST_CODEX_BINARY";
@@ -103,16 +102,6 @@ function frozenProbeResult(
     ...(accountFingerprint ? { accountFingerprint } : {}),
     ...(interpreter ? { interpreter } : {}),
   });
-}
-
-export function isClaudeSdkScriptExecutable(path: string): boolean {
-  return isClaudeSdkScriptPath(path);
-}
-
-export function claudeNativeSdkScriptLaunch(
-  path: string,
-): ReturnType<typeof claudeSdkScriptLaunch> {
-  return claudeSdkScriptLaunch(path);
 }
 
 function assertProbeActive(signal: AbortSignal | undefined): void {
@@ -528,7 +517,7 @@ export class NativeHarnessCatalog {
     }
     assertProbeActive(signal);
     const scriptLaunch = result.id === "claude-code"
-      ? claudeNativeSdkScriptLaunch(result.executable.path)
+      ? claudeSdkScriptLaunch(result.executable.path)
       : undefined;
     const interpreter = result.interpreter;
     if ((scriptLaunch !== undefined) !== (interpreter !== undefined)

@@ -226,8 +226,6 @@ export interface ModelCatalogOptions {
    * to the write.
    */
   onModelRoutingChanged?: (ghostName: string) => void | Promise<void>;
-  /** @deprecated Use `onModelRoutingChanged`. Kept for API compatibility. */
-  onChatModelChanged?: (ghostName: string) => void | Promise<void>;
 }
 
 const CLAUDE_CODE_MODEL: CatalogModel = {
@@ -339,7 +337,7 @@ export class ModelCatalog {
     const claudeCodeProbe = options.claudeCodeProbe ?? new ClaudeCodeProbe();
     this.claudeCodeStatus = options.claudeCodeStatus
       ?? (() => defaultClaudeCodeStatus(claudeCodeProbe));
-    this.onModelRoutingChanged = options.onModelRoutingChanged ?? options.onChatModelChanged;
+    this.onModelRoutingChanged = options.onModelRoutingChanged;
   }
 
   /**

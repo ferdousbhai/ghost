@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadGhostSettings } from "../src/ghost-settings.js";
+import { GHOST_SETTINGS_MAX_BYTES, loadGhostSettings } from "../src/ghost-settings.js";
 import { ghostPaths } from "../src/ghosts.js";
 
 let home: string | null = null;
@@ -28,12 +28,19 @@ describe("loadGhostSettings", () => {
 
     expect(settings.getString("collab.relayUrl")).toBe("wss://relay.example");
     expect(settings.getStringList("ttsr.disabledRules")).toEqual(["noisy"]);
-    expect(settings.get("missing.key")).toBeUndefined();
-    expect(settings.getBoolean("collab.relayUrl")).toBeUndefined();
+    expect(settings.getString("missing.key")).toBeUndefined();
+    expect(settings.getStringList("collab.relayUrl")).toBeUndefined();
   });
 
   it("is empty when settings.yml is absent", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
-    expect(loadGhostSettings(home).get("collab")).toBeUndefined();
+    expect(loadGhostSettings(home).getString("collab")).toBeUndefined();
+  });
+
+  it("refuses a settings.yml over its byte limit", () => {
+    home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
+    const paths = ghostPaths(home);
+    writeFileSync(paths.settingsFile, `# ${"x".repeat(GHOST_SETTINGS_MAX_BYTES)}\n`, "utf8");
+    expect(() => loadGhostSettings(home!)).toThrow(/byte limit/);
   });
 });

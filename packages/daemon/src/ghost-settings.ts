@@ -3,16 +3,15 @@
  * home only. Ghost reads a handful of dotted keys from it; nothing ambient
  * (environment overlays, machine-wide files) is consulted.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "./mcp-server-shape.js";
 
+export const GHOST_SETTINGS_MAX_BYTES = 1_048_576;
+
 export interface GhostSettings {
-  /** The value at a dotted path, or undefined. */
-  get(path: string): unknown;
   getString(path: string): string | undefined;
-  getBoolean(path: string): boolean | undefined;
   getStringList(path: string): string[] | undefined;
 }
 
@@ -27,14 +26,9 @@ export function ghostSettingsFrom(document: unknown): GhostSettings {
     return current;
   };
   return {
-    get,
     getString: (path) => {
       const value = get(path);
       return typeof value === "string" ? value : undefined;
-    },
-    getBoolean: (path) => {
-      const value = get(path);
-      return typeof value === "boolean" ? value : undefined;
     },
     getStringList: (path) => {
       const value = get(path);
@@ -45,6 +39,17 @@ export function ghostSettingsFrom(document: unknown): GhostSettings {
 
 export function loadGhostSettings(homeDir: string): GhostSettings {
   const paths = ghostPaths(homeDir);
-  if (!existsSync(paths.settingsFile)) return ghostSettingsFrom({});
+  let size: number;
+  try {
+    size = statSync(paths.settingsFile).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return ghostSettingsFrom({});
+    throw error;
+  }
+  if (size > GHOST_SETTINGS_MAX_BYTES) {
+    throw new Error(
+      `Ghost settings file ${JSON.stringify(paths.settingsFile)} exceeds its ${GHOST_SETTINGS_MAX_BYTES}-byte limit.`,
+    );
+  }
   return ghostSettingsFrom(parseYaml(readFileSync(paths.settingsFile, "utf8")));
 }

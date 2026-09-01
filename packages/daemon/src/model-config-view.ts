@@ -19,11 +19,6 @@ import { resolveProviderSecrets } from "./secret-resolution.js";
 
 export const KEYRING_PLACEHOLDER = "ghost-keyring-reference";
 
-/** Maps a provider id to the id its credentials are stored under. */
-export type StorageProviderFor = (providerId: string) => string;
-
-export const sameStorageProvider: StorageProviderFor = (providerId) => providerId;
-
 export interface ModelsViewOptions {
   /** Treat an omitted key on a custom endpoint with models as keyless (`auth: "none"`). */
   legacyKeylessAuth?: boolean;
@@ -96,7 +91,6 @@ export interface KeyringProviderRegistration {
 export function collectKeyringProviders(
   models: GhostModelsFile,
   resolver: GhostSecretContext,
-  storageProviderFor: StorageProviderFor = sameStorageProvider,
 ): KeyringProviderRegistration[] {
   const registrations: KeyringProviderRegistration[] = [];
   for (const [provider, config] of Object.entries(models.providers)) {
@@ -104,7 +98,7 @@ export function collectKeyringProviders(
       .filter((value): value is string => typeof value === "string" && isSecretReference(value))
       .map(parseSecretReference);
     if (references.length === 0) continue;
-    const service = serviceForCredentialProvider(storageProviderFor(provider));
+    const service = serviceForCredentialProvider(provider);
     const resolved = resolveProviderSecrets(config, resolver);
     registrations.push({
       provider,
@@ -118,13 +112,9 @@ export function collectKeyringProviders(
   return registrations;
 }
 
-export function providerAccountName(
-  providerId: string,
-  account: string,
-  storageProviderFor: StorageProviderFor = sameStorageProvider,
-): string {
+export function providerAccountName(providerId: string, account: string): string {
   return secretAccountName({
-    service: serviceForCredentialProvider(storageProviderFor(providerId)),
+    service: serviceForCredentialProvider(providerId),
     account,
   });
 }

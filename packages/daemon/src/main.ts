@@ -541,7 +541,6 @@ async function serveDaemon(
     registry,
     homeOperations,
     logger,
-    offline: config.offline,
     onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
   });
   const modelCatalog = new ModelCatalog({
