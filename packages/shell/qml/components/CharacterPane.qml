@@ -66,7 +66,9 @@ Rectangle {
         // A save the daemon accepted makes the draft the seeded text, so the
         // re-seed guard keeps adopting later daemon reads.
         function onCharacterWriteFinished(ok: bool): void {
-            if (ok) root.loadedBody = editor.text;
+            // Latch the body the daemon accepted, not the draft at completion
+            // time — the owner may have typed while the PUT was in flight.
+            if (ok) root.loadedBody = Ghostd.characterBody;
         }
     }
 

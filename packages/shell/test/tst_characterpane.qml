@@ -81,7 +81,7 @@ TestCase {
 
     function loadedPane(body: string): var {
         Ghostd.fetchCharacter(false);
-        requests[0].complete(200, { body: body, title: null, limit: 20000 });
+        requests[0].complete(200, { body: body, limit: 20000 });
         const pane = createTemporaryObject(paneComponent, tc);
         verify(pane !== null);
         return pane;
@@ -95,7 +95,6 @@ TestCase {
         verify(Ghostd.characterLoading);
         requests[0].complete(200, {
             body: "# Casper\n\nKind and curious.",
-            title: "Casper",
             limit: 20000
         });
 
@@ -114,7 +113,7 @@ TestCase {
         Ghostd.fetchCharacter(false);
         const stale = requests[0];
         Ghostd.activeGhost = "mina";
-        stale.complete(200, { body: "Casper's persona.", title: null, limit: 20000 });
+        stale.complete(200, { body: "Casper's persona.", limit: 20000 });
 
         verify(!Ghostd.characterLoading);
         compare(Ghostd.characterBody, "");
@@ -168,10 +167,9 @@ TestCase {
         verify(!pane.dirty);
 
         // The disk is the truth: a forced re-read follows the accepted write.
-        // The daemon still sends `title`; the shell ignores it.
         compare(requests.length, 3);
         compare(requests[2].method, "GET");
-        requests[2].complete(200, { body: "# New\n\nBody.", title: "New", limit: 20000 });
+        requests[2].complete(200, { body: "# New\n\nBody.", limit: 20000 });
         compare(pane.draftText, "# New\n\nBody.");
     }
 }

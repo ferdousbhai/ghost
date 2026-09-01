@@ -920,7 +920,6 @@ describe("/api/ghosts/:name/character", () => {
     expect(read.status).toBe(200);
     expect(await read.json()).toEqual({
       body: "# Casper\n\nDry wit, direct answers.\n",
-      title: "Casper",
       limit: 20_000,
     });
 

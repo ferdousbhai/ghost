@@ -2,7 +2,6 @@
 export const GHOST_HOME_FORMAT = "ghost-home/v2";
 
 export interface CharacterFile {
-  readonly title: string | undefined;
   readonly body: string;
 }
 

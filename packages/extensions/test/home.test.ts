@@ -118,16 +118,14 @@ describe("layout", () => {
 });
 
 describe("character", () => {
-  it("reads the persona and derives its title from the leading heading", async () => {
+  it("reads the persona body", async () => {
     const character = await home.readCharacter();
-    expect(character?.title).toBe("Casper");
     expect(character?.body.startsWith("# Casper")).toBe(true);
   });
 
-  it("leaves the derived title empty when the body has no leading heading", async () => {
+  it("serves a body with no leading heading unchanged", async () => {
     await writeFile(home.characterPath, "I keep the old ledgers.\n", "utf8");
     expect(await home.readCharacter()).toEqual({
-      title: undefined,
       body: "I keep the old ledgers.\n",
     });
   });

@@ -52,6 +52,13 @@ export function loadGhostSettings(homeDir: string): GhostSettings {
           { cause: error },
         );
       }
+      // Name the file and the refusal: the bare "read refused" message is
+      // unactionable at ghost startup (a symlinked or concurrently rewritten
+      // settings.yml lands here).
+      throw new Error(
+        `Ghost settings file ${JSON.stringify(paths.settingsFile)} could not be read safely (${error.refusal}).`,
+        { cause: error },
+      );
     }
     throw error;
   }

@@ -604,7 +604,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     });
     jsonResponse(response, 200, {
       body: character?.body ?? "",
-      title: character?.title ?? null,
       limit: MAX_CHARACTER_BODY_LENGTH,
     });
   };

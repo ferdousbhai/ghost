@@ -455,13 +455,6 @@ function characterBodyFor(name) {
   return `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
 }
 
-/** The daemon derives the title from the first heading; null without one. */
-function characterTitleFor(body) {
-  const heading = body.split("\n").find((line) => line.startsWith("# "));
-  const title = heading ? heading.slice(2).trim() : "";
-  return title === "" ? null : title;
-}
-
 function contextDeletedFor(name) {
   if (!deletedContext.has(name)) deletedContext.set(name, new Set());
   return deletedContext.get(name);
@@ -1972,12 +1965,7 @@ const mockServer = createServer(async (req, res) => {
 
 
   if (parts.length === 4 && parts[3] === "character" && req.method === "GET") {
-    const body = characterBodyFor(name);
-    return json(res, 200, {
-      body,
-      title: characterTitleFor(body),
-      limit: CHARACTER_LIMIT,
-    });
+    return json(res, 200, { body: characterBodyFor(name), limit: CHARACTER_LIMIT });
   }
   if (parts.length === 4 && parts[3] === "character" && req.method === "PUT") {
     const payload = await readBody(req).catch(() => ({}));

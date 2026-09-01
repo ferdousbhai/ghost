@@ -69,9 +69,9 @@ The lifecycle implementation and crash recovery are in
 
 ### Character and memory
 
-`character.md` is plain Markdown with no frontmatter. Its first heading is the
-display title and its complete body (maximum 20,000 JavaScript UTF-16 code
-units) is the persona. A seeded or blank character marks onboarding; the ghost
+`character.md` is plain Markdown with no frontmatter; by convention it opens
+with a heading naming the persona. Its complete body (maximum 20,000
+JavaScript UTF-16 code units) is the persona. A seeded or blank character marks onboarding; the ghost
 shows the owner a draft and waits for confirmation before replacing it.
 
 `memory/*.md` is this ghost's private internal continuity: subjective

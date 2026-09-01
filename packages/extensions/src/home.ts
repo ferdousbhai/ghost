@@ -500,18 +500,6 @@ export class GhostHome {
     });
   }
 
-  private characterTitle(body: string): string | undefined {
-    const firstContentLine = body
-      .split("\n")
-      .map((line) => line.replace(/\r$/, ""))
-      .find((line) => line.trim().length > 0);
-    if (firstContentLine === undefined) return undefined;
-    const match = /^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*$/.exec(firstContentLine);
-    if (!match) return undefined;
-    const title = (match[1] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
-    return title || undefined;
-  }
-
   /**
    * `enforceLimit: false` is for the owner's editor: an oversize hand-edited
    * file must still load so it can be shortened, while every prompt-bound
@@ -530,10 +518,7 @@ export class GhostHome {
         { length: body.length, limit: MAX_CHARACTER_BODY_LENGTH },
       );
     }
-    return {
-      title: this.characterTitle(body),
-      body,
-    };
+    return { body };
   }
 
   /**
