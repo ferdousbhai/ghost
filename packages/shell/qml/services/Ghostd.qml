@@ -985,6 +985,11 @@ Singleton {
     // closure it installed on itself is eligible for collection mid-flight.
     property var request: null
     property var listRequest: null
+    property int listGeneration: 0
+    property var createGhostRequest: null
+    property int createGhostGeneration: 0
+    /** Test seam; production always constructs the native QML XHR. */
+    property var ghostRequestFactory: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
     property var renameGhostRequestFactory: null
@@ -1301,12 +1306,35 @@ Singleton {
     }
 
 
+    function makeGhostRequest(): var {
+        return typeof root.ghostRequestFactory === "function"
+            ? root.ghostRequestFactory() : new XMLHttpRequest();
+    }
+
+    function retireListRequest(): void {
+        root.listGeneration += 1;
+        const request = root.listRequest;
+        root.listRequest = null;
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function retireCreateGhostRequest(): void {
+        root.createGhostGeneration += 1;
+        const request = root.createGhostRequest;
+        root.createGhostRequest = null;
+        if (request && request.readyState !== 4) request.abort();
+    }
+
     function refresh(): void {
         root.fetchHooks(false);
-        const xhr = new XMLHttpRequest();
+        root.retireListRequest();
+        const generation = root.listGeneration;
+        const xhr = root.makeGhostRequest();
         root.listRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.listRequest) return;
+            if (xhr.readyState !== 4 || xhr !== root.listRequest
+                    || generation !== root.listGeneration) return;
+            root.listRequest = null;
             if (xhr.status === 200) {
                 try {
                     const list = JSON.parse(xhr.responseText);
@@ -1332,16 +1360,22 @@ Singleton {
                     : "GET /api/ghosts → " + xhr.status);
             }
         };
-        root.dispatch(xhr, "GET", "/api/ghosts", ({}), null);
+        root.dispatch(xhr, "GET", "/api/ghosts", ({}), null, function () {
+            return xhr === root.listRequest && generation === root.listGeneration;
+        });
     }
 
     function createGhost(name: string): void {
         const trimmed = name.trim();
         if (trimmed === "") return;
-        const xhr = new XMLHttpRequest();
-        root.listRequest = xhr;
+        root.retireCreateGhostRequest();
+        const generation = root.createGhostGeneration;
+        const xhr = root.makeGhostRequest();
+        root.createGhostRequest = xhr;
         xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
+            if (xhr.readyState !== 4 || xhr !== root.createGhostRequest
+                    || generation !== root.createGhostGeneration) return;
+            root.createGhostRequest = null;
             if (xhr.status === 200 || xhr.status === 201) {
                 let created = null;
                 let createdName = trimmed;
@@ -1364,7 +1398,10 @@ Singleton {
         };
         root.dispatch(xhr, "POST", "/api/ghosts",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ name: trimmed }));
+            JSON.stringify({ name: trimmed }), function () {
+                return xhr === root.createGhostRequest
+                    && generation === root.createGhostGeneration;
+            });
     }
 
     function finishCreatedGhostSelection(name: string): void {
