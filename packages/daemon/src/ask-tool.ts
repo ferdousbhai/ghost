@@ -247,8 +247,9 @@ export function createAskTool(options: AskToolOptions): ToolDefinition<typeof as
         };
       }
       const results = resolution.results;
-      if (results.length === 1) {
-        const { id: _id, ...details } = results[0]!;
+      const singleResult = results.length === 1 ? results[0] : undefined;
+      if (singleResult) {
+        const { id: _id, ...details } = singleResult;
         return {
           content: [{ type: "text", text: JSON.stringify(resolution.output) }],
           details: { output: resolution.output, ...details },

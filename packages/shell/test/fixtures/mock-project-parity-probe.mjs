@@ -7,7 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
@@ -271,7 +271,8 @@ try {
   );
   assert.equal(transcriptResponse.status, 200);
   const transcript = JSON.stringify(await transcriptResponse.json());
-  assert.ok(transcript.includes(join(casper.dir, "plans", "hud-work-strip.md")));
+  assert.ok(transcript.includes(join(homedir(), "project-brief.md")));
+  assert.ok(!transcript.includes(join(casper.dir, "plans")));
 
   const createdResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`, {
     method: "POST",
@@ -292,7 +293,8 @@ try {
   });
   assert.equal(turnResponse.status, 200);
   const turnEvents = await turnResponse.text();
-  assert.ok(turnEvents.includes(join(casper.dir, "plans", "step-2.md")));
+  assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
+  assert.ok(!turnEvents.includes(join(casper.dir, "plans")));
 
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
