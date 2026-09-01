@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { randomBytes, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
   chmod,
@@ -7,6 +8,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  realpath,
   rm,
   writeFile,
 } from "node:fs/promises";
@@ -31,13 +33,10 @@ import {
 
 const INTEGRATION_FLAG = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION";
 const INTEGRATION_UID = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID";
-const OWNER_UID = "GHOST_NATIVE_TASK_SCOPE_OWNER_UID";
+const CONTROLLER_UNIT = "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_UNIT";
+const CONTROLLER_DESCRIPTION = "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_DESCRIPTION";
+const CRASH_CONTROLLER_MODE = "--crash-controller";
 const CONTROL_OUTPUT_LIMIT = 8 * 1024;
-const TASK_IDS = {
-  lifecycle: "task-11111111-1111-4111-8111-111111111111",
-  collision: "task-22222222-2222-4222-8222-222222222222",
-  recovery: "task-33333333-3333-4333-8333-333333333333",
-} as const;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -47,6 +46,32 @@ function required(name: string): string {
 
 function receipt(nonce: string): NativeTaskOwnershipReceipt {
   return { version: 1, kind: "systemd-scope", nonce };
+}
+
+function randomReceipt(): NativeTaskOwnershipReceipt {
+  return receipt(randomBytes(16).toString("hex"));
+}
+
+function randomTaskId(): string {
+  return `task-${randomUUID()}`;
+}
+
+function randomService(prefix: string): { unit: string; description: string } {
+  const identity = randomUUID();
+  return {
+    unit: `${prefix}-${identity}.service`,
+    description: `${prefix}-receipt:v1:${identity}`,
+  };
+}
+
+function expectedControllerDescription(unit: string): string {
+  const workflow = /^ghost-native-task-ci-([1-9][0-9]{0,19})-([1-9][0-9]{0,4})-([0-9a-f]{32})\.service$/u.exec(unit);
+  if (workflow) {
+    return `ghost-native-task-ci-receipt:v1:${workflow[1]}:${workflow[2]}:${workflow[3]}`;
+  }
+  const crash = /^ghost-native-task-crash-controller-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.service$/u.exec(unit);
+  if (crash) return `ghost-native-task-crash-controller-receipt:v1:${crash[1]}`;
+  throw new Error("integration controller identity is invalid");
 }
 
 function taskEnvironment(
@@ -154,18 +179,96 @@ async function unitProperties(unit: string): Promise<Map<string, string>> {
     "--property=ActiveState",
     "--property=Description",
     "--property=ControlGroup",
+    "--property=MainPID",
     "--no-pager",
   ]));
 }
 
-async function unitAbsentOrInactive(unit: string): Promise<boolean> {
+async function unitAbsent(unit: string): Promise<boolean> {
   try {
     const status = await unitProperties(unit);
-    return status.get("LoadState") === "not-found"
-      || status.get("ActiveState") === "inactive";
+    return status.get("LoadState") === "not-found";
   } catch {
     return false;
   }
+}
+
+async function assertUnitAbsent(unit: string): Promise<void> {
+  assert.equal((await unitProperties(unit)).get("LoadState"), "not-found");
+}
+
+type OwnedUnits = Map<string, string>;
+
+async function processControlGroup(pid: number): Promise<string | undefined> {
+  return (await readFile(`/proc/${pid}/cgroup`, "utf8"))
+    .split("\n")
+    .find((line) => line.startsWith("0::"))
+    ?.slice(3);
+}
+
+async function assertOwnedUnit(
+  unit: string,
+  description: string,
+  expectedPid?: number,
+): Promise<Map<string, string>> {
+  const properties = await unitProperties(unit);
+  assert.equal(properties.get("LoadState"), "loaded");
+  assert.equal(properties.get("ActiveState"), "active");
+  assert.equal(properties.get("Description"), description);
+  const controlGroup = properties.get("ControlGroup");
+  if (!controlGroup?.startsWith("/")) throw new Error("unit has no exact cgroup");
+  if (expectedPid !== undefined) {
+    assert.equal(Number(properties.get("MainPID")), expectedPid);
+    assert.equal(await processControlGroup(expectedPid), controlGroup);
+  }
+  return properties;
+}
+
+async function startOwnedService(
+  ownedUnits: OwnedUnits,
+  unit: string,
+  description: string,
+  command: readonly string[],
+  environment: Readonly<NodeJS.ProcessEnv> = taskEnvironment(),
+): Promise<void> {
+  await assertUnitAbsent(unit);
+  ownedUnits.set(unit, description);
+  await run("/usr/bin/systemd-run", [
+    "--user",
+    `--unit=${unit}`,
+    `--description=${description}`,
+    "--service-type=exec",
+    "--slice=session.slice",
+    "--collect",
+    "--quiet",
+    "--property=KillMode=control-group",
+    "--property=SendSIGKILL=yes",
+    "--property=TimeoutStopSec=1s",
+    "--",
+    ...command,
+  ], environment);
+}
+
+async function stopOwnedUnit(
+  ownedUnits: OwnedUnits,
+  unit: string,
+): Promise<void> {
+  const description = ownedUnits.get(unit);
+  if (!description) throw new Error("cleanup unit is not recorded");
+  let properties = await unitProperties(unit);
+  if (properties.get("LoadState") === "not-found") {
+    ownedUnits.delete(unit);
+    return;
+  }
+  assert.equal(properties.get("Description"), description);
+  await systemctl(["stop", unit]);
+  properties = await unitProperties(unit);
+  if (properties.get("LoadState") !== "not-found") {
+    assert.equal(properties.get("Description"), description);
+    await systemctl(["reset-failed", unit]);
+  }
+  await waitFor(`cleanup ${unit}`, () => unitAbsent(unit));
+  ownedUnits.delete(unit);
 }
 
 function lineFrom(child: ChildProcess): Promise<Record<string, unknown>> {
@@ -229,23 +332,50 @@ async function writeFixtures(root: string): Promise<{
   return { worker, delayedLauncher };
 }
 
+interface Sentinel {
+  unit: string;
+  description: string;
+  pid: number;
+}
+
+async function startSentinel(root: string, ownedUnits: OwnedUnits): Promise<Sentinel> {
+  const { unit, description } = randomService("ghost-native-task-sentinel");
+  const pidFile = join(root, "sentinel.pid");
+  await startOwnedService(ownedUnits, unit, description, [
+    "/usr/bin/env",
+    "-i",
+    "PATH=/usr/bin:/bin",
+    `PID_FILE=${pidFile}`,
+    "/usr/bin/python3",
+    "-c",
+    "import os,signal,time; open(os.environ['PID_FILE'],'w').write(str(os.getpid())); signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
+  ]);
+  await waitFor("sentinel pid", async () => {
+    try { return (await readFile(pidFile, "utf8")).trim().length > 0; }
+    catch { return false; }
+  });
+  const pid = Number((await readFile(pidFile, "utf8")).trim());
+  assert.ok(Number.isInteger(pid) && pid > 0);
+  await assertOwnedUnit(unit, description, pid);
+  return { unit, description, pid };
+}
+
+async function assertSentinel(sentinel: Sentinel): Promise<void> {
+  assert.equal(pidExists(sentinel.pid), true);
+  await assertOwnedUnit(sentinel.unit, sentinel.description, sentinel.pid);
+}
+
 async function proveLifecycle(
   root: string,
   worker: string,
-  ownedUnits: Set<string>,
-  sentinels: ChildProcess[],
+  ownedUnits: OwnedUnits,
 ): Promise<void> {
-  const taskId = TASK_IDS.lifecycle;
-  const ownership = receipt("11111111111111111111111111111111");
+  const taskId = randomTaskId();
+  const ownership = randomReceipt();
   const unit = nativeTaskScopeUnit(taskId);
-  ownedUnits.add(unit);
+  await assertUnitAbsent(unit);
+  ownedUnits.set(unit, nativeTaskScopeDescription(taskId, ownership));
   const descendantPidFile = join(root, "descendant.pid");
-  const sentinel = spawn("/usr/bin/python3", [
-    "-c",
-    "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
-  ], { stdio: "ignore" });
-  sentinels.push(sentinel);
-  assert.ok(sentinel.pid);
 
   const manager = new SystemdNativeTaskScopeManager({
     controlEnvironment: process.env,
@@ -283,41 +413,37 @@ async function proveLifecycle(
   const controlGroup = properties.get("ControlGroup");
   if (!controlGroup?.startsWith("/")) throw new Error("scope has no exact cgroup");
   for (const pid of [workerPid, descendantPid]) {
-    const cgroup = (await readFile(`/proc/${pid}/cgroup`, "utf8"))
-      .split("\n")
-      .find((line) => line.startsWith("0::"))
-      ?.slice(3);
-    assert.equal(cgroup, controlGroup);
+    assert.equal(await processControlGroup(pid), controlGroup);
   }
 
   await scope.stopAndConfirm();
   await waitFor("scope processes to stop", () =>
     !pidExists(workerPid) && !pidExists(descendantPid));
-  assert.equal(pidExists(sentinel.pid!), true);
-  assert.equal(await unitAbsentOrInactive(unit), true);
+  await waitFor("scope collection", () => unitAbsent(unit));
   ownedUnits.delete(unit);
 }
 
 async function proveCollision(
   root: string,
-  ownedUnits: Set<string>,
-  sentinels: ChildProcess[],
+  ownedUnits: OwnedUnits,
 ): Promise<void> {
-  const taskId = TASK_IDS.collision;
-  const ownership = receipt("22222222222222222222222222222222");
+  const taskId = randomTaskId();
+  const ownership = randomReceipt();
   const unit = nativeTaskScopeUnit(taskId);
-  ownedUnits.add(unit);
+  await assertUnitAbsent(unit);
   const manager = new SystemdNativeTaskScopeManager({
     controlEnvironment: process.env,
     confirmationTimeoutMs: 10_000,
   });
   const reserved = await manager.reserve(taskId, ownership, new AbortController().signal);
   const foreignPid = join(root, "foreign.pid");
+  const foreignDescription = `foreign-native-task-owner:${randomUUID()}`;
+  ownedUnits.set(unit, foreignDescription);
   const foreign = spawn("/usr/bin/systemd-run", [
     "--user",
     "--scope",
     `--unit=${unit}`,
-    "--description=foreign-native-task-owner",
+    `--description=${foreignDescription}`,
     "--collect",
     "--quiet",
     "--pipe",
@@ -333,10 +459,10 @@ async function proveCollision(
     env: taskEnvironment({ PID_FILE: foreignPid }),
     stdio: ["ignore", "ignore", "pipe"],
   });
-  sentinels.push(foreign);
+  foreign.stderr?.resume();
   await waitFor("foreign collision unit", async () => {
     try {
-      return (await unitProperties(unit)).get("Description") === "foreign-native-task-owner";
+      return (await unitProperties(unit)).get("Description") === foreignDescription;
     } catch { return false; }
   });
   const rejectedLauncher = reserved.spawn({
@@ -349,12 +475,11 @@ async function proveCollision(
   await assert.rejects(reserved.stopAndConfirm(), { code: "collision" });
   const foreignWorker = Number((await readFile(foreignPid, "utf8")).trim());
   assert.equal(pidExists(foreignWorker), true);
-  assert.equal((await unitProperties(unit)).get("Description"), "foreign-native-task-owner");
-  await systemctl(["stop", "--no-block", unit]);
-  await waitFor("foreign unit cleanup", () => unitAbsentOrInactive(unit));
+  assert.equal((await unitProperties(unit)).get("Description"), foreignDescription);
+  await stopOwnedUnit(ownedUnits, unit);
   const retried = await manager.reserve(taskId, ownership, new AbortController().signal);
   await retried.stopAndConfirm();
-  ownedUnits.delete(unit);
+  await assertUnitAbsent(unit);
 }
 
 function taskRecord(
@@ -394,43 +519,74 @@ function taskRecord(
 
 async function proveCrashRecovery(
   root: string,
-  ownedUnits: Set<string>,
+  ownedUnits: OwnedUnits,
 ): Promise<void> {
-  const taskId = TASK_IDS.recovery;
-  const ownership = receipt("33333333333333333333333333333333");
+  const taskId = randomTaskId();
+  const ownership = randomReceipt();
   const unit = nativeTaskScopeUnit(taskId);
-  ownedUnits.add(unit);
-  const firstManager = new SystemdNativeTaskScopeManager({
-    controlEnvironment: process.env,
-    confirmationTimeoutMs: 10_000,
-  });
-  const abandoned = await firstManager.reserve(
-    taskId,
-    ownership,
-    new AbortController().signal,
-  );
-  const launcher = abandoned.spawn({
-    executable: "/usr/bin/python3",
-    args: [
-      "-c",
-      "import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
-    ],
-    cwd: root,
-    environment: taskEnvironment(),
-  });
-  launcher.stderr?.resume();
-  await waitFor("recoverable scope", async () => {
-    try {
-      return (await unitProperties(unit)).get("Description")
-        === nativeTaskScopeDescription(taskId, ownership);
-    } catch { return false; }
-  });
-
+  const description = nativeTaskScopeDescription(taskId, ownership);
+  await assertUnitAbsent(unit);
+  ownedUnits.set(unit, description);
   const ghostHome = join(root, "recovery-home");
   await mkdir(ghostHome, { mode: 0o700 });
+  const readyFile = join(root, "crash-controller-ready.json");
+  const crash = randomService("ghost-native-task-crash-controller");
+  const testFile = await realpath(process.argv[1]!);
+  await startOwnedService(ownedUnits, crash.unit, crash.description, [
+    "/usr/bin/env",
+    "-i",
+    `HOME=${required("HOME")}`,
+    "PATH=/usr/bin:/bin",
+    `XDG_RUNTIME_DIR=${required("XDG_RUNTIME_DIR")}`,
+    `DBUS_SESSION_BUS_ADDRESS=${required("DBUS_SESSION_BUS_ADDRESS")}`,
+    `CI=${required("CI")}`,
+    `GITHUB_ACTIONS=${required("GITHUB_ACTIONS")}`,
+    `RUNNER_ENVIRONMENT=${required("RUNNER_ENVIRONMENT")}`,
+    `RUNNER_OS=${required("RUNNER_OS")}`,
+    `GITHUB_RUN_ID=${required("GITHUB_RUN_ID")}`,
+    `GITHUB_RUN_ATTEMPT=${required("GITHUB_RUN_ATTEMPT")}`,
+    `${INTEGRATION_FLAG}=1`,
+    `${INTEGRATION_UID}=${required(INTEGRATION_UID)}`,
+    `${CONTROLLER_UNIT}=${crash.unit}`,
+    `${CONTROLLER_DESCRIPTION}=${crash.description}`,
+    process.execPath,
+    "--bun",
+    testFile,
+    CRASH_CONTROLLER_MODE,
+    root,
+    taskId,
+    ownership.nonce,
+    readyFile,
+  ]);
+  await waitFor("crash controller readiness", async () => {
+    try { return (await readFile(readyFile, "utf8")).trim().length > 0; }
+    catch { return false; }
+  });
+  const readySource = await readFile(readyFile, "utf8");
+  assert.ok(Buffer.byteLength(readySource) <= 1_024);
+  const ready = JSON.parse(readySource) as {
+    controllerPid: unknown;
+    workerPid: unknown;
+  };
+  const controllerPid = Number(ready.controllerPid);
+  const workerPid = Number(ready.workerPid);
+  assert.ok(Number.isInteger(controllerPid) && controllerPid > 0);
+  assert.ok(Number.isInteger(workerPid) && workerPid > 0);
+  await assertOwnedUnit(crash.unit, crash.description, controllerPid);
+  let taskProperties = await assertOwnedUnit(unit, description);
+  assert.equal(await processControlGroup(workerPid), taskProperties.get("ControlGroup"));
+  assert.equal(pidExists(workerPid), true);
+
+  await assertOwnedUnit(crash.unit, crash.description, controllerPid);
+  await systemctl(["kill", "--kill-whom=all", "--signal=SIGKILL", crash.unit]);
+  await waitFor("crashed controller collection", () => unitAbsent(crash.unit));
+  ownedUnits.delete(crash.unit);
+  assert.equal(pidExists(controllerPid), false);
+  taskProperties = await assertOwnedUnit(unit, description);
+  assert.equal(await processControlGroup(workerPid), taskProperties.get("ControlGroup"));
+  assert.equal(pidExists(workerPid), true);
+
   const store = new TaskStore(ghostHome);
-  await store.initialize();
-  await store.write(taskRecord(root, taskId, ownership));
   const recoveryManager = new SystemdNativeTaskScopeManager({
     controlEnvironment: process.env,
     confirmationTimeoutMs: 10_000,
@@ -453,15 +609,61 @@ async function proveCrashRecovery(
     code: "daemon_restarted",
     message: "The daemon restarted before the task became quiescent.",
   });
-  assert.equal(await unitAbsentOrInactive(unit), true);
+  await waitFor("recovered scope collection", () => unitAbsent(unit));
+  assert.equal(pidExists(workerPid), false);
   ownedUnits.delete(unit);
-  await store.dispose();
+  await controller.dispose();
+}
+
+async function runCrashController(
+  root: string,
+  taskId: string,
+  nonce: string,
+  readyFile: string,
+): Promise<never> {
+  const ownership = receipt(nonce);
+  const unit = nativeTaskScopeUnit(taskId);
+  await assertUnitAbsent(unit);
+  const ghostHome = join(root, "recovery-home");
+  const workerPidFile = join(root, "crash-worker.pid");
+  const store = new TaskStore(ghostHome);
+  await store.initialize();
+  await store.write(taskRecord(root, taskId, ownership));
+  const manager = new SystemdNativeTaskScopeManager({
+    controlEnvironment: process.env,
+    confirmationTimeoutMs: 10_000,
+  });
+  const scope = await manager.reserve(taskId, ownership, new AbortController().signal);
+  const launcher = scope.spawn({
+    executable: "/usr/bin/python3",
+    args: [
+      "-c",
+      "import os,signal,time; open(os.environ['PID_FILE'],'w').write(str(os.getpid())); signal.signal(signal.SIGTERM,signal.SIG_IGN); time.sleep(3600)",
+    ],
+    cwd: root,
+    environment: taskEnvironment({ PID_FILE: workerPidFile }),
+  });
+  launcher.stderr?.resume();
+  await waitFor("recoverable scope", async () => {
+    try {
+      return (await unitProperties(unit)).get("Description")
+        === nativeTaskScopeDescription(taskId, ownership);
+    } catch { return false; }
+  });
+  await waitFor("recoverable worker pid", async () => {
+    try { return (await readFile(workerPidFile, "utf8")).trim().length > 0; }
+    catch { return false; }
+  });
+  const workerPid = Number((await readFile(workerPidFile, "utf8")).trim());
+  assert.ok(Number.isInteger(workerPid) && workerPid > 0);
+  await writeFile(readyFile, JSON.stringify({ controllerPid: process.pid, workerPid }));
+  return new Promise<never>(() => undefined);
 }
 
 async function proveImmediateCancellation(
   root: string,
   delayedLauncher: string,
-  ownedUnits: Set<string>,
+  ownedUnits: OwnedUnits,
 ): Promise<void> {
   const python = await resolveNativeHarnessExecutable({
     harness: "pi",
@@ -532,64 +734,101 @@ async function proveImmediateCancellation(
     binding,
   });
   const unit = nativeTaskScopeUnit(task.id);
-  ownedUnits.add(unit);
+  ownedUnits.set(unit, nativeTaskScopeDescription(task.id, task.ownership));
   await registrationSpawned.promise;
   const cancelled = await controller.cancel(task.id);
   assert.equal(cancelled.state, "cancelled");
-  assert.equal(await unitAbsentOrInactive(unit), true);
+  await waitFor("cancelled scope collection", () => unitAbsent(unit));
   ownedUnits.delete(unit);
   await controller.dispose();
 }
 
-async function main(): Promise<void> {
+async function verifyIntegrationBoundary(): Promise<void> {
   assert.equal(required(INTEGRATION_FLAG), "1");
   assert.equal(required("CI"), "true");
   assert.equal(required("GITHUB_ACTIONS"), "true");
+  assert.equal(required("RUNNER_ENVIRONMENT"), "github-hosted");
+  assert.equal(required("RUNNER_OS"), "Linux");
   const uid = process.getuid?.();
-  assert.ok(uid !== undefined && uid > 0, "integration must run as a dedicated non-root UID");
+  assert.ok(uid !== undefined && uid > 0, "integration must run as a non-root UID");
   assert.equal(String(uid), required(INTEGRATION_UID));
-  assert.notEqual(String(uid), required(OWNER_UID));
   assert.equal((await readFile("/proc/1/comm", "utf8")).trim(), "systemd");
   const runtime = required("XDG_RUNTIME_DIR");
   assert.equal(runtime, `/run/user/${uid}`);
+  assert.equal(await realpath(runtime), runtime);
   assert.equal(required("DBUS_SESSION_BUS_ADDRESS"), `unix:path=${runtime}/bus`);
+  const home = required("HOME");
+  assert.equal(await realpath(home), home);
   const [runtimeStats, busStats, homeStats] = await Promise.all([
     lstat(runtime),
     lstat(join(runtime, "bus")),
-    lstat(required("HOME")),
+    lstat(home),
   ]);
   assert.equal(runtimeStats.uid, uid);
   assert.equal(homeStats.uid, uid);
   assert.equal(busStats.isSocket(), true);
+  assert.equal(busStats.uid, uid);
   const version = await run("/usr/bin/systemctl", ["--version"], { PATH: "/usr/bin" });
   const parsedVersion = /^systemd ([0-9]+)$/mu.exec(version.stdout)?.[1];
   assert.ok(parsedVersion && Number(parsedVersion) >= 254);
   await systemctl(["show-environment"]);
+  const controllerUnit = required(CONTROLLER_UNIT);
+  const controllerDescription = required(CONTROLLER_DESCRIPTION);
+  assert.equal(controllerDescription, expectedControllerDescription(controllerUnit));
+  await assertOwnedUnit(controllerUnit, controllerDescription, process.pid);
+}
 
+async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "ghost-real-native-task-"));
   await chmod(root, 0o700);
-  const ownedUnits = new Set<string>();
-  const sentinels: ChildProcess[] = [];
+  const ownedUnits: OwnedUnits = new Map();
+  let sentinel: Sentinel | undefined;
+  let testError: unknown;
   try {
     const fixtures = await writeFixtures(root);
-    await proveLifecycle(root, fixtures.worker, ownedUnits, sentinels);
-    await proveCollision(root, ownedUnits, sentinels);
+    sentinel = await startSentinel(root, ownedUnits);
+    await proveLifecycle(root, fixtures.worker, ownedUnits);
+    await assertSentinel(sentinel);
+    await proveCollision(root, ownedUnits);
+    await assertSentinel(sentinel);
     await proveCrashRecovery(root, ownedUnits);
+    await assertSentinel(sentinel);
     await proveImmediateCancellation(root, fixtures.delayedLauncher, ownedUnits);
-  } finally {
-    for (const unit of ownedUnits) {
-      await systemctl(["stop", "--no-block", unit]).catch(() => undefined);
-      await waitFor(`cleanup ${unit}`, () => unitAbsentOrInactive(unit)).catch(() => undefined);
-    }
-    for (const child of sentinels) {
-      if (child.pid !== undefined && pidExists(child.pid)) child.kill("SIGKILL");
-      child.stdin?.destroy();
-      child.stdout?.destroy();
-      child.stderr?.destroy();
-    }
-    await rm(root, { recursive: true, force: true });
+    await assertSentinel(sentinel);
+  } catch (error) {
+    testError = error;
   }
+  const cleanupErrors: unknown[] = [];
+  for (const unit of [...ownedUnits.keys()]) {
+    if (unit === sentinel?.unit) continue;
+    try { await stopOwnedUnit(ownedUnits, unit); }
+    catch (error) { cleanupErrors.push(error); }
+  }
+  if (sentinel) {
+    try {
+      await assertSentinel(sentinel);
+      await stopOwnedUnit(ownedUnits, sentinel.unit);
+      await waitFor("sentinel process cleanup", () => !pidExists(sentinel.pid));
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+  }
+  await rm(root, { recursive: true, force: true });
+  if (ownedUnits.size > 0 || cleanupErrors.length > 0) {
+    throw new AggregateError(
+      testError === undefined ? cleanupErrors : [testError, ...cleanupErrors],
+      "real native-task cleanup was not confirmed",
+    );
+  }
+  if (testError !== undefined) throw testError;
   process.stdout.write("real native-task systemd scope integration passed\n");
 }
 
-await main();
+await verifyIntegrationBoundary();
+if (process.argv[2] === CRASH_CONTROLLER_MODE) {
+  assert.equal(process.argv.length, 7);
+  await runCrashController(process.argv[3]!, process.argv[4]!, process.argv[5]!, process.argv[6]!);
+} else {
+  assert.equal(process.argv.length, 2);
+  await main();
+}

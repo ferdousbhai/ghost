@@ -30,151 +30,100 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm --filter @ghost/extensions build
 
-      - name: Start a dedicated ephemeral user manager
-        id: manager
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$(cat /proc/1/comm)" == systemd ]]
-          systemd_version="$(systemctl --version | sed -n '1s/^systemd \([0-9][0-9]*\).*/\1/p')"
-          [[ "$systemd_version" =~ ^[0-9]+$ && "$systemd_version" -ge 254 ]]
-          test_user=ghost-scope-ci
-          test_uid=23456
-          runtime_unit="user-runtime-dir@$test_uid.service"
-          manager_unit="user@$test_uid.service"
-          override_dir="/run/systemd/system/$manager_unit.d"
-          override_file="$override_dir/ghost-ci-environment.conf"
-          generator_dir="/run/ghost-task-ci-$test_uid-environment-generators"
-          user_unit_dir="/run/ghost-task-ci-$test_uid-user-units"
-          dbus_override_dir="$user_unit_dir/dbus.socket.d"
-          dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"
-          diagnose_manager_failure() {
-            sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit" || true
-            sudo systemctl --no-pager show \
-              --property=LoadState \
-              --property=ActiveState \
-              --property=SubState \
-              --property=Result \
-              "$runtime_unit" "$manager_unit" || true
-            sudo journalctl --no-pager --lines=80 \
-              --unit "$runtime_unit" \
-              --unit "$manager_unit" || true
-          }
-          trap 'status=$?; if (( status != 0 )); then diagnose_manager_failure; fi; exit "$status"' EXIT
-          printf 'test_user=%s\n' "$test_user" >> "$GITHUB_OUTPUT"
-          printf 'test_uid=%s\n' "$test_uid" >> "$GITHUB_OUTPUT"
-          printf 'owner_uid=%s\n' "$(id -u)" >> "$GITHUB_OUTPUT"
-          printf 'bun=%s\n' "$(command -v bun)" >> "$GITHUB_OUTPUT"
-          ! getent passwd "$test_user" >/dev/null
-          ! getent passwd "$test_uid" >/dev/null
-          [[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]
-          sudo useradd --uid "$test_uid" --user-group --create-home --shell /bin/bash "$test_user"
-          [[ "$(id -u "$test_user")" == "$test_uid" ]]
-          sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
-          sudo install -d -m700 -o "$test_uid" -g "$test_uid" \
-            "/home/$test_user/.cache" \
-            "/home/$test_user/.local/share"
-          [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
-          [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
-          [[ "$user_unit_dir" == "/run/ghost-task-ci-23456-user-units" ]]
-          [[ "$dbus_override_file" == "/run/ghost-task-ci-23456-user-units/dbus.socket.d/ghost-ci-listen.conf" ]]
-          sudo install -d -m755 -- "$override_dir"
-          sudo install -d -m755 -- "$generator_dir"
-          sudo install -d -m755 -- "$user_unit_dir" "$dbus_override_dir"
-          sudo install -m644 /dev/null "$dbus_override_file"
-          printf '%s\n' \
-            '[Socket]' \
-            'ListenStream=' \
-            "ListenStream=/run/user/$test_uid/bus" \
-            'SocketMode=0600' \
-            | sudo tee "$dbus_override_file" >/dev/null
-          [[ "$(stat -c %u:%g:%a "$user_unit_dir")" == 0:0:755 ]]
-          [[ "$(stat -c %u:%g:%a "$dbus_override_dir")" == 0:0:755 ]]
-          [[ "$(stat -c %u:%g:%a "$dbus_override_file")" == 0:0:644 ]]
-          printf '%s\n' \
-            '[Service]' \
-            'PAMName=' \
-            "Environment=HOME=/home/$test_user" \
-            "Environment=USER=$test_user" \
-            "Environment=LOGNAME=$test_user" \
-            "Environment=XDG_RUNTIME_DIR=/run/user/$test_uid" \
-            "Environment=XDG_CONFIG_HOME=/home/$test_user/.config" \
-            "Environment=XDG_DATA_HOME=/home/$test_user/.local/share" \
-            "Environment=XDG_CACHE_HOME=/home/$test_user/.cache" \
-            'Environment=XDG_CONFIG_DIRS=/etc/xdg' \
-            'Environment=XDG_DATA_DIRS=/usr/local/share:/usr/share' \
-            "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus" \
-            "Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir" \
-            "Environment=SYSTEMD_UNIT_PATH=$user_unit_dir:" \
-            | sudo tee "$override_file" >/dev/null
-          sudo chmod 644 "$override_file"
-          sudo systemctl daemon-reload
-          sudo systemctl start "$runtime_unit" "$manager_unit"
-          sudo systemctl is-active --quiet "$runtime_unit"
-          sudo systemctl is-active --quiet "$manager_unit"
-          [[ -d "/run/user/$test_uid" ]]
-          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]
-          for _ in $(seq 1 300); do
-            [[ -S "/run/user/$test_uid/bus" ]] && break
-            sleep 0.1
-          done
-          [[ -S "/run/user/$test_uid/bus" ]]
-          [[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]
-          trap - EXIT
-
       - name: Exercise real receipt-bound scopes
         shell: bash
-        env:
-          TEST_USER: ${{ steps.manager.outputs.test_user }}
-          TEST_UID: ${{ steps.manager.outputs.test_uid }}
-          OWNER_UID: ${{ steps.manager.outputs.owner_uid }}
-          BUN_BIN: ${{ steps.manager.outputs.bun }}
         run: |
           set -euo pipefail
-          [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
-          exec sudo /usr/sbin/runuser -u "$TEST_USER" -- /usr/bin/env -i \
-            HOME="/home/$TEST_USER" \
-            PATH=/usr/bin:/bin \
-            TMPDIR="/home/$TEST_USER/tmp" \
-            XDG_RUNTIME_DIR="/run/user/$TEST_UID" \
-            DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TEST_UID/bus" \
-            CI=true \
-            GITHUB_ACTIONS=true \
-            GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1 \
-            GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID="$TEST_UID" \
-            GHOST_NATIVE_TASK_SCOPE_OWNER_UID="$OWNER_UID" \
-            "$BUN_BIN" --bun \
-              packages/daemon/test/native-task-scope.real-integration.ts
-
-      - name: Remove the dedicated user manager
-        if: always() && steps.manager.outputs.test_user != ''
-        shell: bash
-        env:
-          TEST_USER: ${{ steps.manager.outputs.test_user }}
-          TEST_UID: ${{ steps.manager.outputs.test_uid }}
-        run: |
-          set -euo pipefail
-          [[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]
-          override_dir="/run/systemd/system/user@$TEST_UID.service.d"
-          override_file="$override_dir/ghost-ci-environment.conf"
-          generator_dir="/run/ghost-task-ci-$TEST_UID-environment-generators"
-          user_unit_dir="/run/ghost-task-ci-$TEST_UID-user-units"
-          dbus_override_dir="$user_unit_dir/dbus.socket.d"
-          dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"
-          [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
-          [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
-          [[ "$user_unit_dir" == "/run/ghost-task-ci-23456-user-units" ]]
-          [[ "$dbus_override_file" == "/run/ghost-task-ci-23456-user-units/dbus.socket.d/ghost-ci-listen.conf" ]]
-          if getent passwd "$TEST_USER" >/dev/null; then
-            sudo loginctl disable-linger "$TEST_USER" || true
-            sudo systemctl stop "user@$TEST_UID.service" || true
-            sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true
-            sudo unlink -- "$dbus_override_file" || true
-            sudo rmdir -- "$dbus_override_dir" || true
-            sudo rmdir -- "$user_unit_dir" || true
-            sudo unlink -- "$override_file" || true
-            sudo rmdir -- "$override_dir" || true
-            sudo rmdir -- "$generator_dir" || true
-            sudo systemctl daemon-reload
-            sudo userdel --remove "$TEST_USER"
-          fi
+          [[ "$CI" == true ]]
+          [[ "$GITHUB_ACTIONS" == true ]]
+          [[ "$RUNNER_ENVIRONMENT" == github-hosted ]]
+          [[ "$RUNNER_OS" == Linux ]]
+          [[ "$(cat /proc/1/comm)" == systemd ]]
+          uid="$(id -u)"
+          [[ "$uid" =~ ^[0-9]+$ && "$uid" -gt 0 ]]
+          systemd_version="$(systemctl --version | sed -n '1s/^systemd \([0-9][0-9]*\).*/\1/p')"
+          [[ "$systemd_version" =~ ^[0-9]+$ && "$systemd_version" -ge 254 ]]
+          canonical_home="$(realpath -e -- "$HOME")"
+          [[ "$HOME" == "$canonical_home" ]]
+          [[ "$(stat -c %u "$HOME")" == "$uid" ]]
+          [[ "$XDG_RUNTIME_DIR" == "/run/user/$uid" ]]
+          [[ "$(realpath -e -- "$XDG_RUNTIME_DIR")" == "$XDG_RUNTIME_DIR" ]]
+          [[ "$(stat -c %u "$XDG_RUNTIME_DIR")" == "$uid" ]]
+          [[ "$DBUS_SESSION_BUS_ADDRESS" == "unix:path=$XDG_RUNTIME_DIR/bus" ]]
+          [[ -S "$XDG_RUNTIME_DIR/bus" ]]
+          [[ "$(stat -c %u "$XDG_RUNTIME_DIR/bus")" == "$uid" ]]
+          systemctl --user show-environment >/dev/null
+          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,4}$ ]]
+          suffix="$(tr -d - < /proc/sys/kernel/random/uuid)"
+          [[ "$suffix" =~ ^[0-9a-f]{32}$ ]]
+          controller_unit="ghost-native-task-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${suffix}.service"
+          controller_description="ghost-native-task-ci-receipt:v1:${GITHUB_RUN_ID}:${GITHUB_RUN_ATTEMPT}:${suffix}"
+          controller_load_state="$(systemctl --user show "$controller_unit" --property=LoadState --value 2>/dev/null || true)"
+          [[ "$controller_load_state" == not-found ]]
+          bun_bin="$(realpath -e -- "$(command -v bun)")"
+          [[ "$bun_bin" == /* && -x "$bun_bin" ]]
+          test_file="$(realpath -e -- packages/daemon/test/native-task-scope.real-integration.ts)"
+          [[ "$test_file" == "$GITHUB_WORKSPACE/"* && -f "$test_file" ]]
+          diagnose() {
+            systemctl --user --no-pager --full status "$controller_unit" || true
+            journalctl --user --no-pager --lines=80 --unit "$controller_unit" || true
+          }
+          cleanup() {
+            status=$?
+            cleanup_status=0
+            load_state="$(systemctl --user show "$controller_unit" --property=LoadState --value 2>/dev/null || true)"
+            if [[ "$load_state" != not-found ]]; then
+              initial_receipt="$(systemctl --user show "$controller_unit" --property=Description --value)" || cleanup_status=1
+              if [[ "$initial_receipt" == "$controller_description" ]]; then
+                systemctl --user stop "$controller_unit" || cleanup_status=1
+                load_state="$(systemctl --user show "$controller_unit" --property=LoadState --value 2>/dev/null || true)"
+                if [[ "$load_state" != not-found ]]; then
+                  remaining_receipt="$(systemctl --user show "$controller_unit" --property=Description --value)" || cleanup_status=1
+                  if [[ "$remaining_receipt" == "$controller_description" ]]; then
+                    systemctl --user reset-failed "$controller_unit" || cleanup_status=1
+                  else
+                    cleanup_status=1
+                  fi
+                fi
+                for _ in $(seq 1 100); do
+                  load_state="$(systemctl --user show "$controller_unit" --property=LoadState --value 2>/dev/null || true)"
+                  [[ "$load_state" == not-found ]] && break
+                  sleep 0.1
+                done
+                [[ "$load_state" == not-found ]] || cleanup_status=1
+              else
+                cleanup_status=1
+              fi
+            fi
+            if (( status != 0 || cleanup_status != 0 )); then diagnose; fi
+            if (( status != 0 )); then exit "$status"; fi
+            exit "$cleanup_status"
+          }
+          trap cleanup EXIT
+          /usr/bin/systemd-run --user \
+            "--unit=$controller_unit" \
+            "--description=$controller_description" \
+            --service-type=exec \
+            --slice=session.slice \
+            --wait \
+            --pipe \
+            --collect \
+            --quiet \
+            -- \
+            /usr/bin/env -i \
+              HOME="$HOME" \
+              PATH=/usr/bin:/bin \
+              XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
+              DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+              CI="$CI" \
+              GITHUB_ACTIONS="$GITHUB_ACTIONS" \
+              RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
+              RUNNER_OS="$RUNNER_OS" \
+              GITHUB_RUN_ID="$GITHUB_RUN_ID" \
+              GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+              GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1 \
+              GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID="$uid" \
+              GHOST_NATIVE_TASK_SCOPE_CONTROLLER_UNIT="$controller_unit" \
+              GHOST_NATIVE_TASK_SCOPE_CONTROLLER_DESCRIPTION="$controller_description" \
+              "$bun_bin" --bun "$test_file"

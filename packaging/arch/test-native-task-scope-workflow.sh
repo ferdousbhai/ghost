@@ -42,92 +42,133 @@ PY
   fi
 }
 
+expect_insert_rejected() {
+  local name="$1"
+  local marker="$2"
+  local inserted="$3"
+  python - "$workflow" "$work/$name.yml" "$marker" "$inserted" <<'PY'
+from pathlib import Path
+import sys
+
+source = Path(sys.argv[1])
+target = Path(sys.argv[2])
+marker = sys.argv[3]
+inserted = sys.argv[4]
+text = source.read_text(encoding="utf-8")
+if text.count(marker) != 1:
+    raise SystemExit(f"fixture cannot locate {marker!r}")
+target.write_text(text.replace(marker, f"{marker}\n{inserted}"), encoding="utf-8")
+PY
+  local output
+  if output="$(python "$checker" "$work/$name.yml" 2>&1)"; then
+    printf 'workflow checker accepted hostile fixture: %s\n' "$name" >&2
+    exit 1
+  fi
+  if grep -Fq Traceback <<< "$output"; then
+    printf 'workflow checker produced a traceback for %s:\n%s\n' "$name" "$output" >&2
+    exit 1
+  fi
+}
+
 expect_rejected runner 'runs-on: ubuntu-24.04' 'runs-on: ubuntu-latest'
-expect_rejected ci-guard 'GITHUB_ACTIONS=true' 'GITHUB_ACTIONS=false'
-expect_rejected opt-in \
-  'GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1' \
-  'GHOST_NATIVE_TASK_SCOPE_INTEGRATION=0'
+expect_rejected ci-guard '[[ "$CI" == true ]]' '[[ "$CI" == false ]]'
+expect_rejected actions-guard '[[ "$GITHUB_ACTIONS" == true ]]' '[[ "$GITHUB_ACTIONS" == false ]]'
+expect_rejected hosted-guard \
+  '[[ "$RUNNER_ENVIRONMENT" == github-hosted ]]' \
+  '[[ "$RUNNER_ENVIRONMENT" == self-hosted ]]'
+expect_rejected linux-guard '[[ "$RUNNER_OS" == Linux ]]' '[[ "$RUNNER_OS" == Windows ]]'
+expect_rejected pid1-guard \
+  '[[ "$(cat /proc/1/comm)" == systemd ]]' \
+  ': "PID 1 not checked"'
 expect_rejected uid-guard \
-  'test_uid=23456' \
-  'test_uid="$(id -u)"'
-expect_rejected manager-xdg-override \
-  '"Environment=XDG_RUNTIME_DIR=/run/user/$test_uid"' \
-  '"Environment=XDG_RUNTIME_DIR=/run/user/1001"'
-expect_rejected manager-xdg-config \
-  '"Environment=XDG_CONFIG_HOME=/home/$test_user/.config"' \
-  '"Environment=XDG_CONFIG_HOME=/home/runner/.config"'
-expect_rejected manager-pam-reset \
-  "            'PAMName=' \\" \
-  "            'PAMName=systemd-user' \\"
-expect_rejected manager-environment-generator-path \
-  '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir"' \
-  '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=/usr/lib/systemd/user-environment-generators"'
-expect_rejected manager-user-unit-path \
-  '"Environment=SYSTEMD_UNIT_PATH=$user_unit_dir:"' \
-  '"Environment=SYSTEMD_UNIT_PATH=/usr/lib/systemd/user"'
-expect_rejected manager-user-unit-defaults \
-  '"Environment=SYSTEMD_UNIT_PATH=$user_unit_dir:"' \
-  '"Environment=SYSTEMD_UNIT_PATH=$user_unit_dir"'
-expect_rejected manager-user-unit-root \
-  'user_unit_dir="/run/ghost-task-ci-$test_uid-user-units"' \
-  'user_unit_dir="/home/$test_user/.config/systemd/user"'
-expect_rejected manager-user-unit-mode \
-  'sudo install -d -m755 -- "$user_unit_dir" "$dbus_override_dir"' \
-  'sudo install -d -m777 -- "$user_unit_dir" "$dbus_override_dir"'
-expect_rejected manager-dbus-override-mode \
-  'sudo install -m644 /dev/null "$dbus_override_file"' \
-  'sudo install -m666 /dev/null "$dbus_override_file"'
-expect_rejected manager-dbus-listen \
-  '"ListenStream=/run/user/$test_uid/bus"' \
-  '"ListenStream=/run/user/1001/bus"'
-expect_rejected manager-dbus-reset \
-  "            'ListenStream=' \\" \
-  "            'ListenStream=/run/user/1001/bus' \\"
-expect_rejected manager-bus-override \
-  '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus"' \
-  '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus"'
-expect_rejected runtime-dir-start \
-  'sudo systemctl start "$runtime_unit" "$manager_unit"' \
-  'sudo systemctl start "$manager_unit"'
-expect_rejected runtime-dir-active \
-  'sudo systemctl is-active --quiet "$runtime_unit"' \
-  ': "runtime directory activity not checked"'
-expect_rejected manager-start \
-  'sudo systemctl start "$runtime_unit" "$manager_unit"' \
-  'sudo systemctl start "$runtime_unit"'
-expect_rejected startup-order \
-  $'          sudo systemctl is-active --quiet "$runtime_unit"\n          sudo systemctl is-active --quiet "$manager_unit"' \
-  $'          sudo systemctl is-active --quiet "$manager_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"'
+  '[[ "$uid" =~ ^[0-9]+$ && "$uid" -gt 0 ]]' \
+  '[[ "$uid" =~ ^[0-9]+$ ]]'
+expect_rejected systemd-version \
+  '[[ "$systemd_version" =~ ^[0-9]+$ && "$systemd_version" -ge 254 ]]' \
+  '[[ "$systemd_version" =~ ^[0-9]+$ ]]'
+expect_rejected home-canonical \
+  '[[ "$HOME" == "$canonical_home" ]]' \
+  '[[ -d "$HOME" ]]'
+expect_rejected runtime-exact \
+  '[[ "$XDG_RUNTIME_DIR" == "/run/user/$uid" ]]' \
+  '[[ -d "$XDG_RUNTIME_DIR" ]]'
+expect_rejected runtime-owner \
+  '[[ "$(stat -c %u "$XDG_RUNTIME_DIR")" == "$uid" ]]' \
+  '[[ -d "$XDG_RUNTIME_DIR" ]]'
+expect_rejected bus-exact \
+  '[[ "$DBUS_SESSION_BUS_ADDRESS" == "unix:path=$XDG_RUNTIME_DIR/bus" ]]' \
+  '[[ -n "$DBUS_SESSION_BUS_ADDRESS" ]]'
 expect_rejected bus-owner \
-  '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]' \
-  '[[ -S "/run/user/$test_uid/bus" ]]'
+  '[[ "$(stat -c %u "$XDG_RUNTIME_DIR/bus")" == "$uid" ]]' \
+  '[[ -S "$XDG_RUNTIME_DIR/bus" ]]'
+expect_rejected manager-probe \
+  'systemctl --user show-environment >/dev/null' \
+  ': "user manager environment not checked"'
+expect_rejected run-id-bound \
+  '[[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]' \
+  '[[ -n "$GITHUB_RUN_ID" ]]'
+expect_rejected random-suffix \
+  'suffix="$(tr -d - < /proc/sys/kernel/random/uuid)"' \
+  'suffix=constant'
+expect_rejected unique-unit \
+  'controller_unit="ghost-native-task-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${suffix}.service"' \
+  'controller_unit=ghost-native-task-ci.service'
+expect_rejected absent-unit \
+  '[[ "$controller_load_state" == not-found ]]' \
+  ': "existing controller unit accepted"'
+expect_rejected controller-description \
+  '"--description=$controller_description"' \
+  '--description=unbound-controller'
+expect_rejected controller-service-type '--service-type=exec' '--service-type=simple'
+expect_rejected controller-slice '--slice=session.slice' '--slice=app.slice'
+expect_rejected controller-wait '            --wait \' '            --no-block \'
+expect_rejected controller-pipe '            --pipe \' '            --pty \'
+expect_rejected finite-environment '            /usr/bin/env -i \' '            /usr/bin/env \'
+expect_rejected integration-opt-in \
+  '              GHOST_NATIVE_TASK_SCOPE_INTEGRATION=1 \' \
+  '              GHOST_NATIVE_TASK_SCOPE_INTEGRATION=0 \'
+expect_rejected exact-test-command \
+  '              "$bun_bin" --bun "$test_file"' \
+  '              bun packages/daemon/test/native-task-scope.real-integration.ts'
+expect_rejected cleanup-description \
+  '[[ "$initial_receipt" == "$controller_description" ]]' \
+  '[[ -n "$initial_receipt" ]]'
+expect_rejected cleanup-remaining-description \
+  '[[ "$remaining_receipt" == "$controller_description" ]]' \
+  '[[ -n "$remaining_receipt" ]]'
+expect_rejected cleanup-confirmed \
+  '[[ "$load_state" == not-found ]] || cleanup_status=1' \
+  ': "controller cleanup not confirmed"'
 expect_rejected diagnostic-status-scope \
-  'sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit"' \
-  'sudo systemctl --no-pager --full status'
+  'systemctl --user --no-pager --full status "$controller_unit"' \
+  'systemctl --user --no-pager --full status'
 expect_rejected diagnostic-journal-scope \
-  $'            sudo journalctl --no-pager --lines=80 \\\n              --unit "$runtime_unit" \\\n              --unit "$manager_unit" || true' \
-  '            sudo journalctl --no-pager --lines=80 || true'
+  'journalctl --user --no-pager --lines=80 --unit "$controller_unit"' \
+  'journalctl --user --no-pager --lines=80'
 expect_rejected diagnostic-journal-bound \
-  'sudo journalctl --no-pager --lines=80' \
-  'sudo journalctl --no-pager --lines=200'
-expect_rejected cleanup-condition \
-  "if: always() && steps.manager.outputs.test_user != ''" \
-  'if: always()'
-expect_rejected cleanup-runtime-dir \
-  'sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true' \
-  ': "runtime directory unit not stopped"'
-expect_rejected cleanup-override \
-  'sudo unlink -- "$override_file" || true' \
-  ': "ephemeral manager override not removed"'
-expect_rejected cleanup-generator-dir \
-  'sudo rmdir -- "$generator_dir" || true' \
-  ': "ephemeral generator directory not removed"'
-expect_rejected cleanup-dbus-override \
-  'sudo unlink -- "$dbus_override_file" || true' \
-  ': "ephemeral dbus override not removed"'
-expect_rejected cleanup-user-unit-dir \
-  'sudo rmdir -- "$user_unit_dir" || true' \
-  ': "ephemeral user unit directory not removed"'
+  'journalctl --user --no-pager --lines=80' \
+  'journalctl --user --no-pager --lines=200'
+expect_insert_rejected forbidden-sudo \
+  '          uid="$(id -u)"' \
+  '          sudo true'
+expect_insert_rejected forbidden-runuser \
+  '          uid="$(id -u)"' \
+  '          runuser -u runner -- true'
+expect_insert_rejected forbidden-useradd \
+  '          uid="$(id -u)"' \
+  '          useradd synthetic-ci-user'
+expect_insert_rejected forbidden-loginctl \
+  '          uid="$(id -u)"' \
+  '          loginctl enable-linger runner'
+expect_insert_rejected forbidden-user-unit \
+  '          uid="$(id -u)"' \
+  '          systemctl start user@23456.service'
+expect_insert_rejected forbidden-system-dropin \
+  '          uid="$(id -u)"' \
+  '          install -d /run/systemd/system/user@23456.service.d'
+expect_insert_rejected forbidden-pattern-kill \
+  '          uid="$(id -u)"' \
+  '          pkill -f ghost-native-task'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'
