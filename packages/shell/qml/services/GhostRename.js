@@ -11,8 +11,6 @@ var ownerKeys = [
     "delegatedTasksGhost",
     "projectGhost",
     "mcpGhost",
-    "liveGhost",
-    "collabGhost",
     "activeGhost",
     "memoryGhost"
 ];

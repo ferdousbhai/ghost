@@ -7,7 +7,6 @@ Bubble 1.0 Bubble.qml
 CodeView 1.0 CodeView.qml
 Composer 1.0 Composer.qml
 CommandsBrowser 1.0 CommandsBrowser.qml
-ConnectBrowser 1.0 ConnectBrowser.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
 Conversations 1.0 Conversations.qml
 DelegationBrowser 1.0 DelegationBrowser.qml

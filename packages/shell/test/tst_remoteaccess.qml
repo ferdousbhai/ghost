@@ -179,16 +179,13 @@ TestCase {
         }
     }
 
-    function test_navigationKeepsPhoneAccessBesideRemote(): void {
+    function test_navigationOffersPhoneAccess(): void {
         const navigation = createTemporaryObject(navigationComponent, tc);
         verify(navigation !== null);
-        const connectIndex = navigation.destinations.findIndex(function (destination) {
-            return destination.id === "connect";
-        });
         const remoteIndex = navigation.destinations.findIndex(function (destination) {
             return destination.id === "remote";
         });
-        compare(remoteIndex, connectIndex + 1);
+        verify(remoteIndex >= 0);
         let selected = "";
         navigation.selected.connect(function (section) { selected = section; });
         navigation.activate(remoteIndex);

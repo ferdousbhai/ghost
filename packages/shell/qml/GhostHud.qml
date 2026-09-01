@@ -155,8 +155,6 @@ FloatingWindow {
             Ghostd.fetchSessionResources(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
-        } else if (section === "connect") {
-            Ghostd.fetchConnect(false);
         } else if (section === "memory") {
             Ghostd.fetchMemory(false);
         }
@@ -1168,14 +1166,6 @@ FloatingWindow {
             McpBrowser {
                 id: mcpBrowser
                 visible: hud.currentSection === "mcp"
-                    && !hud.loginOpen && !hud.switcherOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-
-            ConnectBrowser {
-                id: connectBrowser
-                visible: hud.currentSection === "connect"
                     && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true

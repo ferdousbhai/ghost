@@ -62,9 +62,8 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    // Phone access is daemon-global rather than ghost- or conversation-scoped.
-    // Keep its owner/request state outside clearConnect(), which owns the
-    // selected conversation's live-voice and collaboration capabilities.
+    // Phone access is daemon-global rather than ghost- or conversation-scoped,
+    // so its owner/request state survives ghost and conversation switches.
 
     function makeRemoteRequest(): var {
         return typeof root.remoteRequestFactory === "function"
@@ -865,21 +864,6 @@ Singleton {
     readonly property bool workHasRunningJobs: root.workRunningJobCount > 0
     readonly property bool workHasContent: root.workJobs.length > 0 || root.workError !== ""
 
-    property var liveStatus: ({ phase: "idle" })
-    property bool liveLoading: false
-    property bool liveMutating: false
-    property bool liveNotSupported: false
-    property string liveError: ""
-    property string liveGhost: ""
-    property string liveSessionId: ""
-    property var collabStatus: ({ active: false })
-    property bool collabLoading: false
-    property bool collabMutating: false
-    property bool collabNotSupported: false
-    property string collabError: ""
-    property string collabGhost: ""
-    property string collabSessionId: ""
-
     // A ghost owns many conversations (pi sessions). The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
@@ -939,8 +923,6 @@ Singleton {
     signal queueMessageRejected(string text)
     signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
-    signal liveActionFinished(string action, bool ok)
-    signal collabActionFinished(string action, bool writable, bool ok)
     signal memoryWriteFinished(string path, bool ok)
     signal hookConfigWriteFinished(bool ok)
     signal hooksConnectionReset(int epoch)
@@ -1053,8 +1035,6 @@ Singleton {
     property var workMutationRequest: null
     /** Test seam; production constructs native QML XHRs. */
     property var workRequestFactory: null
-    property var liveRequest: null
-    property var collabRequest: null
     property var greetingRequest: null
     property var recapRequest: null
     /** Test seam; production constructs the native recap XHR. */
@@ -1413,7 +1393,6 @@ Singleton {
         root.clearSessionResources();
         root.clearProject();
         root.clearMcp();
-        root.clearConnect();
         root.refresh();
     }
 
@@ -1582,8 +1561,6 @@ Singleton {
             delegatedTasksGhost: root.delegatedTasksGhost,
             projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
-            liveGhost: root.liveGhost,
-            collabGhost: root.collabGhost,
             activeGhost: root.activeGhost,
             memoryGhost: root.memoryGhost
         };
@@ -1600,8 +1577,6 @@ Singleton {
         root.delegatedTasksGhost = state.delegatedTasksGhost;
         root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
-        root.liveGhost = state.liveGhost;
-        root.collabGhost = state.collabGhost;
         root.activeGhost = state.activeGhost;
         root.memoryGhost = state.memoryGhost;
     }
@@ -1654,7 +1629,6 @@ Singleton {
         root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
-        root.clearConnect();
     }
 
     function selectGhost(name: string): void {
@@ -1687,7 +1661,6 @@ Singleton {
         root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
-        root.clearConnect();
         root.fetchCurrentModel();
         root.fetchSessions(name);
         root.fetchGreeting();
@@ -1791,7 +1764,6 @@ Singleton {
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearSessionResources();
-        root.clearConnect();
         root.fetchProject(false, false);
         return target;
     }
@@ -3036,246 +3008,6 @@ Singleton {
     }
 
 
-    function clearConnect(): void {
-        if (root.liveRequest && root.liveRequest.readyState !== 4)
-            root.liveRequest.abort();
-        if (root.collabRequest && root.collabRequest.readyState !== 4)
-            root.collabRequest.abort();
-        root.liveRequest = null;
-        root.collabRequest = null;
-        root.liveStatus = ({ phase: "idle" });
-        root.liveLoading = false;
-        root.liveMutating = false;
-        root.liveNotSupported = false;
-        root.liveError = "";
-        root.liveGhost = "";
-        root.liveSessionId = "";
-        root.collabStatus = ({ active: false });
-        root.collabLoading = false;
-        root.collabMutating = false;
-        root.collabNotSupported = false;
-        root.collabError = "";
-        root.collabGhost = "";
-        root.collabSessionId = "";
-    }
-
-    function responseNotSupported(body: var): bool {
-        return body && typeof body === "object" && (body.supported === false
-            || body.code === "not_supported" || body.errorCode === "not_supported"
-            || (body.error && body.error.code === "not_supported"));
-    }
-
-    function fetchConnect(force: bool): void {
-        root.fetchLive(force);
-        root.fetchCollab(force);
-    }
-
-    function applyLiveStatus(body: var, ghost: string, sessionId: string): bool {
-        if (!body || typeof body !== "object" || Array.isArray(body)) return false;
-        root.liveStatus = body;
-        root.liveNotSupported = root.responseNotSupported(body);
-        root.liveGhost = ghost;
-        root.liveSessionId = sessionId;
-        return true;
-    }
-
-    function fetchLive(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const sessionId = root.ensureSession(ghost);
-        if (!force && root.liveGhost === ghost && root.liveSessionId === sessionId) return;
-        if (root.liveRequest && root.liveRequest.readyState !== 4) {
-            if (!force) return;
-            root.liveRequest.abort();
-        }
-        const xhr = new XMLHttpRequest();
-        root.liveRequest = xhr;
-        root.liveLoading = true;
-        root.liveError = "";
-        root.liveGhost = ghost;
-        root.liveSessionId = sessionId;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.liveRequest) return;
-            root.liveLoading = false;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyLiveStatus(JSON.parse(xhr.responseText), ghost, sessionId))
-                        throw new Error("invalid status");
-                    root.liveError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.liveError = "ghostd sent malformed live-voice status";
-                }
-            } else if (root.errorCode(xhr) === "not_supported") {
-                root.liveNotSupported = true;
-                root.liveStatus = ({
-                    supported: false,
-                    code: "not_supported",
-                    message: root.errorDetail(xhr)
-                });
-                root.liveError = "";
-            } else {
-                root.liveError = root.describeError(xhr, "GET live voice");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/live", ({}), null);
-    }
-
-    function liveAction(action: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || root.liveMutating
-                || ["start", "mute", "unmute", "stop"].indexOf(action) < 0) return;
-        const sessionId = root.ensureSession(ghost);
-        if (root.liveRequest && root.liveRequest.readyState !== 4)
-            root.liveRequest.abort();
-        const xhr = new XMLHttpRequest();
-        root.liveRequest = xhr;
-        root.liveMutating = true;
-        root.liveError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.liveRequest) return;
-            root.liveMutating = false;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                try {
-                    if (!root.applyLiveStatus(JSON.parse(xhr.responseText), ghost, sessionId))
-                        throw new Error("invalid status");
-                    root.liveError = "";
-                    root.reachable = true;
-                    root.liveActionFinished(action, true);
-                } catch (error) {
-                    root.liveError = "ghostd sent malformed live-voice status";
-                    root.liveActionFinished(action, false);
-                }
-            } else if (root.errorCode(xhr) === "not_supported") {
-                root.liveNotSupported = true;
-                root.liveStatus = ({
-                    supported: false,
-                    code: "not_supported",
-                    message: root.errorDetail(xhr)
-                });
-                root.liveError = "";
-                root.liveActionFinished(action, false);
-            } else {
-                root.liveError = root.describeError(xhr, "POST live voice");
-                root.liveActionFinished(action, false);
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/live",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ action: action }));
-    }
-
-    function applyCollabStatus(body: var, ghost: string, sessionId: string): bool {
-        if (!body || typeof body !== "object" || Array.isArray(body)) return false;
-        root.collabStatus = body;
-        root.collabNotSupported = root.responseNotSupported(body);
-        root.collabGhost = ghost;
-        root.collabSessionId = sessionId;
-        return true;
-    }
-
-    function fetchCollab(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const sessionId = root.ensureSession(ghost);
-        if (!force && root.collabGhost === ghost
-                && root.collabSessionId === sessionId) return;
-        if (root.collabRequest && root.collabRequest.readyState !== 4) {
-            if (!force) return;
-            root.collabRequest.abort();
-        }
-        const xhr = new XMLHttpRequest();
-        root.collabRequest = xhr;
-        root.collabLoading = true;
-        root.collabError = "";
-        root.collabGhost = ghost;
-        root.collabSessionId = sessionId;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.collabRequest) return;
-            root.collabLoading = false;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyCollabStatus(JSON.parse(xhr.responseText), ghost, sessionId))
-                        throw new Error("invalid status");
-                    root.collabError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.collabError = "ghostd sent malformed collaboration status";
-                }
-            } else if (root.errorCode(xhr) === "not_supported") {
-                root.collabNotSupported = true;
-                root.collabStatus = ({
-                    supported: false,
-                    code: "not_supported",
-                    message: root.errorDetail(xhr)
-                });
-                root.collabError = "";
-            } else {
-                root.collabError = root.describeError(xhr, "GET collaboration");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/collab", ({}), null);
-    }
-
-    function collabAction(action: string, relayUrl: string, writable: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || root.collabMutating
-                || ["start", "stop"].indexOf(action) < 0) return;
-        const sessionId = root.ensureSession(ghost);
-        if (root.collabRequest && root.collabRequest.readyState !== 4)
-            root.collabRequest.abort();
-        const body = { action: action };
-        const relay = relayUrl.trim();
-        if (action === "start") {
-            body.writable = writable;
-            body.confirmed = true;
-            if (relay !== "") body.relayUrl = relay;
-        }
-        const xhr = new XMLHttpRequest();
-        root.collabRequest = xhr;
-        root.collabMutating = true;
-        root.collabError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.collabRequest) return;
-            root.collabMutating = false;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                try {
-                    if (!root.applyCollabStatus(JSON.parse(xhr.responseText), ghost, sessionId))
-                        throw new Error("invalid status");
-                    root.collabError = "";
-                    root.reachable = true;
-                    root.collabActionFinished(action, writable, true);
-                } catch (error) {
-                    root.collabError = "ghostd sent malformed collaboration status";
-                    root.collabActionFinished(action, writable, false);
-                }
-            } else if (root.errorCode(xhr) === "not_supported") {
-                root.collabNotSupported = true;
-                root.collabStatus = ({
-                    supported: false,
-                    code: "not_supported",
-                    message: root.errorDetail(xhr)
-                });
-                root.collabError = "";
-                root.collabActionFinished(action, writable, false);
-            } else {
-                root.collabError = root.describeError(xhr, "POST collaboration");
-                root.collabActionFinished(action, writable, false);
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/collab",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify(body));
-    }
-
     /**
      * Ask the active ghost for its opening line.
      *
@@ -3489,7 +3221,6 @@ Singleton {
         root.clearCommands();
         root.clearSessionResources();
         root.clearProject();
-        root.clearConnect();
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
         root.fetchGreeting();
@@ -3555,8 +3286,7 @@ Singleton {
                         root.clearCommands();
                         root.clearSessionResources();
                         root.clearProject();
-                        root.clearConnect();
-                        root.clearGreeting();
+                                        root.clearGreeting();
                         root.fetchGreeting();
                     }
                     root.sessionsError = "";
@@ -3703,7 +3433,6 @@ Singleton {
         root.clearSessionResources();
         // Opening the selected title reaches here without changing its identity.
         root.clearWork();
-        root.clearConnect();
         // A conversation with its own history needs no opening line; a greeting
         // would be answering a question nobody just asked.
         root.clearGreeting();

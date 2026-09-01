@@ -23,8 +23,6 @@ TestCase {
             delegatedTasksGhost: "Casper",
             projectGhost: "Casper",
             mcpGhost: "Casper",
-            liveGhost: "Casper",
-            collabGhost: "Casper",
             activeGhost: "Casper",
             memoryGhost: "Casper"
         };
@@ -73,7 +71,7 @@ TestCase {
         compare(renamed.ghosts[0].dir, "/tmp/ghosts/Spooky");
         for (const owner of [
             "greetingGhost", "loginGhost", "commandsGhost", "delegatedTasksGhost", "mcpGhost",
-            "projectGhost", "liveGhost", "collabGhost", "activeGhost", "memoryGhost"
+            "projectGhost", "activeGhost", "memoryGhost"
         ]) compare(renamed[owner], "Spooky");
     }
 }
