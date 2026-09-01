@@ -62,6 +62,7 @@ export {
   resolveClaudeCodeExecutable,
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryFactory,
+  type ClaudePrincipalTaskContextFactory,
   type ClaudeCodeProbeOptions,
   type ClaudeCodeProbeResult,
   type ClaudeCodeRuntimeOptions,
@@ -82,18 +83,96 @@ export {
 } from "./claude-pi-messages.js";
 export {
   captureClaudeCodeEnvironment,
+  captureNativeHarnessEnvironment,
   CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN,
   CLAUDE_CODE_SAFE_ENV_VARS,
   CLAUDE_CODE_VERTEX_REGION_ENV_VARS,
+  CODEX_NATIVE_SAFE_ENV_VARS,
   findProviderCredentialEnv,
+  NATIVE_HARNESS_OPERATIONAL_ENV_VARS,
   PI_OFFLINE_ENV_VAR,
+  PI_NATIVE_SAFE_ENV_VARS,
   PROVIDER_CREDENTIAL_ENV_PATTERNS,
   PROVIDER_CREDENTIAL_ENV_VARS,
   PROVIDER_ROUTING_ENV_VARS,
   scrubProviderEnv,
   type ScrubOptions,
   type ScrubResult,
+  type NativeHarnessEnvironmentProfile,
 } from "./env-scrub.js";
+export {
+  CODEX_BINARY_ENV,
+  MAX_NATIVE_HARNESS_CATALOG_TTL_MS,
+  NATIVE_HARNESS_CATALOG_TTL_MS,
+  NATIVE_HARNESS_PROBE_TIMEOUT_MS,
+  PI_BINARY_ENV,
+  ClaudeNativeHarnessProbe,
+  CodexNativeHarnessProbe,
+  NativeHarnessCatalog,
+  PiNativeHarnessProbe,
+  type NativeHarnessAuthentication,
+  type NativeHarnessAvailability,
+  type ClaudeNativeHarnessProbeOptions,
+  type NativeHarnessCatalogOptions,
+  type NativeHarnessFreshProbe,
+  type NativeHarnessProbeResult,
+  type NativeHarnessStatus,
+} from "./native-harness-catalog.js";
+export {
+  NativeHarnessIdentityError,
+  inspectNativeHarnessExecutable,
+  resolveNativeHarnessExecutable,
+  type NativeHarnessExecutable,
+  type NativeHarnessId,
+  type ResolveNativeHarnessExecutableOptions,
+} from "./native-harness-identity.js";
+export {
+  OWNED_PROCESS_KILL_CONFIRM_MS,
+  OWNED_PROCESS_MAX_STDOUT_BYTES,
+  OWNED_PROCESS_TERM_GRACE_MS,
+  OwnedProcessError,
+  ownedProcessGroupExists,
+  runOwnedCommand,
+  terminateOwnedProcessGroup,
+  waitForOwnedProcessGroupExit,
+  type OwnedCommandOptions,
+  type OwnedCommandResult,
+} from "./owned-process.js";
+export {
+  NATIVE_TASK_JSONL_MAX_FRAME_BYTES,
+  NATIVE_TASK_JSONL_MAX_QUEUED_FRAMES,
+  NativeTaskJsonlProcess,
+  NativeTaskProcessError,
+  type NativeTaskJsonlOptions,
+} from "./native-task-jsonl.js";
+export {
+  captureNativeTaskControlEnvironment,
+  createNativeTaskOwnershipReceipt,
+  isNativeTaskOwnershipReceipt,
+  nativeTaskScopeDescription,
+  nativeTaskScopeUnit,
+  NativeTaskOwnershipError,
+  SystemdNativeTaskScopeManager,
+  type NativeTaskControlResult,
+  type NativeTaskControlRunner,
+  type NativeTaskOwnershipReceipt,
+  type NativeTaskScope,
+  type NativeTaskScopeLaunch,
+  type NativeTaskScopeManager,
+  type SystemdNativeTaskScopeManagerOptions,
+} from "./native-task-scope.js";
+export {
+  PiTaskAdapter,
+  type PiTaskAdapterOptions,
+} from "./pi-task-adapter.js";
+export {
+  CodexTaskAdapter,
+  type CodexTaskAdapterOptions,
+} from "./codex-task-adapter.js";
+export {
+  ClaudeTaskAdapter,
+  type ClaudeTaskAdapterOptions,
+} from "./claude-task-adapter.js";
 export {
   readGhostHomeDigest,
   resolveGhostExtensions,
@@ -393,3 +472,34 @@ export {
   TITLE_PROMPT,
   type GenerateTitleInput,
 } from "./title.js";
+export {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_POLICY,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskContext,
+  type PrincipalTaskServices,
+} from "./principal-task-tools.js";
+export {
+  MAX_TASK_AGENT,
+  MAX_TASK_EVENT_MESSAGE,
+  MAX_TASK_EVENTS,
+  MAX_TASK_RESULT,
+  MAX_TASK_TEXT,
+  TASK_BINDING_VERSION,
+  TASK_RECORD_VERSION,
+  TASKS_DIRNAME,
+  TaskController,
+  TaskStore,
+  type TaskAdapter,
+  type TaskAdapterContext,
+  type TaskAdapterControl,
+  type TaskAdapterHandle,
+  type TaskBindingAuthority,
+  type TaskBindingReceipt,
+  type TaskEvent,
+  type TaskFailure,
+  type TaskInventoryView,
+  type TaskRecord,
+  type TaskState,
+  type TaskStoreOptions,
+} from "./tasks.js";

@@ -40,6 +40,10 @@ than becoming parallel Ghost frameworks.
   Code's supported settings/hooks. It adds machinery only for product boundaries
   the runtimes do not own: persona lifecycle, daemon sessions, the HUD, browser
   relay, desktop sidecar, shared authentication policy, and recoverable moves.
+- **Delegation supervises native workers.** A trusted project can launch the
+  owner's installed Pi, Codex, or Claude Code as independent work. Ghost owns
+  admission, durable lifecycle, bounded status, and exact process cleanup; the
+  harness owns its coding behavior and project resources.
 - **One visible browser.** Ghost drives the owner's signed-in Chromium through
   the opt-in relay. A second ghost profile was removed because the owner could
   not see it and the tab is the useful isolation unit.

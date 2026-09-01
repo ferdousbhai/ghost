@@ -6,6 +6,8 @@ import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
+import { ClaudeTaskAdapter } from "./claude-task-adapter.js";
+import { CodexTaskAdapter } from "./codex-task-adapter.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
@@ -20,6 +22,17 @@ import { createJournalSink } from "./journal.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
+import {
+  captureNativeHarnessEnvironments,
+  createNativeHarnessCatalog,
+  type NativeHarnessEnvironments,
+} from "./native-harness-runtime.js";
+import {
+  captureNativeTaskControlEnvironment,
+  SystemdNativeTaskScopeManager,
+} from "./native-task-scope.js";
+import { PiTaskAdapter } from "./pi-task-adapter.js";
+import type { TaskAdapter } from "./tasks.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
 import { remoteCommand } from "./remote-command.js";
@@ -95,7 +108,7 @@ export interface StagedShutdownOptions {
   abortActive(): void;
   graceful(): Promise<void>;
   /** Best-effort terminal close after the grace deadline. */
-  force(): void;
+  force(): void | Promise<void>;
   graceMs?: number;
   forceMs?: number;
   wait?: (delayMs: number) => Promise<void>;
@@ -123,16 +136,19 @@ export async function runStagedShutdown(options: StagedShutdownOptions): Promise
   ]);
   if (result !== null) {
     if (!result.ok) {
-      options.force();
+      await options.force();
       throw result.error;
     }
     return "graceful";
   }
-  options.force();
+  const forcedCleanup = Promise.resolve().then(options.force);
   const forcedResult = await Promise.race([
     settled,
     wait(options.forceMs ?? DEFAULT_SHUTDOWN_FORCE_MS).then(() => null),
   ]);
+  // Provider/session disposal retains a hard deadline, but native process
+  // groups do not: returning while one is still owned would orphan it.
+  await forcedCleanup;
   if (forcedResult !== null && !forcedResult.ok) throw forcedResult.error;
   return "forced";
 }
@@ -140,7 +156,9 @@ export async function runStagedShutdown(options: StagedShutdownOptions): Promise
 export interface ShutdownSignalOptions {
   login: Pick<LoginManager, "dispose">;
   listening: Pick<ListeningServer, "server" | "relay" | "close">;
-  host: Pick<SessionHost, "beginShutdown" | "disposeAll" | "forceDisposeAll">;
+  host: Pick<SessionHost, "beginShutdown" | "disposeAll"> & {
+    forceDisposeAll(): void | Promise<void>;
+  };
   browsers: { closeAll(): Promise<void> };
   logger: Pick<Logger, "info" | "warn">;
   timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
@@ -185,17 +203,17 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
   for (const listener of inherited.SIGTERM) signalProcess.off("SIGTERM", listener);
   await new Promise<void>((resolvePromise) => {
     let shuttingDown = false;
-    let forced = false;
-    const force = () => {
-      if (forced) return;
-      forced = true;
+    let forcePromise: Promise<void> | undefined;
+    const force = (): Promise<void> => {
+      if (forcePromise) return forcePromise;
       options.listening.server.closeAllConnections();
       void options.listening.relay?.close().catch(() => {});
-      options.host.forceDisposeAll();
+      forcePromise = Promise.resolve(options.host.forceDisposeAll());
+      return forcePromise;
     };
     const shutdown = (signal: "SIGINT" | "SIGTERM") => {
       if (shuttingDown) {
-        force();
+        void force().catch(() => {});
         return;
       }
       shuttingDown = true;
@@ -344,9 +362,12 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Claude Code owns its native external authentication. Capture only that
-  // reviewed child environment before the process-global Pi scrub removes it.
+  // Capture the reviewed native child profiles and the two user-bus selectors
+  // before the process-global provider scrub. The scope-control snapshot can
+  // never carry provider values.
   const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
+  const nativeHarnessEnvironments = captureNativeHarnessEnvironments(process.env);
+  const nativeTaskControlEnvironment = captureNativeTaskControlEnvironment(process.env);
 
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
@@ -390,6 +411,8 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       hooks,
       hooksPath,
       claudeCodeEnvironment,
+      nativeHarnessEnvironments,
+      nativeTaskControlEnvironment,
     );
   } finally {
     await homeReservation.close();
@@ -402,6 +425,8 @@ async function serveDaemon(
   hooks: GhostHookRunner,
   hooksPath: string,
   claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
+  nativeHarnessEnvironments: NativeHarnessEnvironments,
+  nativeTaskControlEnvironment: Readonly<NodeJS.ProcessEnv>,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -430,7 +455,15 @@ async function serveDaemon(
   const loadClaudeAgentSdk = () => claudeAgentSdk.load();
   const claudeCodeProbe = new ClaudeCodeProbe({
     environment: claudeCodeEnvironment,
+    binaryPath: nativeHarnessEnvironments.claudeBinary ?? null,
     loadSdk: loadClaudeAgentSdk,
+  });
+  const nativeHarnesses = createNativeHarnessCatalog(
+    claudeAgentSdk,
+    nativeHarnessEnvironments,
+  );
+  const nativeTaskScopes = new SystemdNativeTaskScopeManager({
+    controlEnvironment: nativeTaskControlEnvironment,
   });
   const host = new SessionHost({
     registry,
@@ -452,6 +485,25 @@ async function serveDaemon(
       loadSdk: loadClaudeAgentSdk,
     },
   });
+  host.attachTaskServices({
+    ownership: nativeTaskScopes,
+    adapters: new Map<string, TaskAdapter>([
+      ["claude-code", new ClaudeTaskAdapter({
+        catalog: nativeHarnesses,
+        sdkLoader: claudeAgentSdk,
+        environment: nativeHarnessEnvironments.claude,
+      })],
+      ["codex", new CodexTaskAdapter({
+        catalog: nativeHarnesses,
+        environment: nativeHarnessEnvironments.codex,
+      })],
+      ["pi", new PiTaskAdapter({
+        catalog: nativeHarnesses,
+        environment: nativeHarnessEnvironments.pi,
+      })],
+    ]),
+  });
+  await host.restoreTaskServices();
   const maintenance = new ConversationMaintenance({
     registry,
     homeOperations,
@@ -492,7 +544,7 @@ async function serveDaemon(
     offline: config.offline,
     onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
   });
-  const catalog = new ModelCatalog({
+  const modelCatalog = new ModelCatalog({
     registry,
     homeOperations,
     logger,
@@ -512,7 +564,8 @@ async function serveDaemon(
       host,
       homeOperations,
       login,
-      catalog,
+      catalog: modelCatalog,
+      nativeHarnesses,
       mcp,
       hooks,
       logger,
@@ -528,6 +581,7 @@ async function serveDaemon(
       port: config.port,
       error: (error as Error).message,
     });
+    await host.disposeAll();
     return 1;
   }
 

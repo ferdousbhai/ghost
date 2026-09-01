@@ -343,7 +343,7 @@ const CLAUDE_ENV_FAMILY_PREFIXES = [
   "GCLOUD_",
   "GOOGLE_",
 ] as const;
-const CLAUDE_CODE_OPERATIONAL_ENV_VARS = [
+export const NATIVE_HARNESS_OPERATIONAL_ENV_VARS = [
   "COLORTERM",
   "DBUS_SESSION_BUS_ADDRESS",
   "DESKTOP_SESSION",
@@ -385,7 +385,23 @@ const CLAUDE_CODE_OPERATIONAL_ENV_VARS = [
   "XDG_SESSION_TYPE",
   "XDG_STATE_HOME",
 ] as const;
-const CLAUDE_CODE_ENVIRONMENT_SNAPSHOT = Symbol("ClaudeCodeEnvironmentSnapshot");
+export const CODEX_NATIVE_SAFE_ENV_VARS = ["CODEX_HOME"] as const;
+export const PI_NATIVE_SAFE_ENV_VARS = ["PI_CODING_AGENT_DIR", "PI_PACKAGE_DIR"] as const;
+
+export type NativeHarnessEnvironmentProfile =
+  | "claude-principal"
+  | "claude-native"
+  | "codex-native"
+  | "pi-native";
+
+const NATIVE_HARNESS_ENVIRONMENT_SNAPSHOTS: Readonly<
+  Record<NativeHarnessEnvironmentProfile, symbol>
+> = {
+  "claude-principal": Symbol("ClaudePrincipalEnvironmentSnapshot"),
+  "claude-native": Symbol("ClaudeNativeEnvironmentSnapshot"),
+  "codex-native": Symbol("CodexNativeEnvironmentSnapshot"),
+  "pi-native": Symbol("PiNativeEnvironmentSnapshot"),
+};
 
 function isClaudeEnvironmentFamily(name: string): boolean {
   return name === "CLAUDECODE"
@@ -396,32 +412,48 @@ function isClaudeEnvironmentFamily(name: string): boolean {
 }
 
 /**
- * Derive the one launch-time environment shared by Claude executable
- * resolution, auth probing, and SDK queries. Values remain opaque: this
- * boundary copies them but never inspects, logs, serializes, or returns them.
+ * Derive one launch-time environment for an owner-installed harness. Values
+ * remain opaque: this boundary copies them but never inspects, logs,
+ * serializes, or returns them.
  */
-export function captureClaudeCodeEnvironment(
+export function captureNativeHarnessEnvironment(
+  profile: NativeHarnessEnvironmentProfile,
   source: Readonly<NodeJS.ProcessEnv> = process.env,
 ): Readonly<NodeJS.ProcessEnv> {
+  const marker = NATIVE_HARNESS_ENVIRONMENT_SNAPSHOTS[profile];
   if ((source as NodeJS.ProcessEnv & {
-    [CLAUDE_CODE_ENVIRONMENT_SNAPSHOT]?: true;
-  })[CLAUDE_CODE_ENVIRONMENT_SNAPSHOT]) return source;
+    [key: symbol]: true | undefined;
+  })[marker]) return source;
 
   const environment: NodeJS.ProcessEnv = {};
-  for (const name of CLAUDE_CODE_OPERATIONAL_ENV_VARS) {
+  for (const name of NATIVE_HARNESS_OPERATIONAL_ENV_VARS) {
     if (source[name] !== undefined) environment[name] = source[name];
   }
 
-  for (const name of CLAUDE_CODE_SAFE_ENV_VARS) {
+  const safeNames = profile.startsWith("claude-")
+    ? CLAUDE_CODE_SAFE_ENV_VARS
+    : profile === "codex-native" ? CODEX_NATIVE_SAFE_ENV_VARS : PI_NATIVE_SAFE_ENV_VARS;
+  for (const name of safeNames) {
     if (CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN.test(name)) {
-      throw new Error(`Claude launch environment misclassified credential-bearing ${name}.`);
+      throw new Error(`Native harness environment misclassified credential-bearing ${name}.`);
     }
     if (source[name] !== undefined) environment[name] = source[name];
   }
-  environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
-  environment.CLAUDE_AGENT_SDK_CLIENT_APP = "ghostd/0.0.1";
-  Object.defineProperty(environment, CLAUDE_CODE_ENVIRONMENT_SNAPSHOT, { value: true });
+  if (profile.startsWith("claude-")) {
+    environment.CLAUDE_AGENT_SDK_CLIENT_APP = "ghostd/0.0.1";
+  }
+  if (profile === "claude-principal") {
+    environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+  }
+  Object.defineProperty(environment, marker, { value: true });
   return Object.freeze(environment);
+}
+
+/** Preserve the principal Claude runtime's existing environment contract. */
+export function captureClaudeCodeEnvironment(
+  source: Readonly<NodeJS.ProcessEnv> = process.env,
+): Readonly<NodeJS.ProcessEnv> {
+  return captureNativeHarnessEnvironment("claude-principal", source);
 }
 
 /**

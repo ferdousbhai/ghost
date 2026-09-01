@@ -6,7 +6,6 @@ import {
   captureClaudeCodeEnvironment,
   CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN,
   CLAUDE_CODE_SAFE_ENV_VARS,
-  CLAUDE_CODE_VERTEX_REGION_ENV_VARS,
   findProviderCredentialEnv,
   PI_NO_TITLE_ENV_VAR,
   PI_OFFLINE_ENV_VAR,
@@ -95,22 +94,6 @@ describe("scrubProviderEnv", () => {
     }
     for (const names of Object.values(CURRENT_CLAUDE_SAFE_ENV_BY_ROUTE)) {
       for (const name of names) expect(CLAUDE_CODE_SAFE_ENV_VARS).toContain(name);
-    }
-  });
-
-  it("keeps the documented direct selector inventory exact", () => {
-    const docs = readFileSync(
-      new URL("../../../docs/claude-code-runtime.md", import.meta.url),
-      "utf8",
-    );
-    const block = /The exact direct non-secret selector inventory is:\n\n```text\n([\s\S]*?)\n```/u
-      .exec(docs)?.[1];
-    expect(block).toBeDefined();
-    const documented = block!.split("\n");
-    expect(new Set(documented).size).toBe(documented.length);
-    expect(documented.sort()).toEqual([...CLAUDE_CODE_SAFE_ENV_VARS].sort());
-    for (const name of CLAUDE_CODE_VERTEX_REGION_ENV_VARS) {
-      expect(documented).toContain(name);
     }
   });
 

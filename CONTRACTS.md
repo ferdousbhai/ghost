@@ -51,6 +51,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   models.json
   mcp.json
   sessions/
+  .tasks/
   .pi/
   .memory-maintenance.json
 ```
@@ -142,12 +143,16 @@ allowlists, and recovery state machines live beside their focused tests in
   [`docs/keyring.md`](docs/keyring.md).
 - Finished artifacts go to the destination the owner requested. Ghost has no
   default Documents destination or automatic document index.
+- Delegated coding work has one private `task-record/v2` JSON record under the
+  ghost home's mode-0700 `.tasks/` directory. Records move to Trash with their
+  parent conversation and are not portable runtime configuration.
 
 ## Runtime contract
 
 Both runtimes receive the same Ghost character, private memory index, first
-meeting policy, Omarchy computer-use policy, scheduled-work policy, and shared
-Obsidian policy. Normal machine-skill discovery admits the owner-installed
+meeting policy, Omarchy computer-use policy, scheduled-work policy, shared
+Obsidian policy, and—when native worker services are configured—delegation
+policy and tools. Normal machine-skill discovery admits the owner-installed
 `obsidian-cli` skill into each runtime's standard skill index; the shared-state
 policy does not duplicate its path or contents. Obsidian content is fetched
 only when relevant through `obsidian`, never injected automatically at session
@@ -164,10 +169,10 @@ Pi sessions use `createAgentSession`, an explicit transcript, Ghost's model
 runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
 automatic credential discovery, themes, prompt templates, executable project
-code, and `task` tool do not enter the session. Ghost keeps Pi's native file,
-search, Bash, compaction, steering/follow-up, and branch behavior, and adds
-`ask`, background jobs, image inspection, browser, screen, desktop, and MCP
-tools. The exact assembly is
+code, and native task tool do not enter the session. Ghost keeps Pi's native
+file, search, Bash, compaction, steering/follow-up, and branch behavior, and
+adds `ask`, supervised native-worker delegation, background jobs, image
+inspection, browser, screen, desktop, and MCP tools. The exact assembly is
 [`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
 [`pi-extension-bridge.ts`](packages/daemon/src/pi-extension-bridge.ts).
 
@@ -187,7 +192,7 @@ planning. Ghost disables only surfaces it owns or cannot safely route:
 and scheduled wakeups. Ghost disables Claude auto-memory; shared persistence is
 Obsidian and private continuity is Ghost memory.
 
-### Ask, jobs, hooks, and maintenance
+### Ask, jobs, delegation, hooks, and maintenance
 
 `ask` is owner input, never tool approval. A pending question is pollable and
 the first valid response wins. The daemon-wide timeout defaults to 120 seconds;
@@ -198,6 +203,23 @@ Every Bash command is represented by a `GhostJob`. Foreground commands wait for
 the configured budget, then continue as background jobs. Job completion is fed
 back into the same conversation; closing the session cancels running jobs.
 Jobs are process-local and an unopened conversation reports `[]`.
+
+Delegated coding tasks are conversation-scoped work executed by an installed
+Pi, Codex, or Claude Code harness. Starting one requires a current trusted
+project binding; arbitrary cwd is never authority. Ghost durably records its
+bounded assignment, lifecycle, events, result, exact project-binding receipt,
+and private process-ownership receipt. Tasks have no Ghost concurrency limit.
+Running work accepts follow-up or cancellation; cancellation, shutdown, and
+startup recovery do not publish a terminal state until the exact captured
+systemd user scope is confirmed quiescent. A restart interrupts rather than
+resumes prior work. The lifecycle is implemented by
+[`tasks.ts`](packages/daemon/src/tasks.ts), the three native adapters, and
+[`native-task-scope.ts`](packages/daemon/src/native-task-scope.ts).
+
+The installed harness owns its native project discovery, skills, agents, MCP,
+tools, model/auth behavior, and session semantics. Ghost owns only admission,
+bounded protocol projection, durable lifecycle, and exact process-tree cleanup;
+it never invents a Git worktree, branch, commit, or approval flow for a task.
 
 Awaited harness hooks are `before_prompt`, `session_stop`, and
 `conversation_idle`. Their JSON protocol, failure behavior, and settings are
@@ -226,6 +248,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 |---|---|
 | `GET /api/hooks` | Redacted hook status. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
+| `GET /api/harnesses` | Bounded availability/authentication for native Pi, Codex, and Claude Code workers. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
@@ -250,6 +273,9 @@ Route parsing, validation, status codes, and reverse states are executable in
 | `GET /sessions/:id/transcript` | Paged renderable Pi history; Claude history stays native. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue Pi steering or follow-up text. |
+| `GET\|POST /sessions/:id/tasks` | List bounded task projections or start one trusted-project native worker. |
+| `GET /sessions/:id/tasks/:taskId` | Read one owned task with bounded events/result. |
+| `POST /sessions/:id/tasks/:taskId/{send,cancel}` | Follow up on running work or request confirmed cancellation. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
@@ -274,11 +300,12 @@ persisted as an assistant answer.
 
 ### `ghost` CLI
 
-The terminal client is an HTTP client only; it never imports daemon state
-modules or edits a ghost home directly. Its command catalog is defined in
+The terminal client is an HTTP client only; it never edits a ghost home
+directly. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
-ask, job, model, memory, status, and skill operations. There are no plan or todo
-commands.
+ask, job, model, memory, status, and skill operations. `ghost delegation` is
+the one daemon-free read-only command: it probes installed native-worker
+harnesses without opening ghost data. There are no plan or todo commands.
 
 ## Models and credentials
 
@@ -315,7 +342,8 @@ hosted-session, concurrency, or spend cap.
   and the `extension-api.ts` seam. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
   authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
-  jobs, HTTP, and the `ghost` CLI. Bun is the production runtime.
+  jobs, delegated-task admission and process ownership, HTTP, and the `ghost`
+  CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
   talks only to authenticated HTTP/SSE and never edits durable state directly.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
@@ -349,6 +377,11 @@ fail-closed state machine lives in
   fsync.
 - Browser/session/process teardown tracks exact captured owners and PIDs. No
   cleanup may kill by pattern or remove a broad directory.
+- Native delegated work runs in an exact receipt-bound
+  `ghost-task-<UUID>.scope` under the user manager. Ghost requires
+  `systemd>=254`, never adopts a pre-existing unit, and reaches a terminal
+  cancellation/interruption state only after the whole captured scope is
+  authoritatively inactive or absent.
 - Logs redact secrets and private payloads. Journal identity fields are `GHOST`
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.
 - Package install/upgrade must not enable Ghost until the desktop owner has the

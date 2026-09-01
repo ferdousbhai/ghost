@@ -21,6 +21,7 @@ import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
+import "DelegationModel.js" as DelegationModel
 import "TurnBlocks.js" as TurnBlocks
 import "../components/ProjectModel.js" as ProjectModel
 
@@ -808,6 +809,25 @@ Singleton {
     property string commandsGhost: ""
     property string commandsSessionId: ""
 
+    // Native coding workers are visible beside (not in place of) the owner
+    // conversation. Catalogue state is machine-wide; task state is stamped to
+    // one exact runtime-qualified parent conversation.
+    property var nativeHarnesses: []
+    property bool nativeHarnessesLoaded: false
+    readonly property bool nativeHarnessesLoading: root.nativeHarnessesRequest !== null
+    property string nativeHarnessesError: ""
+    property var delegatedTasks: []
+    property bool delegatedTasksLoaded: false
+    readonly property bool delegatedTasksLoading: root.delegatedTasksRequest !== null
+    property var selectedDelegatedTask: null
+    property bool delegatedTaskLoading: false
+    readonly property bool delegatedTaskMutating: root.delegatedTaskMutationRequest !== null
+    property string delegatedTasksError: ""
+    property string delegatedTaskNotice: ""
+    property string delegatedTasksGhost: ""
+    property string delegatedTasksSessionId: ""
+    property int delegatedTaskReadGeneration: 0
+
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
     // here. Explicitly bound external-project MCP remains session-owned. GET
     // is sanitized; secret-bearing values are write-only through mutations.
@@ -917,6 +937,7 @@ Singleton {
     signal hooksConnectionReset(int epoch)
     signal projectPreviewFinished(bool ok)
     signal projectMutationFinished(string action, bool ok)
+    signal delegatedTaskMutationFinished(string action, bool ok)
     signal remoteSetFinished(bool enabled, bool ok)
 
     property var providers: []
@@ -1004,6 +1025,11 @@ Singleton {
     property var projectAbandonRequest: null
     property var pendingProjectReplacement: null
     property var commandsRequest: null
+    property var delegationRequestFactory: null
+    property var nativeHarnessesRequest: null
+    property var delegatedTasksRequest: null
+    property var delegatedTaskRequest: null
+    property var delegatedTaskMutationRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
     property var workJobsRequest: null
@@ -1158,6 +1184,7 @@ Singleton {
         root.retireRemoteRequests();
         root.retireHooksRequest();
         root.clearWork();
+        root.clearDelegation(true);
         for (const request of [root.projectRequest, root.projectPreviewRequest,
                 root.projectMutationRequest]) {
             if (request && request.readyState !== 4) request.abort();
@@ -1172,6 +1199,9 @@ Singleton {
         root.modelRequest = null;
         if (root.workGhost !== "" && root.workGhost !== root.activeGhost)
             root.clearWork();
+        if (root.delegatedTasksGhost !== ""
+                && root.delegatedTasksGhost !== root.activeGhost)
+            root.clearDelegatedTasks();
         // A rename moves loginGhost before activeGhost, preserving a live flow.
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
@@ -1184,6 +1214,9 @@ Singleton {
         root.clearRecap();
         if (root.workSessionId !== "" && root.workSessionId !== root.currentSessionId)
             root.clearWork();
+        if (root.delegatedTasksSessionId !== ""
+                && root.delegatedTasksSessionId !== root.currentSessionId)
+            root.clearDelegatedTasks();
     }
     onComposerHasDraftChanged: {
         if (root.composerHasDraft) root.clearRecap();
@@ -1400,6 +1433,10 @@ Singleton {
             root.ghostRenameError = "Wait for the project change to finish before renaming this ghost.";
             return false;
         }
+        if (root.delegatedTaskMutating && root.delegatedTasksGhost === from) {
+            root.ghostRenameError = "Wait for the coding task action to finish before renaming this ghost.";
+            return false;
+        }
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -1415,6 +1452,11 @@ Singleton {
         root.renameGhostProjectSnapshot = projectBelongsToRename
             ? root.projectRenameSnapshot() : null;
         if (projectBelongsToRename) root.retireProjectRequests();
+        const delegationBelongsToRename = root.delegatedTasksGhost === from;
+        if (delegationBelongsToRename) {
+            root.retireDelegationRequest("list");
+            root.retireDelegationRequest("detail");
+        }
         root.pauseLoginRoute(from);
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
@@ -1444,6 +1486,9 @@ Singleton {
                 // authoritative and must own a fresh GET.
                 if (root.activeGhost === settled && root.currentSessionId !== "")
                     root.fetchProject(true, false);
+                if (delegationBelongsToRename && root.activeGhost === settled
+                        && root.currentSessionId !== "")
+                    root.fetchDelegatedTasks(true);
                 root.refresh();
             } else {
                 const projectBefore = root.renameGhostProjectSnapshot;
@@ -1464,6 +1509,9 @@ Singleton {
                 Qt.callLater(function () {
                     if (root.activeGhost === from && root.currentSessionId !== "")
                         root.fetchProject(true, false);
+                    if (delegationBelongsToRename && root.activeGhost === from
+                            && root.currentSessionId !== "")
+                        root.fetchDelegatedTasks(true);
                 });
             }
         };
@@ -1483,6 +1531,7 @@ Singleton {
             greetingGhost: root.greetingGhost,
             loginGhost: root.loginGhost,
             commandsGhost: root.commandsGhost,
+            delegatedTasksGhost: root.delegatedTasksGhost,
             projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             liveGhost: root.liveGhost,
@@ -1500,6 +1549,7 @@ Singleton {
         root.greetingGhost = state.greetingGhost;
         root.loginGhost = state.loginGhost;
         root.commandsGhost = state.commandsGhost;
+        root.delegatedTasksGhost = state.delegatedTasksGhost;
         root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
         root.liveGhost = state.liveGhost;
@@ -1552,6 +1602,7 @@ Singleton {
         root.clearGreeting();
         root.clearMemory();
         root.clearCommands();
+        root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
         root.clearConnect();
@@ -1583,6 +1634,7 @@ Singleton {
         root.clearGreeting();
         root.clearMemory();
         root.clearCommands();
+        root.clearDelegatedTasks();
         root.clearProject();
         root.clearMcp();
         root.clearConnect();
@@ -2240,6 +2292,306 @@ Singleton {
         };
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(sessionId) + "/commands", ({}), null);
+    }
+
+
+    function makeDelegationRequest(): var {
+        return typeof root.delegationRequestFactory === "function"
+            ? root.delegationRequestFactory() : new XMLHttpRequest();
+    }
+
+    function delegationRoute(ghost: string, sessionId: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(sessionId) + "/tasks";
+    }
+
+    function delegationIdentityCurrent(ghost: string, sessionId: string): bool {
+        return ghost !== "" && sessionId !== "" && ghost === root.activeGhost
+            && sessionId === root.currentSessionId
+            && ghost === root.delegatedTasksGhost
+            && sessionId === root.delegatedTasksSessionId;
+    }
+
+    // Do not project daemon/native error text into this panel. Status and
+    // operation are enough for the owner to retry or return to the project.
+    function delegationFailure(xhr: var, action: string): string {
+        if (xhr.status === 0) return "ghostd is unavailable. Retry when it is answering.";
+        if (xhr.status === 401) return "Ghost rejected this local HUD connection.";
+        if (xhr.status === 404) return action + " is no longer available for this conversation.";
+        if (xhr.status === 409) return action + " is not available in the task's current state.";
+        return action + " failed (" + xhr.status + ").";
+    }
+
+    function retireDelegationRequest(name: string): void {
+        let request = null;
+        if (name === "list") {
+            request = root.delegatedTasksRequest;
+            root.delegatedTasksRequest = null;
+        } else if (name === "detail") {
+            request = root.delegatedTaskRequest;
+            root.delegatedTaskRequest = null;
+            root.delegatedTaskLoading = false;
+        } else if (name === "mutation") {
+            request = root.delegatedTaskMutationRequest;
+            root.delegatedTaskMutationRequest = null;
+        } else if (name === "harnesses") {
+            request = root.nativeHarnessesRequest;
+            root.nativeHarnessesRequest = null;
+        }
+        if (request && request.readyState !== 4) request.abort();
+    }
+
+    function clearDelegatedTasks(): void {
+        root.delegatedTaskReadGeneration += 1;
+        root.retireDelegationRequest("list");
+        root.retireDelegationRequest("detail");
+        root.retireDelegationRequest("mutation");
+        root.delegatedTasks = [];
+        root.delegatedTasksLoaded = false;
+        root.selectedDelegatedTask = null;
+        root.delegatedTasksError = "";
+        root.delegatedTaskNotice = "";
+        root.delegatedTasksGhost = "";
+        root.delegatedTasksSessionId = "";
+    }
+
+    function clearDelegation(clearHarnesses: bool): void {
+        root.clearDelegatedTasks();
+        if (!clearHarnesses) return;
+        root.retireDelegationRequest("harnesses");
+        root.nativeHarnesses = [];
+        root.nativeHarnessesLoaded = false;
+        root.nativeHarnessesError = "";
+    }
+
+    function fetchNativeHarnesses(force: bool): void {
+        if (!force && (root.nativeHarnessesLoaded || root.nativeHarnessesLoading)) return;
+        if (root.nativeHarnessesRequest) root.retireDelegationRequest("harnesses");
+        const xhr = root.makeDelegationRequest();
+        root.nativeHarnessesRequest = xhr;
+        root.nativeHarnessesError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.nativeHarnessesRequest) return;
+            root.nativeHarnessesRequest = null;
+            if (xhr.status === 200) {
+                try {
+                    const rows = DelegationModel.catalogue(JSON.parse(xhr.responseText));
+                    if (rows === null) throw new Error("invalid catalogue");
+                    root.nativeHarnesses = rows;
+                    root.nativeHarnessesLoaded = true;
+                    root.nativeHarnessesError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.nativeHarnessesError = "ghostd sent malformed worker availability.";
+                }
+            } else {
+                root.nativeHarnessesError = root.delegationFailure(xhr, "Worker availability");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/harnesses", ({}), null,
+            function () { return xhr === root.nativeHarnessesRequest; });
+    }
+
+    function prepareDelegatedTasks(ghost: string, sessionId: string): void {
+        if (root.delegatedTasksGhost !== ghost
+                || root.delegatedTasksSessionId !== sessionId)
+            root.clearDelegatedTasks();
+        root.delegatedTasksGhost = ghost;
+        root.delegatedTasksSessionId = sessionId;
+    }
+
+    function fetchDelegatedTasks(force: bool): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (ghost === "" || sessionId === "") {
+            root.clearDelegatedTasks();
+            return;
+        }
+        root.prepareDelegatedTasks(ghost, sessionId);
+        if (root.delegatedTaskMutating) return;
+        if (!force && (root.delegatedTasksLoaded || root.delegatedTasksLoading)) return;
+        if (root.delegatedTasksRequest) root.retireDelegationRequest("list");
+        const xhr = root.makeDelegationRequest();
+        const generation = root.delegatedTaskReadGeneration;
+        root.delegatedTasksRequest = xhr;
+        root.delegatedTasksError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.delegatedTasksRequest) return;
+            root.delegatedTasksRequest = null;
+            if (!root.delegationIdentityCurrent(ghost, sessionId)
+                    || generation !== root.delegatedTaskReadGeneration) return;
+            if (xhr.status === 200) {
+                try {
+                    const listing = DelegationModel.listing(JSON.parse(xhr.responseText));
+                    if (listing === null) throw new Error("invalid task list");
+                    root.delegatedTasks = listing.tasks.map(function (task) {
+                        const current = root.delegatedTasks.find(function (row) {
+                            return row.id === task.id;
+                        });
+                        return DelegationModel.mergeTask(current, task);
+                    });
+                    root.delegatedTasksLoaded = true;
+                    root.delegatedTasksError = "";
+                    root.reachable = true;
+                    if (root.selectedDelegatedTask) {
+                        const selectedRow = root.delegatedTasks.find(function (task) {
+                            return task.id === root.selectedDelegatedTask.id;
+                        });
+                        if (selectedRow) root.selectedDelegatedTask = DelegationModel.mergeTask(
+                            root.selectedDelegatedTask, selectedRow);
+                    }
+                    if (root.selectedDelegatedTask
+                            && !listing.tasks.some(function (task) {
+                                return task.id === root.selectedDelegatedTask.id;
+                            })) root.selectedDelegatedTask = null;
+                } catch (error) {
+                    root.delegatedTasksError = "ghostd sent malformed delegated task state.";
+                }
+            } else {
+                root.delegatedTasksError = root.delegationFailure(xhr, "Task list");
+            }
+        };
+        root.dispatch(xhr, "GET", root.delegationRoute(ghost, sessionId) + "?limit=20",
+            ({}), null, function () { return xhr === root.delegatedTasksRequest; });
+    }
+
+    function fetchDelegatedTask(taskId: string, force: bool): void {
+        if (taskId === "" || (!force && root.selectedDelegatedTask
+                && root.selectedDelegatedTask.id === taskId
+                && !root.delegatedTaskLoading)) return;
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.delegationIdentityCurrent(ghost, sessionId)
+                || root.delegatedTaskMutating) return;
+        root.retireDelegationRequest("detail");
+        const xhr = root.makeDelegationRequest();
+        const generation = root.delegatedTaskReadGeneration;
+        root.delegatedTaskRequest = xhr;
+        root.delegatedTaskLoading = true;
+        root.delegatedTasksError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.delegatedTaskRequest) return;
+            root.delegatedTaskRequest = null;
+            root.delegatedTaskLoading = false;
+            if (!root.delegationIdentityCurrent(ghost, sessionId)
+                    || generation !== root.delegatedTaskReadGeneration) return;
+            if (xhr.status === 200) {
+                try {
+                    const task = DelegationModel.task(JSON.parse(xhr.responseText), true);
+                    if (task === null || task.id !== taskId) throw new Error("invalid task");
+                    const accepted = DelegationModel.mergeTask(
+                        root.selectedDelegatedTask, task);
+                    root.selectedDelegatedTask = accepted;
+                    root.replaceDelegatedTask(accepted);
+                    root.delegatedTasksError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.delegatedTasksError = "ghostd sent malformed delegated task detail.";
+                }
+            } else {
+                root.delegatedTasksError = root.delegationFailure(xhr, "Task detail");
+            }
+        };
+        root.dispatch(xhr, "GET", root.delegationRoute(ghost, sessionId) + "/"
+            + encodeURIComponent(taskId), ({}), null,
+            function () { return xhr === root.delegatedTaskRequest; });
+    }
+
+    function replaceDelegatedTask(task: var): void {
+        let found = false;
+        const rows = root.delegatedTasks.map(function (row) {
+            if (row.id !== task.id) return row;
+            found = true;
+            return DelegationModel.mergeTask(row, task);
+        });
+        if (!found) rows.unshift(task);
+        root.delegatedTasks = rows.slice(0, 20);
+        root.delegatedTasksLoaded = true;
+    }
+
+    function runDelegatedTaskMutation(method: string, suffix: string, body: var,
+            successStatus: int, notice: string, action: string,
+            expectedTaskId: string): void {
+        if (root.delegatedTaskMutating) return;
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+        root.delegatedTaskReadGeneration += 1;
+        root.retireDelegationRequest("list");
+        root.retireDelegationRequest("detail");
+        const xhr = root.makeDelegationRequest();
+        root.delegatedTaskMutationRequest = xhr;
+        root.delegatedTasksError = "";
+        root.delegatedTaskNotice = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.delegatedTaskMutationRequest) return;
+            root.delegatedTaskMutationRequest = null;
+            if (!root.delegationIdentityCurrent(ghost, sessionId)) return;
+            if (xhr.status === successStatus) {
+                try {
+                    const task = DelegationModel.task(JSON.parse(xhr.responseText), true);
+                    if (task === null || (expectedTaskId !== ""
+                            && task.id !== expectedTaskId))
+                        throw new Error("invalid task");
+                    const accepted = DelegationModel.mergeTask(
+                        root.selectedDelegatedTask, task);
+                    root.selectedDelegatedTask = accepted;
+                    root.replaceDelegatedTask(accepted);
+                    root.delegatedTaskNotice = notice;
+                    root.delegatedTasksError = "";
+                    root.reachable = true;
+                    root.delegatedTaskMutationFinished(action, true);
+                } catch (error) {
+                    root.delegatedTasksError = "ghostd sent malformed delegated task state.";
+                    root.delegatedTaskMutationFinished(action, false);
+                }
+            } else {
+                root.delegatedTasksError = root.delegationFailure(xhr, "Task action");
+                root.delegatedTaskMutationFinished(action, false);
+            }
+        };
+        root.dispatch(xhr, method, root.delegationRoute(ghost, sessionId) + suffix,
+            ({ "Content-Type": "application/json" }), JSON.stringify(body),
+            function () { return xhr === root.delegatedTaskMutationRequest; });
+    }
+
+    function createDelegatedTask(harness: string, assignment: string): void {
+        const ghost = root.activeGhost;
+        const sessionId = root.currentSessionId;
+        const project = root.projectState;
+        const prompt = assignment.trim();
+        const worker = root.nativeHarnesses.find(function (row) {
+            return row.id === harness;
+        });
+        if (prompt === "" || prompt.length > 32768
+                || !root.delegationIdentityCurrent(ghost, sessionId)
+                || !project || project.id !== sessionId || project.root === null
+                || root.projectGhost !== ghost || root.projectSessionId !== sessionId
+                || !worker || worker.availability !== "available"
+                || worker.authentication === "logged_out")
+            return;
+        root.runDelegatedTaskMutation("POST", "", {
+            harness: harness,
+            assignment: prompt,
+            cwd: project.cwd
+        }, 201, "Worker started.", "create", "");
+    }
+
+    function sendDelegatedTask(taskId: string, message: string): void {
+        const task = root.selectedDelegatedTask;
+        const text = message.trim();
+        if (!task || task.id !== taskId || task.state !== "running" || text === ""
+                || text.length > 32768) return;
+        root.runDelegatedTaskMutation("POST", "/" + encodeURIComponent(taskId)
+            + "/send", { message: text }, 200, "Follow-up sent.", "send", taskId);
+    }
+
+    function cancelDelegatedTask(taskId: string): void {
+        const task = root.selectedDelegatedTask;
+        if (!task || task.id !== taskId || !DelegationModel.active(task.state)
+                || task.state === "cancelling") return;
+        root.runDelegatedTaskMutation("POST", "/" + encodeURIComponent(taskId)
+            + "/cancel", ({}), 200, "Worker stopped.", "cancel", taskId);
     }
 
 
@@ -3021,8 +3373,10 @@ Singleton {
         root.deleteSessionRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
-            root.deletingSessionId = "";
             if (xhr.status === 200) {
+                if (root.delegatedTasksGhost === ghost
+                        && root.delegatedTasksSessionId === id)
+                    root.clearDelegatedTasks();
                 root.dropCommandTranscripts(ghost, id);
                 const key = root.conversationKey(ghost, id);
                 const kept = Object.assign({}, root.turnStates);
@@ -3047,9 +3401,17 @@ Singleton {
                     root.sessionsError = "";
                     root.fetchSessions(ghost);
                 }
-            } else if (ghost === root.activeGhost) {
-                root.sessionsError = root.describeError(xhr, "DELETE conversation");
+            } else {
+                if (ghost === root.activeGhost) {
+                    root.sessionsError = xhr.status === 409
+                            && root.errorCode(xhr) === "tasks_active"
+                        ? "Review or cancel active workers in Delegation, then try again."
+                        : root.describeError(xhr, "DELETE conversation");
+                }
             }
+            // The dialog observes this field to settle. Publish the outcome
+            // first so a failure cannot look like a successful dismissal.
+            root.deletingSessionId = "";
         };
         root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(id), ({}), null);

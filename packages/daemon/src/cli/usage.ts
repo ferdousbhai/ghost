@@ -35,8 +35,8 @@ Common flags:
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd runs the machine (tokens, remote access, provider login, and explicit
-legacy Documents placement); ghost talks to a ghost.
+ghostd runs the machine (tokens, remote access, providers, sessions, and native
+worker ownership); ghost talks to a ghost.
 `;
 }
 

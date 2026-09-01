@@ -80,6 +80,15 @@ query lifecycle, and resume transaction are executable in
 adapter is
 [`claude-pi-messages.ts`](../packages/daemon/src/claude-pi-messages.ts).
 
+The principal also receives Ghost's conversation-scoped task tools when native
+worker services are configured. A delegated Claude task is a different
+boundary: it receives one freshly revalidated trusted-project cwd and retains
+Claude Code's native project settings, skills, agents, MCP, tools, persistence,
+and subagents. Ghost injects no principal persona or project snapshot there; it
+owns only the bounded task record, exact executable admission, and receipt-bound
+systemd scope. Both paths use the same pinned SDK loader and authenticated
+installed executable.
+
 ### What Claude keeps
 
 - its native system prompt, with Ghost's persona/policy appended;

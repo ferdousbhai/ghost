@@ -10,6 +10,7 @@ import {
 } from "./args.js";
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
+import { delegationCommand } from "./delegation.js";
 import { ghostsCommand } from "./ghosts.js";
 import { memoryCommand } from "./memory.js";
 import { modelCommand } from "./model.js";
@@ -178,6 +179,14 @@ export const COMMANDS: readonly Command[] = [
     run: watchCommand,
   },
   {
+    verb: "delegation",
+    usage: "delegation [--json] [-q]",
+    summary: "Inspect local native coding-worker availability.",
+    example: "ghost delegation --json",
+    positionals: [0, 0],
+    run: delegationCommand,
+  },
+  {
     verb: "status",
     usage: "status [--json] [-q]",
     summary: "Check daemon connectivity and authentication.",
@@ -238,6 +247,9 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
     stderr: options.stderr ?? process.stderr,
     fetch: options.fetch ?? globalThis.fetch,
     stdin: options.stdin ?? process.stdin,
+    ...(options.nativeHarnesses === undefined
+      ? {}
+      : { nativeHarnesses: options.nativeHarnesses }),
   };
 }
 

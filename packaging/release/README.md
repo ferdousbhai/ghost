@@ -26,8 +26,10 @@ new daemon or client.
 Installed launchers use `/usr/bin/bun`, so the stable `ghost` package and the
 checkout-only `ghost-dev` recipe require system Bun 1.3.14 or newer. The current
 build/check toolchain requires Bun 1.4.0 or newer. Both recipes also depend on
-system `fd` and `ripgrep` for pi's native `find` and `grep`, preventing a
-read-only planning turn from downloading those tools into pi's cache.
+system `fd` and `ripgrep` for pi's native `find` and `grep`, and on
+`systemd>=254` for receipt-bound native delegated-task scopes. This prevents a
+read-only planning turn from downloading search tools into pi's cache and keeps
+worker ownership on the tested systemd boundary.
 
 ## Reproducibility boundary
 

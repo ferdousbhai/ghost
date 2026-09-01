@@ -3,12 +3,23 @@ import QtTest
 import qs.services
 
 TestCase {
+    id: tc
     name: "TranscriptPagination"
 
     property var requests: []
     property var availableRequests: []
     property var deleteRequests: []
+    property var delegationRequests: []
     property var branchRequests: []
+    property string deleteSettlementError: ""
+
+    Connections {
+        target: Ghostd
+        function onDeletingSessionIdChanged(): void {
+            if (Ghostd.deletingSessionId === "")
+                tc.deleteSettlementError = Ghostd.sessionsError;
+        }
+    }
 
     function fakeRequest(bucket: var): var {
         const xhr = {
@@ -96,7 +107,9 @@ TestCase {
         requests = [];
         availableRequests = [];
         deleteRequests = [];
+        delegationRequests = [];
         branchRequests = [];
+        deleteSettlementError = "";
         Ghostd.transcriptRequestFactory = function () {
             return fakeRequest(requests);
         };
@@ -105,6 +118,9 @@ TestCase {
         };
         Ghostd.deleteSessionRequestFactory = function () {
             return fakeRequest(deleteRequests);
+        };
+        Ghostd.delegationRequestFactory = function () {
+            return fakeRequest(delegationRequests);
         };
         Ghostd.branchRequestFactory = function () {
             return fakeRequest(branchRequests);
@@ -116,6 +132,7 @@ TestCase {
         Ghostd.transcriptRequestFactory = null;
         Ghostd.availableModelsRequestFactory = null;
         Ghostd.deleteSessionRequestFactory = null;
+        Ghostd.delegationRequestFactory = null;
         Ghostd.branchRequestFactory = null;
         Ghostd.turnStates = ({});
         Ghostd.currentSessionId = "";
@@ -418,6 +435,58 @@ TestCase {
         compare(active.rows.length, 0);
         compare(background.rows.length, 0);
         verify(!Ghostd.reachable);
+    }
+
+    function test_activeWorkersKeepDeleteAndDelegationStateUntilSuccessfulRetry(): void {
+        const state = activeState("delegated-delete");
+        Ghostd.sessions = [{
+            id: state.sessionId,
+            conversationId: state.conversationId,
+            runtime: state.runtime,
+            title: "Delegated delete"
+        }];
+        Ghostd.delegatedTasksGhost = "casper";
+        Ghostd.delegatedTasksSessionId = state.sessionId;
+        Ghostd.delegatedTasks = [{
+            id: "task-11111111-1111-4111-8111-111111111111",
+            harness: "codex",
+            agent: null,
+            cwd: "/tmp/project",
+            state: "running",
+            createdAt: "2026-08-31T10:00:00.000Z",
+            updatedAt: "2026-08-31T10:00:01.000Z",
+            taskPreview: "Keep this visible.",
+            taskTruncated: false,
+            resultPreview: null,
+            resultTruncated: false,
+            error: null
+        }];
+        Ghostd.delegatedTasksLoaded = true;
+        Ghostd.fetchDelegatedTask(Ghostd.delegatedTasks[0].id, true);
+        compare(delegationRequests.length, 1);
+        const pendingDetail = delegationRequests[0];
+
+        Ghostd.deleteConversation(state.sessionId);
+        compare(deleteRequests.length, 1);
+        deleteRequests[0].complete(409, {
+            error: { code: "tasks_active", message: "private daemon detail" }
+        });
+        compare(Ghostd.sessionsError,
+            "Review or cancel active workers in Delegation, then try again.");
+        compare(deleteSettlementError, Ghostd.sessionsError);
+        verify(!!Ghostd.turnStates[state.key]);
+        compare(Ghostd.sessions.length, 1);
+        compare(Ghostd.delegatedTasks.length, 1);
+        verify(!pendingDetail.aborted);
+
+        Ghostd.deleteConversation(state.sessionId);
+        compare(deleteRequests.length, 2);
+        deleteRequests[1].complete(200, { ok: true, trash: [] });
+        verify(pendingDetail.aborted);
+        verify(!Ghostd.turnStates[state.key]);
+        compare(Ghostd.delegatedTasks.length, 0);
+        compare(Ghostd.delegatedTasksGhost, "");
+        compare(Ghostd.sessions.length, 0);
     }
 
     function test_httpFailureIsHonestAndKeepsKnownHistory(): void {

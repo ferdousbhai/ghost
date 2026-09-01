@@ -15,7 +15,7 @@ qml/shell.qml             process entry and surfaces
 qml/GhostHud.qml          chat window
 qml/GhostBarWidget.qml    embeddable status widget
 qml/TrayBridge.qml        StatusNotifier bridge
-qml/components/           chat, ask, jobs, queue, tools, routing, orb
+qml/components/           chat, delegation, ask, jobs, queue, tools, routing, orb
 qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
 contrib/                  Omarchy integration
 dev/                      isolated preview, mock daemon, checks
@@ -40,6 +40,10 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
 - The work strip is background-job control only: bounded output, status, cancel,
   and visible-HUD polling while work runs. Plans and tasks live in Obsidian; the
   shell has no plan mode or progress/todo projection.
+- Delegation is a separate conversation-scoped destination for starting,
+  inspecting, following up on, and cancelling native coding workers. New work
+  requires the current trusted project; the HUD never accepts arbitrary cwd or
+  renders raw harness protocol and error payloads.
 - Tool activity is transient beside the orb. Settled replies keep failed calls
   and asks visible by default; the complete trace is available behind the steps
   disclosure.

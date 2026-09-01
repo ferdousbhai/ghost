@@ -135,7 +135,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "hooks", "mcp", "connect", "remote", "character"]
+        if (["chat", "memory", "commands", "delegation", "hooks", "mcp", "connect", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -146,6 +146,9 @@ FloatingWindow {
             composer.take();
         } else if (section === "commands") {
             Ghostd.fetchCommands(false);
+        } else if (section === "delegation") {
+            Ghostd.fetchNativeHarnesses(false);
+            Ghostd.fetchDelegatedTasks(false);
         } else if (section === "hooks") {
             Ghostd.fetchHooks(false);
         } else if (section === "mcp") {
@@ -1132,6 +1135,15 @@ FloatingWindow {
                 }
             }
 
+            DelegationBrowser {
+                id: delegationBrowser
+                visible: hud.currentSection === "delegation"
+                    && !hud.loginOpen && !hud.switcherOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onChatRequested: hud.showSection("chat")
+            }
+
             // Machine-level hook configuration is global: built-in hooks are
             // shown, the owner's command hooks are edited in place. It never
             // creates or selects a conversation merely to show status.
@@ -1218,7 +1230,9 @@ FloatingWindow {
             open: hud.pendingDeleteSessionId !== ""
             title: "Move conversation to Trash?"
             body: "“" + hud.pendingDeleteTitle + "” and its transcript will be "
-                + "moved to the trash. This cannot be undone from the HUD."
+                + "moved to the trash. Finished worker history moves with it. "
+                + "Review or cancel active workers in Delegation first. This "
+                + "cannot be undone from the HUD."
             confirmText: "Move to Trash"
             busy: Ghostd.deletingSessionId === hud.pendingDeleteSessionId
                 && hud.pendingDeleteSessionId !== ""
@@ -1257,7 +1271,7 @@ FloatingWindow {
             open: hud.pendingDeleteGhost !== ""
             title: "Banish " + hud.pendingDeleteGhost + "?"
             body: "Its persona, memories, credentials, and conversations move to Trash. "
-                + "Shared Documents stay on this machine. Type “"
+                + "Shared Obsidian notes stay on this machine. Type “"
                 + hud.pendingDeleteGhost + "” to confirm."
             challenge: hud.pendingDeleteGhost
             confirmText: "Banish"

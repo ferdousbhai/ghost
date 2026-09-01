@@ -8,16 +8,17 @@ built on the [pi](https://github.com/earendil-works/pi) coding agent
 
 Ghost pins pi 0.84.3. pi sessions keep its native filesystem tools and Bash,
 steering/follow-ups, and branchable conversations; Ghost adds its own `ask`
-tool, model roles and fallback chains, bounded declarative skills, rules,
+tool, supervised native Pi/Codex/Claude Code workers, model roles and fallback
+chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. There is no `task` tool and every subagent definition is
-disabled in phase 1; project
-plugins, hooks, custom code tools, and LSP are also disabled pending a
-per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
-files in the ghost home remain the explicit in-process extension surface. The
-optional Claude Code runtime retains Claude's native subagents. Ghost replaces
+relay is planned. Project plugins, agent definitions, custom code tools, and
+LSP remain disabled in principal sessions pending a per-session isolation
+boundary; trusted visible `hooks/pre` and `hooks/post` files in the ghost home
+remain the explicit in-process extension surface. Native delegated workers and
+the optional Claude Code principal retain their own project discovery and
+subagents. Ghost replaces
 pi's coding-oriented system prompt with its character and bounded private
 memory index, plus the owner-installed `obsidian-cli` skill through normal
 machine-skill discovery. Both runtimes use Obsidian's CLI-selected vault as
@@ -42,6 +43,7 @@ shows.
 ghost say "What should I focus on today?"
 ghost sessions
 ghost show -s cli-abc
+ghost delegation
 ```
 
 Status: beta release candidate. See CONTRACTS.md for the data and API

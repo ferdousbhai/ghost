@@ -13,7 +13,8 @@ Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
 toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
 tree. Ghost, pi, provider, and MCP application code plus required static assets
-remain packaged for offline use.
+remain packaged for offline use. Native delegated-task ownership requires the
+package's direct `systemd>=254` dependency.
 
 `fd` and `ripgrep` are explicit runtime dependencies because Pi's native
 `find` and `grep` tools invoke them. The
@@ -27,11 +28,21 @@ Build the checkout package without installing it:
 makepkg --cleanbuild
 ```
 
+## Native coding workers
+
+Ghost does not install Pi, Codex, Claude Code, or the optional Claude Agent SDK
+graph. Install and authenticate only the native harnesses the owner wants, then
+run `ghost delegation` to inspect their bounded availability without opening a
+ghost. `GHOST_PI_BINARY`, `GHOST_CODEX_BINARY`, and `GHOST_CLAUDE_BINARY` may
+select explicit owner executables or wrappers in the daemon service environment;
+restart ghostd after changing that environment. Missing, malformed, logged-out,
+or SDK-incomplete harnesses remain visibly unavailable instead of falling back.
+
 ## Required Obsidian setup
 
 The package depends on Obsidian 1.12.7 or newer and npm. Obsidian is Ghost's
 owner-wide persistent knowledge and task store, shared by every ghost; its vault
-is independent of Documents and is selected only through the CLI.
+is selected only through the CLI, never a presumed filesystem location.
 
 Complete Obsidian's [official CLI registration](https://obsidian.md/help/cli)
 in **Settings → General → Command line interface**, then install the upstream

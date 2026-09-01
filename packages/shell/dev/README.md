@@ -55,6 +55,7 @@ drive that exact nested instance:
 
 ```sh
 qs -p qml/shell.qml ipc call ghost section memory
+qs -p qml/shell.qml ipc call ghost section delegation
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
@@ -93,14 +94,16 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Character / Memory / Commands / Hooks / MCP /
-  Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
+  bottom, and the permanent Chat / Character / Memory / Commands / Delegation /
+  Hooks / MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  Memory is read-only; the
-  phase-one context returns no agent definitions because its isolated task
-  runtime is disabled; Character edits `character.md`. Memory rows offer
-  confirmed, recoverable deletion.
+  Memory is read-only. Ghost/project custom agent definitions are preview-only,
+  while Delegation is the supported native-worker surface: the mock shows
+  Pi/Codex/Claude availability, task creation from the trusted current project,
+  bounded event/result inspection, running follow-up, and cancellation.
+  Character edits `character.md`. Memory rows offer confirmed, recoverable
+  deletion.
   Commands shows the session's searchable Ghost catalog and stages a chosen slash
   command in chat; typing `/` opens its compact
   autocomplete, including clear partial/unsupported labels. Hooks shows the
@@ -204,8 +207,9 @@ Not verified live:
 - **A full streamed turn against the real `ghostd`.** `ghostd` now exists and
   runs as a systemd user service; the tray helper's shell connected to it and
   read the roster live. But the streaming turn path here was exercised only
-  against the mock, which follows the pi-messages event union but cannot prove
-  the daemon emits it. First integration risk: whether the daemon owns
+  against the mock, which follows the runtime-neutral pi-messages-compatible
+  event union but cannot prove the daemon emits it. First integration risk:
+  whether the daemon owns
   conversation history via `options.sessionId` (what this client assumes) or
   expects the full `context` replayed (set `GHOST_HUD_REPLAY=1` if so).
 - **The tray icon rendered inline in Omarchy's bar.** The item registers and the
