@@ -32,6 +32,7 @@ import {
   ClaudeCodeRuntime,
   claudeSessionMetadataPath,
   claudeSessionResumeMarkerPaths,
+  readPublishedClaudeSessionMetadata,
   type ClaudeProjectSnapshot,
   type ClaudeCodeRuntimeOptions,
 } from "./claude-code.js";
@@ -215,6 +216,7 @@ import { resolveMcpServerSecrets, type SecretResolver } from "./secret-resolutio
 import {
   projectBindingPath,
   ProjectBindingStore,
+  type BindingRevocationLease,
   type ProjectBindingState,
   type ProjectPreview,
 } from "./project-binding.js";
@@ -630,6 +632,8 @@ export interface SessionHostOptions {
     stage: SessionTransactionProbeStage,
     path: string,
   ) => void | Promise<void>;
+  /** Test seam for failures before or after atomic transaction publication. */
+  transactionWriter?: typeof writeTransaction;
   /** Test seam for marker lstat failures; production always uses fs.lstat. */
   transactionMarkerLstat?: (path: string) => Promise<unknown>;
   logger?: Logger;
@@ -928,6 +932,13 @@ interface ParentTaskOperationLane {
   exclusive: boolean;
   drained: Promise<void>;
   resolveDrained(): void;
+}
+
+interface PrincipalTaskCapability {
+  readonly ghostName: string;
+  readonly parentId: string;
+  readonly runtime: ConversationRuntime;
+  readonly conversationId: string;
 }
 
 class ParentTaskOperationGate {
@@ -1678,6 +1689,7 @@ export class SessionHost {
   private readonly readWriter: typeof writeReads;
   private readonly conversationFileProbe: NonNullable<SessionHostOptions["conversationFileProbe"]>;
   private readonly transactionProbe: NonNullable<SessionHostOptions["transactionProbe"]>;
+  private readonly transactionWriter: typeof writeTransaction;
   private readonly transactionMarkerLstat: NonNullable<SessionHostOptions["transactionMarkerLstat"]>;
   private readonly logger: Logger;
   private readonly offline: boolean;
@@ -1703,6 +1715,7 @@ export class SessionHost {
   private readonly taskControllerInstances = new Map<string, TaskController>();
   private readonly taskAdmissions = new Set<Promise<unknown>>();
   private readonly taskParentOperations = new ParentTaskOperationGate();
+  private readonly principalTaskCapabilities = new WeakSet<PrincipalTaskCapability>();
   private taskRecovery: Promise<void> | undefined;
   private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
@@ -1774,6 +1787,7 @@ export class SessionHost {
     this.readWriter = options.readWriter ?? writeReads;
     this.conversationFileProbe = options.conversationFileProbe ?? (() => {});
     this.transactionProbe = options.transactionProbe ?? (() => {});
+    this.transactionWriter = options.transactionWriter ?? writeTransaction;
     this.transactionMarkerLstat = options.transactionMarkerLstat ?? lstat;
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
@@ -1815,23 +1829,7 @@ export class SessionHost {
           throw new GhostError("ghost_busy", "Another whole-home move is already in progress.", 409);
         }
         this.homeMoveClaims.add(ghostName);
-        const taskController = this.taskControllerInstances.get(ghostName);
-        const pendingTaskController = this.taskControllers.get(ghostName);
-        const taskDrain = taskController
-          ? taskController.dispose().then(() => {
-              if (this.taskControllerInstances.get(ghostName) === taskController) {
-                this.taskControllerInstances.delete(ghostName);
-                this.taskControllers.delete(ghostName);
-              }
-            })
-          : pendingTaskController
-            ? pendingTaskController.then((controller) => controller.dispose()).then(() => {
-                if (this.taskControllers.get(ghostName) === pendingTaskController) {
-                  this.taskControllers.delete(ghostName);
-                  this.taskControllerInstances.delete(ghostName);
-                }
-              })
-            : Promise.resolve();
+        const taskDrain = this.disposeGhostTaskController(ghostName);
         let released = false;
         return {
           drained: taskDrain,
@@ -2003,6 +2001,26 @@ export class SessionHost {
     return initialized;
   }
 
+  private disposeGhostTaskController(ghostName: string): Promise<void> {
+    const controller = this.taskControllerInstances.get(ghostName);
+    const pending = this.taskControllers.get(ghostName);
+    if (controller) {
+      return controller.dispose().then(() => {
+        if (this.taskControllerInstances.get(ghostName) === controller) {
+          this.taskControllerInstances.delete(ghostName);
+          this.taskControllers.delete(ghostName);
+        }
+      });
+    }
+    if (!pending) return Promise.resolve();
+    return pending.then((created) => created.dispose()).then(() => {
+      if (this.taskControllers.get(ghostName) === pending) {
+        this.taskControllers.delete(ghostName);
+        this.taskControllerInstances.delete(ghostName);
+      }
+    });
+  }
+
   private principalTaskContext(
     ghostName: string,
     runtime: ConversationRuntime,
@@ -2011,13 +2029,20 @@ export class SessionHost {
   ): Promise<PrincipalTaskContext> {
     const parent = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(this.registry.get(ghostName).dir);
+    const capability = Object.freeze({
+      ghostName,
+      parentId: parent.id,
+      runtime,
+      conversationId,
+    });
+    this.principalTaskCapabilities.add(capability);
     this.assertTaskAdmissionOpen();
     return Promise.resolve({
       controller: () => this.taskController(ghostName),
       parent,
       cwd,
       operation: <T>(action: () => Promise<T>) =>
-        this.withParentTaskOperation(ghostName, parent, action),
+        this.withParentTaskOperation(ghostName, parent, action, capability),
       mintBinding: async (cwd, signal) => {
         this.assertTaskAdmissionOpen();
         const binding = await this.projectBindings.mintTaskBinding(
@@ -2062,10 +2087,23 @@ export class SessionHost {
     }
   }
 
-  private async withParentTaskOperation<T>(
+  private withParentTaskOperation<T>(
     ghostName: string,
     parent: ConversationIdentity,
     action: () => Promise<T>,
+    principal?: PrincipalTaskCapability,
+  ): Promise<T> {
+    this.assertTaskAdmissionOpen();
+    return this.homeOperations.withLease(ghostName, () =>
+      this.withParentTaskOperationLeased(ghostName, parent, action, principal)
+    );
+  }
+
+  private async withParentTaskOperationLeased<T>(
+    ghostName: string,
+    parent: ConversationIdentity,
+    action: () => Promise<T>,
+    principal?: PrincipalTaskCapability,
   ): Promise<T> {
     this.assertTaskAdmissionOpen();
     const key = deletionKeyOf(ghostName, parent.runtime, parent.conversationId);
@@ -2079,20 +2117,63 @@ export class SessionHost {
     }
     try {
       const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
-      if (await transactionMarkerState(
+      const markers = [
         deleteTransactionPath(sessionDir, parent.runtime, parent.conversationId),
-        this.transactionMarkerLstat,
-      ) !== "absent") {
+        draftAbandonTransactionPath(sessionDir, parent.runtime, parent.conversationId),
+        ...(parent.runtime === "pi"
+          ? [forkTransactionPath(sessionDir, parent.conversationId)]
+          : []),
+      ];
+      for (const marker of markers) {
+        if (await transactionMarkerState(marker, this.transactionMarkerLstat) === "absent") {
+          continue;
+        }
         throw new GhostError(
           "session_busy",
-          "This conversation is being deleted.",
+          "This conversation has an unfinished lifecycle operation.",
           409,
         );
+      }
+      const published = parent.runtime === "pi"
+        ? await this.publishedPiTaskParent(sessionDir, parent.conversationId)
+        : await readPublishedClaudeSessionMetadata(
+            sessionDir,
+            parent.conversationId,
+          ) !== null;
+      if (!published) {
+        const validPrincipal = principal !== undefined
+          && this.principalTaskCapabilities.has(principal)
+          && principal.ghostName === ghostName
+          && principal.parentId === parent.id
+          && principal.runtime === parent.runtime
+          && principal.conversationId === parent.conversationId
+          && (parent.runtime === "pi"
+            ? this.turnAdmissions.has(this.keyOf(ghostName, parent.conversationId))
+            : this.claudeCode.isBusy(ghostName, parent.conversationId));
+        if (!validPrincipal) {
+          throw new GhostError(
+            "task_parent_unpublished",
+            "Delegated tasks require a published conversation or its active first owner turn.",
+            409,
+          );
+        }
       }
       return await this.taskOperation(action);
     } finally {
       release();
     }
+  }
+
+  private async publishedPiTaskParent(
+    sessionDir: string,
+    conversationId: string,
+  ): Promise<boolean> {
+    const path = join(sessionDir, sessionFileNameFor(conversationId));
+    if (await transactionMarkerState(path, this.transactionMarkerLstat) === "absent") {
+      return false;
+    }
+    await requireSessionFileConversationId(path, conversationId);
+    return true;
   }
 
   private async ownedTask(
@@ -3051,8 +3132,30 @@ export class SessionHost {
     abandoned: boolean;
   }> {
     requireRawConversationId(conversationId);
-    const release = this.reserveProjectTransition(ghostName, runtime, conversationId);
+    const parent = conversationIdentity(runtime, conversationId);
+    const laneKey = deletionKeyOf(ghostName, runtime, conversationId);
+    const taskClaim = this.taskParentOperations.claim(laneKey);
+    if (!taskClaim) {
+      throw new GhostError("session_busy", "This conversation has another lifecycle operation.", 409);
+    }
+    let releaseProjectTransition: (() => void) | undefined;
+    let revocation: BindingRevocationLease | undefined;
+    let revocationCommitted = false;
+    let revocationRetired = false;
     try {
+      releaseProjectTransition = this.reserveProjectTransition(
+        ghostName,
+        runtime,
+        conversationId,
+      );
+      await taskClaim.drained;
+      if ((await this.liveParentTaskEntries(ghostName, parent)).length > 0) {
+        throw new GhostError(
+          "tasks_present",
+          "Delete the full conversation to move its delegated task history with it.",
+          409,
+        );
+      }
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
@@ -3083,7 +3186,16 @@ export class SessionHost {
       const receipt = draftAbandonReceiptPath(sessionDir, runtime, conversationId);
       const markerExists = await transactionMarkerEntryExists(marker);
       if (!markerExists && await transactionMarkerEntryExists(receipt)) {
-        await this.projectBindings.revoke(sessionDir, ghostName, runtime, conversationId);
+        revocation = await this.projectBindings.beginRevocation(
+          sessionDir,
+          ghostName,
+          runtime,
+          conversationId,
+        );
+        revocation.commit();
+        revocationCommitted = true;
+        revocation.retire();
+        revocationRetired = true;
         return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: false };
       }
 
@@ -3124,14 +3236,64 @@ export class SessionHost {
           conversationId,
           artifacts,
         };
-        await writeTransaction(marker, record);
       }
-      await this.projectBindings.revoke(sessionDir, ghostName, runtime, conversationId);
+      revocation = await this.projectBindings.beginRevocation(
+        sessionDir,
+        ghostName,
+        runtime,
+        conversationId,
+      );
+      if (!markerExists) {
+        try {
+          await this.transactionWriter(marker, record);
+        } catch (error) {
+          const markerState = await transactionMarkerState(
+            marker,
+            this.transactionMarkerLstat,
+          ).catch(() => "indeterminate" as const);
+          if (markerState === "absent") revocation.rollback();
+          else {
+            revocation.commit();
+            revocationCommitted = true;
+          }
+          throw error;
+        }
+      }
+      revocation.commit();
+      revocationCommitted = true;
       await this.finishDraftAbandon(sessionDir, marker, receipt, record);
+      revocation.retire();
+      revocationRetired = true;
       await this.announceConversationUpdated(ghostName, runtime, conversationId, "project");
       return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: true };
     } finally {
-      release();
+      if (revocation && !revocationRetired) {
+        const ghost = this.registry.list().find((entry) => entry.name === ghostName);
+        if (ghost) {
+          const sessionDir = ghostPaths(ghost.dir).sessionDir;
+          const [markerState, receiptState] = await Promise.all([
+            transactionMarkerState(
+              draftAbandonTransactionPath(sessionDir, runtime, conversationId),
+              this.transactionMarkerLstat,
+            ).catch(() => "indeterminate" as const),
+            transactionMarkerState(
+              draftAbandonReceiptPath(sessionDir, runtime, conversationId),
+              this.transactionMarkerLstat,
+            ).catch(() => "indeterminate" as const),
+          ]);
+          if (markerState === "absent" && receiptState === "absent" && !revocationCommitted) {
+            revocation.rollback();
+          } else if (markerState === "absent" && receiptState === "present") {
+            revocation.commit();
+            revocation.retire();
+            revocationRetired = true;
+          } else if (markerState !== "absent" || receiptState !== "absent") {
+            revocation.commit();
+          }
+        }
+      }
+      releaseProjectTransition?.();
+      taskClaim.release();
     }
   }
 
@@ -6038,7 +6200,7 @@ export class SessionHost {
       await fsyncDirectory(sessionDir);
     } catch (error) {
       try {
-        await writeTransaction(marker, record);
+        await this.transactionWriter(marker, record);
       } catch (restoreError) {
         throw new AggregateError(
           [error, restoreError],
@@ -6133,7 +6295,7 @@ export class SessionHost {
     await this.transactionProbe("draft-abandon-fsync", sessionDir);
     await fsyncDirectory(sessionDir);
     await this.transactionProbe("draft-abandon-complete", receipt);
-    await writeTransaction(receipt, {
+    await this.transactionWriter(receipt, {
       version: 1,
       kind: "project-draft-abandoned",
       runtime: record.runtime,
@@ -6144,7 +6306,7 @@ export class SessionHost {
       await fsyncDirectory(sessionDir);
     } catch (error) {
       try {
-        await writeTransaction(marker, record);
+        await this.transactionWriter(marker, record);
       } catch (restoreError) {
         throw new AggregateError(
           [error, restoreError],
@@ -6176,7 +6338,7 @@ export class SessionHost {
     }
     await fsyncDirectory(fallbackRoot);
     record.trashRoot = trashRoot;
-    await writeTransaction(marker, record);
+    await this.transactionWriter(marker, record);
     return trashRoot;
   }
 
@@ -6210,7 +6372,7 @@ export class SessionHost {
     record.artifacts = [...record.artifacts, pending];
     record.pending = null;
     await this.transactionProbe("delete-receipt-write", pending.source);
-    await writeTransaction(marker, record);
+    await this.transactionWriter(marker, record);
     await this.transactionProbe("delete-artifact-recorded", pending.source);
   }
 
@@ -6394,7 +6556,7 @@ export class SessionHost {
       digest: delegatedTaskDigest(entries),
     };
     record.delegatedTasks = group;
-    await writeTransaction(marker, record);
+    await this.transactionWriter(marker, record);
     await this.transactionProbe("delete-task-group-recorded", group.trash);
     await this.reconcileDeleteTaskGroup(ghostName, parent, group);
     return group;
@@ -6428,7 +6590,7 @@ export class SessionHost {
       await fsyncDirectory(sessionDir);
     } catch (error) {
       try {
-        await writeTransaction(marker, record);
+        await this.transactionWriter(marker, record);
       } catch (restoreError) {
         throw new AggregateError(
           [error, restoreError],
@@ -6492,6 +6654,7 @@ export class SessionHost {
       if (this.activeForks.has(marker)) continue;
       let markerValidated = false;
       let conversationId: string | undefined;
+      let taskClaim: ReturnType<ParentTaskOperationGate["claim"]> = null;
       try {
         const value = JSON.parse(await readDaemonControlFile(
           marker,
@@ -6581,6 +6744,11 @@ export class SessionHost {
         }
         markerValidated = true;
         conversationId = record.conversationId;
+        taskClaim = this.taskParentOperations.claim(
+          deletionKeyOf(ghostName, "pi", record.conversationId),
+        );
+        if (!taskClaim) throw new Error("fork lifecycle lane is busy");
+        await taskClaim.drained;
         let recoverable = true;
         for (const [temporary, final] of pairs) {
           if (!(await this.transactionEntryExists(temporary))
@@ -6622,6 +6790,8 @@ export class SessionHost {
           path: marker,
           code: markerValidated ? "fork_recovery_pending" : "fork_marker_invalid",
         });
+      } finally {
+        taskClaim?.release();
       }
     }
   }
@@ -6869,6 +7039,14 @@ export class SessionHost {
     }
     if (existsSync(sourceFile)) await requireSessionFileConversationId(sourceFile, sourceId);
     const forkId = `branch-${randomUUID()}`;
+    const forkTaskClaim = this.taskParentOperations.claim(
+      deletionKeyOf(ghostName, "pi", forkId),
+    );
+    if (!forkTaskClaim) {
+      throw new GhostError("session_busy", "The branch target has another lifecycle operation.", 409);
+    }
+    await forkTaskClaim.drained;
+    try {
     const forkFile = join(paths.sessionDir, sessionFileNameFor(forkId));
     const forkMarker = forkTransactionPath(paths.sessionDir, forkId);
     const temporaryForkFile = join(
@@ -6917,7 +7095,7 @@ export class SessionHost {
     ];
     this.activeForks.add(forkMarker);
     try {
-      await writeTransaction(forkMarker, forkRecord);
+      await this.transactionWriter(forkMarker, forkRecord);
       const sourceManager = source.session.sessionManager;
       const entry = sourceManager.getEntry(entryId);
       if (entry?.type !== "message" || entry.message.role !== "user") {
@@ -7072,6 +7250,9 @@ export class SessionHost {
     } catch (error) {
       await this.discardFork(ghostName, forkId, true);
       throw error;
+    }
+    } finally {
+      forkTaskClaim.release();
     }
   }
 
@@ -7459,6 +7640,9 @@ export class SessionHost {
     }
     let maintenanceReservation: MaintenanceConversationDeleteReservation | undefined;
     let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
+    let revocation: BindingRevocationLease | undefined;
+    let revocationCommitted = false;
+    let revocationRetired = false;
     this.deleting.add(deleteKey);
     try {
       await taskDeletion.drained;
@@ -7470,6 +7654,12 @@ export class SessionHost {
           409,
         );
       }
+      revocation = await this.projectBindings.beginRevocation(
+        paths.sessionDir,
+        ghostName,
+        runtime,
+        id,
+      );
       maintenanceReservation = this.maintenance?.reserveConversationDelete({
         ghostName,
         runtime,
@@ -7494,6 +7684,8 @@ export class SessionHost {
         this.transactionMarkerLstat,
       );
       if (deleteState === "indeterminate") {
+        revocation.commit();
+        revocationCommitted = true;
         maintenanceDeleteOutcome = "recovery-pending";
         throw new GhostError(
           "delete_recovery_pending",
@@ -7502,21 +7694,31 @@ export class SessionHost {
         );
       }
       const resumingDeletion = deleteState === "present";
-      if (resumingDeletion) maintenanceDeleteOutcome = "recovery-pending";
-      await this.projectBindings.revoke(paths.sessionDir, ghostName, runtime, id);
+      if (resumingDeletion) {
+        revocation.commit();
+        revocationCommitted = true;
+        maintenanceDeleteOutcome = "recovery-pending";
+      }
       if (!resumingDeletion) {
         mkdirSync(paths.sessionDir, { recursive: true });
         try {
-          await writeTransaction(tombstone, emptyDeleteTransaction(runtime, id));
+          await this.transactionWriter(tombstone, emptyDeleteTransaction(runtime, id));
           maintenanceDeleteOutcome = "recovery-pending";
         } catch (error) {
           const published = await transactionMarkerState(
             tombstone,
             this.transactionMarkerLstat,
           ).catch(() => "indeterminate" as const);
-          if (published !== "absent") maintenanceDeleteOutcome = "recovery-pending";
+          if (published === "absent") revocation.rollback();
+          else {
+            revocation.commit();
+            revocationCommitted = true;
+            maintenanceDeleteOutcome = "recovery-pending";
+          }
           throw error;
         }
+        revocation.commit();
+        revocationCommitted = true;
       }
       const deleteRecord = await this.readDeleteTransaction(
         tombstone,
@@ -7597,7 +7799,7 @@ export class SessionHost {
           trash,
           kind: "fallback",
         };
-        await writeTransaction(tombstone, deleteRecord);
+        await this.transactionWriter(tombstone, deleteRecord);
         await this.transactionProbe("delete-intent-recorded", candidate.path);
         await this.reconcileDeleteMove(tombstone, deleteRecord);
         const artifact = deleteRecord.artifacts.at(-1);
@@ -7607,6 +7809,8 @@ export class SessionHost {
       }
       if (artifacts.length === 0 && !taskGroup && !resumingDeletion) {
         await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
+        revocation.retire();
+        revocationRetired = true;
         maintenanceDeleteOutcome = "rolled-back";
         throw new GhostError(
           "not_found",
@@ -7638,6 +7842,8 @@ export class SessionHost {
       }
       deleteRecord.artifacts = [...artifacts];
       await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
+      revocation.retire();
+      revocationRetired = true;
       this.maintenance?.completeConversationDelete({
         ghostName,
         runtime,
@@ -7663,11 +7869,18 @@ export class SessionHost {
       return { artifacts: receipts };
     } finally {
       this.deleting.delete(deleteKey);
-      taskDeletion.release();
-      if (maintenanceDeleteOutcome === "rolled-back"
-        && await transactionMarkerState(tombstone, this.transactionMarkerLstat) !== "absent") {
-        maintenanceDeleteOutcome = "recovery-pending";
+      if (revocation && !revocationRetired) {
+        const markerState = await transactionMarkerState(
+          tombstone,
+          this.transactionMarkerLstat,
+        ).catch(() => "indeterminate" as const);
+        if (markerState === "absent" && !revocationCommitted) revocation.rollback();
+        else if (markerState !== "absent") {
+          revocation.commit();
+          maintenanceDeleteOutcome = "recovery-pending";
+        }
       }
+      taskDeletion.release();
       maintenanceReservation?.release(maintenanceDeleteOutcome);
     }
   }
@@ -7697,17 +7910,35 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     this.reserveGhosts([ghost.name], "deleting it");
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
+    let revocation: BindingRevocationLease | undefined;
+    let moved = false;
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      await this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
+      await this.disposeGhostTaskController(ghost.name);
+      revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "deleted");
-      const trashed = this.registry.trash(ghost.name);
+      let trashed: { trash: string };
+      try {
+        trashed = this.registry.trash(ghost.name);
+        moved = true;
+        revocation.commit();
+      } catch (error) {
+        if (!existsSync(ghost.dir)) {
+          moved = true;
+          revocation.commit();
+          this.forgetGhost(ghost.name);
+          revocation.retire();
+        }
+        throw error;
+      }
       this.forgetGhost(ghost.name);
+      revocation.retire();
       this.maintenance?.completeGhostDelete(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
+      if (revocation && !moved) revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       maintenanceReservation?.release();
     }
@@ -7741,17 +7972,35 @@ export class SessionHost {
     }
     this.reserveGhosts([ghost.name, nextName], "renaming it");
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
+    let revocation: BindingRevocationLease | undefined;
+    let moved = false;
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      await this.projectBindings.revokeScope(ghost.name);
       await maintenanceReservation?.drained;
+      await this.disposeGhostTaskController(ghost.name);
+      revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "renamed");
-      const renamed = this.registry.rename(ghost.name, nextName);
+      let renamed: Ghost;
+      try {
+        renamed = this.registry.rename(ghost.name, nextName);
+        moved = true;
+        revocation.commit();
+      } catch (error) {
+        if (!existsSync(ghost.dir)) {
+          moved = true;
+          revocation.commit();
+          this.forgetGhost(ghost.name);
+          revocation.retire();
+        }
+        throw error;
+      }
       this.forgetGhost(ghost.name);
+      revocation.retire();
       await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
+      if (revocation && !moved) revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
       maintenanceReservation?.release();

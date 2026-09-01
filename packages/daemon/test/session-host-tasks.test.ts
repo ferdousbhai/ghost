@@ -1,6 +1,7 @@
 import {
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -15,7 +16,7 @@ import { conversationIdentity } from "../src/conversation-identity.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { homeOperationsFor } from "../src/home-operations.js";
 import { createLogger, type LogRecord } from "../src/log.js";
-import { ProjectBindingStore } from "../src/project-binding.js";
+import { projectBindingPath, ProjectBindingStore } from "../src/project-binding.js";
 import {
   SessionHost,
   sessionFileNameFor,
@@ -47,6 +48,8 @@ function setup(options: {
   projectBindings?: ProjectBindingStore;
   maintenance?: SessionHostOptions["maintenance"];
   logger?: SessionHostOptions["logger"];
+  transactionMarkerLstat?: SessionHostOptions["transactionMarkerLstat"];
+  transactionWriter?: SessionHostOptions["transactionWriter"];
 } = {}): {
   home: string;
   ownerHome: string;
@@ -220,8 +223,217 @@ function controlledAdapter(options: {
 }
 
 describe("SessionHost delegated task composition", () => {
+  it("rejects REST task access until the exact parent is durably published", async () => {
+    const { ownerHome } = setup();
+    await attachTasks();
+    const parent = conversationIdentity("pi", "unpublished-task-parent");
+    const project = join(ownerHome, "unpublished-project");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper", parent.conversationId, parent.runtime, project,
+    );
+    await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await expect(host!.listTasks("casper", parent)).rejects.toMatchObject({
+      code: "task_parent_unpublished",
+      status: 409,
+    });
+    await expect(host!.createTask("casper", parent, {
+      harness: "pi",
+      assignment: "Must not start before publication.",
+    }, new AbortController().signal)).rejects.toMatchObject({
+      code: "task_parent_unpublished",
+      status: 409,
+    });
+  });
+
+  it("blocks every task surface behind delete, draft-abandon, and fork markers", async () => {
+    const { home } = setup();
+    await attachTasks();
+    const parent = conversationIdentity("pi", "task-lifecycle-markers");
+    writeConversation(home, parent.conversationId);
+    const sessionDir = ghostPaths(home).sessionDir;
+    const stem = sessionFileNameFor(parent.conversationId).slice(0, -".jsonl".length);
+    const markers = [
+      join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`),
+      join(sessionDir, `.ghost-draft-abandon-${stem}.pi.pending.json`),
+      join(sessionDir, `.ghost-fork-${stem}.pending.json`),
+    ];
+    for (const marker of markers) {
+      writeFileSync(marker, "{}", { mode: 0o600 });
+      await expect(host!.listTasks("casper", parent)).rejects.toMatchObject({
+        code: "session_busy",
+        status: 409,
+      });
+      unlinkSync(marker);
+    }
+    await expect(host!.listTasks("casper", parent)).resolves.toEqual([]);
+  });
+
+  it("requires draft abandonment to have no delegated task history", async () => {
+    const { home, ownerHome } = setup();
+    await attachTasks();
+    const parent = conversationIdentity("pi", "draft-with-worker-history");
+    const project = join(ownerHome, "draft-worker-project");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper", parent.conversationId, parent.runtime, project,
+    );
+    await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    await writeTask(home, taskRecord(home, parent, "completed"));
+
+    await expect(host!.abandonProjectDraft(
+      "casper", parent.conversationId, parent.runtime,
+    )).rejects.toMatchObject({ code: "tasks_present", status: 409 });
+    expect(existsSync(projectBindingPath(
+      ghostPaths(home).sessionDir,
+      parent.runtime,
+      parent.conversationId,
+    ))).toBe(true);
+    expect(readdirSync(ghostPaths(home).sessionDir).some((name) =>
+      name.startsWith(".ghost-draft-abandon-"))).toBe(false);
+
+    await expect(host!.deleteSession(
+      "casper", parent.conversationId, parent.runtime,
+    )).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ artifact: "delegated-tasks", count: 1 }),
+      ]),
+    });
+  });
+
+  it.each(["absent", "present", "indeterminate"] as const)(
+    "treats a failed delete marker publication as %s before deciding revocation",
+    async (publication) => {
+      let writeAttempted = false;
+      const injected = new Error(`injected ${publication} delete marker failure`);
+      const { home, ownerHome } = setup({
+        transactionWriter: async (path, value) => {
+          writeAttempted = true;
+          if (publication === "present") {
+            writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+          }
+          throw injected;
+        },
+        transactionMarkerLstat: async (path) => {
+          if (publication === "indeterminate"
+            && writeAttempted
+            && path.includes(".ghost-delete-")) {
+            throw Object.assign(new Error("injected marker inspection failure"), {
+              code: "EACCES",
+            });
+          }
+          return lstatSync(path);
+        },
+      });
+      const parent = conversationIdentity("pi", `delete-${publication}-barrier`);
+      writeConversation(home, parent.conversationId);
+      const project = join(ownerHome, `${publication}-delete-project`);
+      mkdirSync(project);
+      const preview = await host!.previewProject(
+        "casper", parent.conversationId, parent.runtime, project,
+      );
+      await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      });
+      const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+        .projectBindings;
+      const receipt = await bindings.mintTaskBinding(
+        ghostPaths(home).sessionDir,
+        parent,
+      );
+      const authority = bindings.taskBindingAuthority(
+        ghostPaths(home).sessionDir,
+        "casper",
+      );
+
+      await expect(host!.deleteSession(
+        "casper", parent.conversationId, parent.runtime,
+      )).rejects.toBe(injected);
+      const launch = authority.launchNative(
+        receipt,
+        new AbortController().signal,
+        parent,
+        () => "admitted",
+      );
+      if (publication === "absent") await expect(launch).resolves.toBe("admitted");
+      else await expect(launch).rejects.toMatchObject({ code: "task_binding_changed" });
+    },
+  );
+
+  it.each(["absent", "present", "indeterminate"] as const)(
+    "treats a failed draft marker publication as %s before deciding revocation",
+    async (publication) => {
+      let writeAttempted = false;
+      const injected = new Error(`injected ${publication} draft marker failure`);
+      const { home, ownerHome } = setup({
+        transactionWriter: async (path, value) => {
+          writeAttempted = true;
+          if (publication === "present") {
+            writeFileSync(path, `${JSON.stringify(value)}\n`, { mode: 0o600 });
+          }
+          throw injected;
+        },
+        transactionMarkerLstat: async (path) => {
+          if (publication === "indeterminate"
+            && writeAttempted
+            && path.includes(".ghost-draft-abandon-")) {
+            throw Object.assign(new Error("injected marker inspection failure"), {
+              code: "EACCES",
+            });
+          }
+          return lstatSync(path);
+        },
+      });
+      const parent = conversationIdentity("pi", `draft-${publication}-barrier`);
+      const project = join(ownerHome, `${publication}-draft-project`);
+      mkdirSync(project);
+      const preview = await host!.previewProject(
+        "casper", parent.conversationId, parent.runtime, project,
+      );
+      await host!.bindProject("casper", parent.conversationId, parent.runtime, {
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      });
+      const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+        .projectBindings;
+      const receipt = await bindings.mintTaskBinding(
+        ghostPaths(home).sessionDir,
+        parent,
+      );
+      const authority = bindings.taskBindingAuthority(
+        ghostPaths(home).sessionDir,
+        "casper",
+      );
+
+      await expect(host!.abandonProjectDraft(
+        "casper", parent.conversationId, parent.runtime,
+      )).rejects.toBe(injected);
+      const launch = authority.launchNative(
+        receipt,
+        new AbortController().signal,
+        parent,
+        () => "admitted",
+      );
+      if (publication === "absent") await expect(launch).resolves.toBe("admitted");
+      else await expect(launch).rejects.toMatchObject({ code: "task_binding_changed" });
+    },
+  );
+
   it("settles every initial recovery before the boot barrier resolves", async () => {
     const { home } = setup();
+    writeConversation(home, "recovered");
     const store = new TaskStore(ghostPaths(home).home);
     await store.initialize();
     await store.write(recoveredRecord(home));
@@ -250,6 +462,7 @@ describe("SessionHost delegated task composition", () => {
 
   it("retains a poisoned controller until its store can be confirmed closed", async () => {
     const { home } = setup();
+    writeConversation(home, "poisoned-controller");
     let constructions = 0;
     let disposals = 0;
     let allowClose = false;
@@ -291,6 +504,70 @@ describe("SessionHost delegated task composition", () => {
     allowClose = true;
   });
 
+  it("drains concurrent controller operations before a home move and blocks later operations", async () => {
+    const { home } = setup();
+    const parent = conversationIdentity("pi", "task-home-move");
+    writeConversation(home, parent.conversationId);
+    const entered = Promise.withResolvers<void>();
+    const releases = [
+      Promise.withResolvers<void>(),
+      Promise.withResolvers<void>(),
+    ] as const;
+    let delayReads = false;
+    let delayedReads = 0;
+    let constructions = 0;
+    class DelayedStore extends TaskStore {
+      override async list(): Promise<TaskRecord[]> {
+        if (delayReads && delayedReads < releases.length) {
+          const release = releases[delayedReads];
+          if (!release) throw new Error("unexpected delayed task read");
+          delayedReads += 1;
+          if (delayedReads === releases.length) entered.resolve();
+          await release.promise;
+        }
+        return super.list();
+      }
+    }
+    host!.attachTaskServices({
+      adapters: new Map([["pi", controlledAdapter().adapter]]),
+      ownership: fakeTaskScopeManager(),
+      createStore: (storeHome) => {
+        constructions += 1;
+        return constructions === 1
+          ? new DelayedStore(storeHome)
+          : new TaskStore(storeHome);
+      },
+    });
+    await host!.restoreTaskServices();
+    delayReads = true;
+
+    const first = host!.listTasks("casper", parent);
+    const second = host!.listTasks("casper", parent);
+    await entered.promise;
+    let moveReady = false;
+    const moving = homeOperationsFor(temp!.registry).reserveMove("casper").then((release) => {
+      moveReady = true;
+      return release;
+    });
+    await Promise.resolve();
+    expect(moveReady).toBe(false);
+
+    releases[0].resolve();
+    await Promise.resolve();
+    expect(moveReady).toBe(false);
+    releases[1].resolve();
+    await expect(first).resolves.toEqual([]);
+    await expect(second).resolves.toEqual([]);
+    const releaseMove = await moving;
+    await expect(host!.listTasks("casper", parent)).rejects.toMatchObject({
+      code: "ghost_busy",
+      status: 409,
+    });
+    releaseMove();
+    await expect(host!.listTasks("casper", parent)).resolves.toEqual([]);
+    expect(constructions).toBe(2);
+  });
+
   it("isolates boot recovery failures, starts the principal, and retries that ghost", async () => {
     temp = makeTempGhosts();
     const firstHome = seedGhost(temp.root, { name: "alpha" });
@@ -325,6 +602,8 @@ describe("SessionHost delegated task composition", () => {
     } as const satisfies TaskRecord;
     await writeTask(firstHome, first);
     await writeTask(secondHome, second);
+    writeConversation(firstHome, first.parent.conversationId);
+    writeConversation(secondHome, second.parent.conversationId);
     const ownership = fakeTaskScopeManager();
     ownership.unconfirmed.add(first.id);
     const adapter = controlledAdapter().adapter;
@@ -470,12 +749,18 @@ describe("SessionHost delegated task composition", () => {
     expect(readdirSync(group!.trash).sort()).toEqual(
       terminal.map((record) => `${record.id}.json`).sort(),
     );
-    expect(await host!.listTasks("casper", parent)).toEqual([]);
-    expect(await host!.listTasks("casper", otherRuntime)).toMatchObject([{ id: foreign.id }]);
+    await expect(host!.listTasks("casper", parent)).rejects.toMatchObject({
+      code: "task_parent_unpublished",
+    });
+    const records = new TaskStore(ghostPaths(home).home);
+    await records.initialize();
+    expect((await records.list()).map((record) => record.id)).toEqual([foreign.id]);
 
     const replacement = taskRecord(home, parent, "completed");
     await writeTask(home, replacement);
-    expect(await host!.listTasks("casper", parent)).toMatchObject([{ id: replacement.id }]);
+    expect((await records.list()).map((record) => record.id).sort())
+      .toEqual([foreign.id, replacement.id].sort());
+    await records.dispose();
     expect(readdirSync(group!.trash)).toHaveLength(terminal.length);
   });
 
@@ -900,11 +1185,12 @@ describe("SessionHost delegated task composition", () => {
   });
 
   it("creates, observes, steers, and cancels only for the exact qualified parent", async () => {
-    const { ownerHome } = setup();
+    const { home, ownerHome } = setup();
     const project = join(ownerHome, "project");
     mkdirSync(project);
     const parent = conversationIdentity("pi", "same-id");
     const otherRuntime = conversationIdentity("claude-code", "same-id");
+    writeConversation(home, parent.conversationId);
     const preview = await host!.previewProject(
       "casper",
       parent.conversationId,
@@ -951,14 +1237,15 @@ describe("SessionHost delegated task composition", () => {
     );
     expect(running.binding.cwd).toBe(project);
     expect(await host!.listTasks("casper", parent)).toHaveLength(1);
-    expect(await host!.listTasks("casper", otherRuntime)).toEqual([]);
+    await expect(host!.listTasks("casper", otherRuntime))
+      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
 
     await expect(host!.task("casper", otherRuntime, admitted.id))
-      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
     await expect(host!.sendTask("casper", otherRuntime, admitted.id, "wrong parent"))
-      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
     await expect(host!.cancelTask("casper", otherRuntime, admitted.id))
-      .rejects.toMatchObject({ code: "task_not_found", status: 404 });
+      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
     expect(controlled.followUps).toEqual([]);
     expect(controlled.force).not.toHaveBeenCalled();
 
@@ -1054,10 +1341,11 @@ describe("SessionHost delegated task composition", () => {
   });
 
   it("does not finish forced daemon shutdown before native quiescence", async () => {
-    const { ownerHome } = setup();
+    const { home, ownerHome } = setup();
     const project = join(ownerHome, "project");
     mkdirSync(project);
     const parent = conversationIdentity("pi", "forced");
+    writeConversation(home, parent.conversationId);
     const preview = await host!.previewProject("casper", "forced", "pi", project);
     await host!.bindProject("casper", "forced", "pi", {
       root: project,
@@ -1113,6 +1401,7 @@ describe("SessionHost delegated task composition", () => {
     const project = join(temp.ownerHome, "project");
     mkdirSync(project);
     const parent = conversationIdentity("pi", "shutdown-race");
+    writeConversation(home, parent.conversationId);
     const preview = await host.previewProject("casper", "shutdown-race", "pi", project);
     await host.bindProject("casper", "shutdown-race", "pi", {
       root: project,

@@ -467,6 +467,42 @@ interface TrackedLaunch {
   ownership: NativeTaskOwnershipReceipt;
 }
 
+class TaskOperationGate {
+  readonly #active = new Set<Promise<unknown>>();
+  readonly #signals = new Set<AbortController>();
+  #closed = false;
+
+  run<T>(action: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    if (this.#closed) {
+      return Promise.reject(new GhostError(
+        "tasks_shutting_down",
+        "Tasks are shutting down.",
+        503,
+      ));
+    }
+    const controller = new AbortController();
+    this.#signals.add(controller);
+    let operation: Promise<T>;
+    try {
+      operation = action(controller.signal);
+    } catch (error) {
+      operation = Promise.reject(error);
+    }
+    this.#active.add(operation);
+    void operation.finally(() => {
+      this.#active.delete(operation);
+      this.#signals.delete(controller);
+    }).catch(() => {});
+    return operation;
+  }
+
+  close(): Promise<void> {
+    this.#closed = true;
+    for (const controller of this.#signals) controller.abort();
+    return Promise.allSettled([...this.#active]).then(() => undefined);
+  }
+}
+
 export class TaskController {
   readonly #actors = new Map<string, Promise<void>>();
   readonly #live = new Map<string, LiveTask>();
@@ -475,10 +511,13 @@ export class TaskController {
   readonly #stopTargets = new Map<string, "cancelled" | "interrupted">();
   readonly #followUps = new Map<string, Promise<void>>();
   readonly #controlCleanups = new WeakMap<TaskAdapterControl, Promise<void>>();
+  readonly #operations = new TaskOperationGate();
   #initialization?: Promise<TaskRecord[]>;
   #initialized = false;
   #poisoned = false;
   #shuttingDown = false;
+  #nativeDisposed = false;
+  #disposePromise?: Promise<void>;
   constructor(
     readonly store: TaskStore,
     readonly adapters: ReadonlyMap<string, TaskAdapter>,
@@ -527,8 +566,18 @@ export class TaskController {
   }
   get poisoned(): boolean { return this.#poisoned; }
   #ready(): void { if (!this.#initialized) fail("tasks_uninitialized", "Tasks are not initialized.", 503); }
-  get(id: string): Promise<TaskRecord> { this.#ready(); return this.store.read(id); }
-  list(): Promise<TaskRecord[]> { this.#ready(); return this.store.list(); }
+  get(id: string): Promise<TaskRecord> {
+    return this.#operations.run(async () => {
+      this.#ready();
+      return this.store.read(id);
+    });
+  }
+  list(): Promise<TaskRecord[]> {
+    return this.#operations.run(async () => {
+      this.#ready();
+      return this.store.list();
+    });
+  }
   #actor<T>(id: string, action: () => Promise<T>): Promise<T> {
     const prior = this.#actors.get(id) ?? Promise.resolve(); const result = prior.catch(() => {}).then(action);
     const tail = result.then(() => undefined, () => undefined); this.#actors.set(id, tail);
@@ -544,7 +593,13 @@ export class TaskController {
     record.events.push({ sequence, at: nextMutationTimestamp(record, this.now().toISOString()), code, message: safeText(message, MAX_TASK_EVENT_MESSAGE).text });
     if (record.events.length > MAX_TASK_EVENTS) { record.events.shift(); record.eventCursor.dropped += 1; }
   }
-  async start(input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
+  start(input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt }): Promise<TaskRecord> {
+    return this.#operations.run((signal) => this.#start(input, signal));
+  }
+  async #start(
+    input: { parent: ConversationIdentity; harness: string; agent?: string; task: string; binding: TaskBindingReceipt },
+    operationSignal: AbortSignal,
+  ): Promise<TaskRecord> {
     this.#ready(); if (this.#shuttingDown) fail("tasks_shutting_down", "Tasks are shutting down.", 503);
     if (!validParent(input.parent) || typeof input.harness !== "string"
       || !HARNESS.test(input.harness) || typeof input.task !== "string"
@@ -560,6 +615,9 @@ export class TaskController {
       task: safeText(input.task, MAX_TASK_TEXT).text, binding: expectedBinding, ownership, state: "queued", createdAt: at, updatedAt: at,
       events: [], eventCursor: { nextSequence: 1, dropped: 0 }, result: null, resultTruncated: false, error: null };
     const abort = new AbortController();
+    const abortAdmission = () => abort.abort(operationSignal.reason);
+    operationSignal.addEventListener("abort", abortAdmission, { once: true });
+    if (operationSignal.aborted) abortAdmission();
     const persisted = this.store.write(record);
     const tracked: TrackedLaunch = {
       generation: record.generation,
@@ -576,6 +634,7 @@ export class TaskController {
         await this.#launch(id, record.generation, ownership, abort);
       }
     })().finally(() => {
+      operationSignal.removeEventListener("abort", abortAdmission);
       if (this.#launches.get(id) === tracked) this.#launches.delete(id);
     });
     this.#launches.set(id, tracked); void tracked.promise.catch(() => {});
@@ -791,6 +850,9 @@ export class TaskController {
     return result;
   }
   followUp(id: string, message: string, parent?: ConversationIdentity): Promise<TaskRecord> {
+    return this.#operations.run(() => this.#followUp(id, message, parent));
+  }
+  #followUp(id: string, message: string, parent?: ConversationIdentity): Promise<TaskRecord> {
     this.#ready(); return this.#serializeFollowUp(id, async () => {
       const admitted = await this.#actor(id, async () => {
         const row = await this.store.read(id);
@@ -820,7 +882,10 @@ export class TaskController {
       return this.store.read(id);
     });
   }
-  async cancel(id: string, parent?: ConversationIdentity): Promise<TaskRecord> {
+  cancel(id: string, parent?: ConversationIdentity): Promise<TaskRecord> {
+    return this.#operations.run(() => this.#cancel(id, parent));
+  }
+  async #cancel(id: string, parent?: ConversationIdentity): Promise<TaskRecord> {
     this.#ready();
     const active = this.#live.get(id) ?? this.#launches.get(id);
     if (active) {
@@ -936,7 +1001,9 @@ export class TaskController {
     return settled;
   }
   async beginShutdown(): Promise<void> {
-    this.#ready(); this.#shuttingDown = true;
+    this.#ready();
+    this.#shuttingDown = true;
+    const operations = this.#operations.close();
     const admitted = [...this.#launches.entries()];
     const live = [...this.#live.entries()];
     const activeStops = [...this.#stops.entries()];
@@ -948,6 +1015,7 @@ export class TaskController {
       for (const result of results) if (result.status === "rejected") failures.push(result.reason);
     };
     collect(await Promise.allSettled([
+      operations,
       ...admitted.map(([, launch]) => launch.persisted),
       ...admitted.map(([, launch]) => launch.promise),
       ...cleanups,
@@ -975,14 +1043,33 @@ export class TaskController {
     await Promise.all([...ownershipById].map(([id, ownership]) =>
       this.#sharedStop(id, ownership, "interrupted")));
   }
-  async dispose(): Promise<void> {
-    if (this.#poisoned) {
+  dispose(): Promise<void> {
+    this.#shuttingDown = true;
+    const operations = this.#operations.close();
+    for (const launch of this.#launches.values()) launch.abort.abort();
+    for (const live of this.#live.values()) live.abort.abort();
+    if (this.#disposePromise) return this.#disposePromise;
+    const nativeShutdown = !this.#nativeDisposed && !this.#poisoned
+      ? this.beginShutdown()
+      : undefined;
+    const disposing = (async () => {
+      await operations;
+      if (!this.#nativeDisposed) {
+        if (nativeShutdown) {
+          await nativeShutdown;
+          await this.forceAll();
+        }
+        this.#nativeDisposed = true;
+      }
       await this.store.dispose();
       this.#poisoned = false;
       this.#initialized = false;
       this.#initialization = undefined;
-      return;
-    }
-    await this.beginShutdown(); await this.forceAll(); await this.store.dispose(); this.#initialized = false; this.#initialization = undefined;
+    })();
+    this.#disposePromise = disposing;
+    void disposing.catch(() => {
+      if (this.#disposePromise === disposing) this.#disposePromise = undefined;
+    });
+    return disposing;
   }
 }

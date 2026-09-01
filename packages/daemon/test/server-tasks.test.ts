@@ -123,6 +123,27 @@ describe("native harness API", () => {
 });
 
 describe("delegated task API", () => {
+  it("returns the bounded unpublished-parent error without task internals", async () => {
+    const listTasks = vi.fn(async () => {
+      throw new GhostError(
+        "task_parent_unpublished",
+        "Delegated tasks require a published conversation or its active first owner turn.",
+        409,
+      );
+    });
+    const base = await serve({ host: { listTasks } });
+    const response = await request(
+      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(PARENT.id)}/tasks`,
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: {
+        code: "task_parent_unpublished",
+        message: "Delegated tasks require a published conversation or its active first owner turn.",
+      },
+    });
+  });
+
   it("returns the bounded active-task deletion conflict unchanged", async () => {
     const deleteSession = vi.fn(async () => {
       throw new GhostError(

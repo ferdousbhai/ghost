@@ -217,6 +217,14 @@ anything, so the owner can cancel or wait and retry. Only
 rollback of a fork or project draft that was never shown to the owner remains a
 permanent unlink.
 
+All delegated-task reads and mutations share one runtime-qualified parent lane
+with fork, draft-abandon, and delete lifecycle operations. HTTP task access
+requires the exact durable Pi transcript or Claude sidecar; only the private
+principal bridge may delegate during its still-active first owner turn before
+publication. Draft abandonment requires no task history in any state; finished
+worker history moves only with full conversation deletion. Home moves close and
+drain controller operations before native shutdown and store closure.
+
 `SessionManager.open` receives the explicit transcript file, per-ghost session
 directory, and cwd, so nothing lands in `~/.pi`.
 Credentials are never inherited from the daemon environment: `env-scrub.ts`
@@ -417,6 +425,10 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/sessions/:id/project/preview` | inspect a project and mint a short-lived trust receipt |
 | POST | `/api/ghosts/:name/sessions/:id/project/reload` | refresh an idle conversation's trusted snapshot |
 | DELETE | `/api/ghosts/:name/sessions/:id/project/draft` | abandon an unpublished pre-turn project draft |
+| GET/POST | `/api/ghosts/:name/sessions/:id/tasks` | list or create delegated coding tasks for a published runtime-qualified parent |
+| GET | `/api/ghosts/:name/sessions/:id/tasks/:taskId` | inspect one bounded delegated-task projection |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/send` | follow up while a delegated task is running |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/cancel` | cancel and wait for confirmed native quiescence |
 | GET/POST | `/api/ghosts/:name/mcp` | list or add ghost-owned MCP servers |
 | PUT/DELETE | `/api/ghosts/:name/mcp/:server` | replace or remove one MCP server |
 | PUT | `/api/ghosts/:name/mcp/:server/enabled` | enable or disable one MCP server |

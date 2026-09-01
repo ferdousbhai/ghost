@@ -597,8 +597,42 @@ describe("durable task foundation", () => {
       const task = await start(current.controller); await eventually(current.store, task.id, "running");
       const first = shutdownFirst ? current.controller.beginShutdown() : current.controller.cancel(task.id);
       const second = shutdownFirst ? current.controller.cancel(task.id) : current.controller.beginShutdown();
-      gate.resolve(); await Promise.all([first, second]); expect((await current.store.read(task.id)).state).toBe("interrupted");
+      gate.resolve();
+      if (shutdownFirst) {
+        await expect(second).rejects.toMatchObject({ code: "tasks_shutting_down" });
+        await first;
+      } else {
+        await Promise.all([first, second]);
+      }
+      expect((await current.store.read(task.id)).state).toBe("interrupted");
     }
+  });
+
+  it("gives controller disposal precedence over an admitted cancellation", async () => {
+    const gate = deferred<void>();
+    const quiet = deferred<void>();
+    const result = deferred<string>();
+    const current = await fixture({
+      async start(_input, context) {
+        context.register({
+          async force() {
+            await gate.promise;
+            quiet.resolve();
+            result.resolve("");
+          },
+          quiescence: quiet.promise,
+        });
+        return { result: result.promise, async followUp() {} };
+      },
+    });
+    const task = await start(current.controller);
+    await eventually(current.store, task.id, "running");
+
+    const cancellation = current.controller.cancel(task.id);
+    const disposal = current.controller.dispose();
+    gate.resolve();
+    await Promise.all([cancellation, disposal]);
+    expect((await readPersistedTask(current.home, task.id)).state).toBe("interrupted");
   });
 
   it("keeps an upgraded shutdown target authoritative across a blocked cancelled write", async () => {
@@ -763,6 +797,91 @@ describe("durable task foundation", () => {
     await controller.dispose();
     expect(controller.poisoned).toBe(false);
     expect(closes).toBe(2);
+  });
+
+  it("shares disposal and retries only the store close after native shutdown succeeds", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    let closes = 0;
+    let lists = 0;
+    class RetryCloseStore extends TaskStore {
+      override async list(): Promise<TaskRecord[]> {
+        lists += 1;
+        return super.list();
+      }
+      override async dispose(): Promise<void> {
+        closes += 1;
+        if (closes === 1) throw new Error("injected store close failure");
+        await super.dispose();
+      }
+    }
+    const store = new RetryCloseStore(home);
+    stores.push(store);
+    const controller = new TaskController(
+      store,
+      new Map(),
+      authority,
+      fakeTaskScopeManager(),
+    );
+    await controller.initialize();
+    const listsBeforeDispose = lists;
+
+    const first = controller.dispose();
+    const concurrent = controller.dispose();
+    expect(concurrent).toBe(first);
+    await expect(first).rejects.toThrow("injected store close failure");
+    expect({ closes, lists }).toEqual({ closes: 1, lists: listsBeforeDispose + 1 });
+
+    await expect(controller.dispose()).resolves.toBeUndefined();
+    expect({ closes, lists }).toEqual({ closes: 2, lists: listsBeforeDispose + 1 });
+  });
+
+  it("admits concurrent reads before close, drains both, and rejects later operations", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const readEntered = deferred<void>();
+    const listEntered = deferred<void>();
+    const release = deferred<void>();
+    let delay = false;
+    class DelayedOperationStore extends TaskStore {
+      override async read(id: string): Promise<TaskRecord> {
+        if (delay) {
+          readEntered.resolve();
+          await release.promise;
+        }
+        return super.read(id);
+      }
+      override async list(): Promise<TaskRecord[]> {
+        if (delay) {
+          listEntered.resolve();
+          await release.promise;
+        }
+        return super.list();
+      }
+    }
+    const store = new DelayedOperationStore(home);
+    stores.push(store);
+    await store.initialize();
+    const row = record("completed");
+    await store.write(row);
+    const controller = new TaskController(
+      store,
+      new Map(),
+      authority,
+      fakeTaskScopeManager(),
+    );
+    await controller.initialize();
+    delay = true;
+
+    const reading = controller.get(row.id);
+    const listing = controller.list();
+    await Promise.all([readEntered.promise, listEntered.promise]);
+    let disposed = false;
+    const disposal = controller.dispose().then(() => { disposed = true; });
+    await expect(controller.get(row.id)).rejects.toMatchObject({ code: "tasks_shutting_down" });
+    expect(disposed).toBe(false);
+    release.resolve();
+    await expect(Promise.all([reading, listing])).resolves.toHaveLength(2);
+    await disposal;
+    expect(disposed).toBe(true);
   });
 
   it("does not admit a retry when task-store disposal is unconfirmed", async () => {

@@ -44,6 +44,7 @@ import type { LiveSessionControllerOptions } from "../src/live-voice.js";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
+import { conversationIdentity } from "../src/conversation-identity.js";
 import {
   ConversationMaintenance,
   maintenanceStatePath,
@@ -1863,6 +1864,47 @@ describe("SessionHost.open", () => {
       "ghost_screen",
     ]));
     expect(await modelSystemPrompt("delegation")).toContain("# Coding delegation");
+  });
+
+  it("allows only the private principal capability during an active unpublished first turn", async () => {
+    const barrier = createMockProviderBarrier();
+    const { dir } = await setup(
+      [{ kind: "text", text: "held", barrier }],
+      { title: { enabled: false } },
+    );
+    host!.attachTaskServices(inertTaskServices());
+    await host!.restoreTaskServices();
+    const conversationId = "active-unpublished-delegation";
+    const handle = await host!.open("casper", conversationId);
+    const list = handle.session.getToolDefinition("task_list");
+    expect(list).toBeDefined();
+    const turn = host!.runTurn("casper", {
+      sessionId: conversationId,
+      prompt: "hold this owner turn",
+      emit: () => {},
+    });
+    await barrier.waitForArrivals();
+    const transcript = join(ghostPaths(dir).sessionDir, sessionFileNameFor(conversationId));
+    unlinkSync(transcript);
+
+    await expect(list!.execute(
+      "active-call",
+      {},
+      undefined,
+      undefined,
+      {} as never,
+    )).resolves.toBeDefined();
+    barrier.release();
+    await turn;
+    if (existsSync(transcript)) unlinkSync(transcript);
+    expect(existsSync(transcript)).toBe(false);
+    await expect(list!.execute(
+      "inactive-call",
+      {},
+      undefined,
+      undefined,
+      {} as never,
+    )).rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
   });
 
   it("refuses task-service attachment after session activity", async () => {
@@ -8322,17 +8364,78 @@ describe("SessionHost.renameGhost", () => {
         if (failClose) throw new Error("relay close failed");
       },
     });
+    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+      .projectBindings;
+    const project = join(temp!.ownerHome, "rename-revocation-project");
+    mkdirSync(project);
+    const preview = await host!.previewProject("casper", "rename-revocation", "pi", project);
+    await host!.bindProject("casper", "rename-revocation", "pi", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const parent = { id: "pi:rename-revocation", runtime: "pi", conversationId: "rename-revocation" } as const;
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
+    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
 
     await expect(host!.renameGhost("casper", "wisp"))
       .rejects.toMatchObject({ code: "browser_cleanup_pending", status: 503 });
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
     expect(temp!.registry.get("casper").dir).toBe(dir);
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "old-home-launch",
+    )).resolves.toBe("old-home-launch");
 
     failClose = false;
     await expect(host!.renameGhost("casper", "wisp"))
       .resolves.toMatchObject({ name: "wisp" });
     expect(closed).toEqual([dir, dir]);
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "must-not-launch",
+    )).rejects.toBeInstanceOf(Error);
+  });
+
+  it("does not restore old-name authority when the registry move succeeds before reporting failure", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+      .projectBindings;
+    const project = join(temp!.ownerHome, "post-registry-revocation-project");
+    mkdirSync(project);
+    const conversationId = "post-registry-revocation";
+    const preview = await host!.previewProject("casper", conversationId, "pi", project);
+    await host!.bindProject("casper", conversationId, "pi", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const parent = conversationIdentity("pi", conversationId);
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
+    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
+    const rename = temp!.registry.rename.bind(temp!.registry);
+    vi.spyOn(temp!.registry, "rename").mockImplementationOnce((from, to) => {
+      rename(from, to);
+      throw new Error("injected post-registry failure");
+    });
+
+    await expect(host!.renameGhost("casper", "wisp"))
+      .rejects.toThrow("injected post-registry failure");
+    expect(existsSync(dir)).toBe(false);
+    expect(temp!.registry.get("wisp").dir).toBe(join(temp!.root, "wisp"));
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "must-not-launch",
+    )).rejects.toBeInstanceOf(Error);
   });
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {

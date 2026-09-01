@@ -1264,6 +1264,28 @@ export async function readClaudeSessionMetadataFile(
   }
 }
 
+/** Read one already-published sidecar without running resume recovery or writing state. */
+export async function readPublishedClaudeSessionMetadata(
+  sessionDir: string,
+  conversationId: string,
+): Promise<ClaudeSessionMetadata | null> {
+  const path = claudeSessionMetadataPath(sessionDir, conversationId);
+  try {
+    const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
+    if (metadata.conversationId !== conversationId) {
+      throw new GhostError(
+        "session_identity_mismatch",
+        "The stored Claude conversation identity does not match the requested resume id.",
+        409,
+      );
+    }
+    return metadata;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function readMetadata(
   sessionDir: string,
   conversationId: string,

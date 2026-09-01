@@ -450,6 +450,22 @@ callbacks therefore serialize only across the synchronous process boundary;
 unrelated parents and all work after spawn remain unthrottled. If spawn wins,
 the old admitted worker continues and the mutation publishes afterward; if the
 mutation wins, final revalidation rejects the stale worker without spawning.
+Binding removal and whole-home moves use tokenized revocation leases on this
+same boundary. `beginRevocation` installs one exact-parent pending token before
+its first await, invalidates preview/incarnation authority, and drains the
+current launch lease; `beginScopeRevocation` does the same for every binding
+under one ghost identity. Pending and committed tokens both deny preview,
+binding publication, receipt validation, and launch. Rollback removes only its
+own still-pending token and never restores an old preview or incarnation;
+ordinary writes never clear either state. Commit is synchronous immediately
+after the durable transaction marker or registry move crosses its commit
+barrier. Retirement occurs only after the old authority is unaddressable and
+removes that token plus older committed tokens, never a newer retry token. A
+failure proven to precede durable publication rolls back; a present or
+indeterminate marker, or a home path already moved after a registry error,
+commits and remains retry-only. Whole-home browser, schedule, and pre-move
+failures roll back; failures after the registry move never restore the old
+name's authority.
 The receipt is minted only from that parent's current durable, trusted project
 binding; an unbound conversation cannot delegate coding work. Root and cwd are
 canonical, byte-bounded, and cwd is lexically within a non-null root; receipt comparison
@@ -533,6 +549,23 @@ Startup never resumes an old generation. Adapters own native session and
 subagent behavior; this layer owns only durable lifecycle. It never creates Git
 worktrees or runs Git staging, commit, or branch commands, and it does not
 invent titles, recaps, presentation state, branch state, or queue state.
+
+Every public controller operation enters one closeable, nonserializing
+operation gate synchronously before its first await and remains admitted until
+its actual read, start, native follow-up acknowledgement, or confirmed cancel
+settles. Its SessionHost surface first holds the ghost-home filesystem-identity
+lease, then the runtime-qualified parent lane, for that same complete interval.
+Independent operations remain concurrent. Home moves and daemon
+shutdown close the gate synchronously, abort useful external waits, drain all
+operations already admitted, and only then perform native cleanup and close
+the store. The lock order is home/shutdown admission, runtime-qualified parent
+lane, controller operation gate, short per-task actor, then binding mutex; no
+parent or binding lease is held while an operation gate drains. Controller
+disposal is one memoized promise for concurrent callers and has two retryable
+phases: after native shutdown succeeds it is never repeated, even if the store
+close fails; a later call retries only the same store close. A native failure
+retries the native phase. Poisoned initialization uses the same close phase and
+cannot be replaced by a newly opened store until descriptor closure succeeds.
 
 Native delegated adapters register their force and quiescence boundary before
 their first catalogue or protocol await. Every durable task id derives exactly
@@ -648,8 +681,9 @@ The principal Ghost, on either pi or Claude Code, may create and supervise
 these subordinate coding workers through exactly `task`, `task_list`,
 `task_get`, `task_send`, and `task_cancel`. Task ids are visible only to the
 runtime-qualified parent conversation that created them; the same raw
-conversation id on the other runtime is a different parent and receives a
-404. List and detail projections are bounded and omit binding identities and
+conversation id on the other runtime is a different parent. Once both parents
+are published, a lookup through the other one receives a 404. List and detail
+projections are bounded and omit binding identities and
 raw native protocol. `task` accepts a complete assignment, one of `pi`,
 `codex`, or `claude-code`, an optional cwd inside the parent's current trusted
 project, and an optional opaque agent only for Claude Code. The principal owns
@@ -714,6 +748,18 @@ quiescence, and reads own it through their complete durable read. Conversation
 deletion takes the exclusive side of that same gate synchronously before its
 first await, drains admitted operations, and prevents later operations from
 entering until deletion either fails or settles.
+Every task operation first verifies that no exact delete, draft-abandon, or
+applicable Pi fork marker owns the parent. HTTP operations additionally require
+the exact durable Pi transcript or strictly parsed Claude sidecar; an arbitrary
+raw id or a binding alone is not a task parent and returns bounded
+`409 task_parent_unpublished`. The principal bridge may act during a first turn
+before that publication only through a private, unforgeable capability bound
+to the exact ghost, runtime-qualified identity, and currently admitted owner
+turn; the capability is neither an API value nor reusable after that turn.
+Fork publication/recovery, draft abandonment, and deletion take the exclusive
+side of the same parent lane. Draft abandonment requires zero task records in
+every state; `409 tasks_present` directs the owner to full conversation DELETE,
+which is the only operation that moves terminal worker history.
 Responses use the same bounded task list/detail projections as principal tools:
 they omit the project binding identities, durable assignment body, and native
 protocol and include at most the retained bounded event preview. A task id
@@ -1480,7 +1526,12 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   nothing on any path follows the rename with a recursive removal. Before that
   move, deletion applies the scheduled-work cleanup above; its
   `503 schedule_cleanup_failed` response guarantees the home has not moved and
-  the same confirmed request is the retry path.
+  the same confirmed request is the retry path. Delegated-task admission is
+  fenced and the home controller fully drains before a scope revocation begins.
+  Browser/schedule/pre-move failure rolls that pending token back. The registry
+  move is the commit barrier: once the old path is absent, even if the registry
+  call or later cleanup reports failure, old-name binding authority remains
+  revoked and is retired only after the old identity is unaddressable.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
@@ -1509,7 +1560,11 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   which does not move with the home. Before the home moves, rename applies the
   same scheduled-work retirement as delete. A failure is
   `503 schedule_cleanup_failed`, leaves the old home/name intact, and is retried
-  with the same request; successful partial cleanup is not rolled back.
+  with the same request; successful partial cleanup is not rolled back. Rename
+  uses the same controller drain and tokenized scope-revocation boundary as
+  delete: pre-move failure rolls back only its pending token, while an observed
+  registry move commits synchronously and no later error restores old-name
+  launch authority.
 - `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
   memory list, read from the plain files on each request and never stored.
   `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the
@@ -1899,6 +1954,16 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   later retries of that same abandoned incarnation have `abandoned:false`.
   Previewing or binding the qualified id again removes the completion receipt
   and starts a new incarnation.
+  The route exclusively claims the runtime-qualified parent task lane before
+  inspecting state and rejects any durable child history, including terminal
+  rows, with `409 tasks_present`; the owner must use full conversation DELETE
+  to move that history. It begins the exact binding-revocation lease before
+  publishing the cleanup marker, commits only after that marker and its
+  directory fsync are durable, and retires only after cleanup/receipt
+  reconciliation makes the old authority unreachable. A marker write failure
+  rolls back only when `lstat` proves absence; present or indeterminate state
+  remains committed and retry-only. Rebinding the same id never implicitly
+  clears that revocation or adopts old task rows.
 - Project mutations are serialized per runtime-qualified conversation and use
   optimistic generation. A stale value is `409 stale_generation`; a concurrent
   runtime-neutral turn admission, either runtime's open/close, or another
@@ -2067,6 +2132,14 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   conversation maintenance. The owner may cancel or wait and retry.
   An unknown conversation returns `404 not_found`.
   Deletion writes and fsyncs a v4 tombstone before moving the first artifact.
+  It begins an exact binding-revocation lease immediately after the exclusive
+  task lane drains and the terminal/empty child check succeeds. Maintenance
+  and the draft-abandon marker are then checked inside that pending fence; a
+  failure before tombstone publication rolls it back. The lease commits synchronously
+  after the v4 tombstone and sessions-directory fsync succeed. A failed write
+  rolls back only when marker absence is proven; present or indeterminate
+  marker state keeps revocation committed until successful reconciliation and
+  marker retirement. No project write or same-id reuse clears it implicitly.
   Each move first creates a private same-filesystem fallback Trash root, then
   journals its exact collision-free `{ artifact, source, trash, kind }` intent
   before rename. Resume reconciles the two authoritative locations: source-only

@@ -182,9 +182,10 @@ describe("ProjectBindingStore", () => {
     });
     const receipt = await store.mintTaskBinding(sessionDir, parent);
     const authority = store.taskBindingAuthority(sessionDir, "casper");
-    await store.revoke(
+    const revocation = await store.beginRevocation(
       sessionDir, "casper", parent.runtime, parent.conversationId,
     );
+    revocation.commit();
     // Revocation invalidates preview/admission incarnations, while deletion of
     // the durable binding is the generation-changing half of conversation
     // removal. The launch lease must still be usable only for that exact disk
@@ -223,7 +224,8 @@ describe("ProjectBindingStore", () => {
     const authority = store.taskBindingAuthority(sessionDir, "casper");
     await authority.revalidate(receipt, new AbortController().signal, parent);
 
-    await store.revokeScope("casper");
+    const revocation = await store.beginScopeRevocation("casper");
+    revocation.commit();
 
     let launched = false;
     await expect(authority.launchNative(
@@ -233,6 +235,100 @@ describe("ProjectBindingStore", () => {
       () => { launched = true; return "spawned"; },
     )).rejects.toMatchObject({ code: "task_binding_changed" });
     expect(launched).toBe(false);
+  });
+
+  it("rolls back only its pending token and cannot retire a newer committed revocation", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "task-revocation-tokens");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    const authority = store.taskBindingAuthority(sessionDir, "casper");
+    const launch = () => authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "spawned",
+    );
+
+    const pending = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    await expect(launch()).rejects.toMatchObject({ code: "task_binding_changed" });
+    pending.rollback();
+    await expect(launch()).resolves.toBe("spawned");
+
+    const older = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    older.commit();
+    const newer = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    newer.commit();
+    older.rollback();
+    older.retire();
+    await expect(launch()).rejects.toMatchObject({ code: "task_binding_changed" });
+    newer.retire();
+    await expect(launch()).resolves.toBe("spawned");
+  });
+
+  it("keeps committed scope revocation across writes until the old authority retires", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "scope-write-revocation");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const current = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const lease = await store.beginScopeRevocation("casper");
+    lease.commit();
+    await expect(store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current,
+      root: project,
+      cwd: project,
+      reason: "reloaded",
+      scope: "casper",
+    })).rejects.toMatchObject({ code: "task_binding_changed" });
+    lease.rollback();
+    await expect(store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    lease.retire();
+    await expect(store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    )).resolves.toMatchObject({ root: project });
   });
 
   it("rejects unbound, outside, replaced, and stale-generation task contexts", async () => {
@@ -1162,7 +1258,7 @@ describe("ProjectBindingStore", () => {
   it("revokes preview receipts across raw conversation id reuse", async () => {
     const { sessionDir, project, store } = fixture();
     const first = await store.preview("pi", "reused", project, "casper");
-    await store.revoke(sessionDir, "casper", "pi", "reused");
+    const revocation = await store.beginRevocation(sessionDir, "casper", "pi", "reused");
     const current = await store.read(sessionDir, "pi:reused", "pi", "reused");
     await expect(store.write({
       sessionDir,
@@ -1174,6 +1270,7 @@ describe("ProjectBindingStore", () => {
       reason: "bound",
       scope: "casper",
     })).rejects.toMatchObject({ code: "trust_token_invalid" });
+    revocation.rollback();
 
     const second = await store.preview("pi", "reused", project, "casper");
     await expect(store.write({
