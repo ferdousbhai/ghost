@@ -117,6 +117,7 @@ describe("hello handshake", () => {
     expect(hello.in_hyprland_session).toBe(true);
     const backends = await client.capabilities();
     expect(backends.grim?.foreign_toplevel).toBe(true);
+    expect(backends.ydotool?.available).toBe(false);
     await client.dispose();
   });
 
@@ -187,6 +188,28 @@ describe("request / response", () => {
     expect(sent.args).toEqual({ foo: 1 });
     proc.line({ id: proc.requestId(0), ok: true, result: { ok: true } });
     await expect(pending).resolves.toEqual({ ok: true });
+    await client.dispose();
+  });
+
+  it("logs a malformed line and continues with the next complete response", async () => {
+    const proc = new FakeProcess();
+    const logs: string[] = [];
+    const client = clientFor(proc, { onLog: (line: string) => logs.push(line) });
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+
+    const pending = client.request<{ recovered: boolean }>("state", {});
+    await tick();
+    proc.stdout.emit("data", "not-json\n");
+    proc.line({
+      id: proc.requestId(0),
+      ok: true,
+      result: { recovered: true },
+    });
+
+    await expect(pending).resolves.toEqual({ recovered: true });
+    expect(logs).toEqual(["[unparseable stdout line] not-json"]);
     await client.dispose();
   });
 
