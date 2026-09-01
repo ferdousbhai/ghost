@@ -31,24 +31,19 @@ from .bridge import GhostDesktop, UnknownRefError
 
 DESKTOP_HELPER_PROTOCOL_VERSION = 2
 
-# Order matters: _error_code returns the first isinstance match, so the more
-# specific OmaHarnessError subclasses (UnknownRefError) precede OmaHarnessError.
-_ERROR_CODES: dict[type, str] = {
-    CapabilityError: "capability",
-    AmbiguousTargetError: "ambiguous_target",
-    StateRestoreError: "state_restore",
-    UnknownRefError: "unknown_ref",
-    OmaHarnessError: "harness",
-    ValueError: "invalid_args",
-    KeyError: "invalid_args",
-    TypeError: "invalid_args",
-}
-
-
 def _error_code(exc: BaseException) -> str:
-    for kind, code in _ERROR_CODES.items():
-        if isinstance(exc, kind):
-            return code
+    if isinstance(exc, UnknownRefError):
+        return "unknown_ref"
+    if isinstance(exc, CapabilityError):
+        return "capability"
+    if isinstance(exc, AmbiguousTargetError):
+        return "ambiguous_target"
+    if isinstance(exc, StateRestoreError):
+        return "state_restore"
+    if isinstance(exc, OmaHarnessError):
+        return "harness"
+    if isinstance(exc, (ValueError, KeyError, TypeError)):
+        return "invalid_args"
     return "internal"
 
 

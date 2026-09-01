@@ -7,9 +7,20 @@ import json
 import pytest
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.errors import (
+    AmbiguousTargetError,
+    CapabilityError,
+    OmaHarnessError,
+    StateRestoreError,
+)
 from ghost_desktop_helper._vendor.omaharness.inputs import MAX_CLICKS
-from ghost_desktop_helper.bridge import GhostDesktop
-from ghost_desktop_helper.protocol import DESKTOP_HELPER_PROTOCOL_VERSION, OPS, Server
+from ghost_desktop_helper.bridge import GhostDesktop, UnknownRefError
+from ghost_desktop_helper.protocol import (
+    DESKTOP_HELPER_PROTOCOL_VERSION,
+    OPS,
+    Server,
+    _error_code,
+)
 
 
 def _desktop(**kw):
@@ -119,6 +130,22 @@ def test_stale_ref_maps_to_unknown_ref_code_with_details():
     # ref from a never-minted one.
     assert resp["error"]["details"]["reason"] == "stale"
     json.dumps(resp)  # still serialisable
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (UnknownRefError("stale"), "unknown_ref"),
+        (CapabilityError("missing"), "capability"),
+        (AmbiguousTargetError("ambiguous"), "ambiguous_target"),
+        (StateRestoreError("restore"), "state_restore"),
+        (OmaHarnessError("failure"), "harness"),
+        (ValueError("bad value"), "invalid_args"),
+        (RuntimeError("unexpected"), "internal"),
+    ],
+)
+def test_error_code_precedence_is_explicit(error: BaseException, code: str):
+    assert _error_code(error) == code
 
 
 def test_keyboard_interrupt_is_not_swallowed_into_a_json_error():
