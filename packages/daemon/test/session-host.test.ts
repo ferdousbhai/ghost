@@ -6741,11 +6741,13 @@ describe("multi-ghost", () => {
       const casper = seedGhost(temp.root, {
         name: "casper",
         character: "# casper\n\nYou set type.\n",
+        memory: { "casper-private.md": "Casper keeps this private.\n" },
         provider: { baseUrl: provider.url, modelId: provider.modelId },
       });
       const mina = seedGhost(temp.root, {
         name: "mina",
         character: "# mina\n\nYou keep bees.\n",
+        memory: { "mina-private.md": "Mina keeps this private.\n" },
         provider: { baseUrl: minaProvider.url, modelId: minaProvider.modelId },
       });
       for (const [dir, shellPath] of [[casper, "/bin/bash"], [mina, "/bin/sh"]] as const) {
@@ -6776,7 +6778,16 @@ describe("multi-ghost", () => {
       expect(systems.some((system) => system.includes("keep bees"))).toBe(true);
       for (const system of systems) {
         expect(system.includes("set type") && system.includes("keep bees")).toBe(false);
+        expect(system).toContain("## Shared Obsidian");
+        expect(system).toContain(
+          join(temp.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
+        );
+        expect(system).toContain("Use the CLI-selected current vault by default");
       }
+      expect(provider.requests[0]?.system).toContain("casper-private");
+      expect(provider.requests[0]?.system).not.toContain("mina-private");
+      expect(minaProvider.requests[0]?.system).toContain("mina-private");
+      expect(minaProvider.requests[0]?.system).not.toContain("casper-private");
 
       // Bash execution runs in each session's own working directory; nothing
       // process-global leaks one ghost's shell into the other's.

@@ -1696,6 +1696,54 @@ fi
     expect(append(1)).toContain("written-between-turns");
   });
 
+  it("shares the owner Obsidian contract while keeping two ghosts' memories private", async () => {
+    const { paths, seenOptions } = setupClaudeHost();
+    writeFileSync(
+      join(paths.home, "memory", "casper-private.md"),
+      "Casper keeps this private.\n",
+      "utf8",
+    );
+    const minaDir = seedGhost(temp!.root, {
+      name: "mina",
+      character: "# Mina\n\nYou are Mina, a beekeeper.\n",
+      memory: { "mina-private.md": "Mina keeps this private.\n" },
+    });
+    const minaPaths = ghostPaths(minaDir);
+    mkdirSync(minaPaths.agentDir, { recursive: true });
+    setChatModelRole(minaPaths.home, "claude-code", "default");
+
+    await host!.runTurn("casper", {
+      sessionId: "casper-obsidian-boundary",
+      prompt: "What state can you use?",
+      emit: () => {},
+    });
+    await host!.runTurn("mina", {
+      sessionId: "mina-obsidian-boundary",
+      prompt: "What state can you use?",
+      emit: () => {},
+    });
+
+    expect(seenOptions).toHaveLength(2);
+    const [casperPrompt, minaPrompt] = seenOptions.map(({ systemPrompt }) =>
+      JSON.stringify(systemPrompt));
+    const sharedSkill = join(
+      temp!.ownerHome,
+      ".agents",
+      "skills",
+      "obsidian-cli",
+      "SKILL.md",
+    );
+    for (const prompt of [casperPrompt, minaPrompt]) {
+      expect(prompt).toContain("## Shared Obsidian");
+      expect(prompt).toContain(sharedSkill);
+      expect(prompt).toContain("Use the CLI-selected current vault by default");
+    }
+    expect(casperPrompt).toContain("casper-private");
+    expect(casperPrompt).not.toContain("mina-private");
+    expect(minaPrompt).toContain("mina-private");
+    expect(minaPrompt).not.toContain("casper-private");
+  });
+
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
     const { paths, scheduleUnitDir, seenOptions, lifecycle } = setupClaudeHost();
     mkdirSync(join(paths.home, "docs"), { recursive: true });

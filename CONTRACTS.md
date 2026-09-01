@@ -26,6 +26,9 @@ Ghost never infers an Obsidian vault path, scans for `.obsidian`, assumes
 `~/Documents`, or reads/writes vault files directly. The CLI's current vault is
 the default; `vault=<name>` selects an owner-named vault. Obsidian state is
 unaffected by creating, renaming, deleting, or uninstalling a ghost.
+Ghost does not use the separate Obsidian Headless client: owner-shared note and
+task operations require the desktop-linked CLI and therefore a graphical
+Obsidian instance.
 
 There is no Ghost plan mode, todo store, plan/todo API, or progress UI. Runtime
 native planning may exist, but durable owner-visible plans and tasks belong in
