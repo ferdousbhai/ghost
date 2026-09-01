@@ -12,7 +12,8 @@ var ownerKeys = [
     "projectGhost",
     "mcpGhost",
     "activeGhost",
-    "memoryGhost"
+    "memoryGhost",
+    "characterGhost"
 ];
 
 function cloneMap(value) {

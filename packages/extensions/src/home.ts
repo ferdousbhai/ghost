@@ -513,10 +513,17 @@ export class GhostHome {
     return title || undefined;
   }
 
-  async readCharacter(): Promise<CharacterFile | null> {
+  /**
+   * `enforceLimit: false` is for the owner's editor: an oversize hand-edited
+   * file must still load so it can be shortened, while every prompt-bound
+   * reader keeps the default refusal.
+   */
+  async readCharacter(
+    options?: { enforceLimit?: boolean },
+  ): Promise<CharacterFile | null> {
     const body = await readConfinedText(this.dir, this.characterPath, "Character path");
     if (body === null) return null;
-    if (body.length > MAX_CHARACTER_BODY_LENGTH) {
+    if ((options?.enforceLimit ?? true) && body.length > MAX_CHARACTER_BODY_LENGTH) {
       throw new GhostError(
         "limit_exceeded",
         `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
@@ -528,6 +535,24 @@ export class GhostHome {
       title: this.characterTitle(body),
       body,
     };
+  }
+
+  /**
+   * The owner's persona edits land here so an oversize body is refused at
+   * write time, not discovered when the next cold session fails to start.
+   */
+  async writeCharacter(input: { body: string }): Promise<void> {
+    if (input.body.length > MAX_CHARACTER_BODY_LENGTH) {
+      throw new GhostError(
+        "limit_exceeded",
+        `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
+        + `that body is ${input.body.length}. Nothing was written.`,
+        { length: input.body.length, limit: MAX_CHARACTER_BODY_LENGTH },
+      );
+    }
+    await withFileMutationQueue(this.characterPath, async () => {
+      await atomicWriteFile(this.dir, this.characterPath, input.body);
+    });
   }
 
   async listMemory(): Promise<MemoryListing> {

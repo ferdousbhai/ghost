@@ -157,6 +157,8 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "memory") {
             Ghostd.fetchMemory(false);
+        } else if (section === "character") {
+            Ghostd.fetchCharacter(false);
         }
     }
 
@@ -1104,21 +1106,17 @@ FloatingWindow {
                 Layout.fillHeight: true
             }
 
-            // character.md is a real file, so it gets the real file editor.
-            // Instantiated only while shown: leaving flushes and returning
-            // re-reads, the same as the workbench.
-            Loader {
+            // The persona edits through the daemon's validating writer rather
+            // than the workbench's direct file editor (which remains for
+            // ordinary files): the daemon owns the size cap, so a bad edit is
+            // refused at Save instead of breaking the next cold start.
+            CharacterPane {
                 id: characterPane
-                readonly property string path: Workbench.absolute("character.md")
-                active: hud.currentSection === "character" && characterPane.path !== ""
-                visible: active && !hud.loginOpen && !hud.switcherOpen
+                visible: hud.currentSection === "character"
+                    && !hud.loginOpen && !hud.switcherOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-
-                sourceComponent: FilePane {
-                    filePath: characterPane.path
-                    onClosed: hud.showSection("chat")
-                }
+                onClosed: hud.showSection("chat")
             }
 
             // The effective command palette is conversation-scoped. A pick

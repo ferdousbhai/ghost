@@ -294,6 +294,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT\|DELETE /api/ghosts/:name/memory` | List, write, or trash private memory. |
+| `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
 | `GET /api/ghosts/:name/models` | Paginated available/catalog model rows; `q` is at most 256 characters. |
 | `GET\|PUT /api/ghosts/:name/model-routing` | Read or replace role primaries/fallbacks. |
@@ -387,7 +388,10 @@ hosted-session, concurrency, or spend cap.
   jobs, delegated-task admission and process ownership, HTTP, and the `ghost`
   CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
-  talks only to authenticated HTTP/SSE and never edits durable state directly.
+  talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
+  state (memory, character, control files) directly; the one deliberate
+  exception is the workbench file editor, which writes ordinary files at the
+  owner's explicit direction.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
   opt-in MV3 relay into the owner's Chromium. Pairing and workspace ownership
   are capability-scoped; there is no second browser backend. Client text

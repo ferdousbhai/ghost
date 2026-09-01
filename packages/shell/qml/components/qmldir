@@ -4,6 +4,7 @@ ActionButton 1.0 ActionButton.qml
 ActivityLine 1.0 ActivityLine.qml
 AskDialog 1.0 AskDialog.qml
 Bubble 1.0 Bubble.qml
+CharacterPane 1.0 CharacterPane.qml
 CodeView 1.0 CodeView.qml
 Composer 1.0 Composer.qml
 CommandsBrowser 1.0 CommandsBrowser.qml

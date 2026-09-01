@@ -899,6 +899,56 @@ describe("/api/ghosts/:name/memory", () => {
   });
 });
 
+describe("/api/ghosts/:name/character", () => {
+  it("round-trips the persona file and refuses an oversize write", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    const route = `${base}/api/ghosts/casper/character`;
+    const put = (body: unknown) => fetch(route, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    const written = await put({ body: "# Casper\n\nDry wit, direct answers.\n" });
+    expect(written.status).toBe(200);
+    expect(await written.json()).toEqual({ ok: true, limit: 20_000 });
+    expect(readFileSync(join(ghostDir, "character.md"), "utf8"))
+      .toBe("# Casper\n\nDry wit, direct answers.\n");
+
+    const read = await fetch(route);
+    expect(read.status).toBe(200);
+    expect(await read.json()).toEqual({
+      body: "# Casper\n\nDry wit, direct answers.\n",
+      title: "Casper",
+      limit: 20_000,
+    });
+
+    const oversize = await put({ body: "x".repeat(20_001) });
+    expect(oversize.status).toBe(400);
+    expect((await oversize.json() as { error: { code: string } }).error.code)
+      .toBe("limit_exceeded");
+    expect(readFileSync(join(ghostDir, "character.md"), "utf8"))
+      .toBe("# Casper\n\nDry wit, direct answers.\n");
+
+    expect((await put({ body: 42 })).status).toBe(400);
+    expect((await fetch(route, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(405);
+    expect((await fetch(`${base}/api/ghosts/missing/character`)).status).toBe(404);
+  });
+
+  it("still serves an oversize hand-edited file so the owner can shorten it", async () => {
+    const base = await serve();
+    const ghostDir = join(temp!.root, "casper");
+    writeFileSync(join(ghostDir, "character.md"), "y".repeat(20_400), "utf8");
+
+    const read = await fetch(`${base}/api/ghosts/casper/character`);
+    expect(read.status).toBe(200);
+    const body = await read.json() as { body: string; limit: number };
+    expect(body.body.length).toBe(20_400);
+    expect(body.limit).toBe(20_000);
+  });
+});
+
 describe("POST /api/ghosts/:name/messages runtime admission", () => {
   const body = (sessionId: string, prompt: string) => ({
     ...TURN_BODY,

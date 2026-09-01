@@ -27,7 +27,13 @@ import {
   homeOperationsFor,
   type HomeOperationCoordinator,
 } from "./home-operations.js";
-import { assertValidGhostName, GhostError, type GhostRegistry } from "./ghosts.js";
+import { MAX_CHARACTER_BODY_LENGTH, openGhostHome } from "@ghost/extensions";
+import {
+  assertValidGhostName,
+  GhostError,
+  translateExtensionError,
+  type GhostRegistry,
+} from "./ghosts.js";
 import type {
   GhostHookCommandConfig,
   GhostHookStatus,
@@ -576,6 +582,53 @@ export function createDaemonServer(options: ServerOptions): Server {
       return memoryWriter(ghost.dir, { content, name });
     });
     jsonResponse(response, 200, { ok: true, ...written });
+  };
+
+  /**
+   * The persona file, editable from the HUD without touching the disk
+   * directly. The read tolerates an oversize hand-edited file (it must load
+   * to be shortened); the write refuses one, so a bad edit fails here instead
+   * of at the next cold session start.
+   */
+  const handleReadCharacter = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const character = await homeOperations.withLease(ghostName, async () => {
+      const ghost = options.registry.get(ghostName);
+      try {
+        return await openGhostHome(ghost.dir).readCharacter({ enforceLimit: false });
+      } catch (error) {
+        return translateExtensionError(error);
+      }
+    });
+    jsonResponse(response, 200, {
+      body: character?.body ?? "",
+      title: character?.title ?? null,
+      limit: MAX_CHARACTER_BODY_LENGTH,
+    });
+  };
+
+  const handleWriteCharacter = async (
+    ghostName: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    const body = await readJsonObjectBody(request, maxBodyBytes);
+    const { body: text } = body as { body?: unknown };
+    if (typeof text !== "string") {
+      errorResponse(response, 400, "invalid_request", '"body" must be a string.');
+      return;
+    }
+    await homeOperations.withLease(ghostName, async () => {
+      const ghost = options.registry.get(ghostName);
+      try {
+        await openGhostHome(ghost.dir).writeCharacter({ body: text });
+      } catch (error) {
+        return translateExtensionError(error);
+      }
+    });
+    jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
   };
 
   const handleTrashMemory = async (
@@ -2020,6 +2073,12 @@ export function createDaemonServer(options: ServerOptions): Server {
           if (method === "GET") return await handleListMemory(ghostName, response);
           if (method === "PUT") return await handleWriteMemory(ghostName, request, response);
           if (method === "DELETE") return await handleTrashMemory(ghostName, request, response);
+          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
+        }
+        if (segments.length === 4 && segments[3] === "character") {
+          if (method === "GET") return await handleReadCharacter(ghostName, response);
+          if (method === "PUT") return await handleWriteCharacter(ghostName, request, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }

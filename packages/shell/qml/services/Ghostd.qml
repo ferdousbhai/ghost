@@ -750,6 +750,21 @@ Singleton {
     property string memoryBusyPath: ""
     property string memoryActionError: ""
     property string memoryGhost: ""
+
+    // The persona file, edited through the daemon rather than by a direct
+    // disk write: the daemon owns the size cap and refuses an oversize body,
+    // so a bad edit fails at save time instead of at the next cold session
+    // start. The read tolerates an oversize hand-edited file so it can be
+    // shortened here.
+    property string characterBody: ""
+    property var characterTitle: null
+    /** The daemon's character cap, echoed in its responses; 0 until heard.
+        Never pinned here — the daemon may change it. */
+    property int characterLimit: 0
+    property bool characterLoading: false
+    property bool characterSaving: false
+    property string characterError: ""
+    property string characterGhost: ""
     /** The last listing body verbatim: an unchanged directory must not rebuild
         the list's rows. */
     property string memoryRaw: ""
@@ -924,6 +939,7 @@ Singleton {
     signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
     signal memoryWriteFinished(string path, bool ok)
+    signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
     signal hooksConnectionReset(int epoch)
     signal projectPreviewFinished(bool ok)
@@ -1003,6 +1019,10 @@ Singleton {
     property string eventsFrameBuffer: ""
     property var memoryRequest: null
     property var memoryMutationRequest: null
+    property var characterRequest: null
+    property var characterWriteRequest: null
+    /** Test seam; production constructs native character XHRs. */
+    property var characterRequestFactory: null
     property var remoteRequest: null
     property var remoteQrRequest: null
     /** Test seam; production constructs native QML XHRs. */
@@ -1562,7 +1582,8 @@ Singleton {
             projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             activeGhost: root.activeGhost,
-            memoryGhost: root.memoryGhost
+            memoryGhost: root.memoryGhost,
+            characterGhost: root.characterGhost
         };
     }
 
@@ -1579,6 +1600,7 @@ Singleton {
         root.mcpGhost = state.mcpGhost;
         root.activeGhost = state.activeGhost;
         root.memoryGhost = state.memoryGhost;
+        root.characterGhost = state.characterGhost;
     }
 
     function applyGhostRename(from: string, to: string): void {
@@ -1624,6 +1646,7 @@ Singleton {
         root.clearModelState();
         root.clearGreeting();
         root.clearMemory();
+        root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
         root.clearDelegatedTasks();
@@ -1656,6 +1679,7 @@ Singleton {
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
         root.clearMemory();
+        root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
         root.clearDelegatedTasks();
@@ -2238,6 +2262,120 @@ Singleton {
     function deleteMemory(path: string): void {
         if (path === "") return;
         root.mutateMemory("DELETE", path, ({ path: path, confirm: path }), null);
+    }
+
+
+    function newCharacterRequest(): var {
+        return typeof root.characterRequestFactory === "function"
+            ? root.characterRequestFactory() : new XMLHttpRequest();
+    }
+
+    function clearCharacter(): void {
+        const read = root.characterRequest;
+        const write = root.characterWriteRequest;
+        // Retire ownership before abort because Qt may synchronously deliver DONE.
+        root.characterRequest = null;
+        root.characterWriteRequest = null;
+        root.characterBody = "";
+        root.characterTitle = null;
+        root.characterLimit = 0;
+        root.characterLoading = false;
+        root.characterSaving = false;
+        root.characterError = "";
+        root.characterGhost = "";
+        if (read && read.readyState !== 4) read.abort();
+        if (write && write.readyState !== 4) write.abort();
+    }
+
+    /**
+     * Re-read the active ghost's persona file. `force` bypasses the per-ghost
+     * cache; a successful save forces it so the derived title follows the disk.
+     */
+    function fetchCharacter(force: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") {
+            root.clearCharacter();
+            return;
+        }
+        if (!force && root.characterGhost === ghost) return;
+        if (root.characterRequest && root.characterRequest.readyState !== 4) {
+            if (!force) return;
+            root.characterRequest.abort();
+        }
+
+        const xhr = root.newCharacterRequest();
+        root.characterRequest = xhr;
+        root.characterLoading = true;
+        root.characterError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.characterRequest) return;
+            root.characterRequest = null;
+            root.characterLoading = false;
+            if (ghost !== root.activeGhost) return;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    if (typeof body.body !== "string" || !(body.limit > 0)
+                            || !(body.title === null || typeof body.title === "string"))
+                        throw new Error("invalid character");
+                    root.characterBody = body.body;
+                    root.characterTitle = body.title;
+                    root.characterLimit = body.limit;
+                    root.characterGhost = ghost;
+                    root.characterError = "";
+                    root.reachable = true;
+                } catch (error) {
+                    root.characterError = "ghostd sent a malformed character file";
+                }
+            } else {
+                root.characterError = root.describeError(xhr, "GET character");
+            }
+        };
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", ({}), null);
+    }
+
+    /**
+     * Replace character.md through the daemon's validating writer. The daemon
+     * is the authority on the size cap: an oversize body comes back 400
+     * limit_exceeded and its message is surfaced as characterError while the
+     * caller keeps the draft.
+     */
+    function writeCharacter(body: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || root.characterSaving) return;
+        const xhr = root.newCharacterRequest();
+        root.characterWriteRequest = xhr;
+        root.characterSaving = true;
+        root.characterError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.characterWriteRequest) return;
+            root.characterWriteRequest = null;
+            root.characterSaving = false;
+            if (ghost !== root.activeGhost) return;
+            let ok = false;
+            if (xhr.status === 200) {
+                try {
+                    const result = JSON.parse(xhr.responseText);
+                    if (!result || result.ok !== true) throw new Error("not ok");
+                    ok = true;
+                    root.characterBody = body;
+                    if (result.limit > 0) root.characterLimit = result.limit;
+                    root.characterGhost = ghost;
+                    root.reachable = true;
+                } catch (error) {
+                    root.characterError = "ghostd sent a malformed character result";
+                }
+            } else {
+                root.characterError = root.describeError(xhr, "PUT character");
+            }
+            root.characterWriteFinished(ok);
+            // The file on disk is the truth; re-read for the derived title.
+            if (ok) root.fetchCharacter(true);
+        };
+        root.dispatch(xhr, "PUT",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/character",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ body: body }));
     }
 
 
