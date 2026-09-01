@@ -3,7 +3,7 @@
 This is the code that is *ours*: it composes the vendored, proven modules
 (dispatch-grammar detection, bounded hyprctl, the disruptive-operation
 transaction, the capture ladder, the AT-SPI backend, layout-safe input) into
-the fourteen desktop ops that DESKTOP_HELPER.md defines. Everything hard is
+the desktop ops that docs/desktop-helper.md defines. Everything hard is
 vendored; everything here is glue and honesty-metadata shaping.
 
 Two rules the harness taught us, kept intact:
@@ -49,8 +49,7 @@ _CHROMIUM_HINTS = ("chrom", "electron", "code", "slack", "discord", "spotify")
 # Server-side ceilings for the model-supplied AT-SPI walk knobs. A recursive
 # D-Bus tree walk is strictly serial on the single request line, so an
 # unbounded max_nodes wedges every subsequent desktop op behind it. These caps
-# turn a hostile or careless argument into a bounded walk; they are documented
-# in DESKTOP_HELPER.md.
+# turn a hostile or careless argument into a bounded walk.
 _MAX_NODES_CAP = 5000
 _MAX_DEPTH_CAP = 40
 _MAX_LIMIT_CAP = 200
@@ -650,20 +649,10 @@ class GhostDesktop:
             f"here: {', '.join(present) or '(none)'}"
         )
 
-    def ax_roles(
-        self,
-        *,
-        app: str | int | None = None,
-        max_depth: int = 25,
-        max_nodes: int = 3000,
-    ) -> dict[str, Any]:
-        max_depth = self._clamp_depth(max_depth)
-        max_nodes = self._clamp_nodes(max_nodes)
+    def ax_roles(self, *, app: str | int | None = None) -> dict[str, Any]:
         window = self._resolve_window(app)
         tree = self._ax_tree(window)
-        nodes = tree.snapshot(
-            self._ax_root(window), max_depth=max_depth, max_nodes=max_nodes
-        )
+        nodes = tree.snapshot(self._ax_root(window), max_depth=25, max_nodes=3000)
         self._publish_snapshot(tree, window)
         counts: dict[str, int] = {}
         for node in nodes:
@@ -719,8 +708,6 @@ class GhostDesktop:
         x: float,
         y: float,
         app: str | int | None = None,
-        max_depth: int = 25,
-        max_nodes: int = 3000,
     ) -> dict[str, Any]:
         """Resolve a screen coordinate to the AT-SPI element under it.
 
@@ -733,16 +720,14 @@ class GhostDesktop:
         element bounds normalise to); the vendored walk refuses rather than
         guesses when no node offers bounds it can trust.
         """
-        max_depth = self._clamp_depth(max_depth)
-        max_nodes = self._clamp_nodes(max_nodes)
         window = self._resolve_window(app)
         tree = self._ax_tree(window)
         node = tree.hit_test(
             self._ax_root(window),
             float(x),
             float(y),
-            max_depth=max_depth,
-            max_nodes=max_nodes,
+            max_depth=25,
+            max_nodes=3000,
         )
         epoch = self._publish_snapshot(tree, window)
         return {
@@ -813,7 +798,6 @@ class GhostDesktop:
         self._require_input_allowed("typing")
         warnings: list[str] = []
         if prefer_atspi:
-            node = None
             if ref is not None:
                 node = self._ax_element(ref)
             else:
@@ -920,7 +904,6 @@ class GhostDesktop:
         )
 
     def _click_ref(self, ref: Any, *, button: str, clicks: int) -> dict[str, Any]:
-        clicks = max(1, min(int(clicks), MAX_CLICKS))
         node = self._ax_element(ref)
         # The ref carries the window it was snapshotted in; _ax_element already
         # proved the ref is current, so this window is the one that owns it -
@@ -1121,40 +1104,32 @@ class GhostDesktop:
         screen-space move needs no window at all; a window-space move (or an
         explicit ``app``) focuses the target so the local coordinate resolves.
         """
-        if app is None and coordinate_space == "screen":
-            transaction = _NoCursorRestoreTransaction(
-                self.hyprctl, self.ydotool, operation="mouse_move", runner=self._runner
-            )
-            self._require_input_allowed("mouse_move")
-            self.ydotool.require()
-            with transaction:
-                transaction.move_pointer(float(x), float(y))
-            report = transaction.report()
-            return _honesty(
-                "ydotool",
-                background_safe=report["background_safe"],
-                interference=report["interference"],
-                warnings=[*report["warnings"], _HOVER_WARNING],
-                x=float(x),
-                y=float(y),
-            )
-        window = self._resolve_window(app)
+        bare_screen_move = app is None and coordinate_space == "screen"
+        window = None if bare_screen_move else self._resolve_window(app)
         self._require_input_allowed("mouse_move")
         self.ydotool.require()
-        point = self._screen_point(float(x), float(y), coordinate_space, window)
         transaction = _NoCursorRestoreTransaction(
             self.hyprctl, self.ydotool, operation="mouse_move", runner=self._runner
         )
         with transaction:
-            focused = transaction.focus_target(window)
-            transaction.move_pointer(*self._reproject(point, window, focused))
+            if window is None:
+                transaction.move_pointer(float(x), float(y))
+            else:
+                point = self._screen_point(float(x), float(y), coordinate_space, window)
+                focused = transaction.focus_target(window)
+                transaction.move_pointer(*self._reproject(point, window, focused))
         report = transaction.report()
+        described = (
+            {"x": float(x), "y": float(y)}
+            if window is None
+            else {"target": window["address"]}
+        )
         return _honesty(
             "ydotool",
             background_safe=report["background_safe"],
             interference=report["interference"],
             warnings=[*report["warnings"], _HOVER_WARNING],
-            target=window["address"],
+            **described,
         )
 
 

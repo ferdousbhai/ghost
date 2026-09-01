@@ -51,6 +51,21 @@ Client errors retain the requested `op`. An unavailable helper/pipe is
 `not_found`, a deadline or line-size ceiling is `limit_exceeded`, and a
 malformed handshake/response is `invalid_format`.
 
+The sidecar's own `error.code` vocabulary, which the TS client and the model
+must both handle:
+
+| code | meaning |
+| --- | --- |
+| `unknown_ref` | A stale or never-minted element ref (`details.reason` says which). |
+| `capability` | A backend is missing, refused, or the session is locked; the message carries the remediation. |
+| `ambiguous_target` | More than one window matched the `app` selector. |
+| `state_restore` | The op ran but focus/workspace restoration failed afterward. |
+| `invalid_args` | A malformed argument value. |
+| `harness` | Any other desktop-craft failure. |
+| `internal` | An unexpected error inside the helper. |
+| `unknown_op` | An op outside the advertised set. |
+| `invalid_json`, `invalid_request` | A line that is not JSON / not an object (no `id`). |
+
 Every capture/input/perform result carries **honesty metadata** (from the
 harness's model): `{ backend, background_safe, interference: [...], warnings:
 [...] }`. Never return a blank/faked result — refuse with a clear error and

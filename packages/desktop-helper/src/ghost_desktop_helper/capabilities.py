@@ -27,7 +27,7 @@ def _tool(name: str) -> dict[str, Any]:
     }
 
 
-def detect_backends(hyprctl: hypr.Hyprctl | None = None) -> dict[str, Any]:
+def detect_backends() -> dict[str, Any]:
     """Report which capture / input / accessibility backends are usable."""
     grim = capture_module.detect_grim()
     ydotool_status = inputs.socket_status()

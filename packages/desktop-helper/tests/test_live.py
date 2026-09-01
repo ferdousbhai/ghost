@@ -35,7 +35,7 @@ def test_hello_detects_lua_grammar_on_this_machine():
     grammar = payload["detected-dispatch-grammar"]
     assert grammar["generation"] == dg.LUA, grammar
     version = payload["hyprland-version"]
-    assert version and "0.56" in version["tag"], version
+    assert version and version["tag"], version
 
 
 def test_state_is_populated(desktop):

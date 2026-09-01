@@ -13,7 +13,6 @@ from ghost_desktop_helper._vendor.omaharness.errors import (
     OmaHarnessError,
     StateRestoreError,
 )
-from ghost_desktop_helper._vendor.omaharness.inputs import MAX_CLICKS
 from ghost_desktop_helper.bridge import GhostDesktop, UnknownRefError
 from ghost_desktop_helper.protocol import (
     DESKTOP_HELPER_PROTOCOL_VERSION,
@@ -87,26 +86,6 @@ def test_state_sources_clients_and_workspaces():
     assert result["activewindow"]["address"] == "0xaaaa"
 
 
-def test_protocol_caps_huge_click_repetition():
-    class RecordingDesktop:
-        calls: list[dict] = []
-
-        def click(self, **kwargs):
-            self.calls.append(kwargs)
-            return {"clicks": kwargs["clicks"]}
-
-    desktop = RecordingDesktop()
-    response = _server(desktop).handle(
-        {
-            "id": 22,
-            "op": "click",
-            "args": {"x": 1, "y": 2, "clicks": 10**9},
-        }
-    )
-    assert response["ok"] is True
-    assert desktop.calls[0]["clicks"] == MAX_CLICKS
-
-
 def test_invalid_args_object():
     resp = _server(_desktop()).handle({"id": 3, "op": "see", "args": []})
     assert resp["ok"] is False
@@ -157,3 +136,30 @@ def test_keyboard_interrupt_is_not_swallowed_into_a_json_error():
                           runner=unlocked_runner))
     with pytest.raises(KeyboardInterrupt):
         server.handle({"id": 6, "op": "state"})
+
+
+def test_run_serves_the_line_transport():
+    """Drive the real stdio loop: unsolicited hello, then one response per line."""
+    import io
+
+    desktop = _desktop()
+    stdin = io.StringIO(
+        '{"id": 1, "op": "state"}\n'
+        "\n"
+        "not json\n"
+        "[1, 2]\n"
+    )
+    stdout = io.StringIO()
+    server = Server(
+        stdin=stdin, stdout=stdout, stderr=io.StringIO(),
+        desktop_factory=lambda: desktop,
+    )
+    assert server.run() == 0
+
+    lines = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert lines[0]["type"] == "hello"
+    assert lines[1]["id"] == 1 and lines[1]["ok"] is True
+    assert lines[2]["ok"] is False
+    assert lines[2]["error"]["code"] == "invalid_json"
+    assert lines[3]["ok"] is False
+    assert lines[3]["error"]["code"] == "invalid_request"

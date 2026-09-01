@@ -11,6 +11,7 @@ from __future__ import annotations
 import pytest
 from conftest import FakeHyprctl, sample_window, unlocked_runner
 
+from ghost_desktop_helper._vendor.omaharness.errors import CapabilityError
 from ghost_desktop_helper.bridge import GhostDesktop
 
 
@@ -246,7 +247,7 @@ def test_snapshot_wall_clock_budget_aborts_a_slow_walk():
     tree = _BudgetedTree(
         FakeAtspi(_tree()), budget_s=1.0, clock=lambda: next(clock)
     )
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(CapabilityError) as exc:
         tree.snapshot(_tree())
     assert "budget" in str(exc.value).casefold()
 
@@ -291,6 +292,6 @@ def test_hit_test_resolves_coordinate_to_element_ref():
 
 def test_hit_test_refuses_when_no_trustworthy_bounds():
     d = _desktop(_tree())
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(CapabilityError) as exc:
         d.hit_test(x=120, y=120, app="0xaaaa")
     assert "bounds" in str(exc.value).casefold()

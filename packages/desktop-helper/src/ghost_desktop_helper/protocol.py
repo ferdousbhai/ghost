@@ -1,8 +1,8 @@
 """The line-oriented JSON stdin/stdout protocol.
 
 One request object per line in, one response object per line out, correlated by
-``id``. Stderr is logs. The contract is DESKTOP_HELPER.md; this module owns the
-transport, the hello handshake, op dispatch, and turning a refusal into a
+``id``. Stderr is logs. The contract is docs/desktop-helper.md; this module owns
+the transport, the hello handshake, op dispatch, and turning a refusal into a
 structured error instead of a crash or - worse - a faked result.
 
     request:  {"id": <n>, "op": "<name>", "args": { ... }}
@@ -26,7 +26,6 @@ from ._vendor.omaharness.errors import (
     OmaHarnessError,
     StateRestoreError,
 )
-from ._vendor.omaharness.inputs import MAX_CLICKS
 from .bridge import GhostDesktop, UnknownRefError
 
 DESKTOP_HELPER_PROTOCOL_VERSION = 2
@@ -89,7 +88,7 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
         ref=a.get("ref"),
         app=a.get("app"),
         button=a.get("button", "left"),
-        clicks=max(1, min(int(a.get("clicks", 1)), MAX_CLICKS)),
+        clicks=int(a.get("clicks", 1)),
         coordinate_space=a.get("coordinate_space", "screen"),
     ),
     "scroll": lambda d, a: d.scroll(
@@ -184,7 +183,7 @@ class Server:
         except Exception as exc:  # noqa: BLE001
             payload["detected-dispatch-grammar"] = {"generation": None, "error": str(exc)}
         try:
-            payload["available-backends"] = capabilities.detect_backends(hyprctl)
+            payload["available-backends"] = capabilities.detect_backends()
         except Exception as exc:  # noqa: BLE001
             payload["available-backends"] = {"error": str(exc)}
         return payload
@@ -265,5 +264,5 @@ class Server:
         return 0
 
 
-def main(argv: list[str] | None = None) -> int:
+def main() -> int:
     return Server().run()

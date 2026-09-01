@@ -52,7 +52,7 @@ def test_key_prefers_background_safe_sendshortcut():
 
 def test_locked_session_refuses_focus():
     desktop, _ = _desktop(locked=True)
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(CapabilityError) as exc:
         desktop.focus(address="0xaaaa")
     assert "lock" in str(exc.value).casefold() or "refus" in str(exc.value).casefold()
 

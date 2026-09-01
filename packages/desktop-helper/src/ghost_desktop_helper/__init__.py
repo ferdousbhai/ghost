@@ -1,7 +1,8 @@
 """ghost-desktop-helper: the ghost's Omarchy computer-use Python sidecar.
 
 A thin JSON stdin/stdout bridge over a vendored, attributed subset of
-omarchy-quattro-harness (MIT, Fabio Pauli). See README.md and DESKTOP_HELPER.md.
+omarchy-quattro-harness (MIT, Fabio Pauli). See README.md and
+docs/desktop-helper.md at the repository root.
 
 The vendored harness is private implementation detail under
 ``ghost_desktop_helper._vendor``. It is never added to ``sys.path`` and cannot
