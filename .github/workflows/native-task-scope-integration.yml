@@ -45,7 +45,8 @@ jobs:
           override_dir="/run/systemd/system/$manager_unit.d"
           override_file="$override_dir/ghost-ci-environment.conf"
           generator_dir="/run/ghost-task-ci-$test_uid-environment-generators"
-          dbus_override_dir="/home/$test_user/.config/systemd/user/dbus.socket.d"
+          user_unit_dir="/run/ghost-task-ci-$test_uid-user-units"
+          dbus_override_dir="$user_unit_dir/dbus.socket.d"
           dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"
           diagnose_manager_failure() {
             sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit" || true
@@ -75,17 +76,21 @@ jobs:
             "/home/$test_user/.local/share"
           [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
           [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
-          [[ "$dbus_override_file" == "/home/ghost-scope-ci/.config/systemd/user/dbus.socket.d/ghost-ci-listen.conf" ]]
+          [[ "$user_unit_dir" == "/run/ghost-task-ci-23456-user-units" ]]
+          [[ "$dbus_override_file" == "/run/ghost-task-ci-23456-user-units/dbus.socket.d/ghost-ci-listen.conf" ]]
           sudo install -d -m755 -- "$override_dir"
           sudo install -d -m755 -- "$generator_dir"
-          sudo install -d -m700 -o "$test_uid" -g "$test_uid" -- "$dbus_override_dir"
-          sudo install -m600 -o "$test_uid" -g "$test_uid" /dev/null "$dbus_override_file"
+          sudo install -d -m755 -- "$user_unit_dir" "$dbus_override_dir"
+          sudo install -m644 /dev/null "$dbus_override_file"
           printf '%s\n' \
             '[Socket]' \
             'ListenStream=' \
             "ListenStream=/run/user/$test_uid/bus" \
             'SocketMode=0600' \
             | sudo tee "$dbus_override_file" >/dev/null
+          [[ "$(stat -c %u:%g:%a "$user_unit_dir")" == 0:0:755 ]]
+          [[ "$(stat -c %u:%g:%a "$dbus_override_dir")" == 0:0:755 ]]
+          [[ "$(stat -c %u:%g:%a "$dbus_override_file")" == 0:0:644 ]]
           printf '%s\n' \
             '[Service]' \
             'PAMName=' \
@@ -100,6 +105,7 @@ jobs:
             'Environment=XDG_DATA_DIRS=/usr/local/share:/usr/share' \
             "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus" \
             "Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir" \
+            "Environment=SYSTEMD_UNIT_PATH=$user_unit_dir:" \
             | sudo tee "$override_file" >/dev/null
           sudo chmod 644 "$override_file"
           sudo systemctl daemon-reload
@@ -152,12 +158,20 @@ jobs:
           override_dir="/run/systemd/system/user@$TEST_UID.service.d"
           override_file="$override_dir/ghost-ci-environment.conf"
           generator_dir="/run/ghost-task-ci-$TEST_UID-environment-generators"
+          user_unit_dir="/run/ghost-task-ci-$TEST_UID-user-units"
+          dbus_override_dir="$user_unit_dir/dbus.socket.d"
+          dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"
           [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
           [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
+          [[ "$user_unit_dir" == "/run/ghost-task-ci-23456-user-units" ]]
+          [[ "$dbus_override_file" == "/run/ghost-task-ci-23456-user-units/dbus.socket.d/ghost-ci-listen.conf" ]]
           if getent passwd "$TEST_USER" >/dev/null; then
             sudo loginctl disable-linger "$TEST_USER" || true
             sudo systemctl stop "user@$TEST_UID.service" || true
             sudo systemctl stop "user-runtime-dir@$TEST_UID.service" || true
+            sudo unlink -- "$dbus_override_file" || true
+            sudo rmdir -- "$dbus_override_dir" || true
+            sudo rmdir -- "$user_unit_dir" || true
             sudo unlink -- "$override_file" || true
             sudo rmdir -- "$override_dir" || true
             sudo rmdir -- "$generator_dir" || true
