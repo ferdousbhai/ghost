@@ -31,7 +31,7 @@ import {
   type TaskState,
 } from "../src/tasks.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-import { fakeTaskScopeManager } from "./helpers/task-scope.js";
+import { FakeNativeTaskScopeManager } from "./helpers/task-scope.js";
 
 let temp: TempGhosts | undefined;
 let host: SessionHost | undefined;
@@ -179,7 +179,7 @@ async function attachTasks(
       ["pi", adapter],
       ["claude-code", adapter],
     ]),
-    ownership: fakeTaskScopeManager(),
+    ownership: new FakeNativeTaskScopeManager(),
     ...(createStore ? { createStore } : {}),
   });
   await host!.restoreTaskServices();
@@ -446,7 +446,7 @@ describe("SessionHost delegated task composition", () => {
     const controlled = controlledAdapter();
     host!.attachTaskServices({
       adapters: new Map([["pi", controlled.adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
     });
     await expect(host!.restoreTaskServices()).resolves.toBeUndefined();
     await expect(host!.restoreTaskServices()).resolves.toBeUndefined();
@@ -482,7 +482,7 @@ describe("SessionHost delegated task composition", () => {
     }
     host!.attachTaskServices({
       adapters: new Map([["pi", controlledAdapter().adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
       createStore: (storeHome) => {
         constructions += 1;
         return new PoisonedStore(storeHome);
@@ -534,7 +534,7 @@ describe("SessionHost delegated task composition", () => {
     }
     host!.attachTaskServices({
       adapters: new Map([["pi", controlledAdapter().adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
       createStore: (storeHome) => {
         constructions += 1;
         return constructions === 1
@@ -608,7 +608,7 @@ describe("SessionHost delegated task composition", () => {
     await writeTask(secondHome, second);
     writeConversation(firstHome, first.parent.conversationId);
     writeConversation(secondHome, second.parent.conversationId);
-    const ownership = fakeTaskScopeManager();
+    const ownership = new FakeNativeTaskScopeManager();
     ownership.unconfirmed.add(first.id);
     const adapter = controlledAdapter().adapter;
     host.attachTaskServices({
@@ -1246,7 +1246,7 @@ describe("SessionHost delegated task composition", () => {
     const controlled = controlledAdapter();
     host!.attachTaskServices({
       adapters: new Map([["pi", controlled.adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
     });
     await host!.restoreTaskServices();
 
@@ -1354,7 +1354,7 @@ describe("SessionHost delegated task composition", () => {
     };
     host!.attachTaskServices({
       adapters: new Map([["pi", adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
     });
     await host!.restoreTaskServices();
     const admitted = await host!.createTask("casper", parent, {
@@ -1397,7 +1397,7 @@ describe("SessionHost delegated task composition", () => {
     const controlled = controlledAdapter({ forceGate: gate.promise });
     host!.attachTaskServices({
       adapters: new Map([["pi", controlled.adapter]]),
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
     });
     await host!.restoreTaskServices();
     const admitted = await host!.createTask("casper", parent, {
@@ -1449,7 +1449,7 @@ describe("SessionHost delegated task composition", () => {
       trustToken: preview.trustToken,
       expectedGeneration: 0,
     });
-    const ownership = fakeTaskScopeManager();
+    const ownership = new FakeNativeTaskScopeManager();
     const controlled = controlledAdapter();
     host.attachTaskServices({
       adapters: new Map([["pi", controlled.adapter]]),

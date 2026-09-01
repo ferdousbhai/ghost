@@ -45,13 +45,6 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-  return { promise, resolve, reject };
-}
-
 class StubSdkLoader extends ClaudeAgentSdkLoader {
   constructor(private readonly loadSdk: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>) {
     super({ ownerHome: "/tmp" });
@@ -120,7 +113,7 @@ function fakeSdk(input: {
         throw new Error("invalid fake invocation");
       }
       input.capturedOptions.push(options);
-      const closed = deferred<void>();
+      const closed = Promise.withResolvers<void>();
       const iterator = prompt[Symbol.asyncIterator]();
       options.spawnClaudeCodeProcess({
         command: input.mode === "wrong-command"
@@ -425,7 +418,7 @@ describe("Claude delegated task adapter", () => {
       messages: [],
       interrupts: { count: 0 },
     });
-    const release = deferred<ClaudeAgentSdkModule>();
+    const release = Promise.withResolvers<ClaudeAgentSdkModule>();
     const loader = new StubSdkLoader((signal) => {
       loaderSignal = signal;
       return release.promise;
@@ -456,8 +449,8 @@ describe("Claude delegated task adapter", () => {
     const replacement = join(fake.root, "replacement");
     writeFileSync(replacement, `#!${process.execPath}\nimport { writeFileSync } from "node:fs";\nwriteFileSync(${JSON.stringify(sentinel)}, "started");\nsetInterval(() => {}, 1000);\n`);
     chmodSync(replacement, 0o700);
-    const loaderEntered = deferred<void>();
-    const releaseLoader = deferred<ClaudeAgentSdkModule>();
+    const loaderEntered = Promise.withResolvers<void>();
+    const releaseLoader = Promise.withResolvers<ClaudeAgentSdkModule>();
     const loader = new StubSdkLoader(() => {
       loaderEntered.resolve();
       return releaseLoader.promise;

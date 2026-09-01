@@ -31,12 +31,6 @@ import type {
 
 const roots: string[] = [];
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => { resolve = settle; });
-  return { promise, resolve };
-}
-
 class StubClaudeAgentSdkLoader extends ClaudeAgentSdkLoader {
   constructor(
     private readonly implementation: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>,
@@ -582,7 +576,7 @@ describe("native harness probes", () => {
   });
 
   it("passes admission abort into the Claude SDK phase before any CLI probe", async () => {
-    const base = root(); const { binary, log } = fakeClaude(base); const started = deferred<void>(); let seenSignal: AbortSignal | undefined;
+    const base = root(); const { binary, log } = fakeClaude(base); const started = Promise.withResolvers<void>(); let seenSignal: AbortSignal | undefined;
     const loader = new StubClaudeAgentSdkLoader((signal) => {
       seenSignal = signal; started.resolve();
       return new Promise((_resolveSdk, rejectSdk) => {

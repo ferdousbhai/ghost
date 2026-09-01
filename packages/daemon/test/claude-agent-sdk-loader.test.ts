@@ -20,14 +20,6 @@ import {
 
 const roots: string[] = [];
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((settle) => {
-    resolve = settle;
-  });
-  return { promise, resolve };
-}
-
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
@@ -137,8 +129,8 @@ describe("ClaudeAgentSdkLoader", () => {
   it("coalesces import, revalidates later loads, and caches only the module", async () => {
     const fixture = fixtureRoot();
     const packageRoot = writeSdkPackage(fixture.installRoot);
-    const importStarted = deferred<void>();
-    const releaseImport = deferred<void>();
+    const importStarted = Promise.withResolvers<void>();
+    const releaseImport = Promise.withResolvers<void>();
     const imported = vi.fn(async (_specifier: string) => {
       importStarted.resolve();
       await releaseImport.promise;
@@ -167,8 +159,8 @@ describe("ClaudeAgentSdkLoader", () => {
   it("aborts one SDK waiter without cancelling or poisoning the shared load", async () => {
     const fixture = fixtureRoot();
     writeSdkPackage(fixture.installRoot);
-    const importStarted = deferred<void>();
-    const releaseImport = deferred<void>();
+    const importStarted = Promise.withResolvers<void>();
+    const releaseImport = Promise.withResolvers<void>();
     const sdk = fakeSdk();
     const loader = new ClaudeAgentSdkLoader({
       ownerHome: fixture.ownerHome,

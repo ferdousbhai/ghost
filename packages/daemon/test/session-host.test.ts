@@ -6,6 +6,7 @@
  * provider prompt, and two ghosts staying separate
  * while answering at the same time in one process.
  */
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
@@ -104,10 +105,10 @@ import {
 import { recordingLogger } from "./helpers/recording-logger.js";
 import type { TaskAdapter } from "../src/tasks.js";
 import type { PrincipalTaskContext } from "../src/principal-task-tools.js";
-import { fakeTaskScopeManager } from "./helpers/task-scope.js";
+import { FakeNativeTaskScopeManager } from "./helpers/task-scope.js";
 
 const inertTaskServices = () => ({
-  ownership: fakeTaskScopeManager(),
+  ownership: new FakeNativeTaskScopeManager(),
   adapters: new Map<string, TaskAdapter>([["codex", {
     async start() {
       throw new Error("inert test adapter");
@@ -115,12 +116,12 @@ const inertTaskServices = () => ({
   }]]),
 });
 
-function withActivePrincipalTaskTurn<T>(
+/** Whether the host holds a principal-task capability for this conversation. */
+function principalTaskTurnActive(
   ghostName: string,
   runtime: "pi" | "claude-code",
   conversationId: string,
-  action: () => T,
-): T {
+): boolean {
   const internals = host as unknown as {
     principalTaskCapabilities: Map<string, {
       ghostName: string;
@@ -128,13 +129,11 @@ function withActivePrincipalTaskTurn<T>(
       conversationId: string;
     }>;
   };
-  const capability = [...internals.principalTaskCapabilities.values()].find((candidate) =>
+  return [...internals.principalTaskCapabilities.values()].some((candidate) =>
     candidate.ghostName === ghostName
     && candidate.runtime === runtime
     && candidate.conversationId === conversationId
   );
-  if (!capability) throw new Error("No active principal task turn.");
-  return action();
 }
 
 let temp: TempGhosts | null = null;
@@ -169,7 +168,8 @@ function directoryBytesSnapshot(root: string): string[] {
         snapshot.push(`directory:${relativePath}`);
         visit(path, relativePath);
       } else if (entry.isFile()) {
-        snapshot.push(`file:${relativePath}:${readFileSync(path).toString("base64")}`);
+        const digest = createHash("sha256").update(readFileSync(path)).digest("hex");
+        snapshot.push(`file:${relativePath}:sha256:${digest}`);
       } else {
         snapshot.push(`other:${relativePath}`);
       }
@@ -229,7 +229,7 @@ lines.on("line", (line) => {
 }
 
 async function setup(
-  script: Parameters<typeof startMockProvider>[0]["script"],
+  script: Parameters<typeof startMockProvider>[0]["script"] = [{ kind: "text", text: "hello" }],
   options: Pick<
     SessionHostOptions,
     | "hooks"
@@ -856,7 +856,7 @@ describe("SessionHost recap", () => {
 
 describe("SessionHost.open", () => {
   it("resumes a legacy Pi transcript at its historical cwd", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const paths = ghostPaths(dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     writeFileSync(
@@ -878,7 +878,7 @@ describe("SessionHost.open", () => {
   });
 
   it("accepts only a line-one native Pi cwd header and rejects unsafe transcript shapes", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const paths = ghostPaths(dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     const writeTranscript = (
@@ -958,7 +958,7 @@ describe("SessionHost.open", () => {
   });
 
   it("starts unbound native tools at owner home without admitting home as a project", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     mkdirSync(join(temp!.ownerHome, ".omp", "extensions"), { recursive: true });
     writeFileSync(join(temp!.ownerHome, "AGENTS.md"), "HOSTILE-OWNER-PROJECT");
     writeFileSync(
@@ -980,7 +980,7 @@ describe("SessionHost.open", () => {
   });
 
   it("loads one trusted project snapshot while keeping executable project code disabled", async () => {
-    await setup([{ kind: "text", text: "hello" }], {
+    await setup(undefined, {
       retention: { idleTtlMs: 0, maxSessions: 1 },
     });
     const project = join(temp!.root, "trusted-project");
@@ -1144,7 +1144,7 @@ describe("SessionHost.open", () => {
   });
 
   it("keeps invalid UTF-8 project instructions, skills, and MCP out of Pi", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const project = join(temp!.root, "pi-invalid-project-utf8");
     const invalidSkill = join(project, ".omp", "skills", "invalid");
     const validSkill = join(project, ".omp", "skills", "valid");
@@ -1215,7 +1215,7 @@ describe("SessionHost.open", () => {
   });
 
   it("serializes concurrent project transitions for one runtime conversation", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const firstRoot = join(temp!.root, "project-one");
     const secondRoot = join(temp!.root, "project-two");
     mkdirSync(firstRoot);
@@ -1823,7 +1823,7 @@ describe("SessionHost.open", () => {
   });
 
   it("keeps sessions, settings, and models inside the ghost home", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const handle = await host!.open("casper", "conv-1");
 
     const paths = ghostPaths(dir);
@@ -1836,14 +1836,14 @@ describe("SessionHost.open", () => {
   it("binds the configured model before open() resolves", async () => {
     // createAgentSession owns and awaits initial selection, so open() returns
     // with the configured model already visible to the first prompt.
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const handle = await host!.open("casper", "conv-1");
     expect(handle.session.model?.id).toBe(provider!.modelId);
     expect(handle.session.model?.provider).toBe("ghost-local");
   });
 
   it("inherits Pi's native tools and adds Ghost's own capabilities", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const handle = await host!.open("casper", "conv-1");
     const names = handle.session.getActiveToolNames();
 
@@ -1868,7 +1868,7 @@ describe("SessionHost.open", () => {
   });
 
   it("does not offer inspect_image to a chat model with native vision", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const paths = ghostPaths(dir);
     const models = openAiCompatiblePreset({
       providerId: "ghost-local",
@@ -1885,7 +1885,7 @@ describe("SessionHost.open", () => {
   });
 
   it("adds principal task tools without removing any existing Pi capability", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     host!.attachTaskServices(inertTaskServices());
     expect(() => host!.attachTaskServices(inertTaskServices())).toThrow(/already attached/u);
     const handle = await host!.open("casper", "delegation");
@@ -1927,17 +1927,13 @@ describe("SessionHost.open", () => {
     const transcript = join(ghostPaths(dir).sessionDir, sessionFileNameFor(conversationId));
     unlinkSync(transcript);
 
-    await expect(withActivePrincipalTaskTurn(
-      "casper",
-      "pi",
-      conversationId,
-      () => list!.execute(
-        "active-call",
-        {},
-        undefined,
-        undefined,
-        {} as never,
-      ),
+    expect(principalTaskTurnActive("casper", "pi", conversationId)).toBe(true);
+    await expect(list!.execute(
+      "active-call",
+      {},
+      undefined,
+      undefined,
+      {} as never,
     )).resolves.toBeDefined();
     barrier.release();
     await turn;
@@ -2078,7 +2074,7 @@ describe("SessionHost.open", () => {
   });
 
   it("refuses task-service attachment after session activity", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await host!.open("casper", "already-open");
     expect(() => host!.attachTaskServices(inertTaskServices()))
       .toThrow(/before session activity/u);
@@ -2102,17 +2098,13 @@ describe("SessionHost.open", () => {
     });
     await barrier.waitForArrivals();
     try {
-      await expect(withActivePrincipalTaskTurn(
-        "casper",
-        "pi",
-        "unsafe-task-store",
-        () => list!.execute(
-          "call",
-          {},
-          undefined,
-          undefined,
-          {} as never,
-        ),
+      expect(principalTaskTurnActive("casper", "pi", "unsafe-task-store")).toBe(true);
+      await expect(list!.execute(
+        "call",
+        {},
+        undefined,
+        undefined,
+        {} as never,
       )).rejects.toMatchObject({
         code: "tasks_unavailable",
         message: "Delegated coding tasks are unavailable.",
@@ -2125,7 +2117,7 @@ describe("SessionHost.open", () => {
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const first = await host!.open("casper", "conv-1");
     const again = await host!.open("casper", "conv-1");
     const other = await host!.open("casper", "conv-2");
@@ -2136,7 +2128,7 @@ describe("SessionHost.open", () => {
   });
 
   it("loads executable hooks from the visible ghost home", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const { mkdirSync, writeFileSync } = await import("node:fs");
     const extDir = join(dir, "hooks", "pre");
     mkdirSync(extDir, { recursive: true });
@@ -2154,7 +2146,7 @@ describe("SessionHost.open", () => {
   });
 
   it("loads pinned ghost hook factories without importing Ghost custom-code tools", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const toolsDir = join(dir, "tools");
     const hooksDir = join(dir, "hooks", "pre");
     const imported = join(temp!.root, "evil-tool-imported");
@@ -2182,7 +2174,7 @@ describe("SessionHost.open", () => {
 
   it("loads only visible ghost MCP while unbound, never ambient coding-agent MCP", async () => {
     const logger = recordingLogger();
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       logger,
     });
     const serverPath = join(dir, "ghost-mcp.mjs");
@@ -2247,7 +2239,7 @@ lines.on("line", (line) => {
   });
 
   it("preserves inherited-object MCP names across Pi config, source, tools, and status", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     writeMcpFixture(dir);
     const serverPath = join(dir, "reload-mcp.mjs");
     const names = ["__proto__", "constructor", "toString"];
@@ -2296,7 +2288,7 @@ lines.on("line", (line) => {
     const baseUrl = await listenOnLoopback(server);
 
     try {
-      const { dir } = await setup([{ kind: "text", text: "hello" }], {
+      const { dir } = await setup(undefined, {
         logger: captured.logger,
       });
       writeFileSync(
@@ -2387,7 +2379,7 @@ lines.on("line", (line) => {
     const baseUrl = await listenOnLoopback(server);
 
     try {
-      const { dir } = await setup([{ kind: "text", text: "hello" }], {
+      const { dir } = await setup(undefined, {
         logger: captured.logger,
       });
       writeFileSync(
@@ -2424,7 +2416,7 @@ lines.on("line", (line) => {
   });
 
   it("discovers visible skills and commands without enabling ghost agents", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     mkdirSync(join(dir, "skills", "inking"), { recursive: true });
     mkdirSync(join(dir, "agents"), { recursive: true });
     mkdirSync(join(dir, "commands"), { recursive: true });
@@ -2457,7 +2449,7 @@ lines.on("line", (line) => {
   });
 
   it("admits ambient machine skills without a hardcoded name allowlist", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const skills = join(temp!.ownerHome, ".agents", "skills");
     mkdirSync(join(skills, "firecrawl"), { recursive: true });
     mkdirSync(join(skills, "hey"), { recursive: true });
@@ -2499,7 +2491,7 @@ lines.on("line", (line) => {
   });
 
   it("keeps owner-home coding-agent instructions out of an unbound prompt", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     mkdirSync(join(temp!.ownerHome, ".claude"), { recursive: true });
     mkdirSync(join(temp!.ownerHome, ".agents"), { recursive: true });
     writeFileSync(join(temp!.ownerHome, ".claude", "CLAUDE.md"), "HOSTILE-CLAUDE-IDENTITY");
@@ -6173,7 +6165,7 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("refuses a second concurrent turn in the same conversation", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const first = host!.runTurn("casper", {
       sessionId: "conv-1",
       prompt: "one",
@@ -6186,7 +6178,7 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("refuses to delete a conversation while it is answering", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const turn = host!.runTurn("casper", {
       sessionId: "conv-busy-delete",
       prompt: "one",
@@ -6268,7 +6260,7 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("writes an unknown ghost as a structured 404, not a stream", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await expect(
       host!.runTurn("nobody", { sessionId: "c", prompt: "hi", emit: () => {} }),
     ).rejects.toMatchObject({ code: "not_found", status: 404 });
@@ -6701,33 +6693,13 @@ describe("conversation branching", () => {
     expect((await host!.getProject("casper", "conv-tree", "pi")).root).toBe(project);
   });
 
-  it("keeps an active failed publication hidden until its retained marker can clean up", async () => {
-    let rejectTranscriptCleanup = true;
-    let bindingStore: ProjectBindingStore | undefined;
-    const { firstUser } = await seedBranchable(
-      "Weekend trip",
-      (fixture) => {
-        bindingStore = new ProjectBindingStore({
-          ownerHome: fixture.ownerHome,
-          trustPath: join(fixture.root, "state", "active-fork-cleanup-trust.json"),
-        });
-        return bindingStore;
-      },
-      {
-        transactionProbe: (stage, path) => {
-          if (rejectTranscriptCleanup && stage === "fork-cleanup-unlink"
-            && path.includes(".jsonl.") && path.endsWith(".pending")) {
-            throw new Error("injected active transcript cleanup failure");
-          }
-        },
-      },
-    );
-    vi.spyOn(bindingStore!, "clone").mockRejectedValueOnce(
-      new Error("injected active sidecar publication failure"),
-    );
-
-    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow("transaction remains pending recovery");
+  /**
+   * The shared back half of every retained-fork-marker case: the failed fork
+   * is hidden behind its marker (recovery attempts are blocked, opening 409s),
+   * and once `release()` unblocks cleanup the next listing removes the marker
+   * and every artifact of the hidden conversation.
+   */
+  async function expectForkRecovered(release: () => void): Promise<void> {
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const markerName = readdirSync(sessionDir).find((name) =>
       name.startsWith(".ghost-fork-") && name.endsWith(".pending.json")
@@ -6735,55 +6707,64 @@ describe("conversation branching", () => {
     expect(markerName).toBeDefined();
     const marker = join(sessionDir, markerName!);
     const record = JSON.parse(readFileSync(marker, "utf8")) as { conversationId: string };
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
+    await host!.listSessions("casper");
     await expect(host!.open("casper", record.conversationId))
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
     expect(existsSync(marker)).toBe(true);
 
-    rejectTranscriptCleanup = false;
+    release();
     expect((await host!.listSessions("casper")).map((row) => row.id))
       .not.toContain(`pi:${record.conversationId}`);
     expect(existsSync(marker)).toBe(false);
     expect(readdirSync(sessionDir).some((name) => name.includes(record.conversationId)))
       .toBe(false);
-  });
+  }
 
   it.each([
     "fork-cleanup-verify",
     "fork-cleanup-fsync",
     "fork-marker-unlink",
     "fork-marker-fsync",
+    "active-transcript-cleanup",
   ] as const)("retains the fork marker when %s fails", async (blockedStage) => {
+    const activePublication = blockedStage === "active-transcript-cleanup";
     let rejectStage = true;
-    const { firstUser } = await seedBranchable("Weekend trip", undefined, {
-      transactionProbe: (stage) => {
-        if (rejectStage && stage === blockedStage) {
-          throw new Error(`injected ${blockedStage} failure`);
-        }
+    let bindingStore: ProjectBindingStore | undefined;
+    const { firstUser } = await seedBranchable(
+      "Weekend trip",
+      activePublication
+        ? (fixture) => {
+            bindingStore = new ProjectBindingStore({
+              ownerHome: fixture.ownerHome,
+              trustPath: join(fixture.root, "state", "active-fork-cleanup-trust.json"),
+            });
+            return bindingStore;
+          }
+        : undefined,
+      {
+        transactionProbe: (stage, path) => {
+          if (!rejectStage) return;
+          const blocked = activePublication
+            ? stage === "fork-cleanup-unlink"
+              && path.includes(".jsonl.") && path.endsWith(".pending")
+            : stage === blockedStage;
+          if (blocked) throw new Error(`injected ${blockedStage} failure`);
+        },
       },
-    });
-
-    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow();
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const markerName = readdirSync(sessionDir).find((name) =>
-      name.startsWith(".ghost-fork-") && name.endsWith(".pending.json")
     );
-    expect(markerName).toBeDefined();
-    const marker = join(sessionDir, markerName!);
-    const record = JSON.parse(readFileSync(marker, "utf8")) as { conversationId: string };
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    await expect(host!.open("casper", record.conversationId))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
+    if (activePublication) {
+      vi.spyOn(bindingStore!, "clone").mockRejectedValueOnce(
+        new Error("injected active sidecar publication failure"),
+      );
+    }
 
-    rejectStage = false;
-    expect((await host!.listSessions("casper")).map((row) => row.id))
-      .not.toContain(`pi:${record.conversationId}`);
-    expect(existsSync(marker)).toBe(false);
-    expect(readdirSync(sessionDir).some((name) => name.includes(record.conversationId)))
-      .toBe(false);
+    const forking = expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId));
+    await (activePublication
+      ? forking.rejects.toThrow("transaction remains pending recovery")
+      : forking.rejects.toThrow());
+    await expectForkRecovered(() => {
+      rejectStage = false;
+    });
   });
 
   it.each([
@@ -6913,7 +6894,7 @@ describe("conversation branching", () => {
 
   it("fails closed on malformed, unreadable, and dangling exact fork markers without leaking bytes", async () => {
     const logger = recordingLogger();
-    await setup([{ kind: "text", text: "hello" }], {
+    await setup(undefined, {
       logger,
     });
     await host!.runTurn("casper", {
@@ -7169,7 +7150,7 @@ describe("multi-ghost", () => {
 
 describe("session listing", () => {
   it("lists the ghost's own conversations in the sidebar shape", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hi", emit: () => {} });
     const sessions = await host!.listSessions("casper");
     expect(sessions).toHaveLength(1);
@@ -7187,7 +7168,7 @@ describe("session listing", () => {
   });
 
   it("orders conversations newest-updated first", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await host!.runTurn("casper", { sessionId: "older", prompt: "one", emit: () => {} });
     await new Promise((resolve) => setTimeout(resolve, 10));
     await host!.runTurn("casper", { sessionId: "newer", prompt: "two", emit: () => {} });
@@ -7196,7 +7177,7 @@ describe("session listing", () => {
   });
 
   it("trashes a stored conversation and lets the id start fresh", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "one", emit: () => {} });
     const path = join(ghostPaths(dir).sessionDir, sessionFileNameFor("conv-delete"));
     const maintenancePath = maintenanceStatePath(
@@ -7230,7 +7211,7 @@ describe("session listing", () => {
   });
 
   it("rejects delete before an admitted Pi open publishes its opening promise", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       title: { enabled: false },
     });
     const id = "delete-during-open-admission";
@@ -7315,7 +7296,7 @@ describe("session listing", () => {
       beginShutdown: async () => {},
       disposeAll: async () => {},
     };
-    const { dir } = await setup([{ kind: "text", text: "hello" }], { maintenance });
+    const { dir } = await setup(undefined, { maintenance });
     const id = "delete-maintenance-drain";
     await host!.runTurn("casper", { sessionId: id, prompt: "one", emit: () => {} });
     const sessionDir = ghostPaths(dir).sessionDir;
@@ -7420,7 +7401,7 @@ describe("session listing", () => {
   });
 
   it("hides a tombstoned crash residue and resumes deletion before the raw id can reopen", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     await host!.runTurn("casper", {
       sessionId: "delete-recovery",
       prompt: "persist me",
@@ -7462,7 +7443,7 @@ describe("session listing", () => {
 
   it("durably accumulates every moved artifact and returns the full receipt after retries", async () => {
     let failAfterNextRecord = false;
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       transactionProbe: (stage) => {
         if (stage === "delete-artifact-recorded" && failAfterNextRecord) {
           failAfterNextRecord = false;
@@ -7536,7 +7517,7 @@ describe("session listing", () => {
     "delete-receipt-write",
   ] as const)("resumes deletion after an injected %s crash boundary", async (blockedStage) => {
     let rejectStage = true;
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       transactionProbe: (stage) => {
         if (rejectStage && stage === blockedStage) {
           throw new Error(`injected ${blockedStage} failure`);
@@ -7591,7 +7572,7 @@ describe("session listing", () => {
 
   it("refuses a reserved Trash collision without overwriting either path", async () => {
     let stopAfterIntent = true;
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       transactionProbe: (stage) => {
         if (stopAfterIntent && stage === "delete-intent-recorded") {
           throw new Error("stop after delete intent");
@@ -7628,7 +7609,7 @@ describe("session listing", () => {
 
   it("rejects tombstones that relabel or alias another Ghost artifact before any move", async () => {
     const stages: Array<{ stage: string; path: string }> = [];
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       transactionProbe: (stage, path) => {
         stages.push({ stage, path });
       },
@@ -7870,7 +7851,7 @@ describe("session listing", () => {
       entered: ReturnType<typeof Promise.withResolvers<void>>;
       release: ReturnType<typeof Promise.withResolvers<void>>;
     } | null = null;
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       transactionMarkerLstat: async (path) => {
         if (blocked?.path === path) {
           blocked.entered.resolve();
@@ -7960,7 +7941,7 @@ describe("session listing", () => {
 
   it("filters exact malformed delete markers for both runtimes without trusting marker bytes", async () => {
     const logger = recordingLogger();
-    const { dir } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir } = await setup(undefined, {
       logger,
     });
     const piId = "pi-delete-marker-target";
@@ -8352,7 +8333,7 @@ describe("SessionHost.deleteGhost", () => {
   });
 
   it("closes the ghost's conversations and moves the whole home into the trash", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
     const transcript = sessionFileNameFor("conv-1");
     expect(existsSync(join(ghostPaths(dir).sessionDir, transcript))).toBe(true);
@@ -8374,7 +8355,7 @@ describe("SessionHost.deleteGhost", () => {
   });
 
   it("refuses while one of the ghost's conversations is answering", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const turn = host!.runTurn("casper", {
       sessionId: "conv-busy",
       prompt: "one",
@@ -8393,7 +8374,7 @@ describe("SessionHost.deleteGhost", () => {
   it("leaves the home in place when schedule cleanup fails and completes on retry", async () => {
     let systemdAvailable = false;
     const calls: string[][] = [];
-    const { dir, temp } = await setup([{ kind: "text", text: "hello" }], {
+    const { dir, temp } = await setup(undefined, {
       scheduleCommandRunner: async (args) => {
         calls.push([...args]);
         return systemdAvailable
@@ -8443,7 +8424,7 @@ describe("SessionHost.deleteGhost", () => {
   });
 
   it("blocks a new conversation while the ghost home is moving to trash", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await host!.open("casper", "existing");
     const background = Promise.withResolvers<void>();
     const hosted = (host as unknown as {
@@ -8461,7 +8442,7 @@ describe("SessionHost.deleteGhost", () => {
   });
 
   it("leaves other ghosts alone and refuses an unknown one", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const mina = seedGhost(temp!.root, {
       name: "mina",
       provider: { baseUrl: provider!.url, modelId: provider!.modelId },
@@ -8480,7 +8461,7 @@ describe("SessionHost.deleteGhost", () => {
 
 describe("SessionHost.renameGhost", () => {
   it("fails closed when schedule cleanup cannot be inspected and completes on retry", async () => {
-    const { temp } = await setup([{ kind: "text", text: "hello" }]);
+    const { temp } = await setup();
     const systemdDir = join(temp.ownerHome, ".config", "systemd");
     mkdirSync(systemdDir, { recursive: true });
     writeFileSync(join(systemdDir, "user"), "not a directory");
@@ -8500,7 +8481,7 @@ describe("SessionHost.renameGhost", () => {
   });
 
   it("retires old-name schedules before rename so a new ghost can reuse the name", async () => {
-    const { temp } = await setup([{ kind: "text", text: "hello" }]);
+    const { temp } = await setup();
     const runtimeUnitDir = join(temp.ownerHome, ".runtime", "systemd", "user");
     const timer = "ghost-timer-v1-6-casper-standup.timer";
     const service = "ghost-timer-v1-6-casper-standup.service";
@@ -8741,7 +8722,7 @@ describe("SessionHost.renameGhost", () => {
   });
 
   it("moves the home and keeps every conversation, pin, and memory with it", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
     await host!.renameConversation("casper", "conv-1", "First light");
     await host!.setPinned("casper", "conv-1", true);
@@ -8772,7 +8753,7 @@ describe("SessionHost.renameGhost", () => {
   });
 
   it("leaves owner-authored character Markdown unchanged across a rename", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     const casperBefore = readFileSync(
       ghostPaths(temp!.registry.get("casper").dir).characterFile,
       "utf8",
@@ -8794,7 +8775,7 @@ describe("SessionHost.renameGhost", () => {
   });
 
   it("checks the new name, the old ghost, the collision, and the turn in that order", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     seedGhost(temp!.root, { name: "mina" });
 
     await expect(host!.renameGhost("casper", "../escape"))
@@ -8814,7 +8795,7 @@ describe("SessionHost.renameGhost", () => {
   });
 
   it("blocks both names while the ghost home is being renamed", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await host!.open("casper", "existing");
     const background = Promise.withResolvers<void>();
     const hosted = (host as unknown as {
@@ -8836,7 +8817,7 @@ describe("SessionHost.renameGhost", () => {
 
 describe("pinned conversations", () => {
   async function twoConversations() {
-    const fixture = await setup([{ kind: "text", text: "hello" }]);
+    const fixture = await setup();
     await host!.runTurn("casper", { sessionId: "older", prompt: "one", emit: () => {} });
     await new Promise((resolve) => setTimeout(resolve, 10));
     await host!.runTurn("casper", { sessionId: "newer", prompt: "two", emit: () => {} });
@@ -8918,7 +8899,7 @@ describe("pinned conversations", () => {
 
 describe("runtime-qualified conversation identity", () => {
   it("expands legacy raw owner state across collisions and migrates it on mutation", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     await host!.runTurn("casper", {
       sessionId: "default",
       prompt: "Pi conversation",
@@ -8969,7 +8950,7 @@ describe("runtime-qualified conversation identity", () => {
   });
 
   it("migrates legacy owner state when an unpublished Pi fork is discarded", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const { dir } = await setup();
     const forkId = "branch-collision";
     await host!.runTurn("casper", {
       sessionId: forkId,
@@ -9630,7 +9611,7 @@ describe("transcript resume", () => {
   });
 
   it("404s an unknown conversation id", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     await expect(host!.readTranscript("casper", "no-such-conversation"))
       .rejects.toMatchObject({ code: "not_found", status: 404 });
   });
@@ -9684,7 +9665,7 @@ describe("the first meeting", () => {
   });
 
   it("stops once the character file has been written", async () => {
-    await setup([{ kind: "text", text: "hello" }]);
+    await setup();
     // `setup` seeds a ghost whose character.md the owner wrote.
     const system = await systemPromptFor("casper");
     expect(system).toContain("letterpress printer");

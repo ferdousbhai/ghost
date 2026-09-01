@@ -80,7 +80,3 @@ export class FakeNativeTaskScopeManager implements NativeTaskScopeManager {
     return this.stopAndConfirm(taskId, receipt);
   }
 }
-
-export function fakeTaskScopeManager(): FakeNativeTaskScopeManager {
-  return new FakeNativeTaskScopeManager();
-}

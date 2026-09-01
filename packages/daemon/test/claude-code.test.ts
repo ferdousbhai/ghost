@@ -77,10 +77,10 @@ import type {
   TaskAdapterContext,
   TaskAdapterHandle,
 } from "../src/tasks.js";
-import { fakeTaskScopeManager } from "./helpers/task-scope.js";
+import { FakeNativeTaskScopeManager } from "./helpers/task-scope.js";
 
 const claudeTaskServices = () => ({
-  ownership: fakeTaskScopeManager(),
+  ownership: new FakeNativeTaskScopeManager(),
   adapters: new Map<string, TaskAdapter>([["claude-code", {
     async start() {
       throw new Error("inert Claude task adapter");
@@ -93,7 +93,7 @@ function activeClaudeTaskServices() {
   return {
     followUps,
     services: {
-      ownership: fakeTaskScopeManager(),
+      ownership: new FakeNativeTaskScopeManager(),
       adapters: new Map<string, TaskAdapter>([["claude-code", {
         start(_input, context: TaskAdapterContext): Promise<TaskAdapterHandle> {
           const result = Promise.withResolvers<string>();
@@ -157,7 +157,7 @@ function fakeQuery(
   lifecycle: { interrupted: number; closed: number },
   prompts?: AsyncIterable<SDKUserMessage>,
   onPrompt?: (message: SDKUserMessage) => void | Promise<void>,
-  processExit = deferred(),
+  processExit = Promise.withResolvers<void>(),
   resolveExitOnClose = true,
 ): Query {
   let transportClosed = false;
@@ -430,17 +430,6 @@ function setupClaudeHost(options: {
     },
   });
   return { paths, scheduleUnitDir, seenOptions, seenPrompts, lifecycle };
-}
-
-function deferred<T = void>(): {
-  promise: Promise<T>;
-  resolve: (value: T) => void;
-} {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
 }
 
 function pidExists(pid: number): boolean {
@@ -1060,7 +1049,7 @@ printf '%s\\n' '${JSON.stringify({
   });
 
   it("single-flights and briefly caches failure without poisoning a later retry", async () => {
-    const gate = deferred();
+    const gate = Promise.withResolvers<void>();
     let now = 100;
     let authReads = 0;
     let fail = true;
@@ -1151,8 +1140,8 @@ printf '%s\\n' '${JSON.stringify({
   });
 
   it("never returns or retains a successful probe from before invalidation", async () => {
-    const firstStarted = deferred();
-    const releaseFirst = deferred();
+    const firstStarted = Promise.withResolvers<void>();
+    const releaseFirst = Promise.withResolvers<void>();
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "claude",
@@ -1960,8 +1949,8 @@ fi
 
   it("claims a warm query before async setup can cross its idle deadline", async () => {
     const hooks = new GhostHookRunner();
-    const secondHookStarted = deferred();
-    const releaseSecondHook = deferred();
+    const secondHookStarted = Promise.withResolvers<void>();
+    const releaseSecondHook = Promise.withResolvers<void>();
     let hookCalls = 0;
     await hooks.register((api) => {
       api.on("before_prompt", async () => {
@@ -2057,7 +2046,7 @@ fi
   });
 
   it("expires a persona snapshot after cancellation retires its query", async () => {
-    const firstPrompt = deferred();
+    const firstPrompt = Promise.withResolvers<void>();
     const { paths, lifecycle, seenOptions } = setupClaudeHost({
       warmIdleTtlMs: 20,
       createQuery: (input, state) => {
@@ -4275,8 +4264,8 @@ fi
   });
 
   it("records Claude v3 resume identity before releasing runtime ownership", async () => {
-    const finishEntered = deferred();
-    const allowFinish = deferred();
+    const finishEntered = Promise.withResolvers<void>();
+    const allowFinish = Promise.withResolvers<void>();
     let identity: MaintenanceIdentity | undefined;
     let settled: SettledMaintenanceTurn | undefined;
     let releases = 0;
@@ -5181,7 +5170,7 @@ fi
   });
 
   it("force-closes an active query without requesting over its closed transport", async () => {
-    const started = deferred();
+    const started = Promise.withResolvers<void>();
     const order: string[] = [];
     let transportClosed = false;
     const { lifecycle } = setupClaudeHost({
@@ -5225,7 +5214,7 @@ fi
   });
 
   it("quiesces Claude, the browser, and schedules before moving a ghost home", async () => {
-    const processExit = deferred();
+    const processExit = Promise.withResolvers<void>();
     const cleanupOrder: string[] = [];
     const expectHomeUnmoved = () => {
       expect(existsSync(join(temp!.root, "casper"))).toBe(true);
@@ -5405,7 +5394,7 @@ while :; do /bin/sleep 10; done
   });
 
   it("fails a home move with a retryable type when SDK exit remains unconfirmed", async () => {
-    const processExit = deferred();
+    const processExit = Promise.withResolvers<void>();
     setupClaudeHost({
       exitWaitTimeoutMs: 20,
       createQuery: (input, state) => {
@@ -5439,8 +5428,8 @@ while :; do /bin/sleep 10; done
   });
 
   it("aborts and drains a pre-query turn before close can return", async () => {
-    const probeStarted = deferred();
-    const releaseProbe = deferred();
+    const probeStarted = Promise.withResolvers<void>();
+    const releaseProbe = Promise.withResolvers<void>();
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
       readVersion: readSupportedClaudeVersion,
@@ -5497,8 +5486,8 @@ while :; do /bin/sleep 10; done
   });
 
   it("does not admit a query whose auth probe settles after daemon disposal", async () => {
-    const probeStarted = deferred();
-    const releaseProbe = deferred();
+    const probeStarted = Promise.withResolvers<void>();
+    const releaseProbe = Promise.withResolvers<void>();
     let authReads = 0;
     const probe = new ClaudeCodeProbe({
       binaryPath: "configured-claude",
@@ -5546,7 +5535,7 @@ while :; do /bin/sleep 10; done
 
   it("aborts and drains a turn held in pre-query hook preparation", async () => {
     const hooks = new GhostHookRunner();
-    const hookStarted = deferred();
+    const hookStarted = Promise.withResolvers<void>();
     let hookAborted = false;
     await hooks.register((api) => {
       api.on("before_prompt", async (event) => {
