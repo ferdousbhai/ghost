@@ -32,11 +32,13 @@ no Omarchy-specific file or directory path. Native realpath deduplication and
 name validation apply. Machine skills enter at session construction with lowest
 name precedence, before ghost-home and then project resources; no hardcoded
 skill-name allowlist exists. This owner-trusted machine discovery is deliberately
-outside the descriptor-confined project scanner. A pi session has no `task`
-tool, and every custom or
-ambient subagent definition stays disabled until #31 supplies an isolated
-per-session agent boundary. Ghost and project `agents/*.md` definitions remain
-previewed but inert. Claude Code retains its own native subagents.
+outside the descriptor-confined project scanner. A principal pi session has
+Ghost's exact `task`, `task_list`, `task_get`, `task_send`, and `task_cancel`
+coding-delegation tools. Those tools admit only the native Pi, Codex, and Claude
+Code workers through the durable task boundary below; they do not activate any
+custom or ambient subagent definition. Ghost and project `agents/*.md`
+definitions remain previewed but inert. Claude Code retains its own native
+subagents.
 
 ```
 ~/ghosts/<name>/
@@ -70,6 +72,7 @@ previewed but inert. Claude Code retains its own native subagents.
                                mutations; never cloned by fork
   sessions/pins.json           v2 pinned state: { "version": 2, "pinned": ["<id>", …] }
   sessions/reads.json          v2 read state: { "version": 2, "reads": { "<id>": "<ISO timestamp>" } }
+  .tasks/task-<UUID>.json      task-record/v2 daemon-owned durable delegation
   .pi/                         derived pi machine runtime; never credentials
   .pi/models.pi.json           secret-free provider/models view synced from
                                models.json
@@ -405,9 +408,436 @@ One naming convention makes the boundary readable rather than remembered. A
 plain-named entry in a ghost home is part of that ghost's identity and travels
 with it, including `settings.yml`, `models.json`, and `mcp.json`. A dot-prefixed
 entry is bound to this machine and never leaves it: `.pi/` (derived pi
-runtime), `.trash/` (recoverable per-home deletion state), and
+runtime), `.tasks/` (daemon-owned machine task lifecycle), `.trash/`
+(recoverable per-home deletion state), and
 `.memory-maintenance.json` (the consolidation cooldown). Export needs no
 credential exception: portable files contain references rather than values.
+
+### Delegated tasks (`task-record/v2`)
+
+The one owner may delegate an independent task from a conversation. Each task
+is one mode-0600 atomic JSON record under the ghost home's mode-0700 `.tasks/`
+directory. Its exact durable shape is `{ version: 2, id, generation, parent,
+harness, agent, task, binding, ownership, state, createdAt, updatedAt, events,
+eventCursor, result, resultTruncated, error }`. `parent` is the runtime-qualified
+conversation identity. `agent` is null except for an optional, bounded opaque
+Claude Code agent name. Ghost passes an accepted value through without
+interpreting or rewriting it, but rejects whitespace-only values, control
+text, private-key markers, the public redaction marker, and recognized
+credential patterns before persistence or projection.
+The assignment and every follow-up are bounded strings containing at least one
+non-whitespace character. These invariants and the Claude-only agent rule are
+enforced by the durable parser/controller as well as by each public caller.
+`binding` is an exact `task-binding/v1` authority
+receipt: `{ version: 1, root, rootIdentity, cwd, cwdIdentity, generation }`.
+The project-binding authority revalidates that opaque receipt with the task's
+runtime-qualified parent and abort signal immediately before native spawn. One
+abortable mutex keyed by the exact runtime-qualified binding path serializes
+the final disk revalidation and one synchronous native spawn with binding
+publication, cwd change, revoke, and removal. Slow catalogue, SDK, version, and
+authentication work occurs before that lease; systemd reservation and cleanup
+occur outside it. The adapter receives a one-shot launch capability rather than
+the native scope: its callback must synchronously invoke exactly one spawn with
+the receipt's exact cwd and may not return a thenable. The adapter also carries
+the private executable admission evidence into that capability: Pi and Codex
+carry their exact executable; native Claude carries its executable; script
+Claude carries both its script and the admitted absolute Bun. The one-shot
+spawner synchronously re-fingerprints every carried path as its last operation
+inside the binding lease immediately before `scope.spawn`, with no await
+between identity validation and the spawn call. A changed or incomplete
+evidence set fails and quiesces without spawning. Same-parent launch
+callbacks therefore serialize only across the synchronous process boundary;
+unrelated parents and all work after spawn remain unthrottled. If spawn wins,
+the old admitted worker continues and the mutation publishes afterward; if the
+mutation wins, final revalidation rejects the stale worker without spawning.
+Binding removal and whole-home moves use tokenized revocation leases on this
+same boundary. `beginRevocation` installs one exact-parent pending token before
+its first await, invalidates preview/incarnation authority, and drains the
+current launch lease; `beginScopeRevocation` does the same for every binding
+under one ghost identity. Pending and committed tokens both deny preview,
+binding publication, receipt validation, and launch. Rollback removes only its
+own still-pending token and never restores an old preview or incarnation;
+ordinary writes never clear either state. Commit is synchronous immediately
+after the durable transaction marker or registry move crosses its commit
+barrier. Retirement occurs only after the old authority is unaddressable and
+removes that token plus older committed tokens, never a newer retry token. A
+failure proven to precede durable publication rolls back; a present or
+indeterminate marker, or a home path already moved after a registry error,
+commits and remains retry-only. Whole-home browser, schedule, and pre-move
+failures roll back; failures after the registry move never restore the old
+name's authority.
+Every final-name binding publisher carries the exact ghost scope and checks
+both exact-parent and scope revocation inside the authoritative binding-path
+mutex immediately before publication. This includes ordinary binding writes,
+runtime-health and operational-cwd updates, staged clone creation, and the
+staged clone's final rename. A publisher that already owns that mutex may
+finish before a later revocation drains it; a pending or committed token that
+wins admission rejects publication, and no write clears the token.
+The receipt is minted only from that parent's current durable, trusted project
+binding; an unbound conversation cannot delegate coding work. Root and cwd are
+canonical, byte-bounded, and cwd is lexically within a non-null root; receipt comparison
+binds every path, identity, and generation field independent of JSON key order.
+A start snapshots that receipt before its first await. The authority and native
+adapter each receive a separate frozen copy, so in-place mutation cannot change
+either the durable request or its comparison value.
+A naked lexical cwd is never authority; the task layer
+neither discovers nor changes cwd.
+`harness` is an opaque bounded adapter id, not a place for Ghost to reproduce a
+runtime's policy.
+`ownership` is the exact `native-task-ownership/v1` receipt
+`{ version: 1, kind: "systemd-scope", nonce }`, where `nonce` is 16 random
+bytes encoded as exactly 32 lowercase hexadecimal characters. It is generated
+and durably published with the queued record before any native reservation or
+launch, never inferred from process state, and remains unchanged for the
+record's lifetime. The public task projection does not expose it.
+
+The only states are `queued`, `starting`, `running`, `cancelling`, `completed`,
+`failed`, `cancelled`, and `interrupted`. Startup recovery independently
+attempts to stop and confirm the receipt-bound transient scope for every
+nonterminal record. It atomically changes only each confirmed record to
+`interrupted`, attempts all rows even after a failure, then reports the
+aggregate recovery failure; it never resumes work implicitly. Unknown scope
+state or a user-manager/control-bus failure leaves only that record nonterminal
+rather than fabricating quiescence or preventing later rows from being
+quiesced.
+Events and errors use an exact nested schema, canonical timestamps, bounded
+structured codes, and owner-safe messages. Adapter exceptions are mapped to
+fixed typed failures rather than persisting raw stderr, provider protocol, or
+environment values. Arbitrary owner and harness text receives bounded
+best-effort credential-pattern redaction before safe truncation, including an
+unterminated structured-secret tail; this is defense in depth, not a claim
+that arbitrary prose can be proven secret-free. Results are bounded. Event
+sequence numbers are monotonic and never renumbered: retained event index `i`
+has sequence `eventCursor.dropped + i + 1`. `eventCursor` reports the next
+sequence and the exact number dropped from the bounded history.
+Every durable mutation advances `updatedAt` by at least one millisecond beyond
+the record's prior `updatedAt` and latest event even when the machine clock is
+frozen or moves backwards. Each appended event likewise advances beyond the
+prior record/event high-water mark; the enclosing record publication advances
+again. Recovery strictly advances rather than preserving an equal timestamp.
+
+There is no task concurrency limit or daemon-owned queue policy: every accepted
+task starts independently. A follow-up is accepted only while `running`, and
+follow-ups for one task are serialized in their own abort-raced lane. They
+never hold the lifecycle actor across a native handle or acknowledgement, so
+cancellation and shutdown enter immediately. Cancellation
+does not become `cancelled` and its request does not resolve until the native
+adapter confirms the entire task is quiescent. Before its start handshake can
+complete, an adapter registers both an abort-aware force operation and a
+quiescence promise. One serialized lifecycle actor guards each task; its
+generation fences late events and results. A start is registered synchronously
+before its first durable-write await; shutdown fences that admission, waits for
+its write, and settles its record without spawning native work. SessionHost
+sets its task-admission fence synchronously before its first controller
+snapshot, checks it before controller lookup or creation and again after an
+asynchronous project-binding mint, settles every pre-fence admission, then
+takes a second controller snapshot. No late controller or worker can escape
+shutdown. Initialization is one shared recovery operation; repeated or
+concurrent callers never recover a live task a second time. Every
+revalidation, adapter handshake, follow-up, and result wait
+is tracked and abort-raced. A registered control survives a synchronous start
+throw or rejected handle/result; any non-cancellation failure aborts, forces,
+and waits for quiescence before becoming `failed`. Daemon shutdown has
+destination precedence over an in-flight owner cancellation: either ordering
+settles as `interrupted`. The destination remains authoritative through record
+publication; an upgrade that arrives while a `cancelled` write is blocked is
+rechecked and durably advances that record to `interrupted` before either
+caller resolves. A cancellation admitted before the shutdown fence but delayed
+in its durable read also selects `interrupted` when it registers its shared
+stop after the fence. Shutdown synchronously snapshots every admitted launch and
+live native control before its first await, retains those ids after transient
+trackers settle, and starts one shared idempotent abort, force, and quiescence
+operation per control before awaiting admission persistence or reading task
+storage. It then lists and settles every durable row as `interrupted`.
+Cancellation follows the same ordering for a retained control, so a later
+durable read failure is reported only after native quiescence; a task without
+a retained control remains a pure durable read. Shutdown settles every
+snapshot independently so one storage failure cannot skip another native
+cleanup, and reports storage failure only after all cleanup attempts finish.
+Startup never resumes an old generation. Adapters own native session and
+subagent behavior; this layer owns only durable lifecycle. It never creates Git
+worktrees or runs Git staging, commit, or branch commands, and it does not
+invent titles, recaps, presentation state, branch state, or queue state.
+
+Every public controller operation enters one closeable, nonserializing
+operation gate synchronously before its first await and remains admitted until
+its actual read, start, native follow-up acknowledgement, or confirmed cancel
+settles. Its SessionHost surface first holds the ghost-home filesystem-identity
+lease, then the runtime-qualified parent lane, for that same complete interval.
+Independent operations remain concurrent. Home moves and daemon
+shutdown close the gate synchronously, abort useful external waits, drain all
+operations already admitted, and only then perform native cleanup and close
+the store. The lock order is home/shutdown admission, runtime-qualified parent
+lane, controller operation gate, short per-task actor, then binding mutex; no
+parent or binding lease is held while an operation gate drains. Controller
+disposal is one memoized promise for concurrent callers and has two retryable
+phases: after native shutdown succeeds it is never repeated, even if the store
+close fails; a later call retries only the same store close. A native failure
+retries the native phase. Poisoned initialization uses the same close phase and
+cannot be replaced by a newly opened store until descriptor closure succeeds.
+
+Native delegated adapters register their force and quiescence boundary before
+their first catalogue or protocol await. Every durable task id derives exactly
+one collected transient user-scope name,
+`ghost-task-<durable UUID>.scope`. Before launch Ghost requires that unit to be
+not found; an existing loaded unit is a collision and is never adopted. The
+receipt binds its exact systemd Description as
+`ghost-task-receipt:v1:<task-id>:<nonce>`. The literal launch, with no shell or
+environment expansion, is:
+
+```
+/usr/bin/systemd-run --user --scope --unit=ghost-task-<durable UUID>.scope \
+  --description=ghost-task-receipt:v1:<task-id>:<nonce> \
+  --slice-inherit --collect --quiet --expand-environment=no \
+  --working-directory=<exact trusted cwd> \
+  --property=KillMode=control-group --property=SendSIGKILL=yes \
+  --property=TimeoutStopSec=1s -- <exact admitted executable> <native argv...>
+```
+
+The harness receives only its finite positive profile environment. User-manager
+queries and stops instead use a separate captured environment containing only
+`DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR`; provider values never enter
+that control process. Scope mode is synchronous: the child inherits the exact
+stdin/stdout/stderr file descriptors already created by Ghost's Node spawn.
+The incompatible systemd-run `--pipe` option is forbidden on this inner scope
+launch; outer transient service-mode test controllers may use `--wait --pipe`.
+Stderr is drained or ignored without durable buffering. The transport accepts
+only bounded object frames, has a bounded queue, discards unrecognized
+protocol/tool payloads, and maps malformed, oversized, or unexpected traffic
+to a generic task failure.
+
+Cancellation first requests the harness-native interrupt, then strictly and
+boundedly reads exactly `Id`, `LoadState`, `ActiveState`, and `Description`.
+Only an exact unit id and matching description authorize literal
+`/usr/bin/systemctl --user stop --no-block <unit>`. A mismatch is a collision
+and no signal is sent. A missing unit is quiescent before spawn; after
+`systemd-run` is spawned, Ghost first waits for the shared launcher-settlement
+promise and performs one final missing-unit query. Task cancellation never
+kills the launcher during registration. Restart recovery uses the persisted
+receipt after the prior daemon and launcher have exited. Ghost polls the same
+receipt-bound unit until it is authoritatively `inactive` or `not-found` under
+those rules. Protocol completion, owner
+cancellation, daemon shutdown, and crash recovery become terminal only after
+that confirmation. An unknown state, timeout, or bus/control failure leaves an
+admitted active stop `cancelling` with bounded `ownership_unconfirmed`
+progress; startup recovery leaves the prior nonterminal state unchanged. Both
+can be retried and never become `completed`, `cancelled`, `failed`, or
+`interrupted` by assumption. Stop and confirmation are idempotent and recovery derives the unit
+from the durable id plus receipt. Confirmed teardown and failed launch clear
+their in-memory reservation and launcher state; unconfirmed ownership remains
+retryable. The scope contains ordinary forked, detached, and
+`setsid` descendants and no unrelated process is signalled. It is an ownership
+boundary, not a sandbox: a trusted harness that deliberately asks systemd to
+create another unit can escape this scope and therefore violates the native
+harness contract. Deliberate same-owner tampering with Ghost's reserved
+`ghost-task-*.scope` names or receipt descriptions likewise violates this
+boundary; this is lifecycle ownership, not a hostile-owner sandbox. The native
+Arch package therefore depends directly on `systemd>=254`.
+
+The Pi delegated adapter runs the freshly admitted executable in its native RPC
+mode with one-run `--approve`, the exact cwd, and the positive `pi-native`
+environment. The project-binding authority has already admitted and immediately
+revalidated that exact project; one-run approval lets pinned Pi load its native
+project resources without reading or persisting a separate Pi trust decision.
+It does not
+disable Pi's project discovery, skills, extensions, tools, model fallback,
+session behavior, or other native defaults. The first task is `prompt`, a
+running follow-up is `steer`, and cancellation sends one best-effort `abort`.
+Only the correlated command acknowledgements, `agent_settled`, and the bounded
+last assistant text affect task state; all other RPC event and tool payloads
+are discarded.
+
+The Codex delegated adapter runs the freshly admitted executable as an
+app-server over stdio in the exact cwd. It initializes one native thread with
+`approvalPolicy: "never"` and `sandbox: "danger-full-access"`, verifies that the
+app-server reports the same cwd and policy, and otherwise leaves native model,
+instructions, project discovery, skills, MCP, tools, and execution behavior
+unmodified. A running follow-up is `turn/steer` with the exact active turn id;
+cancellation sends one best-effort `turn/interrupt`. Only correlated responses,
+agent-message text, and the exact active `turn/completed` notification affect
+task state. Before the correlated `turn/start` response, at most one early
+completion is retained, only while that request is in flight; its bounded id
+must equal the returned active turn. A second, late, malformed, or mismatched
+early completion fails and quiesces the task rather than growing protocol
+state. Server-initiated requests fail closed because delegated work has no
+approval or elicitation UI; all other progress and tool payloads are discarded.
+
+The Claude delegated adapter loads the pinned owner-installed Agent SDK through
+the principal SDK loader and runs the freshly admitted Claude executable in the
+exact cwd. SDK loading precedes fresh executable admission. For an admitted
+path ending in the pinned SDK's lowercase `.js`, `.mjs`, `.tsx`, `.ts`, or
+`.jsx` script suffix, the only accepted SDK spawn transform is literal command
+`bun` with that exact path as argument zero and no Ghost-supplied executable
+arguments; Ghost substitutes the canonical absolute `process.execPath` for the
+literal command at the scope boundary. Version and authentication probes use
+that same absolute Bun-plus-script launch plan. Bun is captured before either
+probe; the script and Bun filesystem identities are bound into private
+admission evidence and both are revalidated between probe phases and
+immediately before the synchronous SDK query/spawn boundary. The task launch
+capability performs one final synchronous check of both paths immediately
+before its systemd-scope spawn. Other paths must
+remain the exact admitted command with no interpreter; `node`, `deno`, PATH
+lookup, a different script, or any other transform fails before launch. It
+leaves native filesystem settings, CLAUDE.md, skills, agents,
+hooks, plugins, MCP servers, model selection, tools, persistence, and subagent
+behavior intact. Its only execution-policy override is
+`permissionMode: "bypassPermissions"` with the SDK's required explicit
+dangerous-skip acknowledgement. An optional configured native agent name is an
+opaque SDK value and is neither parsed nor reimplemented by Ghost after the
+shared bounded/control/credential-pattern admission check. Follow-ups
+are priority-now streaming user input. SDK stderr, assistant/tool/protocol
+frames, error detail, and usage remain native-only; only the verified native
+initialization and successful bounded terminal result affect task state.
+
+The principal Ghost, on either pi or Claude Code, may create and supervise
+these subordinate coding workers through exactly `task`, `task_list`,
+`task_get`, `task_send`, and `task_cancel`. Task ids are visible only to the
+runtime-qualified parent conversation that created them; the same raw
+conversation id on the other runtime is a different parent. Once both parents
+are published, a lookup through the other one receives a 404. List and detail
+projections are bounded and omit binding identities and
+raw native protocol. `task` accepts a complete assignment, one of `pi`,
+`codex`, or `claude-code`, an optional cwd inside the parent's current trusted
+project, and an optional opaque agent only for Claude Code. The principal owns
+the outcome and chooses when to delegate, follow up, or cancel; the worker owns
+coding mechanics. Delegation is additive: it does not replace the Ghost's
+memory, Documents, planning/todo, continuity, schedules, communications,
+browser/computer/CLI, recap, queue, titles, or any other owner-agent behavior.
+In pi plan mode `task_list` and `task_get` remain observational; creation,
+follow-up, and cancellation are blocked.
+
+Task services attach to a session host once, before any pi or Claude session
+activity. Double or late attachment is rejected. A task controller is scoped
+to one ghost home and receives that ghost's project-binding authority before
+initialization; the principal tool mints the exact parent receipt at creation,
+and the controller revalidates it immediately before adapter spawn. Task-store
+attachment begins restart recovery for every existing ghost. The attempts run
+independently and ghostd waits for all attempts to settle before it starts
+listening; an unavailable ghost task store or unconfirmed scope settles as
+that ghost's bounded failure, cannot skip another ghost's cleanup, and is not a
+daemon- or principal-startup failure. Each outcome is logged only as bounded
+per-ghost availability, without task, receipt, scope, or storage detail.
+Initialization is mandatory for every task operation. A failed controller
+closes its task-store descriptors before it becomes retryable. If that close
+cannot be confirmed, the controller is poisoned and retained: repeated task
+operations return only generic `503 tasks_unavailable`, no second store is
+opened, and a whole-home move fails until disposal succeeds. A normally closed
+failure may be retried by a later task operation. Principal conversation activity
+remains available throughout. The task
+layer and all native adapters remain forbidden from running Git worktree,
+staging, commit, or branch commands.
+
+At boot ghostd captures one positive, reviewed launch environment and explicit
+binary selector for each of the `pi-native`, `codex-native`, and
+`claude-native` worker profiles before the process-global provider scrub. The
+snapshots contain only operational process variables; selectors are separate
+non-secret paths. Neither is logged, serialized, returned by the API, or copied
+into task records.
+The native catalogue probes and the corresponding adapter share that profile's
+snapshot. No task or catalogue read may fall back to the scrubbed daemon
+environment or to arbitrary ambient credential variables.
+
+The authenticated daemon API exposes the read-only native catalogue at
+`GET /api/harnesses`, returning only `{ harnesses: [{ id, availability,
+authentication }] }`. It never exposes executable, version, account,
+environment, or runtime-identity evidence and has no refresh, install, login,
+or mutation form. Authenticated task routes are scoped beneath one exact
+runtime-qualified parent:
+
+- `GET|POST /api/ghosts/:ghost/sessions/:parent/tasks`
+- `GET /api/ghosts/:ghost/sessions/:parent/tasks/:taskId`
+- `POST /api/ghosts/:ghost/sessions/:parent/tasks/:taskId/send`
+- `POST /api/ghosts/:ghost/sessions/:parent/tasks/:taskId/cancel`
+
+Creation accepts the same bounded `{ harness, assignment, cwd?, agent? }`
+shape as the principal `task` tool. Send accepts exactly `{ message }`; cancel
+accepts an empty object. List accepts an optional decimal `limit` from 1 to 20.
+The HTTP routes and both principal-runtime tool bridges share one
+runtime-qualified parent operation gate. A start owns the gate from project
+binding mint through the durable `queued` record write, send owns it through
+the native acknowledgement, cancel owns it through confirmed scope
+quiescence, and reads own it through their complete durable read. Conversation
+deletion takes the exclusive side of that same gate synchronously before its
+first await, drains admitted operations, and prevents later operations from
+entering until deletion either fails or settles.
+Every task operation first verifies that no exact delete, draft-abandon, or
+applicable Pi fork marker owns the parent. HTTP operations additionally require
+the exact durable Pi transcript or strictly parsed Claude sidecar; an arbitrary
+raw id or a binding alone is not a task parent and returns bounded
+`409 task_parent_unpublished`. The principal bridge may act during a first turn
+before that publication only through a private, unforgeable capability bound
+to the exact ghost, runtime-qualified identity, and currently admitted owner
+turn. Each retained Pi session or warm Claude query has a private bridge
+context. Each owner turn installs one monotonically newer capability object;
+the current bridge context attaches that exact object. Replacing a warm query
+retires only its bridge context, so the cold replacement in the same admitted
+turn can attach the same capability. A tool handler synchronously captures
+that object before its first wait;
+validation requires the same current object and context identity, not merely
+runtime busy state or a lookup through a recreated bridge. A call delayed
+across turns therefore fails instead of borrowing the next turn. Turn
+`finally` clears only its exact object. An ordinary warm-query replacement
+detaches its exact bridge context without invalidating the admitted turn.
+Explicit query/session close, a committed delete or draft-abandon barrier, and
+parent reincarnation retire both the exact bridge and capability with identity
+guards so stale cleanup cannot clear a newer one. A
+published/no-op lifecycle refusal or a delete barrier proven absent leaves the
+healthy bridge intact. An old tool callback cannot act during a recreated
+same-id turn on either runtime. Neither the context nor capability is an API
+value; a capability is never reusable after its turn.
+Fork publication/recovery, draft abandonment, and deletion take the exclusive
+side of the same parent lane. Draft abandonment requires zero task records in
+every state; `409 tasks_present` directs the owner to full conversation DELETE,
+which is the only operation that moves terminal worker history.
+Task-store reads and enumerations share a concurrent inventory window. A
+conversation deletion takes its exclusive side across the complete terminal
+bundle enumeration, pinned-byte inspection, rename reconciliation, and final
+inventory proof. This does not serialize ordinary task mutations or unrelated
+work, but an unrelated list that already read directory names finishes before
+the bundle can move one of those files.
+Responses use the same bounded task list/detail projections as principal tools:
+they omit the project binding identities, durable assignment body, and native
+protocol and include at most the retained bounded event preview. A task id
+owned by any other runtime-qualified parent is indistinguishable from a
+missing id (404) for read, follow-up, and cancellation. Unexpected task,
+adapter, storage, and catalogue failures use the daemon's generic error
+envelope; raw stderr, protocol, environment, credentials, and provider error
+text never cross the wire.
+
+The HUD exposes this boundary as one additive `Delegation` destination; it does
+not replace chat, planning/todo, queue, recap, titles, branches, or any other
+principal Ghost surface. The machine-wide catalogue renders only harness,
+availability, and signed-in/logged-out/unknown state. Task state is stamped to
+the exact active ghost and runtime-qualified conversation: selection changes
+retire stale list, detail, and mutation requests before their response can be
+adopted. Starting any mutation increments a cross-operation read generation,
+retires pending list/detail reads, and blocks new reads until the mutation
+settles, so an older `running` projection cannot overwrite a confirmed terminal
+response. Accepted list and detail snapshots are also merged per task by
+canonical `updatedAt`; equal-timestamp snapshots also retain the furthest
+durable state, and a terminal snapshot is monotonic and can never be revived by
+an active snapshot in either response order. Creation is enabled only when that same conversation has a current
+non-null trusted project binding, and it sends the binding's exact cwd; the HUD
+cannot create from unbound Home context or type an arbitrary cwd. It shows the
+bounded assignment preview, cwd, state, recent structured events, and result
+preview. It never renders task error messages, daemon/native error detail,
+stderr, protocol/tool payloads, environment, executable/version/account data,
+or project-binding identities. Follow-up exists only for `running`; cancel
+exists only for nonterminal work and resolves to the daemon's confirmed state.
+All terminal states remain inspectable. There is no wait, resume, install,
+login, Git workspace, or task-mutation concept beyond the authenticated routes
+above.
+If conversation deletion reports `409 tasks_active`, the delete dialog and
+conversation remain in place and the Delegation state and requests remain
+available so the owner can inspect or cancel workers before retrying. A
+successful delete retires those task requests and state. Finished task history
+moves with the transcript; the HUD has no task-history restore or purge API.
+
+Graceful daemon shutdown closes admission and synchronously begins task
+shutdown before session/store teardown. Forced shutdown reuses the same
+idempotent native control cleanup and does not return from its terminal stage
+successfully until every admitted native scope has confirmed quiescence, even when
+ordinary session/provider teardown exceeds its bounded grace period.
 
 ### Session capabilities
 
@@ -451,8 +881,9 @@ pi's native tools in a Ghost session are `bash`, `edit`, `find`, `grep`, `ls`,
 `read`, and `write`. Ghost's own tools — `ghost_browser`, `ghost_desktop`,
 `ghost_screen`, the `ask` tool, and MCP
 tools named `mcp__<server>_<tool>` — are registered directly as pi custom
-tools and appear in `getActiveToolNames()`; there is no separate mount. There
-is no `task` tool; no bundled, custom, or ambient subagent can be spawned.
+tools and appear in `getActiveToolNames()`; there is no separate mount. The
+five Ghost-owned task tools add only the native coding-worker boundary defined
+above; no bundled, custom, or ambient subagent definition can be spawned.
 Claude Code retains its own native subagent behavior, and its native tool preset
 is subtracted from exactly once, by `disallowedTools`: a native tool is removed
 when it would keep durable state or reach the owner outside Ghost's surfaces,
@@ -481,8 +912,9 @@ factories, adapted to pi by `packages/daemon/src/pi-extension-bridge.ts`;
 neither the ghost home's `tools/` nor any owner-home or bound-project root is
 offered to pi. Project extensions, hooks, TypeScript
 commands, custom code tools, and LSP are disabled for phase 1. Project and
-ghost-file agent definitions are excluded from the spawn allow-list until #31
-supplies an isolated custom-agent seam. MCP comes only from Ghost's own
+ghost-file agent definitions are excluded from execution; native delegated
+workers select an installed harness explicitly and never consume that agent
+catalogue. MCP comes only from Ghost's own
 `GhostMcpManager` (over `@modelcontextprotocol/sdk`): a session receives only
 the ghost's `mcp.json` plus the explicitly bound project's native
 `.omp/mcp.json`/`.omp/.mcp.json` files. It never scans pi's user/global config
@@ -1010,8 +1442,9 @@ one must not be a leak of both.
 
 ### `ghost` CLI
 
-`ghost` is a consumer of this HTTP contract only; it does not open sessions or
-read a ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
+`ghost` is a consumer of this HTTP contract except for one deliberately local,
+read-only command: `ghost delegation`. No CLI command opens sessions or reads a
+ghost home. Ghost selection resolves in this order: `--ghost`, `$GHOST`,
 the private mode-`0600`
 `$XDG_CONFIG_HOME/ghost/cli.json` (default `~/.config/ghost/cli.json`) field
 `{ "ghost": "<name>" }`, then the sole ghost when exactly one exists. Session
@@ -1035,6 +1468,19 @@ begins, then repeats it every 15 seconds while idle. The CLI bounds only
 admission and stream opening to one keepalive interval; it clears that timer
 when the opening response arrives, so a working turn has no wall-clock cap. Its
 one token-refresh retry preserves the same opening budget.
+
+`ghost delegation [--json] [-q]` reads the public native-harness catalogue
+without contacting ghostd. It uses the same positive `claude-native`,
+`codex-native`, and `pi-native` environment snapshots and separately captured
+binary selectors as daemon composition. It may run only the catalogue's local
+executable, version, authentication, account, and SDK availability probes. It
+does not open or create a ghost home, start a provider turn, mutate native
+authentication or Ghost config, load project policy or hooks, change the
+caller's cwd, or expose executable/version/account/environment/runtime-identity
+evidence. Human output is one concise availability/authentication table;
+`--json` is exactly `{ "harnesses": [{ "id", "availability",
+"authentication" }] }`. This status command has no task creation, follow-up,
+or cancellation form; those remain principal/API capabilities.
 
 `ghost smoke` owns a throwaway daemon, ghost root, and XDG state tree. With
 `--no-turn` it proves only daemon startup and ghost creation. Otherwise it may
@@ -1115,7 +1561,15 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   nothing on any path follows the rename with a recursive removal. Before that
   move, deletion applies the scheduled-work cleanup above; its
   `503 schedule_cleanup_failed` response guarantees the home has not moved and
-  the same confirmed request is the retry path.
+  the same confirmed request is the retry path. Delegated-task admission is
+  fenced and the home controller fully drains before a scope revocation begins.
+  Browser/schedule/pre-move failure rolls that pending token back. The registry
+  move is the commit barrier: once the old path is absent, even if the registry
+  call or later cleanup reports failure, old-name binding authority remains
+  revoked and is retired only after the old identity is unaddressable. After a
+  registry exception, only `lstat` `ENOENT` proves that absence; a present old
+  path rolls back, while permission, I/O, or other indeterminate results commit
+  without retirement and require recovery.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
@@ -1144,7 +1598,14 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   which does not move with the home. Before the home moves, rename applies the
   same scheduled-work retirement as delete. A failure is
   `503 schedule_cleanup_failed`, leaves the old home/name intact, and is retried
-  with the same request; successful partial cleanup is not rolled back.
+  with the same request; successful partial cleanup is not rolled back. Rename
+  uses the same controller drain and tokenized scope-revocation boundary as
+  delete: pre-move failure rolls back only its pending token, while an observed
+  registry move commits synchronously and no later error restores old-name
+  launch authority. If the registry call throws, only an exact `ENOENT` from
+  `lstat` proves the old path moved and permits retirement; a present path rolls
+  back the pending token, while permission, I/O, or any indeterminate result
+  commits without retirement and returns recovery-pending.
 - `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
   memory list, read from the plain files on each request and never stored.
   `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the
@@ -1264,9 +1725,11 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   home identity lease across server existence/config inspection, the isolated
   or live-manager action, and the final sanitized response snapshot; rename or
   delete cannot overtake that composite operation.
-- `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
-  pi's `AgentSession` (request `{ model, context, options }` → SSE stream).
-  This contract, Ghost's in-repo client
+- `POST /api/ghosts/:name/messages` — Ghost's runtime-neutral principal SSE
+  wire, retaining the historical **pi-messages** request and event shapes
+  (`{ model, context, options }` → SSE stream). Runtime dispatch selects either
+  pi's `AgentSession` or the Claude Code adapter without changing the client
+  protocol. This contract, Ghost's in-repo client
   (`packages/shell/qml/services/Ghostd.qml`), and the protocol/conformance tests
   in `packages/daemon/test/pi-messages.test.ts`,
   `packages/daemon/test/server.test.ts`, and
@@ -1276,8 +1739,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   `SessionManager.getCwd()` snapshot captured at execution start. It is
   activity-local: a client must not substitute a later session cwd for it.
 - A conversation has two distinct identifiers at this API boundary.
-  `conversationId` is the runtime-owned resume id and is passed unchanged as
-  pi-messages `options.sessionId`. `id` is the opaque public row/action id,
+  `conversationId` is the runtime-owned resume id and is passed unchanged
+  through the selected principal adapter; pi receives it as pi-messages
+  `options.sessionId`. `id` is the opaque public row/action id,
   qualified as `pi:<conversationId>` or `claude-code:<conversationId>` so two
   runtimes may own the same raw id without colliding. Every `:id` session action
   below requires the qualified public id returned by the listing; unqualified
@@ -1407,7 +1871,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   `alwaysApply` rule bodies, and compact skill/discoverable-rule indexes. No
   lexical post-load filter is an authority boundary.
   Project and ghost-file agent definitions are counted but inactive. A pi
-  session has no `task` tool and performs no live/ambient agent discovery.
+  principal has the five native coding-delegation tools, but performs no
+  live/ambient agent discovery; each worker start revalidates the exact bound
+  project receipt independently.
   Machine-skill discovery is the explicit exception described above. Claude
   keeps native `skills:[]` and `settingSources:[]`; the SDK's `skills: "all"`
   option is not usable here because it is a context filter, not a path sandbox.
@@ -1532,6 +1998,16 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   later retries of that same abandoned incarnation have `abandoned:false`.
   Previewing or binding the qualified id again removes the completion receipt
   and starts a new incarnation.
+  The route exclusively claims the runtime-qualified parent task lane before
+  inspecting state and rejects any durable child history, including terminal
+  rows, with `409 tasks_present`; the owner must use full conversation DELETE
+  to move that history. It begins the exact binding-revocation lease before
+  publishing the cleanup marker, commits only after that marker and its
+  directory fsync are durable, and retires only after cleanup/receipt
+  reconciliation makes the old authority unreachable. A marker write failure
+  rolls back only when `lstat` proves absence; present or indeterminate state
+  remains committed and retry-only. Rebinding the same id never implicitly
+  clears that revocation or adopts old task rows.
 - Project mutations are serialized per runtime-qualified conversation and use
   optimistic generation. A stale value is `409 stale_generation`; a concurrent
   runtime-neutral turn admission, either runtime's open/close, or another
@@ -1681,17 +2157,33 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   still use `done`: the command completed without a transport or model error.
   Command output is not an assistant message and is not persisted as one.
 - `DELETE /api/ghosts/:name/sessions/:id` →
-  `{ ok: true, trash: [{ artifact, source, trash, kind }, …] }` — moves every
+  `{ ok: true, trash: [{ artifact, source, trash, kind, count?, digest? }, …] }`
+  — moves every
   Ghost-owned artifact for the conversation to recoverable Trash. `artifact` is
   `omp-transcript` (the pi transcript; the label is kept for compatibility),
   `claude-sidecar`, `project-binding`, `project-snapshot`, `tool-cwds`, or
-  `maintenance-state`.
+  `maintenance-state`; one optional `delegated-tasks` group adds required
+  `count` and `digest` fields.
   Every generation-qualified Pi project snapshot is included. Claude Code's actual
   transcript remains in that runtime's
   external `~/.claude` storage; Ghost does not claim to delete it. An active
   turn or live-voice session must finish or be stopped first
-  (`409 session_busy`); an unknown conversation returns `404 not_found`.
-  Deletion writes and fsyncs a v3 tombstone before moving the first artifact.
+  (`409 session_busy`). Any child in `queued`, `starting`, `running`, or
+  `cancelling` returns bounded `409 tasks_active` before project revocation,
+  maintenance deletion reservation, tombstone publication, or any move. The
+  exclusive parent-task gate first drains admitted task operations and performs
+  this active-child check; only a terminal/empty result may reserve and drain
+  conversation maintenance. The owner may cancel or wait and retry.
+  An unknown conversation returns `404 not_found`.
+  Deletion writes and fsyncs a v4 tombstone before moving the first artifact.
+  It begins an exact binding-revocation lease immediately after the exclusive
+  task lane drains and the terminal/empty child check succeeds. Maintenance
+  and the draft-abandon marker are then checked inside that pending fence; a
+  failure before tombstone publication rolls it back. The lease commits synchronously
+  after the v4 tombstone and sessions-directory fsync succeed. A failed write
+  rolls back only when marker absence is proven; present or indeterminate
+  marker state keeps revocation committed until successful reconciliation and
+  marker retirement. No project write or same-id reuse clears it implicitly.
   Each move first creates a private same-filesystem fallback Trash root, then
   journals its exact collision-free `{ artifact, source, trash, kind }` intent
   before rename. Resume reconciles the two authoritative locations: source-only
@@ -1700,12 +2192,30 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   cannot lose the destination. After every successful reconciliation Ghost
   atomically rewrites and fsyncs the tombstone with the complete ordered receipt
   so far.
-  Before any reconciliation or cleanup, every v2/v3 row's artifact label and
-  source must match the exact runtime/conversation-derived allow-list: the one
-  Pi transcript or Claude sidecar, that runtime's binding, and the Pi tool-cwd
-  sidecar and generation-qualified snapshot names. Sources and destinations are globally
-  distinct and completed receipts require source absent plus Trash destination
-  present. A v3 pending move additionally requires the exact private
+  Terminal child records move out of the live `.tasks/` directory into exactly
+  one private mode-0700 direct child of that same transaction's fallback Trash
+  root. The v4 tombstone keeps only `{ artifact: "delegated-tasks", source,
+  trash, kind: "fallback", count, digest }`: `digest` is SHA-256 over sorted
+  repetitions of `task-id`, NUL, the exact record-byte SHA-256, and newline.
+  It does not grow with task history. Every source and destination record must
+  be a mode-0600, single-link private regular file with a valid terminal
+  `task-record/v2`, unique id, and the exact runtime-qualified parent. Source
+  and Trash directories must be private real directories on the same device.
+  Recovery validates the combined source/Trash inventory against count and
+  digest before every rename: source-only resumes, destination-only is already
+  complete, and both, neither, wrong parent, unexpected entry, link, mode,
+  record, or digest mismatch fails closed. Each record rename fsyncs both
+  directories. Removing the live records prevents a later conversation that
+  reuses the raw id from adopting old workers; an equal raw id on the other
+  runtime is never part of the group. There is no public restore or purge
+  operation for this private transaction history.
+  Before any reconciliation or cleanup, every v2/v3/v4 static row's artifact
+  label and source must match the exact runtime/conversation-derived allow-list:
+  the one Pi transcript or Claude sidecar, that runtime's binding, and the Pi
+  tool-cwd sidecar and generation-qualified snapshot names. Sources and
+  destinations are globally distinct and completed receipts require source
+  absent plus Trash destination present. A v3/v4 pending move additionally
+  requires the exact private
   `.trash/.conversation-<uuid>` root and its next sequential, collision-reserved
   direct child; aliases and another conversation's artifacts are invalid.
   Listings and every open/project route hide or refuse that runtime-qualified
@@ -1776,8 +2286,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   so the shell can rehydrate
   it (issue #26). `messages` are pi's `{ role, content }` messages (user and
   assistant only; private `thinking` reasoning and internal tool-result messages
-  are dropped, exactly as the live stream omits them), the same shape a
-  pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
+  are dropped, exactly as the live stream omits them), the same shape the
+  runtime-neutral principal client renders. Paged with `?limit` (default 1000,
+  max 2000) and
   `?offset`; `total` is the full renderable count and `truncated` is true when a
   page omits messages. Each message also carries its persisted `entryId` and
   `parentId`. Sibling-branch metadata is gone with the navigation it described:
@@ -1894,8 +2405,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   persisted `ask` result, commits the answer as a sibling, and resumes the model
   on that branch. Its response is an SSE stream and includes `branch_changed`.
   Re-answer and awaited Ghost hooks use the conversation's actual live cwd;
-  the pi runtime still has no `task` tool and never discovers agents from
-  that cwd.
+  pi's five principal task tools remain available, but their binding authority
+  is still the conversation's admitted project receipt; re-answer never turns
+  its live cwd into discovery authority and never discovers agent definitions
+  from that cwd.
 - `POST /api/ghosts/:name/greeting` `{}` → `{ greeting: string | null,
   onboarding: boolean }` — one smol-lane completion (see below) writes a short
   in-persona opener for an empty chat from the character file, memory index,
@@ -1992,6 +2505,68 @@ external `claude auth status --json`, without restricting the CLI's
 `authMethod` or `apiProvider` vocabulary. The catalogue may publish that
 reported method/provider name as non-secret connection metadata; no credential
 value is read into or emitted from a response.
+
+### Native harness discovery foundation
+
+Ghost has one discovery catalogue for the owner-installed native harnesses
+`claude-code`, `codex`, and `pi`. Its public rows are exposed through the
+authenticated `GET /api/harnesses`, the HUD's Delegation destination, and the
+side-effect-free local `ghost delegation` command. The catalogue itself does
+not start work. Its public rows contain only the
+harness id, `available | unavailable`, and `authenticated | logged_out |
+unknown`; they never contain an executable path, version, account identifier,
+probe output, or raw error. A bounded catalogue cache is display state only.
+It can never authorize a start: the durable task controller and selected native
+adapter run the harness's fresh private probe immediately before process
+admission. That
+admission supplies one required `AbortSignal`; the catalogue threads it through
+SDK loading, executable and mise resolution, filesystem identity checks,
+version discovery, and authentication or account discovery. An aborted SDK
+waiter does not cancel or poison the principal loader's shared immutable module
+load, but the cancelled admission stops before any later CLI phase.
+
+Discovery and runtime launch share native-harness primitives. An explicit
+`GHOST_CLAUDE_BINARY`, `GHOST_CODEX_BINARY`, or `GHOST_PI_BINARY` is the
+owner-selected literal executable boundary and is never bypassed by default
+discovery. Without an override, Ghost resolves the named executable from its
+captured `PATH`; an Omarchy mise launcher is resolved through `mise which`,
+then the real executable is pinned. Both literal-boundary and resolved-target
+filesystem identity include device, inode, mode, size, and nanosecond change
+times, so symlink retargeting and in-place replacement invalidate a probe.
+Version is part of the private identity and is re-read by a fresh admission
+probe.
+
+Every probe runs in a fresh mode-0700 scratch directory and an owned Linux
+process group. Completion, timeout, abort, and malformed output terminate the
+captured group with bounded TERM then KILL and wait for quiescence; Ghost never
+kills by executable name or pattern. A pre-aborted probe starts no child, and
+an in-flight abort removes its listener before group teardown and scratch
+cleanup. Probes receive immutable, per-harness
+environment snapshots derived from positive allowlists, not the ambient daemon
+environment. The shared Claude snapshot copies the existing reviewed
+operational and non-secret selector inventory. The principal conversation
+profile additionally forces `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`; the native
+worker/discovery profile does not. Codex receives only the operational
+inventory plus `CODEX_HOME`; pi receives only the operational inventory plus
+`PI_CODING_AGENT_DIR` and `PI_PACKAGE_DIR`. Provider credentials, generic
+secret names, loader/shell/package injection, and Ghost-private variables are
+absent from all snapshots. The process-global pi/provider scrub remains a
+separate later boundary.
+
+Claude discovery requires the same injected `ClaudeAgentSdkLoader` instance as
+the principal runtime, and loads that exact SDK boundary before starting any
+CLI probe; a missing or rejected SDK is unavailable even when a valid CLI is
+installed. Construction without that loader is invalid. It otherwise preserves
+the existing CLI version/auth probe. Codex discovery reads stable
+`codex --version`, then starts `codex
+app-server` and performs only `initialize`, the `initialized` notification,
+and `account/read` with `refreshToken:false`; it never requests projects,
+supported agents, settings, or any other method. Pi discovery reads stable
+`pi --version` and deliberately reports authentication `unknown`. These probes
+are side-effect-free at the harness API: they create no thread, turn, tool,
+project, resource, or model request, run from the private scratch cwd, and do
+not execute project hooks or files. The unmodified harness still owns any
+internal account/state maintenance intrinsic to its initialization.
 
 Current-model, catalogue, and routing reads hold the ghost-home identity lease
 from before runtime construction until the pi runtime closes. This covers pi's
@@ -2285,7 +2860,8 @@ Pi's exact-name project-over-ghost shadowing and translates only its validated
 native MCP rows into the SDK config.
 Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
-back to pi-messages. Project MCP names remain opaque, including `ghost`; the
+back to the runtime-neutral pi-messages-compatible principal wire. Project MCP
+names remain opaque, including `ghost`; the
 internal server deterministically takes the first free name in `ghost`,
 `ghost-1`, `ghost-2`, … and that exact name owns its allowed-tool prefix and is
 excluded from project health. The dedicated native Claude environment above is
@@ -2382,7 +2958,8 @@ not coupled to that release identity.
   packages declare Bun, `fd`, and
   `ripgrep` as runtime dependencies for pi's native read-only search tools; the
   executable must not populate pi's cache by downloading them during a
-  plan-mode read.
+  plan-mode read. Both Arch package variants also depend directly on
+  `systemd>=254`, the minimum native task-scope ownership boundary.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the

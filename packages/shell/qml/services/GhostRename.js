@@ -8,6 +8,7 @@ var ownerKeys = [
     "greetingGhost",
     "loginGhost",
     "commandsGhost",
+    "delegatedTasksGhost",
     "projectGhost",
     "mcpGhost",
     "liveGhost",

@@ -882,6 +882,116 @@ function projectState(name, conversation) {
   };
 }
 
+// Native delegation is session-scoped and deliberately stores only the same
+// bounded public projection the HUD receives. It never launches a process.
+const delegatedTaskStore = new Map();
+let delegatedTaskSeq = 10;
+const delegatedTaskKey = (name, conversationId) => JSON.stringify([name, conversationId]);
+const mockTaskId = (sequence) => `task-00000000-0000-4000-8000-${sequence.toString(16).padStart(12, "0")}`;
+
+function taskView(task, detailed) {
+  const view = structuredClone(task);
+  if (!detailed) {
+    delete view.events;
+    delete view.eventsTruncated;
+  }
+  return view;
+}
+
+function initialDelegatedTasks(name, conversation) {
+  const now = Date.now();
+  const project = join(GHOSTS_ROOT, ".mock-project", name, conversation.conversationId);
+  return [
+    {
+      id: mockTaskId(1),
+      harness: "codex",
+      agent: null,
+      cwd: project,
+      state: "running",
+      createdAt: new Date(now - 75_000).toISOString(),
+      updatedAt: new Date(now - 15_000).toISOString(),
+      taskPreview: "Review the delegation panel and run its focused checks.",
+      taskTruncated: false,
+      resultPreview: null,
+      resultTruncated: false,
+      error: null,
+      events: [
+        {
+          sequence: 1,
+          at: new Date(now - 70_000).toISOString(),
+          code: "started",
+          message: "Opened the trusted project and began the focused review.",
+        },
+        {
+          sequence: 2,
+          at: new Date(now - 15_000).toISOString(),
+          code: "progress",
+          message: "Checking task lifecycle and terminal-state presentation.",
+        },
+      ],
+      eventsTruncated: false,
+    },
+    {
+      id: mockTaskId(2),
+      harness: "pi",
+      agent: null,
+      cwd: project,
+      state: "completed",
+      createdAt: new Date(now - 600_000).toISOString(),
+      updatedAt: new Date(now - 420_000).toISOString(),
+      taskPreview: "Trace the existing Notes-style navigation before adding a destination.",
+      taskTruncated: false,
+      resultPreview: "The fixed destination rail and full-body browser seam are the smallest additive fit.",
+      resultTruncated: false,
+      error: null,
+      events: [{
+        sequence: 1,
+        at: new Date(now - 420_000).toISOString(),
+        code: "completed",
+        message: "Returned the bounded architecture summary.",
+      }],
+      eventsTruncated: false,
+    },
+  ];
+}
+
+function delegatedTasks(name, conversation) {
+  const key = delegatedTaskKey(name, conversation.id);
+  if (!delegatedTaskStore.has(key)) {
+    delegatedTaskStore.set(key, initialDelegatedTasks(name, conversation));
+  }
+  return delegatedTaskStore.get(key);
+}
+
+function appendTaskEvent(task, code, message) {
+  const now = new Date().toISOString();
+  task.updatedAt = now;
+  task.events.push({
+    sequence: (task.events.at(-1)?.sequence ?? 0) + 1,
+    at: now,
+    code,
+    message,
+  });
+}
+
+function moveDelegatedTasks(from, to) {
+  for (const [key, tasks] of [...delegatedTaskStore]) {
+    const [name, conversationId] = JSON.parse(key);
+    if (name !== from) continue;
+    delegatedTaskStore.delete(key);
+    delegatedTaskStore.set(delegatedTaskKey(to, conversationId), tasks);
+  }
+}
+
+function dropDelegatedTasks(name, conversationId = null) {
+  for (const key of [...delegatedTaskStore.keys()]) {
+    const [storedName, storedConversation] = JSON.parse(key);
+    if (storedName === name
+        && (conversationId === null || storedConversation === conversationId))
+      delegatedTaskStore.delete(key);
+  }
+}
+
 function withinProject(root, cwd) {
   const nested = relative(root, cwd);
   return nested === "" || (nested !== ".." && !nested.startsWith(`..${sep}`)
@@ -1768,6 +1878,19 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, hooksStatus());
   }
 
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "harnesses") {
+    if (req.method !== "GET") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    return json(res, 200, {
+      harnesses: [
+        { id: "claude-code", availability: "available", authentication: "authenticated" },
+        { id: "codex", availability: "available", authentication: "authenticated" },
+        { id: "pi", availability: "available", authentication: "unknown" },
+      ],
+    });
+  }
+
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
     if (req.method === "GET") return json(res, 200, remoteSnapshot());
     if (req.method !== "POST") return json(res, 405, {
@@ -1914,6 +2037,7 @@ const mockServer = createServer(async (req, res) => {
     sessionStore.delete(name);
     projectStore.delete(name);
     dropWork(name);
+    dropDelegatedTasks(name);
     for (const receipt of abandonedProjectDrafts) {
       if (JSON.parse(receipt)[0] === name) abandonedProjectDrafts.delete(receipt);
     }
@@ -1966,6 +2090,7 @@ const mockServer = createServer(async (req, res) => {
       if (preview.name === name) preview.name = next;
     }
     moveWorkGhost(name, next);
+    moveDelegatedTasks(name, next);
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
     ghost.name = next;
     ghost.dir = join(GHOSTS_ROOT, next);
@@ -2193,6 +2318,93 @@ const mockServer = createServer(async (req, res) => {
       }));
     }
   }
+  if (parts[3] === "sessions" && parts.length >= 6 && parts[5] === "tasks") {
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, {
+      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
+    });
+    const tasks = delegatedTasks(name, conversation);
+    if (parts.length === 6) {
+      if (req.method === "GET") return json(res, 200, {
+        tasks: tasks.slice(0, 20).map((task) => taskView(task, false)),
+        shown: Math.min(20, tasks.length),
+        total: tasks.length,
+      });
+      if (req.method === "POST") {
+        const body = await readBody(req).catch(() => null);
+        const project = projectState(name, conversation);
+        if (!body || !["pi", "codex", "claude-code"].includes(body.harness)
+            || typeof body.assignment !== "string" || body.assignment.trim() === ""
+            || body.assignment.length > 32_768
+            || Object.keys(body).some((key) => !["harness", "assignment", "cwd", "agent"].includes(key))
+            || (body.agent !== undefined && (body.harness !== "claude-code"
+              || typeof body.agent !== "string" || body.agent.length < 1
+              || body.agent.length > 256))
+            || project.root === null || body.cwd !== project.cwd) {
+          return json(res, 400, {
+            error: { code: "invalid_request", message: "A trusted current project is required." },
+          });
+        }
+        const now = new Date().toISOString();
+        const task = {
+          id: mockTaskId(++delegatedTaskSeq),
+          harness: body.harness,
+          agent: body.agent ?? null,
+          cwd: project.cwd,
+          state: "running",
+          createdAt: now,
+          updatedAt: now,
+          taskPreview: body.assignment.trim().replace(/\s+/gu, " ").slice(0, 240),
+          taskTruncated: body.assignment.trim().length > 240,
+          resultPreview: null,
+          resultTruncated: false,
+          error: null,
+          events: [{ sequence: 1, at: now, code: "started", message: "Native worker started." }],
+          eventsTruncated: false,
+        };
+        tasks.unshift(task);
+        return json(res, 201, taskView(task, true));
+      }
+    }
+    const taskId = parts[6] ? decodeURIComponent(parts[6]) : "";
+    const task = tasks.find((row) => row.id === taskId);
+    if (!task) return json(res, 404, {
+      error: { code: "task_not_found", message: "No such task belongs to this conversation." },
+    });
+    if (parts.length === 7 && req.method === "GET") {
+      return json(res, 200, taskView(task, true));
+    }
+    if (parts.length === 8 && parts[7] === "send" && req.method === "POST") {
+      const body = await readBody(req).catch(() => null);
+      if (!body || typeof body.message !== "string" || body.message.trim() === ""
+          || body.message.length > 32_768 || Object.keys(body).some((key) => key !== "message")) {
+        return json(res, 400, {
+          error: { code: "invalid_request", message: "A bounded follow-up is required." },
+        });
+      }
+      if (task.state !== "running") {
+        return json(res, 409, {
+          error: { code: "task_not_running", message: "Follow-up requires a running task." },
+        });
+      }
+      appendTaskEvent(task, "follow_up", "The worker accepted the follow-up.");
+      return json(res, 200, taskView(task, true));
+    }
+    if (parts.length === 8 && parts[7] === "cancel" && req.method === "POST") {
+      const body = await readBody(req).catch(() => null);
+      if (!body || Object.keys(body).length !== 0) return json(res, 400, {
+        error: { code: "invalid_request", message: "Cancel accepts an empty object." },
+      });
+      if (["queued", "starting", "running", "cancelling"].includes(task.state)) {
+        task.state = "cancelled";
+        appendTaskEvent(task, "cancelled", "Native worker stopped completely.");
+      }
+      return json(res, 200, taskView(task, true));
+    }
+    return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "plan") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, {
@@ -2355,10 +2567,21 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const storedTasks = delegatedTaskStore.get(delegatedTaskKey(name, conversation.id)) ?? [];
+    if (storedTasks.some((task) =>
+      ["queued", "starting", "running", "cancelling"].includes(task.state))) {
+      return json(res, 409, {
+        error: {
+          code: "tasks_active",
+          message: "Cancel or wait for this conversation's delegated tasks before deleting it.",
+        },
+      });
+    }
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
       ghostProjects(name).delete(conversation.id);
       dropWork(name, conversation.id);
+      dropDelegatedTasks(name, conversation.id);
       publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     }
     return deleted

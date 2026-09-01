@@ -33,8 +33,9 @@ what was verified how live in [`dev/README.md`](dev/README.md).
 **SSE without a helper process.** Qt's QML `XMLHttpRequest` fires
 `onreadystatechange` repeatedly at `readyState 3`, once per network chunk, and
 exposes the cumulative body in `responseText` — measured here for both GET and
-POST before any UI existed. So `Ghostd` streams pi-messages directly: track a
-consumed offset, buffer the trailing partial frame, parse `data:` lines. No
+POST before any UI existed. So `Ghostd` streams Ghost's runtime-neutral
+pi-messages-compatible principal wire directly: track a consumed offset,
+buffer the trailing partial frame, parse `data:` lines. No
 `Process` running `curl -N`, no line-parser plumbing. Two things the pattern
 demands: `responseText` is cumulative (never treat a `readyState 3` body as a
 delta), and the request object must be held in a property or it can be
@@ -107,6 +108,18 @@ plan mode or the approved plan, read-only todo phases, and background jobs with
 cancellation and bounded output disclosure. It disappears when all three are
 empty and polls running jobs only while the HUD is visible.
 
+The `Delegation` destination supervises conversation-scoped native Pi, Codex,
+and Claude Code coding workers without replacing Ghost's owner-agent surfaces.
+It shows public availability plus bounded task progress and terminal results,
+and permits a new assignment only from the current trusted project. Running
+work can receive a follow-up or be cancelled. There is no HUD-side provider
+policy, arbitrary cwd, raw protocol/error view, wait/resume state, or synthetic
+Git workspace lifecycle.
+Deleting a conversation with active workers keeps the dialog and Delegation
+state intact and asks the owner to review or cancel them. Finished worker
+history moves to private Trash with the transcript; successful deletion then
+retires the matching task requests and projection.
+
 A project bound before the first owner turn is still an unpublished draft. The
 shell keeps that runtime-qualified identity selected while it asks ghostd to
 abandon the draft before New conversation, another ghost, or another stored
@@ -149,14 +162,16 @@ so a reload does not resurrect what streaming set aside.
 
 The restored 64px rail at the right edge is the successor to summon-ghost's
 final `AppSideNav` (`4852804cf4e09ca50c16e08e6106c06df82e2a94`): Chat,
-Character, Memory, Commands, Hooks, MCP, Remote, and Phone access stay reachable
-without covering the content.
+Character, Memory, Commands, Delegation, Hooks, MCP, Remote, and Phone access
+stay reachable without covering the content.
 
 The ghost-scoped context response remains derived rather than persisted. It
-contains character and read-only atomic memory; phase one exposes no runnable
-agent definitions because isolated task/subagent execution is disabled. Memory
-deletion is confirmed and recoverable. Character and agent-definition deletion
-are not offered.
+contains character and read-only atomic memory. Ghost/project custom agent
+definitions remain preview-only and are not runnable; that is separate from
+the supported Delegation destination, where the principal Ghost supervises
+durable native Pi, Codex, and Claude Code coding workers. Memory deletion is
+confirmed and recoverable. Character and agent-definition deletion are not
+offered.
 
 Commands is the effective, conversation-scoped Ghost slash-command catalog:
 headless builtins, admitted Markdown commands and prompt templates, and
@@ -246,7 +261,7 @@ qs -c ghost ipc call ghost ask "<prompt>"     # reply arrives as a notification
 qs -c ghost ipc call ghost login              # open "Connect a model"
 qs -c ghost ipc call ghost loginTo <id> <oauth|api_key>   # and start one
 qs -c ghost ipc call ghost switcher           # open the model switcher
-qs -c ghost ipc call ghost section memory     # chat|character|memory|commands|hooks|mcp|connect|remote
+qs -c ghost ipc call ghost section delegation # chat|character|memory|commands|delegation|hooks|mcp|connect|remote
 qs -c ghost ipc call ghost status             # JSON
 qs -c ghost ipc call ghost refresh            # re-read roster and theme
 ```

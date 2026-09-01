@@ -1,7 +1,7 @@
 # Claude Code harness runtime
 
 Status: owner-local integration with the complete owner-installed Claude Code
-harness. Last documentation review: 2026-08-31.
+harness. Last documentation review: 2026-09-01.
 
 This is the selected Option C boundary: Ghost orchestrates the unrestricted,
 unmodified owner-installed CLI and does not substitute a reduced Claude
@@ -43,6 +43,12 @@ claude auth status --json
 The second command must report `"loggedIn": true`. `authMethod` and
 `apiProvider` are descriptive and are not checked against an allowlist. Select
 the runtime through the normal model API:
+
+After installing the exact external Agent SDK boundary described below, run
+`ghost delegation` to check the bounded public catalogue without opening a
+conversation. Claude is `unavailable` when either the CLI probe or required SDK
+boundary fails, and `logged_out` when the admitted CLI reports no authenticated
+account.
 
 ```bash
 curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
@@ -89,6 +95,33 @@ the wrapper script, or a systemd unit.
 The implementation is in `packages/daemon/src/claude-code.ts`; its wire
 adapter is `packages/daemon/src/claude-pi-messages.ts`.
 
+Ghost has two deliberately different Claude boundaries. The principal remains
+the owner-facing Ghost; delegated Claude is a subordinate native coding worker:
+
+| boundary | principal Claude conversation | delegated native Claude task |
+|---|---|---|
+| trust and cwd | owner home or one Ghost-trusted project plus its immutable declarative snapshot | one exact project cwd from a freshly revalidated task-binding receipt |
+| environment and credentials | finite `claude-principal` profile; a literal owner wrapper may inject its own credentials after Ghost launches it | finite `claude-native` profile; the same wrapper rule applies, and Ghost does not copy credentials into the task |
+| tools and execution policy | native preset plus Ghost tools; the explicit exclusions and permission callback below apply | native defaults; only bypass permission mode and its required acknowledgement are set |
+| coding delegation and subagents | exact Ghost tools `task`, `task_list`, `task_get`, `task_send`, and `task_cancel` let the principal supervise native Pi, Codex, or Claude workers; Claude's own native subagents also remain available | no Ghost task tools or Ghost/project agent definitions are injected; the worker retains Claude Code's native subagent discovery and may receive one optional bounded opaque native agent name |
+| settings, hooks, MCP, plugins, and skills | filesystem setting sources and native plugin/skill discovery are disabled; Ghost supplies its accepted snapshot, translated MCP, and in-process tools | native project/user discovery remains enabled; Ghost supplies none of these fields and may pass only an optional bounded opaque native agent name that passed the shared control/credential-pattern check |
+| auto-memory and persistence | auto-memory disabled; Ghost keeps its Claude sidecar, transcript continuity, and one warm query | native defaults remain enabled, including native persistence; Ghost retains only the bounded durable task record and does not resume the worker |
+| process ownership | warm SDK child and descendants use the principal process-group retirement boundary | one receipt-bound transient systemd user scope derived from the durable task id; task completion waits for confirmed scope inactivity |
+
+Both paths load the same pinned SDK and admit the same installed executable.
+For the SDK's lowercase JavaScript/TypeScript executable suffixes, both also
+bind Ghost's canonical Bun identity, require the SDK's literal `bun` plus exact
+script transform, execute the admitted absolute Bun, and retire or reject work
+when either identity changes. Delegated launch rechecks the admitted script and
+Bun synchronously inside the project-binding lease immediately before scope
+spawn. Otherwise the admitted executable remains the
+direct command. Restrictions documented for the principal must not be projected onto a
+delegated worker, and native worker defaults must not expand the principal.
+The delegated scope launch is synchronous and inherits Ghost's already-open
+stdin/stdout/stderr descriptors for the SDK protocol. Its inner
+`systemd-run --user --scope` command must not use the incompatible `--pipe`
+option; the separate service-mode CI controller may use `--wait --pipe`.
+
 For each turn Ghost:
 
 1. loads the exact owner-installed SDK, resolves and fingerprints the executable
@@ -120,8 +153,8 @@ For each turn Ghost:
    not collide with any opaque project MCP name;
 7. reuses the conversation's live Agent SDK query, starting one only if there
    is none, and pushes the prompt into that query's open input channel, mapping
-   the SDK's async message stream onto Ghost's existing pi-messages SSE
-   protocol until that turn's `result` frame;
+   the SDK's async message stream onto Ghost's runtime-neutral
+   pi-messages-compatible SSE protocol until that turn's `result` frame;
 8. persists the opaque Claude session id, listing metadata, and actual cwd,
    completes post-result hooks and maintenance, then emits the terminal event.
    Only a fully settled success leaves the query warm and arms its idle timer.
@@ -168,8 +201,10 @@ The query is deliberately unrestricted for its local owner:
   with an MCP-specific degraded-state warning because the SDK cannot preserve
   them; values at least 1000 are passed through exactly, including on resume;
 - project executable extensions, hooks, custom code tools, LSP, and ghost or
-  project agent definitions remain disabled pending the per-session isolation
-  work in #31. Agent-definition content is never appended to Claude's prompt;
+  project custom agent definitions remain disabled for the principal.
+  Agent-definition content is never appended to Claude's prompt. This
+  preview-only custom-agent boundary is separate from the five supported Ghost
+  task tools and from Claude Code's own native subagents;
 - Ghost's own browser, desktop, and screen tools are added through an in-process
   MCP server. Claude's native `Read`/`Edit`/`Write`/`Glob`/`Grep` preset owns
   character and foreground memory file access;

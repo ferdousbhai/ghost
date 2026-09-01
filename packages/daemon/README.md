@@ -1,10 +1,13 @@
 # `@ghost/daemon` — `ghostd`
 
 The local process that hosts Ghost personas behind one authenticated loopback
-API. Provider-agnostic conversations run on pi (`@earendil-works/pi-coding-agent`,
-`pi-agent-core`, and `pi-ai` 0.84.3); selecting
-`claude-code/default` uses the owner-local Claude Agent SDK boundary documented
-in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
+API. Principal conversations run either on pi
+(`@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai` 0.84.3) or,
+when `claude-code/default` is selected, through the owner-local Claude Agent
+SDK boundary documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md). Both adapt
+to the same runtime-neutral principal wire; the historical `pi-messages` name
+describes its request and event shapes, not a Pi-only server path.
 
 ## Run it
 
@@ -47,9 +50,55 @@ ghost sessions
 ghost show -s cli-abc
 ghost ask -s cli-abc
 ghost watch
+ghost delegation
 ghost smoke --no-turn
 ghost smoke --model claude-code/default
 ```
+
+`ghost delegation` is the one local read-only client command: it inspects the
+installed Pi, Codex, and Claude Code harnesses without contacting ghostd or
+opening a ghost home. It reports availability/authentication only; delegated
+task mutation remains inside an authenticated Ghost conversation/API.
+
+### Native coding-worker harnesses
+
+Pi, Codex, and Claude Code are owner-installed native coding workers, not
+redistributed in Ghost's runtime archive. Install and configure only the
+harnesses you want through their upstream or Omarchy/mise path, then confirm
+that `pi`, `codex`, or `claude` is visible in the environment from which the
+daemon service starts. Pi keeps its native model/auth setup, Codex must make
+`account/read` report an authenticated account, and Claude Code must make
+`claude auth status --json` report `loggedIn: true`. The authoritative upstream
+projects are [pi](https://github.com/earendil-works/pi),
+[Codex](https://github.com/openai/codex), and
+[Claude Code](https://code.claude.com/docs/en/overview).
+
+Default discovery resolves the corresponding command from ghostd's captured
+startup `PATH`. Relative `PATH` entries are anchored to the startup cwd, and a
+recognized Omarchy/mise launcher is resolved with `mise which` to the exact
+installed target. Set `GHOST_PI_BINARY`, `GHOST_CODEX_BINARY`, or
+`GHOST_CLAUDE_BINARY` in the service environment to select an owner wrapper or
+executable explicitly; an absolute path is the least ambiguous choice. An
+explicit selector is a literal execution boundary and is never mise-unwrapped,
+so Ghost fingerprints and later executes that wrapper rather than silently
+substituting its target. Changing startup `PATH` or a selector in the service
+environment requires a daemon restart. A fresh probe detects an installer or
+mise target rotation on its existing path and invalidates stale admission.
+
+Run `ghost delegation`, `ghost delegation --json`, or quiet mode
+`ghost delegation -q` to inspect the bounded public result. A missing command,
+invalid version/protocol response, failed identity check, or unavailable
+required SDK appears only as `unavailable`; Codex and Claude additionally
+report `authenticated` or `logged_out`, while Pi deliberately reports
+authentication as `unknown`. These display rows never authorize a task: every
+start performs a fresh private probe.
+
+Claude also requires the exact external Agent SDK and peer versions under the
+owner-data directory documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#t3-code-provenance-and-adaptation).
+Ghost neither bundles nor copies that SDK. A valid Claude CLI therefore remains
+`unavailable` until both the owner-installed CLI and this exact SDK boundary
+pass validation.
 
 `ghost smoke` starts a scratch daemon and a scratch ghost. `--no-turn` is the
 package/CI startup proof. A real smoke can select a runtime with `--model`; it
@@ -83,7 +132,9 @@ the structured field contract.
 
 ## Storage and isolation
 
-Everything Ghost owns for a pi conversation stays inside the ghost home:
+Everything Ghost owns for a principal Pi or Claude Code conversation stays
+inside the ghost home. Claude's native transcript remains in Claude's own
+owner-local store; Ghost keeps only its contract-defined sidecars:
 
 ```text
 ~/ghosts/<name>/
@@ -100,6 +151,8 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
   sessions/
     <conversation>.jsonl   pi session file
     claude-<sha256>.json   Claude resume metadata, when selected
+    claude-<sha256>.json.{started,settling}
+                           Claude pass/recovery markers
     <stem>.<runtime>.project.json
                            conversation project root, cwd, and snapshot status
     <stem>.pi.project-snapshot.<generation>.json
@@ -108,6 +161,8 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
                            execution cwd for persisted Pi tool calls
     <stem>.<runtime>.maintenance.json
                            durable idle-maintenance state
+  .tasks/
+    task-<UUID>.json       task-record/v2 durable native delegation
   .trash/                  recoverable per-home deletion state
   .memory-maintenance.json last consolidation claim time
 ```
@@ -204,9 +259,24 @@ encrypted relay is planned. Remote sharing uses the built-in Tailscale viewer.
 Whole ghosts and memory files move to freedesktop Trash, with a
 same-filesystem fallback when needed. Conversation deletion pre-journals every
 owned transcript/sidecar destination inside a private same-filesystem fallback
-Trash root so a crash after rename can recover the complete receipt. Only
+Trash root so a crash after rename can recover the complete receipt. Terminal
+delegated-task records move with that conversation as one count/digest-bound
+private group; active workers return `409 tasks_active` before deletion changes
+anything, so the owner can cancel or wait and retry. Only
 rollback of a fork or project draft that was never shown to the owner remains a
 permanent unlink.
+
+All delegated-task reads and mutations share one runtime-qualified parent lane
+with fork, draft-abandon, and delete lifecycle operations. HTTP task access
+requires the exact durable Pi transcript or Claude sidecar; only the private
+principal bridge may delegate during its still-active first owner turn before
+publication. That bridge is bound to the current runtime-context incarnation
+and exact admitted turn; an old callback cannot follow a deleted and recreated
+same-id conversation. Draft abandonment requires no task history in any state;
+finished worker history moves only with full conversation deletion, under an
+exclusive inventory window that lets already-admitted unrelated reads finish
+before files move. Home moves close and drain controller operations before
+native shutdown and store closure.
 
 `SessionManager.open` receives the explicit transcript file, per-ghost session
 directory, and cwd, so nothing lands in `~/.pi`.
@@ -227,9 +297,24 @@ items. The cwd alone grants no discovery authority. A
 conversation may explicitly trust and bind one project, after which Ghost pins
 its data-only instructions, skills, rules, Markdown commands/prompts, and scoped
 MCP configuration. Project executable extensions, hooks, custom code tools,
-LSP, and custom agent definitions stay disabled until they can run through an
-isolated per-session boundary. A pi session has no `task` tool, so no
-bundled, project, ghost-file, or ambient subagent is invokable in phase 1.
+LSP, and custom agent definitions stay disabled. Both principal runtimes expose
+Ghost's five durable task tools for native Pi, Codex, and Claude Code coding
+workers; those workers revalidate the conversation's exact trusted project and
+receive no Ghost-injected bundled or ghost-file subagent definitions. Their
+native project discovery remains intact; delegated Claude may additionally
+receive one optional opaque native agent name.
+Each worker and its ordinary descendants are owned by one collected transient
+systemd user scope derived from the durable task id. A random receipt is stored
+with the task before launch and must match the scope's exact Description before
+Ghost may stop it. Completion, cancellation, restart recovery, and daemon
+shutdown remain nonterminal until that receipt-bound scope is confirmed
+inactive or safely absent after registration settles; user-manager failures
+never become synthetic success. The scope is lifecycle ownership, not a
+sandbox: a trusted harness that deliberately creates another systemd unit, or
+the same owner deliberately tampering with Ghost's reserved scope names, can
+escape this boundary. Scope-mode systemd-run inherits Ghost's already-open
+JSONL stdio descriptors; its incompatible `--pipe` option is forbidden. Native
+packages require `systemd>=254`.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
@@ -283,8 +368,10 @@ the routing API) is:
 provider's best-ranked model). `task_model`, `smol_model`, `slow_model`, and
 `designer_model` inherit the chat default when unbound; `tiny_model` and
 `advisor_model` follow Ghost's preference lists; `vision_model`, `plan_model`,
-and `commit_model` stay unset until bound. `task_model` and `advisor_model` do
-not make any subagent available while spawning is disabled in phase 1.
+and `commit_model` stay unset until bound. `task_model` and `advisor_model`
+remain model-routing roles: they do not select a native harness or activate a
+project/ghost agent definition. Native task creation chooses Pi, Codex, or
+Claude Code explicitly at the durable delegation boundary.
 
 Fallback arrays are ordered Ghost policy stored in `models.json`. The switcher
 orders a provider's models using provider priority and then descending
@@ -393,6 +480,10 @@ The authoritative route and payload contract is
 | POST | `/api/ghosts/:name/sessions/:id/project/preview` | inspect a project and mint a short-lived trust receipt |
 | POST | `/api/ghosts/:name/sessions/:id/project/reload` | refresh an idle conversation's trusted snapshot |
 | DELETE | `/api/ghosts/:name/sessions/:id/project/draft` | abandon an unpublished pre-turn project draft |
+| GET/POST | `/api/ghosts/:name/sessions/:id/tasks` | list or create delegated coding tasks for a published runtime-qualified parent |
+| GET | `/api/ghosts/:name/sessions/:id/tasks/:taskId` | inspect one bounded delegated-task projection |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/send` | follow up while a delegated task is running |
+| POST | `/api/ghosts/:name/sessions/:id/tasks/:taskId/cancel` | cancel and wait for confirmed native quiescence |
 | GET/POST | `/api/ghosts/:name/mcp` | list or add ghost-owned MCP servers |
 | PUT/DELETE | `/api/ghosts/:name/mcp/:server` | replace or remove one MCP server |
 | PUT | `/api/ghosts/:name/mcp/:server/enabled` | enable or disable one MCP server |
@@ -411,9 +502,10 @@ The authoritative route and payload contract is
 
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
-JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-pi is the harness behind it. A rename or delete closes the old-name event
-stream; reconnect a renamed ghost at its new name.
+JSON for POST/PUT. The historical pi-messages SSE shape remains the
+runtime-neutral principal client wire; either Pi or Claude Code may be the
+harness behind it. A rename or delete closes the old-name event stream;
+reconnect a renamed ghost at its new name.
 
 ## Validate
 
@@ -425,3 +517,15 @@ pnpm --filter @ghost/daemon test
 
 Tests use a scripted local provider and real loopback HTTP/SSE. They never call
 a paid model.
+
+The real native-scope proof runs in the `Native task systemd integration`
+workflow on an ephemeral GitHub-hosted Ubuntu runner with systemd as PID 1 and
+that runner's disposable user manager. It proves inherited JSONL stdio for the
+Pi, Codex, and Claude adapter spawn seams, receipt-bound cancellation, detached
+descendant cleanup, crash recovery, and unrelated-process isolation. Do not
+run the real integration file on a workstation or against the owner's user
+manager. The safe local structural and hostile-fixture check is:
+
+```bash
+bash packaging/arch/test-native-task-scope-workflow.sh
+```

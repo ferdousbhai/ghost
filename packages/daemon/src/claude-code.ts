@@ -14,22 +14,17 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants, existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import {
-  access,
   lstat,
-  mkdtemp,
   mkdir,
   open as openFile,
   readdir,
-  realpath as realpathFile,
   rename,
-  rm,
-  stat,
   unlink,
 } from "node:fs/promises";
-import { delimiter, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { homedir, tmpdir } from "node:os";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { homedir } from "node:os";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -64,6 +59,7 @@ import {
   openRegularFileNoFollow,
   type GhostToolCapabilities,
   type AnyGhostToolDefinition,
+  type CollectedGhostExtension,
   type GhostToolContext,
   type GhostToolResult,
 } from "@ghost/extensions";
@@ -73,7 +69,26 @@ import {
   isValidConversationId,
   requireRawConversationId,
 } from "./conversation-identity.js";
-import { captureClaudeCodeEnvironment } from "./env-scrub.js";
+import {
+  captureClaudeCodeEnvironment,
+  captureNativeHarnessEnvironment,
+} from "./env-scrub.js";
+import {
+  inspectNativeHarnessExecutable,
+  NativeHarnessIdentityError,
+  resolveNativeHarnessExecutable,
+  type NativeHarnessExecutable,
+} from "./native-harness-identity.js";
+import {
+  claudeSdkScriptLaunch,
+  claudeSdkSpawnLaunch,
+} from "./claude-sdk-launch.js";
+import {
+  ownedProcessGroupExists,
+  runOwnedCommand,
+  terminateOwnedProcessGroup,
+  type OwnedCommandResult,
+} from "./owned-process.js";
 import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
 import {
   resolveGhostExtensions,
@@ -99,6 +114,12 @@ import {
 } from "./schedules.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
+import {
+  createPrincipalTaskTools,
+  PRINCIPAL_TASK_POLICY,
+  PRINCIPAL_TASK_TOOL_NAMES,
+  type PrincipalTaskContext,
+} from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
@@ -130,9 +151,6 @@ export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_METADATA_MAX_SCALARS = 128;
 const AUTH_STATUS_IDENTITY_MAX_SCALARS = 512;
-const OWNED_CHILD_MAX_STDOUT_BYTES = 128 * 1024;
-const OWNED_CHILD_TERM_GRACE_MS = 100;
-const OWNED_CHILD_KILL_CONFIRM_MS = 1_000;
 const CLAUDE_QUERY_TERM_GRACE_MS = 500;
 const CLAUDE_QUERY_KILL_CONFIRM_MS = 2_000;
 const CLAUDE_CODE_AUTH_STATUS_ARGS = [
@@ -240,29 +258,41 @@ export type ClaudeCodeQueryExitObserver = (query: Query) => Promise<void>;
 export interface ClaudeCodeProbeResult {
   binaryPath: string;
   executableIdentity: string;
+  interpreter?: NativeHarnessExecutable;
   cliVersion: string;
   authStatus: ClaudeCodeAuthStatus;
 }
 
 export interface ClaudeCodeProbeOptions {
-  binaryPath?: string;
+  /** `null` deliberately disables the ambient selector fallback. */
+  binaryPath?: string | null;
   environment?: Readonly<NodeJS.ProcessEnv>;
+  environmentProfile?: "principal" | "native";
   ttlMs?: number;
   now?: () => number;
   resolveExecutable?: (
     binaryPath: string | undefined,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
   ) => Promise<string>;
-  inspectExecutable?: (binaryPath: string, literalBoundary: boolean) => Promise<string>;
+  inspectExecutable?: (
+    binaryPath: string,
+    literalBoundary: boolean,
+    signal?: AbortSignal,
+  ) => Promise<string>;
   readVersion?: (
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
+    launch?: ClaudeCodeCommandLaunch,
   ) => Promise<string>;
   readAuthStatus?: (
     binaryPath: string,
     environment: Readonly<NodeJS.ProcessEnv>,
+    signal?: AbortSignal,
+    launch?: ClaudeCodeCommandLaunch,
   ) => Promise<ClaudeCodeAuthStatus>;
-  loadSdk?: () => Promise<ClaudeAgentSdkModule>;
+  loadSdk?: (signal?: AbortSignal) => Promise<ClaudeAgentSdkModule>;
 }
 
 export interface ClaudeCodeRuntimeOptions {
@@ -296,170 +326,25 @@ export class ClaudeCodeProcessError extends Error {
   }
 }
 
-interface OwnedCommandResult {
-  stdout: string;
-  exitCode: number | null;
-  signal: NodeJS.Signals | null;
+export interface ClaudeCodeCommandLaunch {
+  executable: string;
+  prefixArguments: readonly string[];
 }
 
-function linuxProcessGroupHasLiveMembers(pid: number): boolean {
-  for (const entry of readdirSync("/proc", { withFileTypes: true })) {
-    if (!entry.isDirectory() || !/^\d+$/u.test(entry.name)) continue;
-    let statLine: string;
-    try {
-      statLine = readFileSync(`/proc/${entry.name}/stat`, "utf8");
-    } catch (error) {
-      // A process can disappear between the directory and stat reads.
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "EACCES" || code === "EPERM") continue;
-      throw error;
-    }
-    const commandEnd = statLine.lastIndexOf(")");
-    const fields = commandEnd < 0
-      ? []
-      : statLine.slice(commandEnd + 2).split(" ");
-    const state = fields[0];
-    const processGroup = Number(fields[2]);
-    if (processGroup === pid && state !== "Z" && state !== "X") return true;
-  }
-  return false;
+export interface ClaudeCodeCommandOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  launch?: ClaudeCodeCommandLaunch;
 }
 
-function processGroupExists(pid: number): boolean {
-  try {
-    process.kill(-pid, 0);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ESRCH") return false;
-    if ((error as NodeJS.ErrnoException).code === "EPERM") return true;
-    throw error;
-  }
-  // Container PID 1 implementations commonly leave killed orphan descendants
-  // as zombies. A zombie keeps kill(2)'s process-group existence check true,
-  // but it cannot execute and teardown is complete. Inspect Linux process
-  // state so confirmation does not wait forever for an unrelated reaper.
-  return process.platform === "linux" ? linuxProcessGroupHasLiveMembers(pid) : true;
-}
-
-function signalOwnedProcessGroup(pid: number, signal: NodeJS.Signals): void {
-  try {
-    process.kill(-pid, signal);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
-  }
-}
-
-async function waitForProcessGroupExit(pid: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (processGroupExists(pid)) {
-    if (Date.now() >= deadline) return false;
-    await new Promise<void>((resolveDelay) => setTimeout(resolveDelay, 10));
-  }
-  return true;
-}
-
-async function terminateOwnedProcessGroup(
-  pid: number,
-  termGraceMs = OWNED_CHILD_TERM_GRACE_MS,
-  killConfirmMs = OWNED_CHILD_KILL_CONFIRM_MS,
-): Promise<void> {
-  if (!processGroupExists(pid)) return;
-  signalOwnedProcessGroup(pid, "SIGTERM");
-  if (await waitForProcessGroupExit(pid, termGraceMs)) return;
-  signalOwnedProcessGroup(pid, "SIGKILL");
-  if (await waitForProcessGroupExit(pid, killConfirmMs)) return;
-  throw new ClaudeCodeProcessError("Claude Code probe process teardown was not confirmed.");
-}
-
-async function runOwnedCommand(
-  executable: string,
+function claudeCodeCommand(
+  binaryPath: string,
   args: readonly string[],
-  options: {
-    environment: Readonly<NodeJS.ProcessEnv>;
-    timeoutMs: number;
-  },
-): Promise<OwnedCommandResult> {
-  const scratch = await mkdtemp(join(tmpdir(), "ghost-claude-probe-"));
-  try {
-    return await runOwnedCommandInDirectory(executable, args, options, scratch);
-  } finally {
-    await rm(scratch, { recursive: true, force: true });
-  }
-}
-
-async function runOwnedCommandInDirectory(
-  executable: string,
-  args: readonly string[],
-  options: {
-    environment: Readonly<NodeJS.ProcessEnv>;
-    timeoutMs: number;
-  },
-  cwd: string,
-): Promise<OwnedCommandResult> {
-  const child = spawn(executable, [...args], {
-    cwd,
-    detached: true,
-    env: options.environment,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  const pid = child.pid;
-  const chunks: Buffer[] = [];
-  let stdoutBytes = 0;
-  child.stderr?.resume();
-
-  type Completion =
-    | { kind: "close"; exitCode: number | null; signal: NodeJS.Signals | null }
-    | { kind: "error" }
-    | { kind: "overflow" }
-    | { kind: "timeout" };
-  let settleCompletion!: (completion: Completion) => void;
-  let completionRequested = false;
-  const completion = new Promise<Completion>((resolveCompletion) => {
-    settleCompletion = resolveCompletion;
-  });
-  const complete = (value: Completion) => {
-    if (completionRequested) return;
-    completionRequested = true;
-    settleCompletion(value);
-  };
-  child.stdout?.on("data", (chunk: Buffer | string) => {
-    if (completionRequested) return;
-    const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    stdoutBytes += bytes.length;
-    if (stdoutBytes > OWNED_CHILD_MAX_STDOUT_BYTES) {
-      complete({ kind: "overflow" });
-      return;
-    }
-    chunks.push(bytes);
-  });
-  child.once("error", () => complete({ kind: "error" }));
-  child.once("close", (exitCode, signal) => {
-    complete({ kind: "close", exitCode, signal });
-  });
-  const deadline = setTimeout(
-    () => complete({ kind: "timeout" }),
-    options.timeoutMs,
-  );
-
-  const outcome = await completion;
-  clearTimeout(deadline);
-  try {
-    if (pid !== undefined) await terminateOwnedProcessGroup(pid);
-  } finally {
-    child.stdout?.destroy();
-    child.stderr?.destroy();
-  }
-
-  if (outcome.kind !== "close") {
-    const reason = outcome.kind === "overflow"
-      ? "produced too much output"
-      : outcome.kind === "timeout" ? "exceeded its hard deadline" : "could not start";
-    throw new ClaudeCodeProcessError(`Claude Code probe ${reason}.`);
-  }
-  return {
-    stdout: Buffer.concat(chunks, stdoutBytes).toString("utf8"),
-    exitCode: outcome.exitCode,
-    signal: outcome.signal,
-  };
+  launch: ClaudeCodeCommandLaunch | undefined,
+): { executable: string; args: string[] } {
+  return launch
+    ? { executable: launch.executable, args: [...launch.prefixArguments, ...args] }
+    : { executable: binaryPath, args: [...args] };
 }
 
 function authStatusMetadata(value: unknown): string | undefined {
@@ -501,157 +386,58 @@ function accountFingerprint(status: Record<string, unknown>): string | undefined
   return createHash("sha256").update(JSON.stringify([primary, context])).digest("hex");
 }
 
-async function executableCandidate(
-  binaryPath: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-): Promise<string | null> {
-  const candidates = isAbsolute(binaryPath) || binaryPath.includes("/")
-    ? [resolve(binaryPath)]
-    : (environment.PATH ?? "")
-      .split(delimiter)
-      .filter(Boolean)
-      .map((directory) => resolve(directory, binaryPath));
-  for (const candidate of candidates) {
-    try {
-      await access(candidate, fsConstants.X_OK);
-      return candidate;
-    } catch {
-      // Continue through PATH. Failure is reported once with the configured
-      // binary name, not as a cascade of candidate errors.
-    }
-  }
-  return null;
-}
-
-async function launcherPrefix(path: string): Promise<string> {
-  const handle = await openFile(path, "r");
-  try {
-    const buffer = Buffer.alloc(4096);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.toString("utf8", 0, bytesRead);
-  } finally {
-    await handle.close();
-  }
-}
-
-async function unwrapMiseClaudeLauncher(
-  path: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  timeoutMs: number,
-): Promise<string> {
-  const prefix = await launcherPrefix(path);
-  if (!prefix.startsWith("#!") || !/\bmise\b/.test(prefix) || !/\bclaude\b/.test(prefix)) {
-    return path;
-  }
-
-  let result: OwnedCommandResult;
-  try {
-    const miseCandidate = await executableCandidate("mise", environment);
-    if (!miseCandidate) throw new Error("mise is not on PATH");
-    const miseExecutable = await realpathFile(miseCandidate);
-    result = await runOwnedCommand(miseExecutable, ["which", "claude"], {
-      environment,
-      timeoutMs,
-    });
-  } catch {
-    throw new ClaudeCodeProcessError(
-      `Claude Code launcher ${JSON.stringify(path)} delegates to mise, but Ghost could not resolve `
-        + "mise's underlying Claude executable.",
-    );
-  }
-  if (result.exitCode !== 0 || result.signal) {
-    throw new ClaudeCodeProcessError("`mise which claude` did not exit successfully.");
-  }
-  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const [misePath] = lines;
-  if (lines.length !== 1 || !misePath) {
-    throw new ClaudeCodeProcessError(
-      `\`mise which claude\` returned ${lines.length} executable paths; expected exactly one.`,
-    );
-  }
-  const resolved = await executableCandidate(misePath, environment);
-  if (!resolved || resolved === path) {
-    throw new ClaudeCodeProcessError(
-      `mise did not resolve an executable behind Claude launcher ${JSON.stringify(path)}.`,
-    );
-  }
-  return await realpathFile(resolved);
-}
-
-interface BigintExecutableStat {
-  dev: bigint;
-  ino: bigint;
-  mode: bigint;
-  size: bigint;
-  mtimeNs: bigint;
-  ctimeNs: bigint;
-  isFile(): boolean;
-  isSymbolicLink(): boolean;
-}
-
-function executableStatIdentity(value: BigintExecutableStat): readonly string[] {
-  return [
-    value.dev.toString(),
-    value.ino.toString(),
-    value.mode.toString(),
-    value.size.toString(),
-    value.mtimeNs.toString(),
-    value.ctimeNs.toString(),
-  ];
-}
-
 async function inspectClaudeCodeExecutable(
   binaryPath: string,
   literalBoundary: boolean,
+  signal?: AbortSignal,
 ): Promise<string> {
-  if (!isAbsolute(binaryPath)) {
-    throw new ClaudeCodeProcessError("Claude Code executable resolution was not absolute.");
+  try {
+    return await inspectNativeHarnessExecutable(binaryPath, literalBoundary, signal);
+  } catch (error) {
+    throw new ClaudeCodeProcessError("Claude Code executable identity is invalid.", { cause: error });
   }
-  const boundary = await lstat(binaryPath, { bigint: true });
-  if (!boundary.isFile() && !boundary.isSymbolicLink()) {
-    throw new ClaudeCodeProcessError("Claude Code executable boundary is not a file or link.");
-  }
-  const targetPath = await realpathFile(binaryPath);
-  const target = await stat(targetPath, { bigint: true });
-  if (!target.isFile()) {
-    throw new ClaudeCodeProcessError("Claude Code executable target is not a regular file.");
-  }
-  await access(binaryPath, fsConstants.X_OK);
-  const identity = JSON.stringify([
-    literalBoundary,
-    binaryPath,
-    executableStatIdentity(boundary),
-    targetPath,
-    executableStatIdentity(target),
-  ]);
-  return createHash("sha256").update(identity).digest("hex");
 }
 
 /** Linux/Omarchy subset of T3's executable-resolution seam. */
 export async function resolveClaudeCodeExecutable(
   binaryPath: string | undefined = undefined,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     throw new RangeError("Claude Code executable timeout must be a finite positive number.");
   }
-  const configuredBinary = binaryPath !== undefined;
-  const selectedBinary = binaryPath ?? "claude";
-  const resolved = await executableCandidate(selectedBinary, environment);
-  if (resolved) {
-    if (configuredBinary) return resolved;
-    const unwrapped = await unwrapMiseClaudeLauncher(resolved, environment, timeoutMs);
-    return await realpathFile(unwrapped);
+  try {
+    return (await resolveNativeHarnessExecutable({
+      harness: "claude-code",
+      ...(binaryPath === undefined ? {} : { explicitBinary: binaryPath }),
+      environment,
+      timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
+    })).path;
+  } catch (error) {
+    if (error instanceof NativeHarnessIdentityError && error.reason === "unavailable") {
+      const selectedBinary = binaryPath ?? "claude";
+      throw new GhostError(
+        "claude_code_missing",
+        `Claude Code is not installed at ${JSON.stringify(selectedBinary)}. Install the official `
+          + `Claude Code CLI, then run \`claude auth login\`. Override the executable with `
+          + `${CLAUDE_CODE_BINARY_ENV} when needed.`,
+        503,
+      );
+    }
+    if (error instanceof NativeHarnessIdentityError && error.reason === "mise") {
+      throw new ClaudeCodeProcessError(
+        "Claude Code launcher delegates to mise, but Ghost could not resolve mise's underlying "
+          + "Claude executable.",
+        { cause: error },
+      );
+    }
+    throw new ClaudeCodeProcessError("Failed to resolve the Claude Code executable.", {
+      cause: error,
+    });
   }
-  throw new GhostError(
-    "claude_code_missing",
-    `Claude Code is not installed at ${JSON.stringify(selectedBinary)}. Install the official `
-      + `Claude Code CLI, then run \`claude auth login\`. Override the executable with `
-      + `${CLAUDE_CODE_BINARY_ENV} when needed.`,
-    503,
-  );
 }
 
 function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
@@ -689,7 +475,7 @@ function authStatusFromJson(raw: string): ClaudeCodeAuthStatus {
 export async function readClaudeCodeAuthStatus(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: ClaudeCodeCommandOptions = {},
 ): Promise<ClaudeCodeAuthStatus> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -698,9 +484,15 @@ export async function readClaudeCodeAuthStatus(
 
   let result: OwnedCommandResult;
   try {
-    result = await runOwnedCommand(binaryPath, CLAUDE_CODE_AUTH_STATUS_ARGS, {
+    const command = claudeCodeCommand(
+      binaryPath,
+      CLAUDE_CODE_AUTH_STATUS_ARGS,
+      options.launch,
+    );
+    result = await runOwnedCommand(command.executable, command.args, {
       environment,
       timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
   } catch {
     throw new ClaudeCodeProcessError("Failed to read Claude Code authentication status.");
@@ -731,7 +523,7 @@ function versionAtLeast(version: readonly number[], minimum: readonly number[]):
 export async function readClaudeCodeVersion(
   binaryPath: string,
   environment: Readonly<NodeJS.ProcessEnv> = captureClaudeCodeEnvironment(),
-  options: { timeoutMs?: number } = {},
+  options: ClaudeCodeCommandOptions = {},
 ): Promise<string> {
   const timeoutMs = options.timeoutMs ?? AUTH_STATUS_TIMEOUT_MS;
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
@@ -739,7 +531,12 @@ export async function readClaudeCodeVersion(
   }
   let result: OwnedCommandResult;
   try {
-    result = await runOwnedCommand(binaryPath, ["--version"], { environment, timeoutMs });
+    const command = claudeCodeCommand(binaryPath, ["--version"], options.launch);
+    result = await runOwnedCommand(command.executable, command.args, {
+      environment,
+      timeoutMs,
+      ...(options.signal ? { signal: options.signal } : {}),
+    });
   } catch {
     throw new ClaudeCodeProcessError("Failed to read Claude Code version.");
   }
@@ -790,10 +587,12 @@ function claudeCodeRuntimeIdentity(
   executableIdentity: string,
   cliVersion: string,
   status: ClaudeCodeAuthStatus,
+  interpreter?: NativeHarnessExecutable,
 ): string {
   return JSON.stringify([
     binaryPath,
     executableIdentity,
+    interpreter?.identity ?? null,
     cliVersion,
     claudeCodeAuthenticationIdentity(status),
   ]);
@@ -826,9 +625,13 @@ export class ClaudeCodeProbe {
   private turnInFlight?: Promise<ClaudeCodeProbeResult>;
 
   constructor(options: ClaudeCodeProbeOptions = {}) {
-    const configuredBinary = options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
+    const configuredBinary = options.binaryPath === null
+      ? undefined
+      : options.binaryPath ?? process.env[CLAUDE_CODE_BINARY_ENV];
     this.binaryPath = configuredBinary;
-    this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
+    this.environment = options.environmentProfile === "native"
+      ? captureNativeHarnessEnvironment("claude-native", options.environment ?? process.env)
+      : captureClaudeCodeEnvironment(options.environment ?? process.env);
     this.ttlMs = options.ttlMs ?? CLAUDE_CODE_PROBE_TTL_MS;
     if (!Number.isFinite(this.ttlMs)
       || this.ttlMs <= 0
@@ -838,10 +641,19 @@ export class ClaudeCodeProbe {
       );
     }
     this.now = options.now ?? Date.now;
-    this.resolveExecutable = options.resolveExecutable ?? resolveClaudeCodeExecutable;
+    this.resolveExecutable = options.resolveExecutable ?? ((binaryPath, environment, signal) =>
+      resolveClaudeCodeExecutable(binaryPath, environment, signal ? { signal } : {}));
     this.inspectExecutable = options.inspectExecutable ?? inspectClaudeCodeExecutable;
-    this.readVersion = options.readVersion ?? readClaudeCodeVersion;
-    this.readAuthStatus = options.readAuthStatus ?? readClaudeCodeAuthStatus;
+    this.readVersion = options.readVersion ?? ((binaryPath, environment, signal, launch) =>
+      readClaudeCodeVersion(binaryPath, environment, {
+        ...(signal ? { signal } : {}),
+        ...(launch ? { launch } : {}),
+      }));
+    this.readAuthStatus = options.readAuthStatus ?? ((binaryPath, environment, signal, launch) =>
+      readClaudeCodeAuthStatus(binaryPath, environment, {
+        ...(signal ? { signal } : {}),
+        ...(launch ? { launch } : {}),
+      }));
     this.loadSdk = options.loadSdk;
   }
 
@@ -868,8 +680,9 @@ export class ClaudeCodeProbe {
     return isClaudeCodeAuthenticated((await this.read()).authStatus);
   }
 
-  /** Turn admission bypasses the catalogue TTL but may share simultaneous fresh work. */
-  readForTurn(): Promise<ClaudeCodeProbeResult> {
+  /** Turn admission bypasses the catalogue TTL; unsignalled principal reads may coalesce. */
+  readForTurn(signal?: AbortSignal): Promise<ClaudeCodeProbeResult> {
+    if (signal) return this.probe(signal);
     if (this.turnInFlight) return this.turnInFlight;
     this.invalidate();
     const promise = this.read();
@@ -885,8 +698,22 @@ export class ClaudeCodeProbe {
     return promise;
   }
 
-  async assertExecutable(result: ClaudeCodeProbeResult): Promise<void> {
-    const current = await this.inspectExecutable(result.binaryPath, this.binaryPath !== undefined);
+  async assertExecutable(result: ClaudeCodeProbeResult, signal?: AbortSignal): Promise<void> {
+    if (result.interpreter) {
+      const interpreter = await this.inspectExecutable(
+        result.interpreter.path,
+        true,
+        signal,
+      );
+      if (interpreter !== result.interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed after authentication.");
+      }
+    }
+    const current = await this.inspectExecutable(
+      result.binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
     if (current !== result.executableIdentity) {
       throw new ClaudeCodeProcessError("Claude Code executable changed after authentication.");
     }
@@ -900,23 +727,8 @@ export class ClaudeCodeProbe {
 
   private async readFresh(generation: number): Promise<ClaudeCodeProbeResult> {
     try {
-      await this.loadSdk?.();
-      const binaryPath = await this.resolveExecutable(this.binaryPath, this.environment);
-      const executableIdentity = await this.inspectExecutable(
-        binaryPath,
-        this.binaryPath !== undefined,
-      );
-      const cliVersion = await this.readVersion(binaryPath, this.environment);
-      const authStatus = await this.readAuthStatus(binaryPath, this.environment);
-      const confirmedIdentity = await this.inspectExecutable(
-        binaryPath,
-        this.binaryPath !== undefined,
-      );
-      if (confirmedIdentity !== executableIdentity) {
-        throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
-      }
+      const value = await this.probe();
       if (generation !== this.generation) return this.read();
-      const value = { binaryPath, executableIdentity, cliVersion, authStatus };
       this.cached = { outcome: { ok: true, value }, expiresAt: this.now() + this.ttlMs };
       return value;
     } catch (error) {
@@ -926,6 +738,82 @@ export class ClaudeCodeProbe {
       this.cached = { outcome: { ok: false, error }, expiresAt: this.now() + this.ttlMs };
       throw error;
     }
+  }
+
+  private async probe(signal?: AbortSignal): Promise<ClaudeCodeProbeResult> {
+    this.assertProbeActive(signal);
+    await this.loadSdk?.(signal);
+    this.assertProbeActive(signal);
+    const binaryPath = await this.resolveExecutable(this.binaryPath, this.environment, signal);
+    this.assertProbeActive(signal);
+    const executableIdentity = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    this.assertProbeActive(signal);
+    const scriptLaunch = claudeSdkScriptLaunch(binaryPath);
+    const interpreter = scriptLaunch
+      ? Object.freeze({
+          path: scriptLaunch.executable,
+          identity: await this.inspectExecutable(scriptLaunch.executable, true, signal),
+          literalBoundary: true,
+        })
+      : undefined;
+    this.assertProbeActive(signal);
+    const cliVersion = await this.readVersion(binaryPath, this.environment, signal, scriptLaunch);
+    this.assertProbeActive(signal);
+    if (interpreter) {
+      const phaseInterpreter = await this.inspectExecutable(
+        interpreter.path,
+        true,
+        signal,
+      );
+      if (phaseInterpreter !== interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed between probes.");
+      }
+    }
+    const phaseExecutable = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    if (phaseExecutable !== executableIdentity) {
+      throw new ClaudeCodeProcessError("Claude Code executable changed between probes.");
+    }
+    this.assertProbeActive(signal);
+    const authStatus = await this.readAuthStatus(binaryPath, this.environment, signal, scriptLaunch);
+    this.assertProbeActive(signal);
+    if (interpreter) {
+      const confirmedInterpreter = await this.inspectExecutable(
+        interpreter.path,
+        true,
+        signal,
+      );
+      if (confirmedInterpreter !== interpreter.identity) {
+        throw new ClaudeCodeProcessError("Claude Code interpreter changed during authentication.");
+      }
+    }
+    const confirmedIdentity = await this.inspectExecutable(
+      binaryPath,
+      this.binaryPath !== undefined,
+      signal,
+    );
+    this.assertProbeActive(signal);
+    if (confirmedIdentity !== executableIdentity) {
+      throw new ClaudeCodeProcessError("Claude Code executable changed during authentication.");
+    }
+    return {
+      binaryPath,
+      executableIdentity,
+      cliVersion,
+      authStatus,
+      ...(interpreter ? { interpreter } : {}),
+    };
+  }
+
+  private assertProbeActive(signal: AbortSignal | undefined): void {
+    if (signal?.aborted) throw new ClaudeCodeProcessError("Claude Code probe was aborted.");
   }
 
   private clearInFlight(promise: Promise<ClaudeCodeProbeResult>): void {
@@ -1376,6 +1264,28 @@ export async function readClaudeSessionMetadataFile(
   }
 }
 
+/** Read one already-published sidecar without running resume recovery or writing state. */
+export async function readPublishedClaudeSessionMetadata(
+  sessionDir: string,
+  conversationId: string,
+): Promise<ClaudeSessionMetadata | null> {
+  const path = claudeSessionMetadataPath(sessionDir, conversationId);
+  try {
+    const metadata = parseMetadata(path, await readClaudeSessionMetadataFile(path));
+    if (metadata.conversationId !== conversationId) {
+      throw new GhostError(
+        "session_identity_mismatch",
+        "The stored Claude conversation identity does not match the requested resume id.",
+        409,
+      );
+    }
+    return metadata;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
 async function readMetadata(
   sessionDir: string,
   conversationId: string,
@@ -1510,6 +1420,7 @@ async function buildPersona(
   homeDir: string,
   ghostName: string,
   scheduleUnitDir: string,
+  includeTaskDelegation: boolean,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -1530,6 +1441,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
@@ -1599,6 +1511,26 @@ async function buildMcpTools(
   return { tools, names: resolved.toolNames };
 }
 
+async function withPrincipalTaskTools(
+  bridge: { tools: SdkMcpToolDefinition[]; names: string[] },
+  principalTasks: PrincipalTaskContext,
+  sdk: ClaudeAgentSdkModule,
+): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
+  const taskExtension = await collectGhostExtension(createPrincipalTaskTools(principalTasks));
+  return {
+    tools: [
+      ...bridge.tools,
+      ...bridgeCollectedClaudeCodeTools(
+        taskExtension,
+        PRINCIPAL_TASK_TOOL_NAMES,
+        { cwd: principalTasks.cwd },
+        sdk,
+      ),
+    ],
+    names: [...bridge.names, ...PRINCIPAL_TASK_TOOL_NAMES],
+  };
+}
+
 export async function bridgeClaudeCodeTools(
   resolved: ReturnType<typeof resolveGhostExtensions>,
   homeDir: string,
@@ -1609,8 +1541,22 @@ export async function bridgeClaudeCodeTools(
   // tool context deliberately carries none.
   const definitions = (await collectGhostExtension(resolved.ghost)).tools;
   const context: GhostToolContext = { cwd: homeDir };
-  return resolved.toolNames.map((name): SdkMcpToolDefinition => {
-    const definition = definitions.get(name);
+  return bridgeCollectedClaudeCodeTools(
+    { tools: definitions },
+    resolved.toolNames,
+    context,
+    sdk,
+  );
+}
+
+function bridgeCollectedClaudeCodeTools(
+  extension: Pick<CollectedGhostExtension, "tools">,
+  names: readonly string[],
+  context: GhostToolContext,
+  sdk: ClaudeAgentSdkModule,
+): SdkMcpToolDefinition[] {
+  return names.map((name): SdkMcpToolDefinition => {
+    const definition = extension.tools.get(name);
     if (!definition) {
       throw new ClaudeCodeProcessError(
         `Ghost declared tool ${JSON.stringify(name)} but its extension did not register it.`,
@@ -2005,7 +1951,7 @@ function claudeProcessExitBoundary(): ClaudeProcessExitBoundary {
       if (terminationRequested) quiesce();
       child.once("exit", () => {
         leaderExited = true;
-        if (pid !== undefined && processGroupExists(pid)) quiesce();
+        if (pid !== undefined && ownedProcessGroupExists(pid)) quiesce();
         else resolveOnce();
       });
       child.once("error", () => {
@@ -2078,6 +2024,7 @@ interface WarmClaudeQuery {
   readonly identity: string;
   readonly exited: Promise<void>;
   readonly terminateProcessGroup: () => void;
+  readonly principalTasks?: ClaudePrincipalTaskContextLease;
   projectMcpFailed: boolean;
 }
 
@@ -2085,6 +2032,17 @@ interface ClaudeSessionPersona {
   readonly prompt: string;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
+
+export interface ClaudePrincipalTaskContextLease {
+  readonly context: PrincipalTaskContext;
+  retire(): void;
+}
+
+export type ClaudePrincipalTaskContextFactory = (
+  ghostName: string,
+  conversationId: string,
+  cwd: string,
+) => Promise<ClaudePrincipalTaskContextLease>;
 
 /**
  * Everything a warm query cannot change after construction. Compared verbatim,
@@ -2169,6 +2127,7 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly loadSdk: () => Promise<ClaudeAgentSdkModule>;
   private readonly hooks: GhostHookRunner;
+  private principalTaskContext: ClaudePrincipalTaskContextFactory | undefined;
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
@@ -2242,6 +2201,18 @@ export class ClaudeCodeRuntime {
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
+  }
+
+  /** Install principal task tools before this runtime admits any conversation. */
+  attachPrincipalTaskTools(factory: ClaudePrincipalTaskContextFactory): void {
+    if (this.principalTaskContext) {
+      throw new Error("Principal task tools are already attached to Claude Code.");
+    }
+    if (this.disposed || this.busy.size > 0 || this.active.size > 0
+      || this.turns.size > 0 || this.warm.size > 0 || this.personas.size > 0) {
+      throw new Error("Principal task tools must be attached before Claude Code activity.");
+    }
+    this.principalTaskContext = factory;
   }
 
   invalidateAuthProbe(): void {
@@ -2399,6 +2370,7 @@ export class ClaudeCodeRuntime {
         executableIdentity,
         cliVersion,
         auth,
+        probed.interpreter,
       );
       const authenticatedWarm = this.warm.get(key);
       const stableAccount = /^[0-9a-f]{64}$/u.test(auth.accountFingerprint ?? "");
@@ -2519,7 +2491,7 @@ export class ClaudeCodeRuntime {
       }
       const sdk = await this.loadSdk();
       this.assertTurnAdmitted(options.signal);
-      const bridge = await buildMcpTools(
+      const baseBridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
@@ -2541,7 +2513,9 @@ export class ClaudeCodeRuntime {
         cwd: runtimeCwd,
         modelId,
         systemPrompt,
-        toolNames: bridge.names,
+        toolNames: this.principalTaskContext
+          ? [...baseBridge.names, ...PRINCIPAL_TASK_TOOL_NAMES]
+          : baseBridge.names,
         projectMcpServers: approvedProject.mcpServers,
       });
       // Nothing the query was built from may have changed under a warm process;
@@ -2564,23 +2538,69 @@ export class ClaudeCodeRuntime {
           const abortController = new AbortController();
           const input = claudeInputChannel();
           const processExit = this.observeQueryExit ? undefined : claudeProcessExitBoundary();
-          const sdkOptions = queryOptions({
-            sdk,
-            binaryPath,
-            cwd: runtimeCwd,
-            ghostName: ghost.name,
-            modelId,
-            systemPrompt,
-            tools: bridge.tools,
-            toolNames: bridge.names,
-            metadata,
-            newSessionId: admittedSdkSessionId,
-            abortController,
-            internalMcpServerName: sdkMcpServerName,
-            projectMcpServers: approvedProject.mcpServers,
-            environment: this.environment,
-            ...(processExit ? { spawnClaudeCodeProcess: processExit.spawn } : {}),
-          });
+          if (processExit) {
+            await this.probe.assertExecutable(probed, options.signal);
+            this.assertTurnAdmitted(options.signal);
+          }
+          const spawnClaudeCodeProcess = processExit
+            ? (spawnOptions: ClaudeSpawnOptions): ClaudeSpawnedProcess => {
+                const launch = claudeSdkSpawnLaunch(
+                  {
+                    path: binaryPath,
+                    identity: executableIdentity,
+                    literalBoundary: true,
+                  },
+                  probed.interpreter,
+                  spawnOptions,
+                  runtimeCwd,
+                );
+                return processExit.spawn({
+                  ...spawnOptions,
+                  command: launch.executable,
+                  args: [...launch.args],
+                });
+              }
+            : undefined;
+          let principalTasks: ClaudePrincipalTaskContextLease | undefined;
+          let bridge = baseBridge;
+          try {
+            principalTasks = this.principalTaskContext
+              ? await this.principalTaskContext(ghost.name, conversationId, runtimeCwd)
+              : undefined;
+            this.assertTurnAdmitted(options.signal);
+            if (principalTasks) {
+              bridge = await withPrincipalTaskTools(baseBridge, principalTasks.context, sdk);
+              this.assertTurnAdmitted(options.signal);
+            }
+          } catch (cause) {
+            input.close();
+            principalTasks?.retire();
+            throw cause;
+          }
+          let sdkOptions: ClaudeQueryOptions;
+          try {
+            sdkOptions = queryOptions({
+              sdk,
+              binaryPath,
+              cwd: runtimeCwd,
+              ghostName: ghost.name,
+              modelId,
+              systemPrompt,
+              tools: bridge.tools,
+              toolNames: bridge.names,
+              metadata,
+              newSessionId: admittedSdkSessionId,
+              abortController,
+              internalMcpServerName: sdkMcpServerName,
+              projectMcpServers: approvedProject.mcpServers,
+              environment: this.environment,
+              ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
+            });
+          } catch (cause) {
+            input.close();
+            principalTasks?.retire();
+            throw cause;
+          }
           let created: Query;
           try {
             created = this.createQuery
@@ -2588,6 +2608,7 @@ export class ClaudeCodeRuntime {
               : sdk.query({ prompt: input.messages, options: sdkOptions });
           } catch (cause) {
             input.close();
+            principalTasks?.retire();
             throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
           }
           let exited: Promise<void>;
@@ -2612,6 +2633,7 @@ export class ClaudeCodeRuntime {
             identity,
             exited,
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
+            ...(principalTasks ? { principalTasks } : {}),
             projectMcpFailed: false,
           };
           this.warm.set(key, warm);
@@ -2892,6 +2914,7 @@ export class ClaudeCodeRuntime {
     const warm = this.warm.get(key);
     if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
+    warm.principalTasks?.retire();
     let exits = this.retiring.get(key);
     if (!exits) {
       exits = new Set();
@@ -2945,6 +2968,7 @@ export class ClaudeCodeRuntime {
       home,
       ghostName,
       this.scheduleUnitDir,
+      this.principalTaskContext !== undefined,
       this.extensionOptions.documents,
     );
     // A turn racing another turn of the same conversation is already refused by

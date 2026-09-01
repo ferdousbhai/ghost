@@ -7,8 +7,9 @@ issue tracker (#17 is the beta gate); contracts live in `../CONTRACTS.md`.
 
 A ghost is an AI persona — character, memory, tools, and access to the owner's
 Documents — that lives entirely on its owner's machine as an Omarchy-native
-desktop app: a pi engine over owner-readable files, summoned with a keystroke,
-and extended with bounded declarative skills and project context. It is an
+desktop app: a principal pi engine or owner-installed Claude Code harness over
+the same Ghost-owned context, summoned with a keystroke and extended with
+bounded declarative skills and project context. It is an
 owner-local desktop application, not a network-facing agent service. No server
 holds a copy. "Your ghost, not our copy of it."
 
@@ -18,13 +19,16 @@ The official repo is the point of collaboration on a narrow, opinionated core �
 ghost home, daemon, shell, and built-in extensions. An owner can modify the
 visible instructions, skills, rules, Markdown commands and prompts, model roles,
 and MCP owned by a ghost or explicitly trusted project. Executable project
-plugins, hooks, custom tools, LSP, and pi subagents stay disabled until #31
-supplies a per-session isolation boundary; trusted visible ghost hook factories
-are the narrow in-process exception. Core stays small and holds the contracts.
-A capability generic enough for every ghost graduates into core or upstream pi;
-private executable additions follow the isolation boundary rather than being
-discovered implicitly from cwd. The measure of success is what owners can
-extend without surrendering the local trust model.
+plugins, hooks, custom tools, LSP, and Ghost/project custom agent definitions
+remain disabled for the principal; trusted visible ghost hook factories are the
+narrow in-process exception. That preview-only custom-agent boundary does not
+disable native coding delegation: the principal may supervise durable Pi,
+Codex, and Claude Code workers, and those workers retain their harness's native
+project discovery and subagent behavior. Core stays small and holds the
+contracts. A capability generic enough for every ghost graduates into core or
+upstream pi; private executable additions follow the isolation boundary rather
+than being discovered implicitly from cwd. The measure of success is what
+owners can extend without surrendering the local trust model.
 
 ## Positioning
 
@@ -45,8 +49,16 @@ ambient credential discovery, and no cloud custody.
   unmodified Claude Code so the owner can use its native authentication and
   provider routes. Both receive the
   same Ghost persona, memory, Documents, and declarative layers and emit the
-  pi-messages wire, while each keeps its native tool harness. Deviations from
+  runtime-neutral pi-messages-compatible principal wire, while each keeps its
+  native tool harness. Deviations from
   pi are named in `CONTRACTS.md` with the invariant that licenses them (#3).
+- **Ghost remains the owner-agent; coding execution delegates thinly.** The
+  persistent principal keeps memory, Documents, planning/todo, continuity,
+  schedules, communications, browser/computer/CLI work, recap, queue, titles,
+  and every other owner-facing responsibility. Its five task tools delegate
+  coding mechanics to native Pi, Codex, or Claude Code workers without turning
+  those workers into replacement personas or importing their presentation and
+  lifecycle policy into Ghost.
 - **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
   Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
   **Claude Code's native authentication through the Claude Code harness** (a

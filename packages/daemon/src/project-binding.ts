@@ -10,7 +10,7 @@ import {
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import type { ConversationRuntime } from "./conversation-identity.js";
+import type { ConversationIdentity, ConversationRuntime } from "./conversation-identity.js";
 import { readDaemonControlFile } from "./control-file.js";
 import {
   descriptorPath,
@@ -29,6 +29,7 @@ import {
   writePiProjectSnapshot,
 } from "./project-snapshot.js";
 import { sessionFileNameFor } from "./session-files.js";
+import type { TaskBindingAuthority, TaskBindingReceipt } from "./tasks.js";
 
 export const PROJECT_BINDING_VERSION = 1;
 export const PROJECT_TRUST_VERSION = 1;
@@ -42,6 +43,74 @@ const PROJECT_BINDING_ERROR_CODE_MAX_BYTES = 128;
 const PROJECT_BINDING_ERROR_MESSAGE_MAX_BYTES = 8 * 1024;
 const PROJECT_BINDING_IDENTITY_MAX_DIGITS = 64;
 const PROJECT_TRUST_TIMESTAMP_MAX_BYTES = 32;
+
+class AbortableKeyedMutex {
+  private readonly entries = new Map<string, {
+    active: boolean;
+    waiters: Array<{
+      signal: AbortSignal;
+      resolve(release: () => void): void;
+      reject(reason: unknown): void;
+      abort(): void;
+    }>;
+  }>();
+
+  acquire(key: string, signal: AbortSignal): Promise<() => void> {
+    signal.throwIfAborted();
+    const entry = this.entries.get(key) ?? { active: false, waiters: [] };
+    this.entries.set(key, entry);
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        signal,
+        resolve,
+        reject,
+        abort: () => {
+          const index = entry.waiters.indexOf(waiter);
+          if (index >= 0) entry.waiters.splice(index, 1);
+          reject(signal.reason ?? new DOMException("Aborted", "AbortError"));
+          this.removeIdle(key, entry);
+        },
+      };
+      entry.waiters.push(waiter);
+      signal.addEventListener("abort", waiter.abort, { once: true });
+      this.advance(key, entry);
+    });
+  }
+
+  private advance(key: string, entry: { active: boolean; waiters: Array<{
+    signal: AbortSignal;
+    resolve(release: () => void): void;
+    reject(reason: unknown): void;
+    abort(): void;
+  }> }): void {
+    if (entry.active) return;
+    const waiter = entry.waiters.shift();
+    if (!waiter) {
+      this.removeIdle(key, entry);
+      return;
+    }
+    waiter.signal.removeEventListener("abort", waiter.abort);
+    if (waiter.signal.aborted) {
+      waiter.reject(waiter.signal.reason ?? new DOMException("Aborted", "AbortError"));
+      this.advance(key, entry);
+      return;
+    }
+    entry.active = true;
+    let released = false;
+    waiter.resolve(() => {
+      if (released) return;
+      released = true;
+      entry.active = false;
+      this.advance(key, entry);
+    });
+  }
+
+  private removeIdle(key: string, entry: { active: boolean; waiters: unknown[] }): void {
+    if (!entry.active && entry.waiters.length === 0 && this.entries.get(key) === entry) {
+      this.entries.delete(key);
+    }
+  }
+}
 
 export interface ProjectResourceSummary {
   instructions: number;
@@ -89,6 +158,21 @@ export interface ProjectBindingState {
   canRebind: boolean;
   lastRefreshAt: string | null;
   reason: ProjectBindingReason;
+}
+
+export interface BindingRevocationLease {
+  /** Irreversibly cross the durable move/publication barrier. */
+  commit(): void;
+  /** Remove only this still-pending admission fence. */
+  rollback(): void;
+  /** Retire this and older committed fences after the old authority is unreachable. */
+  retire(): void;
+}
+
+interface BindingRevocation {
+  readonly token: string;
+  readonly sequence: number;
+  state: "pending" | "committed";
 }
 
 interface StoredProjectBinding {
@@ -540,7 +624,11 @@ export class ProjectBindingStore {
   private readonly trustTokenTtlMs: number;
   private readonly previews = new Map<string, PreviewToken>();
   private readonly incarnations = new Map<string, number>();
-  private readonly bindingWrites = new Map<string, Promise<void>>();
+  private readonly launchMutex = new AbortableKeyedMutex();
+  private readonly bindingPaths = new Map<string, string>();
+  private readonly revocations = new Map<string, Map<string, BindingRevocation>>();
+  private readonly scopeRevocations = new Map<string, Map<string, BindingRevocation>>();
+  private revocationSequence = 0;
 
   constructor(options: ProjectBindingStoreOptions = {}) {
     this.ownerHome = resolve(options.ownerHome ?? homedir());
@@ -559,16 +647,120 @@ export class ProjectBindingStore {
     return [...this.previews.values()].some((preview) => preview.key === key);
   }
 
-  revoke(scope: string, runtime: ConversationRuntime, conversationId: string): void {
-    const key = this.key(scope, runtime, conversationId);
+  private keyScope(key: string): string {
+    return (JSON.parse(key) as [string])[0];
+  }
+
+  private hasRevocation(scope: string, key: string): boolean {
+    return (this.revocations.get(key)?.size ?? 0) > 0
+      || (this.scopeRevocations.get(scope)?.size ?? 0) > 0;
+  }
+
+  private assertNotRevoked(scope: string, key: string): void {
+    if (this.hasRevocation(scope, key)) {
+      throw new GhostError(
+        "task_binding_changed",
+        "The conversation project changed before delegated work started.",
+        409,
+      );
+    }
+  }
+
+  private invalidateKey(key: string): void {
     this.incarnations.set(key, (this.incarnations.get(key) ?? 0) + 1);
     for (const [token, preview] of this.previews) {
       if (preview.key === key) this.previews.delete(token);
     }
   }
 
+  private revocationLease(
+    scope: string,
+    records: Map<string, BindingRevocation>,
+    record: BindingRevocation,
+    retireScope: boolean,
+  ): BindingRevocationLease {
+    const removeOwnPending = () => {
+      if (record.state !== "pending" || records.get(record.token) !== record) return;
+      records.delete(record.token);
+      if (records.size === 0) {
+        (retireScope ? this.scopeRevocations : this.revocations).delete(scope);
+      }
+    };
+    return Object.freeze({
+      commit: () => {
+        if (records.get(record.token) === record && record.state === "pending") {
+          record.state = "committed";
+        }
+      },
+      rollback: removeOwnPending,
+      retire: () => {
+        if (records.get(record.token) !== record || record.state !== "committed") return;
+        const retireRecords = (
+          collection: Map<string, Map<string, BindingRevocation>>,
+          matches: (key: string) => boolean,
+        ) => {
+          for (const [key, entries] of collection) {
+            if (!matches(key)) continue;
+            for (const [token, entry] of entries) {
+              if (entry.state === "committed" && entry.sequence <= record.sequence) {
+                entries.delete(token);
+              }
+            }
+            if (entries.size === 0) collection.delete(key);
+          }
+        };
+        if (retireScope) {
+          retireRecords(this.scopeRevocations, (key) => key === scope);
+          retireRecords(this.revocations, (key) => this.keyScope(key) === scope);
+        } else {
+          retireRecords(this.revocations, (key) => key === scope);
+        }
+      },
+    });
+  }
+
+  async beginRevocation(
+    sessionDir: string,
+    scope: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+  ): Promise<BindingRevocationLease> {
+    const key = this.key(scope, runtime, conversationId);
+    const path = projectBindingPath(sessionDir, runtime, conversationId);
+    this.bindingPaths.set(key, path);
+    const records = this.revocations.get(key) ?? new Map<string, BindingRevocation>();
+    this.revocations.set(key, records);
+    const record: BindingRevocation = {
+      token: randomUUID(),
+      sequence: ++this.revocationSequence,
+      state: "pending",
+    };
+    records.set(record.token, record);
+    this.invalidateKey(key);
+    const lease = this.revocationLease(key, records, record, false);
+    let release: (() => void) | undefined;
+    try {
+      release = await this.launchMutex.acquire(path, new AbortController().signal);
+      return lease;
+    } catch (error) {
+      lease.rollback();
+      throw error;
+    } finally {
+      release?.();
+    }
+  }
+
   /** Revoke all receipts minted under a ghost identity before rename/delete. */
-  revokeScope(scope: string): void {
+  async beginScopeRevocation(scope: string): Promise<BindingRevocationLease> {
+    const records = this.scopeRevocations.get(scope) ?? new Map<string, BindingRevocation>();
+    this.scopeRevocations.set(scope, records);
+    const record: BindingRevocation = {
+      token: randomUUID(),
+      sequence: ++this.revocationSequence,
+      state: "pending",
+    };
+    records.set(record.token, record);
+    const lease = this.revocationLease(scope, records, record, true);
     const keys = new Set<string>();
     for (const preview of this.previews.values()) {
       if ((JSON.parse(preview.key) as [string])[0] === scope) keys.add(preview.key);
@@ -576,23 +768,81 @@ export class ProjectBindingStore {
     for (const key of this.incarnations.keys()) {
       if ((JSON.parse(key) as [string])[0] === scope) keys.add(key);
     }
-    for (const key of keys) {
-      this.incarnations.set(key, (this.incarnations.get(key) ?? 0) + 1);
-      for (const [token, preview] of this.previews) {
-        if (preview.key === key) this.previews.delete(token);
+    for (const key of this.bindingPaths.keys()) {
+      if (this.keyScope(key) === scope) keys.add(key);
+    }
+    for (const key of keys) this.invalidateKey(key);
+    try {
+      for (const key of [...keys].sort()) {
+        const path = this.bindingPaths.get(key);
+        if (!path) continue;
+        const release = await this.launchMutex.acquire(path, new AbortController().signal);
+        release();
       }
+    } catch (error) {
+      lease.rollback();
+      throw error;
+    }
+    return lease;
+  }
+
+  private async withBindingLock<T>(path: string, action: () => Promise<T>): Promise<T> {
+    const release = await this.launchMutex.acquire(path, new AbortController().signal);
+    try {
+      return await action();
+    } finally {
+      release();
     }
   }
 
-  private serializeBinding<T>(path: string, action: () => Promise<T>): Promise<T> {
-    const previous = this.bindingWrites.get(path) ?? Promise.resolve();
-    const result = previous.catch(() => {}).then(action);
-    const tail = result.then(() => {}, () => {});
-    this.bindingWrites.set(path, tail);
-    void tail.finally(() => {
-      if (this.bindingWrites.get(path) === tail) this.bindingWrites.delete(path);
+  private async publishBinding(
+    path: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    expectedGeneration: number,
+    stored: StoredProjectBinding,
+    admit: () => void,
+  ): Promise<void> {
+    await this.withBindingLock(path, async () => {
+      admit();
+      let generation = 0;
+      try {
+        const current: unknown = JSON.parse(await readDaemonControlFile(
+          path,
+          PROJECT_BINDING_MAX_BYTES,
+        ));
+        generation = parseStoredBinding(current, runtime, conversationId, path).generation;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (generation !== expectedGeneration) {
+        throw new GhostError(
+          "stale_generation",
+          "The project binding changed; refresh it and try again.",
+          409,
+        );
+      }
+      admit();
+      await atomicJson(path, parseStoredBinding(stored, runtime, conversationId, path));
     });
-    return result;
+  }
+
+  private bindingAdmission(
+    scope: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    path: string,
+  ): () => void {
+    if (!scope) {
+      throw new GhostError(
+        "invalid_request",
+        "A project binding publisher requires its exact ghost scope.",
+        400,
+      );
+    }
+    const key = this.key(scope, runtime, conversationId);
+    this.bindingPaths.set(key, path);
+    return () => this.assertNotRevoked(scope, key);
   }
 
   async read(
@@ -688,6 +938,7 @@ export class ProjectBindingStore {
       if (preview.expiresAtMs <= now) this.previews.delete(token);
     }
     const key = this.key(scope, runtime, conversationId);
+    this.assertNotRevoked(scope, key);
     const incarnation = this.incarnations.get(key) ?? 0;
     const identity = await identityFor(path);
     const snapshot = await loadProjectDeclarativeSnapshot(identity.root, {
@@ -696,7 +947,8 @@ export class ProjectBindingStore {
       includeContents: false,
     });
     const resources = snapshot.resources;
-    if ((this.incarnations.get(key) ?? 0) !== incarnation) {
+    if ((this.incarnations.get(key) ?? 0) !== incarnation
+      || this.hasRevocation(scope, key)) {
       throw new GhostError("trust_token_revoked", "The conversation changed while its project was previewed.", 409);
     }
     const token = randomBytes(24).toString("base64url");
@@ -756,6 +1008,112 @@ export class ProjectBindingStore {
     return identity;
   }
 
+  private async taskBinding(
+    sessionDir: string,
+    parent: ConversationIdentity,
+    requestedCwd: string | undefined,
+    signal: AbortSignal,
+  ): Promise<TaskBindingReceipt> {
+    signal.throwIfAborted();
+    const current = await this.read(
+      sessionDir,
+      parent.id,
+      parent.runtime,
+      parent.conversationId,
+    );
+    signal.throwIfAborted();
+    if (!current.root) {
+      throw new GhostError(
+        "task_project_required",
+        "Bind and trust a project on this conversation before delegating coding work.",
+        409,
+      );
+    }
+    const root = await this.assertTrusted(current.root);
+    signal.throwIfAborted();
+    const cwd = await this.resolveOperationalCwd(current, requestedCwd ?? current.cwd);
+    signal.throwIfAborted();
+    let cwdStats: import("node:fs").BigIntStats;
+    try {
+      cwdStats = await lstat(cwd, { bigint: true });
+      const confirmedCwd = await realpath(cwd);
+      const confirmedStats = await lstat(cwd, { bigint: true });
+      if (!cwdStats.isDirectory() || cwdStats.isSymbolicLink()
+        || confirmedCwd !== cwd
+        || !confirmedStats.isDirectory() || confirmedStats.isSymbolicLink()
+        || cwdStats.dev !== confirmedStats.dev || cwdStats.ino !== confirmedStats.ino) {
+        throw new Error("changed");
+      }
+    } catch {
+      throw new GhostError("invalid_project_path", "The requested working directory changed during admission.", 409);
+    }
+    signal.throwIfAborted();
+    return Object.freeze({
+      version: 1,
+      root: root.root,
+      rootIdentity: `${root.dev}:${root.ino}`,
+      cwd,
+      cwdIdentity: `${cwdStats.dev}:${cwdStats.ino}`,
+      generation: current.generation,
+    });
+  }
+
+  /** Mint the exact trusted project receipt a principal task persists. */
+  mintTaskBinding(
+    sessionDir: string,
+    parent: ConversationIdentity,
+    requestedCwd?: string,
+    signal = new AbortController().signal,
+  ): Promise<TaskBindingReceipt> {
+    return this.taskBinding(sessionDir, parent, requestedCwd, signal);
+  }
+
+  /** One parent-aware authority for every task record in a ghost home. */
+  taskBindingAuthority(sessionDir: string, scope = ""): TaskBindingAuthority {
+    const validate = async (
+      receipt: TaskBindingReceipt,
+      signal: AbortSignal,
+      parent: ConversationIdentity,
+    ): Promise<TaskBindingReceipt> => {
+      const key = this.key(scope, parent.runtime, parent.conversationId);
+      this.bindingPaths.set(
+        key,
+        projectBindingPath(sessionDir, parent.runtime, parent.conversationId),
+      );
+      this.assertNotRevoked(scope, key);
+      const current = await this.taskBinding(sessionDir, parent, receipt.cwd, signal);
+      this.assertNotRevoked(scope, key);
+      if (current.root !== receipt.root
+        || current.rootIdentity !== receipt.rootIdentity
+        || current.cwd !== receipt.cwd
+        || current.cwdIdentity !== receipt.cwdIdentity
+        || current.generation !== receipt.generation) {
+        throw new GhostError(
+          "task_binding_changed",
+          "The conversation project changed before delegated work started.",
+          409,
+        );
+      }
+      return current;
+    };
+    return {
+      revalidate: validate,
+      launchNative: async (receipt, signal, parent, launch) => {
+        const path = projectBindingPath(sessionDir, parent.runtime, parent.conversationId);
+        this.bindingPaths.set(this.key(scope, parent.runtime, parent.conversationId), path);
+        const release = await this.launchMutex.acquire(path, signal);
+        try {
+          signal.throwIfAborted();
+          const current = await validate(receipt, signal, parent);
+          signal.throwIfAborted();
+          return launch(current);
+        } finally {
+          release();
+        }
+      },
+    };
+  }
+
   async write(input: {
     sessionDir: string;
     runtime: ConversationRuntime;
@@ -769,7 +1127,7 @@ export class ProjectBindingStore {
     status?: "unbound" | "ready" | "degraded";
     error?: { code: string; message: string } | null;
     mcpStatus?: "off" | "ready" | "degraded";
-    scope?: string;
+    scope: string;
   }): Promise<void> {
     if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
       throw new GhostError("invalid_request", "A project working directory must be absolute.", 400);
@@ -796,7 +1154,7 @@ export class ProjectBindingStore {
         if (preview.expiresAtMs < this.now()) {
           throw new GhostError("trust_token_expired", "The project preview expired; preview it again.", 403);
         }
-        if (preview.key !== this.key(input.scope ?? "", input.runtime, input.conversationId)
+        if (preview.key !== this.key(input.scope, input.runtime, input.conversationId)
           || preview.incarnation !== (this.incarnations.get(preview.key) ?? 0)
           || preview.root !== identity.root || preview.dev !== identity.dev || preview.ino !== identity.ino) {
           throw new GhostError("trust_token_invalid", "That preview does not authorize this project.", 403);
@@ -867,10 +1225,21 @@ export class ProjectBindingStore {
       input.runtime,
       input.conversationId,
     );
+    const admit = this.bindingAdmission(
+      input.scope,
+      input.runtime,
+      input.conversationId,
+      bindingPath,
+    );
+    admit();
     try {
-      await atomicJson(
+      await this.publishBinding(
         bindingPath,
-        parseStoredBinding(stored, input.runtime, input.conversationId, bindingPath),
+        input.runtime,
+        input.conversationId,
+        input.current.generation,
+        stored,
+        admit,
       );
     } catch (error) {
       if (snapshotPath) await rm(snapshotPath, { force: true }).catch(() => {});
@@ -886,7 +1255,8 @@ export class ProjectBindingStore {
   }
 
   async remove(sessionDir: string, runtime: ConversationRuntime, conversationId: string): Promise<void> {
-    await rm(projectBindingPath(sessionDir, runtime, conversationId), { force: true });
+    const path = projectBindingPath(sessionDir, runtime, conversationId);
+    await this.withBindingLock(path, () => rm(path, { force: true }));
     if (runtime === "pi") {
       await removePiProjectSnapshotsExcept(sessionDir, conversationId).catch(() => {});
     }
@@ -902,11 +1272,14 @@ export class ProjectBindingStore {
       error: { code: string; message: string } | null;
       mcpStatus: "off" | "ready" | "degraded";
     },
+    scope: string,
   ): Promise<boolean> {
     if (!current.root) return false;
     const identity = await this.assertTrusted(current.root);
     const path = projectBindingPath(sessionDir, runtime, conversationId);
-    return this.serializeBinding(path, async () => {
+    const admit = this.bindingAdmission(scope, runtime, conversationId, path);
+    return this.withBindingLock(path, async () => {
+      admit();
       let disk: unknown;
       try {
         disk = JSON.parse(await readDaemonControlFile(path, PROJECT_BINDING_MAX_BYTES));
@@ -929,6 +1302,7 @@ export class ProjectBindingStore {
         mcpStatus: input.mcpStatus,
         identity: { dev: identity.dev, ino: identity.ino },
       };
+      admit();
       await atomicJson(path, parseStoredBinding(stored, runtime, conversationId, path));
       return true;
     });
@@ -939,6 +1313,7 @@ export class ProjectBindingStore {
     runtime: ConversationRuntime,
     conversationId: string,
     source: ProjectBindingState,
+    scope: string,
     destinationPath = projectBindingPath(sessionDir, runtime, conversationId),
     snapshotDestinationPath?: string,
   ): Promise<void> {
@@ -977,15 +1352,36 @@ export class ProjectBindingStore {
       reason: "resumed",
       identity: identity ? { dev: identity.dev, ino: identity.ino } : null,
     };
+    const finalPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, finalPath);
     try {
-      await atomicJson(
-        destinationPath,
-        parseStoredBinding(stored, runtime, conversationId, destinationPath),
-      );
+      await this.withBindingLock(finalPath, async () => {
+        admit();
+        await atomicJson(
+          destinationPath,
+          parseStoredBinding(stored, runtime, conversationId, destinationPath),
+        );
+      });
     } catch (error) {
       if (destinationSnapshot) await rm(destinationSnapshot, { force: true }).catch(() => {});
       throw error;
     }
+  }
+
+  /** Publish one already-validated staged clone under its authoritative name. */
+  async publishCloneDestination(
+    sessionDir: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    scope: string,
+    stagedPath: string,
+  ): Promise<void> {
+    const destinationPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, destinationPath);
+    await this.withBindingLock(destinationPath, async () => {
+      admit();
+      await rename(stagedPath, destinationPath);
+    });
   }
 
   async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
@@ -1022,6 +1418,7 @@ export class ProjectBindingStore {
     conversationId: string,
     current: ProjectBindingState,
     cwd: string,
+    scope: string,
   ): Promise<void> {
     const resolvedCwd = await this.resolveOperationalCwd(current, cwd);
     const identity = current.root ? await this.assertTrusted(current.root) : null;
@@ -1060,10 +1457,16 @@ export class ProjectBindingStore {
       identity: identity ? { dev: identity.dev, ino: identity.ino } : null,
     };
     const bindingPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, bindingPath);
+    admit();
     try {
-      await atomicJson(
+      await this.publishBinding(
         bindingPath,
-        parseStoredBinding(stored, runtime, conversationId, bindingPath),
+        runtime,
+        conversationId,
+        current.generation,
+        stored,
+        admit,
       );
     } catch (error) {
       if (snapshotPath) await rm(snapshotPath, { force: true }).catch(() => {});

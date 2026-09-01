@@ -17,6 +17,10 @@ export const CLAUDE_AGENT_SDK_PEERS = {
   zod: "4.4.3",
 } as const;
 
+const MCP_SDK_PACKAGE = "@modelcontextprotocol/sdk";
+const MCP_SDK_ENTRY = `${MCP_SDK_PACKAGE}/server/mcp.js`;
+const MCP_SDK_CJS_ENTRY = "dist/cjs/server/mcp.js";
+
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 export interface ClaudeAgentSdkModule {
@@ -72,6 +76,33 @@ function installCommand(root: string): string {
     + `${JSON.stringify(root)} --save-exact ${packages.join(" ")}`;
 }
 
+function sdkLoadAborted(): ClaudeAgentSdkLoadError {
+  return new ClaudeAgentSdkLoadError("Claude Agent SDK load was aborted.");
+}
+
+function awaitSdkLoad(
+  pending: Promise<ClaudeAgentSdkModule>,
+  signal: AbortSignal | undefined,
+): Promise<ClaudeAgentSdkModule> {
+  if (!signal) return pending;
+  if (signal.aborted) return Promise.reject(sdkLoadAborted());
+  return new Promise((resolveLoad, rejectLoad) => {
+    const aborted = () => {
+      signal.removeEventListener("abort", aborted);
+      rejectLoad(sdkLoadAborted());
+    };
+    signal.addEventListener("abort", aborted, { once: true });
+    if (signal.aborted) {
+      aborted();
+      return;
+    }
+    pending.then(
+      (sdk) => { signal.removeEventListener("abort", aborted); resolveLoad(sdk); },
+      (error: unknown) => { signal.removeEventListener("abort", aborted); rejectLoad(error); },
+    );
+  });
+}
+
 /**
  * Loads the optional Claude Agent SDK from Ghost's one versioned owner-data
  * directory. This is location confinement, not a sandbox from code the same
@@ -94,16 +125,18 @@ export class ClaudeAgentSdkLoader {
     this.importModule = options.importModule ?? ((specifier) => import(specifier));
   }
 
-  async load(): Promise<ClaudeAgentSdkModule> {
-    if (this.restartRequired) throw this.restartRequired;
-    if (this.inFlight) return this.inFlight;
-    const pending = this.loadChecked();
-    this.inFlight = pending;
-    try {
-      return await pending;
-    } finally {
-      if (this.inFlight === pending) this.inFlight = undefined;
+  load(signal?: AbortSignal): Promise<ClaudeAgentSdkModule> {
+    if (signal?.aborted) return Promise.reject(sdkLoadAborted());
+    if (this.restartRequired) return Promise.reject(this.restartRequired);
+    if (!this.inFlight) {
+      const pending = this.loadChecked();
+      this.inFlight = pending;
+      void pending.then(
+        () => { if (this.inFlight === pending) this.inFlight = undefined; },
+        () => { if (this.inFlight === pending) this.inFlight = undefined; },
+      );
     }
+    return awaitSdkLoad(this.inFlight, signal);
   }
 
   private requireRestart(detail: string, cause?: unknown): ClaudeAgentSdkLoadError {
@@ -209,9 +242,10 @@ export class ClaudeAgentSdkLoader {
     const requireFromSdk = createRequire(entryPath);
     const peerIdentities: unknown[] = [];
     for (const [peerName, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+      const peerSpecifier = peerName === MCP_SDK_PACKAGE ? MCP_SDK_ENTRY : peerName;
       let peerEntry: string;
       try {
-        peerEntry = await realpath(requireFromSdk.resolve(peerName));
+        peerEntry = await realpath(requireFromSdk.resolve(peerSpecifier));
       } catch (cause) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer ${peerName}@${peerVersion} is not resolvable from ${entryPath}.`,
@@ -265,16 +299,29 @@ export class ClaudeAgentSdkLoader {
         lstat(peerEntry),
       ]);
       if (!peerRootState.isDirectory() || peerRootState.isSymbolicLink()
-        || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()) {
+        || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()
+        || !pathWithin(peerRoot, peerEntry)) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer ${peerName}@${peerVersion} is not a regular package boundary.`,
         );
+      }
+      if (peerName === MCP_SDK_PACKAGE) {
+        const exactEntry = join(peerRoot, MCP_SDK_CJS_ENTRY);
+        const exactState = await lstat(exactEntry).catch(() => undefined);
+        const exactCanonical = await realpath(exactEntry).catch(() => undefined);
+        if (!exactState?.isFile() || exactState.isSymbolicLink()
+          || exactCanonical !== peerEntry) {
+          throw new ClaudeAgentSdkLoadError(
+            `Claude Agent SDK peer ${peerName}@${peerVersion} has an invalid required subpath.`,
+          );
+        }
       }
       peerIdentities.push([
         peerName,
         peerVersion,
         peerRoot,
         peerManifestPath,
+        peerSpecifier,
         peerEntry,
         statIdentity(peerRootState),
         statIdentity(peerManifestState),

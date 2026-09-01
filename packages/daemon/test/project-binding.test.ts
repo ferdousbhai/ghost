@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -13,11 +14,12 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { conversationIdentity } from "../src/conversation-identity.js";
 import {
   PROJECT_TRUST_MAX_BYTES,
   PROJECT_TRUST_MAX_ROOTS,
   PROJECT_TRUST_ROOT_MAX_BYTES,
-  ProjectBindingStore,
+  ProjectBindingStore as ProductionProjectBindingStore,
   projectBindingPath,
   summarizeProject,
 } from "../src/project-binding.js";
@@ -34,6 +36,60 @@ import {
 } from "../src/project-snapshot.js";
 
 const roots: string[] = [];
+
+class ProjectBindingStore extends ProductionProjectBindingStore {
+  override preview(
+    runtime: Parameters<ProductionProjectBindingStore["preview"]>[0],
+    conversationId: string,
+    path: string,
+    scope = "casper",
+  ): ReturnType<ProductionProjectBindingStore["preview"]> {
+    return super.preview(runtime, conversationId, path, scope);
+  }
+
+  override write(
+    input: Omit<Parameters<ProductionProjectBindingStore["write"]>[0], "scope">
+      & { scope?: string },
+  ): Promise<void> {
+    return super.write({ ...input, scope: input.scope ?? "casper" });
+  }
+
+  override updateRuntimeStatus(
+    sessionDir: string,
+    runtime: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[1],
+    conversationId: string,
+    current: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[3],
+    input: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[4],
+    scope = "casper",
+  ): Promise<boolean> {
+    return super.updateRuntimeStatus(
+      sessionDir,
+      runtime,
+      conversationId,
+      current,
+      input,
+      scope,
+    );
+  }
+
+  override writeOperationalCwd(
+    sessionDir: string,
+    runtime: Parameters<ProductionProjectBindingStore["writeOperationalCwd"]>[1],
+    conversationId: string,
+    current: Parameters<ProductionProjectBindingStore["writeOperationalCwd"]>[3],
+    cwd: string,
+    scope = "casper",
+  ): Promise<void> {
+    return super.writeOperationalCwd(
+      sessionDir,
+      runtime,
+      conversationId,
+      current,
+      cwd,
+      scope,
+    );
+  }
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -126,6 +182,376 @@ function trustRowsForSerializedSize(
 }
 
 describe("ProjectBindingStore", () => {
+  it("mints and immediately revalidates an exact parent-qualified task binding", async () => {
+    const { sessionDir, project, store } = fixture();
+    const child = join(project, "pkg");
+    const linkedChild = join(project, "pkg-link");
+    mkdirSync(child);
+    symlinkSync(child, linkedChild, "dir");
+    const parent = conversationIdentity("pi", "task-binding");
+    const initial = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    const preview = await store.preview(parent.runtime, parent.conversationId, project);
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      cwd: child,
+      trustToken: preview.trustToken,
+      reason: "bound",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent, linkedChild);
+    expect(receipt).toMatchObject({
+      version: 1,
+      root: project,
+      cwd: child,
+      generation: 1,
+    });
+    expect(Object.isFrozen(receipt)).toBe(true);
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).resolves.toEqual(receipt);
+  });
+
+  it("serializes final launch validation with binding revoke", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "task-launch-revoke");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    const authority = store.taskBindingAuthority(sessionDir, "casper");
+    const revocation = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    revocation.commit();
+    // Revocation invalidates preview/admission incarnations, while deletion of
+    // the durable binding is the generation-changing half of conversation
+    // removal. The launch lease must still be usable only for that exact disk
+    // generation until remove publishes.
+    await store.remove(sessionDir, parent.runtime, parent.conversationId);
+    let launched = false;
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => { launched = true; return "spawned"; },
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    expect(launched).toBe(false);
+  });
+
+  it("revokes a scope while its admitted task is still probing", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "task-scope-revoke");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    const authority = store.taskBindingAuthority(sessionDir, "casper");
+    await authority.revalidate(receipt, new AbortController().signal, parent);
+
+    const revocation = await store.beginScopeRevocation("casper");
+    revocation.commit();
+
+    let launched = false;
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => { launched = true; return "spawned"; },
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    expect(launched).toBe(false);
+  });
+
+  it("rolls back only its pending token and cannot retire a newer committed revocation", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "task-revocation-tokens");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    const authority = store.taskBindingAuthority(sessionDir, "casper");
+    const launch = () => authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "spawned",
+    );
+
+    const pending = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    await expect(launch()).rejects.toMatchObject({ code: "task_binding_changed" });
+    pending.rollback();
+    await expect(launch()).resolves.toBe("spawned");
+
+    const older = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    older.commit();
+    const newer = await store.beginRevocation(
+      sessionDir, "casper", parent.runtime, parent.conversationId,
+    );
+    newer.commit();
+    older.rollback();
+    older.retire();
+    await expect(launch()).rejects.toMatchObject({ code: "task_binding_changed" });
+    newer.retire();
+    await expect(launch()).resolves.toBe("spawned");
+  });
+
+  it("keeps committed scope revocation across writes until the old authority retires", async () => {
+    const { sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("pi", "scope-write-revocation");
+    const initial = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const preview = await store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const current = await store.read(
+      sessionDir, parent.id, parent.runtime, parent.conversationId,
+    );
+    const lease = await store.beginScopeRevocation("casper");
+    lease.commit();
+    await expect(store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current,
+      root: project,
+      cwd: project,
+      reason: "reloaded",
+      scope: "casper",
+    })).rejects.toMatchObject({ code: "task_binding_changed" });
+    lease.rollback();
+    await expect(store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    lease.retire();
+    await expect(store.preview(
+      parent.runtime, parent.conversationId, project, "casper",
+    )).resolves.toMatchObject({ root: project });
+  });
+
+  it("fences every final-name binding publisher under exact and scope revocation", async () => {
+    const { sessionDir, project, store } = fixture();
+    const source = conversationIdentity("pi", "publisher-source");
+    const initial = await store.read(
+      sessionDir,
+      source.id,
+      source.runtime,
+      source.conversationId,
+    );
+    const preview = await store.preview(
+      source.runtime,
+      source.conversationId,
+      project,
+      "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: source.runtime,
+      conversationId: source.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const current = await store.read(
+      sessionDir,
+      source.id,
+      source.runtime,
+      source.conversationId,
+    );
+
+    const exact = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      source.runtime,
+      source.conversationId,
+    );
+    await expect(store.updateRuntimeStatus(
+      sessionDir,
+      source.runtime,
+      source.conversationId,
+      current,
+      { status: "ready", error: null, mcpStatus: "off" },
+      "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    exact.rollback();
+
+    const scope = await store.beginScopeRevocation("casper");
+    await expect(store.writeOperationalCwd(
+      sessionDir,
+      source.runtime,
+      source.conversationId,
+      current,
+      project,
+      "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    scope.rollback();
+
+    const target = conversationIdentity("pi", "publisher-target");
+    const staged = `${projectBindingPath(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+    )}.pending`;
+    const targetRevocation = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      target.runtime,
+      target.conversationId,
+    );
+    await expect(store.clone(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      current,
+      "casper",
+      staged,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    targetRevocation.rollback();
+    await store.clone(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      current,
+      "casper",
+      staged,
+    );
+    const publicationRevocation = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      target.runtime,
+      target.conversationId,
+    );
+    await expect(store.publishCloneDestination(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      "casper",
+      staged,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    expect(existsSync(staged)).toBe(true);
+    expect(existsSync(projectBindingPath(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+    ))).toBe(false);
+    publicationRevocation.rollback();
+    await store.publishCloneDestination(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      "casper",
+      staged,
+    );
+  });
+
+  it("rejects unbound, outside, replaced, and stale-generation task contexts", async () => {
+    const { root, sessionDir, project, store } = fixture();
+    const parent = conversationIdentity("claude-code", "task-hostile");
+    await expect(store.mintTaskBinding(sessionDir, parent))
+      .rejects.toMatchObject({ code: "task_project_required" });
+    const initial = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    const child = join(project, "pkg");
+    const outside = join(root, "outside");
+    mkdirSync(child);
+    mkdirSync(outside);
+    const preview = await store.preview(parent.runtime, parent.conversationId, project);
+    await store.write({
+      sessionDir,
+      runtime: parent.runtime,
+      conversationId: parent.conversationId,
+      current: initial,
+      root: project,
+      cwd: child,
+      trustToken: preview.trustToken,
+      reason: "bound",
+    });
+    await expect(store.mintTaskBinding(sessionDir, parent, outside))
+      .rejects.toMatchObject({ code: "cwd_outside_project" });
+    const receipt = await store.mintTaskBinding(sessionDir, parent);
+    renameSync(child, `${child}-old`);
+    mkdirSync(child);
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+
+    renameSync(child, `${child}-replacement`);
+    renameSync(`${child}-old`, child);
+    const rebound = await store.read(sessionDir, parent.id, parent.runtime, parent.conversationId);
+    await store.writeOperationalCwd(
+      sessionDir,
+      parent.runtime,
+      parent.conversationId,
+      rebound,
+      project,
+    );
+    await expect(store.taskBindingAuthority(sessionDir).revalidate(
+      receipt,
+      new AbortController().signal,
+      parent,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+  });
+
   it("consults legacy cwd lazily only when no binding sidecar exists", async () => {
     const { ownerHome, sessionDir, project, store } = fixture();
     let legacyReads = 0;
@@ -1004,7 +1430,7 @@ describe("ProjectBindingStore", () => {
   it("revokes preview receipts across raw conversation id reuse", async () => {
     const { sessionDir, project, store } = fixture();
     const first = await store.preview("pi", "reused", project, "casper");
-    store.revoke("casper", "pi", "reused");
+    const revocation = await store.beginRevocation(sessionDir, "casper", "pi", "reused");
     const current = await store.read(sessionDir, "pi:reused", "pi", "reused");
     await expect(store.write({
       sessionDir,
@@ -1016,6 +1442,7 @@ describe("ProjectBindingStore", () => {
       reason: "bound",
       scope: "casper",
     })).rejects.toMatchObject({ code: "trust_token_invalid" });
+    revocation.rollback();
 
     const second = await store.preview("pi", "reused", project, "casper");
     await expect(store.write({

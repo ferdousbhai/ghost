@@ -82,6 +82,7 @@ require_srcinfo_dependency libsecret "$work/ghost-dev.SRCINFO"
 # pi otherwise downloads these into its cache on the first grep/find call.
 require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry depends 'systemd>=254' "$work/ghost-dev.SRCINFO"
 
 GHOST_RELEASE_REPOSITORY=example/ghost-releases \
   bash "$source_root/packaging/release/render-arch-package.sh" \
@@ -99,6 +100,7 @@ require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
 require_srcinfo_dependency libsecret "$work/ghost/.SRCINFO"
 require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
+require_srcinfo_entry depends 'systemd>=254' "$work/ghost/.SRCINFO"
 sed -n 's/^	depends = //p' "$work/ghost-dev.SRCINFO" \
   | LC_ALL=C sort > "$work/development-depends"
 sed -n 's/^	depends = //p' "$work/ghost/.SRCINFO" \

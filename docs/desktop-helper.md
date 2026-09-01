@@ -70,10 +70,10 @@ Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.
 - `focus` `{ address | name }` → focus a window.
 - `workspace` `{ id | name }` → switch workspace.
 - (No `exec` here — the helper stays scoped to desktop control, not arbitrary
-  process launch. Ghost's pi runtime provides Bash through a job-aware
-  replacement for pi's native tool; the helper's value is the
-  GUI/Wayland/accessibility reach a shell lacks, with honesty metadata and
-  lock-safe routing.)
+  process launch. The principal runtime owns shell execution: Pi uses Ghost's
+  job-aware Bash replacement and Claude Code keeps its native Bash. The
+  helper's value is the GUI/Wayland/accessibility reach either shell lacks,
+  with honesty metadata and lock-safe routing.)
 
 Safety
 - Mutating ops (input, ax_perform/set, focus, workspace) refuse when the session is locked (check `hyprctl`/`logind`; fail closed if unknown).

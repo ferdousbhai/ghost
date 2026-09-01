@@ -1,5 +1,10 @@
 # Ghost
 
+> **RELEASE HOLD:** the beta implementation is under acceptance, but no public
+> repository, tag, release, package publication, Omarchy submission, or live
+> installation is authorized. The owner must lift this hold, and the exact
+> candidate must complete the #17 beta gate, before any release action.
+
 Your ghost, on your machine. An AI persona with memory, docs, and tools —
 running locally as an [Omarchy](https://omarchy.org)-native desktop app,
 built on the [pi](https://github.com/earendil-works/pi) coding agent
@@ -11,10 +16,13 @@ tool, model roles and fallback chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses
 the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. There is no `task` tool and every subagent definition is
-disabled in phase 1; project
+relay is planned. The principal Ghost can delegate coding through five durable
+task tools to native Pi, Codex, or Claude Code workers. The principal does not
+execute project or ghost-file subagent definitions; delegated workers retain
+their harness's native project discovery, and Claude may receive one optional
+opaque native agent name. Principal project
 plugins, hooks, custom code tools, and LSP are also disabled pending a
-per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
+separate isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The
 optional Claude Code runtime retains Claude's native subagents. Ghost replaces
 pi's coding-oriented system prompt with its
@@ -30,17 +38,21 @@ index pressure; every memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).
 
-The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use
-it for a quick terminal conversation or to inspect the same sessions the HUD
-shows.
+The `ghost` terminal client normally talks to ghostd's authenticated HTTP API.
+Its one local read-only exception, `ghost delegation`, reports installed native
+coding-worker availability without opening ghost data. Use the API-backed
+commands for a quick terminal conversation or to inspect the same sessions the
+HUD shows.
 
 ```sh
 ghost say "What should I focus on today?"
 ghost sessions
 ghost show -s cli-abc
+ghost delegation
 ```
 
-Status: beta release candidate. See CONTRACTS.md for the data and API
-contracts, and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.
+Status: beta candidate under the release hold above; #17 remains the exact
+candidate's release gate. See CONTRACTS.md for the data and API contracts, and
+[docs/hooks.md](docs/hooks.md) for awaited principal-harness hooks.
 
 License: Apache-2.0

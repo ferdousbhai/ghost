@@ -52,6 +52,30 @@ export function createSdkMcpServer() { return revision; }
   for (const [name, version] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
     const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
     mkdirSync(peerRoot, { recursive: true });
+    if (name === "@modelcontextprotocol/sdk") {
+      writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+        name,
+        version,
+        type: "module",
+        exports: {
+          ".": {
+            import: "./dist/esm/index.js",
+            require: "./dist/cjs/index.js",
+          },
+          "./*": {
+            import: "./dist/esm/*",
+            require: "./dist/cjs/*",
+          },
+        },
+      }));
+      const entryRoot = join(peerRoot, "dist", "cjs", "server");
+      mkdirSync(entryRoot, { recursive: true });
+      writeFileSync(join(peerRoot, "dist", "cjs", "package.json"), JSON.stringify({
+        type: "commonjs",
+      }));
+      writeFileSync(join(entryRoot, "mcp.js"), "module.exports = {};\n");
+      continue;
+    }
     writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
       name,
       version,

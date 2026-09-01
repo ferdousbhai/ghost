@@ -22,6 +22,7 @@ import type {
   McpConnectionTest,
 } from "./mcp-catalog.js";
 import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
+import type { NativeHarnessCatalog } from "./native-harness-catalog.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -45,7 +46,13 @@ import {
   type PiMessagesEvent,
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
+import {
+  DEFAULT_LISTED_TASKS,
+  MAX_LISTED_TASKS,
+  taskProjection,
+} from "./principal-task-tools.js";
 import type { SessionHost } from "./session-host.js";
+import { isValidTaskAgent, MAX_TASK_TEXT } from "./tasks.js";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -67,6 +74,8 @@ export interface ServerOptions {
    * needs no switcher surface.
    */
   catalog?: ModelCatalog;
+  /** Read-only, sanitized native coding-worker availability. */
+  nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -111,6 +120,7 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
+const MAX_TASK_CWD_BYTES = 4_096;
 const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
 const LIVE_STREAMS = Symbol.for("ghostd.liveStreams");
 const RELAY_HUB = Symbol.for("ghostd.relayHub");
@@ -217,6 +227,14 @@ function decodePathSegment(segment: string): string {
 
 function decodeConversationIdentity(segment: string): ConversationIdentity {
   return requireConversationIdentity(decodePathSegment(segment));
+}
+
+function exactObjectKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+): boolean {
+  const accepted = new Set(allowed);
+  return Object.keys(value).every((key) => accepted.has(key));
 }
 
 function bearerToken(header: string | string[] | undefined): string {
@@ -1748,6 +1766,167 @@ export function createDaemonServer(options: ServerOptions): Server {
     );
   };
 
+  const handleNativeHarnesses = async (
+    method: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.nativeHarnesses) {
+      errorResponse(response, 404, "not_found", "Native harnesses are not available.");
+      return;
+    }
+    if (method !== "GET") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const statuses = await options.nativeHarnesses.list();
+    jsonResponse(response, 200, {
+      harnesses: statuses.map(({ id, availability, authentication }) => ({
+        id,
+        availability,
+        authentication,
+      })),
+    });
+  };
+
+  const handleTasks = async (
+    ghostName: string,
+    parent: ConversationIdentity,
+    method: string,
+    url: URL,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      const keys = [...url.searchParams.keys()];
+      const rawLimit = url.searchParams.getAll("limit");
+      if (keys.some((key) => key !== "limit")
+        || rawLimit.length > 1
+        || (rawLimit.length === 1 && !/^(?:[1-9]|1[0-9]|20)$/u.test(rawLimit[0] ?? ""))) {
+        errorResponse(response, 400, "invalid_request", `"limit" must be an integer from 1 to ${MAX_LISTED_TASKS}.`);
+        return;
+      }
+      const limit = rawLimit.length === 0 ? DEFAULT_LISTED_TASKS : Number(rawLimit[0]);
+      const owned = await options.host.listTasks(ghostName, parent);
+      const visible = owned.slice(0, limit);
+      jsonResponse(response, 200, {
+        tasks: visible.map((record) => taskProjection(record, false)),
+        shown: visible.length,
+        total: owned.length,
+      });
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)
+      || !exactObjectKeys(body as Record<string, unknown>, [
+        "harness",
+        "assignment",
+        "cwd",
+        "agent",
+      ])) {
+      errorResponse(response, 400, "invalid_request", "Request body must be an exact task object.");
+      return;
+    }
+    const { harness, assignment, cwd, agent } = body as Record<string, unknown>;
+    if (harness !== "pi" && harness !== "codex" && harness !== "claude-code") {
+      errorResponse(response, 400, "invalid_request", '"harness" must be "pi", "codex", or "claude-code".');
+      return;
+    }
+    if (typeof assignment !== "string" || assignment.trim() === ""
+      || assignment.length > MAX_TASK_TEXT) {
+      errorResponse(response, 400, "invalid_request", '"assignment" is not a bounded non-empty string.');
+      return;
+    }
+    if (cwd !== undefined && (typeof cwd !== "string" || cwd.length < 1
+      || Buffer.byteLength(cwd, "utf8") > MAX_TASK_CWD_BYTES)) {
+      errorResponse(response, 400, "invalid_request", '"cwd" is not a bounded non-empty string.');
+      return;
+    }
+    if (agent !== undefined && (harness !== "claude-code" || !isValidTaskAgent(agent))) {
+      errorResponse(response, 400, "invalid_request", '"agent" is accepted only for Claude Code.');
+      return;
+    }
+    const connection = abortOnClose(request, response);
+    try {
+      const record = await options.host.createTask(ghostName, parent, {
+        harness,
+        assignment,
+        ...(cwd === undefined ? {} : { cwd: cwd as string }),
+        ...(agent === undefined ? {} : { agent: agent as string }),
+      }, connection.signal);
+      if (!connection.signal.aborted && !response.writableEnded) {
+        jsonResponse(response, 201, taskProjection(record, true));
+      }
+    } finally {
+      connection.release();
+    }
+  };
+
+  const handleTask = async (
+    ghostName: string,
+    parent: ConversationIdentity,
+    taskId: string,
+    method: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method !== "GET") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    jsonResponse(response, 200, taskProjection(
+      await options.host.task(ghostName, parent, taskId),
+      true,
+    ));
+  };
+
+  const handleTaskAction = async (
+    ghostName: string,
+    parent: ConversationIdentity,
+    taskId: string,
+    action: "send" | "cancel",
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonBody(request, maxBodyBytes);
+    if (body === null || typeof body !== "object" || Array.isArray(body)) {
+      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
+      return;
+    }
+    if (action === "send") {
+      if (!exactObjectKeys(body as Record<string, unknown>, ["message"])) {
+        errorResponse(response, 400, "invalid_request", "Send accepts exactly one message.");
+        return;
+      }
+      const message = (body as { message?: unknown }).message;
+      if (typeof message !== "string" || message.trim() === ""
+        || message.length > MAX_TASK_TEXT) {
+        errorResponse(response, 400, "invalid_request", '"message" is not a bounded non-empty string.');
+        return;
+      }
+      jsonResponse(response, 200, taskProjection(
+        await options.host.sendTask(ghostName, parent, taskId, message),
+        true,
+      ));
+      return;
+    }
+    if (!exactObjectKeys(body as Record<string, unknown>, [])) {
+      errorResponse(response, 400, "invalid_request", "Cancel accepts an empty object.");
+      return;
+    }
+    jsonResponse(response, 200, taskProjection(
+      await options.host.cancelTask(ghostName, parent, taskId),
+      true,
+    ));
+  };
+
   const server = createServer((request, response) => {
     void (async () => {
       applyCors(request, response);
@@ -1874,6 +2053,9 @@ export function createDaemonServer(options: ServerOptions): Server {
           }));
           return;
         }
+        if (segments.length === 2 && segments[1] === "harnesses") {
+          return await handleNativeHarnesses(method, response);
+        }
         if (segments[1] !== "ghosts") {
           errorResponse(response, 404, "not_found", "Not found.");
           return;
@@ -1938,6 +2120,37 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleDeleteSession(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
+            response,
+          );
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "tasks") {
+          return await handleTasks(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            method,
+            url,
+            request,
+            response,
+          );
+        }
+        if (segments.length === 7 && segments[3] === "sessions" && segments[5] === "tasks") {
+          return await handleTask(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            decodePathSegment(segments[6] ?? ""),
+            method,
+            response,
+          );
+        }
+        if (segments.length === 8 && segments[3] === "sessions" && segments[5] === "tasks"
+          && (segments[7] === "send" || segments[7] === "cancel")) {
+          return await handleTaskAction(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            decodePathSegment(segments[6] ?? ""),
+            segments[7],
+            method,
+            request,
             response,
           );
         }
