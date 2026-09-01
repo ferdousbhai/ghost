@@ -180,6 +180,7 @@ import {
   type TaskRecord,
 } from "./tasks.js";
 import { GhostMcpManager } from "./mcp-manager.js";
+import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
 import { buildRecapPrompt, normalizeRecap } from "./recap.js";
@@ -1113,27 +1114,26 @@ function emptyDeleteTransaction(
   };
 }
 
-type TransactionMarkerState = "absent" | "present" | "indeterminate";
+type TransactionMarkerState =
+  | { state: "absent" | "present" }
+  | { state: "indeterminate"; error: unknown };
 
 async function transactionMarkerState(
   path: string,
-  inspect: (path: string) => Promise<unknown> = lstat,
+  inspect: (path: string) => Promise<unknown>,
 ): Promise<TransactionMarkerState> {
   try {
     await inspect(path);
-    return "present";
+    return { state: "present" };
   } catch (error) {
     // Absence is the only evidence that a transaction does not own this row.
-    // Permission, I/O, and unexpected-path errors fail closed without reading
-    // attacker-controlled marker bytes or following a symbolic link.
+    // Permission, I/O, and unexpected-path errors are indeterminate; each
+    // caller decides whether that fails closed or rethrows, and none reads
+    // attacker-controlled marker bytes or follows a symbolic link.
     return (error as NodeJS.ErrnoException).code === "ENOENT"
-      ? "absent"
-      : "indeterminate";
+      ? { state: "absent" }
+      : { state: "indeterminate", error };
   }
-}
-
-async function transactionMarkerEntryExists(path: string): Promise<boolean> {
-  return await transactionMarkerState(path) !== "absent";
 }
 
 async function fsyncDirectory(path: string): Promise<void> {
@@ -1839,7 +1839,7 @@ export class SessionHost {
       throw new RangeError("title.timeoutMs must be a finite positive number");
     }
     this.titleTimeoutScheduler = options.title?.scheduleTimeout ?? scheduleTitleTimeout;
-    this.askTimeoutSeconds = options.askTimeoutSeconds ?? 0;
+    this.askTimeoutSeconds = options.askTimeoutSeconds ?? DEFAULT_ASK_TIMEOUT_SECONDS;
     this.generateTitle = options.title?.generate ?? defaultTitleGenerator;
     this.greetingEnabled = options.greeting?.enabled ?? true;
     this.greetings = new GreetingCache(
@@ -2288,7 +2288,7 @@ export class SessionHost {
           : []),
       ];
       for (const marker of markers) {
-        if (await transactionMarkerState(marker, this.transactionMarkerLstat) === "absent") {
+        if ((await transactionMarkerState(marker, this.transactionMarkerLstat)).state === "absent") {
           continue;
         }
         throw new GhostError(
@@ -2342,7 +2342,7 @@ export class SessionHost {
     conversationId: string,
   ): Promise<boolean> {
     const path = join(sessionDir, sessionFileNameFor(conversationId));
-    if (await transactionMarkerState(path, this.transactionMarkerLstat) === "absent") {
+    if ((await transactionMarkerState(path, this.transactionMarkerLstat)).state === "absent") {
       return false;
     }
     await requireSessionFileConversationId(path, conversationId);
@@ -2690,12 +2690,12 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     await this.recoverForkTransactions(paths.sessionDir, ghostName);
-    if (await transactionMarkerEntryExists(
+    if (await this.transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
       throw new GhostError("session_busy", "This conversation is still being published.", 409);
     }
-    if (await transactionMarkerEntryExists(
+    if (await this.transactionMarkerEntryExists(
       deleteTransactionPath(paths.sessionDir, "pi", conversationId),
     )) {
       throw new GhostError("session_deleting", "This conversation has an unfinished deletion.", 409);
@@ -2973,12 +2973,12 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     await this.recoverForkTransactions(paths.sessionDir, ghostName);
-    if (runtime === "pi" && await transactionMarkerEntryExists(
+    if (runtime === "pi" && await this.transactionMarkerEntryExists(
       forkTransactionPath(paths.sessionDir, conversationId),
     )) {
       throw new GhostError("session_busy", "This conversation is still being published.", 409);
     }
-    if (await transactionMarkerEntryExists(
+    if (await this.transactionMarkerEntryExists(
       draftAbandonTransactionPath(paths.sessionDir, runtime, conversationId),
     )) {
       throw new GhostError(
@@ -2987,7 +2987,7 @@ export class SessionHost {
         409,
       );
     }
-    if (await transactionMarkerEntryExists(
+    if (await this.transactionMarkerEntryExists(
       deleteTransactionPath(paths.sessionDir, runtime, conversationId),
     )) {
       throw new GhostError("session_deleting", "This conversation has an unfinished deletion.", 409);
@@ -3271,19 +3271,19 @@ export class SessionHost {
       const transcript = join(sessionDir, sessionFileNameFor(conversationId));
       const claudeSidecar = claudeSessionMetadataPath(sessionDir, conversationId);
       if ((runtime === "pi" && this.sessions.has(key))
-        || await transactionMarkerEntryExists(runtime === "pi" ? transcript : claudeSidecar)) {
+        || await this.transactionMarkerEntryExists(runtime === "pi" ? transcript : claudeSidecar)) {
         throw new GhostError(
           "project_draft_published",
           "A published conversation cannot be abandoned as a pre-turn draft.",
           409,
         );
       }
-      if (runtime === "pi" && await transactionMarkerEntryExists(
+      if (runtime === "pi" && await this.transactionMarkerEntryExists(
         forkTransactionPath(sessionDir, conversationId),
       )) {
         throw new GhostError("session_busy", "This conversation is still being published.", 409);
       }
-      if (await transactionMarkerEntryExists(
+      if (await this.transactionMarkerEntryExists(
         deleteTransactionPath(sessionDir, runtime, conversationId),
       )) {
         throw new GhostError("session_busy", "This conversation is still being deleted.", 409);
@@ -3291,8 +3291,8 @@ export class SessionHost {
 
       const marker = draftAbandonTransactionPath(sessionDir, runtime, conversationId);
       const receipt = draftAbandonReceiptPath(sessionDir, runtime, conversationId);
-      const markerExists = await transactionMarkerEntryExists(marker);
-      if (!markerExists && await transactionMarkerEntryExists(receipt)) {
+      const markerExists = await this.transactionMarkerEntryExists(marker);
+      if (!markerExists && await this.transactionMarkerEntryExists(receipt)) {
         revocation = await this.projectBindings.beginRevocation(
           sessionDir,
           ghostName,
@@ -3358,7 +3358,7 @@ export class SessionHost {
           const markerState = await transactionMarkerState(
             marker,
             this.transactionMarkerLstat,
-          ).catch(() => "indeterminate" as const);
+          ).then(({ state }) => state, () => "indeterminate" as const);
           if (markerState === "absent") revocation.rollback();
           else {
             revocation.commit();
@@ -3385,11 +3385,11 @@ export class SessionHost {
             transactionMarkerState(
               draftAbandonTransactionPath(sessionDir, runtime, conversationId),
               this.transactionMarkerLstat,
-            ).catch(() => "indeterminate" as const),
+            ).then(({ state }) => state, () => "indeterminate" as const),
             transactionMarkerState(
               draftAbandonReceiptPath(sessionDir, runtime, conversationId),
               this.transactionMarkerLstat,
-            ).catch(() => "indeterminate" as const),
+            ).then(({ state }) => state, () => "indeterminate" as const),
           ]);
           if (markerState === "absent" && receiptState === "absent" && !revocationCommitted) {
             revocation.rollback();
@@ -3727,10 +3727,10 @@ export class SessionHost {
     return hosted;
     } catch (error) {
       const cleanup = await Promise.allSettled([
-        async () => createdSession?.dispose(),
-        async () => mcp?.manager.disconnectAll(),
-        async () => modelRuntime.close(),
-      ].map(async (action) => action()));
+        Promise.resolve().then(() => createdSession?.dispose()),
+        Promise.resolve().then(() => mcp?.manager.disconnectAll()),
+        Promise.resolve().then(() => modelRuntime.close()),
+      ]);
       const failures = cleanup.flatMap((result) =>
         result.status === "rejected" ? [result.reason] : []);
       if (failures.length > 0) {
@@ -6233,14 +6233,16 @@ export class SessionHost {
     return stored;
   }
 
+  /** Marker presence, treating an unreadable marker as owned (fail closed). */
+  private async transactionMarkerEntryExists(path: string): Promise<boolean> {
+    return (await transactionMarkerState(path, this.transactionMarkerLstat)).state !== "absent";
+  }
+
+  /** Marker presence, rethrowing an unreadable marker to its caller. */
   private async transactionEntryExists(path: string): Promise<boolean> {
-    try {
-      await lstat(path);
-      return true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-      throw error;
-    }
+    const probe = await transactionMarkerState(path, this.transactionMarkerLstat);
+    if (probe.state === "indeterminate") throw probe.error;
+    return probe.state === "present";
   }
 
   private async readDeleteTransaction(
@@ -7057,10 +7059,10 @@ export class SessionHost {
       })),
     ];
     const visibleRows = await Promise.all(rows.map(async (row) => {
-      if (await transactionMarkerEntryExists(
+      if (await this.transactionMarkerEntryExists(
         deleteTransactionPath(paths.sessionDir, row.runtime, row.conversationId),
       )) return null;
-      if (row.runtime === "pi" && await transactionMarkerEntryExists(
+      if (row.runtime === "pi" && await this.transactionMarkerEntryExists(
         forkTransactionPath(paths.sessionDir, row.conversationId),
       )) return null;
       return row;
@@ -7506,13 +7508,13 @@ export class SessionHost {
         ? expandLegacyPins(pinState.pinned, rowsBefore)
         : new Set(pinState.pinned);
       pins.delete(forkIdentity.id);
-      await writePins(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
+      await this.pinWriter(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
       const readState = await readReadState(paths.sessionDir);
       const reads = readState.version === 1
         ? expandLegacyReads(readState.reads, rowsBefore)
         : { ...readState.reads };
       delete reads[forkIdentity.id];
-      await writeReads(paths.sessionDir, Object.fromEntries(
+      await this.readWriter(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([id]) => remainingIds.has(id)),
       ));
     } catch (error) {
@@ -7895,7 +7897,7 @@ export class SessionHost {
       if (runtime === "pi") await this.cancelRecap(piKey);
       await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
-      const draftState = await transactionMarkerState(
+      const { state: draftState } = await transactionMarkerState(
         draftMarker,
         this.transactionMarkerLstat,
       );
@@ -7906,7 +7908,7 @@ export class SessionHost {
           409,
         );
       }
-      const deleteState = await transactionMarkerState(
+      const { state: deleteState } = await transactionMarkerState(
         tombstone,
         this.transactionMarkerLstat,
       );
@@ -7936,7 +7938,7 @@ export class SessionHost {
           const published = await transactionMarkerState(
             tombstone,
             this.transactionMarkerLstat,
-          ).catch(() => "indeterminate" as const);
+          ).then(({ state }) => state, () => "indeterminate" as const);
           if (published === "absent") revocation.rollback();
           else {
             revocation.commit();
@@ -8055,13 +8057,13 @@ export class SessionHost {
         ? expandLegacyPins(pinState.pinned, rowsBefore)
         : new Set(pinState.pinned);
       pins.delete(identity.id);
-      await writePins(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
+      await this.pinWriter(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
       const readState = await readReadState(paths.sessionDir);
       const reads = readState.version === 1
         ? expandLegacyReads(readState.reads, rowsBefore)
         : { ...readState.reads };
       delete reads[identity.id];
-      await writeReads(paths.sessionDir, Object.fromEntries(
+      await this.readWriter(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([key]) => remainingIds.has(key)),
       ));
       try {
@@ -8103,7 +8105,7 @@ export class SessionHost {
         const markerState = await transactionMarkerState(
           tombstone,
           this.transactionMarkerLstat,
-        ).catch(() => "indeterminate" as const);
+        ).then(({ state }) => state, () => "indeterminate" as const);
         if (markerState === "absent" && !revocationCommitted) revocation.rollback();
         else if (markerState !== "absent") {
           revocation.commit();

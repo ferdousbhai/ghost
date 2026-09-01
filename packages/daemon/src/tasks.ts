@@ -468,8 +468,12 @@ export class TaskStore {
   }
   async write(record: TaskRecord): Promise<void> {
     parseRecord(record);
-    const path = descriptorPath(await this.#verifyDirectory(), `${record.id}.json`);
-    writePrivateJsonAtomicCas(path, record, this.#identities.get(record) ?? null);
+    // Shared mode: per-record serialization comes from the controller's actor;
+    // the gate only keeps writes out of withExclusiveInventory windows.
+    await this.#inventory.read(async () => {
+      const path = descriptorPath(await this.#verifyDirectory(), `${record.id}.json`);
+      writePrivateJsonAtomicCas(path, record, this.#identities.get(record) ?? null);
+    });
   }
   async #list(): Promise<TaskRecord[]> {
     const directory = await this.#verifyDirectory(); const records: TaskRecord[] = [];

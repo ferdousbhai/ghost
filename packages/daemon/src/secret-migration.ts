@@ -89,6 +89,12 @@ export interface GhostSecretMigrationOptions {
   agentDbFault?: (stage: AgentDbFaultStage, path: string) => void;
   /** Synchronous adversarial seam immediately before portable CAS publication. */
   portableCommitProbe?: (source: "models" | "mcp", path: string) => void;
+  /**
+   * Test seam observing whether the one-time agent.db/auth.json retirement
+   * machinery ran ("engaged") or was skipped for a home with no legacy
+   * artifact ("skipped").
+   */
+  retirementProbe?: (stage: "skipped" | "engaged", directory: string) => void;
 }
 
 export type AgentDbFaultStage =
@@ -1528,11 +1534,79 @@ function removePlainFile(
   reconcilePlainRemoval(claim, false);
 }
 
+/**
+ * Whether the `.pi` directory still holds anything the one-time retirement
+ * machinery exists for: a legacy `auth.json` or `agent.db` (with companions),
+ * an interrupted migration claim, or plain-removal evidence. One readdir; a
+ * home that never had the artifacts answers false forever.
+ */
+function legacySecretArtifactsPresent(authPath: string): boolean {
+  let names: string[];
+  try {
+    names = readdirSync(dirname(authPath));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+  const authName = basename(authPath);
+  return names.some((name) =>
+    name === authName
+    || name === "agent.db"
+    || AGENT_DB_COMPANION_SUFFIXES.some((suffix) => name === `agent.db${suffix}`)
+    || name.startsWith(AGENT_DB_CLAIM_PREFIX)
+    || (name.startsWith(`${authName}.`) && name.includes(PLAIN_REMOVAL_SUFFIX)));
+}
+
+/**
+ * The live half of every open: authorize the accounts models.json names and
+ * materialize plaintext secrets found in models.json/mcp.json into keyring
+ * references, under the same locks every other writer takes.
+ */
+function materializeLiveReferences(
+  options: GhostSecretMigrationOptions,
+  context: GhostSecretContext,
+  addedAccounts: Set<string>,
+): void {
+  const mcpPath = join(options.home, MCP_FILENAME);
+  withMCPConfigWriteLock(mcpPath, () => {
+    const modelsPath = ghostModelsPath(options.home);
+    const mcp = withSerializedModelsWrite(modelsPath, () => {
+      const snapshot = readGhostModelsSnapshot(options.home);
+      const models = snapshot?.file ?? { providers: {} };
+      context.allowAccounts(models.accounts ?? []);
+      const migratedMcp = migrateMcpFile(options.home, context);
+      for (const account of migratedMcp.addedAccounts) addedAccounts.add(account);
+      const modelsChanged = migrateModels(models, context, addedAccounts);
+      const previousAccounts = models.accounts ?? [];
+      const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
+      if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
+      context.allowAccounts(mergedAccounts);
+      if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
+        options.portableCommitProbe?.("models", modelsPath);
+        writePrivateJsonAtomicCas(modelsPath, models, snapshot?.identity ?? null);
+      }
+      return migratedMcp;
+    });
+    // Accounts are durable policy before the config can publish references
+    // to them; a failed MCP CAS leaves only harmless extra authorization.
+    if (mcp.changed && mcp.document) {
+      options.portableCommitProbe?.("mcp", mcpPath);
+      writePrivateJsonAtomicCas(mcpPath, mcp.document, mcp.identity);
+    }
+  });
+}
+
 function migrateWithContext(
   options: GhostSecretMigrationOptions,
   context: GhostSecretContext,
 ): void {
   const authPath = options.authPath ?? join(options.home, ".pi", "auth.json");
+  if (!legacySecretArtifactsPresent(authPath)) {
+    options.retirementProbe?.("skipped", dirname(authPath));
+    materializeLiveReferences(options, context, new Set());
+    return;
+  }
+  options.retirementProbe?.("engaged", dirname(authPath));
   recoverPlainFileRemovals(authPath, options.plainFileFault);
   const agentDb = join(dirname(authPath), "agent.db");
   const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);
@@ -1546,33 +1620,7 @@ function migrateWithContext(
     legacy = legacyCredentials(authPath);
     importCredentials([...database, ...(legacy?.rows ?? [])], context, addedAccounts);
 
-    const mcpPath = join(options.home, MCP_FILENAME);
-    withMCPConfigWriteLock(mcpPath, () => {
-      const modelsPath = ghostModelsPath(options.home);
-      const mcp = withSerializedModelsWrite(modelsPath, () => {
-        const snapshot = readGhostModelsSnapshot(options.home);
-        const models = snapshot?.file ?? { providers: {} };
-        context.allowAccounts(models.accounts ?? []);
-        const migratedMcp = migrateMcpFile(options.home, context);
-        for (const account of migratedMcp.addedAccounts) addedAccounts.add(account);
-        const modelsChanged = migrateModels(models, context, addedAccounts);
-        const previousAccounts = models.accounts ?? [];
-        const mergedAccounts = [...new Set([...previousAccounts, ...addedAccounts])];
-        if (mergedAccounts.length > 0) models.accounts = mergedAccounts;
-        context.allowAccounts(mergedAccounts);
-        if (modelsChanged || mergedAccounts.length !== previousAccounts.length) {
-          options.portableCommitProbe?.("models", modelsPath);
-          writePrivateJsonAtomicCas(modelsPath, models, snapshot?.identity ?? null);
-        }
-        return migratedMcp;
-      });
-      // Accounts are durable policy before the config can publish references
-      // to them; a failed MCP CAS leaves only harmless extra authorization.
-      if (mcp.changed && mcp.document) {
-        options.portableCommitProbe?.("mcp", mcpPath);
-        writePrivateJsonAtomicCas(mcpPath, mcp.document, mcp.identity);
-      }
-    });
+    materializeLiveReferences(options, context, addedAccounts);
 
     // Plaintext is removed only after every keyring write was read back and
     // both portable config replacements are durable. Every preceding step is

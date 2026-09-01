@@ -1279,4 +1279,58 @@ describe("plaintext migration", () => {
     expect(() => openContext(home, client)).toThrow(SecretServiceError);
     expect(readFileSync(join(home, "models.json"), "utf8")).toContain("keep-me");
   });
+
+  it("skips the legacy retirement machinery for a home that never had the artifacts", () => {
+    const home = root();
+    mkdirSync(join(home, ".pi"), { recursive: true });
+    writeFileSync(join(home, "models.json"), JSON.stringify({
+      providers: { openrouter: { apiKey: "clean-home-secret" } },
+    }));
+    const stages: string[] = [];
+    const client = new MemorySecretServiceClient();
+    const context = openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      retirementProbe: (stage) => stages.push(stage),
+    });
+    try {
+      expect(stages).toEqual(["skipped"]);
+      // The live path still materializes plaintext into keyring references.
+      expect(readFileSync(join(home, "models.json"), "utf8")).not.toContain("clean-home-secret");
+      // And no claim dir or removal evidence was ever created.
+      expect(readdirSync(join(home, ".pi"))).toEqual([]);
+    } finally {
+      context.close();
+    }
+  });
+
+  it("still engages the retirement machinery when a legacy auth.json exists", () => {
+    const home = root();
+    const agentDir = join(home, ".pi");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(join(home, "models.json"), JSON.stringify({ providers: {} }));
+    writeFileSync(join(agentDir, "auth.json"), JSON.stringify({
+      anthropic: {
+        type: "oauth",
+        access: "oauth-access",
+        refresh: "oauth-refresh",
+        expires: 2_000_000_000_000,
+      },
+    }));
+    const stages: string[] = [];
+    const client = new MemorySecretServiceClient();
+    const context = openGhostSecretContext({
+      home,
+      client,
+      metadataPath: join(home, "state.sqlite"),
+      retirementProbe: (stage) => stages.push(stage),
+    });
+    try {
+      expect(stages).toEqual(["engaged"]);
+      expect(() => readFileSync(join(agentDir, "auth.json"), "utf8")).toThrow();
+    } finally {
+      context.close();
+    }
+  });
 });
