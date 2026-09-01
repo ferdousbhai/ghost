@@ -294,6 +294,21 @@ async function readJsonBody(
 }
 
 /**
+ * The parsed request body as a JSON object. Anything else throws the
+ * `invalid_request` the outer handler answers with a 400.
+ */
+async function readJsonObjectBody(
+  request: IncomingMessage,
+  maxBytes: number,
+): Promise<Record<string, unknown>> {
+  const body = await readJsonBody(request, maxBytes);
+  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+    throw new PiMessagesRequestError("invalid_request", "Request body must be a JSON object.");
+  }
+  return body as Record<string, unknown>;
+}
+
+/**
  * What `ServerOptions.apiToken` means. `undefined` is the machine-local token,
  * minted here rather than on the first authenticated request so a client that
  * starts alongside the daemon finds the file. `null` is no authentication at
@@ -431,11 +446,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const name = (body as { name?: unknown }).name;
     if (typeof name !== "string") {
       errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
@@ -550,11 +561,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { content, name } = body as { content?: unknown; name?: unknown };
     if (typeof content !== "string") {
       errorResponse(response, 400, "invalid_request", '"content" must be a string.');
@@ -576,11 +583,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { path, confirm } = body as { path?: unknown; confirm?: unknown };
     if (typeof path !== "string" || path === "") {
       errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
@@ -648,11 +651,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const action = (body as { action?: unknown }).action;
     if (action !== "start" && action !== "mute" && action !== "unmute" && action !== "stop") {
       errorResponse(
@@ -694,11 +693,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { action, relayUrl, writable, confirmed } = body as {
       action?: unknown;
       relayUrl?: unknown;
@@ -744,11 +739,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { pinned } = body as { pinned?: unknown };
     if (typeof pinned !== "boolean") {
       errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
@@ -769,11 +760,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const readAt = await options.host.markRead(
       ghostName,
       conversation.conversationId,
@@ -789,11 +776,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { title } = body as { title?: unknown };
     if (typeof title !== "string") {
       errorResponse(response, 400, "invalid_request", "\"title\" must be a string.");
@@ -858,11 +841,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
 
     const connection = abortOnClose(request, response);
     try {
@@ -943,11 +922,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { name, config } = body as { name?: unknown; config?: unknown };
     if (typeof name !== "string") {
       errorResponse(response, 400, "invalid_request", '"name" must be a string.');
@@ -984,11 +959,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const snapshot = await mutateMcp(
       ghostName,
       () => mcp.updateLeased(ghostName, serverName, (body as { config?: unknown }).config),
@@ -1012,11 +983,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const snapshot = await mutateMcp(
       ghostName,
       () => mcp.setEnabledLeased(
@@ -1077,11 +1044,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const name = (body as { name?: unknown }).name;
     if (typeof name !== "string") {
       errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
@@ -1163,11 +1126,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { providerId, authType, account = "personal" } = body as {
       providerId?: unknown;
       authType?: unknown;
@@ -1227,11 +1186,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const value = (body as { value?: unknown }).value;
     if (typeof value !== "string") {
       errorResponse(response, 400, "invalid_request", "\"value\" must be a string.");
@@ -1310,11 +1265,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { provider, id } = body as { provider?: unknown; id?: unknown };
     if (typeof provider !== "string" || provider === "") {
       errorResponse(response, 400, "invalid_request", "\"provider\" must be a non-empty string.");
@@ -1345,11 +1296,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { role, target, provider, id, fallbacks } = body as {
       role?: unknown;
       target?: unknown;
@@ -1541,11 +1488,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { action, entryId } = body as { action?: unknown; entryId?: unknown };
     if (typeof entryId !== "string" || entryId === "") {
       errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
@@ -1578,11 +1521,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { entryId } = body as { entryId?: unknown };
     if (typeof entryId !== "string" || entryId === "") {
       errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
@@ -1619,11 +1558,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { askId, ...answer } = body as Record<string, unknown>;
     if (typeof askId !== "string" || askId === "") {
       errorResponse(response, 400, "invalid_request", '"askId" must be a non-empty string.');
@@ -1658,11 +1593,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { root, cwd, trustToken, expectedGeneration } = body as Record<string, unknown>;
     if (root !== null && (typeof root !== "string" || root === "" || !isAbsolute(root))) {
       errorResponse(response, 400, "invalid_request", '"root" must be an absolute path string or null.');
@@ -1705,11 +1636,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     if (action === "preview") {
       const path = (body as { path?: unknown }).path;
       if (typeof path !== "string" || path === "" || !isAbsolute(path)) {
@@ -1773,11 +1700,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     const { mode, text } = body as { mode?: unknown; text?: unknown };
     if (mode !== "steer" && mode !== "followUp") {
       errorResponse(response, 400, "invalid_request", '"mode" must be "steer" or "followUp".');
@@ -1853,14 +1776,8 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)
-      || !exactObjectKeys(body as Record<string, unknown>, [
-        "harness",
-        "assignment",
-        "cwd",
-        "agent",
-      ])) {
+    const body = await readJsonObjectBody(request, maxBodyBytes);
+    if (!exactObjectKeys(body, ["harness", "assignment", "cwd", "agent"])) {
       errorResponse(response, 400, "invalid_request", "Request body must be an exact task object.");
       return;
     }
@@ -1929,11 +1846,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
-    const body = await readJsonBody(request, maxBodyBytes);
-    if (body === null || typeof body !== "object" || Array.isArray(body)) {
-      errorResponse(response, 400, "invalid_request", "Request body must be a JSON object.");
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
     if (action === "send") {
       if (!exactObjectKeys(body as Record<string, unknown>, ["message"])) {
         errorResponse(response, 400, "invalid_request", "Send accepts exactly one message.");
@@ -2049,9 +1962,8 @@ export function createDaemonServer(options: ServerOptions): Server {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
             return;
           }
-          const body = await readJsonBody(request, maxBodyBytes);
-          if (body === null || typeof body !== "object" || Array.isArray(body)
-            || typeof (body as { enabled?: unknown }).enabled !== "boolean") {
+          const body = await readJsonObjectBody(request, maxBodyBytes);
+          if (typeof (body as { enabled?: unknown }).enabled !== "boolean") {
             errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
             return;
           }

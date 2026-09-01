@@ -18,7 +18,7 @@ import { HomeOperationCoordinator } from "../src/home-operations.js";
 import {
   ghostModelsPath,
   readGhostModels,
-  setChatModelRole,
+  setGhostModelRole,
 } from "../src/models.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import {
@@ -463,7 +463,7 @@ describe("default model binding", () => {
     );
     await discoveryStarted.promise;
 
-    setChatModelRole(agentDir, "openai-codex", "gpt-5-codex");
+    setGhostModelRole(agentDir, "chat_model", "openai-codex", "gpt-5-codex");
     finishDiscovery.resolve([fakePiModel({ provider: "openrouter", id: "login-default" })]);
 
     await expect(binding).resolves.toBeNull();

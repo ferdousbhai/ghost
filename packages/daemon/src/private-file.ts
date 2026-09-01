@@ -359,3 +359,28 @@ export async function writePrivateJsonAtomic(path: string, value: unknown): Prom
     throw error;
   }
 }
+
+/**
+ * Synchronous sibling of {@link writePrivateJsonAtomic} that also fsyncs the
+ * file and its directory before returning, for writes that must survive a
+ * crash the moment the call returns.
+ */
+export function writePrivateJsonAtomicSync(path: string, value: unknown): void {
+  const rendered = renderPrivateJson(path, value);
+  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
+  let fd: number | undefined;
+  try {
+    fd = openSync(temporary, "wx", 0o600);
+    writeFileSync(fd, rendered, "utf8");
+    fsyncSync(fd);
+    closeSync(fd);
+    fd = undefined;
+    chmodSync(temporary, 0o600);
+    renameSync(temporary, path);
+    fsyncPath(dirname(path));
+  } catch (error) {
+    if (fd !== undefined) closeSync(fd);
+    rmSync(temporary, { force: true });
+    throw error;
+  }
+}

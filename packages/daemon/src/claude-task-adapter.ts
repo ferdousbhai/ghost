@@ -14,7 +14,7 @@ import {
 import { captureNativeHarnessEnvironment } from "./env-scrub.js";
 import type { NativeHarnessProbeResult } from "./native-harness-catalog.js";
 import { claudeSdkSpawnLaunch } from "./claude-sdk-launch.js";
-import { NativeTaskProcessError } from "./native-task-jsonl.js";
+import { deferred, NativeTaskProcessError } from "./native-task-jsonl.js";
 import type {
   TaskAdapter,
   TaskAdapterContext,
@@ -40,20 +40,6 @@ export interface ClaudeTaskAdapterOptions {
 interface PendingInput {
   message: SDKUserMessage;
   delivered: ReturnType<typeof deferred<void>>;
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve(value: T): void;
-  reject(reason: unknown): void;
-} {
-  let resolve!: (value: T) => void;
-  let reject!: (reason: unknown) => void;
-  const promise = new Promise<T>((yes, no) => {
-    resolve = yes;
-    reject = no;
-  });
-  return { promise, resolve, reject };
 }
 
 function failure(): NativeTaskProcessError {

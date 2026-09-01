@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { homedir } from "node:os";
-import { pathToFileURL } from "node:url";
+import { isDirectInvocation } from "../direct-invocation.js";
 import {
   ArgsError,
   flagBoolean,
@@ -301,10 +301,6 @@ export async function ghostCli(argv: readonly string[], options: GhostCliOptions
     runtime.stderr.write(`ghost: ${error instanceof Error ? error.message : String(error)}\n`);
     return EXIT_CODE.failure;
   }
-}
-
-export function isDirectInvocation(moduleUrl: string, entryPath: string | undefined): boolean {
-  return entryPath !== undefined && moduleUrl === pathToFileURL(entryPath).href;
 }
 
 if (isDirectInvocation(import.meta.url, process.argv[1])) {

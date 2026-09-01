@@ -57,7 +57,6 @@ import {
   readGhostModels,
   replaceGhostModelFallbacks,
   resolveChatModelRef,
-  setChatModelRole,
   setGhostModelRole,
   type GhostModelRole,
   type GhostModelRoleBinding,
@@ -863,7 +862,7 @@ export class ModelCatalog {
     id: string,
   ): Promise<SetModelResult> {
     if (provider === CLAUDE_CODE_PROVIDER_ID) {
-      setChatModelRole(configDir, provider, id);
+      setGhostModelRole(configDir, "chat_model", provider, id);
       await this.notifyModelRoutingChanged(ghostName);
       const claudeCode = claudeCodeAvailability(await this.claudeCodeStatus());
       const usable = claudeCode.usable;
@@ -899,7 +898,7 @@ export class ModelCatalog {
         400,
       );
     }
-    setChatModelRole(configDir, model.provider, model.id);
+    setGhostModelRole(configDir, "chat_model", model.provider, model.id);
     await this.notifyModelRoutingChanged(ghostName);
     const usable = runtime.getProviderAuthStatus(model.provider).configured;
     this.logger.info("ghost chat model set", { ghost: ghostName, provider: model.provider, model: model.id, usable });

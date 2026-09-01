@@ -1033,16 +1033,10 @@ export class ConversationMaintenance {
         await ready;
         if (!turn) {
           if (!slot.pending) {
-            await this.homeOperations.withLease(identity.ghostName, async () => {
-              const state = await readState(this.path(identity));
-              const last = state?.pendingTurns.at(-1);
-              if (state) this.queueIdle(
-                slot,
-                state,
-                last?.sequence ?? state.lastSequence,
-                last?.outcome ?? "completed",
-              );
-            });
+            await this.homeOperations.withLease(
+              identity.ghostName,
+              () => this.armFromStoredState(slot),
+            );
           }
           return;
         }
@@ -1153,6 +1147,18 @@ export class ConversationMaintenance {
       const last = state.pendingTurns.at(-1);
       this.queueIdle(slot, state, state.lastSequence, last?.outcome ?? "completed");
     });
+  }
+
+  /** Re-arm a slot's idle timer at its stored last pending turn. */
+  private armFromState(slot: Slot, state: ConversationMaintenanceStateV1): void {
+    const last = state.pendingTurns.at(-1);
+    this.queueIdle(slot, state, last?.sequence ?? state.lastSequence, last?.outcome ?? "completed");
+  }
+
+  /** `armFromState` from the slot's stored sidecar; a missing sidecar arms nothing. */
+  private async armFromStoredState(slot: Slot): Promise<void> {
+    const state = await readState(this.path(slot.identity));
+    if (state) this.armFromState(slot, state);
   }
 
   private queueIdle(
@@ -1488,14 +1494,7 @@ export class ConversationMaintenance {
       await this.homeOperations.withLease(slot.identity.ghostName, async () => {
         if (this.slots.get(this.key(slot.identity)) !== slot || slot.deleteSuppressed
           || slot.pending || slot.running) return;
-        const state = await readState(this.path(slot.identity));
-        const last = state?.pendingTurns.at(-1);
-        if (state) this.queueIdle(
-          slot,
-          state,
-          last?.sequence ?? state.lastSequence,
-          last?.outcome ?? "completed",
-        );
+        await this.armFromStoredState(slot);
       });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
@@ -1553,14 +1552,7 @@ export class ConversationMaintenance {
     // reservations still prevent generation from starting.
     for (const [, slot] of moved) {
       try {
-        const state = await readState(this.path(slot.identity));
-        const last = state?.pendingTurns.at(-1);
-        if (state) this.queueIdle(
-          slot,
-          state,
-          last?.sequence ?? state.lastSequence,
-          last?.outcome ?? "completed",
-        );
+        await this.armFromStoredState(slot);
       } catch (error) {
         slot.logger.warn("renamed conversation maintenance state was not armed", {
           runtime: slot.identity.runtime,
@@ -1642,14 +1634,7 @@ export class ConversationMaintenance {
             throw invalidState(join(sessionDir, name));
           }
           const identity = { ghostName, runtime: state.runtime, conversationId: state.conversationId };
-          const slot = this.slot(identity);
-          const last = state.pendingTurns.at(-1);
-          this.queueIdle(
-            slot,
-            state,
-            last?.sequence ?? state.lastSequence,
-            last?.outcome ?? "completed",
-          );
+          this.armFromState(this.slot(identity), state);
           restored += 1;
         } catch (error) {
           invalid += 1;

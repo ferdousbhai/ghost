@@ -19,7 +19,7 @@ export class NativeTaskProcessError extends Error {
   }
 }
 
-function deferred<T>(): {
+export function deferred<T>(): {
   promise: Promise<T>;
   resolve(value: T): void;
   reject(reason: unknown): void;

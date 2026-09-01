@@ -56,7 +56,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import {
   clearGhostModelRole,
   openAiCompatiblePreset,
-  setChatModelRole,
+  setGhostModelRole,
   writeGhostModels,
   type GhostModelDefinition,
   type GhostModelsFile,
@@ -677,7 +677,7 @@ describe("Ghost slash commands", () => {
 
   it("reports that an active Claude Code runtime has no Ghost command catalog", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
+    setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
 
     await expect(host!.availableCommands("casper", "conv-claude"))
       .rejects.toMatchObject({ code: "not_supported", status: 409 });
@@ -1689,7 +1689,7 @@ describe("SessionHost.open", () => {
       ["claude-code", "pi", "claude-transition"],
     ] as const) {
       if (selectedRuntime === "claude-code") {
-        setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
+        setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
       } else {
         clearGhostModelRole(ghostPaths(dir).home, "chat_model");
       }
@@ -5828,7 +5828,7 @@ describe("SessionHost.runTurn", () => {
         },
       },
     });
-    setChatModelRole(ghostPaths(dir).home, "claude-code", "default");
+    setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
     const id = "claude-direct-command";
     const sessionDir = ghostPaths(dir).sessionDir;
     const events: PiMessagesEvent[] = [];
@@ -5875,7 +5875,7 @@ describe("SessionHost.runTurn", () => {
         for (const identityKind of ["draft", "duplicate"] as const) {
           const id = `${selectedRuntime}-${promptKind}-${identityKind}`;
           if (selectedRuntime === "claude-code") {
-            setChatModelRole(home, "claude-code", "default");
+            setGhostModelRole(home, "chat_model", "claude-code", "default");
           } else {
             clearGhostModelRole(home, "chat_model");
           }
@@ -9383,7 +9383,7 @@ describe("model switch reaches a live cached session", () => {
     // Switch the role on disk exactly as ModelCatalog.setChatModel does, then
     // fire the same rebind hook it invokes. Without the rebind the cached
     // session would answer on model-a forever.
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
 
     // The SAME cached conversation now answers on model-b.
@@ -9404,11 +9404,11 @@ describe("model switch reaches a live cached session", () => {
     const handle = await host.open("casper", "vision-rebind");
     expect(handle.session.getActiveToolNames()).toContain("inspect_image");
 
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
     expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
 
-    setChatModelRole(paths.home, "ghost-local", "model-a");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-a");
     await host.rebindModel("casper");
     expect(handle.session.getActiveToolNames()).toContain("inspect_image");
   });
@@ -9458,7 +9458,7 @@ describe("model switch reaches a live cached session", () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
 
     // Switch while busy: the model must not be yanked out from under the run.
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
     await inflight;
 
@@ -9500,7 +9500,7 @@ describe("model switch reaches a live cached session", () => {
 
     const remoteTurn = handle.session.prompt("Remote prompt.");
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-remote-model"));
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
 
@@ -9528,7 +9528,7 @@ describe("model switch reaches a live cached session", () => {
     const handle = await host.open("casper", "conv-voice-model");
     await host.liveVoiceAction("casper", "conv-voice-model", "start");
 
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
 
@@ -9556,7 +9556,7 @@ describe("model switch reaches a live cached session", () => {
     const starting = host.liveVoiceAction("casper", "conv-voice-start-failure", "start");
     await voice.startEntered;
 
-    setChatModelRole(paths.home, "ghost-local", "model-b");
+    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
     await host.rebindModel("casper");
     releaseStart();
     await expect(starting).rejects.toMatchObject({ code: "live_start_failed", status: 502 });

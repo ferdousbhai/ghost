@@ -124,6 +124,7 @@ import {
   type PrincipalTaskContext,
 } from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
+import { pathIsWithin } from "./path-within.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
   loadProjectDeclarativeSnapshot,
@@ -339,11 +340,11 @@ function claudeCodeCommand(
     : { executable: binaryPath, args: [...args] };
 }
 
-function authStatusMetadata(value: unknown): string | undefined {
+function boundedAuthScalar(value: unknown, maxScalars: number): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   const scalars = [...trimmed];
-  if (!trimmed || scalars.length > AUTH_STATUS_METADATA_MAX_SCALARS) return undefined;
+  if (!trimmed || scalars.length > maxScalars) return undefined;
   if (scalars.some((scalar) => {
     const codePoint = scalar.charCodeAt(0);
     return codePoint <= 0x1f || codePoint === 0x7f;
@@ -351,16 +352,12 @@ function authStatusMetadata(value: unknown): string | undefined {
   return trimmed;
 }
 
+function authStatusMetadata(value: unknown): string | undefined {
+  return boundedAuthScalar(value, AUTH_STATUS_METADATA_MAX_SCALARS);
+}
+
 function authIdentityScalar(value: unknown): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const trimmed = value.trim();
-  const scalars = [...trimmed];
-  if (!trimmed || scalars.length > AUTH_STATUS_IDENTITY_MAX_SCALARS) return undefined;
-  if (scalars.some((scalar) => {
-    const codePoint = scalar.charCodeAt(0);
-    return codePoint <= 0x1f || codePoint === 0x7f;
-  })) return undefined;
-  return trimmed;
+  return boundedAuthScalar(value, AUTH_STATUS_IDENTITY_MAX_SCALARS);
 }
 
 function accountFingerprint(status: Record<string, unknown>): string | undefined {
@@ -1061,7 +1058,7 @@ function validDeclarativePromptSnapshot(value: unknown, root: string | null): bo
       && (!named || (typeof row.name === "string" && row.name.length > 0))
       && typeof row.path === "string"
       && root !== null
-      && pathWithin(root, row.path)
+      && pathIsWithin(root, row.path)
       && typeof row.content === "string");
   };
   const validNamedResource = (entry: unknown): boolean => {
@@ -1738,11 +1735,6 @@ async function answerClaudeQuestion(
     }
     throw error;
   }
-}
-
-function pathWithin(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function projectMcpServers(
@@ -2573,7 +2565,7 @@ export class ClaudeCodeRuntime {
           409,
         );
       }
-      if (project.root && !pathWithin(project.root, runtimeCwd)) {
+      if (project.root && !pathIsWithin(project.root, runtimeCwd)) {
         throw new GhostError(
           "cwd_outside_project",
           "Claude resume metadata points outside the trusted project.",

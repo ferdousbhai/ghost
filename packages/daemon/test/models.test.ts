@@ -29,7 +29,6 @@ import {
   readGhostModels,
   resolveChatModelRef,
   resolveSmolModelRef,
-  setChatModelRole,
   setGhostModelRole,
   withSerializedModelsWrite,
   writeGhostModels,
@@ -95,7 +94,7 @@ describe("models.json round-trip", () => {
     })}\n`, { mode: 0o600 });
     renameSync(path, `${path}.ghost-migration-cas`);
 
-    setChatModelRole(agentDir, "retained", "model-after-recovery");
+    setGhostModelRole(agentDir, "chat_model", "retained", "model-after-recovery");
 
     expect(readGhostModels(agentDir)).toMatchObject({
       providers: { retained: { apiKey: "keyring:retained/personal" } },
@@ -174,7 +173,7 @@ describe("models.json round-trip", () => {
     await once(child.stdout, "data");
     const childExited = once(child, "exit");
 
-    setChatModelRole(agentDir, "local", "after-wait");
+    setGhostModelRole(agentDir, "chat_model", "local", "after-wait");
     await childExited;
     expect(existsSync(lockPath)).toBe(false);
     expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-wait");
@@ -188,7 +187,7 @@ describe("models.json round-trip", () => {
 
     let conflict: unknown;
     try {
-      setChatModelRole(agentDir, "local", "blocked");
+      setGhostModelRole(agentDir, "chat_model", "local", "blocked");
     } catch (error) {
       conflict = error;
     }
@@ -206,7 +205,7 @@ describe("models.json round-trip", () => {
     await exited;
     expect(existsSync(lockPath)).toBe(true);
 
-    setChatModelRole(agentDir, "local", "after-crash");
+    setGhostModelRole(agentDir, "chat_model", "local", "after-crash");
     expect(existsSync(lockPath)).toBe(false);
     expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-crash");
   });
@@ -215,7 +214,7 @@ describe("models.json round-trip", () => {
     const agentDir = makeAgentDir();
     const lockPath = ghostModelsLockPath(agentDir);
     withSerializedModelsWrite(ghostModelsPath(agentDir), () => {
-      expect(() => setChatModelRole(agentDir, "local", "blocked")).toThrowError(
+      expect(() => setGhostModelRole(agentDir, "chat_model", "local", "blocked")).toThrowError(
         expect.objectContaining({
           code: "ghost_models_write_conflict",
           ownerPid: process.pid,
@@ -236,7 +235,7 @@ describe("models.json round-trip", () => {
       startTicks: "1",
     })}\n`, { mode: 0o600 });
 
-    setChatModelRole(agentDir, "local", "after-pid-reuse");
+    setGhostModelRole(agentDir, "chat_model", "local", "after-pid-reuse");
 
     expect(existsSync(lockPath)).toBe(false);
     expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-pid-reuse");
@@ -252,7 +251,7 @@ describe("models.json round-trip", () => {
       startTicks: "1",
     })}\n`, { mode: 0o600 });
 
-    setChatModelRole(agentDir, "local", "after-reclaim");
+    setGhostModelRole(agentDir, "chat_model", "local", "after-reclaim");
 
     expect(existsSync(claim)).toBe(false);
     expect(readGhostModels(agentDir)?.roles?.chat_model?.modelId).toBe("after-reclaim");
@@ -268,7 +267,7 @@ describe("models.json round-trip", () => {
 
     let failure: unknown;
     try {
-      setChatModelRole(agentDir, "local", "blocked");
+      setGhostModelRole(agentDir, "chat_model", "local", "blocked");
     } catch (error) {
       failure = error;
     }
@@ -398,7 +397,7 @@ describe("the legacy title_model role", () => {
       providers: {},
       roles: { title_model: { provider: "anthropic", modelId: "claude-haiku-4-5" } },
     });
-    setChatModelRole(agentDir, "openai-codex", "gpt-5.6");
+    setGhostModelRole(agentDir, "chat_model", "openai-codex", "gpt-5.6");
     expect(readRaw(agentDir).roles).toEqual({
       smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
       chat_model: { provider: "openai-codex", modelId: "gpt-5.6" },

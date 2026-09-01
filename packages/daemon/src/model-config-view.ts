@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { GhostSecretContext, ProviderAccountStatus } from "./keyring-credential-store.js";
 import type { GhostModelsFile, GhostProviderConfig } from "./models.js";
-import { atomicPrivateJson } from "./secret-migration.js";
+import { writePrivateJsonAtomicSync } from "./private-file.js";
 import {
   isSecretReference,
   parseSecretReference,
@@ -72,7 +72,7 @@ export function syncModelsView(
   const document = keyringModelsDocument(models, options);
   const rendered = `${JSON.stringify(document, null, 2)}\n`;
   if (!existsSync(target) || readFileSync(target, "utf8") !== rendered) {
-    atomicPrivateJson(target, document);
+    writePrivateJsonAtomicSync(target, document);
   }
   return target;
 }

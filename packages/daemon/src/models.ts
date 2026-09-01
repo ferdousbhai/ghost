@@ -475,41 +475,39 @@ export function resolveSmolModelRef(
 }
 
 /**
- * Set `roles.chat_model` to a specific (provider, modelId), the writer behind
- * the model switcher. Reuses `readGhostModels`/`writeGhostModels`, preserves
- * every other key (providers, other roles) untouched, and creates the file
- * when the ghost has none yet. Unlike `bindDefaultChatModelIfUnset` in auth.ts,
- * this always overwrites the binding — it is the explicit "switch to this
- * model" action, not a first-run default.
+ * One serialized read-mutate-persist of the ghost's models.json, creating the
+ * file when the ghost has none yet. Every role and fallback writer goes
+ * through here; `mutate` edits the file in place and everything it does not
+ * touch (providers, other roles) is preserved.
  */
-export function setChatModelRole(
+function mutateGhostModels(
   configDir: string,
-  provider: string,
-  modelId: string,
+  mutate: (file: GhostModelsFile) => void,
 ): GhostModelsFile {
   mkdirSync(configDir, { recursive: true });
   const path = ghostModelsPath(configDir);
   return withSerializedModelsWrite(path, () => {
     const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
-    file.roles = { ...(file.roles ?? {}), chat_model: { provider, modelId } };
+    mutate(file);
     persistGhostModels(path, file);
     return file;
   });
 }
 
+/**
+ * Set a role to a specific (provider, modelId) — for `chat_model`, the writer
+ * behind the model switcher. Unlike `bindDefaultChatModelIfUnset` in auth.ts,
+ * this always overwrites the binding — it is the explicit "switch to this
+ * model" action, not a first-run default.
+ */
 export function setGhostModelRole(
   configDir: string,
   role: GhostModelRole,
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
+  return mutateGhostModels(configDir, (file) => {
     file.roles = { ...(file.roles ?? {}), [role]: { provider, modelId } };
-    persistGhostModels(path, file);
-    return file;
   });
 }
 
@@ -517,15 +515,10 @@ export function clearGhostModelRole(
   configDir: string,
   role: GhostModelRole,
 ): GhostModelsFile {
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
+  return mutateGhostModels(configDir, (file) => {
     const roles = { ...(file.roles ?? {}) };
     delete roles[role];
     file.roles = roles;
-    persistGhostModels(path, file);
-    return file;
   });
 }
 
@@ -535,17 +528,12 @@ export function appendGhostModelFallback(
   provider: string,
   modelId: string,
 ): GhostModelsFile {
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
+  return mutateGhostModels(configDir, (file) => {
     const current = [...(file.fallbacks?.[role] ?? [])];
     if (!current.some((binding) => binding.provider === provider && binding.modelId === modelId)) {
       current.push({ provider, modelId });
     }
     file.fallbacks = { ...(file.fallbacks ?? {}), [role]: current };
-    persistGhostModels(path, file);
-    return file;
   });
 }
 
@@ -558,16 +546,11 @@ export function replaceGhostModelFallbacks(
   role: GhostModelRole,
   bindings: readonly GhostModelRoleBinding[],
 ): GhostModelsFile {
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
+  return mutateGhostModels(configDir, (file) => {
     const fallbacks = { ...(file.fallbacks ?? {}) };
     if (bindings.length === 0) delete fallbacks[role];
     else fallbacks[role] = bindings.map((binding) => ({ ...binding }));
     file.fallbacks = fallbacks;
-    persistGhostModels(path, file);
-    return file;
   });
 }
 
@@ -575,15 +558,10 @@ export function clearGhostModelFallbacks(
   configDir: string,
   role: GhostModelRole,
 ): GhostModelsFile {
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file: GhostModelsFile = readGhostModels(configDir) ?? { providers: {} };
+  return mutateGhostModels(configDir, (file) => {
     const fallbacks = { ...(file.fallbacks ?? {}) };
     delete fallbacks[role];
     file.fallbacks = fallbacks;
-    persistGhostModels(path, file);
-    return file;
   });
 }
 

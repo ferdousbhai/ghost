@@ -3,11 +3,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   closeDaemonResources,
-  isDirectInvocation,
   main,
   parseArgs,
   runStagedShutdown,
 } from "../src/main.js";
+import { isDirectInvocation } from "../src/direct-invocation.js";
 import { captureNativeHarnessEnvironments } from "../src/native-harness-runtime.js";
 
 describe("daemon native harness environment capture", () => {

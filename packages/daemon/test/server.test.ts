@@ -19,7 +19,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
 import { listGhostMemory, trashGhostMemoryFile, writeGhostMemory } from "../src/memory-files.js";
-import { setChatModelRole } from "../src/models.js";
+import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
 import {
@@ -910,7 +910,7 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
     const base = await serve([{ kind: "text", text: "must not run" }]);
     const home = ghostPaths(join(temp!.root, "casper")).home;
     const sessionDir = ghostPaths(home).sessionDir;
-    setChatModelRole(home, "claude-code", "default");
+    setGhostModelRole(home, "chat_model", "claude-code", "default");
     const id = "http-claude-direct";
 
     const result = await postTurn(base, body(id, "!!cd /"));
@@ -930,7 +930,7 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
   it("rejects invalid Claude resume timestamps before SSE or runtime admission", async () => {
     const base = await serve([{ kind: "text", text: "must not run" }]);
     const paths = ghostPaths(join(temp!.root, "casper"));
-    setChatModelRole(paths.home, "claude-code", "default");
+    setGhostModelRole(paths.home, "chat_model", "claude-code", "default");
     const conversationId = "http-invalid-claude-time";
     const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
     mkdirSync(paths.sessionDir, { recursive: true });
@@ -989,7 +989,7 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
       ["claude-code", "pi", "http-claude-mismatch", "!pwd"],
     ] as const) {
       if (selectedRuntime === "claude-code") {
-        setChatModelRole(home, "claude-code", "default");
+        setGhostModelRole(home, "chat_model", "claude-code", "default");
       }
       const preview = await host!.previewProject("casper", id, oppositeRuntime, project);
       await host!.bindProject("casper", id, oppositeRuntime, {
@@ -1138,7 +1138,7 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
       `${base}/api/ghosts/missing/sessions/${piSegment("conv-commands")}/commands`,
     )).status).toBe(404);
 
-    setChatModelRole(ghostPaths(join(temp!.root, "casper")).home, "claude-code", "default");
+    setGhostModelRole(ghostPaths(join(temp!.root, "casper")).home, "chat_model", "claude-code", "default");
     const claude = await fetch(url);
     expect(claude.status).toBe(409);
     expect(await claude.json()).toMatchObject({
@@ -1218,7 +1218,7 @@ describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
 
   it("reports a cold Claude query as unavailable instead of reconstructing it", async () => {
     const base = await serve();
-    setChatModelRole(ghostPaths(join(temp!.root, "casper")).home, "claude-code", "default");
+    setGhostModelRole(ghostPaths(join(temp!.root, "casper")).home, "chat_model", "claude-code", "default");
     const id = encodeURIComponent("claude-code:conv-resources");
 
     const response = await fetch(
@@ -1819,7 +1819,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const base = await serve();
     const ghostDir = join(temp!.root, "casper");
     const paths = ghostPaths(ghostDir);
-    setChatModelRole(paths.home, "claude-code", "default");
+    setGhostModelRole(paths.home, "chat_model", "claude-code", "default");
     const project = join(temp!.root, "claude-prestream-secret-project");
     const sentinel = "CLAUDE_PRESTREAM_PROJECT_SECRET";
     mkdirSync(join(project, ".omp"), { recursive: true });

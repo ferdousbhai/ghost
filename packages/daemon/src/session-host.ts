@@ -141,6 +141,7 @@ export {
   conversationIdFromSessionFile,
   sessionFileNameFor,
 };
+import { pathIsWithin } from "./path-within.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { loadGhostHookExtensions } from "./artifact-root.js";
@@ -1164,11 +1165,6 @@ async function writeTransaction(path: string, value: unknown): Promise<void> {
     await unlink(temporary).catch(() => {});
     throw error;
   }
-}
-
-function pathIsWithin(root: string, candidate: string): boolean {
-  const rel = relative(resolve(root), resolve(candidate));
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function exactSessionChild(sessionDir: string, path: string): boolean {
@@ -2840,10 +2836,7 @@ export class SessionHost {
       const hosted = this.sessions.get(key);
       if (hosted) hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
       try {
-        const stopping = this.liveVoice.stop(key);
-        await hosted?.liveVoiceStart?.catch(() => {});
-        await stopping;
-        return await this.liveVoice.stop(key);
+        return await this.stopLiveVoiceThroughStart(key, hosted);
       } finally {
         if (hosted) {
           hosted.liveVoiceTransitions = Math.max(0, (hosted.liveVoiceTransitions ?? 1) - 1);
@@ -8475,12 +8468,24 @@ export class SessionHost {
     return closing;
   }
 
+  /**
+   * Stop live voice through a possibly in-flight start: stop, let the start
+   * settle, wait out the first stop, then stop again so a session the start
+   * raced into is also torn down.
+   */
+  private async stopLiveVoiceThroughStart(
+    key: string,
+    hosted: HostedSession | undefined,
+  ): Promise<LiveVoiceStatus> {
+    const stopping = this.liveVoice.stop(key);
+    await hosted?.liveVoiceStart?.catch(() => {});
+    await stopping;
+    return this.liveVoice.stop(key);
+  }
+
   private async stopHostedVoice(key: string, hosted: HostedSession): Promise<void> {
     if (hosted.voiceStopped) return;
-    const stoppingVoice = this.liveVoice.stop(key);
-    await hosted.liveVoiceStart?.catch(() => {});
-    await stoppingVoice;
-    await this.liveVoice.stop(key);
+    await this.stopLiveVoiceThroughStart(key, hosted);
     hosted.voiceStopped = true;
   }
 

@@ -20,7 +20,7 @@ import {
   ModelCatalog,
   type ModelCatalogRuntime,
 } from "../src/model-catalog.js";
-import { readGhostModels, setChatModelRole, writeGhostModels } from "../src/models.js";
+import { readGhostModels, setGhostModelRole, writeGhostModels } from "../src/models.js";
 import {
   MAX_MODEL_QUERY_LENGTH,
   startDaemonServer,
@@ -131,7 +131,7 @@ describe("GET /api/ghosts/:name/model", () => {
         subscriptionType: "max",
       },
     });
-    setChatModelRole(agentDir(), "claude-code", "default");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "default");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(status).toBe(200);
     expect(body).toEqual({
@@ -154,7 +154,7 @@ describe("GET /api/ghosts/:name/model", () => {
       claudeStatus: { loggedIn: false },
       credentialed: ["openai-codex"],
     });
-    setChatModelRole(agentDir(), "claude-code", "default");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "default");
 
     const { body } = await getJson(`${base}/api/ghosts/casper/model`);
 
@@ -176,7 +176,7 @@ describe("GET /api/ghosts/:name/model", () => {
       claudeStatus: { loggedIn: true, authMethod: "claude.ai" },
       credentialed: [],
     });
-    setChatModelRole(agentDir(), "claude-code", "not-a-runtime");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "not-a-runtime");
 
     expect((await getJson(`${base}/api/ghosts/casper/model`)).body).toEqual({
       current: {
@@ -196,7 +196,7 @@ describe("GET /api/ghosts/:name/model", () => {
       claudeStatus: { loggedIn: false },
       credentialed: ["openai-codex"],
     });
-    setChatModelRole(agentDir(), "claude-code", "default");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "default");
 
     const current = await getJson(`${base}/api/ghosts/casper/model`);
     expect(current.body).toMatchObject({
@@ -215,7 +215,7 @@ describe("GET /api/ghosts/:name/model", () => {
       claudeStatus: { loggedIn: true, authMethod: "claude.ai" },
       credentialed: ["openai-codex"],
     });
-    setChatModelRole(agentDir(), "claude-code", "not-a-runtime");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "not-a-runtime");
 
     expect((await getJson(`${base}/api/ghosts/casper/model`)).body).toMatchObject({
       current: { provider: "claude-code", resolved: false, usable: false },
@@ -230,7 +230,7 @@ describe("GET /api/ghosts/:name/model", () => {
 
   it("reports source=role when roles.chat_model is set and resolves", async () => {
     const base = await serve({ credentialed: ["openai-codex"] });
-    setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
+    setGhostModelRole(agentDir(), "chat_model", "openai-codex", "gpt-5-codex");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(status).toBe(200);
     expect(body.source).toBe("role");
@@ -378,7 +378,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
 
   it("lists only credentialed providers and flags the current selection", async () => {
     const base = await serve({ credentialed: ["openai-codex"], oauth: ["openai-codex"] });
-    setChatModelRole(agentDir(), "openai-codex", "gpt-5-codex");
+    setGhostModelRole(agentDir(), "chat_model", "openai-codex", "gpt-5-codex");
     const { body } = await getJson(`${base}/api/ghosts/casper/models`);
     expect(body.scope).toBe("available");
     const models = body.models as Array<Record<string, unknown>>;
@@ -397,7 +397,7 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
       claudeStatus: { loggedIn: true, apiProvider: "bedrock" },
       credentialed: ["openai-codex"],
     });
-    setChatModelRole(agentDir(), "claude-code", "default");
+    setGhostModelRole(agentDir(), "chat_model", "claude-code", "default");
 
     const { body } = await getJson(
       `${base}/api/ghosts/casper/models?provider=openai-codex`,

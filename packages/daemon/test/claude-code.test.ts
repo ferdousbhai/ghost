@@ -58,7 +58,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
-import { setChatModelRole } from "../src/models.js";
+import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import {
   loadProjectDeclarativeSnapshot,
@@ -352,7 +352,7 @@ function setupClaudeHost(options: {
   });
   const paths = ghostPaths(dir);
   mkdirSync(paths.agentDir, { recursive: true });
-  setChatModelRole(paths.home, "claude-code", "default");
+  setGhostModelRole(paths.home, "chat_model", "claude-code", "default");
   const machineSkills = join(temp.ownerHome, ".agents", "skills");
   if (options.machineSkill) {
     const skillDir = join(machineSkills, options.machineSkill.name);
@@ -2169,7 +2169,7 @@ fi
     });
     const minaPaths = ghostPaths(minaDir);
     mkdirSync(minaPaths.agentDir, { recursive: true });
-    setChatModelRole(minaPaths.home, "claude-code", "default");
+    setGhostModelRole(minaPaths.home, "chat_model", "claude-code", "default");
 
     await host!.runTurn("casper", {
       sessionId: "casper-obsidian-boundary",

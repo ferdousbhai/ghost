@@ -44,6 +44,7 @@ import {
   readPrivateFile,
   readPrivateFilePinned,
   writePrivateJsonAtomicCas,
+  writePrivateJsonAtomicSync,
 } from "./private-file.js";
 import {
   DEFAULT_SECRET_FIELD,
@@ -170,29 +171,6 @@ function plaintextSourceExists(path: string): boolean {
   }
 }
 
-export function atomicPrivateJson(path: string, value: unknown): void {
-  const rendered = `${JSON.stringify(value, null, 2)}\n`;
-  if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
-    throw new SecretServiceError("secret_migration_failed", `${path} would exceed 1 MiB after migration.`);
-  }
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let fd: number | undefined;
-  try {
-    fd = openSync(temporary, "wx", 0o600);
-    writeFileSync(fd, rendered, "utf8");
-    fsyncSync(fd);
-    closeSync(fd);
-    fd = undefined;
-    chmodSync(temporary, 0o600);
-    renameSync(temporary, path);
-    fsyncPath(dirname(path));
-  } catch (error) {
-    if (fd !== undefined) closeSync(fd);
-    rmSync(temporary, { force: true });
-    throw error;
-  }
-}
-
 function parseStoredCredential(type: unknown, data: unknown): AuthCredential {
   if ((type !== "api_key" && type !== "oauth") || typeof data !== "string") {
     throw new SecretServiceError("secret_migration_failed", "agent.db contains an invalid credential row.");
@@ -300,7 +278,7 @@ function agentDbEvidenceFile(file: AgentDbFileClaim): AgentDbEvidenceFile {
 
 function writeAgentDbEvidence(claim: AgentDbClaim, phase: AgentDbPhase): void {
   claim.evidence = { ...claim.evidence, phase };
-  atomicPrivateJson(claim.statePath, claim.evidence);
+  writePrivateJsonAtomicSync(claim.statePath, claim.evidence);
 }
 
 function injectAgentDbFault(
@@ -1297,7 +1275,7 @@ function sameTwoLinkPlainRemoval(left: string, right: string): boolean {
 
 function writePlainRemovalEvidence(claim: PlainRemovalClaim, phase: PlainRemovalPhase): void {
   claim.evidence = { ...claim.evidence, phase };
-  atomicPrivateJson(claim.statePath, claim.evidence);
+  writePrivateJsonAtomicSync(claim.statePath, claim.evidence);
 }
 
 function finishPlainRemovalEvidence(claim: PlainRemovalClaim): void {

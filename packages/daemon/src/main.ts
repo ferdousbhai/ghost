@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { pathToFileURL } from "node:url";
+import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
@@ -611,10 +611,6 @@ async function serveDaemon(
 
   logger.info("stopped");
   return 0;
-}
-
-export function isDirectInvocation(moduleUrl: string, entryPath: string | undefined): boolean {
-  return entryPath !== undefined && moduleUrl === pathToFileURL(entryPath).href;
 }
 
 // Only run when executed, so tests can import parseArgs/main.
