@@ -48,6 +48,7 @@ import {
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
+import type { ClaudeAgentSdkModule } from "../src/claude-agent-sdk-loader.js";
 import { captureClaudeCodeEnvironment } from "../src/env-scrub.js";
 import type {
   MaintenanceIdentity,
@@ -330,6 +331,7 @@ function setupClaudeHost(options: {
     input: ClaudeCodeQueryInput,
     lifecycle: { queries: number; interrupted: number; closed: number },
   ) => Query;
+  loadSdk?: () => Promise<ClaudeAgentSdkModule>;
   hooks?: GhostHookRunner;
   logger?: Logger;
   maintenance?: SessionHostOptions["maintenance"];
@@ -388,7 +390,7 @@ function setupClaudeHost(options: {
       : {}),
     ...(options.transactionWriter ? { transactionWriter: options.transactionWriter } : {}),
     claudeCode: {
-      loadSdk: async () => testClaudeAgentSdk,
+      loadSdk: options.loadSdk ?? (async () => testClaudeAgentSdk),
       ...(options.environment ? { environment: options.environment } : {}),
       ...(options.warmIdleTtlMs === undefined
         ? {}
@@ -1788,6 +1790,30 @@ fi
     expect(seenOptions[1]?.env).toBe(seenOptions[0]?.env);
     expect(JSON.stringify(logger.records)).not.toContain(secret);
     expect(JSON.stringify(logger.records)).not.toContain("native-aws-secret");
+  });
+
+  it("revalidates the SDK boundary before reusing a warm Claude query", async () => {
+    const removed = new Error("SDK install changed; restart required");
+    let installed = true;
+    const { lifecycle, seenPrompts } = setupClaudeHost({
+      loadSdk: async () => {
+        if (!installed) throw removed;
+        return testClaudeAgentSdk;
+      },
+    });
+    const turn = (prompt: string, events: PiMessagesEvent[] = []) => host!.runTurn("casper", {
+      sessionId: "sdk-removal-warm-query",
+      prompt,
+      emit: (event) => events.push(event),
+    });
+
+    await turn("start the warm query");
+    installed = false;
+    const events: PiMessagesEvent[] = [];
+    await turn("do not reuse it after SDK removal", events);
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(lifecycle.queries).toBe(1);
+    expect(seenPrompts).toHaveLength(1);
   });
 
   it("returns image blocks from screen and browser screenshots across the tool bridge", async () => {

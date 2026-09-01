@@ -56,6 +56,8 @@ GHOST_RELEASE_WORK_ROOT="$release_work" \
   bash "$source_tree/packaging/release/smoke-runtime-source.sh" \
     "$release_out/$runtime" "$source_tree" "$version" x86_64 \
       "$commit" "$epoch"
+GHOST_CLAUDE_SDK_BOUNDARY_TEST_ROOT="$release_work" \
+  bash "$source_tree/packaging/release/test-claude-sdk-boundary.sh"
 
 # Ordinary push/PR CI proves the destination-independent source and runtime
 # even while the prospective public repository is deliberately unconfigured.

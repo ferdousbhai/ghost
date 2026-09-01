@@ -49,6 +49,14 @@ artifacts, CI requires the root, daemon, extensions, shell, Chromium package,
 and Chromium extension manifest to carry one canonical, nonzero,
 three-component version. The desktop helper keeps its independent version.
 
+Before any candidate upload, CI also installs the exact optional Claude Agent
+SDK graph from the already-populated pnpm store into a private scratch
+owner-data root. It loads that real graph through Ghost's production Bun
+loader, removes it, and verifies that the loader fails closed until daemon
+restart. The check never starts Claude Code, contacts a provider, or inspects
+owner authentication; authenticated principal and delegated turns remain a
+manual release check.
+
 ## Prospective local rendering example
 
 The renderer takes four positional arguments and requires the public release
