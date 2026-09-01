@@ -190,11 +190,11 @@ TestCase {
         compare(requests[2].body, '{"action":"clear"}');
     }
 
-    function test_todoSummaryAndEveryRealStatus(): void {
+    function test_progressSummaryAndEveryRealStatus(): void {
         const strip = createLoadedStrip(planState({ todo: todo() }), []);
         const summary = findChild(strip, "workTodoSummary");
         const toggle = findChild(strip, "workTodoToggle");
-        compare(summary.text, "Todo · 3/7 done · Now: Build strip");
+        compare(summary.text, "Progress · 3/7 done · Now: Build strip");
         mouseClick(toggle, toggle.width / 2, toggle.height / 2);
         verify(strip.todoExpanded);
         toggle.forceActiveFocus();

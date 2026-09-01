@@ -437,7 +437,7 @@ function seedMockHome(name) {
   );
   writeFileSync(
     join(dir, "plans", "hud-work-strip.md"),
-    "# HUD work strip\n\nShow the conversation plan, todo phases, and background jobs above the queue.\n",
+    "# HUD work strip\n\nShow the conversation plan, progress phases, and background jobs above the queue.\n",
     "utf8",
   );
 }
@@ -714,7 +714,7 @@ const MOCK_TODO = [
 const MOCK_PLAN_CONTENT = [
   "# HUD work strip",
   "",
-  "Show the current conversation's plan, todo phases, and background jobs directly above the queue.",
+  "Show the current conversation's plan, progress phases, and background jobs directly above the queue.",
   "",
   "1. Fetch plan and job state with the active conversation identity.",
   "2. Keep the strip keyboard-accessible and quiet when empty.",

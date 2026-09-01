@@ -103,7 +103,7 @@ ghost/conversation clears it and aborts any request still running; recap
 failures stay silent because the transcript is already the durable fallback.
 
 The chat column also carries a conversation-scoped work strip above that queue:
-plan mode or the approved plan, read-only todo phases, and background jobs with
+plan mode or the approved plan, read-only progress phases, and background jobs with
 cancellation and bounded output disclosure. It disappears when all three are
 empty and polls running jobs only while the HUD is visible.
 

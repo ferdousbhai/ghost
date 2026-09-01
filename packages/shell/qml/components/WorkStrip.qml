@@ -1,8 +1,9 @@
 pragma ComponentBehavior: Bound
 
-// Conversation-scoped work that lives beyond one model turn: the plan, todo
-// phases, and background jobs. Mutations stay in Ghostd; this component owns
-// only disclosure state and the visible-HUD polling cadence.
+// Conversation-scoped work that lives beyond one model turn: the plan,
+// progress phases (the `todo` wire), and background jobs. Mutations stay in
+// Ghostd; this component owns only disclosure state and the visible-HUD polling
+// cadence.
 import QtQuick
 import QtQuick.Layouts
 import qs.services
@@ -84,7 +85,7 @@ Rectangle {
     readonly property var todo: root.todoDigest()
     readonly property int runningJobCount: root.countJobs("running")
     readonly property int settledJobCount: Ghostd.workJobs.length - root.runningJobCount
-    readonly property string todoSummary: "Todo · " + root.todo.done
+    readonly property string progressSummary: "Progress · " + root.todo.done
         + "/" + root.todo.total + " done"
         + (root.todo.now === "" ? "" : " · Now: " + root.todo.now)
     readonly property string jobsSummary: "Jobs · " + root.runningJobCount
@@ -317,12 +318,12 @@ Rectangle {
             objectName: "workTodoToggle"
             visible: Ghostd.workTodo.length > 0
             Layout.fillWidth: true
-            summary: root.todoSummary
+            summary: root.progressSummary
             summaryObjectName: "workTodoSummary"
             expanded: root.todoExpanded
             accent: Theme.foreground
             description: root.todoExpanded
-                ? "Collapse todo phases and tasks." : "Expand todo phases and tasks."
+                ? "Collapse conversation progress." : "Expand conversation progress."
             onToggled: root.todoExpanded = !root.todoExpanded
         }
 

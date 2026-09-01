@@ -819,7 +819,8 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
-    // Plan mode, todo phases, and jobs are one conversation-scoped work view.
+    // Plan mode, progress phases (`todo` on the wire), and jobs are one
+    // conversation-scoped work view.
     // The GETs stay separate so neither a slow plan-file read nor a large job
     // output tail holds the other row back, while the stamps make both caches
     // retire together when the selected conversation changes.
