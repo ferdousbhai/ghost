@@ -89,7 +89,6 @@ jobs:
           sudo systemctl is-active --quiet "$manager_unit"
           [[ -d "/run/user/$test_uid" ]]
           [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]
-          sudo loginctl enable-linger "$test_user"
           for _ in $(seq 1 300); do
             [[ -S "/run/user/$test_uid/bus" ]] && break
             sleep 0.1

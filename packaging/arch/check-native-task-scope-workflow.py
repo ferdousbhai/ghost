@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "532137f6057af9c83f3dae40ab6a42e1e0c16cc43a83b8fba2f0ec37686787fc"
+JOB_SHA256 = "fb88a69ba586edb3b7af2d1e340ae0511bbb3b10abe11659abe60cc6135847ab"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -196,7 +196,6 @@ def errors(text: str) -> list[str]:
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
-                'sudo loginctl enable-linger "$test_user"',
                 '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]',
                 'sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit"',
                 'sudo journalctl --no-pager --lines=80',
@@ -216,7 +215,6 @@ def errors(text: str) -> list[str]:
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
-                'sudo loginctl enable-linger "$test_user"',
                 '[[ -S "/run/user/$test_uid/bus" ]]',
             ],
             "manager bootstrap",
