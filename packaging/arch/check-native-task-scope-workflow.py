@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "eec7ebd895325e1506e48fba0be1c791df8aabfafee8e63ab91e3b0c66e570d8"
+JOB_SHA256 = "4d2a2e65aec76bc9f9b969277edf0558f81ba75db8383a246f4259415c95f988"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -201,12 +201,16 @@ def errors(text: str) -> list[str]:
                 'canonical_home="$(realpath -e -- "$HOME")"',
                 '[[ "$HOME" == "$canonical_home" ]]',
                 '[[ "$(stat -c %u "$HOME")" == "$uid" ]]',
-                '[[ "$XDG_RUNTIME_DIR" == "/run/user/$uid" ]]',
-                '[[ "$(realpath -e -- "$XDG_RUNTIME_DIR")" == "$XDG_RUNTIME_DIR" ]]',
-                '[[ "$(stat -c %u "$XDG_RUNTIME_DIR")" == "$uid" ]]',
-                '[[ "$DBUS_SESSION_BUS_ADDRESS" == "unix:path=$XDG_RUNTIME_DIR/bus" ]]',
-                '[[ -S "$XDG_RUNTIME_DIR/bus" ]]',
-                '[[ "$(stat -c %u "$XDG_RUNTIME_DIR/bus")" == "$uid" ]]',
+                'runtime_dir="/run/user/$uid"',
+                '[[ -d "$runtime_dir" ]]',
+                '[[ "$(realpath -e -- "$runtime_dir")" == "$runtime_dir" ]]',
+                '[[ "$(stat -c %u:%a "$runtime_dir")" == "$uid:700" ]]',
+                'bus_path="$runtime_dir/bus"',
+                '[[ -S "$bus_path" ]]',
+                '[[ "$(stat -c %u:%h "$bus_path")" == "$uid:1" ]]',
+                'bus_address="unix:path=$bus_path"',
+                'export XDG_RUNTIME_DIR="$runtime_dir"',
+                'export DBUS_SESSION_BUS_ADDRESS="$bus_address"',
                 'systemctl --user show-environment >/dev/null',
                 '[[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]',
                 '[[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,4}$ ]]',
@@ -241,8 +245,8 @@ def errors(text: str) -> list[str]:
                 '/usr/bin/env -i',
                 'HOME="$HOME"',
                 'PATH=/usr/bin:/bin',
-                'XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"',
-                'DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS"',
+                'XDG_RUNTIME_DIR="$runtime_dir" \\',
+                'DBUS_SESSION_BUS_ADDRESS="$bus_address" \\',
                 'CI="$CI"',
                 'GITHUB_ACTIONS="$GITHUB_ACTIONS"',
                 'RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT"',
@@ -266,6 +270,9 @@ def errors(text: str) -> list[str]:
                 '[[ "$RUNNER_ENVIRONMENT" == github-hosted ]]',
                 '[[ "$RUNNER_OS" == Linux ]]',
                 '[[ "$(cat /proc/1/comm)" == systemd ]]',
+                'runtime_dir="/run/user/$uid"',
+                'bus_address="unix:path=$bus_path"',
+                'export DBUS_SESSION_BUS_ADDRESS="$bus_address"',
                 'systemctl --user show-environment >/dev/null',
                 'controller_unit="ghost-native-task-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${suffix}.service"',
                 '[[ "$controller_load_state" == not-found ]]',
@@ -277,6 +284,8 @@ def errors(text: str) -> list[str]:
             "real systemd invocation",
             failures,
         )
+        if "$DBUS_SESSION_BUS_ADDRESS" in exercise or "${DBUS_SESSION_BUS_ADDRESS" in exercise:
+            failures.append("integration must not read an ambient D-Bus address")
 
     if isinstance(job_node, MappingNode):
         source = text[job_node.start_mark.index : job_node.end_mark.index]

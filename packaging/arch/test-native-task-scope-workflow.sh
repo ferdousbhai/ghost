@@ -90,17 +90,23 @@ expect_rejected home-canonical \
   '[[ "$HOME" == "$canonical_home" ]]' \
   '[[ -d "$HOME" ]]'
 expect_rejected runtime-exact \
-  '[[ "$XDG_RUNTIME_DIR" == "/run/user/$uid" ]]' \
-  '[[ -d "$XDG_RUNTIME_DIR" ]]'
+  'runtime_dir="/run/user/$uid"' \
+  'runtime_dir="${XDG_RUNTIME_DIR:-/run/user/$uid}"'
 expect_rejected runtime-owner \
-  '[[ "$(stat -c %u "$XDG_RUNTIME_DIR")" == "$uid" ]]' \
-  '[[ -d "$XDG_RUNTIME_DIR" ]]'
-expect_rejected bus-exact \
-  '[[ "$DBUS_SESSION_BUS_ADDRESS" == "unix:path=$XDG_RUNTIME_DIR/bus" ]]' \
-  '[[ -n "$DBUS_SESSION_BUS_ADDRESS" ]]'
+  '[[ "$(stat -c %u:%a "$runtime_dir")" == "$uid:700" ]]' \
+  '[[ -d "$runtime_dir" ]]'
+expect_rejected bus-present \
+  '[[ -S "$bus_path" ]]' \
+  '[[ -e "$bus_path" ]]'
 expect_rejected bus-owner \
-  '[[ "$(stat -c %u "$XDG_RUNTIME_DIR/bus")" == "$uid" ]]' \
-  '[[ -S "$XDG_RUNTIME_DIR/bus" ]]'
+  '[[ "$(stat -c %u:%h "$bus_path")" == "$uid:1" ]]' \
+  '[[ -S "$bus_path" ]]'
+expect_rejected bus-address \
+  'bus_address="unix:path=$bus_path"' \
+  'bus_address="unix:abstract=ghost-ci"'
+expect_rejected ambient-bus \
+  'bus_address="unix:path=$bus_path"' \
+  'bus_address="$DBUS_SESSION_BUS_ADDRESS"'
 expect_rejected manager-probe \
   'systemctl --user show-environment >/dev/null' \
   ': "user manager environment not checked"'

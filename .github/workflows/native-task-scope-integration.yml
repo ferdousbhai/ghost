@@ -46,12 +46,16 @@ jobs:
           canonical_home="$(realpath -e -- "$HOME")"
           [[ "$HOME" == "$canonical_home" ]]
           [[ "$(stat -c %u "$HOME")" == "$uid" ]]
-          [[ "$XDG_RUNTIME_DIR" == "/run/user/$uid" ]]
-          [[ "$(realpath -e -- "$XDG_RUNTIME_DIR")" == "$XDG_RUNTIME_DIR" ]]
-          [[ "$(stat -c %u "$XDG_RUNTIME_DIR")" == "$uid" ]]
-          [[ "$DBUS_SESSION_BUS_ADDRESS" == "unix:path=$XDG_RUNTIME_DIR/bus" ]]
-          [[ -S "$XDG_RUNTIME_DIR/bus" ]]
-          [[ "$(stat -c %u "$XDG_RUNTIME_DIR/bus")" == "$uid" ]]
+          runtime_dir="/run/user/$uid"
+          [[ -d "$runtime_dir" ]]
+          [[ "$(realpath -e -- "$runtime_dir")" == "$runtime_dir" ]]
+          [[ "$(stat -c %u:%a "$runtime_dir")" == "$uid:700" ]]
+          bus_path="$runtime_dir/bus"
+          [[ -S "$bus_path" ]]
+          [[ "$(stat -c %u:%h "$bus_path")" == "$uid:1" ]]
+          bus_address="unix:path=$bus_path"
+          export XDG_RUNTIME_DIR="$runtime_dir"
+          export DBUS_SESSION_BUS_ADDRESS="$bus_address"
           systemctl --user show-environment >/dev/null
           [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]{0,19}$ ]]
           [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]{0,4}$ ]]
@@ -114,8 +118,8 @@ jobs:
             /usr/bin/env -i \
               HOME="$HOME" \
               PATH=/usr/bin:/bin \
-              XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-              DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" \
+              XDG_RUNTIME_DIR="$runtime_dir" \
+              DBUS_SESSION_BUS_ADDRESS="$bus_address" \
               CI="$CI" \
               GITHUB_ACTIONS="$GITHUB_ACTIONS" \
               RUNNER_ENVIRONMENT="$RUNNER_ENVIRONMENT" \
