@@ -101,8 +101,9 @@ export const MAX_FRAME_BYTES = 32 * 1024 * 1024;
  * out of a message handler takes the connection with it.
  */
 export function parseClientFrame(raw: string): ParsedClientFrame {
-  if (raw.length > MAX_FRAME_BYTES) {
-    return { ok: false, reason: `frame is ${raw.length} bytes, over the ${MAX_FRAME_BYTES} cap` };
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > MAX_FRAME_BYTES) {
+    return { ok: false, reason: `frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES} cap` };
   }
   let parsed: unknown;
   try {

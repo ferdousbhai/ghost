@@ -115,11 +115,20 @@ describe("client frames", () => {
     expect(parsed.reason).toContain(reason);
   });
 
-  it("refuses a frame over the size cap without parsing it", () => {
-    const parsed = parseClientFrame("x".repeat(MAX_FRAME_BYTES + 1));
-    expect(parsed).toMatchObject({ ok: false });
-    if (parsed.ok) return;
-    expect(parsed.reason).toMatch(/over the .* cap/);
+  it.each([
+    ["ASCII", "x", MAX_FRAME_BYTES],
+    ["multibyte", "é", MAX_FRAME_BYTES / 2],
+  ])("measures %s frames in UTF-8 bytes at the exact cap", (_kind, unit, count) => {
+    const boundary = unit.repeat(count);
+    expect(Buffer.byteLength(boundary, "utf8")).toBe(MAX_FRAME_BYTES);
+    expect(parseClientFrame(boundary)).toEqual({ ok: false, reason: "not JSON" });
+
+    const oversized = boundary + unit;
+    const bytes = Buffer.byteLength(oversized, "utf8");
+    expect(parseClientFrame(oversized)).toEqual({
+      ok: false,
+      reason: `frame is ${bytes} bytes, over the ${MAX_FRAME_BYTES} cap`,
+    });
   });
 
   it("leaves room for a full-page screenshot, which is the big frame", () => {

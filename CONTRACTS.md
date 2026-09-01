@@ -348,7 +348,8 @@ hosted-session, concurrency, or spend cap.
   talks only to authenticated HTTP/SSE and never edits durable state directly.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
   opt-in MV3 relay into the owner's Chromium. Pairing and workspace ownership
-  are capability-scoped; there is no second browser backend.
+  are capability-scoped; there is no second browser backend. Client text
+  frames are capped at 32 MiB of UTF-8 before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
   it.
