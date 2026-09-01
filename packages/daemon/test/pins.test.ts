@@ -12,7 +12,6 @@ import {
   PINS_VERSION,
   pinsPath,
   readPinState,
-  readPins,
   writePins,
 } from "../src/pins.js";
 
@@ -30,13 +29,13 @@ function makeSessionDir(): string {
 
 describe("pins.json", () => {
   it("reads as empty when the file does not exist", async () => {
-    expect(await readPins(makeSessionDir())).toEqual([]);
+    expect((await readPinState(makeSessionDir())).pinned).toEqual([]);
   });
 
   it("round-trips ids and stores them under the contract's key", async () => {
     const dir = makeSessionDir();
     await writePins(dir, ["conv-1", "conv-2"]);
-    expect(await readPins(dir)).toEqual(["conv-1", "conv-2"]);
+    expect((await readPinState(dir)).pinned).toEqual(["conv-1", "conv-2"]);
     expect(JSON.parse(readFileSync(pinsPath(dir), "utf8")))
       .toEqual({ version: PINS_VERSION, pinned: ["conv-1", "conv-2"] });
     expect(await readPinState(dir)).toEqual({
@@ -55,7 +54,7 @@ describe("pins.json", () => {
     const dir = makeSessionDir();
     for (const body of ["", "{", "null", "[]", "\"conv-1\"", "{}", "{\"pinned\":\"conv-1\"}"]) {
       writeFileSync(pinsPath(dir), body, "utf8");
-      expect(await readPins(dir), JSON.stringify(body)).toEqual([]);
+      expect((await readPinState(dir)).pinned, JSON.stringify(body)).toEqual([]);
     }
     writeFileSync(pinsPath(dir), JSON.stringify({ version: 99, pinned: ["pi:conv-1"] }), "utf8");
     expect(await readPinState(dir)).toEqual({ version: PINS_VERSION, pinned: [] });
@@ -68,7 +67,7 @@ describe("pins.json", () => {
       JSON.stringify({ pinned: ["conv-1", "", 7, null, "conv-1", "conv-2"] }),
       "utf8",
     );
-    expect(await readPins(dir)).toEqual(["conv-1", "conv-2"]);
+    expect((await readPinState(dir)).pinned).toEqual(["conv-1", "conv-2"]);
     expect((await readPinState(dir)).version).toBe(1);
   });
 
@@ -80,6 +79,6 @@ describe("pins.json", () => {
       writePins(dir, ["c"]),
     ]);
     expect(readdirSync(dir)).toEqual([PINS_FILENAME]);
-    expect(["a", "b", "c"]).toContain((await readPins(dir))[0]);
+    expect(["a", "b", "c"]).toContain(((await readPinState(dir)).pinned)[0]);
   });
 });

@@ -45,11 +45,6 @@ export async function readReadState(sessionDir: string): Promise<ConversationRea
   return { version: version === READS_VERSION ? READS_VERSION : 1, reads: kept };
 }
 
-/** Compatibility projection for callers that only need the stored map. */
-export async function readReads(sessionDir: string): Promise<ConversationReads> {
-  return (await readReadState(sessionDir)).reads;
-}
-
 /** Atomically replace the read-state file with exactly `reads`. */
 export async function writeReads(
   sessionDir: string,

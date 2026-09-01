@@ -150,8 +150,8 @@ export interface GhostModelsFile {
   [key: string]: unknown;
 }
 
-export const MODELS_FILENAME = "models.json";
-export const AUTH_FILENAME = "auth.json";
+const MODELS_FILENAME = "models.json";
+const AUTH_FILENAME = "auth.json";
 const MODELS_LOCK_SUFFIX = ".lock";
 const MODELS_LOCK_WAIT_MS = 500;
 const MODELS_LOCK_POLL_MS = 10;
@@ -609,7 +609,7 @@ export function setChatModelRoleIfUnset(
  */
 export const OPENROUTER_DEFAULT_FREE_MODEL = "deepseek/deepseek-r1:free";
 
-export const OPENROUTER_PROVIDER_ID = "openrouter";
+const OPENROUTER_PROVIDER_ID = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export interface OpenRouterPresetOptions {

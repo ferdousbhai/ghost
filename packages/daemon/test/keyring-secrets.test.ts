@@ -1286,16 +1286,13 @@ describe("plaintext migration", () => {
     writeFileSync(join(home, "models.json"), JSON.stringify({
       providers: { openrouter: { apiKey: "clean-home-secret" } },
     }));
-    const stages: string[] = [];
     const client = new MemorySecretServiceClient();
     const context = openGhostSecretContext({
       home,
       client,
       metadataPath: join(home, "state.sqlite"),
-      retirementProbe: (stage) => stages.push(stage),
     });
     try {
-      expect(stages).toEqual(["skipped"]);
       // The live path still materializes plaintext into keyring references.
       expect(readFileSync(join(home, "models.json"), "utf8")).not.toContain("clean-home-secret");
       // And no claim dir or removal evidence was ever created.
@@ -1318,16 +1315,13 @@ describe("plaintext migration", () => {
         expires: 2_000_000_000_000,
       },
     }));
-    const stages: string[] = [];
     const client = new MemorySecretServiceClient();
     const context = openGhostSecretContext({
       home,
       client,
       metadataPath: join(home, "state.sqlite"),
-      retirementProbe: (stage) => stages.push(stage),
     });
     try {
-      expect(stages).toEqual(["engaged"]);
       expect(() => readFileSync(join(agentDir, "auth.json"), "utf8")).toThrow();
     } finally {
       context.close();

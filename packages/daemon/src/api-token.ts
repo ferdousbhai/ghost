@@ -6,7 +6,7 @@ import {
   type TokenStoreOptions,
 } from "./token-store.js";
 
-export const API_TOKEN_FILENAME = "api-token";
+const API_TOKEN_FILENAME = "api-token";
 export const API_TOKEN_PATTERN = TOKEN_PATTERN;
 
 export type ApiTokenStoreOptions = TokenStoreOptions;

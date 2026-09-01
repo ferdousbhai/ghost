@@ -8,7 +8,6 @@ import {
   READS_VERSION,
   readReadState,
   readsPath,
-  readReads,
   writeReads,
 } from "../src/reads.js";
 
@@ -27,10 +26,10 @@ function makeSessionDir(): string {
 describe("reads.json", () => {
   it("reads missing and malformed state as empty", async () => {
     const dir = makeSessionDir();
-    expect(await readReads(dir)).toEqual({});
+    expect((await readReadState(dir)).reads).toEqual({});
     for (const body of ["", "{", "null", "[]", "{}", '{"reads":[]}']) {
       writeFileSync(readsPath(dir), body, "utf8");
-      expect(await readReads(dir), JSON.stringify(body)).toEqual({});
+      expect((await readReadState(dir)).reads, JSON.stringify(body)).toEqual({});
     }
     writeFileSync(
       readsPath(dir),
@@ -48,7 +47,7 @@ describe("reads.json", () => {
       bad: "yesterday",
       number: 7,
     } }), "utf8");
-    expect(await readReads(dir)).toEqual({
+    expect((await readReadState(dir)).reads).toEqual({
       "conv-1": "2026-08-25T10:11:12.000Z",
     });
     expect((await readReadState(dir)).version).toBe(1);

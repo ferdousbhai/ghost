@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { writePrivateJsonAtomic } from "./private-file.js";
 
 export const PINS_FILENAME = "pins.json";
 export const PINS_VERSION = 2;
@@ -39,33 +39,8 @@ export async function readPinState(sessionDir: string): Promise<ConversationPins
   return { version: version === PINS_VERSION ? PINS_VERSION : 1, pinned: ids };
 }
 
-/** Compatibility projection for callers that only need the stored keys. */
-export async function readPins(sessionDir: string): Promise<string[]> {
-  return (await readPinState(sessionDir)).pinned;
-}
-
-/**
- * Replace the pin file with exactly `ids`.
- *
- * The temporary lives beside the destination so `rename` cannot cross a
- * filesystem boundary, and its random, exclusive name keeps two concurrent
- * writers off one staging file. Mode 0600 matches the sibling sidecars.
- */
+/** Atomically replace the pin file with exactly `ids`. */
 export async function writePins(sessionDir: string, ids: readonly string[]): Promise<void> {
   await mkdir(sessionDir, { recursive: true });
-  const path = pinsPath(sessionDir);
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, `${JSON.stringify({ version: PINS_VERSION, pinned: [...ids] }, null, 2)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    await rename(temporary, path);
-  } catch (error) {
-    // `writeFile` may create the temporary before throwing, so cleanup cannot
-    // depend on the call having returned.
-    await rm(temporary, { force: true }).catch(() => {});
-    throw error;
-  }
+  await writePrivateJsonAtomic(pinsPath(sessionDir), { version: PINS_VERSION, pinned: [...ids] });
 }

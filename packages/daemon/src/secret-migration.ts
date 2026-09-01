@@ -85,12 +85,6 @@ export interface GhostSecretMigrationOptions {
   agentDbFault?: (stage: AgentDbFaultStage, path: string) => void;
   /** Synchronous adversarial seam immediately before portable CAS publication. */
   portableCommitProbe?: (source: "models" | "mcp", path: string) => void;
-  /**
-   * Test seam observing whether the one-time agent.db/auth.json retirement
-   * machinery ran ("engaged") or was skipped for a home with no legacy
-   * artifact ("skipped").
-   */
-  retirementProbe?: (stage: "skipped" | "engaged", directory: string) => void;
 }
 
 export type AgentDbFaultStage =
@@ -1598,11 +1592,9 @@ function migrateWithContext(
 ): void {
   const authPath = options.authPath ?? join(options.home, ".pi", "auth.json");
   if (!legacySecretArtifactsPresent(authPath)) {
-    options.retirementProbe?.("skipped", dirname(authPath));
     materializeLiveReferences(options, context, new Set());
     return;
   }
-  options.retirementProbe?.("engaged", dirname(authPath));
   recoverPlainFileRemovals(authPath, options.plainFileFault);
   const agentDb = join(dirname(authPath), "agent.db");
   const agentDbClaim = recoverOrClaimAgentDb(agentDb, options);

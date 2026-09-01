@@ -1,8 +1,9 @@
 import { lstat, readFile, realpath } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { pathIsWithin } from "./path-within.js";
 import type {
   createSdkMcpServer,
   query,
@@ -53,11 +54,6 @@ export class ClaudeAgentSdkLoadError extends Error {
     super(message, options);
     this.name = "ClaudeAgentSdkLoadError";
   }
-}
-
-function pathWithin(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function sdkInstallRoot(ownerHome: string, xdgDataHome: string | undefined): string {
@@ -179,7 +175,7 @@ export class ClaudeAgentSdkLoader {
         { cause },
       );
     }
-    if (!pathWithin(canonicalRoot, packageRoot)) {
+    if (!pathIsWithin(canonicalRoot, packageRoot)) {
       throw new ClaudeAgentSdkLoadError(
         `Claude Agent SDK package resolves outside its versioned install root: ${packageLink}`,
       );
@@ -248,7 +244,7 @@ export class ClaudeAgentSdkLoader {
           { cause },
         );
       }
-      if (!pathWithin(canonicalRoot, peerEntry)) {
+      if (!pathIsWithin(canonicalRoot, peerEntry)) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer resolves outside its versioned install root: ${peerName}`,
         );
@@ -257,7 +253,7 @@ export class ClaudeAgentSdkLoader {
       let peerManifestPath: string | undefined;
       let peerManifestState: FileState | undefined;
       let cursor = dirname(peerEntry);
-      while (pathWithin(canonicalRoot, cursor) && cursor !== canonicalRoot) {
+      while (pathIsWithin(canonicalRoot, cursor) && cursor !== canonicalRoot) {
         const candidate = join(cursor, "package.json");
         const candidateState = await lstat(candidate).catch(() => undefined);
         if (candidateState?.isFile() && !candidateState.isSymbolicLink()
@@ -296,7 +292,7 @@ export class ClaudeAgentSdkLoader {
       ]);
       if (!peerRootState.isDirectory() || peerRootState.isSymbolicLink()
         || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()
-        || !pathWithin(peerRoot, peerEntry)) {
+        || !pathIsWithin(peerRoot, peerEntry)) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer ${peerName}@${peerVersion} is not a regular package boundary.`,
         );

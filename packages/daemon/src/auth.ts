@@ -196,8 +196,8 @@ async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
 }): Promise<LoginRuntime> {
-  // allowModelNetwork is false either way: it gates only catalog refresh, not
-  // the provider's own OAuth HTTP, so a login works offline. create() still
+  // allowModelNetwork stays false: it gates only catalog refresh, not the
+  // provider's own OAuth HTTP, so a login works offline. create() still
   // builds the local credential snapshot, which `configured`/`connectedVia`
   // read.
   return createGhostPiRuntime({

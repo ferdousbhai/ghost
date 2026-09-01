@@ -30,8 +30,8 @@ import {
 import { silentLogger, type Logger } from "./log.js";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
-export const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
-export const MAX_SCHEDULE_SLUG_LENGTH = 64;
+const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
+const MAX_SCHEDULE_SLUG_LENGTH = 64;
 
 const TIMER_SUFFIXES = [".timer"] as const;
 const UNIT_SUFFIXES = [...TIMER_SUFFIXES, ".service"] as const;

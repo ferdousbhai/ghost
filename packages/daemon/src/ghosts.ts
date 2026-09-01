@@ -24,8 +24,8 @@ export interface Ghost {
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
 export const GHOST_AGENT_DIRNAME = ".pi";
-export const GHOST_CHARACTER_FILENAME = "character.md";
-export const GHOST_SETTINGS_FILENAME = "settings.yml";
+const GHOST_CHARACTER_FILENAME = "character.md";
+const GHOST_SETTINGS_FILENAME = "settings.yml";
 
 /**
  * Where a deleted ghost goes when the freedesktop home trash is on another
@@ -33,7 +33,7 @@ export const GHOST_SETTINGS_FILENAME = "settings.yml";
  * skips it and a trashed ghost is gone from the API while its files are still
  * on disk. The ordinary path is the home trash; see `GhostRegistry.trash`.
  */
-export const GHOST_TRASH_DIRNAME = ".trash";
+const GHOST_TRASH_DIRNAME = ".trash";
 
 /**
  * Ghost names are both URL path segments and directory names, so the

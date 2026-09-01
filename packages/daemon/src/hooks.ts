@@ -8,8 +8,8 @@ import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 
-export const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
-export const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
+const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
+const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
 interface GhostHookEventBase {
@@ -318,7 +318,7 @@ function readCommandHooksDocument(path: string): Record<string, unknown> {
   return parsed;
 }
 
-export interface ParsedHooksDocument {
+interface ParsedHooksDocument {
   commands: CommandHook[];
   builtin: Record<string, GhostBuiltinHookSettings>;
 }
@@ -327,7 +327,7 @@ export interface ParsedHooksDocument {
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-export function parseHooksDocument(parsed: unknown, path: string): ParsedHooksDocument {
+function parseHooksDocument(parsed: unknown, path: string): ParsedHooksDocument {
   if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
   return { commands: parseCommandHooks(parsed, path), builtin: parseBuiltinHookSettings(parsed, path) };
 }
