@@ -129,6 +129,17 @@ Retained per-ghost `notes/` and `docs/` trees are inert: Ghost never indexes,
 renames, or rewrites them automatically. The owner's explicit legacy Documents
 placement command is the only Ghost-provided path out of those trees.
 
+An exact `.obsidian` entry that is a real directory marks the Documents root as
+an Obsidian vault. Ghost exposes that one derived capability in the Documents
+index but does not list the hidden entry, read or modify Obsidian configuration,
+launch the application, or make session startup depend on its CLI socket. The
+plain owner-readable files remain canonical. When the capability is present,
+the runtime prompt points at admitted `obsidian-*` machine skills for
+vault-aware search, links, properties, tasks, and renames; native filesystem
+tools remain the fallback when the skill, CLI, or running application is
+unavailable. This is a semantic adapter over Documents, not another content
+store or a Ghost-owned integration API.
+
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
 stays in the home, because the home is the unit of atomic operation: rename and
@@ -259,8 +270,9 @@ chooses it. Automatic context is narrower: at the start of each pi or Claude
 Code session, and for greeting input, Ghost lists only the root's immediate
 non-hidden regular files and directories, newest-modified first with name as
 the deterministic tie-break. It reads no file content, follows no symbolic
-link, and never descends. At most 50 entries and 4,000 characters enter the
-prompt; the index states the exact number of eligible root entries omitted.
+link, and never descends; the only hidden-entry inspection is an `lstat` of the
+exact root `.obsidian` marker. At most 50 entries and 4,000 characters enter
+the prompt; the index states the exact number of eligible root entries omitted.
 Names are fenced and treated as untrusted data.
 
 Already-released native Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
@@ -589,6 +601,12 @@ files themselves, which the native filesystem tools read on demand. A
 conversation the daemon has dropped (pi session eviction, a `close`, or a daemon
 restart) derives them again on its next turn.
 
+The Documents index also carries `obsidianVault`, true only when the descriptor-
+confined root has a real `.obsidian` directory at derivation time. A missing,
+unreadable, non-directory, or symbolic-link marker is false. The flag selects
+trusted prompt policy only; the marker and every listed filename remain
+untrusted filesystem state.
+
 Both indexes are newest-modified first and carry at most 50 entries, with a
 character budget behind that. Each is one entry per line with no bullet marker:
 memory as the bare slug (the file is that slug plus `.md`), Documents as the
@@ -646,6 +664,13 @@ branch moves, so the per-turn section and the per-call guard never rescan the
 tree; the plan and todo routes read the open session's book or open the
 transcript file directly, never a full session.
 
+This todo is live conversation progress, not the owner's durable task store;
+owner-facing UI may label it **Progress** while the existing `todo` tool, slash
+command, transcript type, and wire fields remain stable. Tasks written in an
+Obsidian Documents vault are owner-wide durable work. Ghost never mirrors,
+imports, or synchronizes the two; it creates or changes a vault task only when
+the owner's request calls for a durable task.
+
 `inspect_image` is Ghost-owned (`packages/daemon/src/inspect-image.ts`) and
 exists for a chat model that cannot see images: it reads one
 png/jpg/gif/webp file (relative paths resolve against the conversation cwd),
@@ -684,7 +709,9 @@ product-specific tool. Plan mode blocks model Bash entirely, including Omarchy
 catalog inspection and optional service CLIs; perform that discovery before
 planning or after the owner approves/stops the plan. Claude Code receives the
 same immutable machine-skill index in its prompt but does not enable the SDK's
-unscoped ambient skill discovery.
+unscoped ambient skill discovery. Obsidian's CLI requires a running Obsidian
+instance; Ghost neither starts it while deriving context nor treats its absence
+as a Documents failure.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs

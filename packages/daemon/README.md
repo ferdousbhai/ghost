@@ -122,6 +122,13 @@ non-hidden regular files and directories, with no content reads or descent,
 capped at 50 newest-modified entries and 4,000 characters. Explicit native
 filesystem tools can traverse further when the task calls for it.
 
+When the root contains a real `.obsidian/` directory, the session prompt
+identifies it as an Obsidian vault and directs vault-aware operations through
+admitted `obsidian-*` machine skills. Files remain the source of truth and
+native tools remain the fallback. Ghost does not read the vault configuration,
+launch Obsidian, depend on its CLI socket, or synchronize the conversation's
+progress list with durable vault tasks.
+
 Ghost rename, delete, and future home export never move or copy the owner-wide
 Documents tree.
 

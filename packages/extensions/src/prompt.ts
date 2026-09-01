@@ -89,6 +89,16 @@ function docsSection(input: GhostSystemPromptInput): string[] {
   if (input.docs.omitted > 0) {
     lines.push(`(+${input.docs.omitted} more)`);
   }
+  const vaultPolicy = input.docs.obsidianVault
+    ? [
+        "This Documents root is an Obsidian vault, while its plain files remain the source of truth. "
+          + "For vault-aware search, links, properties, tasks, or renames, first read the relevant "
+          + "installed `obsidian-*` skill and follow its CLI instructions; the CLI requires Obsidian "
+          + "to be open. If the skill, CLI, or application is unavailable, use native filesystem "
+          + "tools. Vault tasks are durable owner tasks; never mirror this conversation's progress "
+          + "list into them unless the owner asks for a durable task.",
+      ]
+    : [];
   return [
     "## Documents",
     "The owner's own files, shared with the owner and every ghost; not a place for this "
@@ -96,6 +106,7 @@ function docsSection(input: GhostSystemPromptInput): string[] {
       + "a trailing `/` marks a directory, and directories are not expanded. It is a snapshot "
       + "taken when this session started, so list the directory yourself when currency "
       + "matters. Read an entry when relevant.",
+    ...vaultPolicy,
     "",
     fenceUntrusted(lines.join("\n"), {
       source: "Documents index",

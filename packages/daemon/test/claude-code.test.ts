@@ -1702,6 +1702,7 @@ fi
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
     const { paths, scheduleUnitDir, seenOptions, lifecycle } = setupClaudeHost();
     mkdirSync(temp!.documentsDir, { recursive: true });
+    mkdirSync(join(temp!.documentsDir, ".obsidian"));
     writeFileSync(join(temp!.documentsDir, "owner-plan.pdf"), "owner bytes");
     mkdirSync(join(paths.home, "docs"), { recursive: true });
     writeFileSync(join(paths.home, "docs", "legacy.md"), "# Legacy home doc\n");
@@ -1766,6 +1767,8 @@ fi
     const appended = systemPrompt.append;
     expect(appended).toContain(temp!.documentsDir);
     expect(appended).toContain("owner-plan.pdf");
+    expect(appended).toContain("This Documents root is an Obsidian vault");
+    expect(appended).toContain("installed `obsidian-*` skill");
     expect(appended).toContain(scheduleUnitDir);
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(appended).not.toContain("~/.config/systemd/user");

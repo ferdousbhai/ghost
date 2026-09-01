@@ -64,7 +64,10 @@ ambient credential discovery, and no cloud custody.
 - **Documents and skills coexist without sharing lifecycle** — Documents are
   live owner-wide files, while skills are bounded declarative instructions from
   a ghost or trusted project. pi supports explicit `/skill:<name>` invocation
-  without treating Documents as a package root.
+  without treating Documents as a package root. A real `.obsidian/` marker can
+  classify that same tree as an Obsidian vault and steer both runtimes toward
+  admitted upstream skills, but the files stay canonical and session startup
+  never depends on the application or its CLI socket.
 - **One browser** — the owner's real signed-in Chromium, reached by an MV3
   extension over `chrome.debugger`, behind a backend-agnostic tool surface. A
   second, ghost-owned profile was tried and removed: it doubled the code for a

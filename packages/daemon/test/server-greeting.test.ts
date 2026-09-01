@@ -386,6 +386,7 @@ function documentPage(name: string) {
   return {
     root: "/owner/Documents",
     path: "",
+    obsidianVault: false,
     entries: [{
       name,
       path: name,
