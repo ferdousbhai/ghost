@@ -1,16 +1,34 @@
 pragma Singleton
 
-// Theme — Ghost keeps Omarchy's accent and semantic colours, while its own
-// reading surfaces use a quiet neutral foundation. This prevents a theme's
-// decorative muted colour from becoming low-contrast body copy and gives the
-// HUD a stable hierarchy across light and dark Omarchy themes.
+// Theme — Omarchy's own design system, as Omarchy publishes it.
+//
+// Ghost is an Omarchy app, so it does not invent a parallel set of sizes,
+// spacings and states. Omarchy 4 publishes the whole system and every stock
+// surface is built from it; this file reads it and adds nothing but the
+// ghost's own identity colours on top.
 //
 // Omarchy (>= 4.0 "Quattro") keeps the active theme as a *copy* at
 // ~/.local/state/omarchy/current/theme/. Two files matter to us:
 //
 //   colors.toml   flat `key = "#rrggbb"` pairs + `mode = "dark"|"light"`
-//   shell.toml    sectioned TOML; [bar] gives us bar height/colors so a
-//                 standalone ghost bar surface lines up with Omarchy's own
+//   shell.toml    sectioned TOML carrying the design system itself:
+//                 [bar] sizes/colours, [hyprland] the compositor's active
+//                 border, [controls] the four-state chrome ladder, [spacing]
+//                 a token scale, and [font] a type scale rooted at one base
+//                 size. Its own template is
+//                 /usr/share/omarchy/default/themed/shell.toml.tpl, which is
+//                 where the default value of every commented-out key below
+//                 comes from.
+//
+// Two things Omarchy states outside those files:
+//
+//   the font    fontconfig maps `monospace` to JetBrainsMono Nerd Font
+//               system-wide (default/fontconfig/conf.avail/50-omarchy.conf),
+//               so asking for "monospace" is how an Omarchy app gets the
+//               Omarchy face. Naming the family here would pin it instead.
+//   the corners shell.toml publishes no radius, and
+//               default/hypr/looknfeel.lua sets `rounding = 0` for every
+//               window but a popped one. Square is the Omarchy shape.
 //
 // Only the keys the theme author actually wrote are present in colors.toml —
 // Omarchy derives the rest (color0..15, bg/fg aliases, bright_* mixes) in
@@ -25,8 +43,9 @@ pragma Singleton
 // gives us a reliable single-shot edge. We watch theme.name and re-read
 // colors.toml when it fires.
 //
-// Everything degrades to the fallback palette below when Omarchy is absent,
-// so these surfaces still run on a bare Hyprland or in a nested compositor.
+// Everything degrades to the fallback palette and the template's own default
+// numbers when Omarchy is absent, so these surfaces still run on a bare
+// Hyprland or in a nested compositor.
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -73,29 +92,170 @@ Singleton {
 
     readonly property bool light: root.pick("mode") === "light"
 
-    // The summon-ghost canvas: a cool near-black (hue ~260) so the warm amber
-    // brand has something cold to glow against. Light mode keeps a plain
-    // neutral paper; the ghost identity reads through the amber tokens there.
-    readonly property color background: root.light ? "#fafafa" : "#05070b"
-    readonly property color surface: root.light ? "#ffffff" : "#0b0d12"
-    readonly property color surfaceDeep: root.light ? "#f2f2f2" : "#11141b"
-    readonly property color foregroundBright: root.light ? "#111111" : "#f8f8f8"
-    readonly property color foreground: root.light ? "#383838" : "#c9ccd4"
-    readonly property color foregroundDim: root.light ? "#666666" : "#8c8f95"
-    readonly property color foregroundFaint: root.light ? "#858585" : "#6a6e76"
+    /**
+     * One `section.key` from shell.toml, following the references Omarchy's own
+     * template writes: `[popups] border = "hyprland.active-border"` names
+     * another key rather than repeating its value. The hop count stops a theme
+     * that points two keys at each other from hanging the HUD.
+     */
+    function shellValue(key: string): var {
+        let value = root.shell[key];
+        for (let hop = 0; hop < 4; hop++) {
+            if (typeof value !== "string"
+                || !/^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*$/u.test(value)
+                || root.shell[value] === undefined) break;
+            value = root.shell[value];
+        }
+        return value;
+    }
 
-    // Chrome has its own ladder instead of borrowing a text colour.
-    readonly property color hover: root.light ? "#eeeeee" : "#151920"
-    readonly property color selection: root.light ? "#e5e5e5" : "#1c2029"
-    readonly property color pressed: root.light ? "#dddddd" : "#232834"
-    readonly property color border: root.light ? "#dedede" : "#1e222a"
-    readonly property color borderStrong: root.light ? "#bdbdbd" : "#363c47"
+    function shellNumber(key: string, fallbackValue: real): real {
+        const raw = root.shellValue(key);
+        if (raw === undefined || raw === "") return fallbackValue;
+        const value = Number(raw);
+        return isFinite(value) ? value : fallbackValue;
+    }
+
+    function shellFlag(key: string, fallbackValue: bool): bool {
+        const raw = root.shellValue(key);
+        if (raw === undefined || raw === "") return fallbackValue;
+        return raw === true || String(raw).toLowerCase() === "true";
+    }
+
+    /**
+     * A colour from shell.toml. Two forms beyond plain `#rrggbb` appear in the
+     * template: Hyprland's `rgba(rrggbbaa)` literal, and a gradient — two or
+     * more colours plus an angle — where the first colour is the one a flat
+     * surface can use.
+     */
+    function shellColor(key: string, fallbackValue: color): color {
+        const raw = root.shellValue(key);
+        if (typeof raw !== "string" || raw.trim() === "") return fallbackValue;
+        const first = raw.trim().split(/\s+/u)[0];
+        const hyprland = /^rgba?\(([0-9a-fA-F]{6}|[0-9a-fA-F]{8})\)$/u.exec(first);
+        if (hyprland) {
+            const digits = hyprland[1];
+            return digits.length === 8
+                ? Qt.rgba(parseInt(digits.slice(0, 2), 16) / 255,
+                    parseInt(digits.slice(2, 4), 16) / 255,
+                    parseInt(digits.slice(4, 6), 16) / 255,
+                    parseInt(digits.slice(6, 8), 16) / 255)
+                : Qt.color("#" + digits);
+        }
+        return /^#[0-9a-fA-F]{3,8}$/u.test(first) ? Qt.color(first) : fallbackValue;
+    }
+
+    /** A step along the line between two colours, opaque. */
+    function blend(from: color, to: color, amount: real): color {
+        return Qt.rgba(from.r + (to.r - from.r) * amount,
+            from.g + (to.g - from.g) * amount,
+            from.b + (to.b - from.b) * amount, 1);
+    }
+
+    // [font] — one base size and a scale derived from it. The ratios are the
+    // template's own commented defaults at base-size 12; a theme that pins a
+    // token in px wins over the ratio, exactly as the template describes.
+    readonly property real fontBase: Math.max(1, root.shellNumber("font.base-size", 12))
+    function fontSizeFor(token: string, ratio: real): int {
+        return Math.max(1, Math.round(root.shellNumber("font." + token, root.fontBase * ratio)));
+    }
+    readonly property int fontSizeCaption: root.fontSizeFor("caption", 10 / 12)
+    readonly property int fontSizeSmall: root.fontSizeFor("body-small", 11 / 12)
+    readonly property int fontSize: root.fontSizeFor("body", 1)
+    readonly property int fontSizeSubtitle: root.fontSizeFor("subtitle", 13 / 12)
+    readonly property int fontSizeTitle: root.fontSizeFor("title", 14 / 12)
+    readonly property int fontSizeHeading: root.fontSizeFor("heading", 16 / 12)
+    readonly property int fontSizeDisplay: root.fontSizeFor("display", 24 / 12)
+    readonly property int fontSizeDisplayLarge: root.fontSizeFor("display-large", 28 / 12)
+    readonly property int iconSizeSmall: root.fontSizeFor("icon-small", 11 / 12)
+    readonly property int iconSize: root.fontSizeFor("icon", 14 / 12)
+    readonly property int iconSizeLarge: root.fontSizeFor("icon-large", 18 / 12)
+
+    // [spacing] — the same shape: a scale that optionally tracks the font base,
+    // and per-token pins in absolute px that bypass it.
+    readonly property real spacingScale: root.shellNumber("spacing.scale", 1)
+        * (root.shellFlag("spacing.scale-with-font", true) ? root.fontBase / 12 : 1)
+    function spaceFor(token: string, base: real): int {
+        return Math.max(0, Math.round(root.shellNumber("spacing." + token, base * root.spacingScale)));
+    }
+    readonly property int spaceXxs: root.spaceFor("xxs", 2)
+    readonly property int spaceXs: root.spaceFor("xs", 3)
+    readonly property int spaceSm: root.spaceFor("sm", 4)
+    readonly property int spaceMd: root.spaceFor("md", 6)
+    readonly property int spaceLg: root.spaceFor("lg", 8)
+    readonly property int spaceXl: root.spaceFor("xl", 10)
+    readonly property int spaceXxl: root.spaceFor("xxl", 12)
+    readonly property int spaceXxxl: root.spaceFor("xxxl", 14)
+    readonly property int spaceHuge: root.spaceFor("huge", 18)
+    readonly property int controlGap: root.spaceFor("control-gap", 8)
+    readonly property int controlPaddingX: root.spaceFor("control-padding-x", 10)
+    readonly property int controlPaddingY: root.spaceFor("control-padding-y", 6)
+    readonly property int inputPaddingY: root.spaceFor("input-padding-y", 7)
+    readonly property int popupRowHeight: root.spaceFor("popup-row-height", 28)
+    readonly property int rowGap: root.spaceFor("row-gap", 8)
+    readonly property int rowPaddingX: root.spaceFor("row-padding-x", 12)
+    readonly property int labelGap: root.spaceFor("label-gap", 4)
+    readonly property int panelGap: root.spaceFor("panel-gap", 14)
+    readonly property int panelPadding: root.spaceFor("panel-padding", 18)
+    readonly property int popupPadding: root.spaceFor("popup-padding", 14)
+    readonly property int dropdownWidth: root.spaceFor("dropdown-width", 240)
+
+    // [controls] — Omarchy publishes one chrome colour and one border colour
+    // per state, and separates the states by alpha. Every fill below is
+    // translucent for that reason: it is a tint of the surface under it, not a
+    // colour of its own.
+    function controlFill(state: string): color {
+        const tint = root.shellColor("controls." + state + "-color",
+            root.shellColor("controls.normal-color", root.foreground));
+        return Qt.rgba(tint.r, tint.g, tint.b,
+            root.shellNumber("controls." + state + "-fill-alpha", 0.04));
+    }
+    function controlBorder(state: string, alphaKey: string): color {
+        const tint = root.shellColor("controls." + state + "-border",
+            root.shellColor("controls.normal-border", root.foreground));
+        return Qt.rgba(tint.r, tint.g, tint.b, root.shellNumber(alphaKey, 0.4));
+    }
+
+    // The canvas is the theme's own background, the same colour Omarchy gives
+    // its bar and popups, so the HUD sits in the desktop rather than beside it.
+    // Its two neighbours are the published steps either side: `dark_background`
+    // recesses a well or a rail, `lighter_background` raises a card. Both modes
+    // come out of the same three keys, so a light Omarchy theme needs no
+    // second palette here.
+    readonly property color background: root.pick("background")
+    readonly property color surface: root.pick("lighter_background")
+    /** The recessed step. The name predates the mapping; wells and rails use it. */
+    readonly property color surfaceDeep: root.pick("dark_background")
+    readonly property color foregroundBright: root.pick("bright_foreground")
+    readonly property color foreground: root.pick("foreground")
+    // Derived rather than taken from `dark_foreground`: that key is a theme's
+    // decorative dim, free to sit at any contrast, and body copy that fades
+    // into the background is the one failure this file has always guarded
+    // against. Walking the text colour toward the canvas keeps the theme's hue
+    // and a predictable ladder.
+    readonly property color foregroundDim: root.blend(root.foreground, root.background, 0.35)
+    readonly property color foregroundFaint: root.blend(root.foreground, root.background, 0.55)
+
+    // Chrome states, straight from [controls]: one colour, four alphas.
+    readonly property color hover: root.controlFill("hover-cursor")
+    readonly property color focusFill: root.controlFill("focus")
+    readonly property color selection: root.controlFill("selected")
+    readonly property color pressed: Qt.rgba(root.selection.r, root.selection.g,
+        root.selection.b, root.shellNumber("controls.pressed-fill-alpha", 0.22))
+    readonly property color border: root.controlBorder("normal", "controls.normal-border-alpha")
+    /** The same border at the strongest alpha Omarchy publishes for it. */
+    readonly property color borderStrong: root.controlBorder("selected",
+        "controls.selected-border-alpha")
+    readonly property int borderWidth: Math.max(1,
+        Math.round(root.shellNumber("controls.normal-border-width", 1)))
     // Compatibility alias for host integrations; new UI code should choose a
     // text or border token explicitly.
     readonly property color muted: root.border
 
     // One inherited accent carries focus, selection, and the active state.
     readonly property color accent: root.pick("accent")
+    /** The compositor's own active border, so a card can line up with a window. */
+    readonly property color activeBorder: root.shellColor("hyprland.active-border", root.accent)
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
@@ -105,10 +265,14 @@ Singleton {
         return luma > 0.58 ? "#111111" : "#ffffff";
     }
 
-    readonly property int barSize: Number(root.shell["bar.size-horizontal"]) || 26
-    readonly property color barBackground: root.shell["bar.background"] || root.background
-    readonly property color barForeground: root.shell["bar.text"] || root.foreground
-    readonly property color barActive: root.shell["bar.active"] || root.accent
+    // The bar's cross-axis size is quoted at base-size 12 and grows with the
+    // type scale when the theme says so.
+    readonly property int barSize: Math.max(1, Math.round(
+        root.shellNumber("bar.size-horizontal", 26)
+        * (root.shellFlag("bar.scale-with-font", true) ? root.fontBase / 12 : 1)))
+    readonly property color barBackground: root.shellColor("bar.background", root.background)
+    readonly property color barForeground: root.shellColor("bar.text", root.foreground)
+    readonly property color barActive: root.shellColor("bar.active", root.accent)
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral
@@ -159,25 +323,35 @@ Singleton {
     readonly property string synKeyword: "#9d8cf5"
     readonly property string synFunction: "#d9c98a"
 
-    // Not themed by Omarchy; kept here so every surface agrees on an 8px
-    // rhythm and a readable native type scale.
-    readonly property int radius: 8
-    readonly property int radiusLarge: 16
-    readonly property int radiusTail: 2
-    readonly property int pad: 16
-    readonly property int gap: 8
-    readonly property int sectionGap: 24
-    readonly property int controlHeight: 36
-    readonly property int compactControlHeight: root.controlHeight - root.gap
-    readonly property int durFast: 200
+    // Omarchy publishes no radius in shell.toml and rounds nothing in
+    // looknfeel.lua. Square is the shape; the tokens stay so a future Omarchy
+    // radius has one place to land.
+    readonly property int radius: 0
+    readonly property int radiusLarge: 0
+    readonly property int radiusTail: 0
+
+    // The names the HUD already uses, pointed at their published equivalents.
+    readonly property int pad: root.panelPadding
+    readonly property int gap: root.controlGap
+    readonly property int sectionGap: root.spaceHuge
+    readonly property int controlHeight: root.spaceFor("control-height", 28)
+    readonly property int compactControlHeight: root.popupRowHeight
+
+    // omarchy.org moves everything on one 150ms ease-out; the longer two keep
+    // their existing relation to it for the few surfaces that travel further.
+    readonly property int durFast: 150
     readonly property int durMed: 300
     readonly property int durSlow: 500
-    readonly property string fontFamily: "sans-serif"
-    readonly property string fontFamilyMono: root.shell["font.family"] || "monospace"
-    readonly property int fontSize: Number(root.shell["font.body"]) || 14
-    readonly property int fontSizeSmall: Number(root.shell["font.body-small"]) || 12
+
+    // "monospace" is not a fallback here: Omarchy's fontconfig binds it to
+    // JetBrainsMono Nerd Font for every app on the machine, which is how an
+    // Omarchy app asks for the Omarchy face without pinning a family. Off
+    // Omarchy it resolves to whatever that machine calls monospace, which is
+    // the right answer there too.
+    readonly property string fontFamily: "monospace"
+    readonly property string fontFamilyMono: root.fontFamily
     /** Proportional line height for reading copy; chrome labels stay at 1.0. */
-    readonly property real lineHeight: 1.35
+    readonly property real lineHeight: 1.4
 
     // A deliberately small parser. Omarchy's theme files are generated from
     // templates and only ever contain `key = "value"`, `key = number`,

@@ -49,6 +49,34 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   routing, remote access, and connection state. Memory deletion is confirmed
   and recoverable.
 
+## Theme
+
+Ghost is an Omarchy app and does not carry its own design system. Omarchy 4
+publishes one, and `qml/services/Theme.qml` reads it out of the active theme
+copy at `~/.local/state/omarchy/current/theme/`:
+
+- `colors.toml` — the palette. `background` is the canvas, the same colour
+  Omarchy gives its bar and popups; `dark_background` recesses a well or a
+  rail and `lighter_background` raises a card. Dim text is walked from the
+  theme's own foreground toward its background rather than taken from
+  `dark_foreground`, which is a decorative key free to sit at any contrast.
+- `shell.toml` — the rest of the system. `[font]` is a type scale rooted at
+  one `base-size`; `[spacing]` is a token scale with an optional font-linked
+  multiplier; `[controls]` is the four-state chrome ladder, one colour and one
+  border varied by alpha; `[hyprland]` is the compositor's active border.
+  Values may name another key (`border = "hyprland.active-border"`), and those
+  references are followed. Every default matches
+  `/usr/share/omarchy/default/themed/shell.toml.tpl`.
+
+Two Omarchy decisions live outside those files. Its fontconfig binds
+`monospace` to JetBrainsMono Nerd Font machine-wide, so the shell asks for
+`monospace` rather than pinning a family. And `shell.toml` publishes no radius
+while `default/hypr/looknfeel.lua` rounds nothing, so surfaces are square.
+
+Only the ghost's own identity is fixed: the amber presence and rose failure
+colours, the spectral orb, and the code view, which stays dark in both Omarchy
+modes because a syntax palette tuned for dark ink turns to mud on paper.
+
 ## Verification
 
 Never launch a plain development Quickshell process on the owner's session bus.
