@@ -1390,6 +1390,136 @@ describe("Claude Code native harness runtime", () => {
     expect(existsSync(claudeSessionMetadataPath(paths.sessionDir, "warm-task-bridge"))).toBe(true);
   });
 
+  it("reattaches the admitted task turn when runtime identity rotates its warm query", async () => {
+    let executableIdentity = "claude-executable-v1";
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      resolveExecutable: async () => process.execPath,
+      inspectExecutable: async () => executableIdentity,
+      readVersion: readSupportedClaudeVersion,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        subscriptionType: "max",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+    });
+    const activeTasks = activeClaudeTaskServices();
+    let oldOptions: ClaudeQueryOptions | undefined;
+    let replacementOptions: ClaudeQueryOptions | undefined;
+    let staleDuringReplacement: TestMcpResult | undefined;
+    let replacementCreate: TestMcpResult | undefined;
+    const successfulTools: string[] = [];
+    const { lifecycle } = setupClaudeHost({
+      probe,
+      createQuery: (input, queryLifecycle) => {
+        const queryNumber = queryLifecycle.queries;
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("rotated task bridge fixture received no session id");
+        if (queryNumber === 1) oldOptions = input.options;
+        else replacementOptions = input.options;
+        return fakeQuery(
+          () => responseMessages(sessionId, `runtime identity query ${queryNumber}`),
+          queryLifecycle,
+          input.prompt,
+          async (message) => {
+            if ((message as { shouldQuery?: boolean }).shouldQuery === false) return;
+            if (queryNumber === 1) {
+              const listed = await invokeClaudeMcpTool(input.options, "task_list", {});
+              expect(listed.isError).not.toBe(true);
+              return;
+            }
+
+            staleDuringReplacement = await invokeClaudeMcpTool(
+              oldOptions as ClaudeQueryOptions,
+              "task_list",
+              {},
+            );
+            replacementCreate = await invokeClaudeMcpTool(input.options, "task", {
+              harness: "claude-code",
+              assignment: "Prove the replacement bridge kept this owner turn.",
+            });
+            if (replacementCreate.isError) return;
+            successfulTools.push("task");
+            const taskId = String(mcpDetails(replacementCreate).id);
+            let detail: TestMcpResult | undefined;
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              detail = await invokeClaudeMcpTool(input.options, "task_get", { task_id: taskId });
+              if (mcpDetails(detail).state === "running") break;
+              await new Promise((resolveDelay) => setTimeout(resolveDelay, 1));
+            }
+            expect(mcpDetails(detail as NonNullable<typeof detail>).state).toBe("running");
+            successfulTools.push("task_get");
+            const listed = await invokeClaudeMcpTool(input.options, "task_list", {});
+            expect(mcpDetails(listed).total).toBe(1);
+            successfulTools.push("task_list");
+            const sent = await invokeClaudeMcpTool(input.options, "task_send", {
+              task_id: taskId,
+              message: "Continue after the warm-query replacement.",
+            });
+            expect(sent.isError).not.toBe(true);
+            successfulTools.push("task_send");
+            const cancelled = await invokeClaudeMcpTool(input.options, "task_cancel", {
+              task_id: taskId,
+            });
+            expect(mcpDetails(cancelled).state).toBe("cancelled");
+            successfulTools.push("task_cancel");
+          },
+        );
+      },
+    });
+    host!.attachTaskServices(activeTasks.services);
+    await host!.restoreTaskServices();
+    const project = join(temp!.root, "rotated-task-project");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper", "rotated-task-bridge", "claude-code", project,
+    );
+    await host!.bindProject("casper", "rotated-task-bridge", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    const firstEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "rotated-task-bridge",
+      prompt: "first",
+      emit: (event) => firstEvents.push(event),
+    });
+    executableIdentity = "claude-executable-v2";
+    const secondEvents: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "rotated-task-bridge",
+      prompt: "second",
+      emit: (event) => secondEvents.push(event),
+    });
+
+    expect(lifecycle.queries).toBe(2);
+    expect(firstEvents.at(-1)).toMatchObject({ type: "done" });
+    expect(secondEvents.at(-1)).toMatchObject({ type: "done" });
+    expect(staleDuringReplacement).toMatchObject({ isError: true });
+    expect(staleDuringReplacement?.content[0]?.text).toContain("exact active owner turn");
+    expect(replacementCreate?.isError).not.toBe(true);
+    expect(successfulTools.sort()).toEqual([
+      "task",
+      "task_cancel",
+      "task_get",
+      "task_list",
+      "task_send",
+    ]);
+    expect(activeTasks.followUps).toEqual(["Continue after the warm-query replacement."]);
+    for (const options of [oldOptions, replacementOptions]) {
+      const afterTurn = await invokeClaudeMcpTool(
+        options as ClaudeQueryOptions,
+        "task_list",
+        {},
+      );
+      expect(afterTurn).toMatchObject({ isError: true });
+      expect(afterTurn.content[0]?.text).toContain("exact active owner turn");
+    }
+  });
+
   it("preserves Claude's warm bridge across no-op lifecycle failures and retires it on close", async () => {
     const observations: Array<{ turn: number; currentError: boolean; staleError?: boolean }> = [];
     let turn = 0;

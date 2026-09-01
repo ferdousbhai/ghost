@@ -763,17 +763,21 @@ the exact durable Pi transcript or strictly parsed Claude sidecar; an arbitrary
 raw id or a binding alone is not a task parent and returns bounded
 `409 task_parent_unpublished`. The principal bridge may act during a first turn
 before that publication only through a private, unforgeable capability bound
-to the exact ghost, runtime-qualified identity, runtime context incarnation,
-and currently admitted owner turn. The private bridge context lives exactly as
-long as its retained Pi session or warm Claude query, while each owner turn
-installs one monotonically newer capability object on that exact context. A
-tool handler synchronously captures that object before its first wait;
+to the exact ghost, runtime-qualified identity, and currently admitted owner
+turn. Each retained Pi session or warm Claude query has a private bridge
+context. Each owner turn installs one monotonically newer capability object;
+the current bridge context attaches that exact object. Replacing a warm query
+retires only its bridge context, so the cold replacement in the same admitted
+turn can attach the same capability. A tool handler synchronously captures
+that object before its first wait;
 validation requires the same current object and context identity, not merely
 runtime busy state or a lookup through a recreated bridge. A call delayed
 across turns therefore fails instead of borrowing the next turn. Turn
-`finally` clears only its exact object. Query/session close, a committed delete
-or draft-abandon barrier, and context reincarnation retire the exact bridge
-context with an identity guard so stale cleanup cannot clear a newer one. A
+`finally` clears only its exact object. An ordinary warm-query replacement
+detaches its exact bridge context without invalidating the admitted turn.
+Explicit query/session close, a committed delete or draft-abandon barrier, and
+parent reincarnation retire both the exact bridge and capability with identity
+guards so stale cleanup cannot clear a newer one. A
 published/no-op lifecycle refusal or a delete barrier proven absent leaves the
 healthy bridge intact. An old tool callback cannot act during a recreated
 same-id turn on either runtime. Neither the context nor capability is an API

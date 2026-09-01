@@ -2086,7 +2086,7 @@ export class SessionHost {
     if (capability.context?.active === capability) capability.context.active = null;
   }
 
-  private invalidatePrincipalTaskContext(context: PrincipalTaskContextIdentity): void {
+  private detachPrincipalTaskContext(context: PrincipalTaskContextIdentity): void {
     const key = this.principalTaskKey(
       context.ghostName,
       context.runtime,
@@ -2094,10 +2094,25 @@ export class SessionHost {
     );
     context.retired = true;
     context.active = null;
-    if (this.principalTaskContexts.get(key) !== context) return;
-    this.principalTaskContexts.delete(key);
     const capability = this.principalTaskCapabilities.get(key);
-    if (capability?.context === context) this.principalTaskCapabilities.delete(key);
+    if (capability?.context === context) capability.context = null;
+    if (this.principalTaskContexts.get(key) === context) {
+      this.principalTaskContexts.delete(key);
+    }
+  }
+
+  private invalidatePrincipalTaskContext(context: PrincipalTaskContextIdentity): void {
+    const key = this.principalTaskKey(
+      context.ghostName,
+      context.runtime,
+      context.conversationId,
+    );
+    const capability = this.principalTaskCapabilities.get(key);
+    const invalidatesCapability = capability?.context === context;
+    this.detachPrincipalTaskContext(context);
+    if (invalidatesCapability && this.principalTaskCapabilities.get(key) === capability) {
+      this.principalTaskCapabilities.delete(key);
+    }
   }
 
   private invalidatePrincipalTaskParent(
@@ -2142,7 +2157,7 @@ export class SessionHost {
     const key = this.principalTaskKey(ghostName, runtime, conversationId);
     const active = this.principalTaskCapabilities.get(key);
     const previous = this.principalTaskContexts.get(key);
-    if (previous) this.invalidatePrincipalTaskContext(previous);
+    if (previous) this.detachPrincipalTaskContext(previous);
     const context: PrincipalTaskContextIdentity = {
       ghostName,
       parentId: parent.id,
@@ -2186,7 +2201,7 @@ export class SessionHost {
     };
     return {
       context: publicContext,
-      retire: () => this.invalidatePrincipalTaskContext(context),
+      retire: () => this.detachPrincipalTaskContext(context),
     };
   }
 
