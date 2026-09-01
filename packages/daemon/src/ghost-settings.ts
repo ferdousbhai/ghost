@@ -3,19 +3,17 @@
  * home only. Ghost reads a handful of dotted keys from it; nothing ambient
  * (environment overlays, machine-wide files) is consulted.
  */
-import { readFileSync, statSync } from "node:fs";
 import { parse as parseYaml } from "yaml";
 import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "./mcp-server-shape.js";
-
-export const GHOST_SETTINGS_MAX_BYTES = 1_048_576;
+import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from "./private-file.js";
 
 export interface GhostSettings {
   getString(path: string): string | undefined;
   getStringList(path: string): string[] | undefined;
 }
 
-export function ghostSettingsFrom(document: unknown): GhostSettings {
+function ghostSettingsFrom(document: unknown): GhostSettings {
   const root = isRecord(document) ? document : {};
   const get = (path: string): unknown => {
     let current: unknown = root;
@@ -39,17 +37,23 @@ export function ghostSettingsFrom(document: unknown): GhostSettings {
 
 export function loadGhostSettings(homeDir: string): GhostSettings {
   const paths = ghostPaths(homeDir);
-  let size: number;
+  let text: string;
   try {
-    size = statSync(paths.settingsFile).size;
+    text = readPrivateFileText(paths.settingsFile);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return ghostSettingsFrom({});
+    if (error instanceof PrivateReadError) {
+      if (error.refusal === "open"
+        && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
+        return ghostSettingsFrom({});
+      }
+      if (error.refusal === "too_large") {
+        throw new Error(
+          `Ghost settings file ${JSON.stringify(paths.settingsFile)} exceeds its ${MAX_PRIVATE_FILE_BYTES}-byte limit.`,
+          { cause: error },
+        );
+      }
+    }
     throw error;
   }
-  if (size > GHOST_SETTINGS_MAX_BYTES) {
-    throw new Error(
-      `Ghost settings file ${JSON.stringify(paths.settingsFile)} exceeds its ${GHOST_SETTINGS_MAX_BYTES}-byte limit.`,
-    );
-  }
-  return ghostSettingsFrom(parseYaml(readFileSync(paths.settingsFile, "utf8")));
+  return ghostSettingsFrom(parseYaml(text));
 }

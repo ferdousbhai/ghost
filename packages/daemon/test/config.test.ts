@@ -114,6 +114,12 @@ describe("loadConfig", () => {
     expect(config.offline).toBe(false);
   });
 
+  it("ignores an empty GHOSTD_CONFIG and falls back to the default path", () => {
+    const root = makeHome();
+    const config = loadConfig({ env: { GHOSTD_CONFIG: "  " }, home: root });
+    expect(config.configPath).toBe(join(root, ".config", "ghost", "config.json"));
+  });
+
   it("lets explicit overrides beat the environment", () => {
     const root = makeHome();
     const config = loadConfig({

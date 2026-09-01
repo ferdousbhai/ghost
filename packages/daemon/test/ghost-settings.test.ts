@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GHOST_SETTINGS_MAX_BYTES, loadGhostSettings } from "../src/ghost-settings.js";
+import { loadGhostSettings } from "../src/ghost-settings.js";
 import { ghostPaths } from "../src/ghosts.js";
+import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 
 let home: string | null = null;
 
@@ -40,7 +41,7 @@ describe("loadGhostSettings", () => {
   it("refuses a settings.yml over its byte limit", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
     const paths = ghostPaths(home);
-    writeFileSync(paths.settingsFile, `# ${"x".repeat(GHOST_SETTINGS_MAX_BYTES)}\n`, "utf8");
+    writeFileSync(paths.settingsFile, `# ${"x".repeat(MAX_PRIVATE_FILE_BYTES)}\n`, "utf8");
     expect(() => loadGhostSettings(home!)).toThrow(/byte limit/);
   });
 });

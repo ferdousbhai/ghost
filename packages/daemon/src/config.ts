@@ -82,7 +82,7 @@ export const DEFAULT_PORT = 7717;
  */
 export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
 export const DEFAULT_HOST = "127.0.0.1";
-export const DEFAULT_GHOSTS_DIRNAME = "ghosts";
+const DEFAULT_GHOSTS_DIRNAME = "ghosts";
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 
@@ -248,7 +248,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const env = overrides.env ?? process.env;
   const home = overrides.home ?? homedir();
   const configPath = overrides.configPath
-    ?? env.GHOSTD_CONFIG?.trim()
+    ?? (env.GHOSTD_CONFIG?.trim() || undefined)
     ?? defaultConfigPath(env, home);
   const file = readConfigFile(configPath);
 

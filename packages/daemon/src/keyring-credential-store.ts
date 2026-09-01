@@ -6,15 +6,9 @@ import {
   mkdirSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { Database } from "bun:sqlite";
 import type { Credential as AuthCredential } from "@earendil-works/pi-ai";
-
-/** A credential write fenced by the refresh lease its owner holds. */
-export interface CredentialRefreshLeaseFence {
-  owner: string;
-  nowMs: number;
-}
 import {
   assertSecretReference,
   formatSecretReference,
@@ -30,6 +24,12 @@ import {
   SecretServiceError,
   type SecretServiceClient,
 } from "./secret-service.js";
+
+/** A credential write fenced by the refresh lease its owner holds. */
+export interface CredentialRefreshLeaseFence {
+  owner: string;
+  nowMs: number;
+}
 
 const SECRET_METADATA_FILENAME = "keyring-metadata.sqlite";
 const SECRET_ENVELOPE_VERSION = 1;
@@ -60,8 +60,8 @@ export interface ProviderAccountStatus {
 
 
 function defaultSecretMetadataPath(): string {
-  const configured = process.env.XDG_STATE_HOME;
-  const stateHome = configured && configured.length > 0
+  const configured = process.env.XDG_STATE_HOME?.trim();
+  const stateHome = configured && isAbsolute(configured)
     ? configured
     : join(homedir(), ".local", "state");
   return join(stateHome, "ghost", SECRET_METADATA_FILENAME);

@@ -25,7 +25,7 @@ export const TASKS_DIRNAME = ".tasks";
 export const MAX_TASK_TEXT = 32_768;
 export const MAX_TASK_AGENT = 256;
 export const MAX_TASK_RESULT = 65_536;
-export const MAX_TASK_EVENTS = 64;
+const MAX_TASK_EVENTS = 64;
 export const MAX_TASK_EVENT_MESSAGE = 1_024;
 
 export type TaskState = "queued" | "starting" | "running" | "cancelling"
@@ -1164,6 +1164,8 @@ export class TaskController {
       ? this.beginShutdown()
       : undefined;
     const disposing = (async () => {
+      let bodyFailure: unknown;
+      let bodyFailed = false;
       try {
         await operations;
         if (!this.#nativeDisposed) {
@@ -1173,12 +1175,26 @@ export class TaskController {
           }
           this.#nativeDisposed = true;
         }
-      } finally {
-        await this.store.dispose();
-        this.#poisoned = false;
-        this.#initialized = false;
-        this.#initialization = undefined;
+      } catch (error) {
+        bodyFailure = error;
+        bodyFailed = true;
       }
+      // The store must be released and the lifecycle flags reset even when the
+      // shutdown body failed; a store.dispose rejection surfaces only when it
+      // is the sole failure, so it never masks the primary error.
+      let storeFailure: unknown;
+      let storeFailed = false;
+      try {
+        await this.store.dispose();
+      } catch (error) {
+        storeFailure = error;
+        storeFailed = true;
+      }
+      this.#poisoned = false;
+      this.#initialized = false;
+      this.#initialization = undefined;
+      if (bodyFailed) throw bodyFailure;
+      if (storeFailed) throw storeFailure;
     })();
     this.#disposePromise = disposing;
     void disposing.catch(() => {

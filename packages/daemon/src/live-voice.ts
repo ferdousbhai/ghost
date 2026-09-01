@@ -137,21 +137,21 @@ export class LiveVoiceManager {
     const record: LiveVoiceRecord = { status };
     this.records.set(sessionKey, record);
 
-    let controller: LiveController;
+    let controller: LiveController | undefined;
     const callbacks: LiveSessionCallbacks = {
       onPhase: (phase) => {
-        if (record.controller !== controller) return;
+        if (!controller || record.controller !== controller) return;
         status.phase = phase;
         status.active = phase !== "error";
-        status.muted = phase === "muted" || controller?.muted === true;
+        status.muted = phase === "muted" || controller.muted === true;
       },
       onLevels: (input, output) => {
-        if (record.controller !== controller) return;
+        if (!controller || record.controller !== controller) return;
         status.inputLevel = input;
         status.outputLevel = output;
       },
       onTranscript: (transcript) => {
-        if (record.controller !== controller || !transcript) return;
+        if (!controller || record.controller !== controller || !transcript) return;
         const index = status.transcript.findIndex(
           (row) => row.role === transcript.role && row.turn === transcript.turn,
         );
@@ -162,7 +162,7 @@ export class LiveVoiceManager {
         }
       },
       onTerminal: (error) => {
-        if (record.controller !== controller) return;
+        if (!controller || record.controller !== controller) return;
         record.controller = undefined;
         status.active = false;
         status.phase = error ? "error" : "stopped";

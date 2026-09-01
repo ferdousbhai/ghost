@@ -20,7 +20,10 @@ The user stepped away and is returning. Recap the conversation in fewer than 40 
 
 /** Collapse provider formatting and keep the presentation-only result bounded. */
 export function normalizeRecap(text: string): string | null {
-  const normalized = text.replace(/[\s -]+/gu, " ").trim();
+  const normalized = text
+    .replace(/^\s*[-*•]+\s+/gmu, "") // list markers opening a line, not in-word hyphens
+    .replace(/\s+/gu, " ")
+    .trim();
   if (!normalized) return null;
 
   const characters = [...normalized];

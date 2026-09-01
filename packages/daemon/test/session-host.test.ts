@@ -80,8 +80,8 @@ import {
   type TrashedConversation,
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
-import { readPins, writePins } from "../src/pins.js";
-import { readReads, writeReads } from "../src/reads.js";
+import { readPinState, writePins } from "../src/pins.js";
+import { readReadState, writeReads } from "../src/reads.js";
 import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
 import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
 import { piProjectSnapshotPath, piProjectSnapshotPaths } from "../src/project-snapshot.js";
@@ -738,7 +738,7 @@ describe("SessionHost recap", () => {
         recapContext = context;
         return {
           role: "assistant",
-          content: [{ type: "text", text: "  Return to the launch plan. -- Next: finish the opening.  " }],
+          content: [{ type: "text", text: "  Return to the launch plan.\n- Next: finish the opening.  " }],
           stopReason: "stop",
         } as never;
       });
@@ -8222,7 +8222,7 @@ describe("passive session recovery during whole-home moves", () => {
     }
 
     expect(existsSync(dir)).toBe(false);
-    expect(await readPins(ghostPaths(join(temp!.root, "wisp")).sessionDir))
+    expect((await readPinState(ghostPaths(join(temp!.root, "wisp")).sessionDir)).pinned)
       .toEqual(["pi:pin-race"]);
   });
 
@@ -8255,7 +8255,7 @@ describe("passive session recovery during whole-home moves", () => {
     const { trash } = await host!.deleteGhost("casper").finally(releaseMove);
 
     expect(existsSync(dir)).toBe(false);
-    expect(await readReads(ghostPaths(trash).sessionDir)).toEqual({
+    expect((await readReadState(ghostPaths(trash).sessionDir)).reads).toEqual({
       "pi:read-race": openedAt.toISOString(),
     });
   });
@@ -8836,7 +8836,7 @@ describe("pinned conversations", () => {
 
     expect((await host!.listSessions("casper")).map((s) => [s.id, s.pinned]))
       .toEqual([["pi:older", true], ["pi:newer", false]]);
-    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual(["pi:older"]);
+    expect((await readPinState(ghostPaths(dir).sessionDir)).pinned).toEqual(["pi:older"]);
 
     // Pinning is idempotent, and pinning both falls back to recency.
     await host!.setPinned("casper", "older", true);
@@ -8852,7 +8852,7 @@ describe("pinned conversations", () => {
     await host!.setPinned("casper", "older", false);
     expect((await host!.listSessions("casper")).map((session) => session.id))
       .toEqual(["pi:newer", "pi:older"]);
-    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
+    expect((await readPinState(ghostPaths(dir).sessionDir)).pinned).toEqual([]);
   });
 
   it("refuses to pin a conversation that does not exist", async () => {
@@ -8867,7 +8867,7 @@ describe("pinned conversations", () => {
     const { dir } = await twoConversations();
     await host!.setPinned("casper", "older", true);
     await host!.deleteSession("casper", "older");
-    expect(await readPins(ghostPaths(dir).sessionDir)).toEqual([]);
+    expect((await readPinState(ghostPaths(dir).sessionDir)).pinned).toEqual([]);
     expect((await host!.listSessions("casper")).map((session) => session.id))
       .toEqual(["pi:newer"]);
   });
@@ -8881,7 +8881,7 @@ describe("pinned conversations", () => {
       .toEqual([["pi:older", true], ["pi:newer", false]]);
 
     await host!.setPinned("casper", "newer", true);
-    expect((await readPins(sessionDir)).sort()).toEqual(["pi:newer", "pi:older"]);
+    expect(((await readPinState(sessionDir)).pinned).sort()).toEqual(["pi:newer", "pi:older"]);
   });
 
   it("treats a malformed pins.json as nothing pinned", async () => {
@@ -8893,7 +8893,7 @@ describe("pinned conversations", () => {
       .toEqual([false, false]);
     // And a pin still lands, replacing the unreadable file wholesale.
     await host!.setPinned("casper", "older", true);
-    expect(await readPins(sessionDir)).toEqual(["pi:older"]);
+    expect((await readPinState(sessionDir)).pinned).toEqual(["pi:older"]);
   });
 });
 

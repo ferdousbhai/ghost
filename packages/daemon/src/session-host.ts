@@ -144,7 +144,7 @@ export {
 import { pathIsWithin } from "./path-within.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
-import { loadGhostHookExtensions } from "./artifact-root.js";
+import { loadGhostHookExtensions } from "./hook-extensions.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";

@@ -15,9 +15,11 @@ describe("recap prompt and presentation", () => {
     expect(prompt).toContain("ghost-recap-title");
   });
 
-  it("collapses whitespace and hyphens, then truncates by Unicode scalar", () => {
-    expect(normalizeRecap("  First\n\tpart. -- Next part.  "))
+  it("collapses whitespace and list markers, then truncates by Unicode scalar", () => {
+    expect(normalizeRecap("  First\n\tpart.\n- Next part.  "))
       .toBe("First part. Next part.");
+    expect(normalizeRecap("Ship the state-of-the-art pre-commit hook"))
+      .toBe("Ship the state-of-the-art pre-commit hook");
     expect(normalizeRecap(" \n\t ")).toBeNull();
 
     const bounded = normalizeRecap("🙂".repeat(RECAP_MAX_CHARACTERS + 10));
