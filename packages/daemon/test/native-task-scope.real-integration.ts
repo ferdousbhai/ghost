@@ -30,6 +30,7 @@ import {
   type TaskBindingReceipt,
   type TaskRecord,
 } from "../src/tasks.js";
+import { parseSupportedSystemdMajor } from "./native-task-scope-integration-version.js";
 
 const INTEGRATION_FLAG = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION";
 const INTEGRATION_UID = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID";
@@ -769,8 +770,7 @@ async function verifyIntegrationBoundary(): Promise<void> {
   assert.equal(busStats.isSocket(), true);
   assert.equal(busStats.uid, uid);
   const version = await run("/usr/bin/systemctl", ["--version"], { PATH: "/usr/bin" });
-  const parsedVersion = /^systemd ([0-9]+)$/mu.exec(version.stdout)?.[1];
-  assert.ok(parsedVersion && Number(parsedVersion) >= 254);
+  assert.ok(parseSupportedSystemdMajor(version.stdout) !== undefined);
   await systemctl(["show-environment"]);
   const controllerUnit = required(CONTROLLER_UNIT);
   const controllerDescription = required(CONTROLLER_DESCRIPTION);
