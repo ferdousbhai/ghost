@@ -48,15 +48,37 @@ import struct
 import sys
 import warnings
 
+
+def _dependency_error(package, error):
+    message = (
+        "System tray support needs %s. Install it with "
+        "`sudo pacman -S --needed %s`, then restart the ghost shell."
+        % (package, package)
+    )
+    sys.stderr.write("ghost-tray-error:" + json.dumps({
+        "kind": "dependency",
+        "message": message,
+        "detail": str(error),
+    }) + "\n")
+    sys.stderr.flush()
+    raise SystemExit(78)
+
 # GLib.unix_fd_add_full works on every PyGObject we target; its newer alias
 # (GLibUnix.fd_add_full) does not exist on older ones, so keep the call and mute
 # only its deprecation notice — otherwise it lands on the shell's log as noise.
 warnings.filterwarnings("ignore", message=r".*unix_fd_add_full.*")
 
-import dbus
-import dbus.service
-from dbus.mainloop.glib import DBusGMainLoop
-from gi.repository import GLib
+try:
+    import dbus
+    import dbus.service
+    from dbus.mainloop.glib import DBusGMainLoop
+except ImportError as error:
+    _dependency_error("python-dbus", error)
+
+try:
+    from gi.repository import GLib
+except ImportError as error:
+    _dependency_error("python-gobject", error)
 
 SNI_IFACE = "org.kde.StatusNotifierItem"
 MENU_IFACE = "com.canonical.dbusmenu"
@@ -529,4 +551,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--check"]:
+        print(json.dumps({"ok": True}))
+    else:
+        main()

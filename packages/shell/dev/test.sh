@@ -3,6 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+node test/fixtures/tray-helper-probe.mjs
 node test/fixtures/mock-project-parity-probe.mjs
 node test/fixtures/mock-mcp-url-sanitizer-probe.mjs
 

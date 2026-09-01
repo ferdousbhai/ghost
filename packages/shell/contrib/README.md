@@ -118,10 +118,11 @@ both stock on Arch/Omarchy:
 sudo pacman -S --needed python-dbus python-gobject
 ```
 
-Missing them, the helper exits and only the tray icon is absent; the rest of the
-shell is unaffected. This is separate from — and complementary to — the in-bar
-indicator above: the tray item is the shell advertising itself system-wide, the
-bar module is Omarchy's bar polling the shell.
+Missing bindings produce an actionable desktop notification; an unexpected
+helper exit is restarted with exponential backoff capped at 30 seconds. The
+rest of the shell remains unaffected. This is separate from — and complementary
+to — the in-bar indicator above: the tray item is the shell advertising itself
+system-wide, the bar module is Omarchy's bar polling the shell.
 
 ## Window and layer namespaces
 

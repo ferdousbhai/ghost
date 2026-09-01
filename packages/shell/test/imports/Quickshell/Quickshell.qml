@@ -14,4 +14,8 @@ QtObject {
     }
 
     function execDetached(arguments: var): void {}
+
+    function shellPath(path: string): string {
+        return "/tmp/ghost-shell-test/" + path;
+    }
 }
