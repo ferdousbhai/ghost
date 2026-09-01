@@ -24,7 +24,7 @@ GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 ghost
 
 `GHOST_INJECTION_THRESHOLD` optionally sets the classifier flag threshold from 0 to 1; it defaults to `0.5`. If no model is configured, the classifier remains disabled and does not download a model.
 
-On the evaluation corpus the heuristic alone catches every injection, so the classifier adds false positives rather than catches; treat it as a second opinion, not a default. Current numbers come from `injection-eval` below.
+On the evaluation corpus the heuristic alone catches every injection, so the classifier adds false positives rather than catches; treat it as a second opinion, not a default.
 
 ## Detection evaluation
 
@@ -34,13 +34,7 @@ Run the deterministic heuristic evaluation from the repository root:
 pnpm --filter @ghost/extensions test injection-eval
 ```
 
-To also measure a local classifier and its additive composite result, set the model for the same command:
-
-```sh
-GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 pnpm --filter @ghost/extensions test injection-eval
-```
-
-The evaluation prints recall, false-positive rate (FPR), per-category catch counts, misses, and false positives. The model-backed block skips cleanly when `GHOST_INJECTION_MODEL` is unset.
+The evaluation prints recall, false-positive rate (FPR), per-category catch counts, misses, and false positives for the heuristic detector. The classifier and composite detectors ship in `untrusted.ts` but carry no corpus measurement of their own.
 
 The heuristic corpus measured on 2026-08-24 contains 34 injection samples and 28 benign samples. Its category distribution and observed catches are:
 

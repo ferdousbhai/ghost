@@ -40,6 +40,7 @@ makedepends=(
   'uv'
 )
 checkdepends=(
+  'jq'
   'nodejs'
   'python-yaml'
 )

@@ -35,6 +35,7 @@ makedepends=(
   'desktop-file-utils'
 )
 checkdepends=(
+  'jq'
   'nodejs'
   'python-yaml'
 )

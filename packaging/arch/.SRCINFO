@@ -6,6 +6,7 @@ pkgbase = ghost-dev
 	install = ghost-dev.install
 	arch = x86_64
 	license = Apache-2.0
+	checkdepends = jq
 	checkdepends = nodejs
 	checkdepends = python-yaml
 	makedepends = bun>=1.4.0

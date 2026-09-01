@@ -76,6 +76,10 @@ command -v node >/dev/null || {
   printf 'nodejs is required by package checks but is not installed\n' >&2
   exit 1
 }
+command -v jq >/dev/null || {
+  printf 'jq is required by the Omarchy contribution regression but is not installed\n' >&2
+  exit 1
+}
 python -c 'import yaml' >/dev/null 2>&1 || {
   printf 'python-yaml is required by package checks but is not installed\n' >&2
   exit 1
@@ -109,7 +113,8 @@ while IFS= read -r suite; do
       "$suite" >&2
     exit 1
   fi
-done < <(find "$source_root/packaging" -name __pycache__ -prune \
+done < <(find "$source_root/packaging" "$source_root/.github/scripts" \
+  -name __pycache__ -prune \
   -o -name 'test-*' -type f -print | sort)
 
 rg -q 'rg[[:space:]]+-l' \
@@ -122,6 +127,7 @@ rg -q '"test"[[:space:]]*:[[:space:]]*"node --test' \
   env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo
 ) > "$work/ghost-dev.SRCINFO"
 cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry checkdepends jq "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
@@ -144,6 +150,7 @@ GHOST_RELEASE_REPOSITORY=example/ghost-releases \
   0.0.1 \
   0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
+require_srcinfo_entry checkdepends jq "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
@@ -169,7 +176,7 @@ fi
 ci_dependencies_file="$work/ci-dependencies"
 bash "$script_dir/ci-dependencies.sh" --names > "$ci_dependencies_file"
 mapfile -t ci_dependencies < "$ci_dependencies_file"
-for package in bun fd nodejs python-yaml ripgrep; do
+for package in bun fd jq nodejs python-yaml ripgrep; do
   if [[ ! " ${ci_dependencies[*]} " =~ [[:space:]]${package}[[:space:]] ]]; then
     printf 'CI dependency set does not contain %s\n' "$package" >&2
     exit 1

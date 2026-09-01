@@ -132,7 +132,8 @@ an interval and returns the frames as an **image sequence** (multiple image
 blocks to a vision model; the saved paths + an `inspect_image` instruction to a
 text-only one) — the ghost's "video understanding", since models have no native
 video input. Zero new dependency; bounded by a frame cap and a wall-clock
-budget, still exclusive-concurrency serialized.
+budget, and serialized against every other capture by the process-wide chain
+in `screen.ts`.
 
 Helper discovery: the extension spawns the sidecar lazily, one per daemon,
 reused across calls; if PyGObject / grim / wtype are missing, tools degrade
