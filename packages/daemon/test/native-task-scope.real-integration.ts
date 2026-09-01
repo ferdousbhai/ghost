@@ -38,6 +38,8 @@ const CONTROLLER_UNIT = "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_UNIT";
 const CONTROLLER_DESCRIPTION = "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_DESCRIPTION";
 const CRASH_CONTROLLER_MODE = "--crash-controller";
 const CONTROL_OUTPUT_LIMIT = 8 * 1024;
+const SCOPE_STATUS_OUTPUT_LIMIT = 4 * 1024;
+const SCOPE_STATUS_PROPERTIES = ["Id", "LoadState", "ActiveState", "Description"] as const;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -170,6 +172,66 @@ function parseProperties(source: string): Map<string, string> {
     result.set(line.slice(0, separator), line.slice(separator + 1));
   }
   return result;
+}
+
+function absentStatusDiagnostic(
+  source: string,
+  exitCode: number | null,
+): Record<string, string | number | null> {
+  const diagnostic: Record<string, string | number | null> = { exitCode };
+  for (const key of SCOPE_STATUS_PROPERTIES) diagnostic[key] = "<invalid>";
+  if (Buffer.byteLength(source, "utf8") > SCOPE_STATUS_OUTPUT_LIMIT
+    || source.includes("\0") || source.includes("\r")) return diagnostic;
+  const seen = new Set<string>();
+  for (const line of source.endsWith("\n")
+    ? source.slice(0, -1).split("\n")
+    : source.split("\n")) {
+    const separator = line.indexOf("=");
+    const key = line.slice(0, separator);
+    const value = line.slice(separator + 1);
+    if (separator < 1 || !SCOPE_STATUS_PROPERTIES.includes(
+      key as (typeof SCOPE_STATUS_PROPERTIES)[number],
+    ) || seen.has(key) || Buffer.byteLength(value, "utf8") > 512) continue;
+    seen.add(key);
+    diagnostic[key] = value;
+  }
+  return diagnostic;
+}
+
+async function assertAbsentScopeStatusPreflight(): Promise<void> {
+  const unit = nativeTaskScopeUnit(randomTaskId());
+  const result = await run(
+    "/usr/bin/systemctl",
+    [
+      "--user",
+      "show",
+      unit,
+      ...SCOPE_STATUS_PROPERTIES.map((property) => `--property=${property}`),
+      "--no-pager",
+    ],
+    captureNativeTaskControlEnvironment(process.env),
+    true,
+  );
+  try {
+    assert.equal(result.exitCode, 0);
+    assert.ok(Buffer.byteLength(result.stdout, "utf8") <= SCOPE_STATUS_OUTPUT_LIMIT);
+    assert.equal(result.stdout.includes("\0"), false);
+    assert.equal(result.stdout.includes("\r"), false);
+    const properties = parseProperties(result.stdout);
+    assert.equal(properties.size, SCOPE_STATUS_PROPERTIES.length);
+    assert.deepEqual([...properties.keys()].sort(), [...SCOPE_STATUS_PROPERTIES].sort());
+    assert.equal(properties.get("Id"), unit);
+    assert.equal(properties.get("LoadState"), "not-found");
+    assert.equal(properties.get("ActiveState"), "inactive");
+    assert.equal(properties.get("Description"), unit);
+  } catch {
+    process.stderr.write(
+      `native task absent-scope preflight failed: ${JSON.stringify(
+        absentStatusDiagnostic(result.stdout, result.exitCode),
+      )}\n`,
+    );
+    throw new Error("systemd absent-scope status is incompatible");
+  }
 }
 
 async function unitProperties(unit: string): Promise<Map<string, string>> {
@@ -785,6 +847,7 @@ async function main(): Promise<void> {
   let sentinel: Sentinel | undefined;
   let testError: unknown;
   try {
+    await assertAbsentScopeStatusPreflight();
     const fixtures = await writeFixtures(root);
     sentinel = await startSentinel(root, ownedUnits);
     await proveLifecycle(root, fixtures.worker, ownedUnits);

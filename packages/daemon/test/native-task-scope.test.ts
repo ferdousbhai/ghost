@@ -53,8 +53,13 @@ async function eventuallyStopped(pids: number[]): Promise<void> {
   }
 }
 
-function status(load: string, active: string, description = ""): string {
-  return `LoadState=${load}\nActiveState=${active}\nDescription=${description}\n`;
+function status(
+  load: string,
+  active: string,
+  description = load === "not-found" ? UNIT : "",
+  id = UNIT,
+): string {
+  return `Id=${id}\nLoadState=${load}\nActiveState=${active}\nDescription=${description}\n`;
 }
 
 describe("systemd native task scope ownership", () => {
@@ -139,6 +144,16 @@ describe("systemd native task scope ownership", () => {
     });
     await scope.stopAndConfirm();
     expect(controlCalls.some((call) => call.args.includes("stop"))).toBe(true);
+    expect(controlCalls.find((call) => call.args.includes("show"))?.args).toEqual([
+      "--user",
+      "show",
+      UNIT,
+      "--property=Id",
+      "--property=LoadState",
+      "--property=ActiveState",
+      "--property=Description",
+      "--no-pager",
+    ]);
     expect(controlCalls.every((call) =>
       Object.keys(call.environment).sort().join(",")
         === "DBUS_SESSION_BUS_ADDRESS,XDG_RUNTIME_DIR")).toBe(true);
@@ -232,10 +247,41 @@ describe("systemd native task scope ownership", () => {
       await expect(manager.reserve(TASK_ID, RECEIPT, new AbortController().signal))
         .rejects.toThrow(/ownership|scope/u);
       await expect(manager.stopAndConfirm(TASK_ID, RECEIPT)).rejects.toThrow(/ownership|scope/u);
+      await expect(manager.recoverAndConfirm(TASK_ID, RECEIPT))
+        .rejects.toThrow(/ownership|scope/u);
       expect(spawned).toBe(false);
       expect(calls.some((call) => call.includes("stop"))).toBe(false);
     }
     expect(() => nativeTaskScopeUnit("task-not-a-uuid")).toThrow(/identity/u);
+  });
+
+  it("treats every loaded unit as a reservation collision, including its own receipt", async () => {
+    let spawned = false;
+    let stopped = false;
+    const manager = new SystemdNativeTaskScopeManager({
+      controlEnvironment: {},
+      runControl: async (args) => {
+        if (args.includes("stop")) stopped = true;
+        return { stdout: status("loaded", "inactive", DESCRIPTION), exitCode: 0 };
+      },
+      spawnChild: (() => { spawned = true; throw new Error("must not spawn"); }) as typeof spawn,
+    });
+    await expect(manager.reserve(TASK_ID, RECEIPT, new AbortController().signal))
+      .rejects.toMatchObject({ code: "collision" });
+    expect(spawned).toBe(false);
+    expect(stopped).toBe(false);
+  });
+
+  it("accepts the exact absent systemd stub independent of property order", async () => {
+    const manager = new SystemdNativeTaskScopeManager({
+      controlEnvironment: {},
+      runControl: async () => ({
+        stdout: `Description=${UNIT}\nActiveState=inactive\nId=${UNIT}\nLoadState=not-found\n`,
+        exitCode: 0,
+      }),
+    });
+    const scope = await manager.reserve(TASK_ID, RECEIPT, new AbortController().signal);
+    await scope.stopAndConfirm();
   });
 
   it("never confirms an active scope after a control or status failure", async () => {
@@ -262,7 +308,7 @@ describe("systemd native task scope ownership", () => {
       runControl: async (args) => {
         if (args.includes("stop")) stopped = true;
         else reads += 1;
-        return { stdout: status("not-found", "inactive"), exitCode: 4 };
+        return { stdout: status("not-found", "inactive"), exitCode: 0 };
       },
       spawnChild: ((_command: string, _args: string[], options: SpawnOptions) => {
         child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
@@ -310,7 +356,7 @@ describe("systemd native task scope ownership", () => {
       runControl: async (args) => {
         if (args.includes("stop")) stops += 1;
         return state === "absent"
-          ? { stdout: status("not-found", "inactive"), exitCode: 4 }
+          ? { stdout: status("not-found", "inactive"), exitCode: 0 }
           : { stdout: status("loaded", "active", "foreign-owner"), exitCode: 0 };
       },
       spawnChild: ((_command: string, _args: string[], options: SpawnOptions) => {
@@ -339,18 +385,39 @@ describe("systemd native task scope ownership", () => {
   });
 
   it("strictly rejects malformed or ambiguous systemctl properties", async () => {
-    const malformed = [
-      "LoadState=loaded\nActiveState=active\n",
-      status("loaded", "unknown", DESCRIPTION),
-      status("not-found", "inactive", DESCRIPTION),
-      `${status("loaded", "active", DESCRIPTION)}Description=${DESCRIPTION}\n`,
-      `LoadState=loaded\nActiveState=active\nDescription=${"x".repeat(513)}\n`,
-      `${"x".repeat(4_097)}\n`,
+    const malformed: Array<{ stdout: string; exitCode: number }> = [
+      { stdout: "", exitCode: 0 },
+      { stdout: "Id=missing-properties\n", exitCode: 0 },
+      { stdout: status("loaded", "unknown", DESCRIPTION), exitCode: 0 },
+      { stdout: status("failed", "inactive", DESCRIPTION), exitCode: 0 },
+      { stdout: status("not-found", "inactive", ""), exitCode: 0 },
+      { stdout: status("not-found", "inactive", DESCRIPTION), exitCode: 0 },
+      { stdout: status("not-found", "inactive", "foreign"), exitCode: 0 },
+      { stdout: status("not-found", "active"), exitCode: 0 },
+      { stdout: status("not-found", "inactive", UNIT, "foreign.scope"), exitCode: 0 },
+      { stdout: status("loaded", "active", DESCRIPTION, "foreign.scope"), exitCode: 0 },
+      {
+        stdout: `${status("loaded", "active", DESCRIPTION)}Description=${DESCRIPTION}\n`,
+        exitCode: 0,
+      },
+      {
+        stdout: `${status("loaded", "active", DESCRIPTION)}Unexpected=value\n`,
+        exitCode: 0,
+      },
+      {
+        stdout: status("loaded", "active", "x".repeat(513)),
+        exitCode: 0,
+      },
+      { stdout: `${"x".repeat(4_097)}\n`, exitCode: 0 },
+      { stdout: status("not-found", "inactive").replace("\n", "\r\n"), exitCode: 0 },
+      { stdout: status("not-found", "inactive").replace("Id=", "Id=\0"), exitCode: 0 },
+      { stdout: status("not-found", "inactive"), exitCode: 4 },
+      { stdout: status("loaded", "active", DESCRIPTION), exitCode: 1 },
     ];
-    for (const stdout of malformed) {
+    for (const result of malformed) {
       const manager = new SystemdNativeTaskScopeManager({
         controlEnvironment: {},
-        runControl: async () => ({ stdout, exitCode: 0 }),
+        runControl: async () => result,
       });
       await expect(manager.reserve(TASK_ID, RECEIPT, new AbortController().signal))
         .rejects.toThrow(/ownership/u);
@@ -363,7 +430,7 @@ describe("systemd native task scope ownership", () => {
       controlEnvironment: {},
       runControl: async () => ({
         stdout: status("not-found", "inactive"),
-        exitCode: 4,
+        exitCode: 0,
       }),
       spawnChild: ((_command: string, _args: string[], options: SpawnOptions) => {
         if (shouldFail) {

@@ -197,17 +197,20 @@ function runSystemctl(
 }
 
 type ScopeStatus = Readonly<{
+  id: string;
   loadState: "not-found";
   activeState: "inactive";
-  description: "";
+  description: string;
 }> | Readonly<{
+  id: string;
   loadState: "loaded";
   activeState: string;
   description: string;
 }>;
 
-function parseScopeStatus(result: NativeTaskControlResult): ScopeStatus {
-  if (Buffer.byteLength(result.stdout, "utf8") > MAX_CONTROL_OUTPUT_BYTES
+function parseScopeStatus(unit: string, result: NativeTaskControlResult): ScopeStatus {
+  if (result.exitCode !== 0
+    || Buffer.byteLength(result.stdout, "utf8") > MAX_CONTROL_OUTPUT_BYTES
     || result.stdout.includes("\0") || result.stdout.includes("\r")) {
     throw new NativeTaskOwnershipError();
   }
@@ -222,28 +225,33 @@ function parseScopeStatus(result: NativeTaskControlResult): ScopeStatus {
     if (properties.has(key)) throw new NativeTaskOwnershipError();
     properties.set(key, line.slice(separator + 1));
   }
-  if (properties.size !== 3
+  if (properties.size !== 4
+    || !properties.has("Id")
     || !properties.has("LoadState")
     || !properties.has("ActiveState")
     || !properties.has("Description")) {
     throw new NativeTaskOwnershipError();
   }
+  const id = properties.get("Id");
   const loadState = properties.get("LoadState");
   const activeState = properties.get("ActiveState");
   const description = properties.get("Description");
-  if (loadState === "not-found") {
-    if (activeState !== "inactive" || description !== "") {
-      throw new NativeTaskOwnershipError();
-    }
-    return { loadState, activeState, description };
-  }
-  if (result.exitCode !== 0 || loadState !== "loaded"
-    || typeof activeState !== "string" || !ACTIVE_STATES.has(activeState)
-    || typeof description !== "string"
+  if (id !== unit || typeof description !== "string"
     || Buffer.byteLength(description, "utf8") > 512) {
     throw new NativeTaskOwnershipError();
   }
-  return { loadState, activeState, description };
+  if (loadState === "not-found") {
+    if (activeState !== "inactive" || description !== unit) {
+      throw new NativeTaskOwnershipError();
+    }
+    return { id, loadState, activeState, description };
+  }
+  if (loadState !== "loaded"
+    || typeof activeState !== "string" || !ACTIVE_STATES.has(activeState)
+  ) {
+    throw new NativeTaskOwnershipError();
+  }
+  return { id, loadState, activeState, description };
 }
 
 class SystemdNativeTaskScope implements NativeTaskScope {
@@ -536,7 +544,7 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
     reservation: ScopeReservation | undefined,
   ): Promise<ScopeStatus> {
     if (!reservation?.spawned) {
-      return { loadState: "not-found", activeState: "inactive", description: "" };
+      return { id: unit, loadState: "not-found", activeState: "inactive", description: unit };
     }
     const launchSettled = reservation.launchSettled;
     if (!launchSettled) throw new NativeTaskOwnershipError();
@@ -565,11 +573,12 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
       "--user",
       "show",
       unit,
+      "--property=Id",
       "--property=LoadState",
       "--property=ActiveState",
       "--property=Description",
       "--no-pager",
     ], this.#controlEnvironment, signal);
-    return parseScopeStatus(result);
+    return parseScopeStatus(unit, result);
   }
 }
