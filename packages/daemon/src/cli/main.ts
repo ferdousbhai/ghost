@@ -235,7 +235,13 @@ export function commandHelp(verb: string): string {
 }
 
 export function version(runtime: Pick<CliRuntime, "env">): string {
-  return runtime.env.GHOSTD_VERSION?.trim() || "0.0.0";
+  // The literal `process.env.GHOSTD_VERSION` read is load-bearing: the release
+  // bundle bakes the version by textual substitution of exactly that
+  // expression (scripts/build-runtime.sh --define). The injected env is
+  // consulted first so the test seam still overrides it.
+  return runtime.env.GHOSTD_VERSION?.trim()
+    || process.env.GHOSTD_VERSION?.trim()
+    || "0.0.0";
 }
 
 function runtimeOptions(options: GhostCliOptions): CliRuntime {
