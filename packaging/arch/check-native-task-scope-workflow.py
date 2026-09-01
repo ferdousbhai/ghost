@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "fb88a69ba586edb3b7af2d1e340ae0511bbb3b10abe11659abe60cc6135847ab"
+JOB_SHA256 = "b3fc85f72a90afe422842fbedf22fcd54c3023899ae6a8e7f4c2b8fa435d2afb"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -179,11 +179,18 @@ def errors(text: str) -> list[str]:
                 'manager_unit="user@$test_uid.service"',
                 'override_file="$override_dir/ghost-ci-environment.conf"',
                 'generator_dir="/run/ghost-task-ci-$test_uid-environment-generators"',
+                'dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"',
                 '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
                 '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
                 '[[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]',
+                '[[ "$dbus_override_file" == "/home/ghost-scope-ci/.config/systemd/user/dbus.socket.d/ghost-ci-listen.conf" ]]',
                 'sudo install -d -m755 -- "$override_dir"',
                 'sudo install -d -m755 -- "$generator_dir"',
+                'sudo install -d -m700 -o "$test_uid" -g "$test_uid" -- "$dbus_override_dir"',
+                'sudo install -m600 -o "$test_uid" -g "$test_uid" /dev/null "$dbus_override_file"',
+                "'ListenStream='",
+                'ListenStream=/run/user/$test_uid/bus',
+                "'SocketMode=0600'",
                 "'PAMName='",
                 'Environment=HOME=/home/$test_user',
                 'Environment=USER=$test_user',
@@ -210,6 +217,7 @@ def errors(text: str) -> list[str]:
             [
                 'sudo install -d -m755 -- "$override_dir"',
                 'sudo install -d -m755 -- "$generator_dir"',
+                'sudo install -m600 -o "$test_uid" -g "$test_uid" /dev/null "$dbus_override_file"',
                 'sudo chmod 644 "$override_file"',
                 'sudo systemctl daemon-reload',
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',

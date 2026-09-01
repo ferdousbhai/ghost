@@ -45,6 +45,8 @@ jobs:
           override_dir="/run/systemd/system/$manager_unit.d"
           override_file="$override_dir/ghost-ci-environment.conf"
           generator_dir="/run/ghost-task-ci-$test_uid-environment-generators"
+          dbus_override_dir="/home/$test_user/.config/systemd/user/dbus.socket.d"
+          dbus_override_file="$dbus_override_dir/ghost-ci-listen.conf"
           diagnose_manager_failure() {
             sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit" || true
             sudo systemctl --no-pager show \
@@ -70,8 +72,17 @@ jobs:
           sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
           [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
           [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
+          [[ "$dbus_override_file" == "/home/ghost-scope-ci/.config/systemd/user/dbus.socket.d/ghost-ci-listen.conf" ]]
           sudo install -d -m755 -- "$override_dir"
           sudo install -d -m755 -- "$generator_dir"
+          sudo install -d -m700 -o "$test_uid" -g "$test_uid" -- "$dbus_override_dir"
+          sudo install -m600 -o "$test_uid" -g "$test_uid" /dev/null "$dbus_override_file"
+          printf '%s\n' \
+            '[Socket]' \
+            'ListenStream=' \
+            "ListenStream=/run/user/$test_uid/bus" \
+            'SocketMode=0600' \
+            | sudo tee "$dbus_override_file" >/dev/null
           printf '%s\n' \
             '[Service]' \
             'PAMName=' \

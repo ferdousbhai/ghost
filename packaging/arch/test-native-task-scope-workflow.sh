@@ -59,6 +59,12 @@ expect_rejected manager-pam-reset \
 expect_rejected manager-environment-generator-path \
   '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir"' \
   '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=/usr/lib/systemd/user-environment-generators"'
+expect_rejected manager-dbus-listen \
+  '"ListenStream=/run/user/$test_uid/bus"' \
+  '"ListenStream=/run/user/1001/bus"'
+expect_rejected manager-dbus-reset \
+  "            'ListenStream=' \\" \
+  "            'ListenStream=/run/user/1001/bus' \\"
 expect_rejected manager-bus-override \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus"' \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus"'
