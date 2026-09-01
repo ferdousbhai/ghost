@@ -53,6 +53,9 @@ expect_rejected uid-guard \
 expect_rejected manager-xdg-override \
   '"Environment=XDG_RUNTIME_DIR=/run/user/$test_uid"' \
   '"Environment=XDG_RUNTIME_DIR=/run/user/1001"'
+expect_rejected manager-xdg-config \
+  '"Environment=XDG_CONFIG_HOME=/home/$test_user/.config"' \
+  '"Environment=XDG_CONFIG_HOME=/home/runner/.config"'
 expect_rejected manager-pam-reset \
   "            'PAMName=' \\" \
   "            'PAMName=systemd-user' \\"

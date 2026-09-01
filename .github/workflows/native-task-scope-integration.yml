@@ -70,6 +70,9 @@ jobs:
           sudo useradd --uid "$test_uid" --user-group --create-home --shell /bin/bash "$test_user"
           [[ "$(id -u "$test_user")" == "$test_uid" ]]
           sudo install -d -m700 -o "$test_uid" -g "$test_uid" "/home/$test_user/tmp"
+          sudo install -d -m700 -o "$test_uid" -g "$test_uid" \
+            "/home/$test_user/.cache" \
+            "/home/$test_user/.local/share"
           [[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]
           [[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]
           [[ "$dbus_override_file" == "/home/ghost-scope-ci/.config/systemd/user/dbus.socket.d/ghost-ci-listen.conf" ]]
@@ -90,6 +93,11 @@ jobs:
             "Environment=USER=$test_user" \
             "Environment=LOGNAME=$test_user" \
             "Environment=XDG_RUNTIME_DIR=/run/user/$test_uid" \
+            "Environment=XDG_CONFIG_HOME=/home/$test_user/.config" \
+            "Environment=XDG_DATA_HOME=/home/$test_user/.local/share" \
+            "Environment=XDG_CACHE_HOME=/home/$test_user/.cache" \
+            'Environment=XDG_CONFIG_DIRS=/etc/xdg' \
+            'Environment=XDG_DATA_DIRS=/usr/local/share:/usr/share' \
             "Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus" \
             "Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir" \
             | sudo tee "$override_file" >/dev/null

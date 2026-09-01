@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "b3fc85f72a90afe422842fbedf22fcd54c3023899ae6a8e7f4c2b8fa435d2afb"
+JOB_SHA256 = "bfaa2451bc898427170f4536d63991250811d23205196aef7fc1eb94fc79f17a"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -196,6 +196,11 @@ def errors(text: str) -> list[str]:
                 'Environment=USER=$test_user',
                 'Environment=LOGNAME=$test_user',
                 'Environment=XDG_RUNTIME_DIR=/run/user/$test_uid',
+                'Environment=XDG_CONFIG_HOME=/home/$test_user/.config',
+                'Environment=XDG_DATA_HOME=/home/$test_user/.local/share',
+                'Environment=XDG_CACHE_HOME=/home/$test_user/.cache',
+                "'Environment=XDG_CONFIG_DIRS=/etc/xdg'",
+                "'Environment=XDG_DATA_DIRS=/usr/local/share:/usr/share'",
                 'Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus',
                 'Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir',
                 'sudo chmod 644 "$override_file"',
