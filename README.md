@@ -24,11 +24,12 @@ pi's coding-oriented system prompt with its character and bounded private
 memory index, plus the owner-installed `obsidian-cli` skill through normal
 machine-skill discovery. Both runtimes use Obsidian's CLI-selected vault as
 owner-visible persistent state shared by every ghost; they never infer that the
-vault is `~/Documents` or access it as raw files. Claude keeps its native preset
-and receives the same Ghost-owned context as an append. Browser and desktop
-capabilities remain available. The Quickshell client renders live tool activity
-beside the recovered summoning orb from the earlier summon-ghost interface,
-naming the call the ghost is inside of while it runs.
+vault is `~/Documents` or access it as raw files. Claude keeps its complete,
+unfiltered native tool preset and receives the same Ghost-owned context as an
+append; Ghost tools are added only for capabilities that preset lacks. Browser
+and desktop capabilities remain available. The Quickshell client renders live
+tool activity beside the recovered summoning orb from the earlier summon-ghost
+interface, naming the call the ghost is inside of while it runs.
 
 Idle maintenance may write one ghost-private reflection and consolidates memory
 only under index pressure; shared knowledge goes through Obsidian instead. Every

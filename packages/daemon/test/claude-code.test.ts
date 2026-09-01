@@ -2233,29 +2233,7 @@ fi
     });
     expect(seenOptions[0]?.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     expect(seenOptions[0]?.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    // Scheduling remains Ghost-owned; Claude's native owner question is
-    // retained because its permission callback is routed through Ghost's HUD.
-    for (const tool of [
-      "CronCreate",
-      "CronDelete",
-      "CronList",
-      "PushNotification",
-      "RemoteTrigger",
-      "ScheduleWakeup",
-    ]) expect(seenOptions[0]?.disallowedTools, tool).toContain(tool);
-    // Claude's own way of working is untouched.
-    for (const tool of [
-      "Agent",
-      "AskUserQuestion",
-      "Task",
-      "Bash",
-      "Read",
-      "Write",
-      "TodoWrite",
-      "WebSearch",
-    ]) {
-      expect(seenOptions[0]?.disallowedTools, tool).not.toContain(tool);
-    }
+    expect(seenOptions[0]).not.toHaveProperty("disallowedTools");
     const permissionInput = { command: "printf owner-approved" };
     await expect(seenOptions[0]?.canUseTool?.("Bash", permissionInput, {
       signal: new AbortController().signal,

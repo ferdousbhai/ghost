@@ -95,20 +95,31 @@ installed executable.
 
 - its native system prompt, with Ghost's persona/policy appended;
 - Bash, file tools, native image understanding, web tools, subagents,
-  background tasks, todos, planning, and native working style;
+  background tasks, todos, planning, scheduling, notifications, remote
+  triggers, and native working style;
 - native `AskUserQuestion`, with Markdown previews and its owner interaction
   handled by Ghost instead of Claude's terminal UI;
 - unrestricted local execution under `bypassPermissions`, because the HUD has
   no Claude approval surface;
 - the owner installation's native authentication and provider routing.
 
-### What Ghost removes or replaces
+### What Ghost adds or redirects
 
-Native cron/scheduling, push notifications, remote triggers, and scheduled
-wakeups are disabled because Ghost owns those surfaces or has no safe route for
-them. Claude auto-memory is disabled. Owner-visible durable knowledge, plans,
-and tasks use Obsidian; ghost-private continuity uses the ghost home's memory
-files.
+Ghost does not deny or replace any tool in Claude's native preset. Native
+scheduling, notifications, remote triggers, worktrees, agents, and every other
+preset tool retain Claude's own semantics and storage. Ghost's in-process
+browser/screen/desktop and supervised delegation tools are additive. Claude
+auto-memory is disabled. Owner-visible durable knowledge, plans, and tasks use
+Obsidian; ghost-private continuity uses the ghost home's memory files.
+
+This is a native-first boundary: if the `claude_code` preset already provides a
+capability, Claude uses that native tool with its original name, input schema,
+output, and behavior. Ghost may project its interaction into an existing UI—as
+with `AskUserQuestion`—but does not wrap it in a competing model-facing tool.
+Ghost adds a tool only for a Ghost-specific capability absent from the preset,
+and additive tools may not shadow native ones. The preset is not enumerated by
+Ghost, so compatible Claude Code releases can add native tools without a daemon
+change.
 
 Claude's model-facing question signature stays native. Pi's `ask` mirrors the
 same `questions`/`header`/`options`/`multiSelect` input and
@@ -120,6 +131,7 @@ chat-redirect behavior do not depend on which principal runtime is active.
 
 | Capability | Pi principal | Claude Code principal |
 |---|---|---|
+| Native tool preset | Pi's admitted native tools | Claude's complete unfiltered `claude_code` preset |
 | Owner questions | Ghost `ask`, using the native Claude signature and result | Native `AskUserQuestion`, routed through the same broker and HUD |
 | Image understanding | Model-native when the chat model accepts images; otherwise `inspect_image` | Native vision; no redundant `inspect_image` |
 | Browser, screen, desktop | Ghost runtime-neutral tools | The same Ghost tools through the SDK MCP bridge |

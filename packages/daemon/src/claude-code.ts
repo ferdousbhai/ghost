@@ -175,29 +175,6 @@ const CLAUDE_CODE_AUTH_STATUS_ARGS = [
   "--json",
 ] as const;
 export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: true };
-
-/**
- * Native preset tools Ghost takes away, and the only reason it takes any away:
- * they create durable state or reach for the owner outside Ghost's own
- * surfaces. Scheduling is a systemd user timer the ghost writes itself and the
- * owner can see in `systemctl --user list-timers`; a Claude cron job would live
- * in Claude's private store, fire outside ghostd with no persona, and survive
- * the ghost's deletion. `AskUserQuestion` is retained and routed through
- * Ghost's owner-question broker. Push and remote triggers are claude.ai session
- * infrastructure with nothing behind them here.
- *
- * Everything that is merely Claude's own way of working stays: subagents,
- * worktrees, the REPL, todos, web search and fetch. Ghosts run unthrottled, and
- * this list is not a throttle.
- */
-export const CLAUDE_CODE_DISALLOWED_TOOLS = [
-  "CronCreate",
-  "CronDelete",
-  "CronList",
-  "PushNotification",
-  "RemoteTrigger",
-  "ScheduleWakeup",
-] as const;
 export interface ClaudeCodeAuthStatus {
   loggedIn: boolean;
   authMethod?: string;
@@ -1689,10 +1666,12 @@ function queryOptions(input: {
     skills: [],
     plugins: [],
     strictMcpConfig: true,
+    // Keep the complete native tool vocabulary Claude was trained against.
+    // `allowedTools` pre-approves additive Ghost MCP tools; it does not filter
+    // the native preset, and Ghost deliberately supplies no denylist.
     tools: { type: "preset", preset: "claude_code" },
     allowedTools: input.toolNames.map((name) =>
       `mcp__${input.internalMcpServerName}__${name}`),
-    disallowedTools: [...CLAUDE_CODE_DISALLOWED_TOOLS],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     // Ordinary permission requests remain bypassed. AskUserQuestion is not an

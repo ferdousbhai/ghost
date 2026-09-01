@@ -191,9 +191,19 @@ installation and environment guarantees are in
 Claude keeps its native preset, including `AskUserQuestion`, image
 understanding, subagents, background tasks, todos, web tools, and planning.
 Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
-`ask`; it disables only native cron/scheduling, push notifications, remote
-triggers, and scheduled wakeups. Ghost disables Claude auto-memory; shared
+`ask` without denying or replacing any native tool. Claude's complete native
+tool preset remains available; Ghost's browser/screen/desktop and supervised
+delegation tools are additive. Ghost disables Claude auto-memory; shared
 persistence is Obsidian and private continuity is Ghost memory.
+
+The Claude Code path is native-first. A capability already supplied by the
+native `claude_code` preset keeps Claude's tool name, schema, result, and
+semantics; Ghost integrates its callbacks and events with daemon/HUD surfaces
+instead of registering a substitute. Additive Ghost tools are limited to
+Ghost-specific capabilities the preset does not supply, and must not shadow a
+native tool. This rule follows the harness Claude models are trained to use and
+lets new native tools arrive with the installed compatible Claude Code version
+without a Ghost allowlist change.
 
 Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
