@@ -34,6 +34,7 @@ import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
 import qs.services
 import qs.components
+import "components/ModelPresentation.js" as ModelPresentation
 
 FloatingWindow {
     id: hud
@@ -435,8 +436,9 @@ FloatingWindow {
                     }
 
                     // Current-model indicator → opens the switcher. Shows the
-                    // model name (or id), a vision badge, a "default" hint when
-                    // the pick is only a fallback, and a CTA when nothing is set.
+                    // model name (or id), Claude subscription when applicable,
+                    // a vision badge, a "default" hint when the pick is only a
+                    // fallback, and a CTA when nothing is set.
                     Rectangle {
                         id: modelIndicator
 
@@ -470,6 +472,17 @@ FloatingWindow {
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
                                 elide: Text.ElideRight
+                            }
+
+                            Text {
+                                readonly property string subscription: ModelPresentation
+                                    .subscriptionLabel(Ghostd.currentModel)
+                                anchors.verticalCenter: parent.verticalCenter
+                                visible: !hud.switcherOpen && subscription !== ""
+                                text: "· " + subscription
+                                color: Theme.foregroundDim
+                                font.family: Theme.fontFamily
+                                font.pixelSize: Theme.fontSizeSmall
                             }
 
                             // Vision badge.

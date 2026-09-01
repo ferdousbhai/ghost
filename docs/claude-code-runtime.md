@@ -41,8 +41,10 @@ claude auth status --json
 ```
 
 The second command must report `"loggedIn": true`. `authMethod` and
-`apiProvider` are descriptive and are not checked against an allowlist. Select
-the runtime through the normal model API:
+`apiProvider` are descriptive and are not checked against an allowlist. When
+the CLI also reports `subscriptionType`, the model API and HUD show it as the
+owner's Claude subscription; this is display metadata, not Ghost deciding the
+billing route. Select the runtime through the normal model API:
 
 ```bash
 curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \

@@ -2001,8 +2001,8 @@ the captured old path. Model mutations use the same boundary through their
 durable write and live-session notification.
 
 - `GET  /api/ghosts/:name/model` → the current selection:
-  `{ current: { provider, id, name?, contextWindow?, hasVision, resolved?,
-  usable? } | null,
+  `{ current: { provider, id, name?, contextWindow?, hasVision, connectedVia?,
+  subscriptionType?, resolved?, usable? } | null,
   source: "role" | "default" | "none" }`. `role` — `roles.chat_model` is set
   and resolves among usable models; `default` — the catalogue default: the
   first catalogue provider's best-ranked model, taking providers in the order
@@ -2020,12 +2020,16 @@ durable write and live-session notification.
   - `scope=available` (default): models the ghost can use right now (from
     credentialed providers). Each row is
     `{ provider, id, name?, contextWindow?, cost?, hasVision, connectedVia?,
-    current }`, tagged by `provider`, with `current: true` on the selected one.
+    subscriptionType?, current }`, tagged by `provider`, with `current: true`
+    on the selected one.
     For pi providers, `connectedVia` is `oauth | api_key`. For the external
     Claude Code harness it is the non-empty `apiProvider` or `authMethod` string
     reported by the installed CLI, falling back to `external` when the CLI
-    reports only `loggedIn: true`. The value is descriptive metadata rather
-    than a finite authorization allowlist.
+    reports only `loggedIn: true`. When that CLI also reports a bounded,
+    non-empty `subscriptionType`, Claude rows carry it unchanged as descriptive
+    `subscriptionType` metadata and the shell presents it as the owner's Claude
+    subscription rather than mistaking the provider name for the billing route.
+    Neither value is a finite authorization allowlist.
   - `scope=catalog`: the full pi catalogue (every provider, logged in or
     not), same row shape plus `usable: boolean` (is the provider
     credentialed; `connectedVia` present only when usable). Supports the

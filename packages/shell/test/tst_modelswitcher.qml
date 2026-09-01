@@ -89,4 +89,18 @@ TestCase {
         verify(status !== null);
         compare(status.text, "Choose the next fallback model");
     }
+
+    function test_connectionLabelPrefersClaudeSubscription(): void {
+        const switcher = createTemporaryObject(switcherComponent, this);
+        verify(switcher !== null);
+        compare(switcher.connectionLabel({
+            provider: "claude-code",
+            connectedVia: "firstParty",
+            subscriptionType: "max"
+        }), "Claude Max subscription");
+        compare(switcher.connectionLabel({
+            provider: "openai-codex",
+            connectedVia: "oauth"
+        }), "via oauth");
+    }
 }

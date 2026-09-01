@@ -1611,11 +1611,12 @@ function compareModels(a, b) {
   return version || a.id.localeCompare(b.id);
 }
 
-/** @type {{ provider: string, id: string, name: string, contextWindow: number, cost: object, hasVision: boolean }[]} */
+/** @type {{ provider: string, id: string, name: string, contextWindow?: number, cost?: object, hasVision: boolean, connectedVia?: string, subscriptionType?: string }[]} */
 const CATALOG = [
   { provider: "anthropic", id: "claude-opus-4", name: "Claude Opus 4", contextWindow: 200000, cost: { input: 15, output: 75 }, hasVision: true },
   { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000, cost: { input: 3, output: 15 }, hasVision: true },
   { provider: "anthropic", id: "claude-haiku-3-5", name: "Claude Haiku 3.5", contextWindow: 200000, cost: { input: 0.8, output: 4 }, hasVision: true },
+  { provider: "claude-code", id: "default", name: "Claude Code (external harness)", hasVision: true, connectedVia: "firstParty", subscriptionType: "max" },
   { provider: "google", id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000, cost: { input: 0.3, output: 2.5 }, hasVision: true },
   { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 2000000, cost: { input: 1.25, output: 10 }, hasVision: true },
   { provider: "ollama", id: "llama3.2", name: "Llama 3.2 (local)", contextWindow: 131072, cost: { input: 0, output: 0 }, hasVision: false },
@@ -1629,7 +1630,7 @@ const CATALOG = [
 
 // Which providers this mock pretends to be credentialed for. `anthropic` starts
 // connected so the available list is non-empty; the rest route through login.
-const credentialed = new Set(["anthropic"]);
+const credentialed = new Set(["anthropic", "claude-code"]);
 const roles = new Map();
 const routing = new Map();
 const ROUTE_ROLES = [
@@ -1659,6 +1660,18 @@ const modelRow = (m) => ({
   contextWindow: m.contextWindow,
   cost: m.cost,
   hasVision: m.hasVision,
+  ...(m.connectedVia ? { connectedVia: m.connectedVia } : {}),
+  ...(m.subscriptionType ? { subscriptionType: m.subscriptionType } : {}),
+});
+
+const currentModelRow = (m) => ({
+  provider: m.provider,
+  id: m.id,
+  name: m.name,
+  ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
+  hasVision: m.hasVision,
+  ...(m.connectedVia ? { connectedVia: m.connectedVia } : {}),
+  ...(m.subscriptionType ? { subscriptionType: m.subscriptionType } : {}),
 });
 
 function resolveCurrent(name) {
@@ -1667,7 +1680,7 @@ function resolveCurrent(name) {
     const m = CATALOG.find((x) => x.provider === role.provider && x.id === role.id);
     if (m) {
       return {
-        current: { provider: m.provider, id: m.id, name: m.name, contextWindow: m.contextWindow, hasVision: m.hasVision },
+        current: currentModelRow(m),
         source: "role",
       };
     }
@@ -1675,7 +1688,7 @@ function resolveCurrent(name) {
   const first = CATALOG.find((x) => credentialed.has(x.provider));
   if (first) {
     return {
-      current: { provider: first.provider, id: first.id, name: first.name, contextWindow: first.contextWindow, hasVision: first.hasVision },
+      current: currentModelRow(first),
       source: "default",
     };
   }
@@ -1704,9 +1717,9 @@ function listModels(name, params) {
     row.current = Boolean(cur && cur.provider === m.provider && cur.id === m.id);
     if (scope === "catalog") {
       row.usable = credentialed.has(m.provider);
-      if (row.usable) row.connectedVia = "api_key";
+      if (row.usable && !row.connectedVia) row.connectedVia = "api_key";
     } else {
-      row.connectedVia = "api_key";
+      if (!row.connectedVia) row.connectedVia = "api_key";
     }
     return row;
   });

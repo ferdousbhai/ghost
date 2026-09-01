@@ -36,6 +36,7 @@ import {
   CLAUDE_CODE_PROVIDER_ID,
   ClaudeCodeProbe,
   claudeCodeConnectionMethod,
+  claudeCodeSubscriptionType,
   isClaudeCodeAuthenticated,
   type ClaudeCodeAuthStatus,
 } from "./claude-code.js";
@@ -88,6 +89,8 @@ export interface ModelView {
   name?: string;
   contextWindow?: number;
   hasVision: boolean;
+  connectedVia?: string;
+  subscriptionType?: string;
   resolved?: boolean;
   usable?: boolean;
 }
@@ -112,6 +115,7 @@ export interface ModelListItem {
   cost?: { input: number; output: number; cacheRead: number; cacheWrite: number };
   hasVision: boolean;
   connectedVia?: string;
+  subscriptionType?: string;
   usable?: boolean;
   current: boolean;
 }
@@ -244,11 +248,28 @@ async function defaultClaudeCodeStatus(probe: ClaudeCodeProbe): Promise<ClaudeCo
 interface ClaudeCodeAvailability {
   usable: boolean;
   connectedVia?: string;
+  subscriptionType?: string;
 }
 
 function claudeCodeAvailability(status: ClaudeCodeAuthStatus | null): ClaudeCodeAvailability {
   if (!status || !isClaudeCodeAuthenticated(status)) return { usable: false };
-  return { usable: true, connectedVia: claudeCodeConnectionMethod(status) };
+  const subscriptionType = claudeCodeSubscriptionType(status);
+  return {
+    usable: true,
+    connectedVia: claudeCodeConnectionMethod(status),
+    ...(subscriptionType ? { subscriptionType } : {}),
+  };
+}
+
+function claudeCodeDisplayMetadata(
+  availability: ClaudeCodeAvailability,
+  usable = availability.usable,
+): Pick<ModelView, "connectedVia" | "subscriptionType"> {
+  if (!usable) return {};
+  return {
+    ...(availability.connectedVia ? { connectedVia: availability.connectedVia } : {}),
+    ...(availability.subscriptionType ? { subscriptionType: availability.subscriptionType } : {}),
+  };
 }
 
 async function defaultCreateRuntime(input: {
@@ -689,6 +710,7 @@ export class ModelCatalog {
               id: role.modelId,
               ...(resolved ? {} : { name: `Claude Code (${role.modelId})` }),
             }),
+            ...claudeCodeDisplayMetadata(claudeCode, resolved && claudeCode.usable),
             resolved,
             usable: resolved && claudeCode.usable,
           },
@@ -805,6 +827,9 @@ export class ModelCatalog {
       }
       const via = connectedViaOf(model.provider, usable);
       if (via) item.connectedVia = via;
+      if (model.provider === CLAUDE_CODE_PROVIDER_ID && usable && claudeCode.subscriptionType) {
+        item.subscriptionType = claudeCode.subscriptionType;
+      }
       if (scope === "catalog") item.usable = usable;
       return item;
     });
@@ -848,7 +873,8 @@ export class ModelCatalog {
     if (provider === CLAUDE_CODE_PROVIDER_ID) {
       setChatModelRole(configDir, provider, id);
       await this.notifyModelRoutingChanged(ghostName);
-      const usable = claudeCodeAvailability(await this.claudeCodeStatus()).usable;
+      const claudeCode = claudeCodeAvailability(await this.claudeCodeStatus());
+      const usable = claudeCode.usable;
       this.logger.info("ghost chat model set", {
         ghost: ghostName,
         provider,
@@ -858,7 +884,10 @@ export class ModelCatalog {
       return {
         ok: true,
         usable,
-        current: modelView(CLAUDE_CODE_MODEL),
+        current: {
+          ...modelView(CLAUDE_CODE_MODEL),
+          ...claudeCodeDisplayMetadata(claudeCode),
+        },
         source: "role",
         ...(!usable
           ? {

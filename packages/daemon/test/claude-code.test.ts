@@ -32,6 +32,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bridgeClaudeCodeTools,
   claudeCodeConnectionMethod,
+  claudeCodeSubscriptionType,
   claudeSdkTranscriptPath,
   claudeSessionMetadataPath,
   CLAUDE_SESSION_METADATA_MAX_BYTES,
@@ -785,10 +786,15 @@ printf '%s\\n' '${JSON.stringify({
     expect(readFileSync(join(temp.ownerHome, "auth-status-cwd-mode"), "utf8").trim()).toBe("700");
     expect(existsSync(authCwd)).toBe(false);
     expect(claudeCodeConnectionMethod(status)).toBe("owner-router");
+    expect(claudeCodeSubscriptionType(status)).toBe("enterprise");
     expect(claudeCodeConnectionMethod({
       loggedIn: true,
       authMethod: `unsafe\n${sentinel}`,
     })).toBe("external");
+    expect(claudeCodeSubscriptionType({
+      loggedIn: true,
+      subscriptionType: `unsafe\n${sentinel}`,
+    })).toBeUndefined();
   });
 
   it("accepts the CLI's documented exit-one logged-out result", async () => {

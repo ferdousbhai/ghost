@@ -19,6 +19,7 @@ import QtQuick
 import QtQuick.Layouts
 import qs.services
 import "ModelRouting.js" as Routing
+import "ModelPresentation.js" as Presentation
 
 Rectangle {
     id: root
@@ -73,6 +74,10 @@ Rectangle {
 
     function routeModelName(model: var): string {
         return Routing.modelName(model);
+    }
+
+    function connectionLabel(model: var): string {
+        return Presentation.connectionLabel(model);
     }
 
     function beginRoutePick(role: string, label: string, target: string): void {
@@ -681,7 +686,8 @@ Rectangle {
                                         text: {
                                             const parts = [];
                                             if (m && m.name && m.id && m.name !== m.id) parts.push(m.id);
-                                            if (m && m.connectedVia) parts.push("via " + m.connectedVia);
+                                            const connection = root.connectionLabel(m);
+                                            if (connection !== "") parts.push(connection);
                                             return parts.join("  ·  ");
                                         }
                                         color: Theme.foregroundDim

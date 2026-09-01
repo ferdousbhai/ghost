@@ -54,6 +54,7 @@ export {
   ClaudeCodeProbe,
   ClaudeCodeRuntime,
   claudeCodeConnectionMethod,
+  claudeCodeSubscriptionType,
   claudeSessionMetadataPath,
   isClaudeCodeAuthenticated,
   readClaudeCodeAuthStatus,

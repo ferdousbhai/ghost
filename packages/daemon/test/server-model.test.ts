@@ -119,7 +119,14 @@ async function postMessage(base: string, sessionId: string): Promise<Response> {
 
 describe("GET /api/ghosts/:name/model", () => {
   it("reports the external Claude Code runtime without asking Pi to resolve it", async () => {
-    const base = await serve({ claudeStatus: { loggedIn: true, authMethod: "claude.ai" } });
+    const base = await serve({
+      claudeStatus: {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+      },
+    });
     setChatModelRole(agentDir(), "claude-code", "default");
     const { status, body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(status).toBe(200);
@@ -129,6 +136,8 @@ describe("GET /api/ghosts/:name/model", () => {
         id: "default",
         name: "Claude Code (external harness)",
         hasVision: true,
+        connectedVia: "firstParty",
+        subscriptionType: "max",
         resolved: true,
         usable: true,
       },
@@ -324,6 +333,23 @@ describe("GET /api/ghosts/:name/models?scope=available", () => {
       id: "default",
       connectedVia: "bedrock",
       hasVision: true,
+    })]);
+  });
+
+  it("shows the external CLI's Claude subscription separately from its provider route", async () => {
+    const base = await serve({
+      claudeStatus: {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+      },
+    });
+    const { body } = await getJson(`${base}/api/ghosts/casper/models?provider=claude-code`);
+    expect(body.models).toEqual([expect.objectContaining({
+      provider: "claude-code",
+      connectedVia: "firstParty",
+      subscriptionType: "max",
     })]);
   });
 
@@ -563,19 +589,34 @@ describe("PUT /api/ghosts/:name/model", () => {
 
   it("selects the externally authenticated Claude Code runtime", async () => {
     const base = await serve({
-      claudeStatus: { loggedIn: true, authMethod: "future_owner_sso" },
+      claudeStatus: {
+        loggedIn: true,
+        authMethod: "claude.ai",
+        apiProvider: "firstParty",
+        subscriptionType: "max",
+      },
     });
     const set = await put(base, { provider: "claude-code", id: "default" });
     expect(set.status).toBe(200);
     expect(set.body).toMatchObject({
       ok: true,
       usable: true,
-      current: { provider: "claude-code", id: "default" },
+      current: {
+        provider: "claude-code",
+        id: "default",
+        connectedVia: "firstParty",
+        subscriptionType: "max",
+      },
     });
     expect(set.body).not.toHaveProperty("warning");
 
     const after = await getJson(`${base}/api/ghosts/casper/model`);
-    expect(after.body.current).toMatchObject({ provider: "claude-code", id: "default" });
+    expect(after.body.current).toMatchObject({
+      provider: "claude-code",
+      id: "default",
+      connectedVia: "firstParty",
+      subscriptionType: "max",
+    });
   });
 
   it("writes Claude Code selection but explains external login when unavailable", async () => {

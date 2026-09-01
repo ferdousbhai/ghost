@@ -773,6 +773,13 @@ export function claudeCodeConnectionMethod(status: ClaudeCodeAuthStatus): string
     ?? "external";
 }
 
+/** Bounded display metadata from the native CLI; never a billing decision. */
+export function claudeCodeSubscriptionType(
+  status: ClaudeCodeAuthStatus,
+): string | undefined {
+  return authStatusMetadata(status.subscriptionType);
+}
+
 function claudeCodeAuthenticationIdentity(status: ClaudeCodeAuthStatus): string {
   return JSON.stringify([
     status.loggedIn,
