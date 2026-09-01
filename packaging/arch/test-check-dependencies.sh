@@ -91,6 +91,7 @@ for install_script in \
 done
 
 bash "$script_dir/test-ci-dependencies.sh"
+bash "$script_dir/test-accept-obsidian.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
 

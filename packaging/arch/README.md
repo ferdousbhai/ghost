@@ -49,6 +49,17 @@ Run `obsidian version` while Obsidian is open. Some Arch repackagings of the
 application omit the official standalone CLI payload; installing the GUI alone
 does not satisfy the check. The ALPM package hook only prints these instructions
 because it runs as root and must not guess which desktop user's home to modify.
+For a bounded source-checkout proof, keep Obsidian open and run:
+
+```sh
+bash packaging/arch/accept-obsidian.sh
+# Or target an owner-named vault explicitly:
+bash packaging/arch/accept-obsidian.sh --vault "Owner Notes"
+```
+
+The harness validates version output rather than trusting exit status, exercises
+CLI create/read/search/tasks/delete, and permanently removes only the unique
+marker-owned note it created. It never resolves or reads the vault path.
 Under the current release hold, there is no supported end-user Omarchy install
 flow. #54 must make that flow perform and verify these owner-level steps before
 it can become supported.
