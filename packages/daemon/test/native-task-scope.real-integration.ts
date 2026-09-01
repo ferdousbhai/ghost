@@ -951,6 +951,10 @@ async function proveCollision(
       return (await unitProperties(unit)).get("Description") === foreignDescription;
     } catch { return false; }
   });
+  await waitFor("foreign collision pid", async () => {
+    try { return (await readFile(foreignPid, "utf8")).trim().length > 0; }
+    catch { return false; }
+  });
   const rejectedLauncher = reserved.spawn({
     executable: "/usr/bin/python3",
     args: ["-c", "time.sleep(3600)"],
