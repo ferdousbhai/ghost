@@ -135,7 +135,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "delegation", "hooks", "resources", "mcp", "connect", "remote", "character"]
+        if (["chat", "memory", "commands", "delegation", "hooks", "resources", "mcp", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
