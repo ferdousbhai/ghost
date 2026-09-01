@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
-// The active ghost's memory, shown as what it is on disk: one plain fact per
-// Markdown file. The fact is the row. Click one to edit it in place; leaving
+// The active ghost's private internal continuity, shown as it is on disk: one
+// plain thought per Markdown file. Click one to edit it in place; leaving
 // the field saves through the daemon's validating writer, Escape discards.
 // "New" is an empty row. There is no detail pane and no refresh button: the
 // memory directory is watched, so the ghost's own writes and its idle
@@ -386,7 +386,7 @@ Rectangle {
 
                                     Text {
                                         visible: editor.text === ""
-                                        text: "One fact worth keeping"
+                                        text: "One private thought worth keeping"
                                         color: Theme.foregroundFaint
                                         font.family: Theme.fontFamily
                                         font.pixelSize: Theme.fontSize
@@ -477,8 +477,8 @@ Rectangle {
                         text: {
                             if (Ghostd.activeGhost === "") return "Choose a ghost to see what it remembers.";
                             if (Ghostd.memoryLoading || Ghostd.memoryError !== "") return "";
-                            return "The ghost writes a fact here when it learns one worth keeping. "
-                                + "You can add one too.";
+                            return "This is the ghost's private internal continuity, not shared notes or tasks. "
+                                + "You can inspect or correct it here.";
                         }
                         visible: text !== ""
                         color: Theme.foregroundDim

@@ -5,8 +5,9 @@ issue tracker (#17 is the beta gate); contracts live in `../CONTRACTS.md`.
 
 ## Vision
 
-A ghost is an AI persona — character, memory, tools, and access to the owner's
-Documents — that lives entirely on its owner's machine as an Omarchy-native
+A ghost is an AI persona — character, private memory, tools, access to the
+owner's Documents, and shared knowledge through Obsidian — that lives entirely
+on its owner's machine as an Omarchy-native
 desktop app: a pi engine over owner-readable files, summoned with a keystroke,
 and extended with bounded declarative skills and project context. It is an
 owner-local desktop application, not a network-facing agent service. No server
@@ -43,10 +44,10 @@ ambient credential discovery, and no cloud custody.
   plus explicit Ghost snapshots express the normal path. `claude-code/default`
   is the narrow exception: the official Claude Agent SDK invokes an installed,
   unmodified Claude Code so the owner can use its native authentication and
-  provider routes. Both receive the
-  same Ghost persona, memory, Documents, and declarative layers and emit the
-  pi-messages wire, while each keeps its native tool harness. Deviations from
-  pi are named in `CONTRACTS.md` with the invariant that licenses them (#3).
+  provider routes. Both receive the same Ghost persona, memory, Documents,
+  shared Obsidian policy, and declarative layers and emit the pi-messages wire,
+  while each keeps its native tool harness. Deviations from pi are named in
+  `CONTRACTS.md` with the invariant that licenses them (#3).
 - **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
   Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
   **Claude Code's native authentication through the Claude Code harness** (a
@@ -61,13 +62,12 @@ ambient credential discovery, and no cloud custody.
 - **No stored indexes** — the memory index and shallow owner Documents index
   are derived per session; files edited out-of-band cannot go stale against a
   persisted catalog.
-- **Documents and skills coexist without sharing lifecycle** — Documents are
-  live owner-wide files, while skills are bounded declarative instructions from
-  a ghost or trusted project. pi supports explicit `/skill:<name>` invocation
-  without treating Documents as a package root. A real `.obsidian/` marker can
-  classify that same tree as an Obsidian vault and steer both runtimes toward
-  admitted upstream skills, but the files stay canonical and session startup
-  never depends on the application or its CLI socket.
+- **Three persistence scopes** — per-ghost memory is private persona context;
+  Obsidian is durable owner-visible knowledge and task state shared by every
+  ghost; Documents hold owner-wide files and finished artifacts. Obsidian's
+  application and CLI select the vault. Ghost links the upstream `obsidian-cli`
+  skill in both runtime prompts and never infers a vault from Documents,
+  searches for `.obsidian`, or bypasses the CLI with raw file access.
 - **One browser** — the owner's real signed-in Chromium, reached by an MV3
   extension over `chrome.debugger`, behind a backend-agnostic tool surface. A
   second, ghost-owned profile was tried and removed: it doubled the code for a
@@ -81,7 +81,10 @@ ambient credential discovery, and no cloud custody.
 - **Env scrubbing** — a ghost only sees credentials deliberately referenced and
   allowed by its `models.json`; stray shell API keys must never leak cloud
   models into a sovereign ghost.
-- **No Obsidian integration promises** — plain files make it unnecessary.
+- **No Ghost-owned notes database** — Obsidian's existing ecosystem owns shared
+  notes, tasks, links, properties, and vault selection; Ghost owns only the
+  prompt policy and install/readiness contract that make both runtimes use its
+  CLI consistently.
 - **Apache-2.0, fresh repo** — the predecessor repo's history carries private
   identifiers; the open contribution is this codebase.
 

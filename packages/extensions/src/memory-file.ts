@@ -31,7 +31,7 @@ export function parseMemoryFileName(name: string): string {
   const slug = name.slice(0, -".md".length);
   if (!MEMORY_SLUG_PATTERN.test(slug) || slug.length > MAX_MEMORY_FILE_SLUG_LENGTH) {
     throw new MemoryFileFormatError(
-      "Memory file names must be short kebab-case slugs of lowercase letters, digits, and dashes, like preferred-tone.md.",
+      "Memory file names must be short kebab-case slugs of lowercase letters, digits, and dashes, like how-i-approach-work.md.",
     );
   }
   return slug;
@@ -91,11 +91,11 @@ export function memorySlugForText(text: string): string {
 export function assertWritableMemory(content: string): void {
   const normalized = content.trim();
   if (normalized.length === 0) {
-    throw new MemoryFileFormatError("A memory must contain one concise fact.");
+    throw new MemoryFileFormatError("A memory must contain one concise private thought.");
   }
   if (normalized.length > MAX_MEMORY_FILE_CONTENT_LENGTH) {
     throw new MemoryFileFormatError(
-      `Memory files must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated facts into separate files.`,
+      `Memory files must be ${MAX_MEMORY_FILE_CONTENT_LENGTH} characters or fewer. Split unrelated thoughts into separate files.`,
     );
   }
   const utf8 = new TextEncoder().encode(normalized);

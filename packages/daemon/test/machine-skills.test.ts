@@ -8,7 +8,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadMachineSkills, machineSkillPaths } from "../src/machine-skills.js";
+import {
+  loadMachineSkills,
+  machineSkillPaths,
+  obsidianCliSkillPath,
+  renderSharedObsidianPolicy,
+} from "../src/machine-skills.js";
 
 const roots: string[] = [];
 
@@ -25,6 +30,26 @@ function writeSkill(path: string, name: string, description: string): void {
 }
 
 describe("machine skills", () => {
+  it("links the official Obsidian CLI skill and keeps vault access on the CLI", () => {
+    const ownerHome = "/home/owner";
+    const skillPath = join(
+      ownerHome,
+      ".agents",
+      "skills",
+      "obsidian-cli",
+      "SKILL.md",
+    );
+
+    expect(obsidianCliSkillPath(ownerHome)).toBe(skillPath);
+    const policy = renderSharedObsidianPolicy(ownerHome);
+    expect(policy).toContain(
+      `[obsidian-cli skill](<${skillPath}>)`,
+    );
+    expect(policy).toContain("shared by every ghost on this machine");
+    expect(policy).toContain("Never infer or scan for a vault path");
+    expect(policy).toContain("do not fall back to direct vault-file access");
+  });
+
   it("admits ambient skills without a name allowlist and follows standard symlinks", async () => {
     const ownerHome = mkdtempSync(join(tmpdir(), "ghost-machine-skills-"));
     const managed = mkdtempSync(join(tmpdir(), "ghost-managed-skills-"));

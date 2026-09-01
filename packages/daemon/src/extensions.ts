@@ -168,7 +168,7 @@ export async function readGhostHomeDigest(
     : { files: [], skipped: [] };
   const documentPage = documentsResult.status === "fulfilled"
     ? documentsResult.value
-    : { root: "", path: "", obsidianVault: false, entries: [], total: 0 };
+    : { root: "", path: "", entries: [], total: 0 };
   return {
     character: character?.body ?? null,
     memoryLines: deriveMemoryIndex(memory.files).lines,

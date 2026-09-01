@@ -31,8 +31,6 @@ export interface SkippedDocumentEntry {
 export interface DocumentDirectoryPage {
   readonly root: string;
   readonly path: string;
-  /** Whether the canonical Documents root contains a real `.obsidian` directory. */
-  readonly obsidianVault: boolean;
   readonly entries: readonly DocumentDirectoryEntry[];
   readonly total: number;
   readonly fileCount: number;
@@ -121,16 +119,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function hasObsidianMarker(directory: FileHandle): Promise<boolean> {
-  try {
-    return (await lstat(descriptorPath(directory, ".obsidian"))).isDirectory();
-  } catch {
-    // Vault awareness is an optional hint. Missing or unreadable markers leave
-    // Documents usable as ordinary files instead of failing the whole index.
-    return false;
-  }
-}
-
 /** A descriptor-confined view of the owner's machine-wide Documents tree. */
 export class MachineDocuments {
   readonly configuredRoot: string;
@@ -171,25 +159,6 @@ export class MachineDocuments {
     };
   }
 
-  private async detectObsidianVault(
-    root: string,
-    path: string,
-    directory: FileHandle,
-  ): Promise<boolean> {
-    if (path === "") return hasObsidianMarker(directory);
-    let rootDirectory: FileHandle | undefined;
-    try {
-      rootDirectory = await openConfinedDirectory(root, root, {
-        label: "Documents directory",
-      });
-      return await hasObsidianMarker(rootDirectory);
-    } catch {
-      return false;
-    } finally {
-      await rootDirectory?.close();
-    }
-  }
-
   async listDirectory(
     inputPath = "",
     options: ListDocumentDirectoryOptions = {},
@@ -206,13 +175,7 @@ export class MachineDocuments {
     const opened = await this.openDirectory(path);
     const entries: DocumentDirectoryEntry[] = [];
     const skipped: SkippedDocumentEntry[] = [];
-    let obsidianVault = false;
     try {
-      obsidianVault = await this.detectObsidianVault(
-        opened.root,
-        path,
-        opened.directory,
-      );
       for (const entry of await readdir(descriptorPath(opened.directory), {
         withFileTypes: true,
       })) {
@@ -258,7 +221,6 @@ export class MachineDocuments {
     return {
       root: opened.root,
       path,
-      obsidianVault,
       entries: page,
       total: entries.length,
       fileCount,

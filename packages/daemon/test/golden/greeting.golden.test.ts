@@ -214,7 +214,6 @@ describe("golden: greeting flow", () => {
       memoryLines: ["- owner-prefers-short.md"],
       documents: {
         root: "/home/owner/Documents",
-        obsidianVault: false,
         lines: ['- file: "press.md"'],
         chars: 19,
         omitted: 0,

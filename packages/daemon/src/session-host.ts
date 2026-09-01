@@ -86,6 +86,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  renderSharedObsidianPolicy,
 } from "./machine-skills.js";
 import {
   maintenanceStatePath,
@@ -2725,6 +2726,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      renderSharedObsidianPolicy(this.ownerHome),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)

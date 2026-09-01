@@ -83,7 +83,7 @@ describe("writeGhostMemory", () => {
       expect.objectContaining({
         code: "invalid_format",
         status: 400,
-        message: expect.stringContaining("one concise fact"),
+        message: expect.stringContaining("one concise private thought"),
       }),
     );
     await expect(writeGhostMemory(ghost, { name: "Not A Slug", content: "x" })).rejects

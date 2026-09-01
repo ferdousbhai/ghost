@@ -92,6 +92,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  renderSharedObsidianPolicy,
 } from "./machine-skills.js";
 import {
   renderScheduledWorkPolicy,
@@ -1516,6 +1517,7 @@ async function removeResumeMarkers(metadataPath: string): Promise<boolean> {
 async function buildPersona(
   homeDir: string,
   ghostName: string,
+  ownerHome: string,
   scheduleUnitDir: string,
   configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
@@ -1537,6 +1539,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      renderSharedObsidianPolicy(ownerHome),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
@@ -2951,6 +2954,7 @@ export class ClaudeCodeRuntime {
     const prompt = await buildPersona(
       home,
       ghostName,
+      this.ownerHome,
       this.scheduleUnitDir,
       this.extensionOptions.documents,
     );

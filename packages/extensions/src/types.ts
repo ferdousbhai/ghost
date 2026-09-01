@@ -14,7 +14,6 @@ export interface MemoryRecord {
 
 export interface DocumentsIndex {
   readonly root: string;
-  readonly obsidianVault: boolean;
   readonly lines: readonly string[];
   readonly chars: number;
   readonly omitted: number;

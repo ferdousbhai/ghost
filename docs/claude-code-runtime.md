@@ -112,7 +112,9 @@ For each turn Ghost:
    Documents root — derived once when the daemon first ran a turn for that
    conversation and held until explicit close or idle expiry, then rebuilds the
    Omarchy CLI-first computer-use policy, the owner-deliverable policy, the
-   scheduled-work policy rendered from ghostd's one resolved systemd user-unit
+   shared Obsidian policy with an explicit link to
+   `~/.agents/skills/obsidian-cli/SKILL.md`, the scheduled-work policy rendered
+   from ghostd's one resolved systemd user-unit
    directory, the machine/ghost/project skill index, and the always-active
    declarative instructions;
 5. applies the conversation's pre-turn project binding: owner home when
@@ -159,6 +161,11 @@ The query is deliberately unrestricted for its local owner:
   exposes its packaged skills through links in those standard roots. Native SDK
   skill discovery stays empty, and neither cwd nor hidden ghost providers add
   resources;
+- Obsidian is owner-wide persistent knowledge shared across ghosts, independent
+  of Documents and private memory. Claude reads the linked skill and uses the
+  `obsidian` CLI-selected vault for every operation; it never discovers a vault
+  path or falls back to raw vault files. A missing skill, command, or running
+  Obsidian instance is reported as incomplete setup;
 - because the first-turn MCP translation is persisted for resume, phase 1
   rejects any project MCP row containing environment expansion, stdio env,
   headers, auth/OAuth, or URL userinfo/query before starting Claude. It never

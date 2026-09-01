@@ -1,27 +1,50 @@
+print_obsidian_readiness_steps() {
+  cat <<'EOF'
+  1. Open Obsidian and enable Settings > General > Command line interface.
+  2. Install the upstream CLI skill:
+
+  npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+    --global --yes --skill obsidian-cli
+
+  3. Keep Obsidian open and verify both installation boundaries:
+
+  obsidian version
+  test -f ~/.agents/skills/obsidian-cli/SKILL.md
+
+The Obsidian application package alone is not sufficient when its Arch build
+omits the official standalone CLI. Follow https://obsidian.md/help/cli for the
+official Linux registration. This root package hook cannot install a skill into
+an arbitrary desktop user's home.
+EOF
+}
+
 post_install() {
   cat <<'EOF'
-Ghost is installed. Enable it for the current graphical login with:
-
-  systemctl --user enable --now ghostd.service ghost-shell.service
-
-The package does not edit Hyprland or Omarchy configuration. Optional summon
-key and bar snippets are under /usr/share/doc/ghost/shell-contrib/.
+Ghost is installed. The package does not edit Hyprland or Omarchy
+configuration. Optional summon key and bar snippets are under
+/usr/share/doc/ghost/shell-contrib/.
 
 To relay the browser you already use, load this directory unpacked in Chromium:
 
   /usr/share/ghost/chromium-extension
 
-Optional pi integrations are installed from upstream as this desktop user;
-Ghost packages none of their CLIs or skills:
+Obsidian is shared persistent state for the owner and every ghost. Before
+enabling Ghost, complete this required setup as the desktop user:
+EOF
+  print_obsidian_readiness_steps
+  cat <<'EOF'
 
-  omarchy pkg add npm
+Then enable Ghost for the current graphical login with:
+
+  systemctl --user enable --now ghostd.service ghost-shell.service
+
+Other optional pi integrations are installed from upstream as this desktop
+user; Ghost packages none of their CLIs or skills:
+
   npx -y firecrawl-cli@latest init --all --skip-auth
   hey skill install
   omarchy pkg add basecamp-cli
   basecamp skill install
-  omarchy pkg add obsidian
-  npx -y skills@latest add https://github.com/kepano/obsidian-skills \
-    --global --yes --skill json-canvas obsidian-bases obsidian-cli obsidian-markdown
   npm install -g @googleworkspace/cli
   npx -y skills@latest add https://github.com/googleworkspace/cli \
     --global --yes --skill gws-calendar gws-chat gws-docs gws-drive gws-forms \
@@ -47,8 +70,14 @@ EOF
 
 post_upgrade() {
   cat <<'EOF'
-Ghost was upgraded. Re-enable and restart the user services so an older
-default.target link is replaced by the graphical-session.target lifecycle:
+Ghost was upgraded. Before restarting it, verify the required owner-level
+Obsidian setup:
+EOF
+  print_obsidian_readiness_steps
+  cat <<'EOF'
+
+Then re-enable and restart the user services so an older default.target link is
+replaced by the graphical-session.target lifecycle:
 
   systemctl --user reenable --now ghostd.service ghost-shell.service
 

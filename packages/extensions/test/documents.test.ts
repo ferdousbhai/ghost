@@ -82,40 +82,10 @@ describe("MachineDocuments", () => {
     ]);
     expect(JSON.stringify(page)).not.toContain("do-not-index");
     expect(page).toMatchObject({
-      obsidianVault: false,
       total: 3,
       directoryCount: 1,
       fileCount: 2,
     });
-  });
-
-  it("classifies a real root .obsidian directory without listing or entering it", async () => {
-    const { root, documents } = await fixture();
-    await mkdir(join(root, ".obsidian"));
-    await writeFile(join(root, ".obsidian", "app.json"), "OWNER-CONFIG");
-    await mkdir(join(root, "Projects"));
-
-    const rootPage = await documents.listDirectory();
-    const nestedPage = await documents.listDirectory("Projects");
-
-    expect(rootPage.obsidianVault).toBe(true);
-    expect(nestedPage.obsidianVault).toBe(true);
-    expect(rootPage.entries.map((entry) => entry.name)).toEqual(["Projects"]);
-    expect(JSON.stringify(rootPage)).not.toContain("OWNER-CONFIG");
-  });
-
-  it("does not treat a symbolic .obsidian marker as a vault", async () => {
-    const { root, documents } = await fixture();
-    const outside = join(root, "..", "outside-vault-config");
-    await mkdir(outside);
-    await writeFile(join(outside, "app.json"), "OUTSIDE-CONFIG");
-    await symlink(outside, join(root, ".obsidian"));
-
-    const page = await documents.listDirectory();
-
-    expect(page.obsidianVault).toBe(false);
-    expect(page.entries).toEqual([]);
-    expect(JSON.stringify(page)).not.toContain("OUTSIDE-CONFIG");
   });
 
   it("skips hidden, symlink, and special entries without following or blocking", async () => {

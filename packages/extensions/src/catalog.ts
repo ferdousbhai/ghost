@@ -62,8 +62,7 @@ function catalogLine(entry: DocumentDirectoryEntry): string {
 }
 
 export function deriveDocumentsIndex(
-  page: Pick<DocumentDirectoryPage, "root" | "entries" | "total">
-    & Partial<Pick<DocumentDirectoryPage, "obsidianVault">>,
+  page: Pick<DocumentDirectoryPage, "root" | "entries" | "total">,
 ): DocumentsIndex {
   const available = page.entries.slice(0, DOCUMENT_INDEX_MAX_ENTRIES);
   const lines: string[] = [];
@@ -76,7 +75,6 @@ export function deriveDocumentsIndex(
   }
   return {
     root: page.root,
-    obsidianVault: page.obsidianVault === true,
     lines,
     chars,
     omitted: Math.max(0, page.total - lines.length),

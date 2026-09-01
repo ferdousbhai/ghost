@@ -39,7 +39,7 @@ TestCase {
         Ghostd.activeGhost = "";
     }
 
-    function test_rowsAreTheFactsAsListed(): void {
+    function test_rowsAreTheMemoriesAsListed(): void {
         const list = createTemporaryObject(listComponent, tc);
         verify(list !== null);
         compare(list.rows.length, 2);

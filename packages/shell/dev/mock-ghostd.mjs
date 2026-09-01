@@ -1859,7 +1859,7 @@ const mockServer = createServer(async (req, res) => {
     const content = typeof body?.content === "string" ? body.content.trim() : "";
     if (content === "") {
       return json(res, 400, {
-        error: { message: "A memory must contain one concise fact.", code: "invalid_request" },
+        error: { message: "A memory must contain one concise private thought.", code: "invalid_request" },
       });
     }
     if (content.length > 2000) {

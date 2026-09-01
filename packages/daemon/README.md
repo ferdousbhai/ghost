@@ -88,7 +88,7 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
 ```text
 ~/ghosts/<name>/
   character.md             persona
-  memory/*.md              one stable fact per plain Markdown file
+  memory/*.md              one private memory per Markdown file
   settings.yml             the ghost's own plain YAML settings
   models.json              providers, keyring policy, roles, and fallbacks;
                            secret references only
@@ -122,15 +122,30 @@ non-hidden regular files and directories, with no content reads or descent,
 capped at 50 newest-modified entries and 4,000 characters. Explicit native
 filesystem tools can traverse further when the task calls for it.
 
-When the root contains a real `.obsidian/` directory, the session prompt
-identifies it as an Obsidian vault and directs vault-aware operations through
-admitted `obsidian-*` machine skills. Files remain the source of truth and
-native tools remain the fallback. Ghost does not read the vault configuration,
-launch Obsidian, depend on its CLI socket, or synchronize the conversation's
-progress list with durable vault tasks.
-
 Ghost rename, delete, and future home export never move or copy the owner-wide
 Documents tree.
+
+### Shared Obsidian
+
+Obsidian is a separate owner-wide knowledge and task store shared by the owner
+and every ghost. Both runtime prompts link the upstream skill at
+`~/.agents/skills/obsidian-cli/SKILL.md` and require its `obsidian` commands for
+search, reads, notes, links, properties, tasks, and renames. The CLI-selected
+current vault is the default; `vault=<name>` targets a vault the owner names.
+Ghost never assumes a vault lives in Documents, searches for `.obsidian`, or
+falls back to direct vault-file access.
+
+The owner-level installer must enable **Settings → General → Command line
+interface**, install the
+[upstream skill](https://github.com/kepano/obsidian-skills) with `npx skills`,
+and verify `obsidian version` while Obsidian is running. If any boundary is
+missing, the runtime reports incomplete setup instead of treating Documents as
+a vault. Conversation Progress remains transcript-local; a task created through
+Obsidian is durable owner work and is never mirrored automatically.
+
+Under the current release hold, no supported end-user Omarchy installation flow
+performs that owner-level readiness gate. #54 must add and verify it before the
+flow becomes supported; the root package hooks only print the required steps.
 
 An older local install may still have a per-ghost `notes/` or `docs/` tree.
 Ghost leaves that tree byte-for-byte untouched: it is neither indexed as live
@@ -172,15 +187,15 @@ disk and never persist a catalog.
 
 The memory index is likewise derived newest-modified first, once when a session
 starts, with at most 50 entries and 4,000 characters. After a settled turn has
-been idle for 60 seconds, ordinary maintenance may write one owner-grounded
-fact. Reaching 50 valid memory files switches that delivery to consolidation,
-limited to four writes and four recoverable `.trash/` deletions with a ten-hour
-claimed cooldown. Foreground turns get no deletion tool and write through the
-runtime's native filesystem tools; the prompt carries the filename and hard
-limits of 2,000 JavaScript UTF-16 code units and 6,001 on-disk bytes, but those
-native writes do not pass through GhostHome validation or redaction. HUD and
-background writers do, and redact common secret forms before validation, slug
-derivation, or disk.
+been idle for 60 seconds, ordinary maintenance may write one ghost-private
+reflection that is not shared knowledge. Reaching 50 valid memory files
+switches that delivery to consolidation, limited to four writes and four
+recoverable `.trash/` deletions with a ten-hour claimed cooldown. Foreground
+turns get no deletion tool and write through the runtime's native filesystem
+tools; the prompt carries the filename and hard limits of 2,000 JavaScript
+UTF-16 code units and 6,001 on-disk bytes, but those native writes do not pass
+through GhostHome validation or redaction. HUD and background writers do, and
+redact common secret forms before validation, slug derivation, or disk.
 
 ### Ghost and conversation-project MCP
 
@@ -343,8 +358,9 @@ ad-hoc prompts:
   every later turn. The `todo` tool is view-only while planning; `/todo` keeps a
   phased task list the shell can show (`GET …/sessions/:id/todo`). Claude Code
   conversations do not support this Ghost-owned mode.
-- Pi can use Firecrawl, HEY, Basecamp, Obsidian, Google Workspace, and other
-  CLI skills through `bash` when the owner installs them. At session
+- Pi uses the required Obsidian CLI skill and can use Firecrawl, HEY, Basecamp,
+  Google Workspace, and other optional CLI skills through `bash` when the owner
+  installs them. At session
   construction, Ghost uses pi's native parser to snapshot every valid skill
   visible under `~/.agents/skills/` and `~/.pi/agent/skills/`, including
   symlinked entries. There is no hardcoded skill-name allowlist.

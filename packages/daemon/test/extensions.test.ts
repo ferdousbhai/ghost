@@ -28,7 +28,6 @@ describe("readGhostHomeDigest", () => {
         documents: async () => ({
           root: "/not-read/Documents",
           path: "",
-          obsidianVault: false,
           entries: [],
           total: 0,
           fileCount: 0,
@@ -61,7 +60,6 @@ describe("readGhostHomeDigest", () => {
       const digest = await readGhostHomeDigest(home, fixture.documentsDir);
 
       expect(digest.documents.root).toBe(fixture.documentsDir);
-      expect(digest.documents.obsidianVault).toBe(false);
       expect(digest.documents.lines).toHaveLength(DOCUMENT_INDEX_MAX_ENTRIES);
       expect(digest.documents.total).toBe(total);
       expect(digest.documents.omitted).toBe(37);
@@ -112,7 +110,6 @@ describe("readGhostHomeDigest", () => {
             : Promise.resolve({
               root: "/owner/Documents",
               path: "",
-              obsidianVault: false,
               entries: [{
                 name: "DOCUMENT_OK",
                 path: "DOCUMENT_OK",
@@ -138,10 +135,9 @@ describe("readGhostHomeDigest", () => {
       );
       expect(digest.documents).toMatchObject(
         "documents" in testCase.failed
-          ? { root: "", obsidianVault: false, lines: [], omitted: 0, total: 0 }
+          ? { root: "", lines: [], omitted: 0, total: 0 }
           : {
               root: "/owner/Documents",
-              obsidianVault: false,
               lines: ["DOCUMENT_OK"],
               omitted: 0,
               total: 1,

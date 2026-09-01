@@ -264,15 +264,16 @@ logged and fail open.
 
 Ghost's built-in idle-memory hook uses `smol_model` and only memory list/read/
 search plus one receipt-journaled write. Transcript text is fenced as untrusted
-data. It cannot access Documents, character, deletion, network/MCP, shell, or
-general session tools. A new owner action, conversation delete, whole-home move,
-or shutdown aborts and drains background work before proceeding. Its exact
-mode-0600 v1 state is stored per runtime-qualified conversation beside the
-transcript and is never cloned during fork. Recovery replays only the exact
-journaled bytes when the current memory still matches the stored `before`
-digest; it never asks a model to reconstruct an interrupted write. A transient,
-aborted, or model failure which leaves pending turns arms one fixed 60-second
-retry, including after restart, rather than a zero-delay loop.
+data. It cannot access Documents, Obsidian, character, deletion, network/MCP,
+shell, or general session tools. A new owner action, conversation delete,
+whole-home move, or shutdown aborts and drains background work before
+proceeding. Its exact mode-0600 v1 state is stored per runtime-qualified
+conversation beside the transcript and is never cloned during fork. Recovery
+replays only the exact journaled bytes when the current memory still matches
+the stored `before` digest; it never asks a model to reconstruct an interrupted
+write. A transient, aborted, or model failure which leaves pending turns arms
+one fixed 60-second retry, including after restart, rather than a zero-delay
+loop.
 
 That retry invokes only the built-in memory registration by its exact
 registration identity. A command or observer registered at the same 60-second

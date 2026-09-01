@@ -41,7 +41,7 @@ previewed but inert. Claude Code retains its own native subagents.
 ```
 ~/ghosts/<name>/
   character.md                 plain Markdown persona → system prompt
-  memory/*.md                  one concise fact per plain Markdown file
+  memory/*.md                  one concise private memory per Markdown file
   skills/<name>/SKILL.md       the ghost's own skills
   agents/<name>.md             reserved custom subagents (preview-only today)
   commands/<name>.md           the ghost's own slash commands
@@ -85,10 +85,13 @@ body. A larger body written with a runtime's native file tools or by hand fails
 the next cold session's persona derivation rather than being truncated into the
 prompt; an already-derived warm session keeps its snapshot until retirement.
 
-Memory files have no frontmatter and no required heading. Their complete
-Markdown content is the fact. The per-session index is one file name per line
-and nothing else: the slug is what says what a fact is about, so the writer's
-instructions ask for a name that does. It orders files by modification time
+Memory files have no frontmatter and no required heading. They are one ghost's
+private internal continuity: subjective reflections, ghost-specific
+interpretations, and commitments about its own behavior. Owner facts or
+preferences, shared decisions or notes, project knowledge, and durable tasks
+belong in Obsidian instead. The complete Markdown content is one memory. The
+per-session index is one file name per line and nothing else: the slug says what
+the memory is about. It orders files by modification time
 descending, then slug ascending, and admits only complete lines through its
 4,000-character budget, so the stalest facts fall out first. Index lines are
 fenced as untrusted data. The memory API returns `updated` as the file's full
@@ -129,16 +132,15 @@ Retained per-ghost `notes/` and `docs/` trees are inert: Ghost never indexes,
 renames, or rewrites them automatically. The owner's explicit legacy Documents
 placement command is the only Ghost-provided path out of those trees.
 
-An exact `.obsidian` entry that is a real directory marks the Documents root as
-an Obsidian vault. Ghost exposes that one derived capability in the Documents
-index but does not list the hidden entry, read or modify Obsidian configuration,
-launch the application, or make session startup depend on its CLI socket. The
-plain owner-readable files remain canonical. When the capability is present,
-the runtime prompt points at admitted `obsidian-*` machine skills for
-vault-aware search, links, properties, tasks, and renames; native filesystem
-tools remain the fallback when the skill, CLI, or running application is
-unavailable. This is a semantic adapter over Documents, not another content
-store or a Ghost-owned integration API.
+Obsidian is a separate owner-wide knowledge and task store selected by the
+Obsidian application and CLI. Ghost never infers a vault from Documents,
+searches the filesystem for `.obsidian`, assumes a vault path, or reads and
+writes vault files directly. Both runtimes receive an explicit link to the
+owner-installed `obsidian-cli` skill and use its `obsidian` commands for every
+vault operation. The CLI's current vault is the default; an owner-named vault
+is selected with the CLI's `vault=<name>` argument. Obsidian content belongs to
+the owner and is shared deliberately across every ghost on the machine. It is
+not part of any ghost home, rename, delete, export, or private-memory lifecycle.
 
 What lives in a ghost home and what lives in the machine's own directories is
 decided by lifecycle, not by which reads more natural. Mutable per-ghost state
@@ -257,10 +259,12 @@ progress, while `503 schedule_cleanup_failed` guarantees the home and name have
 not moved.
 
 A file a ghost authors *for the owner* — a report, an export, a generated image —
-belongs in the owner's Documents tree or the requested working directory, never
-in ghost-home persona, memory, or runtime files. Memory is private context for
-one ghost; Documents are owner-wide files shared with the owner and every
-ghost. Both runtimes carry this rule in their prompt.
+belongs in the requested working directory or another owner-chosen destination,
+never in ghost-home persona, memory, or runtime files. When the destination
+materially matters and none was given, the ghost asks. Memory is private
+internal continuity for one ghost; Obsidian is the only durable owner-visible
+knowledge, notes, and task state shared with every ghost. Both runtimes carry
+these distinctions in their prompt.
 
 Documents may be regular files of any type and may nest to any depth or width;
 Ghost imposes no folder-depth or sibling-count policy on the live tree. It does
@@ -270,10 +274,9 @@ chooses it. Automatic context is narrower: at the start of each pi or Claude
 Code session, and for greeting input, Ghost lists only the root's immediate
 non-hidden regular files and directories, newest-modified first with name as
 the deterministic tie-break. It reads no file content, follows no symbolic
-link, and never descends; the only hidden-entry inspection is an `lstat` of the
-exact root `.obsidian` marker. At most 50 entries and 4,000 characters enter
-the prompt; the index states the exact number of eligible root entries omitted.
-Names are fenced and treated as untrusted data.
+link, and never descends or inspects hidden entries. At most 50 entries and
+4,000 characters enter the prompt; the index states the exact number of
+eligible root entries omitted. Names are fenced and treated as untrusted data.
 
 Already-released native Pi transcript headers are history: a legacy conversation resumes at the absolute cwd in its header rather
 than silently changing the meaning of its relative tool paths. Project-state
@@ -446,8 +449,8 @@ prompt prose is retained or subtracted by marker.
 The Ghost-owned pi prompt is ordered: the complete `character.md` body (or a
 two-line unwritten-character fallback); the fenced, bounded memory index; the
 fenced, shallow Documents index; the shared Omarchy CLI-first computer-use,
-owner-deliverable, and rendered scheduled-work policies; accepted instruction
-files and unconditional `alwaysApply` rules; a
+owner-deliverable, shared-Obsidian, and rendered scheduled-work policies;
+accepted instruction files and unconditional `alwaysApply` rules; a
 compact index of visible skill names, descriptions, and `SKILL.md` locations; the
 discoverable-rule index; then the seeded first-meeting section when applicable.
 Skill bodies, conditional-rule bodies,
@@ -550,7 +553,7 @@ sessions is a planned port (issue #3).
 Documents and memory retrieval and foreground memory writes use those native
 filesystem tools directly. Ghost registers no duplicate document or memory
 list/read/search/write tools. A foreground session writes or replaces the
-entire one-fact Markdown file under the rendered memory root. Those writes are
+complete Markdown file for one memory under the rendered memory root. Those writes are
 no longer serialized through the home writer's mutation queue and no longer
 derive a slug, so the filename and format convention is now carried by the
 system prompt. Ghost registers no dedicated foreground deletion tool; idle
@@ -600,12 +603,6 @@ per session, never stored, and never re-derived mid-session — live truth is th
 files themselves, which the native filesystem tools read on demand. A
 conversation the daemon has dropped (pi session eviction, a `close`, or a daemon
 restart) derives them again on its next turn.
-
-The Documents index also carries `obsidianVault`, true only when the descriptor-
-confined root has a real `.obsidian` directory at derivation time. A missing,
-unreadable, non-directory, or symbolic-link marker is false. The flag selects
-trusted prompt policy only; the marker and every listed filename remain
-untrusted filesystem state.
 
 Both indexes are newest-modified first and carry at most 50 entries, with a
 character budget behind that. Each is one entry per line with no bullet marker:
@@ -667,9 +664,9 @@ transcript file directly, never a full session.
 This todo is live conversation progress, not the owner's durable task store;
 owner-facing UI may label it **Progress** while the existing `todo` tool, slash
 command, transcript type, and wire fields remain stable. Tasks written in an
-Obsidian Documents vault are owner-wide durable work. Ghost never mirrors,
-imports, or synchronizes the two; it creates or changes a vault task only when
-the owner's request calls for a durable task.
+Obsidian vault through the CLI are owner-wide durable work. Ghost never mirrors,
+imports, or synchronizes the two; it creates or changes an Obsidian task only
+when the owner's request calls for a durable task.
 
 `inspect_image` is Ghost-owned (`packages/daemon/src/inspect-image.ts`) and
 exists for a chat model that cannot see images: it reads one
@@ -683,11 +680,10 @@ naming the role to bind. A chat model that accepts images is told to use
 pi's `read`, which attaches image files itself; `ghost_screen` already points
 a blind model at `inspect_image` for its saved frames.
 
-Ghost registers neither `web_search` nor `web_fetch` for pi and packages no
-third-party CLI or skill. Omarchy itself owns its packaged skills, standard-root
-links, and CLI command catalog; Ghost admits those links like every other
-machine skill. The owner installs and updates other optional integrations from
-their upstream source as the desktop user:
+Ghost registers neither `web_search` nor `web_fetch` for pi. Omarchy itself
+owns its packaged skills, standard-root links, and CLI command catalog; Ghost
+admits those links like every other machine skill. The owner installs and
+updates optional integrations from their upstream source as the desktop user:
 
 - Firecrawl: `npx -y firecrawl-cli@latest init --all --skip-auth` (replace
   `--skip-auth` with `--browser` for its authenticated flow).
@@ -695,9 +691,6 @@ their upstream source as the desktop user:
   `hey` command runs `omarchy update` to receive that migration, then
   `hey skill install`.
 - Basecamp: `omarchy pkg add basecamp-cli`, then `basecamp skill install`.
-- Obsidian: `omarchy pkg add obsidian`, enable **Settings → General → Command
-  line interface** in Obsidian 1.12.7 or newer, then install the desired skills
-  from `https://github.com/kepano/obsidian-skills` with `npx skills` globally.
 - Google Workspace: `npm install -g @googleworkspace/cli`, then install the
   desired service skills from `https://github.com/googleworkspace/cli` with
   `npx skills` globally.
@@ -710,8 +703,25 @@ catalog inspection and optional service CLIs; perform that discovery before
 planning or after the owner approves/stops the plan. Claude Code receives the
 same immutable machine-skill index in its prompt but does not enable the SDK's
 unscoped ambient skill discovery. Obsidian's CLI requires a running Obsidian
-instance; Ghost neither starts it while deriving context nor treats its absence
-as a Documents failure.
+instance. Obsidian is the required exception to the optional-integration rule:
+the Ghost package depends on Obsidian 1.12.7 or newer and npm, while the
+owner-level installer must use Obsidian's **Settings → General → Command line
+interface** registration and run
+`npx -y skills@latest add https://github.com/kepano/obsidian-skills --global --yes --skill obsidian-cli`
+as the desktop owner. Setup is complete only when `obsidian version` succeeds
+with the application running and
+`~/.agents/skills/obsidian-cli/SKILL.md` exists. An Arch package that omits the
+official standalone CLI does not satisfy that gate merely by installing the GUI
+application. An ALPM package hook runs as root and therefore only prints these
+owner-level steps; it never guesses a home or runs `npx` for another user. The
+current release hold has no supported end-user Omarchy installation flow; #54
+must make that flow perform and verify the owner-level readiness gate before it
+can become supported. Ghost does not start Obsidian while deriving context. If
+the skill, command, or running application is unavailable, the runtime reports
+the incomplete setup instead of scanning for a vault or falling back to direct
+vault-file access. Ghost's removal hook never removes the owner-installed
+skill, vault, notes, or tasks because they may be used by the owner and other
+agents.
 
 Background jobs are Ghost-owned (`packages/daemon/src/jobs.ts`) and
 conversation-scoped. Ghost's own `bash` tool replaces pi's by name and runs
@@ -851,9 +861,11 @@ The ordinary maintenance model receives only a close-neutralized untrusted
 transcript fence and four memory-only tools: list metadata, read one memory,
 plain-text search, and one atomic write. It has no Documents, character,
 deletion, network/MCP, native filesystem, shell, or general session tool. One
-ordinary generation may publish at most one memory file. Memories must be
-grounded in what the owner said or confirmed; assistant text alone may carry
-external or untrusted content and is not evidence worth memorizing.
+ordinary generation may publish at most one memory file. It writes only a
+ghost-private reflection grounded in direct interaction. It has no Obsidian
+access and leaves owner-useful shared material alone rather than copying it into
+memory; assistant text alone may carry external or untrusted content and is not
+evidence for factual claims.
 
 Pressure makes that idle delivery run consolidation instead of ordinary
 maintenance. Pressure means the home holds at least as many valid memory files
@@ -869,9 +881,10 @@ the cooldown rather than creating a provider-failure loop.
 Consolidation receives the same four tools plus `delete_memory`. It may publish
 at most four writes and four recoverable deletes, in journaled sequence, and
 may touch one memory path only once. Its doctrine merges duplicate or
-overlapping facts under the clearest slug, deletes only a no-longer-true memory
-or one fully superseded by a write in that run, minimizes churn, and prefers a
-no-op. Transcript and memory-file contents are data, never instructions. A
+overlapping memories under the clearest slug, deletes only a no-longer-true
+memory or one fully superseded by a write in that run, minimizes churn, and
+prefers a no-op. Transcript and memory-file contents are data, never
+instructions. A
 completed consolidation emits one foreground receipt notice listing every
 mutation, or that it made none.
 
@@ -1173,10 +1186,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   `503 schedule_cleanup_failed`, leaves the old home/name intact, and is retried
   with the same request; successful partial cleanup is not rolled back.
 - `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
-  memory list, read from the plain files on each request and never stored.
+  private-memory list, read from the plain files on each request and never stored.
   `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the
   index's order (newest first, slug as the tie-break), where `content` is the
-  whole file (the fact) and `updated` is the full ISO filesystem modification
+  whole file (the memory) and `updated` is the full ISO filesystem modification
   timestamp. `skipped` reports malformed memory files
   as `{ path, reason }` without hiding the valid siblings. Paths are
   ghost-home-relative; a client already gets that home's absolute `dir` from
@@ -1188,7 +1201,7 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
 - `PUT  /api/ghosts/:name/memory` `{ content, name? }` →
   `{ ok: true, slug, path, created }` — creates or replaces exactly one memory
   file through the validating, redacting, atomic `GhostHome` writer used by the
-  HUD and idle maintenance; an omitted `name` derives the slug from the fact. A
+  HUD and idle maintenance; an omitted `name` derives the slug from the memory. A
   format rejection (empty, over the limit, bad slug) is a 400 with the writer's
   own message. The route holds the ghost-home identity lease from before it
   resolves `ghost.dir` until the atomic writer completes, so a concurrent
@@ -2002,8 +2015,9 @@ are read as `smol_model` when the new key is absent; writers persist only
 While `character.md` is missing, blank, or byte-equal to the seed, sessions —
 pi and Claude Code runtimes alike — get a
 "first meeting" system-prompt section: help with the owner's request first,
-learn about them one question at a time during quiet moments, save stable facts
-as memory, and eventually draft the character, get the owner's approval, and
+learn about them one question at a time during quiet moments, save owner-useful
+facts and preferences through Obsidian, reserve memory for private internal
+continuity, and eventually draft the character, get the owner's approval, and
 write `<ghost-home>/character.md` with the runtime's native file tool. The
 populated character file IS the completion latch — there is no separate
 onboarding state — and the section stops being injected on the first session

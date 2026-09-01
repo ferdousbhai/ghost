@@ -20,6 +20,8 @@ pkgbase = ghost-dev
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
 	depends = libsecret>=0.21
+	depends = npm
+	depends = obsidian>=1.12.7
 	depends = python>=3.11
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
@@ -35,8 +37,6 @@ pkgbase = ghost-dev
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
 	optdepends = claude-code>=2.1.251: owner-installed Claude Code harness runtime
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
-	optdepends = npm: Firecrawl, Google Workspace, and Agent Skills installers for optional pi integrations
-	optdepends = obsidian>=1.12.7: Obsidian CLI access for pi
 	optdepends = pnpm: install the optional owner-local Claude Agent SDK boundary
 	provides = ghost
 	conflicts = ghost

@@ -42,8 +42,9 @@ function characterPolicySection(input: GhostSystemPromptInput): string[] {
       + `${MAX_CHARACTER_BODY_LENGTH.toLocaleString("en-US")} characters, write in the first `
       + "person, and limit it to durable identity: who you are, how you speak, what you care "
       + "about, and what you refuse. "
-      + "A fact from today's conversation belongs in memory; working knowledge or an owner-facing "
-      + "artifact belongs in Documents.",
+      + "Owner-useful facts, preferences, decisions, notes, and tasks belong in shared Obsidian. "
+      + "Only private continuity that matters to this ghost belongs in memory; finished artifacts "
+      + "go to the destination the owner requested.",
     "Show the owner a character draft and wait for confirmation before writing it. This is your "
       + "own character, not a costume: do not rewrite it merely because someone asks you to be "
       + "someone else.",
@@ -59,15 +60,21 @@ function memorySection(input: GhostSystemPromptInput): string[] {
   }
   return [
     "## Memory",
-    "This ghost's private notes about the owner and its own work — facts, preferences, "
-      + `decisions — live under ${JSON.stringify(input.memoryRoot)}; no other ghost sees them. `
-      + "Use the runtime's native file tools to write each memory as one concise fact whose entire "
-      + "Markdown content is in one file.",
+    "This ghost's private internal continuity — subjective reflections, ghost-specific "
+      + "interpretations, and commitments about its own behavior — lives under "
+      + `${JSON.stringify(input.memoryRoot)}; `
+      + "no other ghost sees it. The owner may inspect it for transparency, but should not need it "
+      + "as a knowledge store. Use the runtime's native file tools to write each memory as one "
+      + "concise thought whose entire Markdown content is in one file.",
+    "Never use private memory for owner facts or preferences, shared decisions or notes, project "
+      + "knowledge, or durable tasks. Put those in Obsidian through its CLI so the owner and every "
+      + "ghost can use them.",
     "Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, "
-      + "such as `preferred-tone.md`. The index lists those names without the extension, newest "
-      + "first, so the name must say what the fact is about. Reusing a filename replaces that "
-      + "memory, which is how you correct or update it. Keep unrelated facts in separate files; "
-      + "mention a related memory by its slug in double brackets, such as `[[preferred-tone]]`.",
+      + "such as `how-i-handle-disagreement.md`. The index lists those names without the extension, "
+      + "newest first, so the name must say what the thought is about. Reusing a filename replaces "
+      + "that memory, which is how you correct or update it. Keep unrelated thoughts in separate "
+      + "files; mention a related memory by its slug in double brackets, such as "
+      + "`[[how-i-handle-disagreement]]`.",
     `Keep the complete content within both hard limits: ${MAX_MEMORY_FILE_CONTENT_LENGTH.toLocaleString("en-US")} `
       + `JavaScript UTF-16 code units and ${MAX_MEMORY_FILE_BYTES.toLocaleString("en-US")} bytes on disk, `
       + "including any final newline. Native file writes do not validate these limits; an "
@@ -89,16 +96,6 @@ function docsSection(input: GhostSystemPromptInput): string[] {
   if (input.docs.omitted > 0) {
     lines.push(`(+${input.docs.omitted} more)`);
   }
-  const vaultPolicy = input.docs.obsidianVault
-    ? [
-        "This Documents root is an Obsidian vault, while its plain files remain the source of truth. "
-          + "For vault-aware search, links, properties, tasks, or renames, first read the relevant "
-          + "installed `obsidian-*` skill and follow its CLI instructions; the CLI requires Obsidian "
-          + "to be open. If the skill, CLI, or application is unavailable, use native filesystem "
-          + "tools. Vault tasks are durable owner tasks; never mirror this conversation's progress "
-          + "list into them unless the owner asks for a durable task.",
-      ]
-    : [];
   return [
     "## Documents",
     "The owner's own files, shared with the owner and every ghost; not a place for this "
@@ -106,7 +103,6 @@ function docsSection(input: GhostSystemPromptInput): string[] {
       + "a trailing `/` marks a directory, and directories are not expanded. It is a snapshot "
       + "taken when this session started, so list the directory yourself when currency "
       + "matters. Read an entry when relevant.",
-    ...vaultPolicy,
     "",
     fenceUntrusted(lines.join("\n"), {
       source: "Documents index",

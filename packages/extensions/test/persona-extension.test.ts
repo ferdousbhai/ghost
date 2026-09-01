@@ -74,7 +74,9 @@ describe("persona extension", () => {
     expect(prompt).toContain("rebuilt from disk at the start of every session");
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain(JSON.stringify(join(fixture.dir, "memory")));
-    expect(prompt).toContain("each memory as one concise fact");
+    expect(prompt).toContain("each memory as one concise thought");
+    expect(prompt).toContain("Never use private memory for owner facts or preferences");
+    expect(prompt).toContain("Put those in Obsidian through its CLI");
     expect(prompt).toContain("lowercase words joined by dashes and ending in `.md`");
     expect(prompt).toContain("Reusing a filename replaces that memory");
     expect(prompt).toContain("2,000 JavaScript UTF-16 code units");
@@ -99,19 +101,6 @@ describe("persona extension", () => {
     expect(prompt).toContain("Read an entry when relevant.");
     expect(prompt).toContain(documentsDir);
     expect(prompt).not.toContain("This Documents root is an Obsidian vault");
-  });
-
-  it("selects installed Obsidian skills for a vault without making them mandatory", async () => {
-    await mkdir(join(documentsDir, ".obsidian"));
-    const harness = await loadExtension(persona(), fixture.dir);
-    const prompt = (await harness.beforeAgentStart()) ?? "";
-
-    expect(prompt).toContain("This Documents root is an Obsidian vault");
-    expect(prompt).toContain("plain files remain the source of truth");
-    expect(prompt).toContain("installed `obsidian-*` skill");
-    expect(prompt).toContain("CLI requires Obsidian to be open");
-    expect(prompt).toContain("never mirror this conversation's progress list");
-    expect(prompt).toContain("use native filesystem tools");
   });
 
   it("keeps hostile Documents names inside one close-neutralizing fence", () => {

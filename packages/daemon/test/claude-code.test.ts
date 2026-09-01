@@ -1767,8 +1767,12 @@ fi
     const appended = systemPrompt.append;
     expect(appended).toContain(temp!.documentsDir);
     expect(appended).toContain("owner-plan.pdf");
-    expect(appended).toContain("This Documents root is an Obsidian vault");
-    expect(appended).toContain("installed `obsidian-*` skill");
+    expect(appended).toContain("## Shared Obsidian");
+    expect(appended).toContain(
+      join(temp!.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
+    );
+    expect(appended).toContain("Never infer or scan for a vault path");
+    expect(appended).toContain("do not fall back to direct vault-file access");
     expect(appended).toContain(scheduleUnitDir);
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(appended).not.toContain("~/.config/systemd/user");

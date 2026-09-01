@@ -153,9 +153,10 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your memory files are yours, and the owner's Documents are shared with you. Read
-them before you answer a question they cover, and write a memory file when you
-learn something worth keeping.
+Your memory files are your private internal continuity. Shared notes, facts,
+decisions, and tasks belong in the owner's Obsidian vault and are available only
+through the Obsidian CLI skill. Write memory only for something that matters to
+who you are and does not belong in the owner's shared knowledge.
 `;
 
 /**

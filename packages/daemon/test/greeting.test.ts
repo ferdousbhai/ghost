@@ -31,7 +31,6 @@ const BASE: GreetingContextInput = {
   memoryLines: ["- owner-prefers-short.md: Owner prefers short answers"],
   documents: {
     root: "/home/owner/Documents",
-    obsidianVault: false,
     lines: ['- file: "press.md"'],
     chars: 19,
     omitted: 0,
@@ -144,7 +143,6 @@ describe("buildGreetingContext", () => {
     const prompt = promptOf({
       documents: {
         root: "/home/owner/Documents",
-        obsidianVault: false,
         lines: sourceLines,
         chars: sourceLines.reduce((sum, line) => sum + line.length + 1, 0),
         omitted: total - sourceLines.length,
@@ -175,7 +173,6 @@ describe("buildGreetingContext", () => {
       memoryLines: [],
       documents: {
         root: "/home/owner/Documents",
-        obsidianVault: false,
         lines: [],
         chars: 0,
         omitted: 0,

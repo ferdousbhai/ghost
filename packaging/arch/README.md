@@ -28,16 +28,41 @@ Build the checkout package without installing it:
 makepkg --cleanbuild
 ```
 
-## Optional CLI integrations
+## Required Obsidian setup
 
-Ghost packages none of these CLIs or skills. Install only the integrations you
-want as the desktop user; the upstream installer then owns its files and
-updates. The package's optional dependencies expose the system prerequisites.
-Install the shared npm prerequisite once if you did not select it with Ghost:
+The package depends on Obsidian 1.12.7 or newer and npm. Obsidian is Ghost's
+owner-wide persistent knowledge and task store, shared by every ghost; its vault
+is independent of Documents and is selected only through the CLI.
+
+Complete Obsidian's [official CLI registration](https://obsidian.md/help/cli)
+in **Settings → General → Command line interface**, then install the upstream
+`obsidian-cli` skill as the desktop owner:
 
 ```sh
-omarchy pkg add npm
+npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+  --global --yes --skill obsidian-cli
+
+obsidian version
+test -f ~/.agents/skills/obsidian-cli/SKILL.md
 ```
+
+Run `obsidian version` while Obsidian is open. Some Arch repackagings of the
+application omit the official standalone CLI payload; installing the GUI alone
+does not satisfy the check. The ALPM package hook only prints these instructions
+because it runs as root and must not guess which desktop user's home to modify.
+Under the current release hold, there is no supported end-user Omarchy install
+flow. #54 must make that flow perform and verify these owner-level steps before
+it can become supported.
+
+Ghost's prompt links `~/.agents/skills/obsidian-cli/SKILL.md` directly. Every
+vault operation uses `obsidian`; Ghost never scans for `.obsidian`, assumes a
+vault under `~/Documents`, or falls back to editing vault files. Removing Ghost
+does not remove the owner-installed skill or any vault data.
+
+## Optional CLI integrations
+
+Install only the integrations you want as the desktop user; the upstream
+installer then owns its files and updates. npm is already a Ghost dependency.
 
 [Firecrawl](https://github.com/firecrawl/cli) provides keyless web search and
 scraping plus its official skills:
@@ -60,17 +85,6 @@ hey auth login
 omarchy pkg add basecamp-cli
 basecamp skill install
 basecamp auth login
-```
-
-Obsidian 1.12.7 or newer includes its CLI. Enable **Settings → General →
-Command line interface** in Obsidian, then install the Obsidian CEO's
-[skill pack](https://github.com/kepano/obsidian-skills):
-
-```sh
-omarchy pkg add obsidian
-npx -y skills@latest add https://github.com/kepano/obsidian-skills \
-  --global --yes \
-  --skill json-canvas obsidian-bases obsidian-cli obsidian-markdown
 ```
 
 Google publishes both the
@@ -135,7 +149,8 @@ The package owns only files under `/usr`, plus the system Quickshell symlink at
 `/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, docs, memory, sessions, provider credentials, and API tokens
-untouched.
+untouched. Its removal hook likewise leaves the owner-installed Obsidian skill
+and every vault, note, and task untouched.
 
 An upgrade requires `systemctl --user reenable --now ghostd.service
 ghost-shell.service`; re-enabling also moves an installation made with the old

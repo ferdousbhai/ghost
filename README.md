@@ -1,7 +1,8 @@
 # Ghost
 
-Your ghost, on your machine. An AI persona with memory, docs, and tools —
-running locally as an [Omarchy](https://omarchy.org)-native desktop app,
+Your ghost, on your machine. An AI persona with private memory, shared Obsidian
+knowledge, docs, and tools — running locally as an
+[Omarchy](https://omarchy.org)-native desktop app,
 built on the [pi](https://github.com/earendil-works/pi) coding agent
 (`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`).
 
@@ -17,16 +18,18 @@ plugins, hooks, custom code tools, and LSP are also disabled pending a
 per-session isolation boundary. Trusted visible `hooks/pre` and `hooks/post`
 files in the ghost home remain the explicit in-process extension surface. The
 optional Claude Code runtime retains Claude's native subagents. Ghost replaces
-pi's coding-oriented system prompt with its
-character, bounded memory and shallow owner Documents indexes, and minimal
-runtime guidance; Claude keeps its native preset and receives the same
-Ghost-owned context as an append. Browser and desktop capabilities remain
-available. The Quickshell client renders
-live tool activity and the recovered summoning orb from the earlier
-summon-ghost interface.
+pi's coding-oriented system prompt with its character, bounded memory and
+shallow owner Documents indexes, plus an explicit link to the owner-installed
+`obsidian-cli` skill. Both runtimes use Obsidian's CLI-selected vault as
+owner-visible persistent state shared by every ghost; they never infer that the
+vault is `~/Documents` or access it as raw files. Claude keeps its native preset
+and receives the same Ghost-owned context as an append. Browser and desktop
+capabilities remain available. The Quickshell client renders live tool activity
+and the recovered summoning orb from the earlier summon-ghost interface.
 
-Idle maintenance may write owner-grounded memory and consolidates it only under
-index pressure; every memory write redacts common credential forms before disk.
+Idle maintenance may write one ghost-private reflection and consolidates memory
+only under index pressure; shared knowledge goes through Obsidian instead. Every
+memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).
 
