@@ -287,12 +287,18 @@ TestCase {
         compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
     }
 
-    function test_absurdTotalStopsAfterOneRequest(): void {
+    function test_totalBeyondPageBudgetStopsAtThePageCap(): void {
+        // No total pre-check pins pageLimit × maxPages any more (a clamping
+        // daemon would break it); the page-count guard is the single cap.
         const state = activeState("runaway");
         Ghostd.loadConversationTranscript(state, false);
-        requests[0].complete(200, page(state, messages(0, 1000), 10001, true));
+        for (let pageIndex = 0; pageIndex < 10; pageIndex++) {
+            compare(requests.length, pageIndex + 1);
+            requests[pageIndex].complete(200, page(state,
+                messages(pageIndex * 1000, 1000), 10001, true));
+        }
 
-        compare(requests.length, 1);
+        compare(requests.length, 10);
         compare(state.rows.length, 0);
         compare(Ghostd.sessionsError, "Transcript is too large to load safely");
     }

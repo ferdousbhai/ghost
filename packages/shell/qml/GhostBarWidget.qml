@@ -24,6 +24,8 @@ Item {
         ? "offline"
         : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity : "thinking") : "idle")
 
+    Accessible.role: Accessible.Button
+    Accessible.name: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
     Accessible.description: root.status
 
     implicitWidth: row.implicitWidth

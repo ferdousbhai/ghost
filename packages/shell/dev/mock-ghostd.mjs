@@ -443,6 +443,24 @@ function setGhostCollab(name, sessionId, state) {
 const deletedContext = new Map();
 /** Per-ghost owner-written facts, layered over the seeded MOCK_MEMORY. */
 const writtenMemory = new Map();
+/** The daemon's character cap (MAX_CHARACTER_BODY_LENGTH); shells must read
+    it from responses, never pin it. */
+const CHARACTER_LIMIT = 20000;
+/** Per-ghost owner-written persona, layered over the seeded character.md. */
+const writtenCharacter = new Map();
+
+function characterBodyFor(name) {
+  if (writtenCharacter.has(name)) return writtenCharacter.get(name);
+  // Matches what seedMockHome writes to disk.
+  return `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
+}
+
+/** The daemon derives the title from the first heading; null without one. */
+function characterTitleFor(body) {
+  const heading = body.split("\n").find((line) => line.startsWith("# "));
+  const title = heading ? heading.slice(2).trim() : "";
+  return title === "" ? null : title;
+}
 
 function contextDeletedFor(name) {
   if (!deletedContext.has(name)) deletedContext.set(name, new Set());
@@ -1953,6 +1971,35 @@ const mockServer = createServer(async (req, res) => {
   }
 
 
+  if (parts.length === 4 && parts[3] === "character" && req.method === "GET") {
+    const body = characterBodyFor(name);
+    return json(res, 200, {
+      body,
+      title: characterTitleFor(body),
+      limit: CHARACTER_LIMIT,
+    });
+  }
+  if (parts.length === 4 && parts[3] === "character" && req.method === "PUT") {
+    const payload = await readBody(req).catch(() => ({}));
+    const body = typeof payload?.body === "string" ? payload.body : null;
+    if (body === null) {
+      return json(res, 400, {
+        error: { message: '"body" must be a string.', code: "invalid_request" },
+      });
+    }
+    if (body.length > CHARACTER_LIMIT) {
+      return json(res, 400, {
+        error: {
+          message: `character.md is limited to ${CHARACTER_LIMIT} characters.`,
+          code: "limit_exceeded",
+        },
+      });
+    }
+    writtenCharacter.set(name, body);
+    if (OWNS_GHOSTS_ROOT) writeFileSync(join(ghost.dir, "character.md"), body, "utf8");
+    return json(res, 200, { ok: true, limit: CHARACTER_LIMIT });
+  }
+
   if (parts.length === 4 && parts[3] === "memory" && req.method === "GET") {
     return json(res, 200, memoryListing(name));
   }
@@ -2038,6 +2085,7 @@ const mockServer = createServer(async (req, res) => {
     }
     deletedContext.delete(name);
     writtenMemory.delete(name);
+    writtenCharacter.delete(name);
     mcpStore.delete(name);
     liveStates.delete(name);
     collabStates.delete(name);
@@ -2065,8 +2113,8 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, projectStore, deletedContext, writtenMemory, mcpStore,
-        liveStates, collabStates, roles, routing]) {
+    for (const store of [sessionStore, projectStore, deletedContext, writtenMemory,
+        writtenCharacter, mcpStore, liveStates, collabStates, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);

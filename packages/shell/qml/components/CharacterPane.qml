@@ -43,6 +43,10 @@ Rectangle {
     }
 
     Component.onCompleted: root.seed()
+    // A ghost switch clears the character state without re-reading it; a
+    // visible pane fetches for itself, the way McpBrowser and CommandsBrowser
+    // do, so returning here never shows a permanently blank persona.
+    onVisibleChanged: if (root.visible && Ghostd.activeGhost !== "") Ghostd.fetchCharacter(false)
 
     Connections {
         target: Ghostd
@@ -56,6 +60,13 @@ Rectangle {
         // A persona typed at one ghost has no meaning in another's file.
         function onActiveGhostChanged(): void {
             root.seed();
+            if (root.visible && Ghostd.activeGhost !== "") Ghostd.fetchCharacter(false);
+        }
+
+        // A save the daemon accepted makes the draft the seeded text, so the
+        // re-seed guard keeps adopting later daemon reads.
+        function onCharacterWriteFinished(ok: bool): void {
+            if (ok) root.loadedBody = editor.text;
         }
     }
 

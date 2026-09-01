@@ -179,17 +179,16 @@ TestCase {
         }
     }
 
+    // Generic destination activation is tst_hooksbrowser's coverage; this
+    // pins only what is phone-access-specific — the label the owner reads.
     function test_navigationOffersPhoneAccess(): void {
         const navigation = createTemporaryObject(navigationComponent, tc);
         verify(navigation !== null);
-        const remoteIndex = navigation.destinations.findIndex(function (destination) {
+        const remote = navigation.destinations.find(function (destination) {
             return destination.id === "remote";
         });
-        verify(remoteIndex >= 0);
-        let selected = "";
-        navigation.selected.connect(function (section) { selected = section; });
-        navigation.activate(remoteIndex);
-        compare(selected, "remote");
+        verify(remote !== undefined);
+        compare(remote.label, "Phone access");
     }
 
     function test_switchPostsExactEnabledBody(): void {

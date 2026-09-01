@@ -757,7 +757,6 @@ Singleton {
     // start. The read tolerates an oversize hand-edited file so it can be
     // shortened here.
     property string characterBody: ""
-    property var characterTitle: null
     /** The daemon's character cap, echoed in its responses; 0 until heard.
         Never pinned here — the daemon may change it. */
     property int characterLimit: 0
@@ -2277,7 +2276,6 @@ Singleton {
         root.characterRequest = null;
         root.characterWriteRequest = null;
         root.characterBody = "";
-        root.characterTitle = null;
         root.characterLimit = 0;
         root.characterLoading = false;
         root.characterSaving = false;
@@ -2289,7 +2287,7 @@ Singleton {
 
     /**
      * Re-read the active ghost's persona file. `force` bypasses the per-ghost
-     * cache; a successful save forces it so the derived title follows the disk.
+     * cache; a successful save forces it so the view follows the disk.
      */
     function fetchCharacter(force: bool): void {
         const ghost = root.activeGhost;
@@ -2315,11 +2313,9 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    if (typeof body.body !== "string" || !(body.limit > 0)
-                            || !(body.title === null || typeof body.title === "string"))
+                    if (typeof body.body !== "string" || !(body.limit > 0))
                         throw new Error("invalid character");
                     root.characterBody = body.body;
-                    root.characterTitle = body.title;
                     root.characterLimit = body.limit;
                     root.characterGhost = ghost;
                     root.characterError = "";
@@ -2370,7 +2366,7 @@ Singleton {
                 root.characterError = root.describeError(xhr, "PUT character");
             }
             root.characterWriteFinished(ok);
-            // The file on disk is the truth; re-read for the derived title.
+            // The file on disk is the truth; re-read what the daemon stored.
             if (ok) root.fetchCharacter(true);
         };
         root.dispatch(xhr, "PUT",
@@ -3424,7 +3420,7 @@ Singleton {
                         root.clearCommands();
                         root.clearSessionResources();
                         root.clearProject();
-                                        root.clearGreeting();
+                        root.clearGreeting();
                         root.fetchGreeting();
                     }
                     root.sessionsError = "";
@@ -3743,8 +3739,6 @@ Singleton {
                 if (typeof body.total !== "number" || !Number.isFinite(body.total)
                         || Math.floor(body.total) !== body.total || body.total < 0)
                     throw new Error("invalid transcript total");
-                if (body.total > root.transcriptPageLimit * root.transcriptMaxPages)
-                    throw new Error("transcript exceeds client cap");
                 if (typeof body.truncated !== "boolean")
                     throw new Error("invalid transcript truncation marker");
                 if (load.total < 0) load.total = body.total;
@@ -3779,9 +3773,7 @@ Singleton {
                 root.requestTranscriptPage(state, load);
             } catch (error) {
                 root.failTranscriptLoad(state, load,
-                    String(error).indexOf("exceeds client cap") >= 0
-                        ? "Transcript is too large to load safely"
-                        : "ghostd sent an inconsistent transcript page", false);
+                    "ghostd sent an inconsistent transcript page", false);
             }
         };
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)

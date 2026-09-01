@@ -87,7 +87,7 @@ TestCase {
         return pane;
     }
 
-    function test_fetchAppliesBodyTitleAndDaemonLimit(): void {
+    function test_fetchAppliesBodyAndDaemonLimit(): void {
         Ghostd.fetchCharacter(false);
         compare(requests.length, 1);
         compare(requests[0].method, "GET");
@@ -101,7 +101,6 @@ TestCase {
 
         verify(!Ghostd.characterLoading);
         compare(Ghostd.characterBody, "# Casper\n\nKind and curious.");
-        compare(Ghostd.characterTitle, "Casper");
         compare(Ghostd.characterLimit, 20000);
         compare(Ghostd.characterGhost, "casper");
         compare(Ghostd.characterError, "");
@@ -154,7 +153,7 @@ TestCase {
         compare(requests.length, 2); // no re-read after a refused write
     }
 
-    function test_successfulSaveUpdatesStateAndRereadsForTitle(): void {
+    function test_successfulSaveUpdatesStateAndRereads(): void {
         const pane = loadedPane("# Old\n\nBody.");
         pane.draftText = "# New\n\nBody.";
         pane.save();
@@ -168,11 +167,11 @@ TestCase {
         compare(writeSpy.signalArguments[0][0], true);
         verify(!pane.dirty);
 
-        // The disk is the truth: a forced re-read follows for the derived title.
+        // The disk is the truth: a forced re-read follows the accepted write.
+        // The daemon still sends `title`; the shell ignores it.
         compare(requests.length, 3);
         compare(requests[2].method, "GET");
         requests[2].complete(200, { body: "# New\n\nBody.", title: "New", limit: 20000 });
-        compare(Ghostd.characterTitle, "New");
         compare(pane.draftText, "# New\n\nBody.");
     }
 }

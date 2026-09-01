@@ -241,7 +241,6 @@ Singleton {
         * (root.shellFlag("bar.scale-with-font", true) ? root.fontBase / 12 : 1)))
     readonly property color barBackground: root.shellColor("bar.background", root.background)
     readonly property color barForeground: root.shellColor("bar.text", root.foreground)
-    readonly property color barActive: root.shellColor("bar.active", root.accent)
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral
