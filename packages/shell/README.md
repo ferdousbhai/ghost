@@ -73,6 +73,11 @@ Two Omarchy decisions live outside those files. Its fontconfig binds
 `monospace` rather than pinning a family. And `shell.toml` publishes no radius
 while `default/hypr/looknfeel.lua` rounds nothing, so surfaces are square.
 
+Because the face is monospace, horizontal measures are quoted in columns:
+`Theme.ch(n)` resolves a character count through the real metrics of whatever
+font fontconfig hands us, so a theme that raises `font.base-size` widens
+reading columns and panels with it instead of clipping them.
+
 Only the ghost's own identity is fixed: the amber presence and rose failure
 colours, the spectral orb, and the code view, which stays dark in both Omarchy
 modes because a syntax palette tuned for dark ink turns to mud on paper.

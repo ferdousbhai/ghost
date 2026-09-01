@@ -45,7 +45,7 @@ Item {
     readonly property var pinnedSessions: root.group(true)
     readonly property var filteredSessions: Ghostd.sessions.filter(root.matches)
 
-    implicitWidth: 190
+    implicitWidth: Theme.ch(26)
     implicitHeight: 240
 
     /** Drop the filter — what a caller outside the list (the sidebar footer's

@@ -126,13 +126,16 @@ Item {
 
         anchors.right: root.mine ? parent.right : undefined
         anchors.left: root.mine ? undefined : parent.left
+        // The ghost's reply still claims the row rather than sitting in a
+        // bubble; what it does not claim is a 130-column line on a maximised
+        // HUD. The measure only bites past that width.
         width: root.mine
             ? Math.min(parent.width * 0.82,
                 Math.max(bodyText.implicitWidth
                     + (messageActions.visible
                         ? messageActions.implicitWidth + Theme.gap : 0)
                     + root.contentInset * 2, 72))
-            : parent.width
+            : Math.min(parent.width, Theme.readingMeasure + root.contentInset * 2)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
 

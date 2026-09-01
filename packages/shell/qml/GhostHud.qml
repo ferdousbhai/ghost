@@ -731,7 +731,15 @@ FloatingWindow {
                             anchors.horizontalCenter: parent.horizontalCenter
                             y: Math.max(0, (transcriptView.height - height) / 2)
                             visible: transcriptView.count === 0
-                            width: Math.min(transcriptView.width * 0.8, 340)
+                            // A greeting is a short paragraph, so the card is
+                            // as wide as one reads well — measured in columns
+                            // now that every glyph is one column wide. A narrow
+                            // HUD gives it the whole column rather than a
+                            // fraction of one: there is no room to spare at 30
+                            // columns, and the fraction was what pushed the
+                            // wrap to every third word.
+                            width: Math.min(transcriptView.width - Theme.pad * 2,
+                                Theme.ch(46) + Theme.pad * 2)
                             spacing: Theme.pad
 
                             // Materialize: fade up while swelling past 1 and
@@ -896,7 +904,12 @@ FloatingWindow {
 
                                     anchors.centerIn: parent
                                     width: parent.width - Theme.pad * 2
-                                    horizontalAlignment: Text.AlignHCenter
+                                    // The card is centred; its sentences are
+                                    // not. A centred rag is the one thing a
+                                    // fixed-width face renders worse than a
+                                    // proportional one, because every line
+                                    // break lands on a column boundary.
+                                    horizontalAlignment: Text.AlignLeft
                                     // Deliberately unbound: the crossfade swaps
                                     // the words at the bottom of the opacity dip
                                     // so neither line is ever half-visible.

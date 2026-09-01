@@ -353,6 +353,30 @@ Singleton {
     /** Proportional line height for reading copy; chrome labels stay at 1.0. */
     readonly property real lineHeight: 1.4
 
+    // A monospace UI has one honest horizontal unit and it is not the pixel:
+    // every glyph is one column wide, so a reading measure or a panel width is
+    // a character count. omarchy.org sizes its own button gap in `ch` for the
+    // same reason. Resolved through the real metrics of whatever face
+    // fontconfig hands us, so a theme that raises `font.base-size` widens the
+    // columns with it instead of clipping them.
+    FontMetrics {
+        id: bodyMetrics
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize
+    }
+    readonly property real charWidth: bodyMetrics.advanceWidth("0")
+    function ch(count: real): int {
+        return Math.round(count * root.charWidth);
+    }
+
+    /**
+     * The widest a line of prose is allowed to get. Well past the 45–75 the
+     * typographers argue over, because a reply is read in a window the owner
+     * sized, not a page — this only ever catches the extreme, where a maximised
+     * HUD would otherwise run a sentence past 130 columns.
+     */
+    readonly property int readingMeasure: root.ch(92)
+
     // A deliberately small parser. Omarchy's theme files are generated from
     // templates and only ever contain `key = "value"`, `key = number`,
     // `key = true`, `# comment` and `[section]`. Anything fancier (arrays,

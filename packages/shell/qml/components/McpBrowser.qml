@@ -293,7 +293,7 @@ Rectangle {
             ColumnLayout {
                 Layout.preferredWidth: Theme.pad * 15
                 Layout.minimumWidth: Theme.pad * 12
-                Layout.maximumWidth: Theme.pad * 18
+                Layout.maximumWidth: Theme.ch(40)
                 Layout.fillHeight: true
                 spacing: Theme.gap
 
