@@ -53,6 +53,9 @@ expect_rejected uid-guard \
 expect_rejected manager-xdg-override \
   '"Environment=XDG_RUNTIME_DIR=/run/user/$test_uid"' \
   '"Environment=XDG_RUNTIME_DIR=/run/user/1001"'
+expect_rejected manager-pam-reset \
+  "            'PAMName=' \\" \
+  "            'PAMName=systemd-user' \\"
 expect_rejected manager-bus-override \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus"' \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus"'

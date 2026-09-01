@@ -71,6 +71,7 @@ jobs:
           sudo install -d -m755 -- "$override_dir"
           printf '%s\n' \
             '[Service]' \
+            'PAMName=' \
             "Environment=HOME=/home/$test_user" \
             "Environment=USER=$test_user" \
             "Environment=LOGNAME=$test_user" \

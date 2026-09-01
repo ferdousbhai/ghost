@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "2e53646bfc2f387ba68acd1ae9a9c6b6b13b9425612f1b52d6e06a4e76a65c28"
+JOB_SHA256 = "708ef9e0a62cb7f73d66463f2127e5fe66676ea5c9d455e2e925d5fac63eb52a"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -181,6 +181,7 @@ def errors(text: str) -> list[str]:
                 '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
                 '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
                 'sudo install -d -m755 -- "$override_dir"',
+                "'PAMName='",
                 'Environment=HOME=/home/$test_user',
                 'Environment=USER=$test_user',
                 'Environment=LOGNAME=$test_user',
