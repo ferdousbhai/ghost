@@ -18,7 +18,7 @@ import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
-import { listGhostMemory, writeGhostMemory } from "../src/memory-files.js";
+import { listGhostMemory, trashGhostMemoryFile, writeGhostMemory } from "../src/memory-files.js";
 import { setChatModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
@@ -65,6 +65,7 @@ async function serve(
     hooks?: ServerOptions["hooks"];
     memoryReader?: ServerOptions["memoryReader"];
     memoryWriter?: ServerOptions["memoryWriter"];
+    memoryTrasher?: ServerOptions["memoryTrasher"];
     conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
@@ -115,6 +116,9 @@ async function serve(
     ...(serverOptions.memoryWriter === undefined
       ? {}
       : { memoryWriter: serverOptions.memoryWriter }),
+    ...(serverOptions.memoryTrasher === undefined
+      ? {}
+      : { memoryTrasher: serverOptions.memoryTrasher }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -764,6 +768,41 @@ describe("/api/ghosts/:name/memory", () => {
     expect(existsSync(ghostDir)).toBe(false);
     expect(readFileSync(join(trash, "memory", "the-memory-write-owns-its-home.md"), "utf8"))
       .toBe("The memory write owns its home path.\n");
+  });
+
+  it("holds the home lease through a memory trash before a concurrent delete", async () => {
+    const trasherEntered = Promise.withResolvers<void>();
+    const releaseTrasher = Promise.withResolvers<void>();
+    const base = await serve(undefined, {
+      memoryTrasher: async (...args) => {
+        trasherEntered.resolve();
+        await releaseTrasher.promise;
+        return trashGhostMemoryFile(...args);
+      },
+    });
+    const ghostDir = join(temp!.root, "casper");
+    writeFileSync(join(ghostDir, "memory", "doomed.md"), "doomed\n", "utf8");
+    const trashing = fetch(`${base}/api/ghosts/casper/memory`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path: "memory/doomed.md", confirm: "memory/doomed.md" }),
+    });
+    await trasherEntered.promise;
+
+    let deleteSettled = false;
+    const deleting = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" })
+      .then((response) => {
+        deleteSettled = true;
+        return response;
+      });
+    await waitForHomeMove();
+    expect(deleteSettled).toBe(false);
+
+    releaseTrasher.resolve();
+    const [trashed, deleted] = await Promise.all([trashing, deleting]);
+    expect(trashed.status).toBe(200);
+    expect(deleted.status).toBe(200);
+    expect(existsSync(ghostDir)).toBe(false);
   });
 
   it.each(["rename", "delete"] as const)(

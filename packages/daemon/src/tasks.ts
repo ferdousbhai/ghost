@@ -1156,22 +1156,25 @@ export class TaskController {
     for (const launch of this.#launches.values()) launch.abort.abort();
     for (const live of this.#live.values()) live.abort.abort();
     if (this.#disposePromise) return this.#disposePromise;
-    const nativeShutdown = !this.#nativeDisposed && !this.#poisoned
+    const nativeShutdown = this.#initialized && !this.#nativeDisposed && !this.#poisoned
       ? this.beginShutdown()
       : undefined;
     const disposing = (async () => {
-      await operations;
-      if (!this.#nativeDisposed) {
-        if (nativeShutdown) {
-          await nativeShutdown;
-          await this.forceAll();
+      try {
+        await operations;
+        if (!this.#nativeDisposed) {
+          if (nativeShutdown) {
+            await nativeShutdown;
+            await this.forceAll();
+          }
+          this.#nativeDisposed = true;
         }
-        this.#nativeDisposed = true;
+      } finally {
+        await this.store.dispose();
+        this.#poisoned = false;
+        this.#initialized = false;
+        this.#initialization = undefined;
       }
-      await this.store.dispose();
-      this.#poisoned = false;
-      this.#initialized = false;
-      this.#initialization = undefined;
     })();
     this.#disposePromise = disposing;
     void disposing.catch(() => {

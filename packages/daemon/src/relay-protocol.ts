@@ -212,7 +212,7 @@ export function authorizeRelayUpgrade(
     return { ok: false, status: 404, reason: "Not a relay endpoint." };
   }
   const remote = request.remoteAddress;
-  if (remote !== undefined && !LOOPBACK_ADDRESSES.has(remote)) {
+  if (remote === undefined || !LOOPBACK_ADDRESSES.has(remote)) {
     return { ok: false, status: 403, reason: "The relay accepts loopback connections only." };
   }
 

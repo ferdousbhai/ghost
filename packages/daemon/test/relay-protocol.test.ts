@@ -37,7 +37,7 @@ const TOKEN = "a".repeat(64);
 function upgrade(overrides: {
   url?: string;
   headers?: Record<string, string>;
-  remoteAddress?: string;
+  remoteAddress?: string | undefined;
 } = {}) {
   return authorizeRelayUpgrade(
     {
@@ -47,7 +47,7 @@ function upgrade(overrides: {
         "sec-websocket-protocol": `${RELAY_SUBPROTOCOL}, ${RELAY_TOKEN_SUBPROTOCOL_PREFIX}${TOKEN}`,
         ...(overrides.headers ?? {}),
       },
-      remoteAddress: overrides.remoteAddress ?? "127.0.0.1",
+      remoteAddress: "remoteAddress" in overrides ? overrides.remoteAddress : "127.0.0.1",
     },
     TOKEN,
   );
@@ -173,6 +173,10 @@ describe("who may open a relay socket", () => {
 
   it("refuses a connection from off this machine", () => {
     expect(upgrade({ remoteAddress: "192.168.1.40" })).toMatchObject({ ok: false, status: 403 });
+  });
+
+  it("refuses a connection whose remote address is unknown", () => {
+    expect(upgrade({ remoteAddress: undefined })).toMatchObject({ ok: false, status: 403 });
   });
 
   it("accepts loopback in all the spellings Node uses", () => {

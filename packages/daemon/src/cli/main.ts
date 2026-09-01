@@ -235,7 +235,6 @@ export function commandHelp(verb: string): string {
 }
 
 export function version(runtime: Pick<CliRuntime, "env">): string {
-  if (process.env.GHOSTD_VERSION?.trim()) return process.env.GHOSTD_VERSION.trim();
   return runtime.env.GHOSTD_VERSION?.trim() || "0.0.0";
 }
 

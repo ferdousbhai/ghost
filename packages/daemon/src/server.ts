@@ -62,6 +62,10 @@ export interface ServerOptions {
   memoryReader?: typeof listGhostMemory;
   /** Test seam for pausing the validated owner memory writer. */
   memoryWriter?: typeof writeGhostMemory;
+  /** Test seam for pausing the memory-to-Trash move. */
+  memoryTrasher?: (
+    ...args: Parameters<typeof trashGhostMemoryFile>
+  ) => ReturnType<typeof trashGhostMemoryFile> | Promise<ReturnType<typeof trashGhostMemoryFile>>;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
    * routes out entirely (they 404) — a server that only ever runs turns needs
@@ -318,6 +322,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
   const memoryReader = options.memoryReader ?? listGhostMemory;
   const memoryWriter = options.memoryWriter ?? writeGhostMemory;
+  const memoryTrasher = options.memoryTrasher ?? trashGhostMemoryFile;
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -590,8 +595,11 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
-    const ghost = options.registry.get(ghostName);
-    jsonResponse(response, 200, { ok: true, ...trashGhostMemoryFile(ghost.dir, path) });
+    const trashed = await homeOperations.withLease(ghostName, () => {
+      const ghost = options.registry.get(ghostName);
+      return memoryTrasher(ghost.dir, path);
+    });
+    jsonResponse(response, 200, { ok: true, ...trashed });
   };
 
   const handleGreeting = async (
