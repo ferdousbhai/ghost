@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "708ef9e0a62cb7f73d66463f2127e5fe66676ea5c9d455e2e925d5fac63eb52a"
+JOB_SHA256 = "532137f6057af9c83f3dae40ab6a42e1e0c16cc43a83b8fba2f0ec37686787fc"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -178,15 +178,19 @@ def errors(text: str) -> list[str]:
                 'runtime_unit="user-runtime-dir@$test_uid.service"',
                 'manager_unit="user@$test_uid.service"',
                 'override_file="$override_dir/ghost-ci-environment.conf"',
+                'generator_dir="/run/ghost-task-ci-$test_uid-environment-generators"',
                 '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
                 '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
+                '[[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]',
                 'sudo install -d -m755 -- "$override_dir"',
+                'sudo install -d -m755 -- "$generator_dir"',
                 "'PAMName='",
                 'Environment=HOME=/home/$test_user',
                 'Environment=USER=$test_user',
                 'Environment=LOGNAME=$test_user',
                 'Environment=XDG_RUNTIME_DIR=/run/user/$test_uid',
                 'Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus',
+                'Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir',
                 'sudo chmod 644 "$override_file"',
                 'sudo systemctl daemon-reload',
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
@@ -206,6 +210,7 @@ def errors(text: str) -> list[str]:
             manager,
             [
                 'sudo install -d -m755 -- "$override_dir"',
+                'sudo install -d -m755 -- "$generator_dir"',
                 'sudo chmod 644 "$override_file"',
                 'sudo systemctl daemon-reload',
                 'sudo systemctl start "$runtime_unit" "$manager_unit"',
@@ -236,11 +241,13 @@ def errors(text: str) -> list[str]:
             [
                 '[[ "$TEST_USER" == ghost-scope-ci && "$TEST_UID" == 23456 ]]',
                 '[[ "$override_file" == "/run/systemd/system/user@23456.service.d/ghost-ci-environment.conf" ]]',
+                '[[ "$generator_dir" == "/run/ghost-task-ci-23456-environment-generators" ]]',
                 'sudo systemctl stop "user@$TEST_UID.service"',
                 'sudo loginctl disable-linger "$TEST_USER"',
                 'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
                 'sudo unlink -- "$override_file"',
                 'sudo rmdir -- "$override_dir"',
+                'sudo rmdir -- "$generator_dir"',
                 'sudo systemctl daemon-reload',
                 'sudo userdel --remove "$TEST_USER"',
             ],
@@ -255,6 +262,7 @@ def errors(text: str) -> list[str]:
                 'sudo systemctl stop "user-runtime-dir@$TEST_UID.service"',
                 'sudo unlink -- "$override_file"',
                 'sudo rmdir -- "$override_dir"',
+                'sudo rmdir -- "$generator_dir"',
                 'sudo systemctl daemon-reload',
                 'sudo userdel --remove "$TEST_USER"',
             ],

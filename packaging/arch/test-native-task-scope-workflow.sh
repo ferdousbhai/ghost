@@ -56,6 +56,9 @@ expect_rejected manager-xdg-override \
 expect_rejected manager-pam-reset \
   "            'PAMName=' \\" \
   "            'PAMName=systemd-user' \\"
+expect_rejected manager-environment-generator-path \
+  '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=$generator_dir"' \
+  '"Environment=SYSTEMD_ENVIRONMENT_GENERATOR_PATH=/usr/lib/systemd/user-environment-generators"'
 expect_rejected manager-bus-override \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$test_uid/bus"' \
   '"Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1001/bus"'
@@ -92,6 +95,9 @@ expect_rejected cleanup-runtime-dir \
 expect_rejected cleanup-override \
   'sudo unlink -- "$override_file" || true' \
   ': "ephemeral manager override not removed"'
+expect_rejected cleanup-generator-dir \
+  'sudo rmdir -- "$generator_dir" || true' \
+  ': "ephemeral generator directory not removed"'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'
