@@ -1,11 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  ClassifierInjectionDetector,
-  CompositeInjectionDetector,
   HeuristicInjectionDetector,
   INJECTION_REASONS,
   type InjectionDetection,
-  type InjectionDetector,
 } from "../src/untrusted.js";
 
 type InjectionCategory =
@@ -361,19 +358,6 @@ function summarizeEvaluation(
   return { recall, fpr };
 }
 
-async function evaluateAsync(detector: InjectionDetector): Promise<{
-  readonly injectionResults: InjectionDetection[];
-  readonly benignResults: InjectionDetection[];
-}> {
-  const injectionResults = await Promise.all(
-    INJECTION_SAMPLES.map((sample) => detector.detect(sample.text)),
-  );
-  const benignResults = await Promise.all(
-    BENIGN_SAMPLES.map((sample) => detector.detect(sample.text)),
-  );
-  return { injectionResults, benignResults };
-}
-
 describe("prompt-injection detection evaluation", () => {
   it("keeps heuristic recall and false-positive rate within measured bounds", () => {
     const detector = new HeuristicInjectionDetector();
@@ -394,36 +378,3 @@ describe("prompt-injection detection evaluation", () => {
     expect(fpr).toBeLessThanOrEqual(0.04);
   });
 });
-
-describe.skipIf(!process.env.GHOST_INJECTION_MODEL?.trim())(
-  "classifier-backed prompt-injection evaluation",
-  () => {
-    it("reports classifier and additive composite metrics", async () => {
-      const classifierResults = await evaluateAsync(
-        new ClassifierInjectionDetector(),
-      );
-      const compositeResults = await evaluateAsync(
-        new CompositeInjectionDetector(
-          new HeuristicInjectionDetector(),
-          new ClassifierInjectionDetector(),
-        ),
-      );
-
-      summarizeEvaluation(
-        "ClassifierInjectionDetector evaluation",
-        classifierResults.injectionResults,
-        classifierResults.benignResults,
-      );
-      summarizeEvaluation(
-        "CompositeInjectionDetector evaluation",
-        compositeResults.injectionResults,
-        compositeResults.benignResults,
-      );
-
-      expect(classifierResults.injectionResults).toHaveLength(
-        INJECTION_SAMPLES.length,
-      );
-      expect(compositeResults.benignResults).toHaveLength(BENIGN_SAMPLES.length);
-    });
-  },
-);

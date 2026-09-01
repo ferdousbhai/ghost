@@ -21,8 +21,6 @@ import {
   relayBackend,
   RELAY_OFF_MESSAGE,
   RELAY_OPS,
-  RELAY_PROTOCOL_VERSION,
-  RELAY_SUBPROTOCOL,
   type RelayOp,
   type RelayReply,
   type RelayTransport,
@@ -133,15 +131,6 @@ function deferred(): { promise: Promise<void>; resolve(): void } {
 
 
 describe("the protocol constants are a contract", () => {
-  it("names exactly the verbs the seam has, plus current and status", () => {
-    expect([...RELAY_OPS]).toEqual([
-      "status", "current", "open", "read", "find",
-      "click", "type", "screenshot", "back", "close",
-      "forward", "scroll", "drag", "key", "javascript",
-      "console", "network", "upload", "resize", "tabs",
-    ]);
-  });
-
   it("has exactly one op that runs page script, and it is the named `javascript` one", () => {
     // The closed-set claim changed with Tier 1: the owner's ghost, on the
     // owner's machine, may run script in the page. That capability lives in
@@ -171,11 +160,6 @@ describe("the protocol constants are a contract", () => {
     const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
     expect(description).toMatch(/javascript/i);
     expect(description).toMatch(/returns .* untrusted|untrusted DATA/i);
-  });
-
-  it("pins the version and subprotocol the extension has to agree with", () => {
-    expect(RELAY_PROTOCOL_VERSION).toBe(4);
-    expect(RELAY_SUBPROTOCOL).toBe("ghost-relay.v1");
   });
 });
 

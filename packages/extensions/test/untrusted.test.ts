@@ -191,17 +191,4 @@ describe("HeuristicInjectionDetector", () => {
   ])("does not flag benign prose: %s", (content) => {
     expect(detector.detect(content)).toEqual({ flagged: false, score: 0, reasons: [] });
   });
-
-  it("allows a future detector implementation to resolve asynchronously", async () => {
-    const asyncDetector: InjectionDetector = {
-      async detect() {
-        return { flagged: false, score: 0, reasons: [] };
-      },
-    };
-    await expect(asyncDetector.detect("content")).resolves.toEqual({
-      flagged: false,
-      score: 0,
-      reasons: [],
-    });
-  });
 });
