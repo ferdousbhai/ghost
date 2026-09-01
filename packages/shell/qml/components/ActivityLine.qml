@@ -94,6 +94,10 @@ Item {
                 anchors.centerIn: parent
                 diameter: 20
                 running: Ghostd.streaming
+                ghost: Ghostd.activeGhost
+                // One turn, one orb. The assistant row advances once per turn,
+                // which is exactly the grain this wants.
+                turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
             }
 
             Rectangle {

@@ -82,6 +82,16 @@ Only the ghost's own identity is fixed: the amber presence and rose failure
 colours, the spectral orb, and the code view, which stays dark in both Omarchy
 modes because a syntax palette tuned for dark ink turns to mud on paper.
 
+The orb is a phosphor matrix — square cells on a square grid, bright at the
+core and falling off to the rim, with motes walking the outer ring one cell at
+a time. It is made of the same stuff as the rest of the screen and stays the
+one lit thing in it. No two summonings look alike: `OrbSeed.js` takes the
+disc's falloff, its phosphor's place in the spectral band and its mote count
+from the ghost's name, so a ghost looks like itself across every conversation,
+and every cell's rhythm from the turn, so the same ghost never flickers the
+same way twice. Both are pure functions of their seed, which is what makes an
+orb testable and stops a redraw restyling it mid-turn.
+
 ## Verification
 
 Never launch a plain development Quickshell process on the owner's session bus.

@@ -44,6 +44,8 @@ Item {
                 anchors.centerIn: parent
                 diameter: 12
                 running: visible
+                ghost: Ghostd.activeGhost
+                turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
             }
 
             Rectangle {
