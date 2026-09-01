@@ -51,17 +51,17 @@ expect_rejected uid-guard \
   'test_uid=23456' \
   'test_uid="$(id -u)"'
 expect_rejected runtime-dir-start \
-  'sudo systemctl start "$runtime_unit"' \
-  ': "runtime directory unit not started"'
+  'sudo systemctl start "$runtime_unit" "$manager_unit"' \
+  'sudo systemctl start "$manager_unit"'
 expect_rejected runtime-dir-active \
   'sudo systemctl is-active --quiet "$runtime_unit"' \
   ': "runtime directory activity not checked"'
 expect_rejected manager-start \
-  'sudo systemctl start "$manager_unit"' \
-  ': "user manager not started"'
+  'sudo systemctl start "$runtime_unit" "$manager_unit"' \
+  'sudo systemctl start "$runtime_unit"'
 expect_rejected startup-order \
-  $'          sudo systemctl start "$runtime_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"\n          [[ -d "/run/user/$test_uid" ]]\n          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]\n          sudo loginctl enable-linger "$test_user"\n          sudo systemctl start "$manager_unit"' \
-  $'          sudo systemctl start "$manager_unit"\n          sudo systemctl start "$runtime_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"\n          [[ -d "/run/user/$test_uid" ]]\n          [[ "$(stat -c %u "/run/user/$test_uid")" == "$test_uid" ]]\n          sudo loginctl enable-linger "$test_user"'
+  $'          sudo systemctl is-active --quiet "$runtime_unit"\n          sudo systemctl is-active --quiet "$manager_unit"' \
+  $'          sudo systemctl is-active --quiet "$manager_unit"\n          sudo systemctl is-active --quiet "$runtime_unit"'
 expect_rejected bus-owner \
   '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]' \
   '[[ -S "/run/user/$test_uid/bus" ]]'

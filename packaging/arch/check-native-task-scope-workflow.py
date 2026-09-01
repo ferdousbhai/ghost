@@ -14,7 +14,7 @@ from yaml.nodes import MappingNode, Node, ScalarNode, SequenceNode
 from yaml.tokens import AliasToken, AnchorToken
 
 
-JOB_SHA256 = "6badcde9335a50bfa6d288fcd98181e4d530fdcfb7c8bcdc22dd9c4b61e6a87a"
+JOB_SHA256 = "b249e4abb3971bed045a15625b85cb3aaf10588c98ab74dfa192db4fa9e79ae6"
 CHECKOUT = "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1"
 SETUP_BUN = "oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6"
 STEP_NAMES = [
@@ -178,11 +178,10 @@ def errors(text: str) -> list[str]:
                 'runtime_unit="user-runtime-dir@$test_uid.service"',
                 'manager_unit="user@$test_uid.service"',
                 '[[ "$test_uid" != "$(id -u)" && "$test_uid" -gt 0 ]]',
-                'sudo systemctl start "$runtime_unit"',
+                'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
-                'sudo loginctl enable-linger "$test_user"',
-                'sudo systemctl start "$manager_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
+                'sudo loginctl enable-linger "$test_user"',
                 '[[ "$(stat -c %u "/run/user/$test_uid/bus")" == "$test_uid" ]]',
                 'sudo systemctl --no-pager --full status "$runtime_unit" "$manager_unit"',
                 'sudo journalctl --no-pager --lines=80',
@@ -195,11 +194,10 @@ def errors(text: str) -> list[str]:
         require_order(
             manager,
             [
-                'sudo systemctl start "$runtime_unit"',
+                'sudo systemctl start "$runtime_unit" "$manager_unit"',
                 'sudo systemctl is-active --quiet "$runtime_unit"',
-                'sudo loginctl enable-linger "$test_user"',
-                'sudo systemctl start "$manager_unit"',
                 'sudo systemctl is-active --quiet "$manager_unit"',
+                'sudo loginctl enable-linger "$test_user"',
                 '[[ -S "/run/user/$test_uid/bus" ]]',
             ],
             "manager bootstrap",
