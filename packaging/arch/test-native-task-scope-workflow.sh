@@ -6,6 +6,8 @@ script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(realpath "$script_dir/../..")"
 checker="$script_dir/check-native-task-scope-workflow.py"
 workflow="$repo_root/.github/workflows/native-task-scope-integration.yml"
+integration="$repo_root/packages/daemon/test/native-task-scope.real-integration.ts"
+diagnostic="$repo_root/packages/daemon/test/native-task-scope-integration-diagnostic.ts"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-native-scope-workflow.XXXXXX")"
 cleanup() {
   find -P "$work" -depth -delete
@@ -13,6 +15,42 @@ cleanup() {
 trap cleanup EXIT
 
 python "$checker" "$workflow"
+
+python - "$integration" "$diagnostic" <<'PY'
+from pathlib import Path
+import sys
+
+integration = Path(sys.argv[1]).read_text(encoding="utf-8")
+diagnostic = Path(sys.argv[2]).read_text(encoding="utf-8")
+required = {
+    "integration": (
+        "launcherFailure: classifyLauncherStderr(",
+        "readStageDiagnostic(stageReceipt)",
+        "      scopeObservedOwnedLoaded,\n      scopeStatus,",
+        "process.stderr.write(`${serializeLifecycleDiagnostic({",
+    ),
+    "diagnostic": (
+        "constants.O_RDONLY | constants.O_NOFOLLOW",
+        "stat.nlink === 1",
+        "(stat.mode & 0o777) === 0o600",
+        "const MAX_DIAGNOSTIC_BYTES = 2 * 1024",
+    ),
+}
+for context, fragments in required.items():
+    source = integration if context == "integration" else diagnostic
+    for fragment in fragments:
+        if source.count(fragment) != 1:
+            raise SystemExit(f"native scope {context} diagnostic boundary changed: {fragment!r}")
+for fragment in (
+    "process.stderr.write(launcherStderr",
+    "process.stderr.write(Buffer.concat(launcherStderr",
+    "stderr: Buffer.concat(launcherStderr",
+    "path: stageReceipt",
+    "scopeUnit: unit",
+):
+    if fragment in integration:
+        raise SystemExit(f"native scope diagnostic exposes private detail: {fragment!r}")
+PY
 
 expect_rejected() {
   local name="$1"

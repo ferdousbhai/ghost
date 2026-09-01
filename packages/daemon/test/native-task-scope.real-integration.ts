@@ -31,6 +31,14 @@ import {
   type TaskRecord,
 } from "../src/tasks.js";
 import { parseSupportedSystemdMajor } from "./native-task-scope-integration-version.js";
+import {
+  boundedSignal,
+  classifyLauncherStderr,
+  classifyScopeStatus,
+  readStageDiagnostic,
+  serializeLifecycleDiagnostic,
+  type StatusDiagnostic,
+} from "./native-task-scope-integration-diagnostic.js";
 
 const INTEGRATION_FLAG = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION";
 const INTEGRATION_UID = "GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID";
@@ -40,6 +48,8 @@ const CRASH_CONTROLLER_MODE = "--crash-controller";
 const CONTROL_OUTPUT_LIMIT = 8 * 1024;
 const SCOPE_STATUS_OUTPUT_LIMIT = 4 * 1024;
 const SCOPE_STATUS_PROPERTIES = ["Id", "LoadState", "ActiveState", "Description"] as const;
+const LAUNCHER_STDERR_LIMIT = 4 * 1024;
+const DIAGNOSTIC_STATUS_TIMEOUT_MS = 500;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -234,6 +244,79 @@ async function assertAbsentScopeStatusPreflight(): Promise<void> {
   }
 }
 
+async function diagnosticScopeStatus(
+  unit: string,
+  description: string,
+): Promise<StatusDiagnostic> {
+  const result = await new Promise<{ stdout: string; exitCode: number | null }>((resolve) => {
+    const child = spawn(
+      "/usr/bin/systemctl",
+      [
+        "--user",
+        "show",
+        unit,
+        ...SCOPE_STATUS_PROPERTIES.map((property) => `--property=${property}`),
+        "--no-pager",
+      ],
+      {
+        env: captureNativeTaskControlEnvironment(process.env),
+        stdio: ["ignore", "pipe", "ignore"],
+        windowsHide: true,
+      },
+    );
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let settled = false;
+    const finish = (stdout: string, exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      child.stdout?.destroy();
+      resolve({ stdout, exitCode });
+    };
+    const timeout = setTimeout(() => {
+      child.kill("SIGKILL");
+      finish("", null);
+    }, DIAGNOSTIC_STATUS_TIMEOUT_MS);
+    child.stdout?.on("data", (chunk: Buffer | string) => {
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      bytes += value.length;
+      if (bytes > SCOPE_STATUS_OUTPUT_LIMIT) {
+        child.kill("SIGKILL");
+        finish("", null);
+      } else {
+        chunks.push(value);
+      }
+    });
+    child.once("error", () => finish("", null));
+    child.once("close", (exitCode) => {
+      finish(Buffer.concat(chunks, bytes).toString("utf8"), exitCode);
+    });
+  });
+  return classifyScopeStatus(unit, description, result);
+}
+
+async function observeOwnedLoadedScope(
+  unit: string,
+  description: string,
+  child: ChildProcess,
+): Promise<boolean> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    const status = await diagnosticScopeStatus(unit, description);
+    if (status.shape === "valid"
+      && status.id === "unit"
+      && status.loadState === "loaded"
+      && status.activeState !== "missing"
+      && status.activeState !== "other"
+      && status.description === "receipt") return true;
+    if (child.exitCode !== null || child.signalCode !== null || Date.now() >= deadline) {
+      return false;
+    }
+    await Bun.sleep(10);
+  }
+}
+
 async function unitProperties(unit: string): Promise<Map<string, string>> {
   return parseProperties(await systemctl([
     "show",
@@ -370,8 +453,28 @@ async function writeFixtures(root: string): Promise<{
   const worker = join(root, "worker.py");
   const delayedLauncher = join(root, "delayed-launcher.py");
   await writeFile(worker, [
-    "import json, os, signal, sys, time",
-    "child = os.fork()",
+    "import errno, json, os, signal, sys, time",
+    "stage_path = os.environ['GHOST_STAGE_RECEIPT']",
+    "def record_stage(stage, failure='none'):",
+    "    source = json.dumps({'failure': failure, 'stage': stage, 'version': 1}, separators=(',', ':'), sort_keys=True).encode()",
+    "    temporary = stage_path + '.' + str(os.getpid()) + '.tmp'",
+    "    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)",
+    "    try:",
+    "        os.fchmod(descriptor, 0o600)",
+    "        offset = 0",
+    "        while offset < len(source): offset += os.write(descriptor, source[offset:])",
+    "        os.fsync(descriptor)",
+    "    finally:",
+    "        os.close(descriptor)",
+    "    os.replace(temporary, stage_path)",
+    "    directory = os.open(os.path.dirname(stage_path), os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)",
+    "    try: os.fsync(directory)",
+    "    finally: os.close(directory)",
+    "record_stage('entered')",
+    "try: child = os.fork()",
+    "except OSError as error:",
+    "    record_stage('entered', 'resource' if error.errno in (errno.EAGAIN, errno.ENOMEM) else 'other')",
+    "    raise",
     "if child == 0:",
     "    os.setsid()",
     "    grandchild = os.fork()",
@@ -380,9 +483,23 @@ async function writeFixtures(root: string): Promise<{
     "    os.close(0); os.close(1); os.close(2)",
     "    with open(os.environ['GHOST_DESCENDANT_PID'], 'w') as target: target.write(str(os.getpid()))",
     "    while True: time.sleep(1)",
+    "record_stage('forked')",
     "signal.signal(signal.SIGTERM, signal.SIG_IGN)",
+    "record_stage('waiting_input')",
     "line = sys.stdin.readline()",
-    "print(json.dumps({'pid': os.getpid(), 'cwd': os.getcwd(), 'argv': sys.argv[1:], 'marker': os.environ.get('GHOST_LITERAL_MARKER'), 'provider': os.environ.get('OPENAI_API_KEY'), 'input': json.loads(line)}), flush=True)",
+    "if not line:",
+    "    record_stage('waiting_input', 'stdin_or_protocol')",
+    "    raise SystemExit(65)",
+    "record_stage('input_received')",
+    "try: payload = json.loads(line)",
+    "except Exception:",
+    "    record_stage('input_received', 'stdin_or_protocol')",
+    "    raise",
+    "try: print(json.dumps({'pid': os.getpid(), 'cwd': os.getcwd(), 'argv': sys.argv[1:], 'marker': os.environ.get('GHOST_LITERAL_MARKER'), 'provider': os.environ.get('OPENAI_API_KEY'), 'input': payload}), flush=True)",
+    "except Exception:",
+    "    record_stage('input_received', 'stdin_or_protocol')",
+    "    raise",
+    "record_stage('emitted')",
     "while True: time.sleep(1)",
     "",
   ].join("\n"), { mode: 0o700 });
@@ -437,12 +554,36 @@ async function proveLifecycle(
   const ownership = randomReceipt();
   const unit = nativeTaskScopeUnit(taskId);
   await assertUnitAbsent(unit);
-  ownedUnits.set(unit, nativeTaskScopeDescription(taskId, ownership));
+  const description = nativeTaskScopeDescription(taskId, ownership);
+  ownedUnits.set(unit, description);
   const descendantPidFile = join(root, "descendant.pid");
+  const stageReceipt = join(root, "lifecycle-stage.json");
+  const launcherStderr: Buffer[] = [];
+  let launcherStderrBytes = 0;
+  let launcherStderrTruncated = false;
+  let launcherExitCode: number | null = null;
+  let launcherSignal: string | null = null;
 
   const manager = new SystemdNativeTaskScopeManager({
     controlEnvironment: process.env,
     confirmationTimeoutMs: 10_000,
+    spawnChild: ((command: string, args: string[], options: SpawnOptions) => {
+      const launched = spawn(command, args, options);
+      launched.stderr?.on("data", (chunk: Buffer | string) => {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const remaining = LAUNCHER_STDERR_LIMIT - launcherStderrBytes;
+        if (remaining > 0) {
+          launcherStderr.push(value.subarray(0, remaining));
+          launcherStderrBytes += Math.min(value.length, remaining);
+        }
+        if (value.length > remaining) launcherStderrTruncated = true;
+      });
+      launched.once("close", (exitCode, signal) => {
+        launcherExitCode = exitCode;
+        launcherSignal = signal;
+      });
+      return launched;
+    }) as typeof spawn,
   });
   const scope = await manager.reserve(taskId, ownership, new AbortController().signal);
   const child = scope.spawn({
@@ -456,34 +597,58 @@ async function proveLifecycle(
       DBUS_SESSION_BUS_ADDRESS: required("DBUS_SESSION_BUS_ADDRESS"),
       GHOST_DESCENDANT_PID: descendantPidFile,
       GHOST_LITERAL_MARKER: "literal value with spaces",
+      GHOST_STAGE_RECEIPT: stageReceipt,
     },
   });
-  child.stdin?.write(`${JSON.stringify({ ping: "literal" })}\n`);
-  const output = await lineFrom(child);
-  assert.equal(output.cwd, root);
-  assert.deepEqual(output.argv, ["literal argument", "--looks=like-option"]);
-  assert.equal(output.marker, "literal value with spaces");
-  assert.equal(output.provider, null);
-  assert.deepEqual(output.input, { ping: "literal" });
-  const workerPid = Number(output.pid);
-  await waitFor("double-fork descendant pid", async () => {
-    try { return (await readFile(descendantPidFile, "utf8")).trim().length > 0; } catch { return false; }
-  });
-  const descendantPid = Number((await readFile(descendantPidFile, "utf8")).trim());
-  assert.ok(Number.isInteger(workerPid) && Number.isInteger(descendantPid));
-  const properties = await unitProperties(unit);
-  assert.equal(properties.get("Description"), nativeTaskScopeDescription(taskId, ownership));
-  const controlGroup = properties.get("ControlGroup");
-  if (!controlGroup?.startsWith("/")) throw new Error("scope has no exact cgroup");
-  for (const pid of [workerPid, descendantPid]) {
-    assert.equal(await processControlGroup(pid), controlGroup);
-  }
+  const observedOwnedLoaded = observeOwnedLoadedScope(unit, description, child);
+  try {
+    child.stdin?.write(`${JSON.stringify({ ping: "literal" })}\n`);
+    const output = await lineFrom(child);
+    assert.equal(output.cwd, root);
+    assert.deepEqual(output.argv, ["literal argument", "--looks=like-option"]);
+    assert.equal(output.marker, "literal value with spaces");
+    assert.equal(output.provider, null);
+    assert.deepEqual(output.input, { ping: "literal" });
+    const workerPid = Number(output.pid);
+    await waitFor("double-fork descendant pid", async () => {
+      try { return (await readFile(descendantPidFile, "utf8")).trim().length > 0; }
+      catch { return false; }
+    });
+    const descendantPid = Number((await readFile(descendantPidFile, "utf8")).trim());
+    assert.ok(Number.isInteger(workerPid) && Number.isInteger(descendantPid));
+    const properties = await unitProperties(unit);
+    assert.equal(properties.get("Description"), description);
+    const controlGroup = properties.get("ControlGroup");
+    if (!controlGroup?.startsWith("/")) throw new Error("scope has no exact cgroup");
+    for (const pid of [workerPid, descendantPid]) {
+      assert.equal(await processControlGroup(pid), controlGroup);
+    }
 
-  await scope.stopAndConfirm();
-  await waitFor("scope processes to stop", () =>
-    !pidExists(workerPid) && !pidExists(descendantPid));
-  await waitFor("scope collection", () => unitAbsent(unit));
-  ownedUnits.delete(unit);
+    await scope.stopAndConfirm();
+    await waitFor("scope processes to stop", () =>
+      !pidExists(workerPid) && !pidExists(descendantPid));
+    await waitFor("scope collection", () => unitAbsent(unit));
+    ownedUnits.delete(unit);
+  } catch (error) {
+    const [scopeObservedOwnedLoaded, scopeStatus, fixture] = await Promise.all([
+      observedOwnedLoaded.catch(() => false),
+      diagnosticScopeStatus(unit, description),
+      readStageDiagnostic(stageReceipt),
+    ]);
+    process.stderr.write(`${serializeLifecycleDiagnostic({
+      version: 1,
+      launcherExitCode: child.exitCode ?? launcherExitCode,
+      launcherSignal: boundedSignal(child.signalCode ?? launcherSignal),
+      launcherFailure: classifyLauncherStderr(
+        Buffer.concat(launcherStderr, launcherStderrBytes).toString("utf8"),
+        launcherStderrTruncated,
+      ),
+      scopeObservedOwnedLoaded,
+      scopeStatus,
+      fixture,
+    })}\n`);
+    throw error;
+  }
 }
 
 async function proveCollision(
