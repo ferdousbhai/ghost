@@ -1,5 +1,10 @@
 # Ghost
 
+> **RELEASE HOLD:** the beta implementation is under acceptance, but no public
+> repository, tag, release, package publication, Omarchy submission, or live
+> installation is authorized. The owner must lift this hold, and the exact
+> candidate must complete the #17 beta gate, before any release action.
+
 Your ghost, on your machine. An AI persona with memory, docs, and tools —
 running locally as an [Omarchy](https://omarchy.org)-native desktop app,
 built on the [pi](https://github.com/earendil-works/pi) coding agent
@@ -46,7 +51,8 @@ ghost show -s cli-abc
 ghost delegation
 ```
 
-Status: beta release candidate. See CONTRACTS.md for the data and API
-contracts, and [docs/hooks.md](docs/hooks.md) for awaited model-harness hooks.
+Status: beta candidate under the release hold above; #17 remains the exact
+candidate's release gate. See CONTRACTS.md for the data and API contracts, and
+[docs/hooks.md](docs/hooks.md) for awaited principal-harness hooks.
 
 License: Apache-2.0

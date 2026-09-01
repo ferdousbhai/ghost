@@ -1,8 +1,11 @@
 # Ghost hooks
 
-Ghost owns an awaited lifecycle boundary above its model harnesses. A hook has
-the same behavior whether a conversation uses pi or the owner-local Claude Code
-runtime.
+Ghost owns an awaited lifecycle boundary above its two principal conversation
+harnesses. A hook has the same behavior whether the owner-facing conversation
+uses pi or the owner-local Claude Code runtime. Delegated native Pi, Codex, and
+Claude coding workers do not enter this Ghost hook lifecycle: each worker keeps
+its native project/user hook behavior inside its receipt-bound task scope, and
+Ghost does not translate, duplicate, or await those hooks as principal events.
 
 Ghost supports three events. `before_prompt` runs after the user submits a prompt
 but before the model request. It can add advisory context to that request without
@@ -88,9 +91,10 @@ its interval and persisted retry state refers to that identity.
 ```
 
 This file configures Ghost's machine-level awaited command hooks. They run for
-both pi and Claude Code conversations, above either model harness, and commands
-run with the daemon user's permissions. It is therefore a trusted machine
-configuration surface, not portable ghost data.
+both principal pi and principal Claude Code conversations, above either model
+harness, and commands run with the daemon user's permissions. They never run as
+delegated-worker hooks. It is therefore a trusted machine configuration
+surface, not portable ghost data.
 
 Ghost-owned hook extensions are a separate, pi-only mechanism. Direct,
 non-hidden `.js`/`.ts` regular files in a trusted ghost home's visible
@@ -211,8 +215,9 @@ using stderr as the reason. Other exit codes, malformed output, thrown handlers,
 and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
-Ghost sets `stop_hook_active: true` on continuation passes. As with Codex and
-Claude Code, the hook owns its continuation policy: Ghost keeps honoring a
+Ghost sets `stop_hook_active: true` on continuation passes. As with the native
+stop-hook conventions of Codex and Claude Code, the hook owns its continuation
+policy: Ghost keeps honoring a
 blocking result until the hook accepts the stop. Hook authors must use
 `stop_hook_active` or their own bounded counter to avoid an unbounded loop and
 should normally stop after one revision. A continuation reason is in model

@@ -1725,9 +1725,11 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   home identity lease across server existence/config inspection, the isolated
   or live-manager action, and the final sanitized response snapshot; rename or
   delete cannot overtake that composite operation.
-- `POST /api/ghosts/:name/messages` — the **pi-messages wire protocol** over
-  pi's `AgentSession` (request `{ model, context, options }` → SSE stream).
-  This contract, Ghost's in-repo client
+- `POST /api/ghosts/:name/messages` — Ghost's runtime-neutral principal SSE
+  wire, retaining the historical **pi-messages** request and event shapes
+  (`{ model, context, options }` → SSE stream). Runtime dispatch selects either
+  pi's `AgentSession` or the Claude Code adapter without changing the client
+  protocol. This contract, Ghost's in-repo client
   (`packages/shell/qml/services/Ghostd.qml`), and the protocol/conformance tests
   in `packages/daemon/test/pi-messages.test.ts`,
   `packages/daemon/test/server.test.ts`, and
@@ -1737,8 +1739,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   `SessionManager.getCwd()` snapshot captured at execution start. It is
   activity-local: a client must not substitute a later session cwd for it.
 - A conversation has two distinct identifiers at this API boundary.
-  `conversationId` is the runtime-owned resume id and is passed unchanged as
-  pi-messages `options.sessionId`. `id` is the opaque public row/action id,
+  `conversationId` is the runtime-owned resume id and is passed unchanged
+  through the selected principal adapter; pi receives it as pi-messages
+  `options.sessionId`. `id` is the opaque public row/action id,
   qualified as `pi:<conversationId>` or `claude-code:<conversationId>` so two
   runtimes may own the same raw id without colliding. Every `:id` session action
   below requires the qualified public id returned by the listing; unqualified
@@ -2283,8 +2286,9 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   so the shell can rehydrate
   it (issue #26). `messages` are pi's `{ role, content }` messages (user and
   assistant only; private `thinking` reasoning and internal tool-result messages
-  are dropped, exactly as the live stream omits them), the same shape a
-  pi-messages client renders. Paged with `?limit` (default 1000, max 2000) and
+  are dropped, exactly as the live stream omits them), the same shape the
+  runtime-neutral principal client renders. Paged with `?limit` (default 1000,
+  max 2000) and
   `?offset`; `total` is the full renderable count and `truncated` is true when a
   page omits messages. Each message also carries its persisted `entryId` and
   `parentId`. Sibling-branch metadata is gone with the navigation it described:
@@ -2856,7 +2860,8 @@ Pi's exact-name project-over-ghost shadowing and translates only its validated
 native MCP rows into the SDK config.
 Unbound sessions enable no cwd-discovered skills. Existing Ghost extension
 tools are added through one in-process SDK MCP server, and output is normalized
-back to pi-messages. Project MCP names remain opaque, including `ghost`; the
+back to the runtime-neutral pi-messages-compatible principal wire. Project MCP
+names remain opaque, including `ghost`; the
 internal server deterministically takes the first free name in `ghost`,
 `ghost-1`, `ghost-2`, … and that exact name owns its allowed-tool prefix and is
 excluded from project health. The dedicated native Claude environment above is
@@ -2953,7 +2958,8 @@ not coupled to that release identity.
   packages declare Bun, `fd`, and
   `ripgrep` as runtime dependencies for pi's native read-only search tools; the
   executable must not populate pi's cache by downloading them during a
-  plan-mode read.
+  plan-mode read. Both Arch package variants also depend directly on
+  `systemd>=254`, the minimum native task-scope ownership boundary.
 - `packages/shell` — the Omarchy/Quickshell HUD, model routing, ask/queue and
   branching UI, live tool cards, and summoning indicator.
 - `packages/chromium-extension` — the browser relay, driving tabs of the

@@ -1,10 +1,13 @@
 # `@ghost/daemon` — `ghostd`
 
 The local process that hosts Ghost personas behind one authenticated loopback
-API. Provider-agnostic conversations run on pi (`@earendil-works/pi-coding-agent`,
-`pi-agent-core`, and `pi-ai` 0.84.3); selecting
-`claude-code/default` uses the owner-local Claude Agent SDK boundary documented
-in [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
+API. Principal conversations run either on pi
+(`@earendil-works/pi-coding-agent`, `pi-agent-core`, and `pi-ai` 0.84.3) or,
+when `claude-code/default` is selected, through the owner-local Claude Agent
+SDK boundary documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md). Both adapt
+to the same runtime-neutral principal wire; the historical `pi-messages` name
+describes its request and event shapes, not a Pi-only server path.
 
 ## Run it
 
@@ -57,6 +60,46 @@ installed Pi, Codex, and Claude Code harnesses without contacting ghostd or
 opening a ghost home. It reports availability/authentication only; delegated
 task mutation remains inside an authenticated Ghost conversation/API.
 
+### Native coding-worker harnesses
+
+Pi, Codex, and Claude Code are owner-installed native coding workers, not
+redistributed in Ghost's runtime archive. Install and configure only the
+harnesses you want through their upstream or Omarchy/mise path, then confirm
+that `pi`, `codex`, or `claude` is visible in the environment from which the
+daemon service starts. Pi keeps its native model/auth setup, Codex must make
+`account/read` report an authenticated account, and Claude Code must make
+`claude auth status --json` report `loggedIn: true`. The authoritative upstream
+projects are [pi](https://github.com/earendil-works/pi),
+[Codex](https://github.com/openai/codex), and
+[Claude Code](https://code.claude.com/docs/en/overview).
+
+Default discovery resolves the corresponding command from ghostd's captured
+startup `PATH`. Relative `PATH` entries are anchored to the startup cwd, and a
+recognized Omarchy/mise launcher is resolved with `mise which` to the exact
+installed target. Set `GHOST_PI_BINARY`, `GHOST_CODEX_BINARY`, or
+`GHOST_CLAUDE_BINARY` in the service environment to select an owner wrapper or
+executable explicitly; an absolute path is the least ambiguous choice. An
+explicit selector is a literal execution boundary and is never mise-unwrapped,
+so Ghost fingerprints and later executes that wrapper rather than silently
+substituting its target. Changing startup `PATH` or a selector in the service
+environment requires a daemon restart. A fresh probe detects an installer or
+mise target rotation on its existing path and invalidates stale admission.
+
+Run `ghost delegation`, `ghost delegation --json`, or quiet mode
+`ghost delegation -q` to inspect the bounded public result. A missing command,
+invalid version/protocol response, failed identity check, or unavailable
+required SDK appears only as `unavailable`; Codex and Claude additionally
+report `authenticated` or `logged_out`, while Pi deliberately reports
+authentication as `unknown`. These display rows never authorize a task: every
+start performs a fresh private probe.
+
+Claude also requires the exact external Agent SDK and peer versions under the
+owner-data directory documented in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#t3-code-provenance-and-adaptation).
+Ghost neither bundles nor copies that SDK. A valid Claude CLI therefore remains
+`unavailable` until both the owner-installed CLI and this exact SDK boundary
+pass validation.
+
 `ghost smoke` starts a scratch daemon and a scratch ghost. `--no-turn` is the
 package/CI startup proof. A real smoke can select a runtime with `--model`; it
 checks three turns in one conversation, readable memory output, and persisted
@@ -89,7 +132,9 @@ the structured field contract.
 
 ## Storage and isolation
 
-Everything Ghost owns for a pi conversation stays inside the ghost home:
+Everything Ghost owns for a principal Pi or Claude Code conversation stays
+inside the ghost home. Claude's native transcript remains in Claude's own
+owner-local store; Ghost keeps only its contract-defined sidecars:
 
 ```text
 ~/ghosts/<name>/
@@ -106,6 +151,8 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
   sessions/
     <conversation>.jsonl   pi session file
     claude-<sha256>.json   Claude resume metadata, when selected
+    claude-<sha256>.json.{started,settling}
+                           Claude pass/recovery markers
     <stem>.<runtime>.project.json
                            conversation project root, cwd, and snapshot status
     <stem>.pi.project-snapshot.<generation>.json
@@ -114,6 +161,8 @@ Everything Ghost owns for a pi conversation stays inside the ghost home:
                            execution cwd for persisted Pi tool calls
     <stem>.<runtime>.maintenance.json
                            durable idle-maintenance state
+  .tasks/
+    task-<UUID>.json       task-record/v2 durable native delegation
   .trash/                  recoverable per-home deletion state
   .memory-maintenance.json last consolidation claim time
 ```
@@ -265,7 +314,7 @@ sandbox: a trusted harness that deliberately creates another systemd unit, or
 the same owner deliberately tampering with Ghost's reserved scope names, can
 escape this boundary. Scope-mode systemd-run inherits Ghost's already-open
 JSONL stdio descriptors; its incompatible `--pipe` option is forbidden. Native
-packages require systemd 254 or newer.
+packages require `systemd>=254`.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the
@@ -453,9 +502,10 @@ The authoritative route and payload contract is
 
 Every `/api` route except the deliberately public relay status requires the
 machine-local bearer token, rejects non-loopback browser origins, and requires
-JSON for POST/PUT. The pi-messages SSE response remains the client wire format;
-pi is the harness behind it. A rename or delete closes the old-name event
-stream; reconnect a renamed ghost at its new name.
+JSON for POST/PUT. The historical pi-messages SSE shape remains the
+runtime-neutral principal client wire; either Pi or Claude Code may be the
+harness behind it. A rename or delete closes the old-name event stream;
+reconnect a renamed ghost at its new name.
 
 ## Validate
 
@@ -467,3 +517,15 @@ pnpm --filter @ghost/daemon test
 
 Tests use a scripted local provider and real loopback HTTP/SSE. They never call
 a paid model.
+
+The real native-scope proof runs in the `Native task systemd integration`
+workflow on an ephemeral GitHub-hosted Ubuntu runner with systemd as PID 1 and
+that runner's disposable user manager. It proves inherited JSONL stdio for the
+Pi, Codex, and Claude adapter spawn seams, receipt-bound cancellation, detached
+descendant cleanup, crash recovery, and unrelated-process isolation. Do not
+run the real integration file on a workstation or against the owner's user
+manager. The safe local structural and hostile-fixture check is:
+
+```bash
+bash packaging/arch/test-native-task-scope-workflow.sh
+```

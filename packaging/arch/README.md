@@ -11,9 +11,10 @@ conflicts with stable `ghost`, so the variants cannot be installed together.
 `/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
-toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
-tree. Ghost, pi, provider, and MCP application code plus required static assets
-remain packaged for offline use.
+toolchain requires Bun 1.4.0 or newer. Native delegated-task ownership also
+requires `systemd>=254`. It installs no source or `node_modules` tree. Ghost,
+pi, provider, and MCP application code plus required static assets remain
+packaged for offline use.
 
 `fd` and `ripgrep` are explicit runtime dependencies because pi's native
 `find` and `grep` tools invoke them. Providing the system binaries prevents a
@@ -29,6 +30,22 @@ makepkg --cleanbuild
 ```
 
 ## Optional CLI integrations
+
+The package does not install the native Pi, Codex, or Claude Code worker
+executables. Install and authenticate the ones you want through their upstream
+or Omarchy/mise mechanism, then run `ghost delegation` to inspect the bounded
+public status without opening ghost data. Default discovery uses `pi`, `codex`,
+and `claude` from ghostd's captured startup `PATH` and resolves recognized mise
+launchers to their installed targets. A service-level `GHOST_PI_BINARY`,
+`GHOST_CODEX_BINARY`, or `GHOST_CLAUDE_BINARY` selects a literal owner
+executable/wrapper instead and is never mise-unwrapped; prefer an absolute
+path. Restart ghostd after changing that service environment; a fresh probe
+detects an installed or mise target rotation. Missing, malformed, or
+unauthenticated boundaries remain visibly
+`unavailable` or `logged_out` rather than silently falling back to another
+harness. See the daemon's
+[native coding-worker guidance](../../packages/daemon/README.md#native-coding-worker-harnesses)
+for the exact discovery semantics.
 
 Ghost packages none of these CLIs or skills. Install only the integrations you
 want as the desktop user; the upstream installer then owns its files and
@@ -97,6 +114,9 @@ reports logged in. The package does not ship the Claude Agent SDK. To use that
 path, follow the exact versioned installation and Option C environment boundary
 in
 [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#runtime-and-security-boundary).
+Its exact Agent SDK and peer packages live only in Ghost's versioned
+mode-`0700` owner-data boundary described there; neither the checkout nor the
+stable runtime archive redistributes them.
 
 Before opening a session, install `libsecret` (for `secret-tool`) and run a
 user-session Secret Service provider such as `gnome-keyring`; its default
