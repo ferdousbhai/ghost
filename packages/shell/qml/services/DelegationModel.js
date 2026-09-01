@@ -114,8 +114,10 @@ function task(value, detailed) {
             || Date.parse(value.updatedAt) < Date.parse(value.createdAt)
             || !boundedText(value.taskPreview, 240, false)
             || typeof value.taskTruncated !== "boolean"
+            // The daemon owns the preview cap; the shell only refuses what it
+            // cannot render at all.
             || !(value.resultPreview === null
-                || boundedText(value.resultPreview, 32768, true))
+                || boundedText(value.resultPreview, Infinity, true))
             || typeof value.resultTruncated !== "boolean")
         return null;
     if (value.agent !== null && value.harness !== "claude-code") return null;

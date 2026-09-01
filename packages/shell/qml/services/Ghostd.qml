@@ -1059,7 +1059,6 @@ Singleton {
     property var recapRequest: null
     /** Test seam; production constructs the native recap XHR. */
     property var recapRequestFactory: null
-    property var transcriptRequest: null
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
     readonly property int transcriptMaxPages: 10
@@ -1067,10 +1066,6 @@ Singleton {
     property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
     property var readSessionRequests: ({})
-    property var askRequest: null
-    property var askSubmitRequest: null
-    property var queueRequest: null
-    property var queueStatusRequest: null
     property var branchRequest: null
     property var branchRequestFactory: null
 
@@ -1760,7 +1755,6 @@ Singleton {
         state.transcriptGeneration = Number(state.transcriptGeneration || 0) + 1;
         state.transcriptRequest = null;
         state.transcriptLoad = null;
-        if (root.isActiveTurn(state)) root.transcriptRequest = null;
         // Retire ownership before abort because Qt may synchronously deliver DONE.
         if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") xhr.abort();
     }
@@ -1929,14 +1923,6 @@ Singleton {
         state.presentationDirty = root.presentationDirty;
     }
 
-    /** Legacy direct stream helpers have no key; a single live turn is unambiguous. */
-    function compatibilityTurnState(): var {
-        const active = root.activeTurnState(false);
-        if (active) return active;
-        if (root.liveConversationKeys.length !== 1) return null;
-        return root.turnStates[root.liveConversationKeys[0]] || null;
-    }
-
     function projectTurnFields(state: var): void {
         if (!root.isActiveTurn(state)) return;
         root.projectTurnProjection(state);
@@ -1967,7 +1953,6 @@ Singleton {
         root.consumed = state.consumed;
         root.frameBuffer = state.frameBuffer;
         root.presentationDirty = state.presentationDirty;
-        root.transcriptRequest = state.transcriptRequest;
     }
 
     function clearTurnProjection(): void {
@@ -1995,7 +1980,6 @@ Singleton {
         root.consumed = 0;
         root.frameBuffer = "";
         root.presentationDirty = false;
-        root.transcriptRequest = null;
     }
 
     function showTurnState(ghost: string, sessionId: string): void {
@@ -2734,7 +2718,7 @@ Singleton {
         const worker = root.nativeHarnesses.find(function (row) {
             return row.id === harness;
         });
-        if (prompt === "" || prompt.length > 32768
+        if (prompt === ""
                 || !root.delegationIdentityCurrent(ghost, sessionId)
                 || !project || project.id !== sessionId || project.root === null
                 || root.projectGhost !== ghost || root.projectSessionId !== sessionId
@@ -2751,8 +2735,8 @@ Singleton {
     function sendDelegatedTask(taskId: string, message: string): void {
         const task = root.selectedDelegatedTask;
         const text = message.trim();
-        if (!task || task.id !== taskId || task.state !== "running" || text === ""
-                || text.length > 32768) return;
+        if (!task || task.id !== taskId || task.state !== "running" || text === "")
+            return;
         root.runDelegatedTaskMutation("POST", "/" + encodeURIComponent(taskId)
             + "/send", { message: text }, 200, "Follow-up sent.", "send", taskId);
     }
@@ -3843,7 +3827,6 @@ Singleton {
         state.transcriptRequest = null;
         state.transcriptLoad = null;
         if (!root.isActiveTurn(state)) return;
-        root.transcriptRequest = null;
         root.sessionsError = message;
         if (unreachable) root.fail(message);
     }
@@ -3855,10 +3838,7 @@ Singleton {
         state.transcriptLoad = null;
         root.rehydrateTurn(state, load.messages);
         root.reachable = true;
-        if (root.isActiveTurn(state)) {
-            root.transcriptRequest = null;
-            root.sessionsError = "";
-        }
+        if (root.isActiveTurn(state)) root.sessionsError = "";
     }
 
     function requestTranscriptPage(state: var, load: var): void {
@@ -3873,7 +3853,6 @@ Singleton {
         const xhr = root.newTranscriptRequest();
         load.pageCount += 1;
         state.transcriptRequest = xhr;
-        if (root.isActiveTurn(state)) root.transcriptRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || !root.transcriptLoadIsCurrent(state, load, xhr)) return;
             if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
@@ -3958,11 +3937,6 @@ Singleton {
      * its message is a lone `toolCall` part, so dropping the row takes the
      * card's re-answer branch with it and the question can never be answered.
      */
-    function rehydrate(messages: var): void {
-        const state = root.activeTurnState(true);
-        if (state) root.rehydrateTurn(state, messages);
-    }
-
     function rehydrateTurn(state: var, messages: var): void {
         state.activity = "";
         state.statusText = "";
@@ -4001,21 +3975,9 @@ Singleton {
         root.commandExchanges = next;
     }
 
-    function currentCommandExchanges(): var {
-        const state = root.activeTurnState(false);
-        return state ? root.commandExchangesFor(state) : [];
-    }
-
     function commandExchangesFor(state: var): var {
         const key = root.commandTranscriptKey(state.ghost, state.sessionId);
         return Array.isArray(root.commandExchanges[key]) ? root.commandExchanges[key] : [];
-    }
-
-    function receiveCommandOutput(event: var): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.receiveCommandOutputFor(state, event);
     }
 
     function receiveCommandOutputFor(state: var, event: var): void {
@@ -4278,14 +4240,6 @@ Singleton {
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
-    function beginTurn(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const state = root.ensureTurnState(ghost, root.ensureSession(ghost));
-        root.captureActiveTurn(state);
-        root.beginTurnFor(state);
-    }
-
     function beginTurnFor(state: var): void {
         root.clearRecap();
         root.cancelTranscriptLoad(state);
@@ -4302,11 +4256,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    function resetAssistantSegment(): void {
-        const state = root.activeTurnState(true);
-        if (state) root.resetAssistantSegmentFor(state);
-    }
-
     function resetAssistantSegmentFor(state: var): void {
         state.blocks = ({});
         state.toolNames = [];
@@ -4316,21 +4265,11 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    function resetAskState(): void {
-        const state = root.activeTurnState(true);
-        if (state) root.resetAskStateFor(state);
-    }
-
     function resetAskStateFor(state: var): void {
         state.pendingAsk = null;
         state.askSubmitting = false;
         state.askError = "";
         root.projectTurnFields(state);
-    }
-
-    function resetInteractionState(): void {
-        const state = root.activeTurnState(true);
-        if (state) root.resetInteractionStateFor(state);
     }
 
     function resetInteractionStateFor(state: var): void {
@@ -4345,16 +4284,6 @@ Singleton {
     }
 
     /** Consume the cumulative Qt XHR body and settle every readyState-4 path. */
-    function readStream(xhr: var, ghost: string, requestName: string,
-            missingTerminal: string): void {
-        const state = root.compatibilityTurnState();
-        if (!state || state.ghost !== ghost) return;
-        root.captureTurnProjection(state);
-        root.readTurnStream(xhr, state.key, requestName, missingTerminal);
-        root.projectTurnRows(state);
-        root.projectTurnProjection(state);
-    }
-
     function readTurnStream(xhr: var, key: string, requestName: string,
             missingTerminal: string): void {
         const state = root.turnStates[key];
@@ -4382,15 +4311,6 @@ Singleton {
         }
         if (xhr === state.request) state.request = null;
         root.projectTurnFields(state);
-    }
-
-    function expireStream(): void {
-        const state = root.compatibilityTurnState();
-        if (!state) return;
-        root.captureTurnProjection(state);
-        root.expireTurnStream(state);
-        root.projectTurnRows(state);
-        root.projectTurnProjection(state);
     }
 
     function expireTurnStream(state: var): void {
@@ -4454,13 +4374,6 @@ Singleton {
      * boundaries, never frame boundaries, so the trailing partial frame is
      * carried over to the next call.
      */
-    function ingest(chunk: string): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.ingestTurn(state, chunk);
-    }
-
     function ingestTurn(state: var, chunk: string): void {
         if (chunk === "") return;
         state.frameBuffer += chunk.replace(/\r\n/gu, "\n");
@@ -4478,15 +4391,6 @@ Singleton {
                 console.warn("ghost: unparseable SSE frame:", payload);
             }
         }
-    }
-
-    function handleEvent(event: var): void {
-        const state = root.compatibilityTurnState();
-        if (!state) return;
-        root.captureTurnProjection(state);
-        root.handleTurnEvent(state, event);
-        root.projectTurnRows(state);
-        root.projectTurnProjection(state);
     }
 
     function handleTurnEvent(state: var, event: var): void {
@@ -4619,13 +4523,6 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    function updateTool(id: string, patch: var): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.updateToolFor(state, id, patch);
-    }
-
     function updateToolFor(state: var, id: string, patch: var): void {
         const next = [];
         let found = false;
@@ -4653,24 +4550,10 @@ Singleton {
         root.syncToolActivityFor(state);
     }
 
-    function syncToolActivity(): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.syncToolActivityFor(state);
-    }
-
     function syncToolActivityFor(state: var): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
         root.setTurnRow(state, state.assistantRow, "toolActivity", state.toolActivities);
         root.projectTurnFields(state);
-    }
-
-    function settleToolActivity(cancelled: bool): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.settleToolActivityFor(state, cancelled);
     }
 
     function settleToolActivityFor(state: var, cancelled: bool): void {
@@ -4683,13 +4566,6 @@ Singleton {
         }
         state.toolActivities = next;
         root.syncToolActivityFor(state);
-    }
-
-    function flush(force: bool, segmentClosed: bool): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.flushTurn(state, force, segmentClosed);
     }
 
     function flushTurn(state: var, force: bool, segmentClosed: bool): void {
@@ -4710,20 +4586,6 @@ Singleton {
             root.setTurnRow(state, state.assistantRow, "tools", tools);
         state.presentationDirty = false;
         root.projectTurnFields(state);
-    }
-
-    function finishTurn(errorMessage: string): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.endTurnState(state, errorMessage);
-    }
-
-    function endTurn(ghost: string, errorMessage: string): void {
-        const state = root.activeTurnState(false);
-        if (!state || state.ghost !== ghost) return;
-        root.captureActiveTurn(state);
-        root.endTurnState(state, errorMessage);
     }
 
     function endTurnState(state: var, errorMessage: string): void {
@@ -4766,13 +4628,6 @@ Singleton {
         });
         if (errorMessage === "" && root.hudVisible && root.isActiveTurn(state))
             root.markConversationRead(state.ghost, state.sessionId);
-    }
-
-    function receiveOwnerMessage(text: string): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        root.receiveOwnerMessageFor(state, text);
     }
 
     function receiveOwnerMessageFor(state: var, text: string): void {
@@ -4833,17 +4688,11 @@ Singleton {
     }
 
 
-    function fetchPendingAsk(): void {
-        const state = root.activeTurnState(false);
-        if (state) root.fetchPendingAskFor(state);
-    }
-
     function fetchPendingAskFor(state: var): void {
         if (!state.streaming || state.activity !== "ask") return;
         if (state.askRequest && state.askRequest.readyState !== 4) return;
         const xhr = new XMLHttpRequest();
         state.askRequest = xhr;
-        if (root.isActiveTurn(state)) root.askRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== state.askRequest || !state.streaming) return;
             if (xhr.status === 200) {
@@ -4873,7 +4722,6 @@ Singleton {
         state.askError = "";
         const xhr = new XMLHttpRequest();
         state.askSubmitRequest = xhr;
-        root.askSubmitRequest = xhr;
         root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== state.askSubmitRequest) return;
@@ -4909,20 +4757,10 @@ Singleton {
     }
 
 
-    function applyQueue(body: var): void {
-        const state = root.activeTurnState(false);
-        if (state) root.applyQueueFor(state, body);
-    }
-
     function applyQueueFor(state: var, body: var): void {
         state.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
         state.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
         root.projectTurnFields(state);
-    }
-
-    function fetchQueue(): void {
-        const state = root.activeTurnState(false);
-        if (state) root.fetchQueueFor(state);
     }
 
     function fetchQueueFor(state: var): void {
@@ -4930,7 +4768,6 @@ Singleton {
         if (state.queueStatusRequest && state.queueStatusRequest.readyState !== 4) return;
         const xhr = new XMLHttpRequest();
         state.queueStatusRequest = xhr;
-        if (root.isActiveTurn(state)) root.queueStatusRequest = xhr;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== state.queueStatusRequest || !state.streaming) return;
             if (xhr.status === 200) {
@@ -4961,7 +4798,6 @@ Singleton {
 
         const xhr = new XMLHttpRequest();
         state.queueRequest = xhr;
-        root.queueRequest = xhr;
         root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== state.queueRequest) return;

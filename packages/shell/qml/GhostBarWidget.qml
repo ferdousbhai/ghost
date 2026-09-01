@@ -15,7 +15,6 @@ Item {
     id: root
 
     property color foregroundColor: Theme.barForeground
-    property color activeColor: Theme.barActive
     property color idleColor: Theme.foregroundDim
     property bool showName: true
 
@@ -24,6 +23,8 @@ Item {
     readonly property string status: !Ghostd.reachable
         ? "offline"
         : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity : "thinking") : "idle")
+
+    Accessible.description: root.status
 
     implicitWidth: row.implicitWidth
     implicitHeight: Math.max(row.implicitHeight, 18)

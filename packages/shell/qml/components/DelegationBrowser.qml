@@ -28,7 +28,6 @@ Rectangle {
         })
     readonly property bool canCreate: root.hasTrustedProject
         && root.selectedHarnessAvailable && assignmentInput.text.trim() !== ""
-        && assignmentInput.text.trim().length <= 32768
         && !Ghostd.delegatedTaskMutating
     readonly property bool hasActiveTasks: Ghostd.delegatedTasks.some(function (task) {
         return DelegationModel.active(task.state);
@@ -779,7 +778,6 @@ Rectangle {
                                     && Ghostd.selectedDelegatedTask.state === "running"
                                 label: Ghostd.delegatedTaskMutating ? "Sending" : "Send follow-up"
                                 enabled: followUpInput.text.trim() !== ""
-                                    && followUpInput.text.trim().length <= 32768
                                     && !Ghostd.delegatedTaskMutating
                                 onClicked: {
                                     Ghostd.sendDelegatedTask(

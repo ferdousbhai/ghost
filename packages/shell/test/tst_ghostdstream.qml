@@ -2,105 +2,136 @@ import QtQuick
 import QtTest
 import qs.services
 
+// Single-conversation stream settlement, driven through the real per-turn
+// path (ensureTurnState / beginTurnFor / handleTurnEvent / readTurnStream).
+// tst_concurrentstreams.qml covers how independent turns coexist; this file
+// pins what one turn's terminal paths — done, error, EOF, watchdog, cancel —
+// must settle.
 TestCase {
     name: "GhostdStream"
 
     function init(): void {
-        Ghostd.cancel();
+        Ghostd.turnStates = ({});
+        Ghostd.liveConversationKeys = [];
         Ghostd.activeGhost = "casper";
-        Ghostd.currentSessionId = "pi:stream-test";
-        Ghostd.sessionIds = ({ casper: "pi:stream-test" });
-        Ghostd.clearTranscript();
+        Ghostd.currentSessionId = "";
+        Ghostd.sessionIds = ({ casper: "" });
+        Ghostd.clearTurnProjection();
         Ghostd.lastError = "";
         Ghostd.reachable = true;
+        Ghostd.hudVisible = false;
     }
 
     function cleanup(): void {
-        Ghostd.cancel();
-        Ghostd.clearTranscript();
+        for (const key of Ghostd.liveConversationKeys.slice()) {
+            const state = Ghostd.turnStates[key];
+            if (state) Ghostd.cancelTurn(state);
+        }
+        Ghostd.turnStates = ({});
+        Ghostd.liveConversationKeys = [];
+        Ghostd.currentSessionId = "";
+        Ghostd.clearTurnProjection();
     }
 
-    function openTurn(): void {
-        Ghostd.beginTurn();
-        Ghostd.transcript.append({
+    function openTurn(id: string, abortCounter: var): var {
+        const publicId = "pi:" + id;
+        Ghostd.adoptConversation("casper", publicId);
+        const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
+        Ghostd.beginTurnFor(state);
+        Ghostd.appendTurnRow(state, {
             role: "user", text: "Start", tools: "", toolActivity: [],
             error: "", pending: false, entryId: ""
         });
-        Ghostd.transcript.append({
+        Ghostd.appendTurnRow(state, {
             role: "assistant", text: "", tools: "", toolActivity: [],
             error: "", pending: true, entryId: ""
         });
-        Ghostd.assistantRow = 1;
+        state.assistantRow = state.rows.length - 1;
+        const xhr = {
+            readyState: 3,
+            status: 200,
+            responseText: "",
+            abort: function () { if (abortCounter) abortCounter.count += 1; }
+        };
+        state.request = xhr;
+        Ghostd.projectTurnFields(state);
+        return { state: state, xhr: xhr };
     }
 
-    function makeInteractionDirty(): void {
-        Ghostd.activity = "read";
-        Ghostd.statusText = "Still reading";
-        Ghostd.pendingAsk = ({ id: "ask-1" });
-        Ghostd.askSubmitting = true;
-        Ghostd.askError = "old ask error";
-        Ghostd.steeringQueue = ["steer"];
-        Ghostd.followUpQueue = ["later"];
-        Ghostd.queueSubmitting = true;
-        Ghostd.queueError = "old queue error";
+    function makeInteractionDirty(state: var): void {
+        state.activity = "read";
+        state.statusText = "Still reading";
+        state.pendingAsk = ({ id: "ask-1" });
+        state.askSubmitting = true;
+        state.askError = "old ask error";
+        state.steeringQueue = ["steer"];
+        state.followUpQueue = ["later"];
+        state.queueSubmitting = true;
+        state.queueError = "old queue error";
+        Ghostd.projectTurnFields(state);
     }
 
-    function verifyInteractionSettled(): void {
-        verify(!Ghostd.streaming);
-        compare(Ghostd.activity, "");
-        compare(Ghostd.statusText, "");
-        compare(Ghostd.pendingAsk, null);
-        verify(!Ghostd.askSubmitting);
-        compare(Ghostd.askError, "");
-        compare(Ghostd.steeringQueue.length, 0);
-        compare(Ghostd.followUpQueue.length, 0);
-        verify(!Ghostd.queueSubmitting);
-        compare(Ghostd.queueError, "");
+    function verifyInteractionSettled(state: var): void {
+        verify(!state.streaming);
+        compare(state.activity, "");
+        compare(state.statusText, "");
+        compare(state.pendingAsk, null);
+        verify(!state.askSubmitting);
+        compare(state.askError, "");
+        compare(state.steeringQueue.length, 0);
+        compare(state.followUpQueue.length, 0);
+        verify(!state.queueSubmitting);
+        compare(state.queueError, "");
     }
 
     function test_dequeuedSteerBecomesTranscriptRowWithoutReload(): void {
-        openTurn();
-        Ghostd.steeringQueue = ["Use the shorter version."];
-        Ghostd.handleEvent({ type: "text_end", contentIndex: 0, content: "First pass" });
-        Ghostd.handleEvent({ type: "owner_message", text: "Use the shorter version." });
+        const turn = openTurn("steer", null);
+        turn.state.steeringQueue = ["Use the shorter version."];
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "text_end", contentIndex: 0, content: "First pass" });
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "owner_message", text: "Use the shorter version." });
 
+        compare(turn.state.rows.length, 4);
+        compare(turn.state.rows[1].text, "First pass");
+        verify(!turn.state.rows[1].pending);
+        compare(turn.state.rows[2].role, "user");
+        compare(turn.state.rows[2].text, "Use the shorter version.");
+        compare(turn.state.rows[3].role, "assistant");
+        verify(turn.state.rows[3].pending);
+        compare(turn.state.steeringQueue.length, 0);
+        verify(turn.state.streaming);
+        // The active projection mirrors the rows without a transcript reload.
         compare(Ghostd.transcript.count, 4);
-        compare(Ghostd.transcript.get(1).text, "First pass");
-        verify(!Ghostd.transcript.get(1).pending);
-        compare(Ghostd.transcript.get(2).role, "user");
         compare(Ghostd.transcript.get(2).text, "Use the shorter version.");
-        compare(Ghostd.transcript.get(3).role, "assistant");
-        verify(Ghostd.transcript.get(3).pending);
-        compare(Ghostd.steeringQueue.length, 0);
-        verify(Ghostd.streaming);
     }
 
     function test_consecutiveSteersDoNotCreateEmptyAssistantRows(): void {
-        openTurn();
+        const turn = openTurn("steer-batch", null);
 
-        Ghostd.handleEvent({ type: "owner_message", text: "First steer" });
-        Ghostd.handleEvent({ type: "owner_message", text: "Second steer" });
+        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "First steer" });
+        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "Second steer" });
 
-        compare(Ghostd.transcript.count, 4);
-        compare(Ghostd.transcript.get(0).role, "user");
-        compare(Ghostd.transcript.get(1).text, "First steer");
-        compare(Ghostd.transcript.get(2).text, "Second steer");
-        compare(Ghostd.transcript.get(3).role, "assistant");
-        verify(Ghostd.transcript.get(3).pending);
+        compare(turn.state.rows.length, 4);
+        compare(turn.state.rows[0].role, "user");
+        compare(turn.state.rows[1].text, "First steer");
+        compare(turn.state.rows[2].text, "Second steer");
+        compare(turn.state.rows[3].role, "assistant");
+        verify(turn.state.rows[3].pending);
     }
 
     function test_eofWithoutTerminalSettlesEveryTurnField(): void {
-        openTurn();
-        makeInteractionDirty();
-        const xhr = { readyState: 4, status: 200, responseText: "data: {\"type\":\"start\"}\n\n" };
-        Ghostd.request = xhr;
-        Ghostd.currentSessionId = "";
+        const turn = openTurn("eof", null);
+        makeInteractionDirty(turn.state);
+        turn.xhr.readyState = 4;
+        turn.xhr.responseText = "data: {\"type\":\"start\"}\n\n";
 
-        Ghostd.readStream(xhr, "casper", "turn", "missing terminal");
+        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn", "missing terminal");
 
-        verifyInteractionSettled();
-        compare(Ghostd.lastError, "missing terminal");
-        verify(!Ghostd.transcript.get(1).pending);
+        verifyInteractionSettled(turn.state);
+        compare(turn.state.lastError, "missing terminal");
+        verify(!turn.state.rows[1].pending);
+        compare(turn.state.request, null);
     }
 
     function test_doneAndErrorBothSettleEveryTurnField(): void {
@@ -108,67 +139,59 @@ TestCase {
             { type: "done", expected: "" },
             { type: "error", errorMessage: "provider failed", expected: "provider failed" }
         ]) {
-            openTurn();
-            makeInteractionDirty();
-            Ghostd.currentSessionId = "";
-            Ghostd.handleEvent(terminal);
+            const turn = openTurn("terminal-" + terminal.type, null);
+            makeInteractionDirty(turn.state);
+            Ghostd.handleTurnEvent(turn.state, terminal);
 
-            verifyInteractionSettled();
-            compare(Ghostd.lastError, terminal.expected);
-            verify(!Ghostd.transcript.get(Ghostd.transcript.count - 1).pending);
-            Ghostd.clearTranscript();
+            verifyInteractionSettled(turn.state);
+            compare(turn.state.lastError, terminal.expected);
+            verify(!turn.state.rows[turn.state.rows.length - 1].pending);
         }
     }
 
     function test_reanswerBranchUsesTheSameTerminalCleanup(): void {
-        Ghostd.beginTurn();
-        Ghostd.handleEvent({
+        const publicId = "pi:reanswer";
+        Ghostd.adoptConversation("casper", publicId);
+        const state = Ghostd.ensureTurnState("casper", publicId, "reanswer", "pi");
+        Ghostd.beginTurnFor(state);
+        Ghostd.handleTurnEvent(state, {
             type: "branch_changed",
             transcript: {
-                id: "pi:stream-test",
-                conversationId: "stream-test",
+                id: publicId,
+                conversationId: "reanswer",
                 runtime: "pi",
                 messages: [{ role: "user", content: "Earlier question", entryId: "entry-1" }]
             }
         });
-        makeInteractionDirty();
-        Ghostd.currentSessionId = "";
-        Ghostd.handleEvent({ type: "done" });
+        makeInteractionDirty(state);
+        Ghostd.handleTurnEvent(state, { type: "done" });
 
-        verifyInteractionSettled();
-        compare(Ghostd.transcript.get(0).text, "Earlier question");
-        verify(!Ghostd.transcript.get(1).pending);
+        verifyInteractionSettled(state);
+        compare(state.rows[0].text, "Earlier question");
+        verify(!state.rows[1].pending);
     }
 
     function test_watchdogSettlesAndRetiresThePartialStream(): void {
-        openTurn();
-        makeInteractionDirty();
-        let aborts = 0;
-        const xhr = {
-            readyState: 3,
-            status: 200,
-            responseText: "",
-            abort: function () { aborts += 1; }
-        };
-        Ghostd.request = xhr;
-        Ghostd.currentSessionId = "";
+        const aborts = { count: 0 };
+        const turn = openTurn("watchdog", aborts);
+        makeInteractionDirty(turn.state);
 
-        Ghostd.expireStream();
+        Ghostd.expireTurnStream(turn.state);
 
-        compare(aborts, 1);
-        compare(Ghostd.request, null);
+        compare(aborts.count, 1);
+        compare(turn.state.request, null);
         verify(!Ghostd.reachable);
-        compare(Ghostd.lastError, "the stream stopped responding");
-        verifyInteractionSettled();
+        compare(turn.state.lastError, "the stream stopped responding");
+        verifyInteractionSettled(turn.state);
     }
 
     function test_askExecutionEndClearsTimedOutDialogBeforeTurnEnds(): void {
-        openTurn();
-        Ghostd.pendingAsk = ({ id: "ask-timeout" });
-        Ghostd.askSubmitting = true;
-        Ghostd.askError = "old error";
+        const turn = openTurn("ask-timeout", null);
+        turn.state.pendingAsk = ({ id: "ask-timeout" });
+        turn.state.askSubmitting = true;
+        turn.state.askError = "old error";
 
-        Ghostd.handleEvent({
+        Ghostd.handleTurnEvent(turn.state, {
             type: "tool_execution_end",
             id: "call-ask",
             toolName: "ask",
@@ -176,15 +199,15 @@ TestCase {
             summary: "Timed out"
         });
 
-        compare(Ghostd.pendingAsk, null);
-        verify(!Ghostd.askSubmitting);
-        compare(Ghostd.askError, "");
-        verify(Ghostd.streaming);
+        compare(turn.state.pendingAsk, null);
+        verify(!turn.state.askSubmitting);
+        compare(turn.state.askError, "");
+        verify(turn.state.streaming);
     }
 
     function test_toolExecutionCapturesTheCallCwd(): void {
-        openTurn();
-        Ghostd.handleEvent({
+        const turn = openTurn("tool-cwd", null);
+        Ghostd.handleTurnEvent(turn.state, {
             type: "tool_execution_start",
             id: "call-write",
             toolName: "write",
@@ -192,9 +215,9 @@ TestCase {
             cwd: "/home/owner/project-a"
         });
 
-        const tools = Ghostd.transcript.get(1).toolActivity;
-        compare(tools.count, 1);
-        compare(tools.get(0).cwd, "/home/owner/project-a");
+        const tools = turn.state.rows[1].toolActivity;
+        compare(tools.length, 1);
+        compare(tools[0].cwd, "/home/owner/project-a");
     }
 
     function test_restoredToolKeepsItsOwnCwd(): void {
@@ -216,7 +239,8 @@ TestCase {
     }
 
     function test_cancelRetiresXhrBeforeItsSynchronousAbortCallback(): void {
-        openTurn();
+        const turn = openTurn("cancel", null);
+        const state = turn.state;
         let aborts = 0;
         const xhr = {
             readyState: 3,
@@ -224,34 +248,27 @@ TestCase {
             responseText: "",
             abort: function () {
                 aborts += 1;
-                Ghostd.readStream(xhr, "casper", "turn", "missing terminal");
+                Ghostd.readTurnStream(xhr, state.key, "turn", "missing terminal");
             }
         };
-        Ghostd.request = xhr;
+        state.request = xhr;
 
-        Ghostd.cancel();
+        Ghostd.cancelTurn(state);
 
         compare(aborts, 1);
         verify(Ghostd.reachable);
-        compare(Ghostd.lastError, "");
-        verify(!Ghostd.streaming);
+        compare(state.lastError, "");
+        verify(!state.streaming);
     }
 
     function test_clickingActiveTitleDoesNotInterruptItsTurn(): void {
-        openTurn();
-        let aborts = 0;
-        const xhr = {
-            readyState: 3,
-            status: 200,
-            responseText: "",
-            abort: function () { aborts += 1; }
-        };
-        Ghostd.request = xhr;
+        const aborts = { count: 0 };
+        const turn = openTurn("active-click", aborts);
 
-        Ghostd.openConversation("pi:stream-test");
+        Ghostd.openConversation(turn.state.sessionId);
 
-        verify(Ghostd.streaming);
-        compare(Ghostd.request, xhr);
-        compare(aborts, 0);
+        verify(turn.state.streaming);
+        compare(turn.state.request, turn.xhr);
+        compare(aborts.count, 0);
     }
 }

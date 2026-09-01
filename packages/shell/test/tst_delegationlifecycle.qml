@@ -176,9 +176,9 @@ TestCase {
         Ghostd.cancelDelegatedTask(task().id);
         compare(requests.length, 4);
 
+        // Length limits are the daemon's to enforce — an oversized text goes
+        // out and comes back as invalid_request; only emptiness gates here.
         Ghostd.selectedDelegatedTask = task();
-        Ghostd.sendDelegatedTask(task().id, "x".repeat(32769));
-        Ghostd.createDelegatedTask("codex", "x".repeat(32769));
         Ghostd.sendDelegatedTask(task().id, " \n\t ");
         Ghostd.createDelegatedTask("codex", " \n\t ");
         compare(requests.length, 4);

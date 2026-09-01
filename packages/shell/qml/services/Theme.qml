@@ -58,8 +58,6 @@ Singleton {
 
     property var colors: ({})
     property var shell: ({})
-    property string themeName: ""
-    readonly property bool themed: Object.keys(root.colors).length > 0
     readonly property bool reducedMotion: {
         const value = String(Quickshell.env("GHOST_REDUCE_MOTION") || "").toLowerCase();
         return value === "1" || value === "true" || value === "yes";
@@ -221,22 +219,16 @@ Singleton {
     // Chrome states, straight from [controls]: one colour, four alphas.
     readonly property color hover: root.controlFill("hover-cursor")
     readonly property color selection: root.controlFill("selected")
-    readonly property color pressed: Qt.rgba(root.selection.r, root.selection.g,
-        root.selection.b, root.shellNumber("controls.pressed-fill-alpha", 0.22))
     readonly property color border: root.controlBorder("normal", "controls.normal-border-alpha")
     /** The same border at the strongest alpha Omarchy publishes for it. */
     readonly property color borderStrong: root.controlBorder("selected",
         "controls.selected-border-alpha")
-    // Compatibility alias for host integrations; new UI code should choose a
-    // text or border token explicitly.
-    readonly property color muted: root.border
 
     // One inherited accent carries focus, selection, and the active state.
     readonly property color accent: root.pick("accent")
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
-    readonly property color thinking: root.pick("magenta")
     readonly property color onAccent: {
         const luma = root.accent.r * 0.299 + root.accent.g * 0.587 + root.accent.b * 0.114;
         return luma > 0.58 ? "#111111" : "#ffffff";
@@ -257,8 +249,6 @@ Singleton {
     // colour, not themed — it layers over whatever Omarchy provides.
     readonly property color ghostAmber: "#fbbf24"
     readonly property color ghostAmberBright: "#fcd34d"
-    readonly property color ghostAmberDeep: "#f59e0b"
-    readonly property color ghostEmber: "#f97316"
     readonly property color ghostRose: "#fb7185"
     readonly property color spectral: "#c8dcff"
 
@@ -404,15 +394,14 @@ Singleton {
     }
 
     // The one watchable file: rewritten in place on every theme switch, and
-    // it survives the directory swap that kills watches inside theme/.
+    // it survives the directory swap that kills watches inside theme/. Its
+    // content is never read — only the change edge matters.
     FileView {
         id: nameFile
         path: root.stateDir + "/theme.name"
         blockLoading: true
         watchChanges: true
         printErrors: false
-        onLoaded: root.themeName = nameFile.text().trim()
-        onLoadFailed: root.themeName = ""
         onFileChanged: {
             nameFile.reload();
             // The directory swap has already happened by the time theme.name is
