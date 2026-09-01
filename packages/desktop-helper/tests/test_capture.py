@@ -14,7 +14,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from conftest import FakeHyprctl, sample_window, unlocked_runner
+from conftest import FakeHyprctl, FakeResult, sample_window, unlocked_runner
 
 from ghost_desktop_helper import bridge as bridge_module
 from ghost_desktop_helper._vendor.omaharness.errors import (
@@ -32,6 +32,26 @@ class _RaisingHeadless:
 
     def capture(self, client: dict[str, Any], output: Path) -> dict[str, Any]:
         raise self._error
+
+
+class _AvailableCaptureRouter:
+    @staticmethod
+    def capabilities() -> SimpleNamespace:
+        return SimpleNamespace(installed=True)
+
+
+class _PngRunner:
+    def __init__(self) -> None:
+        self.calls: list[tuple[list[str], float | None]] = []
+
+    def __call__(self, argv: list[str], *, timeout: float | None = None) -> FakeResult:
+        self.calls.append((argv, timeout))
+        Path(argv[-1]).write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+            + (1).to_bytes(4, "big")
+            + (1).to_bytes(4, "big")
+        )
+        return FakeResult()
 
 
 def _desktop(headless: Any) -> GhostDesktop:
@@ -80,6 +100,55 @@ def test_capability_error_in_headless_rung_still_degrades():
 
     assert result is None
     assert any("headless-output capture unavailable" in w for w in warnings)
+
+
+def test_output_capture_uses_direct_grim_with_honest_provenance():
+    runner = _PngRunner()
+    desktop = GhostDesktop(
+        hyprctl=FakeHyprctl(),
+        capture_router=_AvailableCaptureRouter(),
+        runner=runner,
+    )
+
+    result = desktop.capture(target="screen", output="eDP-1")
+
+    assert runner.calls[0][0][:-1] == ["grim", "-t", "png", "-o", "eDP-1"]
+    assert runner.calls[0][1] == 6.0
+    assert result["backend"] == "grim-output"
+    assert result["capture_mode"] == "output"
+    assert result["background_safe"] is True
+    assert result["interference"] == []
+    assert result["warnings"] == []
+    assert result["output"] == "eDP-1"
+    assert not Path(runner.calls[0][0][-1]).exists()
+
+
+def test_region_capture_uses_direct_grim_and_warns_about_composited_pixels():
+    runner = _PngRunner()
+    desktop = GhostDesktop(
+        hyprctl=FakeHyprctl(),
+        capture_router=_AvailableCaptureRouter(),
+        runner=runner,
+    )
+    region = {"x": 10.0, "y": 20.0, "width": 30.0, "height": 40.0}
+
+    result = desktop.capture(target="region", region=region)
+
+    assert runner.calls[0][0][:-1] == [
+        "grim",
+        "-t",
+        "png",
+        "-g",
+        "10,20 30x40",
+    ]
+    assert runner.calls[0][1] == 6.0
+    assert result["backend"] == "grim-region"
+    assert result["capture_mode"] == "region"
+    assert result["background_safe"] is True
+    assert result["interference"] == []
+    assert any("currently-composited pixels" in item for item in result["warnings"])
+    assert result["region"] == region
+    assert not Path(runner.calls[0][0][-1]).exists()
 
 
 def test_oversized_capture_is_rejected_before_read_and_removed(tmp_path: Path):

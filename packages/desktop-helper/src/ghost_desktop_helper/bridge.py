@@ -1229,6 +1229,10 @@ class GhostDesktop:
             return None
 
     def _capture_output(self, output: str | None) -> dict[str, Any]:
+        # CaptureRouter owns window capture because selecting a window may need
+        # a focus/move transaction. Output and arbitrary-region capture only
+        # read already-composited pixels, so they call grim directly and keep
+        # distinct backend/capture_mode provenance.
         monitors = self.hyprctl.monitors()
         if output is not None:
             matches = [m for m in monitors if m["name"] == output]
