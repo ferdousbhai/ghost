@@ -13,8 +13,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import { lstat as lstatAsync } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { basename, join, relative, resolve } from "node:path";
 import type {
   Options as ClaudeQueryOptions,
   Query,
@@ -70,7 +71,11 @@ import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
-import type { TaskAdapter } from "../src/tasks.js";
+import type {
+  TaskAdapter,
+  TaskAdapterContext,
+  TaskAdapterHandle,
+} from "../src/tasks.js";
 import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 const claudeTaskServices = () => ({
@@ -81,6 +86,32 @@ const claudeTaskServices = () => ({
     },
   }]]),
 });
+
+function activeClaudeTaskServices() {
+  const followUps: string[] = [];
+  return {
+    followUps,
+    services: {
+      ownership: fakeTaskScopeManager(),
+      adapters: new Map<string, TaskAdapter>([["claude-code", {
+        start(_input, context: TaskAdapterContext): Promise<TaskAdapterHandle> {
+          const result = Promise.withResolvers<string>();
+          const quiescence = Promise.withResolvers<void>();
+          context.register({
+            force: async () => quiescence.resolve(),
+            quiescence: quiescence.promise,
+          });
+          return Promise.resolve({
+            result: result.promise,
+            async followUp(message) {
+              followUps.push(message);
+            },
+          });
+        },
+      }]]),
+    },
+  };
+}
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -124,7 +155,7 @@ function fakeQuery(
   messages: SDKMessage[] | ((turn: number) => SDKMessage[]),
   lifecycle: { interrupted: number; closed: number },
   prompts?: AsyncIterable<SDKUserMessage>,
-  onPrompt?: (message: SDKUserMessage) => void,
+  onPrompt?: (message: SDKUserMessage) => void | Promise<void>,
   processExit = deferred(),
   resolveExitOnClose = true,
 ): Query {
@@ -138,7 +169,7 @@ function fakeQuery(
     }
     let turn = 0;
     for await (const prompt of prompts) {
-      onPrompt?.(prompt);
+      await onPrompt?.(prompt);
       // Synthetic context carries no turn of its own, exactly as the SDK treats
       // a `shouldQuery: false` message.
       if ((prompt as { shouldQuery?: boolean }).shouldQuery === false) continue;
@@ -164,6 +195,36 @@ function fakeQuery(
 function observeFakeQueryExit(query: Query): Promise<void> {
   return (query as Query & { [FAKE_QUERY_EXIT]?: Promise<void> })[FAKE_QUERY_EXIT]
     ?? Promise.resolve();
+}
+
+interface TestMcpResult {
+  isError?: boolean;
+  content: Array<{ text?: string }>;
+}
+
+async function invokeClaudeMcpTool(
+  options: ClaudeQueryOptions,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<TestMcpResult> {
+  const servers = options.mcpServers as Record<string, {
+    type: string;
+    instance?: {
+      _registeredTools?: Record<string, {
+        handler(args: unknown, extra: unknown): Promise<unknown>;
+      }>;
+    };
+  }>;
+  const internal = Object.values(servers).find((server) =>
+    server.type === "sdk" && server.instance?._registeredTools?.[name]
+  );
+  const tool = internal?.instance?._registeredTools?.[name];
+  if (!tool) throw new Error(`Missing warm Claude task tool ${name}`);
+  return await tool.handler(args, {}) as TestMcpResult;
+}
+
+function mcpDetails(result: TestMcpResult): Record<string, unknown> {
+  return JSON.parse(result.content[0]?.text ?? "null") as Record<string, unknown>;
 }
 
 function responseMessages(sessionId: string, text: string, numTurns = 1): SDKMessage[] {
@@ -278,6 +339,8 @@ function setupClaudeHost(options: {
   useSdkSpawnExitBoundary?: boolean;
   browserSessionClose?: SessionHostOptions["browserSessionClose"];
   scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
+  transactionMarkerLstat?: SessionHostOptions["transactionMarkerLstat"];
+  transactionWriter?: SessionHostOptions["transactionWriter"];
   prepare?: (fixture: NonNullable<typeof temp>) => void;
 } = {}) {
   temp = makeTempGhosts();
@@ -320,6 +383,10 @@ function setupClaudeHost(options: {
     ...(options.scheduleCommandRunner
       ? { scheduleCommandRunner: options.scheduleCommandRunner }
       : {}),
+    ...(options.transactionMarkerLstat
+      ? { transactionMarkerLstat: options.transactionMarkerLstat }
+      : {}),
+    ...(options.transactionWriter ? { transactionWriter: options.transactionWriter } : {}),
     claudeCode: {
       loadSdk: async () => testClaudeAgentSdk,
       ...(options.environment ? { environment: options.environment } : {}),
@@ -355,7 +422,7 @@ function setupClaudeHost(options: {
           responseMessages(sessionId, "Hello from the plan."),
           lifecycle,
           input.prompt,
-          (message) => seenPrompts.push(message),
+          (message) => { seenPrompts.push(message); },
         );
       },
       ...(options.useSdkSpawnExitBoundary ? {} : { observeQueryExit: observeFakeQueryExit }),
@@ -1210,6 +1277,184 @@ describe("Claude Code native harness runtime", () => {
     expect(options?.allowedTools?.slice(-5).map((name) => name.split("__").at(-1)))
       .toEqual(["task", "task_list", "task_get", "task_send", "task_cancel"]);
     expect(JSON.stringify(options?.systemPrompt)).toContain("# Coding delegation");
+  });
+
+  it("keeps one warm task bridge while fencing a delayed prior-turn callback", async () => {
+    const heldMarker = {
+      enabled: false,
+      entered: Promise.withResolvers<void>(),
+      release: Promise.withResolvers<void>(),
+    };
+    let delayedTurnOne: Promise<TestMcpResult> | undefined;
+    const successfulTools: string[] = [];
+    let promptNumber = 0;
+    const activeTasks = activeClaudeTaskServices();
+    const { paths, lifecycle } = setupClaudeHost({
+      transactionMarkerLstat: async (path) => {
+        if (heldMarker.enabled) {
+          heldMarker.enabled = false;
+          heldMarker.entered.resolve();
+          await heldMarker.release.promise;
+        }
+        return lstatAsync(path);
+      },
+      createQuery: (input, queryLifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("warm task fixture received no session id");
+        return fakeQuery(
+          (turn) => responseMessages(sessionId, `warm task turn ${turn}`),
+          queryLifecycle,
+          input.prompt,
+          async (message) => {
+            if ((message as { shouldQuery?: boolean }).shouldQuery === false) return;
+            promptNumber += 1;
+            if (promptNumber === 1) {
+              heldMarker.enabled = true;
+              delayedTurnOne = invokeClaudeMcpTool(input.options, "task_list", {});
+              return;
+            }
+            heldMarker.release.resolve();
+            const delayed = await delayedTurnOne;
+            expect(delayed).toMatchObject({ isError: true });
+            expect(delayed?.content[0]?.text).toContain("exact active owner turn");
+
+            const created = await invokeClaudeMcpTool(input.options, "task", {
+              harness: "claude-code",
+              assignment: "Exercise the retained warm bridge.",
+            });
+            expect(created.isError).not.toBe(true);
+            successfulTools.push("task");
+            const taskId = String(mcpDetails(created).id);
+            let detail: TestMcpResult | undefined;
+            for (let attempt = 0; attempt < 100; attempt += 1) {
+              detail = await invokeClaudeMcpTool(input.options, "task_get", { task_id: taskId });
+              if (mcpDetails(detail).state === "running") break;
+              await new Promise((resolveDelay) => setTimeout(resolveDelay, 1));
+            }
+            expect(mcpDetails(detail as NonNullable<typeof detail>).state).toBe("running");
+            successfulTools.push("task_get");
+            const listed = await invokeClaudeMcpTool(input.options, "task_list", {});
+            expect(mcpDetails(listed).total).toBe(1);
+            successfulTools.push("task_list");
+            const sent = await invokeClaudeMcpTool(input.options, "task_send", {
+              task_id: taskId,
+              message: "Continue with the focused proof.",
+            });
+            expect(sent.isError).not.toBe(true);
+            successfulTools.push("task_send");
+            const cancelled = await invokeClaudeMcpTool(
+              input.options,
+              "task_cancel",
+              { task_id: taskId },
+            );
+            expect(mcpDetails(cancelled).state).toBe("cancelled");
+            successfulTools.push("task_cancel");
+          },
+        );
+      },
+    });
+    host!.attachTaskServices(activeTasks.services);
+    await host!.restoreTaskServices();
+    const project = join(temp!.root, "warm-task-project");
+    mkdirSync(project);
+    const preview = await host!.previewProject(
+      "casper", "warm-task-bridge", "claude-code", project,
+    );
+    await host!.bindProject("casper", "warm-task-bridge", "claude-code", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+
+    await host!.runTurn("casper", {
+      sessionId: "warm-task-bridge",
+      prompt: "first",
+      emit: () => {},
+    });
+    await heldMarker.entered.promise;
+    await host!.runTurn("casper", {
+      sessionId: "warm-task-bridge",
+      prompt: "second",
+      emit: () => {},
+    });
+
+    expect(lifecycle.queries).toBe(1);
+    expect(successfulTools.sort()).toEqual([
+      "task",
+      "task_cancel",
+      "task_get",
+      "task_list",
+      "task_send",
+    ]);
+    expect(activeTasks.followUps).toEqual(["Continue with the focused proof."]);
+    expect(existsSync(claudeSessionMetadataPath(paths.sessionDir, "warm-task-bridge"))).toBe(true);
+  });
+
+  it("preserves Claude's warm bridge across no-op lifecycle failures and retires it on close", async () => {
+    const observations: Array<{ turn: number; currentError: boolean; staleError?: boolean }> = [];
+    let turn = 0;
+    let firstQueryOptions: ClaudeQueryOptions | undefined;
+    const { lifecycle } = setupClaudeHost({
+      transactionWriter: async (path) => {
+        if (basename(path).startsWith(".ghost-delete-")) {
+          throw new Error("injected pre-publication Claude delete failure");
+        }
+        throw new Error(`unexpected transaction write ${path}`);
+      },
+      createQuery: (input, queryLifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume;
+        if (!sessionId) throw new Error("Claude lifecycle fixture received no session id");
+        firstQueryOptions ??= input.options;
+        return fakeQuery(
+          () => responseMessages(sessionId, "retained Claude bridge"),
+          queryLifecycle,
+          input.prompt,
+          async (message) => {
+            if ((message as { shouldQuery?: boolean }).shouldQuery === false) return;
+            turn += 1;
+            if (turn === 1) return;
+            const current = await invokeClaudeMcpTool(input.options, "task_list", {});
+            const observation: {
+              turn: number;
+              currentError: boolean;
+              staleError?: boolean;
+            } = { turn, currentError: current.isError === true };
+            if (turn === 4) {
+              const stale = await invokeClaudeMcpTool(
+                firstQueryOptions as ClaudeQueryOptions,
+                "task_list",
+                {},
+              );
+              observation.staleError = stale.isError === true;
+              expect(stale.content[0]?.text).toContain("exact active owner turn");
+            }
+            observations.push(observation);
+          },
+        );
+      },
+    });
+    host!.attachTaskServices(claudeTaskServices());
+    await host!.restoreTaskServices();
+    const id = "retained-claude-lifecycle";
+
+    await host!.runTurn("casper", { sessionId: id, prompt: "publish", emit: () => {} });
+    await expect(host!.abandonProjectDraft("casper", id, "claude-code"))
+      .rejects.toMatchObject({ code: "project_draft_published", status: 409 });
+    await host!.runTurn("casper", { sessionId: id, prompt: "after abandon", emit: () => {} });
+
+    await expect(host!.deleteSession("casper", id, "claude-code"))
+      .rejects.toThrow("injected pre-publication Claude delete failure");
+    await host!.runTurn("casper", { sessionId: id, prompt: "after rollback", emit: () => {} });
+
+    await host!.close("casper", id);
+    await host!.runTurn("casper", { sessionId: id, prompt: "after recreate", emit: () => {} });
+
+    expect(lifecycle.queries).toBe(2);
+    expect(observations).toEqual([
+      { turn: 2, currentError: false },
+      { turn: 3, currentError: false },
+      { turn: 4, currentError: false, staleError: true },
+    ]);
   });
 
   it("keeps wrapper-injected credentials beyond Ghost while using it for every CLI path", async () => {

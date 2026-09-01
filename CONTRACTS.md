@@ -764,15 +764,20 @@ raw id or a binding alone is not a task parent and returns bounded
 `409 task_parent_unpublished`. The principal bridge may act during a first turn
 before that publication only through a private, unforgeable capability bound
 to the exact ghost, runtime-qualified identity, runtime context incarnation,
-and currently admitted owner turn. There is exactly one current capability
-object and monotonically newer generation for that parent; validation requires
-the same current object from the turn's private asynchronous execution context
-and the same runtime context identity, not merely runtime busy state or a
-lookup of whichever turn is current.
-Turn `finally`, close, deletion, draft abandonment, and context reincarnation
-invalidate it with an identity guard so a stale `finally` cannot clear a newer
-turn. An old tool callback cannot act during a recreated same-id turn on either
-runtime. The capability is neither an API value nor reusable after its turn.
+and currently admitted owner turn. The private bridge context lives exactly as
+long as its retained Pi session or warm Claude query, while each owner turn
+installs one monotonically newer capability object on that exact context. A
+tool handler synchronously captures that object before its first wait;
+validation requires the same current object and context identity, not merely
+runtime busy state or a lookup through a recreated bridge. A call delayed
+across turns therefore fails instead of borrowing the next turn. Turn
+`finally` clears only its exact object. Query/session close, a committed delete
+or draft-abandon barrier, and context reincarnation retire the exact bridge
+context with an identity guard so stale cleanup cannot clear a newer one. A
+published/no-op lifecycle refusal or a delete barrier proven absent leaves the
+healthy bridge intact. An old tool callback cannot act during a recreated
+same-id turn on either runtime. Neither the context nor capability is an API
+value; a capability is never reusable after its turn.
 Fork publication/recovery, draft abandonment, and deletion take the exclusive
 side of the same parent lane. Draft abandonment requires zero task records in
 every state; `409 tasks_present` directs the owner to full conversation DELETE,

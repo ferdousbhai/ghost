@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { AsyncLocalStorage } from "node:async_hooks";
 import {
   lstat,
   mkdir,
@@ -944,6 +943,8 @@ interface PrincipalTaskContextIdentity {
   readonly runtime: ConversationRuntime;
   readonly conversationId: string;
   readonly incarnation: number;
+  active: PrincipalTaskCapability | null;
+  retired: boolean;
 }
 
 interface PrincipalTaskCapability {
@@ -1737,7 +1738,6 @@ export class SessionHost {
   private readonly taskParentOperations = new ParentTaskOperationGate();
   private readonly principalTaskContexts = new Map<string, PrincipalTaskContextIdentity>();
   private readonly principalTaskCapabilities = new Map<string, PrincipalTaskCapability>();
-  private readonly principalTaskTurn = new AsyncLocalStorage<PrincipalTaskCapability>();
   private principalTaskGeneration = 0;
   private principalTaskIncarnation = 0;
   private taskRecovery: Promise<void> | undefined;
@@ -1953,7 +1953,7 @@ export class SessionHost {
       throw new Error("Principal task services require native scope ownership.");
     }
     this.claudeCode.attachPrincipalTaskTools((ghostName, conversationId, cwd) =>
-      this.principalTaskContext(ghostName, "claude-code", conversationId, cwd));
+      this.principalTaskContextLease(ghostName, "claude-code", conversationId, cwd));
     this.taskServices = {
       adapters,
       ownership: services.ownership,
@@ -2070,6 +2070,7 @@ export class SessionHost {
       context: this.principalTaskContexts.get(key) ?? null,
     };
     this.principalTaskCapabilities.set(key, capability);
+    if (capability.context) capability.context.active = capability;
     return capability;
   }
 
@@ -2082,6 +2083,21 @@ export class SessionHost {
     if (this.principalTaskCapabilities.get(key) === capability) {
       this.principalTaskCapabilities.delete(key);
     }
+    if (capability.context?.active === capability) capability.context.active = null;
+  }
+
+  private invalidatePrincipalTaskContext(context: PrincipalTaskContextIdentity): void {
+    const key = this.principalTaskKey(
+      context.ghostName,
+      context.runtime,
+      context.conversationId,
+    );
+    context.retired = true;
+    context.active = null;
+    if (this.principalTaskContexts.get(key) !== context) return;
+    this.principalTaskContexts.delete(key);
+    const capability = this.principalTaskCapabilities.get(key);
+    if (capability?.context === context) this.principalTaskCapabilities.delete(key);
   }
 
   private invalidatePrincipalTaskParent(
@@ -2090,15 +2106,15 @@ export class SessionHost {
     conversationId: string,
   ): void {
     const key = this.principalTaskKey(ghostName, runtime, conversationId);
-    this.principalTaskCapabilities.delete(key);
-    this.principalTaskContexts.delete(key);
+    const context = this.principalTaskContexts.get(key);
+    if (context) this.invalidatePrincipalTaskContext(context);
+    else this.principalTaskCapabilities.delete(key);
   }
 
   private invalidatePrincipalTaskScope(ghostName: string): void {
-    for (const [key, context] of this.principalTaskContexts) {
+    for (const context of this.principalTaskContexts.values()) {
       if (context.ghostName !== ghostName) continue;
-      this.principalTaskContexts.delete(key);
-      this.principalTaskCapabilities.delete(key);
+      this.invalidatePrincipalTaskContext(context);
     }
     for (const [key, capability] of this.principalTaskCapabilities) {
       if (capability.ghostName === ghostName) this.principalTaskCapabilities.delete(key);
@@ -2111,29 +2127,51 @@ export class SessionHost {
     conversationId: string,
     cwd: string,
   ): Promise<PrincipalTaskContext> {
+    return this.principalTaskContextLease(ghostName, runtime, conversationId, cwd)
+      .then((lease) => lease.context);
+  }
+
+  private async principalTaskContextLease(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    cwd: string,
+  ): Promise<{ context: PrincipalTaskContext; retire(): void }> {
     const parent = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(this.registry.get(ghostName).dir);
     const key = this.principalTaskKey(ghostName, runtime, conversationId);
-    const context = Object.freeze({
+    const active = this.principalTaskCapabilities.get(key);
+    const previous = this.principalTaskContexts.get(key);
+    if (previous) this.invalidatePrincipalTaskContext(previous);
+    const context: PrincipalTaskContextIdentity = {
       ghostName,
       parentId: parent.id,
       runtime,
       conversationId,
       incarnation: ++this.principalTaskIncarnation,
-    });
+      active: null,
+      retired: false,
+    };
     this.principalTaskContexts.set(key, context);
-    const active = this.principalTaskCapabilities.get(key);
-    if (active) active.context = context;
+    if (active) {
+      this.principalTaskCapabilities.set(key, active);
+      active.context = context;
+      context.active = active;
+    }
     this.assertTaskAdmissionOpen();
-    return Promise.resolve({
+    const publicContext: PrincipalTaskContext = {
       controller: () => this.taskController(ghostName),
       parent,
       cwd,
-      operation: <T>(action: () => Promise<T>) =>
-        this.withParentTaskOperation(ghostName, parent, action, {
+      operation: <T>(action: () => Promise<T>) => {
+        // Capture the bridge's exact current turn synchronously. Any wait below
+        // can cross into a newer turn, where validation rejects this old token.
+        const capability = context.active;
+        return this.withParentTaskOperation(ghostName, parent, action, {
           context,
-          capability: this.principalTaskTurn.getStore() ?? null,
-        }),
+          capability,
+        });
+      },
       mintBinding: async (cwd, signal) => {
         this.assertTaskAdmissionOpen();
         const binding = await this.projectBindings.mintTaskBinding(
@@ -2145,7 +2183,11 @@ export class SessionHost {
         this.assertTaskAdmissionOpen();
         return binding;
       },
-    });
+    };
+    return {
+      context: publicContext,
+      retire: () => this.invalidatePrincipalTaskContext(context),
+    };
   }
 
   private assertTaskAdmissionOpen(): void {
@@ -2229,6 +2271,8 @@ export class SessionHost {
         const active = this.principalTaskCapabilities.get(key);
         if (active !== principal.capability
           || active === undefined
+          || principal.context.retired
+          || principal.context.active !== active
           || active.context !== principal.context
           || this.principalTaskContexts.get(key) !== principal.context
           || active.ghostName !== ghostName
@@ -3255,7 +3299,6 @@ export class SessionHost {
           409,
         );
       }
-      this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
@@ -3294,6 +3337,7 @@ export class SessionHost {
         );
         revocation.commit();
         revocationCommitted = true;
+        this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
         revocation.retire();
         revocationRetired = true;
         return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: false };
@@ -3355,12 +3399,14 @@ export class SessionHost {
           else {
             revocation.commit();
             revocationCommitted = true;
+            this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
           }
           throw error;
         }
       }
       revocation.commit();
       revocationCommitted = true;
+      this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
       await this.finishDraftAbandon(sessionDir, marker, receipt, record);
       revocation.retire();
       revocationRetired = true;
@@ -3385,10 +3431,12 @@ export class SessionHost {
             revocation.rollback();
           } else if (markerState === "absent" && receiptState === "present") {
             revocation.commit();
+            this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
             revocation.retire();
             revocationRetired = true;
           } else if (markerState !== "absent" || receiptState !== "absent") {
             revocation.commit();
+            this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
           }
         }
       }
@@ -5396,14 +5444,11 @@ export class SessionHost {
       conversationId,
     );
     try {
-      await this.principalTaskTurn.run(
-        capability,
-        () => this.runAdmittedTurnWithPrincipalCapability(
-          ghostName,
-          options,
-          selected,
-          finishMaintenance,
-        ),
+      await this.runAdmittedTurnWithPrincipalCapability(
+        ghostName,
+        options,
+        selected,
+        finishMaintenance,
       );
     } finally {
       this.finishPrincipalTaskTurn(capability);
@@ -7810,6 +7855,14 @@ export class SessionHost {
     let revocation: BindingRevocationLease | undefined;
     let revocationCommitted = false;
     let revocationRetired = false;
+    let runtimeRetired = false;
+    const retireRuntime = async (): Promise<void> => {
+      if (runtimeRetired) return;
+      this.invalidatePrincipalTaskParent(ghostName, runtime, id);
+      if (runtime === "pi") await this.closePi(ghostName, sessionId);
+      else await this.closeClaude(ghostName, id);
+      runtimeRetired = true;
+    };
     this.deleting.add(deleteKey);
     try {
       await taskDeletion.drained;
@@ -7821,7 +7874,6 @@ export class SessionHost {
           409,
         );
       }
-      this.invalidatePrincipalTaskParent(ghostName, runtime, id);
       revocation = await this.projectBindings.beginRevocation(
         paths.sessionDir,
         ghostName,
@@ -7855,6 +7907,7 @@ export class SessionHost {
         revocation.commit();
         revocationCommitted = true;
         maintenanceDeleteOutcome = "recovery-pending";
+        await retireRuntime();
         throw new GhostError(
           "delete_recovery_pending",
           "This conversation has an invalid or unreadable deletion transaction.",
@@ -7882,12 +7935,14 @@ export class SessionHost {
             revocation.commit();
             revocationCommitted = true;
             maintenanceDeleteOutcome = "recovery-pending";
+            await retireRuntime();
           }
           throw error;
         }
         revocation.commit();
         revocationCommitted = true;
       }
+      this.invalidatePrincipalTaskParent(ghostName, runtime, id);
       const deleteRecord = await this.readDeleteTransaction(
         tombstone,
         runtime,
@@ -7908,8 +7963,7 @@ export class SessionHost {
         .filter((task): task is Promise<void> => task !== undefined);
       if (background.length > 0) await Promise.allSettled(background);
 
-      if (runtime === "pi") await this.closePi(ghostName, sessionId);
-      else await this.closeClaude(ghostName, id);
+      await retireRuntime();
       const piPath = join(paths.sessionDir, sessionFileNameFor(id));
       const claudePath = claudeSessionMetadataPath(paths.sessionDir, id);
       const claudeResumeMarkers = Object.values(
@@ -8037,6 +8091,7 @@ export class SessionHost {
       return { artifacts: receipts };
     } finally {
       this.deleting.delete(deleteKey);
+      let retiringRuntime: Promise<void> | undefined;
       if (revocation && !revocationRetired) {
         const markerState = await transactionMarkerState(
           tombstone,
@@ -8046,10 +8101,12 @@ export class SessionHost {
         else if (markerState !== "absent") {
           revocation.commit();
           maintenanceDeleteOutcome = "recovery-pending";
+          retiringRuntime = retireRuntime();
         }
       }
       taskDeletion.release();
       maintenanceReservation?.release(maintenanceDeleteOutcome);
+      await retiringRuntime;
     }
   }
 
@@ -8370,6 +8427,8 @@ export class SessionHost {
     key: string,
     reason: string,
   ): Promise<void> {
+    const [ghostName, conversationId] = sessionKeyParts(key);
+    this.invalidatePrincipalTaskParent(ghostName, "pi", conversationId);
     const alreadyClosing = this.closing.get(key);
     if (alreadyClosing) return alreadyClosing.promise;
     const hosted = this.cleanupRetries.get(key) ?? this.sessions.get(key);

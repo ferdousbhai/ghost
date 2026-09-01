@@ -127,7 +127,6 @@ function withActivePrincipalTaskTurn<T>(
       runtime: "pi" | "claude-code";
       conversationId: string;
     }>;
-    principalTaskTurn: { run<R>(store: unknown, callback: () => R): R };
   };
   const capability = [...internals.principalTaskCapabilities.values()].find((candidate) =>
     candidate.ghostName === ghostName
@@ -135,7 +134,7 @@ function withActivePrincipalTaskTurn<T>(
     && candidate.conversationId === conversationId
   );
   if (!capability) throw new Error("No active principal task turn.");
-  return internals.principalTaskTurn.run(capability, action);
+  return action();
 }
 
 let temp: TempGhosts | null = null;
@@ -249,6 +248,7 @@ async function setup(
     | "readWriter"
     | "conversationFileProbe"
     | "transactionProbe"
+    | "transactionWriter"
     | "transactionMarkerLstat"
     | "ghostHomeLstat"
     | "logger"
@@ -1951,7 +1951,6 @@ describe("SessionHost.open", () => {
           id: string,
         ): unknown;
         finishPrincipalTaskTurn(capability: unknown): void;
-        principalTaskTurn: { run<R>(store: unknown, callback: () => R): R };
         invalidatePrincipalTaskParent(
           ghostName: string,
           selectedRuntime: typeof runtime,
@@ -1975,10 +1974,7 @@ describe("SessionHost.open", () => {
         conversationId,
         temp!.ownerHome,
       );
-      await expect(internals.principalTaskTurn.run(
-        oldCapability,
-        () => oldContext.operation(async () => "old turn"),
-      ))
+      await expect(oldContext.operation(async () => "old turn"))
         .resolves.toBe("old turn");
 
       internals.invalidatePrincipalTaskParent("casper", runtime, conversationId);
@@ -1995,25 +1991,76 @@ describe("SessionHost.open", () => {
       );
       // A late finally from the old incarnation cannot clear the newer turn.
       internals.finishPrincipalTaskTurn(oldCapability);
-      await expect(internals.principalTaskTurn.run(
-        oldCapability,
-        () => oldContext.operation(async () => "stale"),
-      ))
+      await expect(oldContext.operation(async () => "stale"))
         .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
-      await expect(internals.principalTaskTurn.run(
-        currentCapability,
-        () => currentContext.operation(async () => "current turn"),
-      ))
+      await expect(currentContext.operation(async () => "current turn"))
         .resolves.toBe("current turn");
 
       internals.finishPrincipalTaskTurn(currentCapability);
-      await expect(internals.principalTaskTurn.run(
-        currentCapability,
-        () => currentContext.operation(async () => "after turn"),
-      ))
+      await expect(currentContext.operation(async () => "after turn"))
         .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
     },
   );
+
+  it("preserves Pi's retained bridge across no-op lifecycle failures and retires it on close", async () => {
+    const afterAbandon = createMockProviderBarrier();
+    const afterRollback = createMockProviderBarrier();
+    const afterRecreate = createMockProviderBarrier();
+    let rejectDelete = true;
+    await setup([
+      { kind: "text", text: "published" },
+      { kind: "text", text: "after abandon", barrier: afterAbandon },
+      { kind: "text", text: "after rollback", barrier: afterRollback },
+      { kind: "text", text: "after recreate", barrier: afterRecreate },
+    ], {
+      title: { enabled: false },
+      transactionWriter: async (path) => {
+        if (rejectDelete && basename(path).startsWith(".ghost-delete-")) {
+          throw new Error("injected pre-publication delete failure");
+        }
+        throw new Error(`unexpected transaction write ${path}`);
+      },
+    });
+    host!.attachTaskServices(inertTaskServices());
+    await host!.restoreTaskServices();
+    const id = "retained-pi-lifecycle";
+    const original = await host!.open("casper", id);
+    const oldList = original.session.getToolDefinition("task_list");
+    expect(oldList).toBeDefined();
+    await host!.runTurn("casper", { sessionId: id, prompt: "publish", emit: () => {} });
+
+    await expect(host!.abandonProjectDraft("casper", id, "pi"))
+      .rejects.toMatchObject({ code: "project_draft_published", status: 409 });
+    const second = host!.runTurn("casper", { sessionId: id, prompt: "again", emit: () => {} });
+    await afterAbandon.waitForArrivals();
+    await expect(oldList!.execute("after-abandon", {}, undefined, undefined, {} as never))
+      .resolves.toBeDefined();
+    afterAbandon.release();
+    await second;
+
+    await expect(host!.deleteSession("casper", id, "pi"))
+      .rejects.toThrow("injected pre-publication delete failure");
+    const third = host!.runTurn("casper", { sessionId: id, prompt: "still here", emit: () => {} });
+    await afterRollback.waitForArrivals();
+    await expect(oldList!.execute("after-rollback", {}, undefined, undefined, {} as never))
+      .resolves.toBeDefined();
+    afterRollback.release();
+    await third;
+
+    rejectDelete = false;
+    await host!.close("casper", id);
+    const replacement = await host!.open("casper", id);
+    const newList = replacement.session.getToolDefinition("task_list");
+    expect(newList).toBeDefined();
+    const fourth = host!.runTurn("casper", { sessionId: id, prompt: "new bridge", emit: () => {} });
+    await afterRecreate.waitForArrivals();
+    await expect(oldList!.execute("stale-bridge", {}, undefined, undefined, {} as never))
+      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
+    await expect(newList!.execute("new-bridge", {}, undefined, undefined, {} as never))
+      .resolves.toBeDefined();
+    afterRecreate.release();
+    await fourth;
+  });
 
   it("refuses task-service attachment after session activity", async () => {
     await setup([{ kind: "text", text: "hello" }]);

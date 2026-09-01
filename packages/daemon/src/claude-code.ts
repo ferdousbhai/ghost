@@ -1501,7 +1501,6 @@ async function buildMcpTools(
   ghostName: string,
   extensionOptions: GhostExtensionOptions,
   sdk: ClaudeAgentSdkModule,
-  principalTasks?: PrincipalTaskContext,
 ): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const resolved = resolveGhostExtensions(
     { ...extensionOptions, ghostName },
@@ -1509,11 +1508,18 @@ async function buildMcpTools(
     CLAUDE_CODE_TOOL_CAPABILITIES,
   );
   const tools = await bridgeClaudeCodeTools(resolved, homeDir, sdk);
-  if (!principalTasks) return { tools, names: resolved.toolNames };
+  return { tools, names: resolved.toolNames };
+}
+
+async function withPrincipalTaskTools(
+  bridge: { tools: SdkMcpToolDefinition[]; names: string[] },
+  principalTasks: PrincipalTaskContext,
+  sdk: ClaudeAgentSdkModule,
+): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
   const taskExtension = await collectGhostExtension(createPrincipalTaskTools(principalTasks));
   return {
     tools: [
-      ...tools,
+      ...bridge.tools,
       ...bridgeCollectedClaudeCodeTools(
         taskExtension,
         PRINCIPAL_TASK_TOOL_NAMES,
@@ -1521,7 +1527,7 @@ async function buildMcpTools(
         sdk,
       ),
     ],
-    names: [...resolved.toolNames, ...PRINCIPAL_TASK_TOOL_NAMES],
+    names: [...bridge.names, ...PRINCIPAL_TASK_TOOL_NAMES],
   };
 }
 
@@ -2018,6 +2024,7 @@ interface WarmClaudeQuery {
   readonly identity: string;
   readonly exited: Promise<void>;
   readonly terminateProcessGroup: () => void;
+  readonly principalTasks?: ClaudePrincipalTaskContextLease;
   projectMcpFailed: boolean;
 }
 
@@ -2026,11 +2033,16 @@ interface ClaudeSessionPersona {
   idleTimer?: ReturnType<typeof setTimeout>;
 }
 
+export interface ClaudePrincipalTaskContextLease {
+  readonly context: PrincipalTaskContext;
+  retire(): void;
+}
+
 export type ClaudePrincipalTaskContextFactory = (
   ghostName: string,
   conversationId: string,
   cwd: string,
-) => Promise<PrincipalTaskContext>;
+) => Promise<ClaudePrincipalTaskContextLease>;
 
 /**
  * Everything a warm query cannot change after construction. Compared verbatim,
@@ -2479,16 +2491,11 @@ export class ClaudeCodeRuntime {
       }
       const sdk = await this.loadSdk();
       this.assertTurnAdmitted(options.signal);
-      const principalTasks = this.principalTaskContext
-        ? await this.principalTaskContext(ghost.name, conversationId, runtimeCwd)
-        : undefined;
-      this.assertTurnAdmitted(options.signal);
-      const bridge = await buildMcpTools(
+      const baseBridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
         sdk,
-        principalTasks,
       );
       this.assertTurnAdmitted(options.signal);
       try {
@@ -2506,7 +2513,9 @@ export class ClaudeCodeRuntime {
         cwd: runtimeCwd,
         modelId,
         systemPrompt,
-        toolNames: bridge.names,
+        toolNames: this.principalTaskContext
+          ? [...baseBridge.names, ...PRINCIPAL_TASK_TOOL_NAMES]
+          : baseBridge.names,
         projectMcpServers: approvedProject.mcpServers,
       });
       // Nothing the query was built from may have changed under a warm process;
@@ -2552,23 +2561,46 @@ export class ClaudeCodeRuntime {
                 });
               }
             : undefined;
-          const sdkOptions = queryOptions({
-            sdk,
-            binaryPath,
-            cwd: runtimeCwd,
-            ghostName: ghost.name,
-            modelId,
-            systemPrompt,
-            tools: bridge.tools,
-            toolNames: bridge.names,
-            metadata,
-            newSessionId: admittedSdkSessionId,
-            abortController,
-            internalMcpServerName: sdkMcpServerName,
-            projectMcpServers: approvedProject.mcpServers,
-            environment: this.environment,
-            ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
-          });
+          let principalTasks: ClaudePrincipalTaskContextLease | undefined;
+          let bridge = baseBridge;
+          try {
+            principalTasks = this.principalTaskContext
+              ? await this.principalTaskContext(ghost.name, conversationId, runtimeCwd)
+              : undefined;
+            this.assertTurnAdmitted(options.signal);
+            if (principalTasks) {
+              bridge = await withPrincipalTaskTools(baseBridge, principalTasks.context, sdk);
+              this.assertTurnAdmitted(options.signal);
+            }
+          } catch (cause) {
+            input.close();
+            principalTasks?.retire();
+            throw cause;
+          }
+          let sdkOptions: ClaudeQueryOptions;
+          try {
+            sdkOptions = queryOptions({
+              sdk,
+              binaryPath,
+              cwd: runtimeCwd,
+              ghostName: ghost.name,
+              modelId,
+              systemPrompt,
+              tools: bridge.tools,
+              toolNames: bridge.names,
+              metadata,
+              newSessionId: admittedSdkSessionId,
+              abortController,
+              internalMcpServerName: sdkMcpServerName,
+              projectMcpServers: approvedProject.mcpServers,
+              environment: this.environment,
+              ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
+            });
+          } catch (cause) {
+            input.close();
+            principalTasks?.retire();
+            throw cause;
+          }
           let created: Query;
           try {
             created = this.createQuery
@@ -2576,6 +2608,7 @@ export class ClaudeCodeRuntime {
               : sdk.query({ prompt: input.messages, options: sdkOptions });
           } catch (cause) {
             input.close();
+            principalTasks?.retire();
             throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
           }
           let exited: Promise<void>;
@@ -2600,6 +2633,7 @@ export class ClaudeCodeRuntime {
             identity,
             exited,
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
+            ...(principalTasks ? { principalTasks } : {}),
             projectMcpFailed: false,
           };
           this.warm.set(key, warm);
@@ -2880,6 +2914,7 @@ export class ClaudeCodeRuntime {
     const warm = this.warm.get(key);
     if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
+    warm.principalTasks?.retire();
     let exits = this.retiring.get(key);
     if (!exits) {
       exits = new Set();
