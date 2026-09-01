@@ -1954,10 +1954,13 @@ describe("Ghost ask interaction", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "paper",
+            header: "Paper",
             question: "Which paper stock?",
-            options: [{ label: "Cream" }, { label: "White" }],
-            recommended: 0,
+            options: [
+              { label: "Cream", description: "Warm paper stock" },
+              { label: "White", description: "Bright paper stock" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -1968,7 +1971,7 @@ describe("Ghost ask interaction", () => {
       options: { sessionId: "conv-ask" },
     });
     const ask = await waitForAsk(base, "conv-ask");
-    expect(ask.questions[0]).toMatchObject({ id: "paper", question: "Which paper stock?" });
+    expect(ask.questions[0]).toMatchObject({ id: "question-1", question: "Which paper stock?" });
 
     const queued = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`, {
       method: "POST",
@@ -1991,7 +1994,7 @@ describe("Ghost ask interaction", () => {
       body: JSON.stringify({
         askId: ask.id,
         kind: "submit",
-        results: [{ id: "paper", selectedOptions: ["Cardboard"] }],
+        results: [{ id: "question-1", selectedOptions: ["Cardboard"] }],
       }),
     });
     expect(invalid.status).toBe(400);
@@ -2003,7 +2006,7 @@ describe("Ghost ask interaction", () => {
       body: JSON.stringify({
         askId: ask.id,
         kind: "submit",
-        results: [{ id: "paper", selectedOptions: ["Cream"] }],
+        results: [{ id: "question-1", selectedOptions: ["Cream"] }],
       }),
     });
     expect(accepted.status).toBe(200);
@@ -2641,9 +2644,13 @@ describe("DELETE /api/ghosts/:name", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "paper",
+            header: "Paper",
             question: "Which paper stock?",
-            options: [{ label: "Cream" }, { label: "White" }],
+            options: [
+              { label: "Cream", description: "Warm paper stock" },
+              { label: "White", description: "Bright paper stock" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -2875,9 +2882,13 @@ describe("Ghost conversation tree routes", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "paper",
+            header: "Paper",
             question: "Which paper stock?",
-            options: [{ label: "Cream" }, { label: "White" }],
+            options: [
+              { label: "Cream", description: "Warm paper stock" },
+              { label: "White", description: "Bright paper stock" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -2891,7 +2902,7 @@ describe("Ghost conversation tree routes", () => {
       body: JSON.stringify({
         askId: firstAsk.id,
         kind: "submit",
-        results: [{ id: "paper", selectedOptions: ["Cream"] }],
+        results: [{ id: "question-1", selectedOptions: ["Cream"] }],
       }),
     });
     await initial;
@@ -2918,7 +2929,7 @@ describe("Ghost conversation tree routes", () => {
       body: JSON.stringify({
         askId: revised.id,
         kind: "submit",
-        results: [{ id: "paper", selectedOptions: ["White"] }],
+        results: [{ id: "question-1", selectedOptions: ["White"] }],
       }),
     });
     const completed = await reanswerResponse;

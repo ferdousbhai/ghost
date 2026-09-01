@@ -171,8 +171,10 @@ resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
 automatic credential discovery, themes, prompt templates, executable project
 code, and native task tool do not enter the session. Ghost keeps Pi's native
 file, search, Bash, compaction, steering/follow-up, and branch behavior, and
-adds `ask`, supervised native-worker delegation, background jobs, image
-inspection, browser, screen, desktop, and MCP tools. The exact assembly is
+adds `ask`, supervised native-worker delegation, background jobs, browser,
+screen, desktop, and MCP tools. `inspect_image` is added only when the active
+chat model does not accept image input; vision-capable Pi models use their
+native image understanding. The exact assembly is
 [`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
 [`pi-extension-bridge.ts`](packages/daemon/src/pi-extension-bridge.ts).
 
@@ -186,23 +188,47 @@ versioned XDG data root with exact package/version/entry validation. Detailed
 installation and environment guarantees are in
 [`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
 
-Claude keeps its native preset, including subagents, todos, web tools, and
-planning. Ghost disables only surfaces it owns or cannot safely route:
-`AskUserQuestion`, native cron/scheduling, push notifications, remote triggers,
-and scheduled wakeups. Ghost disables Claude auto-memory; shared persistence is
-Obsidian and private continuity is Ghost memory.
+Claude keeps its native preset, including `AskUserQuestion`, image
+understanding, subagents, background tasks, todos, web tools, and planning.
+Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
+`ask`; it disables only native cron/scheduling, push notifications, remote
+triggers, and scheduled wakeups. Ghost disables Claude auto-memory; shared
+persistence is Obsidian and private continuity is Ghost memory.
+
+Ghost-owned model capabilities have one cross-runtime contract even when the
+runtime supplies the implementation: owner questions, image understanding,
+browser/screen/desktop control, and supervised delegation are available on
+both principal paths. Runtime mechanics remain native. Pi exposes its
+transcript, branches, commands, steering, and `GhostJob` state through daemon
+APIs; Claude owns the corresponding session and background-task state inside
+its opaque warm query.
+
+Two deliberate capability gaps remain. Pi's MCP manager admits ghost-home MCP
+plus trusted-project MCP, including secret resolution and per-server cwd;
+Claude currently admits only credential-free trusted-project MCP that its SDK
+can represent and persist. Trusted ghost-home `hooks/pre` and `hooks/post`
+extension factories are Pi-native executable extensions and do not enter
+Claude. These exceptions must stay visible in the resource/API surfaces and
+must not be presented as shared capabilities.
 
 ### Ask, jobs, delegation, hooks, and maintenance
 
-`ask` is owner input, never tool approval. A pending question is pollable and
-the first valid response wins. The daemon-wide timeout defaults to 120 seconds;
-zero waits forever. On timeout, an explicit model recommendation is submitted;
-otherwise no selection is invented.
+`ask` is owner input, never tool approval. Pi's model-facing `ask` input and
+output match Claude Code's native `AskUserQuestion` contract: one to four
+questions, two to four described options per question, `multiSelect`, optional
+previews and metadata, answers keyed by question text, and optional per-question
+annotations. The internal wire name remains `ask` for both runtimes so the HUD
+has one predictable interaction. A pending question is pollable and the first
+valid response wins. The daemon-wide timeout defaults to 120 seconds; zero
+waits forever. A model-facing timeout returns an empty answer map and never
+invents an owner selection.
 
-Every Bash command is represented by a `GhostJob`. Foreground commands wait for
-the configured budget, then continue as background jobs. Job completion is fed
-back into the same conversation; closing the session cancels running jobs.
-Jobs are process-local and an unopened conversation reports `[]`.
+In Pi, every Bash command is represented by a `GhostJob`. Foreground commands
+wait for the configured budget, then continue as background jobs. Job
+completion is fed back into the same conversation; closing the session cancels
+running jobs. Jobs are process-local and an unopened conversation reports
+`[]`. Claude keeps its native Bash and background tasks; they do not appear in
+the `GhostJob` API.
 
 Delegated coding tasks are conversation-scoped work executed by an installed
 Pi, Codex, or Claude Code harness. Starting one requires a current trusted

@@ -69,6 +69,7 @@ function usageFromResult(result: SDKResultMessage): Usage {
 }
 
 function visibleToolName(name: string, internalMcpServerName: string): string {
+  if (name === "AskUserQuestion") return "ask";
   const prefix = `mcp__${internalMcpServerName}__`;
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }

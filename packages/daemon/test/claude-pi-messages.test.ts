@@ -164,6 +164,29 @@ describe("Claude Agent SDK -> pi-messages", () => {
     });
   });
 
+  it("normalizes Claude's native owner question to the shared ask wire name", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    callTool(adapter, {
+      index: 0,
+      block: {
+        type: "tool_use",
+        id: "ask-1",
+        name: "AskUserQuestion",
+        input: {},
+      },
+      partialJson: JSON.stringify({ questions: [] }),
+    });
+
+    expect(events).toContainEqual({
+      type: "tool_execution_start",
+      id: "ask-1",
+      toolName: "ask",
+      arguments: { questions: [] },
+      cwd: process.cwd(),
+    });
+  });
+
   it("brackets every tool call with an execution window the HUD can narrate", () => {
     const events: PiMessagesEvent[] = [];
     const adapter = createClaudePiMessagesAdapter((event) => events.push(event), {

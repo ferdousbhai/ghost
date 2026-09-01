@@ -36,6 +36,12 @@ import type {
   SpawnedProcess as ClaudeSpawnedProcess,
   McpServerConfig as ClaudeMcpServerConfig,
 } from "@anthropic-ai/claude-agent-sdk";
+import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
+import {
+  AskCancelledError,
+  isAskToolInput,
+  resolveAskUserQuestion,
+} from "./ask-tool.js";
 import {
   ClaudeAgentSdkLoader,
   type ClaudeAgentSdkModule,
@@ -176,17 +182,15 @@ export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: tr
  * surfaces. Scheduling is a systemd user timer the ghost writes itself and the
  * owner can see in `systemctl --user list-timers`; a Claude cron job would live
  * in Claude's private store, fire outside ghostd with no persona, and survive
- * the ghost's deletion. `AskUserQuestion` has no handler in the
- * daemon and no HUD surface, and it would bypass Ghost's deliberate policy that
- * a timed-out ask is never answered by a guessing model. Push and remote
- * triggers are claude.ai session infrastructure with nothing behind them here.
+ * the ghost's deletion. `AskUserQuestion` is retained and routed through
+ * Ghost's owner-question broker. Push and remote triggers are claude.ai session
+ * infrastructure with nothing behind them here.
  *
  * Everything that is merely Claude's own way of working stays: subagents,
  * worktrees, the REPL, todos, web search and fetch. Ghosts run unthrottled, and
  * this list is not a throttle.
  */
 export const CLAUDE_CODE_DISALLOWED_TOOLS = [
-  "AskUserQuestion",
   "CronCreate",
   "CronDelete",
   "CronList",
@@ -325,6 +329,8 @@ export interface ClaudeCodeRuntimeOptions {
   observeQueryExit?: ClaudeCodeQueryExitObserver;
   /** Maximum close wait for an acknowledged SDK subprocess exit. */
   exitWaitTimeoutMs?: number;
+  /** Daemon-owned ask deadline, read at invocation time; 0 waits forever. */
+  askTimeoutMs?: () => number;
 }
 
 export class ClaudeCodeProcessError extends Error {
@@ -1656,6 +1662,7 @@ function queryOptions(input: {
   abortController: AbortController;
   internalMcpServerName: string;
   projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+  canUseTool: NonNullable<ClaudeQueryOptions["canUseTool"]>;
   environment: Readonly<NodeJS.ProcessEnv>;
   spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
 }): ClaudeQueryOptions {
@@ -1688,10 +1695,10 @@ function queryOptions(input: {
     disallowedTools: [...CLAUDE_CODE_DISALLOWED_TOOLS],
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
-    // Ghost has no approval surface. Keep the SDK's native headless fallback
-    // aligned with bypass mode for every request that survived disallowedTools;
-    // Claude still owns safety checks it applies before invoking this callback.
-    canUseTool: async () => ({ behavior: "allow" }),
+    // Ordinary permission requests remain bypassed. AskUserQuestion is not an
+    // approval request: its callback pauses in Ghost's owner-question broker.
+    canUseTool: input.canUseTool,
+    toolConfig: { askUserQuestion: { previewFormat: "markdown" } },
     mcpServers: mcpServerRecord([
       ...Object.entries(input.projectMcpServers),
       [input.internalMcpServerName, mcp],
@@ -1708,6 +1715,51 @@ function queryOptions(input: {
       : { sessionId: input.newSessionId }),
     env: input.environment,
   };
+}
+
+async function answerClaudeQuestion(
+  broker: AskBroker,
+  rawInput: Record<string, unknown>,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<NonNullable<ClaudeQueryOptions["canUseTool"]>>>> {
+  if (!isAskToolInput(rawInput)) {
+    return {
+      behavior: "deny",
+      message: "AskUserQuestion received malformed questions, so the owner was not prompted.",
+    };
+  }
+  try {
+    const resolution = await resolveAskUserQuestion(broker, rawInput, {
+      signal,
+      timeout: timeoutMs,
+    });
+    if (resolution.kind === "chat") {
+      return {
+        behavior: "deny",
+        message: resolution.output.response
+          ?? "The owner chose to discuss these questions instead of answering them.",
+      };
+    }
+    return {
+      behavior: "allow",
+      updatedInput: {
+        ...rawInput,
+        answers: resolution.output.answers,
+        ...(resolution.output.annotations
+          ? { annotations: resolution.output.annotations }
+          : {}),
+        ...(resolution.output.autoAnsweredAfterMs
+          ? { afkTimeoutMs: resolution.output.autoAnsweredAfterMs }
+          : {}),
+      },
+    };
+  } catch (error) {
+    if (error instanceof AskCancelledError) {
+      return { behavior: "deny", message: "The owner dismissed these questions." };
+    }
+    throw error;
+  }
 }
 
 function pathWithin(root: string, candidate: string): boolean {
@@ -2140,6 +2192,7 @@ interface WarmClaudeQuery {
   readonly exited: Promise<void>;
   readonly terminateProcessGroup: () => void;
   readonly principalTasks?: ClaudePrincipalTaskContextLease;
+  readonly ask: AskBroker;
   readonly resources: SessionResourceView;
   projectMcpFailed: boolean;
 }
@@ -2251,6 +2304,7 @@ export class ClaudeCodeRuntime {
   private readonly exitWaitTimeoutMs: number;
   private readonly observeQueryExit: ClaudeCodeQueryExitObserver | undefined;
   private readonly machineSkills: string[];
+  private readonly askTimeoutMs: () => number;
   private readonly busy = new Set<string>();
   private readonly active = new Map<
     string,
@@ -2297,6 +2351,7 @@ export class ClaudeCodeRuntime {
     }
     this.exitWaitTimeoutMs = exitWaitTimeoutMs;
     this.observeQueryExit = options.observeQueryExit;
+    this.askTimeoutMs = options.askTimeoutMs ?? (() => 0);
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
@@ -2351,6 +2406,25 @@ export class ClaudeCodeRuntime {
   sessionResources(ghostName: string, conversationId: string): SessionResourceView | null {
     requireRawConversationId(conversationId);
     return this.warm.get(JSON.stringify([ghostName, conversationId]))?.resources ?? null;
+  }
+
+  pendingAsk(ghostName: string, conversationId: string): PendingAsk | null {
+    requireRawConversationId(conversationId);
+    return this.warm.get(JSON.stringify([ghostName, conversationId]))?.ask.pending ?? null;
+  }
+
+  answerAsk(
+    ghostName: string,
+    conversationId: string,
+    askId: string,
+    answer: unknown,
+  ): void {
+    requireRawConversationId(conversationId);
+    const broker = this.warm.get(JSON.stringify([ghostName, conversationId]))?.ask;
+    if (!broker) {
+      throw new AskBrokerError("ask_not_pending", "This conversation is not waiting for an answer.");
+    }
+    broker.answer(askId, answer);
   }
 
   /** Cwd/rebind defaults derived solely from durable Claude resume metadata. */
@@ -2763,6 +2837,7 @@ export class ClaudeCodeRuntime {
               }
             : undefined;
           let principalTasks: ClaudePrincipalTaskContextLease | undefined;
+          const ask = new AskBroker();
           let bridge = baseBridge;
           try {
             principalTasks = this.principalTaskContext
@@ -2794,6 +2869,15 @@ export class ClaudeCodeRuntime {
               abortController,
               internalMcpServerName: sdkMcpServerName,
               projectMcpServers: approvedProject.mcpServers,
+              canUseTool: async (toolName, permissionInput, permissionOptions) =>
+                toolName === "AskUserQuestion"
+                  ? answerClaudeQuestion(
+                      ask,
+                      permissionInput,
+                      permissionOptions.signal,
+                      this.askTimeoutMs(),
+                    )
+                  : { behavior: "allow" },
               environment: this.environment,
               ...(spawnClaudeCodeProcess ? { spawnClaudeCodeProcess } : {}),
             });
@@ -2835,6 +2919,7 @@ export class ClaudeCodeRuntime {
             exited,
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
             ...(principalTasks ? { principalTasks } : {}),
+            ask,
             resources,
             projectMcpFailed: false,
           };
@@ -3116,6 +3201,7 @@ export class ClaudeCodeRuntime {
     const warm = this.warm.get(key);
     if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
+    warm.ask.close();
     warm.principalTasks?.retire();
     let exits = this.retiring.get(key);
     if (!exits) {

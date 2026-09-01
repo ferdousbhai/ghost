@@ -2228,14 +2228,14 @@ fi
       strictMcpConfig: true,
       permissionMode: "bypassPermissions",
       allowDangerouslySkipPermissions: true,
+      toolConfig: { askUserQuestion: { previewFormat: "markdown" } },
       persistSession: true,
     });
     expect(seenOptions[0]?.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     expect(seenOptions[0]?.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    // Scheduling and asking the owner are Ghost-owned; Claude's own versions
-    // would keep state or reach the owner outside Ghost's surfaces.
+    // Scheduling remains Ghost-owned; Claude's native owner question is
+    // retained because its permission callback is routed through Ghost's HUD.
     for (const tool of [
-      "AskUserQuestion",
       "CronCreate",
       "CronDelete",
       "CronList",
@@ -2244,7 +2244,16 @@ fi
       "ScheduleWakeup",
     ]) expect(seenOptions[0]?.disallowedTools, tool).toContain(tool);
     // Claude's own way of working is untouched.
-    for (const tool of ["Agent", "Task", "Bash", "Read", "Write", "TodoWrite", "WebSearch"]) {
+    for (const tool of [
+      "Agent",
+      "AskUserQuestion",
+      "Task",
+      "Bash",
+      "Read",
+      "Write",
+      "TodoWrite",
+      "WebSearch",
+    ]) {
       expect(seenOptions[0]?.disallowedTools, tool).not.toContain(tool);
     }
     const permissionInput = { command: "printf owner-approved" };
@@ -2253,6 +2262,87 @@ fi
       toolUseID: "permission-test",
     })).resolves.toEqual({ behavior: "allow" });
     expect(permissionInput).toEqual({ command: "printf owner-approved" });
+
+    const askInput = {
+      questions: [{
+        header: "Finish",
+        question: "Which finish should I use?",
+        options: [
+          {
+            label: "Matte",
+            description: "Quiet and low-glare",
+            preview: "Matte preview",
+          },
+          { label: "Gloss", description: "Brighter and reflective" },
+        ],
+        multiSelect: false,
+      }],
+    };
+    const askPermission = seenOptions[0]?.canUseTool?.("AskUserQuestion", askInput, {
+      signal: new AbortController().signal,
+      toolUseID: "ask-permission-test",
+    });
+    const pendingAsk = host!.pendingAsk("casper", "conversation-1", "claude-code");
+    if (!pendingAsk) throw new Error("Claude's permission callback did not publish its question.");
+    expect(pendingAsk.questions).toEqual([expect.objectContaining({
+      id: "question-1",
+      question: "Which finish should I use?",
+      multi: false,
+    })]);
+    host!.answerAsk("casper", "conversation-1", pendingAsk.id, {
+      kind: "submit",
+      results: [{
+        id: "question-1",
+        selectedOptions: ["Matte"],
+        note: "Use recycled stock",
+      }],
+    }, "claude-code");
+    await expect(askPermission).resolves.toEqual({
+      behavior: "allow",
+      updatedInput: {
+        ...askInput,
+        answers: { "Which finish should I use?": "Matte" },
+        annotations: {
+          "Which finish should I use?": {
+            preview: "Matte preview",
+            notes: "Use recycled stock",
+          },
+        },
+      },
+    });
+    expect(host!.pendingAsk("casper", "conversation-1", "claude-code")).toBeNull();
+
+    await expect(seenOptions[0]?.canUseTool?.("AskUserQuestion", { questions: [] }, {
+      signal: new AbortController().signal,
+      toolUseID: "malformed-ask-permission-test",
+    })).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("malformed"),
+    });
+
+    const chatPermission = seenOptions[0]?.canUseTool?.("AskUserQuestion", askInput, {
+      signal: new AbortController().signal,
+      toolUseID: "chat-ask-permission-test",
+    });
+    const chatAsk = host!.pendingAsk("casper", "conversation-1", "claude-code");
+    if (!chatAsk) throw new Error("Claude's chat redirect did not publish its question.");
+    host!.answerAsk("casper", "conversation-1", chatAsk.id, { kind: "chat" }, "claude-code");
+    await expect(chatPermission).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("discuss"),
+    });
+
+    const cancelPermission = seenOptions[0]?.canUseTool?.("AskUserQuestion", askInput, {
+      signal: new AbortController().signal,
+      toolUseID: "cancel-ask-permission-test",
+    });
+    const cancelAsk = host!.pendingAsk("casper", "conversation-1", "claude-code");
+    if (!cancelAsk) throw new Error("Claude's cancellable ask did not publish its question.");
+    host!.answerAsk("casper", "conversation-1", cancelAsk.id, { kind: "cancel" }, "claude-code");
+    await expect(cancelPermission).resolves.toEqual({
+      behavior: "deny",
+      message: expect.stringContaining("dismissed"),
+    });
     const systemPrompt = seenOptions[0]?.systemPrompt;
     expect(systemPrompt).toMatchObject({
       type: "preset",

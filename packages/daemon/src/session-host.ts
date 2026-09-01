@@ -259,6 +259,19 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
   "write",
 ];
 
+const INSPECT_IMAGE_TOOL_NAME = "inspect_image";
+
+/** Keep the fallback vision tool out of a model's tool list when it can read images itself. */
+function syncInspectImageTool(session: AgentSession): void {
+  const active = session.getActiveToolNames();
+  const hasActive = active.includes(INSPECT_IMAGE_TOOL_NAME);
+  const needsFallback = session.model?.input.includes("image") !== true;
+  if (needsFallback === hasActive) return;
+  session.setActiveToolsByName(needsFallback
+    ? [...active, INSPECT_IMAGE_TOOL_NAME]
+    : active.filter((name) => name !== INSPECT_IMAGE_TOOL_NAME));
+}
+
 const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
@@ -680,6 +693,7 @@ export interface SessionHostOptions {
     | "machineSkillPaths"
     | "ownerHome"
     | "scheduleUnitDir"
+    | "askTimeoutMs"
   >;
   liveVoice?: LiveVoiceManager;
   collaboration?: CollaborationManager;
@@ -1879,6 +1893,7 @@ export class SessionHost {
       hooks: this.hooks,
       ...(options.claudeCode ?? {}),
       scheduleUnitDir: this.scheduleUnitDir,
+      askTimeoutMs: () => this.askTimeoutSeconds * 1000,
     });
     this.liveVoice = options.liveVoice ?? new LiveVoiceManager();
     this.liveVoice.setOnInactive(async (key) => {
@@ -3660,6 +3675,7 @@ export class SessionHost {
     });
     const { session, extensionsResult } = created;
     createdSession = session;
+    syncInspectImageTool(session);
     await this.sessionStartupProbe("agent-session", modelRuntime);
 
     for (const error of extensionsResult.errors ?? []) {
@@ -3822,8 +3838,13 @@ export class SessionHost {
     sessionId?: string | null,
     runtime: ConversationRuntime = "pi",
   ): PendingAsk | null {
-    assertPiConversation(runtime, "Ask");
     this.registry.get(ghostName);
+    if (runtime === "claude-code") {
+      return this.claudeCode.pendingAsk(
+        ghostName,
+        requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY),
+      );
+    }
     return this.sessions.get(this.keyOf(ghostName, sessionId))?.ask.pending ?? null;
   }
 
@@ -3834,8 +3855,27 @@ export class SessionHost {
     answer: unknown,
     runtime: ConversationRuntime = "pi",
   ): void {
-    assertPiConversation(runtime, "Ask");
     this.registry.get(ghostName);
+    if (runtime === "claude-code") {
+      try {
+        this.claudeCode.answerAsk(
+          ghostName,
+          requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY),
+          askId,
+          answer,
+        );
+      } catch (error) {
+        if (error instanceof AskBrokerError) {
+          throw new GhostError(
+            error.code,
+            error.message,
+            error.code === "invalid_ask_answer" ? 400 : 409,
+          );
+        }
+        throw error;
+      }
+      return;
+    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) {
       throw new GhostError("ask_not_pending", "This conversation is not waiting for an answer.", 409);
@@ -4926,6 +4966,7 @@ export class SessionHost {
         configDir,
         ghostName,
       );
+      syncInspectImageTool(hosted.session);
     } catch (error) {
       hosted.logger.warn("model rebind failed", {
         error: (error as Error).message,

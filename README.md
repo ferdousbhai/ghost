@@ -7,8 +7,9 @@ built on the [pi](https://github.com/earendil-works/pi) coding agent
 (`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`).
 
 Ghost pins pi 0.84.3. pi sessions keep its native filesystem tools and Bash,
-steering/follow-ups, and branchable conversations; Ghost adds its own `ask`
-tool, supervised native Pi/Codex/Claude Code workers, model roles and fallback
+steering/follow-ups, and branchable conversations; Ghost adds an `ask` tool
+matching Claude Code's native `AskUserQuestion`, supervised native
+Pi/Codex/Claude Code workers, model roles and fallback
 chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
 explicitly trusted project. Live voice remains deferred; remote sharing uses

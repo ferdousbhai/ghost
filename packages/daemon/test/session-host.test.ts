@@ -311,7 +311,7 @@ async function establishHistoricalAsk(sessionId: string): Promise<string> {
   const ask = await waitFor(() => host!.pendingAsk("casper", sessionId));
   host!.answerAsk("casper", sessionId, ask.id, {
     kind: "submit",
-    results: [{ id: "finish", selectedOptions: ["Matte"] }],
+    results: [{ id: "question-1", selectedOptions: ["Matte"] }],
   });
   await initial;
   const transcript = await host!.readTranscript("casper", sessionId);
@@ -1857,6 +1857,7 @@ describe("SessionHost.open", () => {
       "write",
     ]);
     expect(names).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES, "ask"]));
+    expect(names).toContain("inspect_image");
     expect(names).not.toContain("web_search");
     expect(names).not.toContain("web_fetch");
     expect(names).not.toContain("task");
@@ -1864,6 +1865,23 @@ describe("SessionHost.open", () => {
     for (const name of ["ghost_browser", "ghost_desktop", "ghost_screen"]) {
       expect(handle.session.getToolDefinition(name), `${name} must be available`).toBeDefined();
     }
+  });
+
+  it("does not offer inspect_image to a chat model with native vision", async () => {
+    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const paths = ghostPaths(dir);
+    const models = openAiCompatiblePreset({
+      providerId: "ghost-local",
+      baseUrl: provider!.url,
+      modelId: provider!.modelId,
+      apiKey: "not-needed",
+    });
+    models.providers["ghost-local"]!.models![0]!.input = ["text", "image"];
+    writeGhostModels(paths.home, models);
+
+    const handle = await host!.open("casper", "vision-tools");
+    expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
+    expect(handle.session.getToolDefinition("inspect_image")).toBeDefined();
   });
 
   it("adds principal task tools without removing any existing Pi capability", async () => {
@@ -3175,9 +3193,13 @@ describe("SessionHost.reloadMcp", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "reload-ready",
+            header: "Reload",
             question: "Finish the collab turn?",
-            options: [{ label: "Yes" }],
+            options: [
+              { label: "Yes", description: "Finish this turn" },
+              { label: "No", description: "Keep this turn open" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -3187,9 +3209,13 @@ describe("SessionHost.reloadMcp", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "reconnect-ready",
+            header: "Reconnect",
             question: "Finish the reconnect turn?",
-            options: [{ label: "Yes" }],
+            options: [
+              { label: "Yes", description: "Finish this turn" },
+              { label: "No", description: "Keep this turn open" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -3199,9 +3225,13 @@ describe("SessionHost.reloadMcp", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "publication-ready",
+            header: "Publish",
             question: "Finish the publication-first turn?",
-            options: [{ label: "Yes" }],
+            options: [
+              { label: "Yes", description: "Finish this turn" },
+              { label: "No", description: "Keep this turn open" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -3271,7 +3301,7 @@ describe("SessionHost.reloadMcp", () => {
     expect(opened.session.getToolDefinition(toolName)).toBeUndefined();
     host!.answerAsk("casper", conversationId, reloadAsk.id, {
       kind: "submit",
-      results: [{ id: "reload-ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await reloadTurn;
     await reload;
@@ -3297,7 +3327,7 @@ describe("SessionHost.reloadMcp", () => {
     expect(opened.session.getToolDefinition(toolName)).toBeDefined();
     host!.answerAsk("casper", conversationId, reconnectAsk.id, {
       kind: "submit",
-      results: [{ id: "reconnect-ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await reconnectTurn;
     await reconnect;
@@ -3333,7 +3363,7 @@ describe("SessionHost.reloadMcp", () => {
     const publicationAsk = await waitFor(() => host!.pendingAsk("casper", conversationId));
     host!.answerAsk("casper", conversationId, publicationAsk.id, {
       kind: "submit",
-      results: [{ id: "publication-ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await publicationFirstTurn;
     expect(refreshSpy).toHaveBeenCalled();
@@ -3349,9 +3379,13 @@ describe("SessionHost.reloadMcp", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "abort-ready",
+            header: "Abort",
             question: "Wait for abort?",
-            options: [{ label: "Yes" }],
+            options: [
+              { label: "Yes", description: "Wait for abort" },
+              { label: "No", description: "Continue without waiting" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -3360,9 +3394,13 @@ describe("SessionHost.reloadMcp", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "shutdown-ready",
+            header: "Shutdown",
             question: "Wait for shutdown?",
-            options: [{ label: "Yes" }],
+            options: [
+              { label: "Yes", description: "Wait for shutdown" },
+              { label: "No", description: "Continue without waiting" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4148,9 +4186,13 @@ lines.on("line", (line) => {
         name: "ask",
         args: {
           questions: [{
-            id: "ready",
+            header: "Ready",
             question: "Ready?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Continue" },
+              { label: "No", description: "Wait" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4173,7 +4215,7 @@ lines.on("line", (line) => {
     expect(handle.session.getToolDefinition(toolName)).toBeUndefined();
     host!.answerAsk("casper", "conv-mcp-busy", pending.id, {
       kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await turn;
 
@@ -4189,9 +4231,13 @@ lines.on("line", (line) => {
         name: "ask",
         args: {
           questions: [{
-            id: "remote-ready",
+            header: "Ready",
             question: "Ready?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Continue" },
+              { label: "No", description: "Wait" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4213,7 +4259,7 @@ lines.on("line", (line) => {
 
     host!.answerAsk("casper", "conv-mcp-remote", pending.id, {
       kind: "submit",
-      results: [{ id: "remote-ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await remoteTurn;
     await waitFor(() => handle.session.getToolDefinition(toolName) ? true : null);
@@ -4406,14 +4452,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "finish",
             header: "Finish",
             question: "Which finish should I use?",
             options: [
               { label: "Matte", description: "Quiet and low-glare" },
               { label: "Gloss", description: "Brighter and reflective" },
             ],
-            recommended: 0,
+            multiSelect: false,
           }],
         },
       },
@@ -4432,11 +4477,11 @@ describe("SessionHost.runTurn", () => {
 
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-ask"));
     expect(pending.questions).toEqual([
-      expect.objectContaining({ id: "finish", question: "Which finish should I use?" }),
+      expect.objectContaining({ id: "question-1", question: "Which finish should I use?" }),
     ]);
     host!.answerAsk("casper", "conv-ask", pending.id, {
       kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Matte"] }],
+      results: [{ id: "question-1", selectedOptions: ["Matte"] }],
     });
     await turn;
 
@@ -4475,11 +4520,13 @@ describe("SessionHost.runTurn", () => {
           name: "ask",
           args: {
             questions: [{
-              id: "finish",
               header: "Finish",
               question: "Which finish should I use?",
-              options: [{ label: "Matte" }, { label: "Gloss" }],
-              recommended: 0,
+              options: [
+                { label: "Matte", description: "Quiet and low-glare" },
+                { label: "Gloss", description: "Brighter and reflective" },
+              ],
+              multiSelect: false,
             }],
           },
         },
@@ -4509,7 +4556,7 @@ describe("SessionHost.runTurn", () => {
     const firstAsk = await waitFor(() => host!.pendingAsk("casper", "conv-reanswer"));
     host!.answerAsk("casper", "conv-reanswer", firstAsk.id, {
       kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Matte"] }],
+      results: [{ id: "question-1", selectedOptions: ["Matte"] }],
     });
     await firstTurn;
 
@@ -4533,7 +4580,7 @@ describe("SessionHost.runTurn", () => {
     const revisedAsk = await waitFor(() => host!.pendingAsk("casper", "conv-reanswer"));
     host!.answerAsk("casper", "conv-reanswer", revisedAsk.id, {
       kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Gloss"] }],
+      results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
     });
     await writerEntered.promise;
     await waitFor(() => events.some((event) => event.type === "branch_changed") ? true : null);
@@ -4607,10 +4654,13 @@ describe("SessionHost.runTurn", () => {
           name: "ask",
           args: {
             questions: [{
-              id: "finish",
+              header: "Finish",
               question: "Which finish?",
-              options: [{ label: "Matte" }, { label: "Gloss" }],
-              recommended: 0,
+              options: [
+                { label: "Matte", description: "Quiet and low-glare" },
+                { label: "Gloss", description: "Brighter and reflective" },
+              ],
+              multiSelect: false,
             }],
           },
         },
@@ -4656,7 +4706,7 @@ describe("SessionHost.runTurn", () => {
       const revisedAsk = await waitFor(() => host!.pendingAsk("casper", sessionId));
       host!.answerAsk("casper", sessionId, revisedAsk.id, {
         kind: "submit",
-        results: [{ id: "finish", selectedOptions: ["Gloss"] }],
+        results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
       });
       await reanswer;
 
@@ -4707,10 +4757,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "finish",
+            header: "Finish",
             question: "Which finish?",
-            options: [{ label: "Matte" }, { label: "Gloss" }],
-            recommended: 0,
+            options: [
+              { label: "Matte", description: "Quiet and low-glare" },
+              { label: "Gloss", description: "Brighter and reflective" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4750,10 +4803,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "finish",
+            header: "Finish",
             question: "Which finish?",
-            options: [{ label: "Matte" }, { label: "Gloss" }],
-            recommended: 0,
+            options: [
+              { label: "Matte", description: "Quiet and low-glare" },
+              { label: "Gloss", description: "Brighter and reflective" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4773,7 +4829,7 @@ describe("SessionHost.runTurn", () => {
     );
     host!.answerAsk("casper", "strict-reanswer-maintenance", firstAsk.id, {
       kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Matte"] }],
+      results: [{ id: "question-1", selectedOptions: ["Matte"] }],
     });
     await initial;
     const before = await host!.readTranscript("casper", "strict-reanswer-maintenance");
@@ -4794,7 +4850,7 @@ describe("SessionHost.runTurn", () => {
     );
     host!.answerAsk("casper", "strict-reanswer-maintenance", revisedAsk.id, {
       kind: "submit",
-      results: [{ id: "finish", selectedOptions: ["Gloss"] }],
+      results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
     });
     await reanswer;
 
@@ -4821,10 +4877,13 @@ describe("SessionHost.runTurn", () => {
       name: "ask",
       args: {
         questions: [{
-          id: "finish",
+          header: "Finish",
           question: "Which finish should I use?",
-          options: [{ label: "Matte" }, { label: "Gloss" }],
-          recommended: 0,
+          options: [
+            { label: "Matte", description: "Quiet and low-glare" },
+            { label: "Gloss", description: "Brighter and reflective" },
+          ],
+          multiSelect: false,
         }],
       },
     };
@@ -4849,7 +4908,7 @@ describe("SessionHost.runTurn", () => {
       const pending = await waitFor(() => host!.pendingAsk("casper", "conv-submitted"));
       host!.answerAsk("casper", "conv-submitted", pending.id, {
         kind: "submit",
-        results: [{ id: "finish", selectedOptions: ["Matte"] }],
+        results: [{ id: "question-1", selectedOptions: ["Matte"] }],
       });
       await turn;
 
@@ -4885,12 +4944,9 @@ describe("SessionHost.runTurn", () => {
       expect(await settledOf("conv-timedout")).toBe("timedOut");
     }, 15_000);
 
-    it("answers a timed-out question with nothing when it recommended nothing", async () => {
-      const { questions } = ASK_STEP.args;
-      const [question] = questions;
-      const { recommended: _recommended, ...open } = question!;
+    it("answers a timed-out question without inventing an owner choice", async () => {
       await setup([
-        { ...ASK_STEP, args: { questions: [open] } },
+        ASK_STEP,
         { kind: "text", text: "Nobody chose; I will hold." },
       ], { askTimeoutSeconds: 1 });
       const turn = host!.runTurn("casper", {
@@ -4950,9 +5006,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "ready",
+            header: "Ready",
             question: "Ready to continue?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Continue" },
+              { label: "No", description: "Wait" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -4976,7 +5036,7 @@ describe("SessionHost.runTurn", () => {
 
     host!.answerAsk("casper", "conv-queue", pending.id, {
       kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await turn;
     const requests = JSON.stringify(provider!.requests.map((request) => request.messages));
@@ -5021,9 +5081,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "ready",
+            header: "Ready",
             question: "Ready?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Continue" },
+              { label: "No", description: "Wait" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -5045,7 +5109,7 @@ describe("SessionHost.runTurn", () => {
     );
     host!.answerAsk("casper", "strict-queued-maintenance", pending.id, {
       kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await turn;
 
@@ -6145,9 +6209,13 @@ describe("SessionHost.runTurn", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "remote-delete",
+            header: "Finish",
             question: "Can the remote turn finish?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Finish the turn" },
+              { label: "No", description: "Keep it open" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -6167,7 +6235,7 @@ describe("SessionHost.runTurn", () => {
 
     host!.answerAsk("casper", "conv-remote-delete", pending.id, {
       kind: "submit",
-      results: [{ id: "remote-delete", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await remoteTurn;
     const deleted = await host!.deleteSession("casper", "conv-remote-delete");
@@ -9171,9 +9239,13 @@ describe("renaming a conversation", () => {
         name: "ask",
         args: {
           questions: [{
-            id: "ready",
+            header: "Ready",
             question: "Ready?",
-            options: [{ label: "Yes" }, { label: "No" }],
+            options: [
+              { label: "Yes", description: "Continue" },
+              { label: "No", description: "Wait" },
+            ],
+            multiSelect: false,
           }],
         },
       },
@@ -9191,7 +9263,7 @@ describe("renaming a conversation", () => {
       .toBe("Watching it work");
     host!.answerAsk("casper", "conv-live", pending.id, {
       kind: "submit",
-      results: [{ id: "ready", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await turn;
     expect(await titleOf("conv-live")).toBe("Watching it work");
@@ -9319,6 +9391,28 @@ describe("model switch reaches a live cached session", () => {
     expect(provider.requests.at(-1)?.model).toBe("model-b");
   });
 
+  it("tracks inspect_image availability across live model rebinds", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    const models = twoModelFile(provider.url);
+    models.providers["ghost-local"]!.models![1]!.input = ["text", "image"];
+    writeGhostModels(paths.home, models);
+    host = new SessionHost({ registry: temp.registry, offline: true });
+
+    const handle = await host.open("casper", "vision-rebind");
+    expect(handle.session.getActiveToolNames()).toContain("inspect_image");
+
+    setChatModelRole(paths.home, "ghost-local", "model-b");
+    await host.rebindModel("casper");
+    expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
+
+    setChatModelRole(paths.home, "ghost-local", "model-a");
+    await host.rebindModel("casper");
+    expect(handle.session.getActiveToolNames()).toContain("inspect_image");
+  });
+
   it("rebinds a cleared chat role through the same Ghost catalogue-default resolver", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
@@ -9385,9 +9479,13 @@ describe("model switch reaches a live cached session", () => {
           name: "ask",
           args: {
             questions: [{
-              id: "remote-model",
+              header: "Model",
               question: "Keep this model for the current turn?",
-              options: [{ label: "Yes" }, { label: "No" }],
+              options: [
+                { label: "Yes", description: "Keep the current model" },
+                { label: "No", description: "Change after this turn" },
+              ],
+              multiSelect: false,
             }],
           },
         },
@@ -9408,7 +9506,7 @@ describe("model switch reaches a live cached session", () => {
 
     host.answerAsk("casper", "conv-remote-model", pending.id, {
       kind: "submit",
-      results: [{ id: "remote-model", selectedOptions: ["Yes"] }],
+      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
     });
     await remoteTurn;
     await waitFor(() => handle.model?.id === "model-b" ? true : null);

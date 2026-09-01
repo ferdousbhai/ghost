@@ -68,9 +68,11 @@ Before each admitted owner turn Ghost:
 3. builds or reuses the conversation persona and trusted-project snapshot;
 4. exposes Ghost tools as one in-process SDK MCP server and translates only the
    admitted, credential-free project MCP rows;
-5. starts or reuses one warm SDK query and maps its messages onto Ghost's
+5. routes native `AskUserQuestion` permission callbacks through Ghost's
+   conversation-scoped ask broker and existing HUD dialog;
+6. starts or reuses one warm SDK query and maps its messages onto Ghost's
    pi-messages protocol;
-6. persists opaque resume metadata and actual cwd, runs awaited hooks and
+7. persists opaque resume metadata and actual cwd, runs awaited hooks and
    maintenance, then publishes the terminal event.
 
 The exact probes, timeouts, identity rechecks, process-group teardown, warm
@@ -92,19 +94,49 @@ installed executable.
 ### What Claude keeps
 
 - its native system prompt, with Ghost's persona/policy appended;
-- Bash, file tools, web tools, subagents, todos, planning, and native working
-  style;
+- Bash, file tools, native image understanding, web tools, subagents,
+  background tasks, todos, planning, and native working style;
+- native `AskUserQuestion`, with Markdown previews and its owner interaction
+  handled by Ghost instead of Claude's terminal UI;
 - unrestricted local execution under `bypassPermissions`, because the HUD has
   no Claude approval surface;
 - the owner installation's native authentication and provider routing.
 
 ### What Ghost removes or replaces
 
-`AskUserQuestion`, native cron/scheduling, push notifications, remote triggers,
-and scheduled wakeups are disabled because Ghost owns those surfaces or has no
-safe route for them. Claude auto-memory is disabled. Owner-visible durable
-knowledge, plans, and tasks use Obsidian; ghost-private continuity uses the
-ghost home's memory files.
+Native cron/scheduling, push notifications, remote triggers, and scheduled
+wakeups are disabled because Ghost owns those surfaces or has no safe route for
+them. Claude auto-memory is disabled. Owner-visible durable knowledge, plans,
+and tasks use Obsidian; ghost-private continuity uses the ghost home's memory
+files.
+
+Claude's model-facing question signature stays native. Pi's `ask` mirrors the
+same `questions`/`header`/`options`/`multiSelect` input and
+`answers`/`annotations` output. The pi-messages adapter normalizes the visible
+tool name to `ask`, so the daemon route, HUD activity, timeout, dismissal, and
+chat-redirect behavior do not depend on which principal runtime is active.
+
+### Principal capability parity
+
+| Capability | Pi principal | Claude Code principal |
+|---|---|---|
+| Owner questions | Ghost `ask`, using the native Claude signature and result | Native `AskUserQuestion`, routed through the same broker and HUD |
+| Image understanding | Model-native when the chat model accepts images; otherwise `inspect_image` | Native vision; no redundant `inspect_image` |
+| Browser, screen, desktop | Ghost runtime-neutral tools | The same Ghost tools through the SDK MCP bridge |
+| Supervised delegation | Ghost principal task tools | The same Ghost principal task tools through the SDK MCP bridge |
+| Files, search, shell | Pi-native tools; Ghost wraps Bash in `GhostJob` | Claude-native tools and background tasks |
+| Skills, rules, prompts | Admitted declarative snapshot | The same admitted bytes appended to Claude's native prompt |
+| MCP | Ghost-home and trusted-project rows through Ghost's MCP manager | Credential-free trusted-project rows only |
+| Ghost-home executable hook extensions | Pi-native extension factories | Not admitted |
+| Transcript, branches, commands, job API | Daemon-visible Pi session state | Native opaque Claude session state; these daemon APIs are unsupported |
+
+The last three differences are boundaries, not substitute tools. MCP is a
+real remaining capability gap: the current Claude snapshot cannot persist
+secret-bearing rows and the SDK configuration cannot express Ghost's
+per-server cwd. Ghost-home executable hook extensions are coupled to Pi's
+extension API. Transcript, branching, command expansion, and background-task
+state are runtime mechanics that Ghost does not emulate on top of Claude's
+opaque session.
 
 Filesystem setting sources, SDK plugin/skill discovery, and ambient MCP are
 empty. Ghost supplies only the explicit machine/ghost/project declarative
