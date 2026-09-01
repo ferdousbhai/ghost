@@ -29,6 +29,8 @@ from ._vendor.omaharness.errors import (
 from ._vendor.omaharness.inputs import MAX_CLICKS
 from .bridge import GhostDesktop, UnknownRefError
 
+DESKTOP_HELPER_PROTOCOL_VERSION = 1
+
 # Order matters: _error_code returns the first isinstance match, so the more
 # specific OmaHarnessError subclasses (UnknownRefError) precede OmaHarnessError.
 _ERROR_CODES: dict[type, str] = {
@@ -171,7 +173,7 @@ class Server:
             "type": "hello",
             "helper": "ghost-desktop-helper",
             "version": __version__,
-            "protocol": 1,
+            "protocol": DESKTOP_HELPER_PROTOCOL_VERSION,
             "ops": OPS,
             "in_hyprland_session": hypr.in_hyprland_session(),
         }

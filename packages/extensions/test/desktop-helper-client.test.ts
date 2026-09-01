@@ -10,6 +10,7 @@
 import { EventEmitter } from "node:events";
 import { describe, expect, it } from "vitest";
 import {
+  DESKTOP_HELPER_PROTOCOL_VERSION,
   DesktopHelperClient,
   ghostErrorFromSidecar,
   MAX_HELPER_LINE_BYTES,
@@ -23,7 +24,7 @@ const HELLO: HelloPayload = {
   type: "hello",
   helper: "ghost-desktop-helper",
   version: "0.1.0",
-  protocol: 1,
+  protocol: DESKTOP_HELPER_PROTOCOL_VERSION,
   ops: ["state", "capture"],
   in_hyprland_session: true,
   "available-backends": {
@@ -124,6 +125,30 @@ describe("hello handshake", () => {
     proc.emit("exit", 1, null);
     await expect(pending).rejects.toThrowError(/exited/);
   });
+
+  it.each([undefined, 0, 2, "1"])(
+    "rejects helper protocol %s before sending a request",
+    async (protocol) => {
+      const proc = new FakeProcess();
+      const client = clientFor(proc);
+      const pending = client.request("state");
+
+      proc.line({ ...HELLO, protocol });
+
+      await expect(pending).rejects.toMatchObject({
+        code: "invalid_format",
+        message: expect.stringMatching(/same build/i),
+        details: {
+          expectedProtocol: DESKTOP_HELPER_PROTOCOL_VERSION,
+          actualProtocol: protocol ?? null,
+          helperVersion: HELLO.version,
+        },
+      });
+      expect(proc.writes).toEqual([]);
+      expect(proc.killSignals).toEqual(["SIGTERM"]);
+      await client.dispose();
+    },
+  );
 
   it("retries after a synchronous launch failure instead of caching the rejection", async () => {
     const proc = new FakeProcess();

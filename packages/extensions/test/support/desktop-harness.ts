@@ -26,11 +26,12 @@ import type {
 import type { ToolCallEventResult } from "./harness.js";
 import type { CommandResult, CommandRunner, RunCommandOptions } from "../../src/extensions/shared.js";
 import { CommandError } from "../../src/extensions/shared.js";
-import type {
-  AvailableBackends,
-  DesktopHelper,
-  HelloPayload,
-  RequestOptions,
+import {
+  DESKTOP_HELPER_PROTOCOL_VERSION,
+  type AvailableBackends,
+  type DesktopHelper,
+  type HelloPayload,
+  type RequestOptions,
 } from "../../src/extensions/desktop-helper-client.js";
 
 type AnyTool = AnyGhostToolDefinition;
@@ -128,7 +129,7 @@ export function fakeHelper(options: FakeHelperOptions = {}): FakeHelper {
     type: "hello",
     helper: "ghost-desktop-helper",
     version: "0.1.0",
-    protocol: 1,
+    protocol: DESKTOP_HELPER_PROTOCOL_VERSION,
     ops: ["state", "capture", "ax_query"],
     in_hyprland_session: options.inHyprland ?? true,
     "available-backends": backends,

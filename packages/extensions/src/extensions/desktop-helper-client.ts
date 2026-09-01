@@ -69,6 +69,26 @@ export interface HelloPayload {
   readonly [key: string]: unknown;
 }
 
+export const DESKTOP_HELPER_PROTOCOL_VERSION = 1;
+
+function helperProtocolError(hello: HelloPayload): GhostError | null {
+  if (hello.protocol === DESKTOP_HELPER_PROTOCOL_VERSION) return null;
+  const reported = hello.protocol === undefined
+    ? "no protocol version"
+    : `protocol ${JSON.stringify(hello.protocol)}`;
+  return new GhostError(
+    "invalid_format",
+    `The desktop helper reported ${reported}, but this Ghost build requires protocol `
+      + `${DESKTOP_HELPER_PROTOCOL_VERSION}. Reinstall or update Ghost so ghostd and `
+      + "ghost-desktop-helper come from the same build, then restart ghostd.",
+    {
+      expectedProtocol: DESKTOP_HELPER_PROTOCOL_VERSION,
+      actualProtocol: hello.protocol ?? null,
+      helperVersion: hello.version ?? null,
+    },
+  );
+}
+
 /**
  * The four honesty fields every capture / input / perform op carries, so the
  * model knows whether an action disturbed the desktop and whether the pixels or
@@ -419,6 +439,11 @@ export class DesktopHelperClient implements DesktopHelper {
       if (this.child !== child) return;
       this.onStdout(chunk, (hello) => {
         if (this.child !== child) return;
+        const protocolError = helperProtocolError(hello);
+        if (protocolError) {
+          void this.teardown(protocolError);
+          return;
+        }
         this.clearStartTimer();
         this.helloPayload = hello;
         this.rejectReady = null;

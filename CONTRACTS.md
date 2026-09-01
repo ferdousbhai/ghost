@@ -379,7 +379,8 @@ hosted-session, concurrency, or spend cap.
   frames are capped at 32 MiB of UTF-8 before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
-  it.
+  it. Its startup handshake and the extensions client agree on desktop-helper
+  protocol version 1; a mismatch retires the sidecar before any request is sent.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   candidates, not user data or service activation policy.
 

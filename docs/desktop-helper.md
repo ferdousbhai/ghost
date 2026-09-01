@@ -31,6 +31,13 @@ A `hello` handshake reports helper version, Hyprland version, detected
 dispatcher grammar, and which capabilities/backends are actually available
 (grim foreign-toplevel? wtype? ydotool? AT-SPI bus?).
 
+The handshake carries desktop-helper protocol version `1`, pinned by
+`DESKTOP_HELPER_PROTOCOL_VERSION` in the [Python sidecar](../packages/desktop-helper/src/ghost_desktop_helper/protocol.py)
+and [TypeScript client](../packages/extensions/src/extensions/desktop-helper-client.ts).
+A missing or different version stops the sidecar before any request is sent and
+asks the owner to reinstall/update Ghost so `ghostd` and
+`ghost-desktop-helper` come from the same build.
+
 Request:  `{ "id": <n>, "op": "<name>", "args": { ... } }`
 Response: `{ "id": <n>, "ok": true, "result": { ... } }`
        |  `{ "id": <n>, "ok": false, "error": { "code": "...", "message": "...", "details": {} } }`

@@ -9,7 +9,7 @@ from conftest import FakeHyprctl, sample_window, unlocked_runner
 
 from ghost_desktop_helper._vendor.omaharness.inputs import MAX_CLICKS
 from ghost_desktop_helper.bridge import GhostDesktop
-from ghost_desktop_helper.protocol import OPS, Server
+from ghost_desktop_helper.protocol import DESKTOP_HELPER_PROTOCOL_VERSION, OPS, Server
 
 
 def _desktop(**kw):
@@ -26,6 +26,8 @@ def test_hello_reports_required_fields():
     assert payload["type"] == "hello"
     assert payload["helper"] == "ghost-desktop-helper"
     assert "version" in payload
+    assert DESKTOP_HELPER_PROTOCOL_VERSION == 1
+    assert payload["protocol"] == DESKTOP_HELPER_PROTOCOL_VERSION
     assert "hyprland-version" in payload
     assert "detected-dispatch-grammar" in payload
     assert "available-backends" in payload
