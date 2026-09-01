@@ -20,6 +20,8 @@ Rectangle {
 
     signal closeRequested()
 
+    property string requestedProvider: ""
+
     // The current daemon-reported step, unpacked with guards (no nested access
     // on a possibly-empty object).
     readonly property var view: Ghostd.loginState
@@ -36,10 +38,12 @@ Rectangle {
     radius: Theme.radius
     color: Theme.background
 
-    function open(): void {
+    function open(provider: string): void {
         codeField.text = "";
+        root.requestedProvider = provider;
         Ghostd.resetLogin();
         Ghostd.fetchProviders();
+        Qt.callLater(root.focusRequestedProvider);
     }
 
     function close(): void {
@@ -48,8 +52,27 @@ Rectangle {
         root.closeRequested();
     }
 
+    function focusRequestedProvider(): void {
+        if (!root.visible || !root.picking || root.requestedProvider === "") return;
+        for (let index = 0; index < providerRepeater.count; index += 1) {
+            const provider = Ghostd.providers[index];
+            if (!provider || provider.id !== root.requestedProvider) continue;
+            const row = providerRepeater.itemAt(index);
+            if (!row) return;
+            row.focus = true;
+            row.forceActiveFocus();
+            const top = row.y;
+            const bottom = top + row.height;
+            if (top < providerList.contentY) providerList.contentY = top;
+            else if (bottom > providerList.contentY + providerList.height)
+                providerList.contentY = Math.max(0, bottom - providerList.height);
+            return;
+        }
+    }
+
     onVisibleChanged: if (!visible) {
         codeField.text = "";
+        root.requestedProvider = "";
         Ghostd.cancelLogin();
     }
     Component.onDestruction: Ghostd.cancelLogin()
@@ -61,6 +84,9 @@ Rectangle {
     Connections {
         target: Ghostd
         function onLoginGenerationChanged(): void { codeField.text = ""; }
+        function onProvidersChanged(): void {
+            Qt.callLater(root.focusRequestedProvider);
+        }
     }
 
     function submitCurrentInput(): void {
@@ -109,6 +135,8 @@ Rectangle {
         }
 
         Flickable {
+            id: providerList
+            objectName: "providerList"
             visible: root.picking
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -116,6 +144,7 @@ Rectangle {
             contentHeight: providerColumn.implicitHeight
             clip: true
             interactive: contentHeight > height
+            onContentHeightChanged: Qt.callLater(root.focusRequestedProvider)
 
             Column {
                 id: providerColumn
@@ -135,11 +164,15 @@ Rectangle {
                 }
 
                 Repeater {
+                    id: providerRepeater
                     model: Ghostd.providers
 
                     Rectangle {
                         id: providerRow
                         required property var modelData
+
+                        objectName: "provider-" + providerRow.modelData.id
+                        activeFocusOnTab: true
 
                         readonly property bool hasOauth: (providerRow.modelData.authTypes || []).indexOf("oauth") >= 0
                         readonly property bool hasApiKey: (providerRow.modelData.authTypes || []).indexOf("api_key") >= 0
@@ -148,8 +181,17 @@ Rectangle {
                         implicitHeight: 46
                         radius: Theme.radius / 2
                         color: Theme.surface
-                        border.width: 0
-                        border.color: Theme.border
+                        border.width: providerRow.activeFocus ? 1 : 0
+                        border.color: Theme.accent
+
+                        function startPrimaryLogin(): void {
+                            Ghostd.startLogin(providerRow.modelData.id,
+                                providerRow.hasOauth ? "oauth" : "api_key");
+                        }
+
+                        Keys.onReturnPressed: providerRow.startPrimaryLogin()
+                        Keys.onEnterPressed: providerRow.startPrimaryLogin()
+                        Keys.onSpacePressed: providerRow.startPrimaryLogin()
 
                         RowLayout {
                             anchors.fill: parent
@@ -214,9 +256,7 @@ Rectangle {
                                     anchors.fill: parent
                                     hoverEnabled: true
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: Ghostd.startLogin(
-                                        providerRow.modelData.id,
-                                        providerRow.hasOauth ? "oauth" : "api_key")
+                                    onClicked: providerRow.startPrimaryLogin()
                                 }
                             }
 

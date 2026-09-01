@@ -6,6 +6,10 @@ import "../qml/components" as Components
 TestCase {
     id: tc
     name: "LoginLifecycle"
+    when: windowShown
+    width: 800
+    height: 700
+    visible: true
 
     property var requestQueue: []
 
@@ -346,9 +350,44 @@ TestCase {
         // persistent component must not repopulate either rejected value.
         panel.visible = true;
         tc.useRequests([providers]);
-        panel.open();
+        panel.open("");
         compare(field.text, "");
         compare(Ghostd.providersRequest, providers);
+    }
+
+    function test_requestedProviderIsFocusedAndScrolledIntoView(): void {
+        const providers = tc.request("providers");
+        const start = tc.request("start");
+        tc.useRequests([providers, start]);
+        const panel = createTemporaryObject(loginPanel, tc, {
+            height: 180,
+            visible: true
+        });
+        verify(panel !== null);
+
+        panel.open("target-provider");
+        tc.complete(providers, 200, { providers: [
+            { id: "one", name: "One", authTypes: ["oauth"] },
+            { id: "two", name: "Two", authTypes: ["oauth"] },
+            { id: "three", name: "Three", authTypes: ["oauth"] },
+            { id: "four", name: "Four", authTypes: ["oauth"] },
+            { id: "target-provider", name: "Target", authTypes: ["oauth"] }
+        ] });
+
+        const target = findChild(panel, "provider-target-provider");
+        const list = findChild(panel, "providerList");
+        verify(target !== null);
+        verify(list !== null);
+        tryVerify(function () { return target.activeFocus; });
+        tryVerify(function () { return list.contentY > 0; });
+        compare(panel.requestedProvider, "target-provider");
+
+        keyClick(Qt.Key_Return);
+        compare(Ghostd.loginStartRequest, start);
+        compare(JSON.parse(start.body), {
+            providerId: "target-provider",
+            authType: "oauth"
+        });
     }
 
     function test_panelCloseAbortsTheFlowBeforeItDismisses(): void {

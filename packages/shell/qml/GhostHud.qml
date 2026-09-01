@@ -191,7 +191,7 @@ FloatingWindow {
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
         hud.loginOpen = true;
-        modelLogin.open();
+        modelLogin.open("");
     }
 
     function openSwitcher(): void {
@@ -208,16 +208,16 @@ FloatingWindow {
         hud.loginFromSwitcher = true;
         hud.switcherOpen = false;
         hud.loginOpen = true;
-        modelLogin.open();
+        modelLogin.open("");
     }
 
-    function openLoginForSelectedModel(): void {
+    function openLoginForSelectedModel(provider: string): void {
         projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.switcherOpen = false;
         hud.loginOpen = true;
-        modelLogin.open();
+        modelLogin.open(provider);
     }
 
     /**
@@ -1330,7 +1330,7 @@ FloatingWindow {
                 composer.take();
             }
             function onModelSwitchNeedsLogin(provider: string): void {
-                hud.openLoginForSelectedModel();
+                hud.openLoginForSelectedModel(provider);
             }
             function onQueueMessageRejected(text: string): void {
                 composer.text = text;
