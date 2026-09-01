@@ -577,7 +577,7 @@ export interface SessionRetentionConfig {
   schedule?: (callback: () => void, intervalMs: number) => SessionRetentionTimer;
 }
 
-export const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000;
+const DEFAULT_SESSION_IDLE_TTL_MS = 30 * 60_000;
 const DEFAULT_MAX_CACHED_SESSIONS = 24;
 const DEFAULT_SESSION_SWEEP_INTERVAL_MS = 60_000;
 
@@ -3355,10 +3355,10 @@ export class SessionHost {
         try {
           await this.transactionWriter(marker, record);
         } catch (error) {
-          const markerState = await transactionMarkerState(
+          const { state: markerState } = await transactionMarkerState(
             marker,
             this.transactionMarkerLstat,
-          ).then(({ state }) => state, () => "indeterminate" as const);
+          );
           if (markerState === "absent") revocation.rollback();
           else {
             revocation.commit();
@@ -3385,11 +3385,11 @@ export class SessionHost {
             transactionMarkerState(
               draftAbandonTransactionPath(sessionDir, runtime, conversationId),
               this.transactionMarkerLstat,
-            ).then(({ state }) => state, () => "indeterminate" as const),
+            ).then(({ state }) => state),
             transactionMarkerState(
               draftAbandonReceiptPath(sessionDir, runtime, conversationId),
               this.transactionMarkerLstat,
-            ).then(({ state }) => state, () => "indeterminate" as const),
+            ).then(({ state }) => state),
           ]);
           if (markerState === "absent" && receiptState === "absent" && !revocationCommitted) {
             revocation.rollback();
@@ -7935,10 +7935,10 @@ export class SessionHost {
           await this.transactionWriter(tombstone, emptyDeleteTransaction(runtime, id));
           maintenanceDeleteOutcome = "recovery-pending";
         } catch (error) {
-          const published = await transactionMarkerState(
+          const { state: published } = await transactionMarkerState(
             tombstone,
             this.transactionMarkerLstat,
-          ).then(({ state }) => state, () => "indeterminate" as const);
+          );
           if (published === "absent") revocation.rollback();
           else {
             revocation.commit();
@@ -8102,10 +8102,10 @@ export class SessionHost {
       this.deleting.delete(deleteKey);
       let retiringRuntime: Promise<void> | undefined;
       if (revocation && !revocationRetired) {
-        const markerState = await transactionMarkerState(
+        const { state: markerState } = await transactionMarkerState(
           tombstone,
           this.transactionMarkerLstat,
-        ).then(({ state }) => state, () => "indeterminate" as const);
+        );
         if (markerState === "absent" && !revocationCommitted) revocation.rollback();
         else if (markerState !== "absent") {
           revocation.commit();

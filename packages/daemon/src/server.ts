@@ -1612,7 +1612,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { askId, ...answer } = body as Record<string, unknown>;
+    const { askId, ...answer } = body;
     if (typeof askId !== "string" || askId === "") {
       errorResponse(response, 400, "invalid_request", '"askId" must be a non-empty string.');
       return;
@@ -1647,7 +1647,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { root, cwd, trustToken, expectedGeneration } = body as Record<string, unknown>;
+    const { root, cwd, trustToken, expectedGeneration } = body;
     if (root !== null && (typeof root !== "string" || root === "" || !isAbsolute(root))) {
       errorResponse(response, 400, "invalid_request", '"root" must be an absolute path string or null.');
       return;
@@ -1834,7 +1834,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "Request body must be an exact task object.");
       return;
     }
-    const { harness, assignment, cwd, agent } = body as Record<string, unknown>;
+    const { harness, assignment, cwd, agent } = body;
     if (harness !== "pi" && harness !== "codex" && harness !== "claude-code") {
       errorResponse(response, 400, "invalid_request", '"harness" must be "pi", "codex", or "claude-code".');
       return;
@@ -1901,7 +1901,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
     if (action === "send") {
-      if (!exactObjectKeys(body as Record<string, unknown>, ["message"])) {
+      if (!exactObjectKeys(body, ["message"])) {
         errorResponse(response, 400, "invalid_request", "Send accepts exactly one message.");
         return;
       }
@@ -1917,7 +1917,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       ));
       return;
     }
-    if (!exactObjectKeys(body as Record<string, unknown>, [])) {
+    if (!exactObjectKeys(body, [])) {
       errorResponse(response, 400, "invalid_request", "Cancel accepts an empty object.");
       return;
     }

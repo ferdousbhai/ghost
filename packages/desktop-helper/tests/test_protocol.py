@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 
 import pytest
@@ -140,8 +141,6 @@ def test_keyboard_interrupt_is_not_swallowed_into_a_json_error():
 
 def test_run_serves_the_line_transport():
     """Drive the real stdio loop: unsolicited hello, then one response per line."""
-    import io
-
     desktop = _desktop()
     stdin = io.StringIO(
         '{"id": 1, "op": "state"}\n'

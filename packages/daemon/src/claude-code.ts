@@ -1436,7 +1436,7 @@ async function settleResumeMetadata(
   await removeResumeMarkers(path);
 }
 
-async function removeResumeMarkers(metadataPath: string): Promise<boolean> {
+async function removeResumeMarkers(metadataPath: string): Promise<void> {
   let removed = false;
   // Settling is the recovery authority, so it is always removed last. A crash
   // between unlinks remains recoverable rather than degrading to started-only.
@@ -1449,7 +1449,6 @@ async function removeResumeMarkers(metadataPath: string): Promise<boolean> {
     }
   }
   if (removed) await syncDirectory(dirname(metadataPath));
-  return removed;
 }
 
 async function buildPersona(
@@ -2782,7 +2781,11 @@ export class ClaudeCodeRuntime {
         if (!warm) {
           const abortController = new AbortController();
           const input = claudeInputChannel();
-          const processExit = this.observeQueryExit ? undefined : claudeProcessExitBoundary();
+          // Exactly one exit source exists: the test seam, or the real
+          // subprocess boundary. Capturing the seam here lets every later use
+          // narrow without an optional call that would fail silently.
+          const observeQueryExit = this.observeQueryExit;
+          const processExit = observeQueryExit ? undefined : claudeProcessExitBoundary();
           if (processExit) {
             await this.probe.assertExecutable(probed, options.signal);
             this.assertTurnAdmitted(options.signal);
@@ -2868,10 +2871,11 @@ export class ClaudeCodeRuntime {
           }
           let exited: Promise<void>;
           try {
-            // processExit is defined exactly when observeQueryExit is not.
-            exited = processExit
-              ? processExit.exited
-              : Promise.resolve(this.observeQueryExit?.(created));
+            // The seam and the boundary are mutually exclusive by the
+            // construction above; the assertion keeps a broken invariant loud.
+            exited = observeQueryExit
+              ? Promise.resolve(observeQueryExit(created))
+              : processExit!.exited;
           } catch (cause) {
             exited = Promise.reject(cause);
           }
