@@ -82,6 +82,7 @@ function helperProtocolError(hello: HelloPayload): GhostError | null {
       + `${DESKTOP_HELPER_PROTOCOL_VERSION}. Reinstall or update Ghost so ghostd and `
       + "ghost-desktop-helper come from the same build, then restart ghostd.",
     {
+      op: "hello",
       expectedProtocol: DESKTOP_HELPER_PROTOCOL_VERSION,
       actualProtocol: hello.protocol ?? null,
       helperVersion: hello.version ?? null,
@@ -353,6 +354,7 @@ export const MAX_HELPER_LINE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
   + 256 * 1024;
 
 interface Pending {
+  readonly op: string;
   resolve(value: unknown): void;
   reject(error: unknown): void;
   timer: ReturnType<typeof setTimeout> | undefined;
@@ -396,7 +398,9 @@ export class DesktopHelperClient implements DesktopHelper {
   private start(): Promise<HelloPayload> {
     if (this.disposed) {
       return Promise.reject(
-        new GhostError("not_found", "The desktop helper client was disposed.", {}),
+        new GhostError("not_found", "The desktop helper client was disposed.", {
+          op: "hello",
+        }),
       );
     }
     if (this.ready) return this.ready;
@@ -408,7 +412,17 @@ export class DesktopHelperClient implements DesktopHelper {
     } catch (error) {
       // Do not cache a synchronous resolution/spawn failure. The helper may be
       // installed or its override repaired while the daemon remains running.
-      return Promise.reject(error);
+      if (error instanceof GhostError) {
+        return Promise.reject(this.forOperation(error, "hello"));
+      }
+      const cause = error instanceof Error ? error.message : String(error);
+      return Promise.reject(
+        new GhostError(
+          "not_found",
+          `The desktop helper could not be launched: ${cause}.`,
+          { op: "hello", cause },
+        ),
+      );
     }
     this.child = child;
 
@@ -421,18 +435,19 @@ export class DesktopHelperClient implements DesktopHelper {
     this.ready = ready;
     this.rejectReady = rejectReady;
 
+    const startTimeoutMs = this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS;
     this.startTimer = setTimeout(() => {
       const error = new GhostError(
-        "not_found",
+        "limit_exceeded",
         `The desktop helper did not send its hello handshake within `
-        + `${Math.round((this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS) / 1000)}s. `
+        + `${Math.round(startTimeoutMs / 1000)}s. `
         + (this.stderrBuffer.trim()
           ? `It logged: ${this.stderrBuffer.trim().slice(-500)}`
           : "It produced no output."),
-        {},
+        { op: "hello", timeoutMs: startTimeoutMs },
       );
       void this.teardown(error);
-    }, this.options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
+    }, startTimeoutMs);
 
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
@@ -468,7 +483,7 @@ export class DesktopHelperClient implements DesktopHelper {
       const wrapped = new GhostError(
         "not_found",
         `The desktop helper input pipe failed: ${error.message}.`,
-        { cause: error.message },
+        { op: "hello", cause: error.message },
       );
       this.failAll(wrapped);
       void this.teardown(wrapped);
@@ -481,7 +496,7 @@ export class DesktopHelperClient implements DesktopHelper {
         "not_found",
         `The desktop helper could not be started: ${error.message}. Install `
         + `${HELPER_BINARY} or point ${HELPER_COMMAND_ENV} at it.`,
-        { cause: error.message },
+        { op: "hello", cause: error.message },
       );
       this.failAll(wrapped);
       void this.teardown(wrapped);
@@ -495,7 +510,7 @@ export class DesktopHelperClient implements DesktopHelper {
         "not_found",
         `The desktop helper exited (code ${code ?? "null"}, signal ${signal ?? "null"})`
         + (detail ? `: ${detail}` : "."),
-        { code, signal },
+        { op: "hello", code, signal },
       );
       this.failAll(exited);
       void this.teardown(exited, true);
@@ -526,7 +541,7 @@ export class DesktopHelperClient implements DesktopHelper {
         const error = new GhostError(
           "limit_exceeded",
           `The desktop helper sent a protocol line larger than ${MAX_HELPER_LINE_BYTES} bytes.`,
-          { maxBytes: MAX_HELPER_LINE_BYTES },
+          { op: "hello", maxBytes: MAX_HELPER_LINE_BYTES },
         );
         this.failAll(error);
         void this.teardown(error);
@@ -578,11 +593,32 @@ export class DesktopHelperClient implements DesktopHelper {
     pending.detachAbort?.();
     this.armIdleTimer();
     if (record["ok"] === true) {
+      if (!("result" in record)) {
+        pending.reject(this.malformedResponse(id, pending.op));
+        return;
+      }
       pending.resolve(record["result"]);
       return;
     }
-    const error = (record["error"] ?? {}) as SidecarError;
-    pending.reject(ghostErrorFromSidecar(error, "request"));
+    const error = record["error"];
+    if (
+      record["ok"] !== false
+      || error === null
+      || typeof error !== "object"
+      || Array.isArray(error)
+    ) {
+      pending.reject(this.malformedResponse(id, pending.op));
+      return;
+    }
+    pending.reject(ghostErrorFromSidecar(error as SidecarError, pending.op));
+  }
+
+  private malformedResponse(id: number, op: string): GhostError {
+    return new GhostError(
+      "invalid_format",
+      `The desktop helper sent a malformed response for ${op}.`,
+      { id, op },
+    );
   }
 
   private onStderr(chunk: string): void {
@@ -618,7 +654,13 @@ export class DesktopHelperClient implements DesktopHelper {
     this.clearIdleTimer();
     return new Promise<T>((resolve, reject) => {
       const timeoutMs = options.timeoutMs ?? this.options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-      const pending: Pending = { resolve: resolve as (v: unknown) => void, reject, timer: undefined, detachAbort: undefined };
+      const pending: Pending = {
+        op,
+        resolve: resolve as (v: unknown) => void,
+        reject,
+        timer: undefined,
+        detachAbort: undefined,
+      };
 
       pending.timer = setTimeout(() => {
         this.pending.delete(id);
@@ -626,7 +668,7 @@ export class DesktopHelperClient implements DesktopHelper {
         this.armIdleTimer();
         reject(
           new GhostError(
-            "not_found",
+            "limit_exceeded",
             `The desktop helper did not answer ${op} within ${Math.round(timeoutMs / 1000)}s.`,
             { op, timeoutMs },
           ),
@@ -698,9 +740,14 @@ export class DesktopHelperClient implements DesktopHelper {
     for (const [id, pending] of this.pending) {
       if (pending.timer) clearTimeout(pending.timer);
       pending.detachAbort?.();
-      pending.reject(error);
+      pending.reject(this.forOperation(error, pending.op));
       this.pending.delete(id);
     }
+  }
+
+  private forOperation(error: GhostError, op: string): GhostError {
+    if (error.details["op"] === op) return error;
+    return new GhostError(error.code, error.message, { ...error.details, op });
   }
 
   private teardown(error?: GhostError, alreadyExited = false): Promise<void> {
@@ -710,7 +757,7 @@ export class DesktopHelperClient implements DesktopHelper {
     if (!child) return this.stopping ?? Promise.resolve();
     this.child = null;
     this.rejectReady?.(
-      error ?? new GhostError("not_found", "The desktop helper was stopped.", {}),
+      error ?? new GhostError("not_found", "The desktop helper was stopped.", { op: "hello" }),
     );
     this.rejectReady = null;
     this.ready = null;
@@ -733,7 +780,9 @@ export class DesktopHelperClient implements DesktopHelper {
 
   async dispose(): Promise<void> {
     this.disposed = true;
-    const error = new GhostError("not_found", "The desktop helper client was disposed.", {});
+    const error = new GhostError("not_found", "The desktop helper client was disposed.", {
+      op: "hello",
+    });
     this.failAll(error);
     await this.teardown(error);
   }

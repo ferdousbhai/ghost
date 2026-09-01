@@ -126,7 +126,11 @@ describe("hello handshake", () => {
     const client = clientFor(proc);
     const pending = client.hello();
     proc.emit("exit", 1, null);
-    await expect(pending).rejects.toThrowError(/exited/);
+    await expect(pending).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/exited/),
+      details: { op: "hello", code: 1, signal: null },
+    });
   });
 
   it.each([undefined, 0, 1, 3, "2"])(
@@ -141,7 +145,8 @@ describe("hello handshake", () => {
       await expect(pending).rejects.toMatchObject({
         code: "invalid_format",
         message: expect.stringMatching(/same build/i),
-        details: {
+      details: {
+          op: "hello",
           expectedProtocol: DESKTOP_HELPER_PROTOCOL_VERSION,
           actualProtocol: protocol ?? null,
           helperVersion: HELLO.version,
@@ -164,7 +169,11 @@ describe("hello handshake", () => {
       },
     });
 
-    await expect(client.hello()).rejects.toThrowError(/not installed yet/);
+    await expect(client.hello()).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/not installed yet/),
+      details: { op: "hello", cause: "not installed yet" },
+    });
     const ready = client.hello();
     proc.line(HELLO);
     await expect(ready).resolves.toMatchObject({ type: "hello" });
@@ -229,7 +238,42 @@ describe("request / response", () => {
     });
     await expect(pending).rejects.toMatchObject({
       code: "not_found",
-      details: { sidecarCode: "capability" },
+      details: { op: "ax_query", sidecarCode: "capability" },
+    });
+    await client.dispose();
+  });
+
+  it.each([
+    { ok: true },
+    { ok: false, error: "not-an-error-object" },
+  ])("rejects a malformed response with its actual operation", async (response) => {
+    const proc = new FakeProcess();
+    const client = clientFor(proc);
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+
+    const pending = client.request("state", {});
+    await tick();
+    proc.line({ id: proc.requestId(0), ...response });
+
+    await expect(pending).rejects.toMatchObject({
+      code: "invalid_format",
+      details: { id: proc.requestId(0), op: "state" },
+    });
+    await client.dispose();
+  });
+
+  it("reports a request deadline as limit_exceeded with the actual operation", async () => {
+    const proc = new FakeProcess();
+    const client = clientFor(proc, { requestTimeoutMs: 5 });
+    const ready = client.hello();
+    proc.line(HELLO);
+    await ready;
+
+    await expect(client.request("state", {})).rejects.toMatchObject({
+      code: "limit_exceeded",
+      details: { op: "state", timeoutMs: 5 },
     });
     await client.dispose();
   });
@@ -280,7 +324,10 @@ describe("request / response", () => {
       if (proc.killed) break;
     }
 
-    await expect(pending).rejects.toMatchObject({ code: "limit_exceeded" });
+    await expect(pending).rejects.toMatchObject({
+      code: "limit_exceeded",
+      details: { op: "capture", maxBytes: MAX_HELPER_LINE_BYTES },
+    });
     expect(proc.killed).toBe(true);
     await client.dispose();
   });
@@ -341,7 +388,11 @@ describe("lifecycle", () => {
     await ready;
     proc.writeError = new Error("broken pipe");
 
-    await expect(client.request("state", {})).rejects.toThrowError(/Could not send state/);
+    await expect(client.request("state", {})).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/Could not send state/),
+      details: { op: "state", cause: "broken pipe" },
+    });
     await tick();
     expect(proc.killSignals).toEqual(["SIGTERM"]);
     await client.dispose();
@@ -363,7 +414,11 @@ describe("lifecycle", () => {
     await tick();
     const pipeError = Object.assign(new Error("write EPIPE"), { code: "EPIPE" });
     first.stdin.emit("error", pipeError);
-    await expect(rejected).rejects.toThrowError(/input pipe failed: write EPIPE/);
+    await expect(rejected).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/input pipe failed: write EPIPE/),
+      details: { op: "state", cause: "write EPIPE" },
+    });
     expect(first.killSignals).toEqual(["SIGTERM"]);
 
     const replacementReady = client.hello();
@@ -394,11 +449,19 @@ describe("lifecycle", () => {
     });
     const firstReady = client.hello();
     first.stderr.emit("data", "first-child-only\n");
-    await expect(firstReady).rejects.toThrowError(/first-child-only/);
+    await expect(firstReady).rejects.toMatchObject({
+      code: "limit_exceeded",
+      message: expect.stringMatching(/first-child-only/),
+      details: { op: "hello", timeoutMs: 5 },
+    });
     first.stderr.emit("data", "late-first-child-output\n");
 
     const secondReady = client.hello();
-    await expect(secondReady).rejects.toThrowError(/It produced no output/);
+    await expect(secondReady).rejects.toMatchObject({
+      code: "limit_exceeded",
+      message: expect.stringMatching(/It produced no output/),
+      details: { op: "hello", timeoutMs: 5 },
+    });
     await client.dispose();
   });
 
@@ -411,7 +474,11 @@ describe("lifecycle", () => {
     const pending = client.request("state", {});
     await tick();
     proc.emit("exit", 0, null);
-    await expect(pending).rejects.toThrowError(/exited/);
+    await expect(pending).rejects.toMatchObject({
+      code: "not_found",
+      message: expect.stringMatching(/exited/),
+      details: { op: "state" },
+    });
   });
 
   it.each(["error", "exit"] as const)(

@@ -47,6 +47,10 @@ Request:  `{ "id": <n>, "op": "<name>", "args": { ... } }`
 Response: `{ "id": <n>, "ok": true, "result": { ... } }`
        |  `{ "id": <n>, "ok": false, "error": { "code": "...", "message": "...", "details": {} } }`
 
+Client errors retain the requested `op`. An unavailable helper/pipe is
+`not_found`, a deadline or line-size ceiling is `limit_exceeded`, and a
+malformed handshake/response is `invalid_format`.
+
 Every capture/input/perform result carries **honesty metadata** (from the
 harness's model): `{ backend, background_safe, interference: [...], warnings:
 [...] }`. Never return a blank/faked result — refuse with a clear error and

@@ -382,6 +382,8 @@ hosted-session, concurrency, or spend cap.
   it. Its startup handshake and the extensions client agree on desktop-helper
   protocol version 2; a mismatch retires the sidecar before any request is sent.
   Startup/explicit `hello` is the diagnostic boundary; there is no `doctor` op.
+  Client errors retain the operation: unavailable transport is `not_found`,
+  deadlines/size are `limit_exceeded`, and malformed protocol is `invalid_format`.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   candidates, not user data or service activation policy.
 
