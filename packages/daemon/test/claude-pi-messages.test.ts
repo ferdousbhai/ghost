@@ -32,6 +32,48 @@ function success(overrides: Record<string, unknown> = {}): SDKMessage {
   });
 }
 
+let uuid = 0;
+
+function streamEvent(event: unknown): SDKMessage {
+  return message({
+    type: "stream_event",
+    parent_tool_use_id: null,
+    uuid: `stream-${++uuid}`,
+    session_id: "session-1",
+    event,
+  });
+}
+
+/** One complete tool block: the model opens it, streams its arguments, closes it. */
+function callTool(
+  adapter: ReturnType<typeof createClaudePiMessagesAdapter>,
+  call: { index: number; block: Record<string, unknown>; partialJson?: string },
+): void {
+  adapter.handle(streamEvent({
+    type: "content_block_start",
+    index: call.index,
+    content_block: call.block,
+  }));
+  if (call.partialJson !== undefined) {
+    adapter.handle(streamEvent({
+      type: "content_block_delta",
+      index: call.index,
+      delta: { type: "input_json_delta", partial_json: call.partialJson },
+    }));
+  }
+  adapter.handle(streamEvent({ type: "content_block_stop", index: call.index }));
+}
+
+function toolResults(content: unknown[]): SDKMessage {
+  return message({
+    type: "user",
+    parent_tool_use_id: null,
+    uuid: `user-${++uuid}`,
+    session_id: "session-1",
+    message: { role: "user", content },
+  });
+}
+
 describe("Claude Agent SDK -> pi-messages", () => {
   it("streams text with dense indices and maps terminal usage", () => {
     const events: PiMessagesEvent[] = [];
@@ -92,41 +134,17 @@ describe("Claude Agent SDK -> pi-messages", () => {
     const events: PiMessagesEvent[] = [];
     const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
     adapter.setInternalMcpServerName("ghost-1");
-    adapter.handle(message({
-      type: "stream_event",
-      parent_tool_use_id: null,
-      uuid: "a",
-      session_id: "session-1",
-      event: {
-        type: "content_block_start",
-        index: 0,
-        content_block: {
-          type: "mcp_tool_use",
-          id: "tool-1",
-          name: "mcp__ghost-1__ghost_browser",
-          server_name: "ghost-1",
-          input: {},
-        },
+    callTool(adapter, {
+      index: 0,
+      block: {
+        type: "mcp_tool_use",
+        id: "tool-1",
+        name: "mcp__ghost-1__ghost_browser",
+        server_name: "ghost-1",
+        input: {},
       },
-    }));
-    adapter.handle(message({
-      type: "stream_event",
-      parent_tool_use_id: null,
-      uuid: "b",
-      session_id: "session-1",
-      event: {
-        type: "content_block_delta",
-        index: 0,
-        delta: { type: "input_json_delta", partial_json: "{\"action\":\"tabs\"}" },
-      },
-    }));
-    adapter.handle(message({
-      type: "stream_event",
-      parent_tool_use_id: null,
-      uuid: "c",
-      session_id: "session-1",
-      event: { type: "content_block_stop", index: 0 },
-    }));
+      partialJson: "{\"action\":\"tabs\"}",
+    });
 
     expect(events).toContainEqual({
       type: "toolcall_start",
@@ -144,6 +162,102 @@ describe("Claude Agent SDK -> pi-messages", () => {
         arguments: { action: "tabs" },
       },
     });
+  });
+
+  it("brackets every tool call with an execution window the HUD can narrate", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event), {
+      getCwd: () => "/home/owner/project",
+    });
+    callTool(adapter, {
+      index: 0,
+      block: { type: "tool_use", id: "tool-1", name: "Read", input: {} },
+      partialJson: "{\"file_path\":\"docs/design.md\"}",
+    });
+
+    expect(events).toContainEqual({
+      type: "tool_execution_start",
+      id: "tool-1",
+      toolName: "Read",
+      arguments: { file_path: "docs/design.md" },
+      cwd: "/home/owner/project",
+    });
+
+    adapter.handle(toolResults([
+      { type: "tool_result", tool_use_id: "tool-1", content: "# design" },
+    ]));
+
+    expect(events).toContainEqual({
+      type: "tool_execution_end",
+      id: "tool-1",
+      toolName: "Read",
+      isError: false,
+      summary: "# design",
+    });
+  });
+
+  it("closes a ghost tool under its visible name and keeps a failure's text", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.setInternalMcpServerName("ghost-1");
+    callTool(adapter, {
+      index: 0,
+      block: {
+        type: "mcp_tool_use",
+        id: "tool-1",
+        name: "mcp__ghost-1__ghost_browser",
+        server_name: "ghost-1",
+        input: { action: "read" },
+      },
+    });
+    callTool(adapter, {
+      index: 1,
+      block: {
+        type: "mcp_tool_use",
+        id: "tool-2",
+        name: "mcp__ghost-1__ghost_screen",
+        server_name: "ghost-1",
+        input: {},
+      },
+    });
+    adapter.handle(toolResults([
+      {
+        type: "tool_result",
+        tool_use_id: "tool-1",
+        content: [{ type: "text", text: "Read the departures board" }],
+      },
+      {
+        type: "tool_result",
+        tool_use_id: "tool-2",
+        is_error: true,
+        content: [{ type: "text", text: "No display is attached" }],
+      },
+    ]));
+
+    expect(events).toContainEqual({
+      type: "tool_execution_end",
+      id: "tool-1",
+      toolName: "ghost_browser",
+      isError: false,
+      summary: "Read the departures board",
+    });
+    expect(events).toContainEqual({
+      type: "tool_execution_end",
+      id: "tool-2",
+      toolName: "ghost_screen",
+      isError: true,
+      summary: "No display is attached",
+    });
+  });
+
+  it("ignores tool results for calls it never announced", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.handle(toolResults([
+      { type: "tool_result", tool_use_id: "replayed", content: "stale" },
+    ]));
+
+    expect(events).toEqual([]);
   });
 
   it("does not leak subagent narration into the parent transcript", () => {

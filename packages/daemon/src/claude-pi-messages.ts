@@ -13,7 +13,14 @@ import type {
   SDKMessage,
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { addUsage, copyUsage, zeroUsage, type PiMessagesEvent, type Usage } from "./pi-messages.js";
+import {
+  addUsage,
+  copyUsage,
+  toolResultSummary,
+  zeroUsage,
+  type PiMessagesEvent,
+  type Usage,
+} from "./pi-messages.js";
 
 export interface ClaudePiMessagesAdapter {
   setInternalMcpServerName(name: string): void;
@@ -100,10 +107,12 @@ function resultErrorMessage(result: SDKResultMessage): string {
  */
 export function createClaudePiMessagesAdapter(
   emit: (event: PiMessagesEvent) => void,
-  options: { includeThinking?: boolean } = {},
+  options: { includeThinking?: boolean; getCwd?: () => string } = {},
 ): ClaudePiMessagesAdapter {
   const includeThinking = options.includeThinking === true;
   const blocks = new Map<number, StreamBlock>();
+  /** Tools whose execution has been announced and not yet closed by a result. */
+  const executing = new Map<string, string>();
   let nextWireIndex = 0;
   let started = false;
   let terminal = false;
@@ -116,6 +125,8 @@ export function createClaudePiMessagesAdapter(
   };
 
   const usageSnapshot = (): Usage => copyUsage(totalUsage);
+
+  const getCwd = (): string => options.getCwd?.() ?? process.cwd();
 
   const send = (event: PiMessagesEvent): void => {
     if (terminal) return;
@@ -187,6 +198,7 @@ export function createClaudePiMessagesAdapter(
       send({ type: "thinking_end", contentIndex: block.wireIndex, content: block.content });
       return;
     }
+    const args = parseToolInput(block);
     send({
       type: "toolcall_end",
       contentIndex: block.wireIndex,
@@ -194,9 +206,61 @@ export function createClaudePiMessagesAdapter(
         type: "toolCall",
         id: block.id,
         name: block.name,
-        arguments: parseToolInput(block),
+        arguments: args,
       },
     });
+    // Claude runs a requested tool as soon as its block closes, and the SDK
+    // offers no separate pre-execution frame. Announcing execution here is what
+    // gives the HUD a live "what is it doing" state for the whole run of the
+    // call; without it a Claude turn looks identical whether it is reading a
+    // file or idling. `tool_progress` carries no arguments and arrives only
+    // for slow calls, so it cannot open this window.
+    executing.set(block.id, block.name);
+    send({
+      type: "tool_execution_start",
+      id: block.id,
+      toolName: block.name,
+      arguments: args,
+      cwd: getCwd(),
+    });
+  };
+
+  /**
+   * Close the execution window a `tool_result` answers.
+   *
+   * Membership in `executing` is the whole test: a subagent's tool calls are
+   * announced like any other (only its narration is private), so matching on
+   * the id closes exactly the calls this adapter opened and ignores replayed or
+   * synthetic user content.
+   */
+  const handleToolResults = (content: unknown): void => {
+    if (!Array.isArray(content)) return;
+    for (const part of content) {
+      if (!part || typeof part !== "object") continue;
+      const result = part as {
+        type?: unknown;
+        tool_use_id?: unknown;
+        content?: unknown;
+        is_error?: unknown;
+      };
+      if (result.type !== "tool_result" || typeof result.tool_use_id !== "string") continue;
+      const toolName = executing.get(result.tool_use_id);
+      if (toolName === undefined) continue;
+      executing.delete(result.tool_use_id);
+      // `toolResultSummary` reads pi's `{ content: [...] }` shape; a provider
+      // block may carry its text directly instead. Which of a tool's results
+      // are worth showing is the HUD's call, made once for both runtimes.
+      const summary = toolResultSummary(
+        typeof result.content === "string" ? result.content : result,
+      );
+      send({
+        type: "tool_execution_end",
+        id: result.tool_use_id,
+        toolName,
+        isError: result.is_error === true,
+        ...(summary ? { summary } : {}),
+      });
+    }
   };
 
   const handleStreamEvent = (message: Extract<SDKMessage, { type: "stream_event" }>): void => {
@@ -263,6 +327,10 @@ export function createClaudePiMessagesAdapter(
       if (terminal) return;
       if (message.type === "stream_event") {
         handleStreamEvent(message);
+        return;
+      }
+      if (message.type === "user") {
+        handleToolResults((message.message as { content?: unknown } | undefined)?.content);
         return;
       }
       if (message.type !== "result") return;

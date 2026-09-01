@@ -2369,8 +2369,13 @@ export class ClaudeCodeRuntime {
     finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
     const logger = this.logger.child({ ghost: ghost.name, conversation: conversationId });
+    // The turn's trusted working directory, resolved below before any tool can
+    // run. `tool_execution_start.cwd` is activity-local by contract, and a
+    // Claude conversation cannot move its cwd mid-turn.
+    let turnCwd = process.cwd();
     const adapter = createClaudePiMessagesAdapter(options.emit, {
       includeThinking: options.includeThinking,
+      getCwd: () => turnCwd,
     });
     let settledTurn: SettledMaintenanceTurn | undefined;
     let pendingTerminalResult: SDKResultMessage | undefined;
@@ -2440,6 +2445,7 @@ export class ClaudeCodeRuntime {
           409,
         );
       }
+      turnCwd = runtimeCwd;
       const ownerTurnCount = metadata?.ownerTurnCount ?? 0;
       if (ownerTurnCount >= Number.MAX_SAFE_INTEGER) {
         throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");

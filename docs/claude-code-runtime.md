@@ -571,6 +571,19 @@ are:
 - T3's parent-tool-use filtering: subagent text/thinking is never merged into
   the parent response.
 
+Ghost adds the tool execution window T3 has no use for. The SDK reports a tool
+call and, later, its `tool_result`, but never "this call is running now" — so
+the adapter opens `tool_execution_start` as the tool's content block closes,
+with the turn's trusted cwd and the parsed arguments, and closes it on the
+matching result. That window is what lets the HUD say what the ghost is doing
+for the whole run of a call instead of falling back to a generic waiting state.
+A subagent's calls are bracketed too: only its narration is private. The
+closing event carries the bounded tool result as `summary`, exactly as the pi
+adapter does; which results are worth showing is the HUD's one rule for both
+runtimes, not a per-runtime policy in the wire translator. `tool_progress` is
+not used: it arrives only for slow calls and carries no arguments, so it cannot
+open the window.
+
 The full T3 provider graph, approvals UI, and long-lived queue were not copied.
 Claude Code's own coding tools and subagents remain native. Ghost passes
 `settingSources: []`, `plugins: []`, `skills: []`, and

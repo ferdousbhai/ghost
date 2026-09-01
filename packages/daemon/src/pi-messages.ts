@@ -301,7 +301,12 @@ type AssistantContentBlock =
 
 const TOOL_SUMMARY_LIMIT = 240;
 
-function toolResultSummary(result: unknown): string | undefined {
+/**
+ * One bounded line of what a tool actually returned, from either a pi tool
+ * result or a provider `tool_result` block. Both runtimes put this on the wire
+ * as the live `summary`, so the HUD reads one shape whatever ran the tool.
+ */
+export function toolResultSummary(result: unknown): string | undefined {
   let text: string | undefined;
   if (typeof result === "string") text = result;
   else if (result && typeof result === "object") {

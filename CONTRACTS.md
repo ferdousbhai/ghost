@@ -1315,6 +1315,15 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   Every native `tool_execution_start` includes `cwd`, the absolute
   `SessionManager.getCwd()` snapshot captured at execution start. It is
   activity-local: a client must not substitute a later session cwd for it.
+  Both runtimes bracket every tool call with `tool_execution_start` and
+  `tool_execution_end`, so a client always knows which call is running now and
+  can say so. Claude Code has no separate pre-execution frame: it opens the
+  window as the tool's content block closes, carrying that turn's trusted cwd,
+  and closes it on the matching `tool_result` — including a subagent's calls,
+  whose narration stays private but whose tools are announced. It emits no
+  `tool_execution_update` and no `intent`. Neither runtime decides which
+  results are worth reading: `summary` is whatever the tool returned, bounded,
+  and the client owns the display rule.
 - A conversation has two distinct identifiers at this API boundary.
   `conversationId` is the runtime-owned resume id and is passed unchanged as
   pi-messages `options.sessionId`. `id` is the opaque public row/action id,
