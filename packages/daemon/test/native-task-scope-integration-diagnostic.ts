@@ -4,6 +4,8 @@ import { open, type FileHandle } from "node:fs/promises";
 const MAX_STAGE_BYTES = 256;
 const MAX_STATUS_BYTES = 4 * 1024;
 const MAX_DIAGNOSTIC_BYTES = 2 * 1024;
+const MAX_RAW_STDERR_BYTES = 4 * 1024;
+const MAX_RAW_DIAGNOSTIC_BYTES = 32 * 1024;
 
 const STAGES = new Set([
   "entered",
@@ -43,6 +45,22 @@ const TASK_RECEIPT =
   /^ghost-task-receipt:v1:task-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):[0-9a-f]{32}$/u;
 export const SYSTEMD_SCOPE_CAPABILITY_STEPS = [
   "A", "B", "C", "D", "E", "F", "G", "H", "I",
+] as const;
+export const CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS = [
+  "CI",
+  "DBUS_SESSION_BUS_ADDRESS",
+  "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_DESCRIPTION",
+  "GHOST_NATIVE_TASK_SCOPE_CONTROLLER_UNIT",
+  "GHOST_NATIVE_TASK_SCOPE_INTEGRATION",
+  "GHOST_NATIVE_TASK_SCOPE_INTEGRATION_UID",
+  "GITHUB_ACTIONS",
+  "GITHUB_RUN_ATTEMPT",
+  "GITHUB_RUN_ID",
+  "HOME",
+  "PATH",
+  "RUNNER_ENVIRONMENT",
+  "RUNNER_OS",
+  "XDG_RUNTIME_DIR",
 ] as const;
 const CAPABILITY_STEP_SET = new Set<string>(SYSTEMD_SCOPE_CAPABILITY_STEPS);
 
@@ -97,6 +115,13 @@ export interface CapabilityDiagnostic {
   launcherFailure: IntegrationFailureCategory;
   scopeObservedOwnedLoaded: boolean;
   scopeStatus: StatusDiagnostic;
+}
+
+export interface StepARawDiagnostic extends CapabilityDiagnostic {
+  step: "A";
+  command: "/usr/bin/true";
+  stderr: Uint8Array;
+  stderrTruncated: boolean;
 }
 
 function safeExitCode(value: number | null): number | null {
@@ -232,6 +257,18 @@ export function boundedSignal(signal: string | null): string {
   return signal !== null && SIGNAL.test(signal) ? signal : "none";
 }
 
+export function assertCapabilityDiagnosticEnvironment(
+  source: Readonly<NodeJS.ProcessEnv>,
+): void {
+  const keys = Object.keys(source).sort();
+  if (keys.length !== CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS.length
+    || keys.some((key, index) => key !== CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS[index])
+    || CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS.some((key) =>
+      typeof source[key] !== "string" || source[key]?.includes("\0"))) {
+    throw new Error("integration capability environment is invalid");
+  }
+}
+
 function safeStatus(input: StatusDiagnostic): StatusDiagnostic {
   return {
     exitCode: safeExitCode(input.exitCode),
@@ -301,6 +338,40 @@ export function serializeCapabilityDiagnostic(input: CapabilityDiagnostic): stri
   });
   if (Buffer.byteLength(source, "utf8") > MAX_DIAGNOSTIC_BYTES) {
     throw new Error("integration capability diagnostic exceeded bound");
+  }
+  return source;
+}
+
+function escapeDiagnosticControls(source: string): string {
+  return [...source].map((character) => {
+    const point = character.codePointAt(0)!;
+    return point <= 0x1f || (point >= 0x7f && point <= 0x9f)
+      || point === 0x2028 || point === 0x2029
+      ? `\\u${point.toString(16).padStart(4, "0")}`
+      : character;
+  }).join("");
+}
+
+export function serializeStepARawDiagnostic(input: StepARawDiagnostic): string {
+  if (input.step !== "A" || input.command !== "/usr/bin/true"
+    || input.stderrTruncated
+    || input.stderr.byteLength > MAX_RAW_STDERR_BYTES) {
+    throw new Error("integration capability raw diagnostic is invalid");
+  }
+  const source = JSON.stringify({
+    version: 1,
+    step: "A",
+    launcherExitCode: safeExitCode(input.launcherExitCode),
+    launcherSignal: boundedSignal(input.launcherSignal === "none" ? null : input.launcherSignal),
+    launcherFailure: FAILURE_CATEGORIES.has(input.launcherFailure)
+      ? input.launcherFailure
+      : "other",
+    scopeObservedOwnedLoaded: input.scopeObservedOwnedLoaded === true,
+    scopeStatus: safeStatus(input.scopeStatus),
+    stderr: escapeDiagnosticControls(Buffer.from(input.stderr).toString("utf8")),
+  });
+  if (Buffer.byteLength(source, "utf8") > MAX_RAW_DIAGNOSTIC_BYTES) {
+    throw new Error("integration capability raw diagnostic exceeded bound");
   }
   return source;
 }

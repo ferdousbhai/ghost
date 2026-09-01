@@ -4,16 +4,20 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertCapabilityDiagnosticEnvironment,
   boundedSignal,
+  CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS,
   classifyLauncherStderr,
   classifyScopeStatus,
   readStageDiagnostic,
   serializeCapabilityDiagnostic,
   serializeLifecycleDiagnostic,
+  serializeStepARawDiagnostic,
   SYSTEMD_SCOPE_CAPABILITY_STEPS,
   systemdScopeCapabilityArgs,
   type CapabilityDiagnostic,
   type LifecycleDiagnostic,
+  type StepARawDiagnostic,
 } from "./native-task-scope-integration-diagnostic.js";
 
 const UNIT = "ghost-task-11111111-1111-4111-8111-111111111111.scope";
@@ -282,5 +286,73 @@ describe("real systemd integration diagnostics", () => {
       launcherFailure: "other",
       scopeStatus: { activeState: "other", description: "other" },
     });
+  });
+
+  it("requires the exact credential-free integration environment", () => {
+    const environment = Object.fromEntries(
+      CAPABILITY_DIAGNOSTIC_ENVIRONMENT_KEYS.map((key) => [key, `value-${key}`]),
+    );
+    expect(() => assertCapabilityDiagnosticEnvironment(environment)).not.toThrow();
+    expect(() => assertCapabilityDiagnosticEnvironment({
+      ...environment,
+      ANTHROPIC_API_KEY: "credential",
+    })).toThrow("integration capability environment is invalid");
+    const missing = { ...environment };
+    delete missing.HOME;
+    expect(() => assertCapabilityDiagnosticEnvironment(missing))
+      .toThrow("integration capability environment is invalid");
+    expect(() => assertCapabilityDiagnosticEnvironment({
+      ...environment,
+      PATH: "invalid\0path",
+    })).toThrow("integration capability environment is invalid");
+  });
+
+  it("confines step A raw stderr to the fixed command and escaped byte bound", () => {
+    const input: StepARawDiagnostic = {
+      version: 1,
+      step: "A",
+      command: "/usr/bin/true",
+      launcherExitCode: 1,
+      launcherSignal: "none",
+      launcherFailure: "other",
+      scopeObservedOwnedLoaded: false,
+      scopeStatus: classifyScopeStatus(UNIT, RECEIPT, {
+        stdout: `Description=${UNIT}\nActiveState=inactive\nId=${UNIT}\nLoadState=not-found\n`,
+        exitCode: 0,
+      }),
+      stderr: Buffer.from("fixed diagnostic\0\r\n\t\u001b\u007f\u0085\u2028"),
+      stderrTruncated: false,
+    };
+    const serialized = serializeStepARawDiagnostic(input);
+    expect([...serialized].some((character) => {
+      const point = character.codePointAt(0)!;
+      return point <= 0x1f || (point >= 0x7f && point <= 0x9f)
+        || point === 0x2028 || point === 0x2029;
+    })).toBe(false);
+    expect(JSON.parse(serialized)).toMatchObject({
+      step: "A",
+      launcherExitCode: 1,
+      launcherSignal: "none",
+      scopeStatus: {
+        id: "unit",
+        loadState: "not-found",
+        activeState: "inactive",
+        description: "unit",
+      },
+      stderr: "fixed diagnostic\\u0000\\u000d\\u000a\\u0009\\u001b\\u007f\\u0085\\u2028",
+    });
+    expect(() => serializeStepARawDiagnostic({
+      ...input,
+      command: "/usr/bin/python3",
+    } as unknown as StepARawDiagnostic))
+      .toThrow("integration capability raw diagnostic is invalid");
+    expect(() => serializeStepARawDiagnostic({
+      ...input,
+      stderr: Buffer.alloc(4 * 1024 + 1, 0x78),
+    })).toThrow("integration capability raw diagnostic is invalid");
+    expect(() => serializeStepARawDiagnostic({
+      ...input,
+      stderrTruncated: true,
+    })).toThrow("integration capability raw diagnostic is invalid");
   });
 });

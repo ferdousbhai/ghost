@@ -32,12 +32,14 @@ import {
 } from "../src/tasks.js";
 import { parseSupportedSystemdMajor } from "./native-task-scope-integration-version.js";
 import {
+  assertCapabilityDiagnosticEnvironment,
   boundedSignal,
   classifyLauncherStderr,
   classifyScopeStatus,
   readStageDiagnostic,
   serializeCapabilityDiagnostic,
   serializeLifecycleDiagnostic,
+  serializeStepARawDiagnostic,
   SYSTEMD_SCOPE_CAPABILITY_STEPS,
   systemdScopeCapabilityArgs,
   type CapabilityDiagnostic,
@@ -529,6 +531,7 @@ interface CapabilityLaunchResult {
   stdout: string;
   stdoutTruncated: boolean;
   stderr: string;
+  rawStderr: Uint8Array;
   stderrTruncated: boolean;
   observedOwnedLoaded: boolean;
 }
@@ -598,11 +601,13 @@ async function launchCapabilityStep(
       child.once("close", finish);
     },
   );
+  const rawStderr = Buffer.concat(stderr, stderrBytes);
   return {
     ...closed,
     stdout: Buffer.concat(stdout, stdoutBytes).toString("utf8"),
     stdoutTruncated,
-    stderr: Buffer.concat(stderr, stderrBytes).toString("utf8"),
+    stderr: rawStderr.toString("utf8"),
+    rawStderr,
     stderrTruncated,
     observedOwnedLoaded: await observedOwnedLoaded.catch(() => false),
   };
@@ -660,6 +665,7 @@ async function proveScopeCapabilities(
   worker: string,
   ownedUnits: OwnedUnits,
 ): Promise<void> {
+  assertCapabilityDiagnosticEnvironment(process.env);
   for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS) {
     const taskId = randomTaskId();
     const ownership = randomReceipt();
@@ -725,7 +731,16 @@ async function proveScopeCapabilities(
         scopeObservedOwnedLoaded: result.observedOwnedLoaded,
         scopeStatus: postLaunch,
       };
-      process.stderr.write(`${serializeCapabilityDiagnostic(diagnostic)}\n`);
+      const serialized = step === "A"
+        ? serializeStepARawDiagnostic({
+          ...diagnostic,
+          step: "A",
+          command: "/usr/bin/true",
+          stderr: result.rawStderr,
+          stderrTruncated: result.stderrTruncated,
+        })
+        : serializeCapabilityDiagnostic(diagnostic);
+      process.stderr.write(`${serialized}\n`);
       throw new Error("systemd scope capability step failed");
     }
   }

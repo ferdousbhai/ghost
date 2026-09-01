@@ -30,9 +30,14 @@ required = {
         "      scopeObservedOwnedLoaded,\n      scopeStatus,",
         "process.stderr.write(`${serializeLifecycleDiagnostic({",
         "await proveScopeCapabilities(root, fixtures.worker, ownedUnits);",
+        "assertCapabilityDiagnosticEnvironment(process.env);",
         "for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS)",
         "systemdScopeCapabilityArgs({ step, unit, description, cwd: root, worker })",
         "scopeStatus: postLaunch,",
+        'const serialized = step === "A"',
+        'command: "/usr/bin/true",',
+        "stderr: result.rawStderr,",
+        "stderrTruncated: result.stderrTruncated,",
     ),
     "diagnostic": (
         "constants.O_RDONLY | constants.O_NOFOLLOW",
@@ -42,6 +47,11 @@ required = {
         "export const SYSTEMD_SCOPE_CAPABILITY_STEPS = [",
         "export function systemdScopeCapabilityArgs(",
         "export function serializeCapabilityDiagnostic(",
+        "export function serializeStepARawDiagnostic(",
+        "export function assertCapabilityDiagnosticEnvironment(",
+        "const MAX_RAW_STDERR_BYTES = 4 * 1024",
+        'input.step !== "A" || input.command !== "/usr/bin/true"',
+        'stderr: escapeDiagnosticControls(Buffer.from(input.stderr).toString("utf8")),',
         'if (level >= 1) args.push("--slice-inherit");',
         'if (level >= 2) args.push("--expand-environment=no");',
         'if (level >= 3) args.push(`--working-directory=${input.cwd}`);',
@@ -231,6 +241,9 @@ expect_insert_rejected forbidden-system-dropin \
 expect_insert_rejected forbidden-pattern-kill \
   '          uid="$(id -u)"' \
   '          pkill -f ghost-native-task'
+expect_insert_rejected forbidden-extra-environment \
+  '              HOME="$HOME" \' \
+  '              ANTHROPIC_API_KEY=credential \'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'
