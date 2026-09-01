@@ -8,7 +8,11 @@ import {
   classifyLauncherStderr,
   classifyScopeStatus,
   readStageDiagnostic,
+  serializeCapabilityDiagnostic,
   serializeLifecycleDiagnostic,
+  SYSTEMD_SCOPE_CAPABILITY_STEPS,
+  systemdScopeCapabilityArgs,
+  type CapabilityDiagnostic,
   type LifecycleDiagnostic,
 } from "./native-task-scope-integration-diagnostic.js";
 
@@ -174,5 +178,109 @@ describe("real systemd integration diagnostics", () => {
     expect(boundedSignal("SIGTERM")).toBe("SIGTERM");
     expect(boundedSignal("/private/path")).toBe("none");
     expect(boundedSignal(null)).toBe("none");
+  });
+
+  it("builds the cumulative credential-free capability ladder in exact order", () => {
+    const cwd = "/private/integration";
+    const worker = "/private/integration/worker.py";
+    const common = [
+      "--user",
+      "--scope",
+      `--unit=${UNIT}`,
+      `--description=${RECEIPT}`,
+    ];
+    const invocation = (step: (typeof SYSTEMD_SCOPE_CAPABILITY_STEPS)[number]) =>
+      systemdScopeCapabilityArgs({ step, unit: UNIT, description: RECEIPT, cwd, worker });
+
+    expect(SYSTEMD_SCOPE_CAPABILITY_STEPS).toEqual([
+      "A", "B", "C", "D", "E", "F", "G", "H", "I",
+    ]);
+    expect(invocation("A")).toEqual([
+      ...common, "--collect", "--quiet", "--pipe", "--", "/usr/bin/true",
+    ]);
+    expect(invocation("B")).toEqual([
+      ...common, "--slice-inherit", "--collect", "--quiet", "--pipe", "--",
+      "/usr/bin/true",
+    ]);
+    const throughC = [
+      ...common, "--slice-inherit", "--collect", "--quiet", "--pipe",
+      "--expand-environment=no",
+    ];
+    expect(invocation("C")).toEqual([...throughC, "--", "/usr/bin/true"]);
+    const throughD = [...throughC, `--working-directory=${cwd}`];
+    expect(invocation("D")).toEqual([...throughD, "--", "/usr/bin/true"]);
+    const throughE = [...throughD, "--property=KillMode=control-group"];
+    expect(invocation("E")).toEqual([...throughE, "--", "/usr/bin/true"]);
+    const throughF = [...throughE, "--property=SendSIGKILL=yes"];
+    expect(invocation("F")).toEqual([...throughF, "--", "/usr/bin/true"]);
+    const throughG = [...throughF, "--property=TimeoutStopSec=1s"];
+    expect(invocation("G")).toEqual([...throughG, "--", "/usr/bin/true"]);
+    expect(invocation("H")).toEqual([
+      ...throughG,
+      "--",
+      "/usr/bin/python3",
+      "-c",
+      "import json; print(json.dumps({'ready': True}, separators=(',', ':')), flush=True)",
+    ]);
+    expect(invocation("I")).toEqual([
+      ...throughG, "--", "/usr/bin/python3", worker, "--readiness-only",
+    ]);
+    for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS) {
+      const args = invocation(step);
+      const command = args[args.indexOf("--") + 1];
+      expect(command).not.toMatch(/(?:^|\/)(?:ba|z|fi)?sh$/u);
+      expect(Object.isFrozen(args)).toBe(true);
+    }
+    expect(() => systemdScopeCapabilityArgs({
+      step: "A",
+      unit: UNIT,
+      description: RECEIPT.replace(
+        "task-11111111-1111-4111-8111-111111111111",
+        "task-22222222-2222-4222-8222-222222222222",
+      ),
+      cwd,
+      worker,
+    })).toThrow("integration capability identity is invalid");
+  });
+
+  it("serializes only bounded capability enums and status comparisons", () => {
+    const capability: CapabilityDiagnostic = {
+      version: 1,
+      step: "G",
+      launcherExitCode: 1,
+      launcherSignal: "SIGTERM",
+      launcherFailure: "registration",
+      scopeObservedOwnedLoaded: false,
+      scopeStatus: classifyScopeStatus(UNIT, RECEIPT, {
+        stdout: `Description=${UNIT}\nActiveState=inactive\nId=${UNIT}\nLoadState=not-found\n`,
+        exitCode: 0,
+      }),
+    };
+    const serialized = serializeCapabilityDiagnostic(capability);
+    expect(serialized).toContain('"step":"G"');
+    expect(serialized).not.toContain(UNIT);
+    expect(serialized).not.toContain(RECEIPT);
+    expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(2 * 1024);
+
+    const hostile = capability as unknown as Record<string, unknown>;
+    hostile.step = "/private/path";
+    hostile.launcherSignal = "owner-secret";
+    hostile.launcherFailure = "owner-secret";
+    hostile.scopeStatus = {
+      ...(hostile.scopeStatus as object),
+      activeState: "/private/path",
+      description: "owner-secret",
+    };
+    const hostileSerialized = serializeCapabilityDiagnostic(
+      hostile as unknown as CapabilityDiagnostic,
+    );
+    expect(hostileSerialized).not.toContain("owner-secret");
+    expect(hostileSerialized).not.toContain("/private/path");
+    expect(JSON.parse(hostileSerialized)).toMatchObject({
+      step: "A",
+      launcherSignal: "none",
+      launcherFailure: "other",
+      scopeStatus: { activeState: "other", description: "other" },
+    });
   });
 });

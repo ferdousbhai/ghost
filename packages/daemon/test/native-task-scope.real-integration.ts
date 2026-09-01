@@ -36,7 +36,11 @@ import {
   classifyLauncherStderr,
   classifyScopeStatus,
   readStageDiagnostic,
+  serializeCapabilityDiagnostic,
   serializeLifecycleDiagnostic,
+  SYSTEMD_SCOPE_CAPABILITY_STEPS,
+  systemdScopeCapabilityArgs,
+  type CapabilityDiagnostic,
   type StatusDiagnostic,
 } from "./native-task-scope-integration-diagnostic.js";
 
@@ -50,6 +54,9 @@ const SCOPE_STATUS_OUTPUT_LIMIT = 4 * 1024;
 const SCOPE_STATUS_PROPERTIES = ["Id", "LoadState", "ActiveState", "Description"] as const;
 const LAUNCHER_STDERR_LIMIT = 4 * 1024;
 const DIAGNOSTIC_STATUS_TIMEOUT_MS = 500;
+const CAPABILITY_LAUNCH_TIMEOUT_MS = 5_000;
+const CAPABILITY_COLLECTION_TIMEOUT_MS = 1_000;
+const CAPABILITY_STDOUT_LIMIT = 1_024;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -471,6 +478,10 @@ async function writeFixtures(root: string): Promise<{
     "    try: os.fsync(directory)",
     "    finally: os.close(directory)",
     "record_stage('entered')",
+    "if sys.argv[1:] == ['--readiness-only']:",
+    "    print(json.dumps({'ready': True}, separators=(',', ':')), flush=True)",
+    "    record_stage('emitted')",
+    "    raise SystemExit(0)",
     "try: child = os.fork()",
     "except OSError as error:",
     "    record_stage('entered', 'resource' if error.errno in (errno.EAGAIN, errno.ENOMEM) else 'other')",
@@ -510,6 +521,214 @@ async function writeFixtures(root: string): Promise<{
     "",
   ].join("\n"), { mode: 0o700 });
   return { worker, delayedLauncher };
+}
+
+interface CapabilityLaunchResult {
+  exitCode: number | null;
+  signal: string | null;
+  stdout: string;
+  stdoutTruncated: boolean;
+  stderr: string;
+  stderrTruncated: boolean;
+  observedOwnedLoaded: boolean;
+}
+
+async function launchCapabilityStep(
+  args: readonly string[],
+  cwd: string,
+  environment: Readonly<NodeJS.ProcessEnv>,
+  unit: string,
+  description: string,
+): Promise<CapabilityLaunchResult> {
+  const child = spawn("/usr/bin/systemd-run", [...args], {
+    cwd,
+    env: environment,
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+  const observedOwnedLoaded = observeOwnedLoadedScope(unit, description, child);
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let stdoutTruncated = false;
+  let stderrTruncated = false;
+  const collect = (
+    chunks: Buffer[],
+    limit: number,
+    bytes: () => number,
+    update: (value: number) => void,
+    truncate: () => void,
+  ) => (chunk: Buffer | string) => {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remaining = limit - bytes();
+    if (remaining > 0) chunks.push(value.subarray(0, remaining));
+    update(Math.min(limit, bytes() + value.length));
+    if (value.length > remaining) truncate();
+  };
+  child.stdout?.on("data", collect(
+    stdout,
+    CAPABILITY_STDOUT_LIMIT,
+    () => stdoutBytes,
+    (value) => { stdoutBytes = value; },
+    () => { stdoutTruncated = true; },
+  ));
+  child.stderr?.on("data", collect(
+    stderr,
+    LAUNCHER_STDERR_LIMIT,
+    () => stderrBytes,
+    (value) => { stderrBytes = value; },
+    () => { stderrTruncated = true; },
+  ));
+  const closed = await new Promise<{ exitCode: number | null; signal: string | null }>(
+    (resolve) => {
+      let settled = false;
+      let forcedSignal: string | null = null;
+      const finish = (exitCode: number | null, signal: string | null) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve({ exitCode, signal: signal ?? forcedSignal });
+      };
+      const timeout = setTimeout(() => {
+        forcedSignal = "SIGKILL";
+        child.kill("SIGKILL");
+      }, CAPABILITY_LAUNCH_TIMEOUT_MS);
+      child.once("error", () => finish(null, null));
+      child.once("close", finish);
+    },
+  );
+  return {
+    ...closed,
+    stdout: Buffer.concat(stdout, stdoutBytes).toString("utf8"),
+    stdoutTruncated,
+    stderr: Buffer.concat(stderr, stderrBytes).toString("utf8"),
+    stderrTruncated,
+    observedOwnedLoaded: await observedOwnedLoaded.catch(() => false),
+  };
+}
+
+function exactAbsentStatus(status: StatusDiagnostic): boolean {
+  return status.exitCode === 0
+    && status.shape === "valid"
+    && status.id === "unit"
+    && status.loadState === "not-found"
+    && status.activeState === "inactive"
+    && status.description === "unit";
+}
+
+async function waitForCapabilityCollection(
+  unit: string,
+  description: string,
+): Promise<StatusDiagnostic> {
+  const deadline = Date.now() + CAPABILITY_COLLECTION_TIMEOUT_MS;
+  let status = await diagnosticScopeStatus(unit, description);
+  while (!exactAbsentStatus(status) && Date.now() < deadline) {
+    if (status.shape !== "valid"
+      || status.id !== "unit"
+      || status.loadState !== "loaded"
+      || status.description !== "receipt") return status;
+    await Bun.sleep(10);
+    status = await diagnosticScopeStatus(unit, description);
+  }
+  return status;
+}
+
+async function cleanupCapabilityScope(
+  taskId: string,
+  ownership: NativeTaskOwnershipReceipt,
+  status: StatusDiagnostic,
+): Promise<StatusDiagnostic> {
+  if (exactAbsentStatus(status)) return status;
+  if (status.shape !== "valid"
+    || status.id !== "unit"
+    || status.loadState !== "loaded"
+    || status.description !== "receipt") return status;
+  const manager = new SystemdNativeTaskScopeManager({
+    controlEnvironment: process.env,
+    confirmationTimeoutMs: 10_000,
+  });
+  await manager.recoverAndConfirm(taskId, ownership);
+  return diagnosticScopeStatus(
+    nativeTaskScopeUnit(taskId),
+    nativeTaskScopeDescription(taskId, ownership),
+  );
+}
+
+async function proveScopeCapabilities(
+  root: string,
+  worker: string,
+  ownedUnits: OwnedUnits,
+): Promise<void> {
+  for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS) {
+    const taskId = randomTaskId();
+    const ownership = randomReceipt();
+    const unit = nativeTaskScopeUnit(taskId);
+    const description = nativeTaskScopeDescription(taskId, ownership);
+    const preflight = await diagnosticScopeStatus(unit, description);
+    if (!exactAbsentStatus(preflight)) {
+      process.stderr.write(`${serializeCapabilityDiagnostic({
+        version: 1,
+        step,
+        launcherExitCode: null,
+        launcherSignal: "none",
+        launcherFailure: "other",
+        scopeObservedOwnedLoaded: false,
+        scopeStatus: preflight,
+      })}\n`);
+      throw new Error("systemd scope capability preflight failed");
+    }
+    const stageReceipt = join(root, `capability-${step}-stage.json`);
+    const finiteEnvironment = step === "H" || step === "I"
+      ? taskEnvironment(step === "I" ? { GHOST_STAGE_RECEIPT: stageReceipt } : {})
+      : captureNativeTaskControlEnvironment(process.env);
+    ownedUnits.set(unit, description);
+    const result = await launchCapabilityStep(
+      systemdScopeCapabilityArgs({ step, unit, description, cwd: root, worker }),
+      root,
+      finiteEnvironment,
+      unit,
+      description,
+    );
+    const postLaunch = await waitForCapabilityCollection(unit, description);
+    let postCleanup = postLaunch;
+    let cleanupConfirmed = false;
+    try {
+      postCleanup = await cleanupCapabilityScope(taskId, ownership, postLaunch);
+      cleanupConfirmed = exactAbsentStatus(postCleanup);
+      if (cleanupConfirmed) ownedUnits.delete(unit);
+    } catch {
+      postCleanup = await diagnosticScopeStatus(unit, description);
+    }
+    const expectedOutput = step === "H" || step === "I" ? "{\"ready\":true}\n" : "";
+    const stageReady = step !== "I" || await readStageDiagnostic(stageReceipt).then(
+      (fixture) => fixture.state === "valid"
+        && fixture.private
+        && fixture.stage === "emitted"
+        && fixture.failure === "none",
+      () => false,
+    );
+    const succeeded = result.exitCode === 0
+      && result.signal === null
+      && !result.stdoutTruncated
+      && result.stdout === expectedOutput
+      && exactAbsentStatus(postLaunch)
+      && cleanupConfirmed
+      && stageReady;
+    if (!succeeded) {
+      const diagnostic: CapabilityDiagnostic = {
+        version: 1,
+        step,
+        launcherExitCode: result.exitCode,
+        launcherSignal: boundedSignal(result.signal),
+        launcherFailure: classifyLauncherStderr(result.stderr, result.stderrTruncated),
+        scopeObservedOwnedLoaded: result.observedOwnedLoaded,
+        scopeStatus: postLaunch,
+      };
+      process.stderr.write(`${serializeCapabilityDiagnostic(diagnostic)}\n`);
+      throw new Error("systemd scope capability step failed");
+    }
+  }
 }
 
 interface Sentinel {
@@ -1014,6 +1233,7 @@ async function main(): Promise<void> {
   try {
     await assertAbsentScopeStatusPreflight();
     const fixtures = await writeFixtures(root);
+    await proveScopeCapabilities(root, fixtures.worker, ownedUnits);
     sentinel = await startSentinel(root, ownedUnits);
     await proveLifecycle(root, fixtures.worker, ownedUnits);
     await assertSentinel(sentinel);

@@ -37,6 +37,14 @@ const STATUS_LOAD_STATES = new Set(["loaded", "not-found", "other", "missing"]);
 const STATUS_DESCRIPTIONS = new Set(["receipt", "unit", "empty", "other", "missing"]);
 const STAGE_STATES = new Set(["valid", "missing", "invalid"]);
 const SIGNAL = /^SIG[A-Z0-9]{1,12}$/u;
+const TASK_SCOPE =
+  /^ghost-task-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.scope$/u;
+const TASK_RECEIPT =
+  /^ghost-task-receipt:v1:task-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):[0-9a-f]{32}$/u;
+export const SYSTEMD_SCOPE_CAPABILITY_STEPS = [
+  "A", "B", "C", "D", "E", "F", "G", "H", "I",
+] as const;
+const CAPABILITY_STEP_SET = new Set<string>(SYSTEMD_SCOPE_CAPABILITY_STEPS);
 
 export type IntegrationFailureCategory =
   | "none"
@@ -77,6 +85,18 @@ export interface LifecycleDiagnostic {
   scopeObservedOwnedLoaded: boolean;
   scopeStatus: StatusDiagnostic;
   fixture: StageDiagnostic;
+}
+
+export type CapabilityStep = (typeof SYSTEMD_SCOPE_CAPABILITY_STEPS)[number];
+
+export interface CapabilityDiagnostic {
+  version: 1;
+  step: CapabilityStep;
+  launcherExitCode: number | null;
+  launcherSignal: string;
+  launcherFailure: IntegrationFailureCategory;
+  scopeObservedOwnedLoaded: boolean;
+  scopeStatus: StatusDiagnostic;
 }
 
 function safeExitCode(value: number | null): number | null {
@@ -212,6 +232,79 @@ export function boundedSignal(signal: string | null): string {
   return signal !== null && SIGNAL.test(signal) ? signal : "none";
 }
 
+function safeStatus(input: StatusDiagnostic): StatusDiagnostic {
+  return {
+    exitCode: safeExitCode(input.exitCode),
+    shape: STATUS_SHAPES.has(input.shape) ? input.shape : "invalid",
+    id: STATUS_IDS.has(input.id) ? input.id : "other",
+    loadState: STATUS_LOAD_STATES.has(input.loadState) ? input.loadState : "other",
+    activeState: STATUS_ACTIVE_STATES.has(input.activeState) ? input.activeState : "other",
+    description: STATUS_DESCRIPTIONS.has(input.description) ? input.description : "other",
+  } as StatusDiagnostic;
+}
+
+export function systemdScopeCapabilityArgs(input: {
+  step: CapabilityStep;
+  unit: string;
+  description: string;
+  cwd: string;
+  worker: string;
+}): readonly string[] {
+  const unit = TASK_SCOPE.exec(input.unit);
+  const description = TASK_RECEIPT.exec(input.description);
+  if (!CAPABILITY_STEP_SET.has(input.step)
+    || !unit || !description || unit[1] !== description[1]
+    || !input.cwd.startsWith("/") || input.cwd.includes("\0")
+    || !input.worker.startsWith("/") || input.worker.includes("\0")) {
+    throw new Error("integration capability identity is invalid");
+  }
+  const level = SYSTEMD_SCOPE_CAPABILITY_STEPS.indexOf(input.step);
+  const args = [
+    "--user",
+    "--scope",
+    `--unit=${input.unit}`,
+    `--description=${input.description}`,
+  ];
+  if (level >= 1) args.push("--slice-inherit");
+  args.push("--collect", "--quiet", "--pipe");
+  if (level >= 2) args.push("--expand-environment=no");
+  if (level >= 3) args.push(`--working-directory=${input.cwd}`);
+  if (level >= 4) args.push("--property=KillMode=control-group");
+  if (level >= 5) args.push("--property=SendSIGKILL=yes");
+  if (level >= 6) args.push("--property=TimeoutStopSec=1s");
+  args.push("--");
+  if (input.step === "H") {
+    args.push(
+      "/usr/bin/python3",
+      "-c",
+      "import json; print(json.dumps({'ready': True}, separators=(',', ':')), flush=True)",
+    );
+  } else if (input.step === "I") {
+    args.push("/usr/bin/python3", input.worker, "--readiness-only");
+  } else {
+    args.push("/usr/bin/true");
+  }
+  return Object.freeze(args);
+}
+
+export function serializeCapabilityDiagnostic(input: CapabilityDiagnostic): string {
+  const source = JSON.stringify({
+    version: 1,
+    step: CAPABILITY_STEP_SET.has(input.step) ? input.step : "A",
+    launcherExitCode: safeExitCode(input.launcherExitCode),
+    launcherSignal: boundedSignal(input.launcherSignal === "none" ? null : input.launcherSignal),
+    launcherFailure: FAILURE_CATEGORIES.has(input.launcherFailure)
+      ? input.launcherFailure
+      : "other",
+    scopeObservedOwnedLoaded: input.scopeObservedOwnedLoaded === true,
+    scopeStatus: safeStatus(input.scopeStatus),
+  });
+  if (Buffer.byteLength(source, "utf8") > MAX_DIAGNOSTIC_BYTES) {
+    throw new Error("integration capability diagnostic exceeded bound");
+  }
+  return source;
+}
+
 export function serializeLifecycleDiagnostic(input: LifecycleDiagnostic): string {
   const source = JSON.stringify({
     version: 1,
@@ -221,20 +314,7 @@ export function serializeLifecycleDiagnostic(input: LifecycleDiagnostic): string
       ? input.launcherFailure
       : "other",
     scopeObservedOwnedLoaded: input.scopeObservedOwnedLoaded === true,
-    scopeStatus: {
-      exitCode: safeExitCode(input.scopeStatus.exitCode),
-      shape: STATUS_SHAPES.has(input.scopeStatus.shape) ? input.scopeStatus.shape : "invalid",
-      id: STATUS_IDS.has(input.scopeStatus.id) ? input.scopeStatus.id : "other",
-      loadState: STATUS_LOAD_STATES.has(input.scopeStatus.loadState)
-        ? input.scopeStatus.loadState
-        : "other",
-      activeState: STATUS_ACTIVE_STATES.has(input.scopeStatus.activeState)
-        ? input.scopeStatus.activeState
-        : "other",
-      description: STATUS_DESCRIPTIONS.has(input.scopeStatus.description)
-        ? input.scopeStatus.description
-        : "other",
-    },
+    scopeStatus: safeStatus(input.scopeStatus),
     fixture: {
       state: STAGE_STATES.has(input.fixture.state) ? input.fixture.state : "invalid",
       private: input.fixture.private === true,

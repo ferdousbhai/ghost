@@ -24,16 +24,30 @@ integration = Path(sys.argv[1]).read_text(encoding="utf-8")
 diagnostic = Path(sys.argv[2]).read_text(encoding="utf-8")
 required = {
     "integration": (
-        "launcherFailure: classifyLauncherStderr(",
-        "readStageDiagnostic(stageReceipt)",
+        "launcherFailure: classifyLauncherStderr(result.stderr, result.stderrTruncated),",
+        "readStageDiagnostic(stageReceipt),",
+        'const stageReady = step !== "I" || await readStageDiagnostic(stageReceipt).then(',
         "      scopeObservedOwnedLoaded,\n      scopeStatus,",
         "process.stderr.write(`${serializeLifecycleDiagnostic({",
+        "await proveScopeCapabilities(root, fixtures.worker, ownedUnits);",
+        "for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS)",
+        "systemdScopeCapabilityArgs({ step, unit, description, cwd: root, worker })",
+        "scopeStatus: postLaunch,",
     ),
     "diagnostic": (
         "constants.O_RDONLY | constants.O_NOFOLLOW",
         "stat.nlink === 1",
         "(stat.mode & 0o777) === 0o600",
         "const MAX_DIAGNOSTIC_BYTES = 2 * 1024",
+        "export const SYSTEMD_SCOPE_CAPABILITY_STEPS = [",
+        "export function systemdScopeCapabilityArgs(",
+        "export function serializeCapabilityDiagnostic(",
+        'if (level >= 1) args.push("--slice-inherit");',
+        'if (level >= 2) args.push("--expand-environment=no");',
+        'if (level >= 3) args.push(`--working-directory=${input.cwd}`);',
+        'if (level >= 4) args.push("--property=KillMode=control-group");',
+        'if (level >= 5) args.push("--property=SendSIGKILL=yes");',
+        'if (level >= 6) args.push("--property=TimeoutStopSec=1s");',
     ),
 }
 for context, fragments in required.items():
@@ -47,6 +61,10 @@ for fragment in (
     "stderr: Buffer.concat(launcherStderr",
     "path: stageReceipt",
     "scopeUnit: unit",
+    "process.stderr.write(result.stderr",
+    "process.stderr.write(result.stdout",
+    "launcherStderr: result.stderr",
+    "scopeStatus: postCleanup,",
 ):
     if fragment in integration:
         raise SystemExit(f"native scope diagnostic exposes private detail: {fragment!r}")
