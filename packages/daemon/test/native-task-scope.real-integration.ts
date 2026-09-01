@@ -951,6 +951,13 @@ async function proveCollision(
       return (await unitProperties(unit)).get("Description") === foreignDescription;
     } catch { return false; }
   });
+  await waitFor("foreign collision worker pid", async () => {
+    try {
+      const pid = Number((await readFile(foreignPid, "utf8")).trim());
+      return Number.isSafeInteger(pid) && pid > 1 && pidExists(pid);
+    } catch { return false; }
+  });
+  const foreignWorker = Number((await readFile(foreignPid, "utf8")).trim());
   const rejectedLauncher = reserved.spawn({
     executable: "/usr/bin/python3",
     args: ["-c", "time.sleep(3600)"],
@@ -959,7 +966,6 @@ async function proveCollision(
   });
   rejectedLauncher.stderr?.resume();
   await assert.rejects(reserved.stopAndConfirm(), { code: "collision" });
-  const foreignWorker = Number((await readFile(foreignPid, "utf8")).trim());
   assert.equal(pidExists(foreignWorker), true);
   assert.equal((await unitProperties(unit)).get("Description"), foreignDescription);
   await stopOwnedUnit(ownedUnits, unit);
