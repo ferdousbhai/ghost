@@ -212,11 +212,18 @@ export class ClaudeAgentSdkLoader {
       let peerEntry: string;
       try {
         peerEntry = await realpath(requireFromSdk.resolve(peerName));
-      } catch (cause) {
-        throw new ClaudeAgentSdkLoadError(
-          `Claude Agent SDK peer ${peerName}@${peerVersion} is not resolvable from ${entryPath}.`,
-          { cause },
-        );
+      } catch (entryCause) {
+        try {
+          // A peer can be a valid package without exporting a loadable root.
+          // Resolve its metadata as the anchor, then perform the same bounded
+          // package-root and version checks below.
+          peerEntry = await realpath(requireFromSdk.resolve(`${peerName}/package.json`));
+        } catch (metadataCause) {
+          throw new ClaudeAgentSdkLoadError(
+            `Claude Agent SDK peer ${peerName}@${peerVersion} is not resolvable from ${entryPath}.`,
+            { cause: new AggregateError([entryCause, metadataCause]) },
+          );
+        }
       }
       if (!pathWithin(canonicalRoot, peerEntry)) {
         throw new ClaudeAgentSdkLoadError(

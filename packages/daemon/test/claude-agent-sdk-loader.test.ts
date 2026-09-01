@@ -266,6 +266,30 @@ describe("ClaudeAgentSdkLoader", () => {
     expect(imported).not.toHaveBeenCalled();
   });
 
+  it("accepts a pinned peer that exposes metadata but no loadable package root", async () => {
+    const fixture = fixtureRoot();
+    writeSdkPackage(fixture.installRoot);
+    const peerRoot = join(
+      fixture.installRoot,
+      "node_modules",
+      "@modelcontextprotocol",
+      "sdk",
+    );
+    rmSync(join(peerRoot, "index.js"));
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name: "@modelcontextprotocol/sdk",
+      version: CLAUDE_AGENT_SDK_PEERS["@modelcontextprotocol/sdk"],
+    }));
+    const imported = vi.fn(async (_specifier: string) => fakeSdk());
+
+    await expect(new ClaudeAgentSdkLoader({
+      ownerHome: fixture.ownerHome,
+      xdgDataHome: fixture.dataHome,
+      importModule: imported,
+    }).load()).resolves.toBeDefined();
+    expect(imported).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts a pnpm-style in-root link but rejects one outside the install", async () => {
     const fixture = fixtureRoot();
     mkdirSync(fixture.installRoot, { recursive: true });
