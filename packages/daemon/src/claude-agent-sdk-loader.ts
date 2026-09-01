@@ -17,6 +17,10 @@ export const CLAUDE_AGENT_SDK_PEERS = {
   zod: "4.4.3",
 } as const;
 
+const MCP_SDK_PACKAGE = "@modelcontextprotocol/sdk";
+const MCP_SDK_ENTRY = `${MCP_SDK_PACKAGE}/server/mcp.js`;
+const MCP_SDK_CJS_ENTRY = "dist/cjs/server/mcp.js";
+
 const PACKAGE_JSON_MAX_BYTES = 64 * 1024;
 
 export interface ClaudeAgentSdkModule {
@@ -238,9 +242,10 @@ export class ClaudeAgentSdkLoader {
     const requireFromSdk = createRequire(entryPath);
     const peerIdentities: unknown[] = [];
     for (const [peerName, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+      const peerSpecifier = peerName === MCP_SDK_PACKAGE ? MCP_SDK_ENTRY : peerName;
       let peerEntry: string;
       try {
-        peerEntry = await realpath(requireFromSdk.resolve(peerName));
+        peerEntry = await realpath(requireFromSdk.resolve(peerSpecifier));
       } catch (cause) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer ${peerName}@${peerVersion} is not resolvable from ${entryPath}.`,
@@ -294,16 +299,29 @@ export class ClaudeAgentSdkLoader {
         lstat(peerEntry),
       ]);
       if (!peerRootState.isDirectory() || peerRootState.isSymbolicLink()
-        || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()) {
+        || !peerEntryState.isFile() || peerEntryState.isSymbolicLink()
+        || !pathWithin(peerRoot, peerEntry)) {
         throw new ClaudeAgentSdkLoadError(
           `Claude Agent SDK peer ${peerName}@${peerVersion} is not a regular package boundary.`,
         );
+      }
+      if (peerName === MCP_SDK_PACKAGE) {
+        const exactEntry = join(peerRoot, MCP_SDK_CJS_ENTRY);
+        const exactState = await lstat(exactEntry).catch(() => undefined);
+        const exactCanonical = await realpath(exactEntry).catch(() => undefined);
+        if (!exactState?.isFile() || exactState.isSymbolicLink()
+          || exactCanonical !== peerEntry) {
+          throw new ClaudeAgentSdkLoadError(
+            `Claude Agent SDK peer ${peerName}@${peerVersion} has an invalid required subpath.`,
+          );
+        }
       }
       peerIdentities.push([
         peerName,
         peerVersion,
         peerRoot,
         peerManifestPath,
+        peerSpecifier,
         peerEntry,
         statIdentity(peerRootState),
         statIdentity(peerManifestState),

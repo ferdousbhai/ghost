@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -50,6 +51,68 @@ function fakeSdk(): ClaudeAgentSdkModule {
   };
 }
 
+function writePeerPackage(installRoot: string, name: string, version: string): void {
+  const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
+  mkdirSync(peerRoot, { recursive: true });
+  if (name === "@modelcontextprotocol/sdk") {
+    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+      name,
+      version,
+      type: "module",
+      exports: {
+        ".": {
+          import: "./dist/esm/index.js",
+          require: "./dist/cjs/index.js",
+        },
+        "./*": {
+          import: "./dist/esm/*",
+          require: "./dist/cjs/*",
+        },
+      },
+    }));
+    for (const format of ["cjs", "esm"] as const) {
+      const formatRoot = join(peerRoot, "dist", format);
+      const entryRoot = join(formatRoot, "server");
+      mkdirSync(entryRoot, { recursive: true });
+      writeFileSync(join(formatRoot, "package.json"), JSON.stringify({
+        type: format === "cjs" ? "commonjs" : "module",
+      }));
+      writeFileSync(
+        join(entryRoot, "mcp.js"),
+        format === "cjs"
+          ? "module.exports = { McpServer: class McpServer {} };\n"
+          : "export class McpServer {}\n",
+      );
+    }
+    return;
+  }
+  writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
+    name,
+    version,
+    main: "index.js",
+  }));
+  writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
+}
+
+function writePeerPackages(installRoot: string): void {
+  for (const [name, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
+    writePeerPackage(installRoot, name, peerVersion);
+  }
+}
+
+function mcpCjsEntry(installRoot: string): string {
+  return join(
+    installRoot,
+    "node_modules",
+    "@modelcontextprotocol",
+    "sdk",
+    "dist",
+    "cjs",
+    "server",
+    "mcp.js",
+  );
+}
+
 function writeSdkPackage(
   installRoot: string,
   version = CLAUDE_AGENT_SDK_VERSION,
@@ -66,16 +129,7 @@ function writeSdkPackage(
     version,
   }));
   writeFileSync(join(packageRoot, "sdk.mjs"), "export const fixture = true;\n");
-  for (const [name, peerVersion] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
-    const peerRoot = join(installRoot, "node_modules", ...name.split("/"));
-    mkdirSync(peerRoot, { recursive: true });
-    writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
-      name,
-      version: peerVersion,
-      main: "index.js",
-    }));
-    writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
-  }
+  writePeerPackages(installRoot);
   return packageRoot;
 }
 
@@ -293,6 +347,95 @@ describe("ClaudeAgentSdkLoader", () => {
     expect(imported).not.toHaveBeenCalled();
   });
 
+  it("loads through the MCP subpath when the pinned package root export is absent", async () => {
+    const fixture = fixtureRoot();
+    const packageRoot = writeSdkPackage(fixture.installRoot);
+    writeFileSync(join(packageRoot, "sdk.mjs"), `
+export function query() {}
+export function tool() {}
+export function createSdkMcpServer() {}
+`);
+    expect(existsSync(join(
+      fixture.installRoot,
+      "node_modules",
+      "@modelcontextprotocol",
+      "sdk",
+      "dist",
+      "cjs",
+      "index.js",
+    ))).toBe(false);
+
+    const sdk = await new ClaudeAgentSdkLoader({
+      ownerHome: fixture.ownerHome,
+      xdgDataHome: fixture.dataHome,
+    }).load();
+
+    expect(typeof sdk.query).toBe("function");
+    expect(typeof sdk.createSdkMcpServer).toBe("function");
+  });
+
+  it("rejects invalid MCP subpaths and metadata before import", async () => {
+    const cases = [
+      "missing",
+      "symlinked",
+      "outside",
+      "missing-metadata",
+      "malformed-metadata",
+    ] as const;
+    for (const scenario of cases) {
+      const fixture = fixtureRoot();
+      writeSdkPackage(fixture.installRoot);
+      const entry = mcpCjsEntry(fixture.installRoot);
+      if (scenario === "missing") {
+        rmSync(entry);
+      } else if (scenario === "symlinked") {
+        rmSync(entry);
+        const alternate = join(dirname(entry), "alternate.js");
+        writeFileSync(alternate, "module.exports = {};\n");
+        symlinkSync(alternate, entry);
+      } else if (scenario === "outside") {
+        rmSync(entry);
+        const outside = mkdtempSync(join(tmpdir(), "ghost-claude-mcp-outside-"));
+        roots.push(outside);
+        const alternate = join(outside, "mcp.js");
+        writeFileSync(alternate, "module.exports = {};\n");
+        symlinkSync(alternate, entry);
+      } else {
+        const metadata = join(dirname(dirname(dirname(dirname(entry)))), "package.json");
+        if (scenario === "missing-metadata") rmSync(metadata);
+        else writeFileSync(metadata, "not json\n");
+      }
+      const imported = vi.fn(async () => fakeSdk());
+
+      await expect(new ClaudeAgentSdkLoader({
+        ownerHome: fixture.ownerHome,
+        xdgDataHome: fixture.dataHome,
+        importModule: imported,
+      }).load()).rejects.toThrow(/peer|subpath|resolv|outside/i);
+      expect(imported).not.toHaveBeenCalled();
+    }
+  });
+
+  it("requires restart when the validated MCP subpath rotates", async () => {
+    const fixture = fixtureRoot();
+    writeSdkPackage(fixture.installRoot);
+    const imported = vi.fn(async () => fakeSdk());
+    const loader = new ClaudeAgentSdkLoader({
+      ownerHome: fixture.ownerHome,
+      xdgDataHome: fixture.dataHome,
+      importModule: imported,
+    });
+    await loader.load();
+    writeFileSync(mcpCjsEntry(fixture.installRoot), "module.exports = { changed: true };\n");
+
+    const changed = await loader.load().catch((error: unknown) => error);
+    expect(changed).toMatchObject({
+      message: expect.stringMatching(/restart-required.*changed after/s),
+    });
+    await expect(loader.load()).rejects.toBe(changed);
+    expect(imported).toHaveBeenCalledTimes(1);
+  });
+
   it("accepts a pnpm-style in-root link but rejects one outside the install", async () => {
     const fixture = fixtureRoot();
     mkdirSync(fixture.installRoot, { recursive: true });
@@ -310,16 +453,7 @@ describe("ClaudeAgentSdkLoader", () => {
       version: CLAUDE_AGENT_SDK_VERSION,
     }));
     writeFileSync(join(inRoot, "sdk.mjs"), "export const fixture = true;\n");
-    for (const [name, version] of Object.entries(CLAUDE_AGENT_SDK_PEERS)) {
-      const peerRoot = join(fixture.installRoot, "node_modules", ...name.split("/"));
-      mkdirSync(peerRoot, { recursive: true });
-      writeFileSync(join(peerRoot, "package.json"), JSON.stringify({
-        name,
-        version,
-        main: "index.js",
-      }));
-      writeFileSync(join(peerRoot, "index.js"), "module.exports = {};\n");
-    }
+    writePeerPackages(fixture.installRoot);
     symlinkSync(inRoot, linkedPath, "dir");
     const imported = vi.fn(async (_specifier: string) => fakeSdk());
     await expect(new ClaudeAgentSdkLoader({
