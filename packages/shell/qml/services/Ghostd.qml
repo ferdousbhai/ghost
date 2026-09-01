@@ -3901,9 +3901,13 @@ Singleton {
                 if (load.total < 0) load.total = body.total;
                 else if (load.total !== body.total)
                     throw new Error("transcript changed between pages");
+                // The daemon clamps `limit` silently, so a page shorter than
+                // asked for is its clamp speaking, not corruption — the next
+                // request just continues from where this one ended. Only a
+                // page that overshoots what remains is inconsistent.
                 const expected = Math.min(root.transcriptPageLimit,
                     load.total - requestedOffset);
-                if (expected < 0 || body.messages.length !== expected)
+                if (expected < 0 || body.messages.length > expected)
                     throw new Error("inconsistent transcript page length");
                 const truncated = requestedOffset > 0
                     || requestedOffset + body.messages.length < load.total;
@@ -5353,9 +5357,11 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
+                    // The daemon clamps `limit` silently, so the echoed value —
+                    // not the requested one — is what the page must agree with.
                     if (!Array.isArray(body.models) || typeof body.total !== "number"
                             || !Number.isFinite(body.total) || Math.floor(body.total) !== body.total
-                            || body.total < body.models.length || body.limit !== 500
+                            || body.total < body.models.length || !(body.limit > 0)
                             || body.offset !== 0
                             || body.models.length !== Math.min(body.total, body.limit))
                         throw new Error("invalid available model page");

@@ -7,10 +7,9 @@ pragma ComponentBehavior: Bound
 // sidebar footer below mints a new session id like "+ new ghost" mints a ghost.
 //
 // The list is shaped like Apple Notes' sidebar: its section heading and search
-// field sit on top, then a "Pinned" group that disappears when it is empty,
-// then the rest. Pinned state lives on the daemon row (`pinned`), which also
-// owns the ordering; the HUD only splits the already-sorted listing into the
-// two groups.
+// field sit on top, then the rows. Pinned state lives on the daemon row
+// (`pinned`), which also owns the ordering; pinned conversations arrive first
+// in the listing and that order speaks for itself.
 import QtQuick
 import QtQuick.Layouts
 import qs.services
@@ -42,7 +41,6 @@ Item {
 
     readonly property string query: searchInput.text.trim()
 
-    readonly property var pinnedSessions: root.group(true)
     readonly property var filteredSessions: Ghostd.sessions.filter(root.matches)
 
     implicitWidth: Theme.ch(26)
@@ -126,12 +124,6 @@ Item {
     function matches(session: var): bool {
         if (root.query === "") return true;
         return root.titleOf(session).toLowerCase().indexOf(root.query.toLowerCase()) !== -1;
-    }
-
-    function group(pinned: bool): var {
-        return Ghostd.sessions.filter(function (session) {
-            return (session && session.pinned === true) === pinned && root.matches(session);
-        });
     }
 
     /**
@@ -299,9 +291,9 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         width: 16
                         height: Theme.controlHeight
-                        // Pinned state reads from which section the row sits in,
-                        // the way Notes does it, so this is a hover action and
-                        // never a permanent badge.
+                        // Pinned state reads from where the row sits — pinned
+                        // rows lead the daemon's ordering — so this is a hover
+                        // action and never a permanent badge.
                         visible: actions.showActions && !entry.deleting
                         z: 2
                         radius: Theme.radius / 2
@@ -495,20 +487,6 @@ Item {
                     onClicked: searchInput.text = ""
                 }
             }
-        }
-
-        // Header and rows vanish together when nothing pinned survives the
-        // filter; Notes never shows an empty group.
-        Text {
-            visible: root.pinnedSessions.length > 0
-            Layout.fillWidth: true
-            text: "Pinned"
-            color: Theme.foregroundDim
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeCaption
-            font.weight: Font.DemiBold
-            font.capitalization: Font.AllUppercase
-            font.letterSpacing: 1
         }
 
         ListView {

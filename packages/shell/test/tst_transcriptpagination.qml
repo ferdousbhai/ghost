@@ -251,7 +251,10 @@ TestCase {
         compare(Ghostd.sessionsError, "");
     }
 
-    function test_shortOrChangingPageFailsWithoutPublishingPartialHistory(): void {
+    function test_shortPageContinuesButChangingTotalFailsUnpublished(): void {
+        // A page shorter than the requested limit is the daemon's silent
+        // clamp, not corruption: the load keeps paging from where it ended
+        // and publishes nothing until the total is reached.
         const shortState = activeState("short");
         shortState.rows = [{
             role: "user", text: "known-good", tools: "", toolActivity: [],
@@ -261,13 +264,17 @@ TestCase {
         Ghostd.loadConversationTranscript(shortState, false);
         requests[0].complete(200, page(shortState, messages(0, 2), 3, true));
 
-        compare(requests.length, 1);
+        compare(requests.length, 2);
+        verify(requests[1].url.endsWith("?limit=1000&offset=2"));
         compare(shortState.rows.length, 1);
         compare(shortState.rows[0].text, "known-good");
-        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
+        requests[1].complete(200, page(shortState, messages(2, 1), 3, true));
+
+        compare(shortState.rows.length, 3);
+        compare(shortState.rows[2].text, "message-2");
+        compare(Ghostd.sessionsError, "");
 
         requests = [];
-        Ghostd.sessionsError = "";
         const changingState = activeState("changing");
         Ghostd.loadConversationTranscript(changingState, false);
         requests[0].complete(200,
@@ -507,11 +514,16 @@ TestCase {
             || Ghostd.sessionsError.indexOf("try later") >= 0);
     }
 
+    // Lives here for the request-factory harness in init(); it is about page
+    // accounting, not transcripts.
     function test_availableModelCountUsesPageTotal(): void {
         Ghostd.activeGhost = "casper";
         Ghostd.fetchAvailableModels();
         compare(availableRequests.length, 1);
-        verify(availableRequests[0].url.endsWith("?scope=available&limit=500&offset=0"));
+        // The daemon clamps `limit` to its own maximum silently, so the test
+        // pins the scope and offset the shell chose — never the limit value.
+        verify(availableRequests[0].url.indexOf("scope=available") >= 0);
+        verify(availableRequests[0].url.indexOf("offset=0") >= 0);
         const models = [];
         for (let index = 0; index < 500; index++)
             models.push({ provider: "local", id: "model-" + index });
@@ -524,6 +536,26 @@ TestCase {
         });
 
         compare(Ghostd.availableModels.length, 500);
+        compare(Ghostd.availableModelTotal, 501);
+        compare(Ghostd.modelError, "");
+    }
+
+    function test_daemonClampedModelLimitIsAuthoritative(): void {
+        Ghostd.activeGhost = "casper";
+        Ghostd.fetchAvailableModels();
+        compare(availableRequests.length, 1);
+        const models = [];
+        for (let index = 0; index < 200; index++)
+            models.push({ provider: "local", id: "model-" + index });
+        availableRequests[0].complete(200, {
+            scope: "available",
+            models: models,
+            total: 501,
+            limit: 200,
+            offset: 0
+        });
+
+        compare(Ghostd.availableModels.length, 200);
         compare(Ghostd.availableModelTotal, 501);
         compare(Ghostd.modelError, "");
     }
