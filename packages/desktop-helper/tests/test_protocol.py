@@ -26,7 +26,7 @@ def test_hello_reports_required_fields():
     assert payload["type"] == "hello"
     assert payload["helper"] == "ghost-desktop-helper"
     assert "version" in payload
-    assert DESKTOP_HELPER_PROTOCOL_VERSION == 1
+    assert DESKTOP_HELPER_PROTOCOL_VERSION == 2
     assert payload["protocol"] == DESKTOP_HELPER_PROTOCOL_VERSION
     assert "hyprland-version" in payload
     assert "detected-dispatch-grammar" in payload
@@ -43,6 +43,18 @@ def test_unknown_op_is_structured_error():
     assert resp["ok"] is False
     assert resp["error"]["code"] == "unknown_op"
     assert resp["id"] == 7
+
+
+def test_hello_is_the_only_diagnostic_op():
+    server = _server(_desktop())
+    hello = server.handle({"id": 8, "op": "hello"})
+    doctor = server.handle({"id": 9, "op": "doctor"})
+
+    assert hello["ok"] is True
+    assert hello["result"]["type"] == "hello"
+    assert doctor["ok"] is False
+    assert doctor["error"]["code"] == "unknown_op"
+    assert "doctor" not in OPS
 
 
 def test_see_returns_windows_correlated_by_id():

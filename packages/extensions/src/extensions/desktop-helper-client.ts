@@ -69,7 +69,7 @@ export interface HelloPayload {
   readonly [key: string]: unknown;
 }
 
-export const DESKTOP_HELPER_PROTOCOL_VERSION = 1;
+export const DESKTOP_HELPER_PROTOCOL_VERSION = 2;
 
 function helperProtocolError(hello: HelloPayload): GhostError | null {
   if (hello.protocol === DESKTOP_HELPER_PROTOCOL_VERSION) return null;
@@ -287,8 +287,8 @@ function findOnPath(name: string, env: NodeJS.ProcessEnv): string | null {
 /**
  * Locate the helper: an explicit override first, then `ghost-desktop-helper` on
  * PATH, then `python -m ghost_desktop_helper`. If none resolves, throw a
- * `not_found` naming exactly how to install it — the doctor surfaces the same
- * gap. Resolution never runs anything; it only checks that an executable exists.
+ * `not_found` naming exactly how to install it. Resolution never runs anything;
+ * it only checks that an executable exists.
  */
 export function resolveHelperCommand(
   env: NodeJS.ProcessEnv = process.env,

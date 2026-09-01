@@ -75,8 +75,8 @@ class HeadlessCapture:
     def pending(self) -> dict[str, Any] | None:
         """Return an interrupted transaction, or ``None``. Never raises.
 
-        ``doctor`` calls this, so a missing runtime directory or an unreadable
-        journal must degrade to "nothing pending" rather than break diagnostics.
+        Diagnostic callers use this, so a missing runtime directory or an
+        unreadable journal must degrade to "nothing pending".
         """
         try:
             payload = json.loads(self.journal_path.read_text(encoding="utf-8"))

@@ -29,7 +29,7 @@ from ._vendor.omaharness.errors import (
 from ._vendor.omaharness.inputs import MAX_CLICKS
 from .bridge import GhostDesktop, UnknownRefError
 
-DESKTOP_HELPER_PROTOCOL_VERSION = 1
+DESKTOP_HELPER_PROTOCOL_VERSION = 2
 
 # Order matters: _error_code returns the first isinstance match, so the more
 # specific OmaHarnessError subclasses (UnknownRefError) precede OmaHarnessError.
@@ -53,7 +53,7 @@ def _error_code(exc: BaseException) -> str:
 
 
 # Ops that mutate or read enough that a fully-constructed, Hyprland-backed
-# GhostDesktop is required; hello/doctor are answered without one.
+# GhostDesktop is required; hello is answered without one.
 _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
     "see": lambda d, a: d.see(a.get("name")),
     "state": lambda d, a: d.state(),
@@ -134,7 +134,7 @@ _HANDLERS: dict[str, Callable[[GhostDesktop, dict[str, Any]], Any]] = {
     ),
 }
 
-OPS = sorted([*_HANDLERS.keys(), "hello", "doctor"])
+OPS = sorted([*_HANDLERS.keys(), "hello"])
 
 
 class Server:
@@ -206,8 +206,6 @@ class Server:
         try:
             if op == "hello":
                 result: Any = self.hello()
-            elif op == "doctor":
-                result = self.hello()
             elif op in _HANDLERS:
                 result = _HANDLERS[op](self._get_desktop(), args)
             else:

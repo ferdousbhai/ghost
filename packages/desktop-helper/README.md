@@ -45,7 +45,7 @@ On startup the helper emits an unsolicited `hello` line (also available as the
 grammar, and which backends are actually available:
 
 ```json
-{"type":"hello","helper":"ghost-desktop-helper","version":"0.1.0","protocol":1,
+{"type":"hello","helper":"ghost-desktop-helper","version":"0.1.0","protocol":2,
  "ops":[...], "in_hyprland_session":true,
  "hyprland-version":{"tag":"v0.56.2", ...},
  "detected-dispatch-grammar":{"generation":"lua-table","detected_by":"probe",
@@ -88,7 +88,7 @@ screenshot or an empty tree dressed up as success.
 | `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG via the 3-tier ladder; honesty metadata; producer output is limited to 8 MiB |
 | `focus` | `{address \| name}` | focus a window; honesty metadata |
 | `workspace` | `{id \| name}` | switch workspace; honesty metadata |
-| `hello` / `doctor` | — | the handshake payload above |
+| `hello` | — | the complete diagnostic/handshake payload above; degraded backends include reasons |
 
 Roles use a unified GTK3/4 vocabulary (`push button` and `button` fold to one);
 `ax_query` refuses an unknown role and lists the ones actually present.
@@ -180,7 +180,7 @@ today `python-gobject` is built for **Python 3.14**, so:
   on the exact minor version. Set `GHOST_DESKTOP_NO_SYSTEM_GI=1` to skip it in
   an environment that compiled its own bindings.
 
-`hello` / `doctor` report `available-backends.atspi` with the interpreter, the
+`hello` reports `available-backends.atspi` with the interpreter, the
 reason, and the remediation, so a dark accessibility path says so out loud
 instead of quietly returning nothing.
 

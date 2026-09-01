@@ -22,7 +22,7 @@ class CapabilityError(OmaHarnessError):
     """A required compositor, tool, or accessibility capability is missing.
 
     Raised instead of guessing. Every instance should name the capability and,
-    where one exists, the remediation command ``doctor`` would print.
+    where one exists, its remediation.
     """
 
 

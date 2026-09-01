@@ -111,6 +111,8 @@ describe("hello handshake", () => {
     const pending = client.hello();
     proc.line(HELLO);
     const hello = await pending;
+    expect(DESKTOP_HELPER_PROTOCOL_VERSION).toBe(2);
+    expect(hello.protocol).toBe(DESKTOP_HELPER_PROTOCOL_VERSION);
     expect(hello.version).toBe("0.1.0");
     expect(hello.in_hyprland_session).toBe(true);
     const backends = await client.capabilities();
@@ -126,7 +128,7 @@ describe("hello handshake", () => {
     await expect(pending).rejects.toThrowError(/exited/);
   });
 
-  it.each([undefined, 0, 2, "1"])(
+  it.each([undefined, 0, 1, 3, "2"])(
     "rejects helper protocol %s before sending a request",
     async (protocol) => {
       const proc = new FakeProcess();

@@ -252,9 +252,8 @@ def tool_version(name: str, *, flag: str = "--version") -> str | None:
     """Return a one-line version string for a dependency, or ``None``.
 
     A tool that rejects the flag has not told us its version, so this reports
-    ``None`` rather than the first line of its error text. ``doctor`` prints
-    what comes back verbatim, and "unknown" is a far more useful diagnostic
-    than a usage message dressed up as a version number.
+    ``None`` rather than the first line of its error text. "unknown" is a far
+    more useful diagnostic than a usage message dressed up as a version number.
     """
     if which(name) is None:
         return None

@@ -1,4 +1,4 @@
-"""Backend / capability detection for the hello handshake and doctor op.
+"""Backend / capability detection for the hello handshake.
 
 Everything here is read-only and never raises: a missing tool is a first-class,
 reported outcome (the helper degrades and says so), not a crash. The hello

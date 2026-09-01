@@ -380,7 +380,8 @@ hosted-session, concurrency, or spend cap.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
   it. Its startup handshake and the extensions client agree on desktop-helper
-  protocol version 1; a mismatch retires the sidecar before any request is sent.
+  protocol version 2; a mismatch retires the sidecar before any request is sent.
+  Startup/explicit `hello` is the diagnostic boundary; there is no `doctor` op.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   candidates, not user data or service activation policy.
 

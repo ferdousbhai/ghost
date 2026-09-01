@@ -403,7 +403,7 @@ def detect(probe: Any, *, version: dict[str, Any] | None = None) -> dict[str, An
     ``probe`` is called with the encoded no-op and must return ``True`` when
     the compositor accepted it. The result records *how* the answer was
     reached, because "we asked the compositor" and "we read a version string"
-    are not the same quality of evidence and ``doctor`` reports both.
+    are not the same quality of evidence and diagnostics report both.
     """
     override = os.environ.get(ENV_OVERRIDE, "").strip()
     if override:

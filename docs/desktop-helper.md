@@ -31,12 +31,17 @@ A `hello` handshake reports helper version, Hyprland version, detected
 dispatcher grammar, and which capabilities/backends are actually available
 (grim foreign-toplevel? wtype? ydotool? AT-SPI bus?).
 
-The handshake carries desktop-helper protocol version `1`, pinned by
+The handshake carries desktop-helper protocol version `2`, pinned by
 `DESKTOP_HELPER_PROTOCOL_VERSION` in the [Python sidecar](../packages/desktop-helper/src/ghost_desktop_helper/protocol.py)
 and [TypeScript client](../packages/extensions/src/extensions/desktop-helper-client.ts).
 A missing or different version stops the sidecar before any request is sent and
 asks the owner to reinstall/update Ghost so `ghostd` and
 `ghost-desktop-helper` come from the same build.
+
+The unsolicited startup `hello` and explicit `hello` op are the complete
+diagnostic boundary: their `in_hyprland_session`, Hyprland version/grammar, and
+`available-backends` fields report degraded capabilities with reasons. There is
+no separate `doctor` alias.
 
 Request:  `{ "id": <n>, "op": "<name>", "args": { ... } }`
 Response: `{ "id": <n>, "ok": true, "result": { ... } }`
@@ -109,4 +114,4 @@ budget, still exclusive-concurrency serialized.
 Helper discovery: the daemon locates/starts the sidecar (like it does nothing
 today — the extension spawns it lazily, one per daemon, reused); if PyGObject
 / grim / wtype are missing, tools degrade with a clear "install X" error and
-the doctor reports it.
+`hello` reports it.

@@ -381,7 +381,7 @@ class Hyprctl:
         """Report which dispatcher grammar this compositor speaks, and why.
 
         Detected once per session by asking the compositor, then cached. The
-        answer carries its own provenance because ``doctor`` prints it: a
+        answer carries its own provenance because diagnostics report it: a
         grammar established by probe is a different claim from one guessed
         off a version string.
         """
