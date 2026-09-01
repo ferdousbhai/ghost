@@ -760,7 +760,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
+    await readJsonObjectBody(request, maxBodyBytes);
     const readAt = await options.host.markRead(
       ghostName,
       conversation.conversationId,
@@ -841,7 +841,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
+    await readJsonObjectBody(request, maxBodyBytes);
 
     const connection = abortOnClose(request, response);
     try {

@@ -9,7 +9,7 @@ import {
 } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
 import {
   convertToLlm,

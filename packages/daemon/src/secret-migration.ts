@@ -1,11 +1,9 @@
 /** Idempotent migration from portable plaintext into machine Secret Service. */
 import { createHash, randomUUID } from "node:crypto";
 import {
-  chmodSync,
   closeSync,
   constants,
   fstatSync,
-  fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
@@ -15,7 +13,6 @@ import {
   rmSync,
   rmdirSync,
   unlinkSync,
-  writeFileSync,
   type BigIntStats,
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -38,7 +35,6 @@ import {
 import { mcpServerValidationErrors } from "./mcp-server-shape.js";
 import {
   fsyncPath,
-  MAX_PRIVATE_FILE_BYTES,
   type PrivateFileIdentity,
   PrivateReadError,
   readPrivateFile,
