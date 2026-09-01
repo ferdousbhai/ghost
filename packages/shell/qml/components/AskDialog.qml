@@ -498,7 +498,7 @@ Rectangle {
                 text: "A quick question"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize + 1
+                font.pixelSize: Theme.fontSizeSubtitle
                 font.weight: Font.DemiBold
                 // fillWidth without this is a floor, not a ceiling: in a narrow
                 // HUD the title keeps its whole implicit width and runs under

@@ -177,7 +177,7 @@ Rectangle {
                     text: "MCP servers"
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 3
+                    font.pixelSize: Theme.fontSizeHeading
                     font.weight: Font.DemiBold
                 }
 
@@ -388,7 +388,7 @@ Rectangle {
                                     + " · " + root.textOf(serverRow.modelData.source || "ghost")
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamilyMono
-                                font.pixelSize: Theme.fontSizeSmall - 1
+                                font.pixelSize: Theme.fontSizeCaption
                                 elide: Text.ElideRight
                             }
                         }
@@ -465,7 +465,7 @@ Rectangle {
                                         text: root.selectedServer ? root.selectedServer.name : ""
                                         color: Theme.foregroundBright
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSize + 3
+                                        font.pixelSize: Theme.fontSizeHeading
                                         font.weight: Font.DemiBold
                                         elide: Text.ElideRight
                                     }
@@ -603,7 +603,7 @@ Rectangle {
                                         text: root.textOf(modelData.path) + " — " + root.textOf(modelData.reason)
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamilyMono
-                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                        font.pixelSize: Theme.fontSizeCaption
                                         wrapMode: Text.WrapAnywhere
                                     }
                                 }
@@ -619,7 +619,7 @@ Rectangle {
                                 text: root.adding ? "Add MCP server" : "Replace " + root.editorName
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 3
+                                font.pixelSize: Theme.fontSizeHeading
                                 font.weight: Font.DemiBold
                             }
 

@@ -121,7 +121,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 3
+                    font.pixelSize: Theme.fontSizeHeading
                     font.weight: Font.DemiBold
                 }
 
@@ -202,7 +202,7 @@ Rectangle {
                             color: harnessCard.modelData.authentication === "authenticated"
                                 ? Theme.ok : Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall - 1
+                            font.pixelSize: Theme.fontSizeCaption
                             elide: Text.ElideRight
                         }
                     }
@@ -477,7 +477,7 @@ Rectangle {
                                     textFormat: Text.PlainText
                                     color: root.statusColor(taskCard.modelData.state)
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    font.pixelSize: Theme.fontSizeCaption
                                     font.weight: Font.DemiBold
                                 }
                             }
@@ -500,7 +500,7 @@ Rectangle {
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundFaint
                                 font.family: Theme.fontFamilyMono
-                                font.pixelSize: Theme.fontSizeSmall - 1
+                                font.pixelSize: Theme.fontSizeCaption
                                 elide: Text.ElideMiddle
                             }
                         }
@@ -578,7 +578,7 @@ Rectangle {
                                     textFormat: Text.PlainText
                                     color: Theme.foregroundBright
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSize + 1
+                                    font.pixelSize: Theme.fontSizeSubtitle
                                     font.weight: Font.DemiBold
                                     elide: Text.ElideRight
                                 }
@@ -590,7 +590,7 @@ Rectangle {
                                     textFormat: Text.PlainText
                                     color: Theme.foregroundFaint
                                     font.family: Theme.fontFamilyMono
-                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    font.pixelSize: Theme.fontSizeCaption
                                     elide: Text.ElideMiddle
                                 }
                             }
@@ -618,7 +618,7 @@ Rectangle {
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall - 1
+                                font.pixelSize: Theme.fontSizeCaption
                                 font.capitalization: Font.AllUppercase
                                 font.letterSpacing: 1
                             }
@@ -649,7 +649,7 @@ Rectangle {
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall - 1
+                                font.pixelSize: Theme.fontSizeCaption
                                 font.capitalization: Font.AllUppercase
                                 font.letterSpacing: 1
                             }
@@ -695,7 +695,7 @@ Rectangle {
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall - 1
+                                font.pixelSize: Theme.fontSizeCaption
                                 font.capitalization: Font.AllUppercase
                                 font.letterSpacing: 1
                             }

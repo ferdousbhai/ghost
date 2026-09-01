@@ -100,7 +100,7 @@ Item {
                 text: "Ghosts"
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall - 1
+                font.pixelSize: Theme.fontSizeCaption
                 font.weight: Font.DemiBold
                 font.capitalization: Font.AllUppercase
                 font.letterSpacing: 1

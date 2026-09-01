@@ -53,7 +53,7 @@ Rectangle {
                 text: urlField.label + " · select and copy"
                 color: Theme.foregroundFaint
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall - 1
+                font.pixelSize: Theme.fontSizeCaption
             }
 
             TextEdit {
@@ -127,7 +127,7 @@ Rectangle {
                     text: "Remote"
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 3
+                    font.pixelSize: Theme.fontSizeHeading
                     font.weight: Font.DemiBold
                 }
                 Text {
@@ -205,7 +205,7 @@ Rectangle {
                                 text: "Live voice"
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 1
+                                font.pixelSize: Theme.fontSizeSubtitle
                                 font.weight: Font.DemiBold
                             }
                             Text {
@@ -349,7 +349,7 @@ Rectangle {
                         text: "Remote collaboration"
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize + 1
+                        font.pixelSize: Theme.fontSizeSubtitle
                         font.weight: Font.DemiBold
                     }
                     Text {

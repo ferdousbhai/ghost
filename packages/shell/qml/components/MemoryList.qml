@@ -150,7 +150,7 @@ Rectangle {
                 text: "Memory"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize + 1
+                font.pixelSize: Theme.fontSizeSubtitle
                 font.weight: Font.DemiBold
             }
 
@@ -429,7 +429,7 @@ Rectangle {
                             color: deleteArea.containsMouse && deleteArea.enabled
                                 ? Theme.danger : Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize + 2
+                            font.pixelSize: Theme.fontSizeTitle
                         }
 
                         MouseArea {

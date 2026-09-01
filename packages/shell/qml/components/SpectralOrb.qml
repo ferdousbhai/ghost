@@ -1,3 +1,5 @@
+pragma ComponentBehavior: Bound
+
 // SpectralOrb — the ghost, drawn the way this desktop draws everything else.
 //
 // It began as a QML port of summon-ghost's layered gradient orb (be07ca78) and

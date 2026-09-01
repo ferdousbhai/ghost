@@ -166,39 +166,21 @@ Singleton {
     readonly property int fontSizeTitle: root.fontSizeFor("title", 14 / 12)
     readonly property int fontSizeHeading: root.fontSizeFor("heading", 16 / 12)
     readonly property int fontSizeDisplay: root.fontSizeFor("display", 24 / 12)
-    readonly property int fontSizeDisplayLarge: root.fontSizeFor("display-large", 28 / 12)
-    readonly property int iconSizeSmall: root.fontSizeFor("icon-small", 11 / 12)
-    readonly property int iconSize: root.fontSizeFor("icon", 14 / 12)
-    readonly property int iconSizeLarge: root.fontSizeFor("icon-large", 18 / 12)
 
     // [spacing] — the same shape: a scale that optionally tracks the font base,
-    // and per-token pins in absolute px that bypass it.
+    // and per-token pins in absolute px that bypass it. Only the tokens with a
+    // consumer are named; the rest of Omarchy's scale lands when a surface
+    // wants it, rather than sitting here as vocabulary.
     readonly property real spacingScale: root.shellNumber("spacing.scale", 1)
         * (root.shellFlag("spacing.scale-with-font", true) ? root.fontBase / 12 : 1)
     function spaceFor(token: string, base: real): int {
         return Math.max(0, Math.round(root.shellNumber("spacing." + token, base * root.spacingScale)));
     }
-    readonly property int spaceXxs: root.spaceFor("xxs", 2)
-    readonly property int spaceXs: root.spaceFor("xs", 3)
-    readonly property int spaceSm: root.spaceFor("sm", 4)
-    readonly property int spaceMd: root.spaceFor("md", 6)
-    readonly property int spaceLg: root.spaceFor("lg", 8)
-    readonly property int spaceXl: root.spaceFor("xl", 10)
-    readonly property int spaceXxl: root.spaceFor("xxl", 12)
-    readonly property int spaceXxxl: root.spaceFor("xxxl", 14)
     readonly property int spaceHuge: root.spaceFor("huge", 18)
     readonly property int controlGap: root.spaceFor("control-gap", 8)
     readonly property int controlPaddingX: root.spaceFor("control-padding-x", 10)
-    readonly property int controlPaddingY: root.spaceFor("control-padding-y", 6)
-    readonly property int inputPaddingY: root.spaceFor("input-padding-y", 7)
     readonly property int popupRowHeight: root.spaceFor("popup-row-height", 28)
-    readonly property int rowGap: root.spaceFor("row-gap", 8)
-    readonly property int rowPaddingX: root.spaceFor("row-padding-x", 12)
-    readonly property int labelGap: root.spaceFor("label-gap", 4)
-    readonly property int panelGap: root.spaceFor("panel-gap", 14)
     readonly property int panelPadding: root.spaceFor("panel-padding", 18)
-    readonly property int popupPadding: root.spaceFor("popup-padding", 14)
-    readonly property int dropdownWidth: root.spaceFor("dropdown-width", 240)
 
     // [controls] — Omarchy publishes one chrome colour and one border colour
     // per state, and separates the states by alpha. Every fill below is
@@ -238,7 +220,6 @@ Singleton {
 
     // Chrome states, straight from [controls]: one colour, four alphas.
     readonly property color hover: root.controlFill("hover-cursor")
-    readonly property color focusFill: root.controlFill("focus")
     readonly property color selection: root.controlFill("selected")
     readonly property color pressed: Qt.rgba(root.selection.r, root.selection.g,
         root.selection.b, root.shellNumber("controls.pressed-fill-alpha", 0.22))
@@ -246,16 +227,12 @@ Singleton {
     /** The same border at the strongest alpha Omarchy publishes for it. */
     readonly property color borderStrong: root.controlBorder("selected",
         "controls.selected-border-alpha")
-    readonly property int borderWidth: Math.max(1,
-        Math.round(root.shellNumber("controls.normal-border-width", 1)))
     // Compatibility alias for host integrations; new UI code should choose a
     // text or border token explicitly.
     readonly property color muted: root.border
 
     // One inherited accent carries focus, selection, and the active state.
     readonly property color accent: root.pick("accent")
-    /** The compositor's own active border, so a card can line up with a window. */
-    readonly property color activeBorder: root.shellColor("hyprland.active-border", root.accent)
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")

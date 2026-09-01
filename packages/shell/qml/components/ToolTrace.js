@@ -30,11 +30,120 @@ function quoted(value) {
 
 /**
  * The file a call names, whichever harness asked for it. pi's native tools take
- * `path`; Claude Code's take `file_path`. Same file, same sentence.
+ * `path`, Claude Code's take `file_path`, and its notebook editor takes
+ * `notebook_path`. Same file, same sentence.
  */
 function pathArgument(activity) {
-    return argument(activity, "path") || argument(activity, "file_path");
+    return argument(activity, "path")
+        || argument(activity, "file_path")
+        || argument(activity, "notebook_path");
 }
+
+/**
+ * One name for one job.
+ *
+ * The two harnesses do the same work under different spellings — pi's `read`
+ * is Claude Code's `Read`, its `find` is `Glob` — and the wire deliberately
+ * carries whichever name actually ran, because a transcript is a record of
+ * what happened and Claude's `Read` takes a `file_path` that pi's `read` would
+ * not recognise. Presentation is where the two vocabularies meet, and this is
+ * the one place in it that knows they are two: everything below reads the
+ * canonical name, so a tool Claude renames is one line here rather than a
+ * search through five switch statements.
+ */
+var CANONICAL = {
+    Read: "read",
+    Write: "write",
+    Edit: "edit",
+    NotebookEdit: "edit",
+    Bash: "bash",
+    Grep: "grep",
+    Glob: "find",
+    // Ghost's own pre-OMP name for the work `inspect_image` does now; historical
+    // transcripts still replay it.
+    look_at_image: "inspect_image",
+    // pi's memory tools under the names older sessions wrote them with.
+    list_memory: "ghost_memory_list"
+};
+
+function canonicalName(activity) {
+    const name = String(activity.name || "");
+    return CANONICAL[name] || name;
+}
+
+/**
+ * The tools that are a verb and one argument. Every one of them reads the same
+ * way — "Reading docs/design.md", "Ran pnpm test" — and writing them out was a
+ * dozen near-identical blocks that had to be found and edited one at a time.
+ * The sentence with no argument is spelled out rather than derived: "Searching
+ * for the files" is not what "Searching the files" turns into.
+ */
+var VERBS = {
+    read: {
+        past: "Read", present: "Reading", of: pathArgument,
+        alonePast: "Read a file", alonePresent: "Reading a file"
+    },
+    ls: {
+        past: "Listed", present: "Listing", key: "path",
+        alonePast: "Listed a directory", alonePresent: "Listing a directory"
+    },
+    bash: {
+        past: "Ran", present: "Running", key: "command",
+        alonePast: "Ran a command", alonePresent: "Running a command"
+    },
+    grep: {
+        past: "Searched for", present: "Searching for", key: "pattern", quote: true,
+        alonePast: "Searched the files", alonePresent: "Searching the files"
+    },
+    find: {
+        past: "Looked for files matching", present: "Looking for files matching",
+        key: "pattern", quote: true,
+        alonePast: "Looked for files", alonePresent: "Looking for files"
+    },
+    WebFetch: {
+        past: "Read", present: "Reading", key: "url",
+        alonePast: "Read a page", alonePresent: "Reading a page"
+    },
+    WebSearch: {
+        past: "Searched the web for", present: "Searching the web for",
+        key: "query", quote: true,
+        alonePast: "Searched the web", alonePresent: "Searching the web"
+    },
+    Task: {
+        past: "Delegated", present: "Delegating", key: "description",
+        alonePast: "Delegated a task", alonePresent: "Delegating a task"
+    },
+    ghost_notes_read: {
+        past: "Read", present: "Reading", key: "path",
+        alonePast: "Read a document", alonePresent: "Reading a document"
+    },
+    ghost_notes_write: {
+        past: "Updated", present: "Updating", key: "path",
+        alonePast: "Saved a document", alonePresent: "Saving a document"
+    },
+    ghost_notes_grep: {
+        past: "Looked for", present: "Looking for", key: "query", quote: true,
+        suffix: " in your docs",
+        alonePast: "Searched your docs", alonePresent: "Searching your docs"
+    },
+    ghost_memory_read: {
+        past: "Recalled", present: "Recalling", key: "name",
+        alonePast: "Recalled a memory", alonePresent: "Recalling a memory"
+    },
+    read_memory: {
+        past: "Looked for", present: "Looking for", key: "query", quote: true,
+        suffix: " in memory",
+        alonePast: "Recalled a memory", alonePresent: "Recalling a memory"
+    }
+};
+
+function verbTrace(verb, activity, completed) {
+    const raw = verb.of ? verb.of(activity) : argument(activity, verb.key);
+    if (raw === "") return completed ? verb.alonePast : verb.alonePresent;
+    return (completed ? verb.past : verb.present) + " "
+        + (verb.quote ? quoted(raw) : compact(raw, 80)) + (verb.suffix || "");
+}
+
 
 function isAsk(activity) {
     return String(activity.name || "") === "ask";
@@ -223,14 +332,10 @@ function askAction(activity) {
  */
 function fileTarget(activity) {
     activity = fields(activity);
-    switch (String(activity.name || "")) {
+    switch (canonicalName(activity)) {
     case "write":
     case "edit":
-    case "Write":
-    case "Edit":
         return pathArgument(activity);
-    case "NotebookEdit":
-        return argument(activity, "notebook_path");
     // Historical transcripts keep the old tool name and target retired
     // per-ghost files. They are never shared Documents paths.
     case "ghost_notes_write": {
@@ -246,12 +351,9 @@ function fileTarget(activity) {
 /** Which explicit path base the caller must use for {@link fileTarget}. */
 function fileBase(activity) {
     activity = fields(activity);
-    switch (String(activity.name || "")) {
+    switch (canonicalName(activity)) {
     case "write":
     case "edit":
-    case "Write":
-    case "Edit":
-    case "NotebookEdit":
         return "cwd";
     case "ghost_notes_write":
         return "ghost";
@@ -269,7 +371,9 @@ function fileCwd(activity) {
 // it. These fallbacks also keep restored transcripts useful: persisted tool
 // calls retain their arguments, while live intent/result summaries do not.
 function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) {
-    const name = String(activity.name || "");
+    const name = canonicalName(activity);
+    const verb = VERBS[name];
+    if (verb) return verbTrace(verb, activity, completed);
 
     switch (name) {
     case "ask": {
@@ -303,66 +407,21 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
     }
     case "ghost_notes_list":
         return completed ? "Looked through your docs" : "Looking through your docs";
-    case "ghost_notes_read": {
-        const path = argument(activity, "path");
-        return path !== ""
-            ? (completed ? "Read " : "Reading ") + path
-            : (completed ? "Read a document" : "Reading a document");
-    }
-    case "ghost_notes_grep": {
-        const query = argument(activity, "query");
-        return query !== ""
-            ? (completed ? "Looked for " : "Looking for ")
-                + quoted(query) + " in your docs"
-            : (completed ? "Searched your docs" : "Searching your docs");
-    }
-    case "ghost_notes_write": {
-        const path = argument(activity, "path");
-        return path !== ""
-            ? (completed ? "Updated " : "Updating ") + path
-            : (completed ? "Saved a document" : "Saving a document");
-    }
-    // The harnesses' own file, shell, and search tools. A session does most of
-    // its work through these rather than the ghost_* ones, so without them a
-    // turn shows nothing where the ghost read, changed, or searched anything.
-    // pi names them in lower case and takes `path`; Claude Code capitalises and
-    // takes `file_path`. The work is the same, so the sentence is too.
-    case "write":
-    case "Write": {
+    // The writers are not in the verb table: their argument is the same one the
+    // workbench chip resolves, and the caller has usually already paid for it.
+    case "write": {
         const written = preparedFileTarget === undefined
             ? fileTarget(activity) : preparedFileTarget;
         return written !== ""
             ? (completed ? "Wrote " : "Writing ") + written
             : (completed ? "Wrote a file" : "Writing a file");
     }
-    case "edit":
-    case "Edit":
-    case "NotebookEdit": {
+    case "edit": {
         const written = preparedFileTarget === undefined
             ? fileTarget(activity) : preparedFileTarget;
         return written !== ""
             ? (completed ? "Edited " : "Editing ") + written
             : (completed ? "Edited a file" : "Editing a file");
-    }
-    case "read":
-    case "Read": {
-        const target = pathArgument(activity);
-        return target !== ""
-            ? (completed ? "Read " : "Reading ") + target
-            : (completed ? "Read a file" : "Reading a file");
-    }
-    case "ls": {
-        const dir = argument(activity, "path");
-        return dir !== ""
-            ? (completed ? "Listed " : "Listing ") + dir
-            : (completed ? "Listed a directory" : "Listing a directory");
-    }
-    case "bash":
-    case "Bash": {
-        const command = argument(activity, "command");
-        return command !== ""
-            ? (completed ? "Ran " : "Running ") + compact(command, 80)
-            : (completed ? "Ran a command" : "Running a command");
     }
     case "BashOutput":
         return completed
@@ -370,65 +429,15 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
             : "Checking on a running command";
     case "KillShell":
         return completed ? "Stopped a running command" : "Stopping a running command";
-    case "grep":
-    case "Grep": {
-        const pattern = argument(activity, "pattern");
-        return pattern !== ""
-            ? (completed ? "Searched for " : "Searching for ") + quoted(pattern)
-            : (completed ? "Searched the files" : "Searching the files");
-    }
-    case "find":
-    case "Glob": {
-        const pattern = argument(activity, "pattern");
-        return pattern !== ""
-            ? (completed ? "Looked for files matching " : "Looking for files matching ")
-                + quoted(pattern)
-            : (completed ? "Looked for files" : "Looking for files");
-    }
-    case "WebFetch": {
-        const url = argument(activity, "url");
-        return url !== ""
-            ? (completed ? "Read " : "Reading ") + url
-            : (completed ? "Read a page" : "Reading a page");
-    }
-    case "WebSearch": {
-        const query = argument(activity, "query");
-        return query !== ""
-            ? (completed ? "Searched the web for " : "Searching the web for ") + quoted(query)
-            : (completed ? "Searched the web" : "Searching the web");
-    }
-    case "Task": {
-        const description = argument(activity, "description");
-        return description !== ""
-            ? (completed ? "Delegated " : "Delegating ") + compact(description, 80)
-            : (completed ? "Delegated a task" : "Delegating a task");
-    }
     case "TodoWrite":
         return completed ? "Updated its plan" : "Updating its plan";
     case "ghost_memory_list":
-    case "list_memory":
         return completed
             ? "Looked through remembered details"
             : "Looking through remembered details";
-    case "ghost_memory_read": {
-        const memoryName = argument(activity, "name");
-        return memoryName !== ""
-            ? (completed ? "Recalled " : "Recalling ") + memoryName
-            : (completed ? "Recalled a memory" : "Recalling a memory");
-    }
-    case "read_memory": {
-        const query = argument(activity, "query");
-        return query !== ""
-            ? (completed ? "Looked for " : "Looking for ")
-                + quoted(query) + " in memory"
-            : (completed ? "Recalled a memory" : "Recalling a memory");
-    }
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
-    // `look_at_image` was Ghost's tool before `inspect_image` took the job.
-    // Historical transcripts still replay the old name.
     case "inspect_image":
-    case "look_at_image":
         return completed ? "Looked closely at the image" : "Looking closely at the image";
     case "ghost_screen":
         return completed ? "Checked what’s on screen" : "Checking what’s on screen";
@@ -480,9 +489,8 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
  * that explains what went wrong.
  */
 function resultIsRawContent(activity) {
-    switch (String(activity.name || "")) {
+    switch (canonicalName(activity)) {
     case "read":
-    case "Read":
     case "ls":
     case "WebFetch":
         return true;

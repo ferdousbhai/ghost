@@ -419,7 +419,7 @@ FloatingWindow {
                         text: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize + 1
+                        font.pixelSize: Theme.fontSizeSubtitle
                         font.weight: Font.DemiBold
                     }
                 }
@@ -650,7 +650,7 @@ FloatingWindow {
                                 text: "+"
                                 color: Theme.ghostAmberBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 4
+                                font.pixelSize: Theme.fontSizeHeading
                             }
 
                             MouseArea {
@@ -865,7 +865,7 @@ FloatingWindow {
                                 text: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 8
+                                font.pixelSize: Theme.fontSizeDisplay
                                 font.weight: Font.Medium
                             }
 

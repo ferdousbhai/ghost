@@ -309,7 +309,7 @@ Rectangle {
                             text: "…truncated"
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamilyMono
-                            font.pixelSize: Theme.fontSizeSmall - 1
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }

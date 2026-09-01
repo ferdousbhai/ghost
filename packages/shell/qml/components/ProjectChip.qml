@@ -261,7 +261,7 @@ FocusScope {
                                         : ProjectModel.title(root.binding)))
                             color: Theme.foregroundBright
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize + 2
+                            font.pixelSize: Theme.fontSizeTitle
                             font.weight: Font.DemiBold
                         }
 
@@ -290,7 +290,7 @@ FocusScope {
                             text: "×"
                             color: Theme.foregroundDim
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize + 3
+                            font.pixelSize: Theme.fontSizeHeading
                         }
                         MouseArea {
                             id: closeArea

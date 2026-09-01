@@ -149,7 +149,7 @@ Rectangle {
             textFormat: Text.PlainText
             color: Theme.foregroundFaint
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall - 1
+            font.pixelSize: Theme.fontSizeCaption
         }
 
         Rectangle {
@@ -215,7 +215,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 3
+                    font.pixelSize: Theme.fontSizeHeading
                     font.weight: Font.DemiBold
                 }
 
@@ -437,7 +437,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         color: Theme.foregroundFaint
                         font.family: Theme.fontFamilyMono
-                        font.pixelSize: Theme.fontSizeSmall - 1
+                        font.pixelSize: Theme.fontSizeCaption
                     }
 
                     Item {
@@ -463,7 +463,7 @@ Rectangle {
                                 color: deleteArea.containsMouse && deleteArea.enabled
                                     ? Theme.danger : Theme.foregroundFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 2
+                                font.pixelSize: Theme.fontSizeTitle
                             }
 
                             MouseArea {
@@ -513,7 +513,7 @@ Rectangle {
                     textFormat: Text.PlainText
                     color: Theme.ghostAmber
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall - 1
+                    font.pixelSize: Theme.fontSizeCaption
                     wrapMode: Text.WordWrap
                 }
             }
@@ -659,7 +659,7 @@ Rectangle {
                             textFormat: Text.PlainText
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall - 1
+                            font.pixelSize: Theme.fontSizeCaption
                         }
                     }
                 }

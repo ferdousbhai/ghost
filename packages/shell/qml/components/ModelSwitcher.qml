@@ -145,7 +145,7 @@ Rectangle {
                         : "Choose a model")
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize + 1
+                font.pixelSize: Theme.fontSizeSubtitle
                 font.weight: Font.DemiBold
             }
 
@@ -411,7 +411,7 @@ Rectangle {
                                         text: routeEntry.route ? "Ghost @" + routeEntry.route.ompRole : ""
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                        font.pixelSize: Theme.fontSizeCaption
                                     }
                                     Item { Layout.fillWidth: true }
                                     Text {
@@ -714,7 +714,7 @@ Rectangle {
                                         text: "Vision"
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall - 1
+                                        font.pixelSize: Theme.fontSizeCaption
                                     }
                                 }
 
@@ -821,7 +821,7 @@ Rectangle {
                                     text: "Vision"
                                     color: Theme.foregroundDim
                                     font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    font.pixelSize: Theme.fontSizeCaption
                                 }
                             }
 

@@ -152,7 +152,7 @@ Rectangle {
             textFormat: Text.PlainText
             color: Theme.foregroundBright
             font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSize + 3
+            font.pixelSize: Theme.fontSizeHeading
             font.weight: Font.DemiBold
         }
 
@@ -225,7 +225,7 @@ Rectangle {
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 1
+                                font.pixelSize: Theme.fontSizeSubtitle
                                 font.weight: Font.DemiBold
                             }
 
@@ -370,7 +370,7 @@ Rectangle {
                         textFormat: Text.PlainText
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSize + 1
+                        font.pixelSize: Theme.fontSizeSubtitle
                         font.weight: Font.DemiBold
                     }
 

@@ -82,7 +82,7 @@ Rectangle {
                 text: "Connect a model"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize + 1
+                font.pixelSize: Theme.fontSizeSubtitle
                 font.weight: Font.DemiBold
             }
 
@@ -368,7 +368,7 @@ Rectangle {
                         text: root.deviceCode
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamilyMono
-                        font.pixelSize: Theme.fontSize + 6
+                        font.pixelSize: Theme.fontSizeHeading
                         font.weight: Font.DemiBold
                     }
 

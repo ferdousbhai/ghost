@@ -91,7 +91,7 @@ Rectangle {
                     text: "Commands"
                     color: Theme.foregroundBright
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 3
+                    font.pixelSize: Theme.fontSizeHeading
                     font.weight: Font.DemiBold
                 }
 
@@ -250,7 +250,7 @@ Rectangle {
                     text: "Discovering commands…"
                     color: Theme.foreground
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 1
+                    font.pixelSize: Theme.fontSizeSubtitle
                     font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -277,7 +277,7 @@ Rectangle {
                     text: root.searchText.trim() === "" ? "No commands available" : "No matching commands"
                     color: Theme.foreground
                     font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize + 1
+                    font.pixelSize: Theme.fontSizeSubtitle
                     font.weight: Font.DemiBold
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -313,7 +313,7 @@ Rectangle {
                             text: commandGroup.modelData.label
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall - 1
+                            font.pixelSize: Theme.fontSizeCaption
                             font.weight: Font.DemiBold
                             font.capitalization: Font.AllUppercase
                             font.letterSpacing: 1
@@ -403,7 +403,7 @@ Rectangle {
                                             color: CommandCatalog.availability(commandRow.modelData)
                                                 === "unsupported" ? Theme.danger : Theme.warn
                                             font.family: Theme.fontFamily
-                                            font.pixelSize: Theme.fontSizeSmall - 2
+                                            font.pixelSize: Theme.fontSizeCaption
                                             font.weight: Font.DemiBold
                                         }
                                     }
@@ -425,7 +425,7 @@ Rectangle {
                                     text: root.detailText(commandRow.modelData)
                                     color: Theme.foregroundFaint
                                     font.family: Theme.fontFamilyMono
-                                    font.pixelSize: Theme.fontSizeSmall - 1
+                                    font.pixelSize: Theme.fontSizeCaption
                                     wrapMode: Text.WordWrap
                                 }
                             }
@@ -438,7 +438,7 @@ Rectangle {
                                 text: "→"
                                 color: commandArea.containsMouse ? Theme.ghostAmberBright : Theme.foregroundFaint
                                 font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize + 2
+                                font.pixelSize: Theme.fontSizeTitle
                             }
 
                             MouseArea {
@@ -468,7 +468,7 @@ Rectangle {
                     + "  ·  selecting one never runs it"
                 color: Theme.foregroundFaint
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall - 1
+                font.pixelSize: Theme.fontSizeCaption
                 horizontalAlignment: Text.AlignHCenter
             }
         }
