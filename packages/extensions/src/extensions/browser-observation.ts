@@ -7,7 +7,7 @@ import type {
 export const MAX_BROWSER_OBSERVATION_BYTES = 64 * 1024;
 export const MAX_BROWSER_OBSERVATION_ITEMS = 50;
 export const MAX_BROWSER_OBSERVATION_STRING_BYTES = 2 * 1024;
-export const MAX_BROWSER_OBSERVATION_DEPTH = 6;
+const MAX_BROWSER_OBSERVATION_DEPTH = 6;
 
 export interface BoundedJavascriptResult extends BackendJavascriptResult {
   readonly omitted: number;
@@ -46,7 +46,7 @@ function utf8Bytes(value: string): number {
   return Buffer.byteLength(value, "utf8");
 }
 
-export function boundBrowserObservationString(
+function boundBrowserObservationString(
   value: unknown,
   maxBytes = MAX_BROWSER_OBSERVATION_STRING_BYTES,
 ): StringProjection {

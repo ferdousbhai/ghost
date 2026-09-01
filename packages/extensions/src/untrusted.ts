@@ -369,7 +369,7 @@ export class CompositeInjectionDetector implements InjectionDetector {
 
 const defaultHeuristicInjectionDetector = new HeuristicInjectionDetector();
 
-export const defaultInjectionDetector: InjectionDetector =
+const defaultInjectionDetector: InjectionDetector =
   configuredModel(process.env) === undefined
     ? defaultHeuristicInjectionDetector
     : new CompositeInjectionDetector(

@@ -25,7 +25,7 @@ import {
 
 export const GHOST_DESKTOP = "ghost_desktop";
 
-export const NOTIFY_SEND_BINARY = "notify-send";
+const NOTIFY_SEND_BINARY = "notify-send";
 
 export type DesktopAction =
   | "state"

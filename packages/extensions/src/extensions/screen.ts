@@ -38,15 +38,9 @@ import {
   writeScreenshotFile,
 } from "./screenshot-retention.js";
 
-export {
-  DEFAULT_SCREENSHOT_RETENTION,
-  ghostScreenshotName,
-  resolveScreenshotDirectory,
-} from "./screenshot-retention.js";
-
 export const GHOST_SCREEN = "ghost_screen";
 
-export const CAPTURE_MIME_TYPE = "image/png";
+const CAPTURE_MIME_TYPE = "image/png";
 
 type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
 
@@ -63,13 +57,13 @@ export type GhostImageContent = Extract<
  * spinner finish, a progress bar move, or a dialog appear, without flooding the
  * context or the disk. Zero new dependency — it just loops the capture op.
  */
-export const DEFAULT_WATCH_FRAMES = 4;
+const DEFAULT_WATCH_FRAMES = 4;
 export const MAX_WATCH_FRAMES = 8;
-export const DEFAULT_WATCH_INTERVAL_MS = 500;
+const DEFAULT_WATCH_INTERVAL_MS = 500;
 export const MAX_WATCH_INTERVAL_MS = 5_000;
-export const MAX_WATCH_RUN_MS = 30_000;
+const MAX_WATCH_RUN_MS = 30_000;
 
-export const SCREEN_MODES = ["capture", "watch"] as const;
+const SCREEN_MODES = ["capture", "watch"] as const;
 
 export type ScreenMode = (typeof SCREEN_MODES)[number];
 
@@ -283,7 +277,7 @@ export interface WatchViaHelperOptions extends CaptureViaHelperOptions {
  * when the sidecar answers instantly. The whole run is bounded by both a frame
  * cap and a wall-clock budget, and a caller abort cuts a wait short.
  */
-export async function watchViaHelper(
+async function watchViaHelper(
   options: WatchViaHelperOptions,
 ): Promise<HelperCapture[]> {
   const frames = clampInt(options.frames, DEFAULT_WATCH_FRAMES, 1, MAX_WATCH_FRAMES);
@@ -467,7 +461,7 @@ function watchDetails(
  * inspect each with `inspect_image`, exactly like the single-capture branch.
  * Frames over the inline byte budget keep their saved path but not their pixels.
  */
-export async function buildWatchResult(
+async function buildWatchResult(
   home: GhostHome,
   params: { prompt: string; target?: ScreenTarget | undefined; window?: string | undefined; region?: string | undefined; output?: string | undefined },
   captures: HelperCapture[],
@@ -582,7 +576,7 @@ export function createScreenExtension(
             + `Defaults to ${DEFAULT_WATCH_INTERVAL_MS}.`,
         })),
       }),
-      execute: async (_toolCallId, params, signal, ctx) => serializeCapture(async () => {
+      execute: (_toolCallId, params, signal, ctx) => serializeCapture(async () => {
         const home = resolveHome(options, ctx);
         const { vision } = resolveToolCapabilities(options, ctx);
         const captureOptions: CaptureViaHelperOptions = {

@@ -500,7 +500,6 @@ export class GhostHome {
     });
   }
 
-
   private characterTitle(body: string): string | undefined {
     const firstContentLine = body
       .split("\n")

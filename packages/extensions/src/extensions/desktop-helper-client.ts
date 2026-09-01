@@ -178,7 +178,7 @@ export type SidecarErrorCode =
  * so the model can recover; those survive via `sidecarDetails`. The raw code
  * always survives in `details.sidecarCode`.
  */
-export const SIDECAR_ERROR_TO_GHOST: Readonly<Record<string, GhostErrorCode>> = {
+const SIDECAR_ERROR_TO_GHOST: Readonly<Record<string, GhostErrorCode>> = {
   capability: "not_found",
   state_restore: "conflict",
   unknown_ref: "invalid_format",
@@ -257,9 +257,9 @@ export interface DesktopHelper {
 }
 
 
-export const HELPER_COMMAND_ENV = "GHOST_DESKTOP_HELPER";
+const HELPER_COMMAND_ENV = "GHOST_DESKTOP_HELPER";
 
-export const HELPER_BINARY = "ghost-desktop-helper";
+const HELPER_BINARY = "ghost-desktop-helper";
 
 export interface ResolvedHelperCommand {
   readonly command: string;
@@ -346,10 +346,10 @@ export interface DesktopHelperClientOptions {
   readonly onLog?: (line: string) => void;
 }
 
-export const DEFAULT_START_TIMEOUT_MS = 20_000;
-export const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_START_TIMEOUT_MS = 20_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
-export const DEFAULT_STOP_TIMEOUT_MS = 1_000;
+const DEFAULT_STOP_TIMEOUT_MS = 1_000;
 export const MAX_HELPER_LINE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
   + 256 * 1024;
 

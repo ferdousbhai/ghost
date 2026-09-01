@@ -348,6 +348,10 @@ describe("ghost_screen tool", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let firstStarted!: () => void;
+    const firstStart = new Promise<void>((resolve) => {
+      firstStarted = resolve;
+    });
     let firstCapture = true;
     const helper = fakeHelper({
       handle: (op) => {
@@ -355,6 +359,7 @@ describe("ghost_screen tool", () => {
         const mine = firstCapture;
         firstCapture = false;
         order.push(mine ? "start-1" : "start-2");
+        if (mine) firstStarted();
         return (mine ? gate : Promise.resolve()).then(() => {
           order.push(mine ? "end-1" : "end-2");
           return {
@@ -372,7 +377,10 @@ describe("ghost_screen tool", () => {
     const { harness } = await harnessFor(VISION_CHAT, helper);
     const first = harness.call(GHOST_SCREEN, { prompt: "first" });
     const second = harness.call(GHOST_SCREEN, { prompt: "second" });
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await firstStart;
+    // Drain the microtask queue so a wrongly unserialized second capture had
+    // every chance to reach the helper before the assertion.
+    for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
     // The second capture must not reach the helper while the first is open.
     expect(order).toEqual(["start-1"]);
     release();

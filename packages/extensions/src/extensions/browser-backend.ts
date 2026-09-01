@@ -320,14 +320,3 @@ export async function withTimeout<T>(
     if (timer) clearTimeout(timer);
   }
 }
-
-export function rethrowBackendError(
-  error: unknown,
-  action: string,
-  timeoutMs: number,
-): never {
-  if (error instanceof GhostError) throw error;
-  const text = errorMessage(error);
-  if (/timeout .* exceeded|TimeoutError/i.test(text)) throw timeoutError(action, timeoutMs);
-  throw new GhostBrowserError("navigation_failed", `${action} failed: ${text}`, { action });
-}
