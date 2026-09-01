@@ -26,6 +26,7 @@ PencilGlyph 1.0 PencilGlyph.qml
 ProjectChip 1.0 ProjectChip.qml
 QueueLine 1.0 QueueLine.qml
 RemoteAccess 1.0 RemoteAccess.qml
+RenameSession 1.0 RenameSession.qml
 Roster 1.0 Roster.qml
 SessionResources 1.0 SessionResources.qml
 SpectralOrb 1.0 SpectralOrb.qml

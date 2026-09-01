@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import "../qml/components" as Components
+import qs.components
 
 TestCase {
     id: tc
@@ -12,28 +12,21 @@ TestCase {
         Repeater {
             id: rows
             model: transcript
-            delegate: Item {
+            // The real Bubble, so its allActivities normalizer — the code that
+            // recovers a nested QQmlListModel role into the JS array its card
+            // Repeater consumes — is what this lifecycle actually exercises.
+            delegate: Bubble {
                 required property var toolActivity
 
-                // Bubble recovers a nested QQmlListModel role into the real JS
-                // array that its card Repeater consumes.
-                readonly property var shownActivities: {
-                    const value = toolActivity;
-                    if (!value) return [];
-                    if (Array.isArray(value)) return value;
-                    const list = [];
-                    for (let i = 0; i < value.count; i++) list.push(value.get(i));
-                    return list;
-                }
-
-                Repeater {
-                    model: parent.shownActivities
-                    delegate: Components.ToolCard {
-                        required property var modelData
-                        width: 500
-                        activity: modelData
-                    }
-                }
+                width: 500
+                speaker: "assistant"
+                body: ""
+                toolTrail: ""
+                activities: toolActivity
+                failure: ""
+                busy: true
+                sourceEntryId: ""
+                rowIndex: 0
             }
         }
     }
@@ -52,6 +45,7 @@ TestCase {
 
     function test_listModelRoleReplacementDoesNotWarnDuringDelegateTeardown(): void {
         failOnWarning(/ToolCard\.qml:[0-9]+: TypeError/);
+        failOnWarning(/Bubble\.qml:[0-9]+: TypeError/);
 
         transcript.append({ toolActivity: [tc.call("first", "running")] });
         wait(0);

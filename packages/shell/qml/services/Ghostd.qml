@@ -1062,6 +1062,9 @@ Singleton {
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
     readonly property int transcriptMaxPages: 10
+    /** The shell's own patience for a silent stream — three of the daemon's
+        15s SSE keepalives missed means that response is no longer live. */
+    readonly property int streamSilenceMs: 45000
     property var deleteSessionRequest: null
     property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
@@ -1123,7 +1126,7 @@ Singleton {
     // The conversation event stream uses the daemon's same 15s keepalive.
     Timer {
         id: eventsWatchdog
-        interval: 45000
+        interval: root.streamSilenceMs
         repeat: false
         onTriggered: root.expireConversationEvents()
     }
@@ -2059,7 +2062,7 @@ Singleton {
         const now = Date.now();
         for (const key of root.liveConversationKeys) {
             const state = root.turnStates[key];
-            if (state && now - state.lastStreamActivity >= 45000)
+            if (state && now - state.lastStreamActivity >= root.streamSilenceMs)
                 root.expireTurnStream(state);
         }
     }

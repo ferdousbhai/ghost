@@ -25,56 +25,22 @@ Item {
 
     // Held on the list, not the row: the roster is replaced wholesale on every
     // refresh, which rebuilds every delegate underneath a half-typed name.
-    property string editingName: ""
-    property string editDraft: ""
-    /** The field currently up, or null. A reference rather than a flag:
-        a rebuilt row can take the keyboard before the row it replaced
-        reports losing it, and only the object itself knows the truth. */
-    property var editor: null
+    readonly property RenameSession rename: RenameSession {
+        commit: (from, draft) => {
+            // A renamed ghost is not a new one. Without this the row would rise
+            // into place again, as if it had just been summoned.
+            root.summoned[draft] = true;
+            Ghostd.renameGhost(from, draft);
+        }
+        onFinished: root.refocused()
+    }
 
     function beginRename(name: string): void {
         if (name === "") return;
         // One name being typed at a time; the summon row is the other.
         root.naming = false;
         Ghostd.ghostRenameError = "";
-        root.editDraft = name;
-        root.editingName = name;
-    }
-
-    function commitRename(): void {
-        const from = root.editingName;
-        if (from === "") return;
-        const draft = root.editDraft.trim();
-        // An emptied field is not a request for a nameless ghost — there is no
-        // such thing — so it means the same as Esc: keep the name it has.
-        if (draft === "") {
-            root.cancelRename();
-            return;
-        }
-        root.editingName = "";
-        root.editDraft = "";
-        // A renamed ghost is not a new one. Without this the row would rise
-        // into place again, as if it had just been summoned.
-        root.summoned[draft] = true;
-        Ghostd.renameGhost(from, draft);
-        root.refocused();
-    }
-
-    function cancelRename(): void {
-        if (root.editingName === "") return;
-        root.editingName = "";
-        root.editDraft = "";
-        root.refocused();
-    }
-
-    /**
-     * Losing the keyboard commits — but a roster refresh destroys the field and
-     * builds a new one, and that is not the owner clicking away. So ask a tick
-     * later: if nothing has taken the keyboard back by then, they really did.
-     */
-    function commitOnBlur(): void {
-        if (root.editingName === "" || (root.editor && root.editor.activeFocus)) return;
-        root.commitRename();
+        root.rename.begin(name, name);
     }
 
     // Names that have already made their entrance. Ghostd.ghosts is replaced
@@ -164,7 +130,7 @@ Item {
 
                 readonly property bool active: entry.modelData.name === Ghostd.activeGhost
                 readonly property bool deleting: Ghostd.deletingGhost === entry.modelData.name
-                readonly property bool editing: root.editingName === entry.modelData.name
+                readonly property bool editing: root.rename.editingKey === entry.modelData.name
 
                 width: root.width
                 height: Theme.controlHeight
@@ -179,7 +145,7 @@ Item {
                 // A row that already exists when the rename starts. The other
                 // path — a refresh rebuilding it mid-edit — is picked up in
                 // Component.onCompleted below.
-                onEditingChanged: if (entry.editing) renameField.begin(root.editDraft)
+                onEditingChanged: if (entry.editing) renameField.begin(root.rename.draft)
 
                 Behavior on color {
                     enabled: !Theme.reducedMotion
@@ -192,7 +158,7 @@ Item {
 
                 Component.onCompleted: {
                     // A refresh rebuilt the row this rename is running on.
-                    if (entry.editing) renameField.begin(root.editDraft);
+                    if (entry.editing) renameField.begin(root.rename.draft);
                     const seen = root.summoned[entry.modelData.name] === true;
                     root.summoned[entry.modelData.name] = true;
                     if (seen || Theme.reducedMotion)
@@ -268,11 +234,11 @@ Item {
                             // Every row carries one of these, and an idle one
                             // reports its own empty text on creation; only the
                             // live one speaks.
-                            onEdited: value => { if (entry.editing) root.editDraft = value; }
-                            onCommitted: root.commitRename()
-                            onCancelled: root.cancelRename()
-                            onFocusGained: root.editor = renameField
-                            onFocusLost: Qt.callLater(root.commitOnBlur)
+                            onEdited: value => { if (entry.editing) root.rename.draft = value; }
+                            onCommitted: root.rename.commitRename()
+                            onCancelled: root.rename.cancel()
+                            onFocusGained: root.rename.editor = renameField
+                            onFocusLost: Qt.callLater(root.rename.commitOnBlur)
                         }
 
                         Rectangle {
