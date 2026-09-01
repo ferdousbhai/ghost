@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
+import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { readFileSync } from "node:fs";
 import {
   chmod,
@@ -15,6 +16,13 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { conversationIdentity } from "../src/conversation-identity.js";
+import {
+  ClaudeAgentSdkLoader,
+  type ClaudeAgentSdkModule,
+} from "../src/claude-agent-sdk-loader.js";
+import { ClaudeTaskAdapter } from "../src/claude-task-adapter.js";
+import { CodexTaskAdapter } from "../src/codex-task-adapter.js";
+import type { NativeHarnessProbeResult } from "../src/native-harness-catalog.js";
 import { resolveNativeHarnessExecutable } from "../src/native-harness-identity.js";
 import {
   captureNativeTaskControlEnvironment,
@@ -23,26 +31,23 @@ import {
   SystemdNativeTaskScopeManager,
   type NativeTaskOwnershipReceipt,
 } from "../src/native-task-scope.js";
+import { PiTaskAdapter } from "../src/pi-task-adapter.js";
 import {
   TaskController,
   TaskStore,
   type TaskAdapter,
+  type TaskAdapterContext,
+  type TaskAdapterControl,
   type TaskBindingReceipt,
   type TaskRecord,
 } from "../src/tasks.js";
 import { parseSupportedSystemdMajor } from "./native-task-scope-integration-version.js";
 import {
-  assertCapabilityDiagnosticEnvironment,
   boundedSignal,
   classifyLauncherStderr,
   classifyScopeStatus,
   readStageDiagnostic,
-  serializeCapabilityDiagnostic,
   serializeLifecycleDiagnostic,
-  serializeStepARawDiagnostic,
-  SYSTEMD_SCOPE_CAPABILITY_STEPS,
-  systemdScopeCapabilityArgs,
-  type CapabilityDiagnostic,
   type StatusDiagnostic,
 } from "./native-task-scope-integration-diagnostic.js";
 
@@ -56,9 +61,6 @@ const SCOPE_STATUS_OUTPUT_LIMIT = 4 * 1024;
 const SCOPE_STATUS_PROPERTIES = ["Id", "LoadState", "ActiveState", "Description"] as const;
 const LAUNCHER_STDERR_LIMIT = 4 * 1024;
 const DIAGNOSTIC_STATUS_TIMEOUT_MS = 500;
-const CAPABILITY_LAUNCH_TIMEOUT_MS = 5_000;
-const CAPABILITY_COLLECTION_TIMEOUT_MS = 1_000;
-const CAPABILITY_STDOUT_LIMIT = 1_024;
 
 function required(name: string): string {
   const value = process.env[name];
@@ -480,10 +482,6 @@ async function writeFixtures(root: string): Promise<{
     "    try: os.fsync(directory)",
     "    finally: os.close(directory)",
     "record_stage('entered')",
-    "if sys.argv[1:] == ['--readiness-only']:",
-    "    print(json.dumps({'ready': True}, separators=(',', ':')), flush=True)",
-    "    record_stage('emitted')",
-    "    raise SystemExit(0)",
     "try: child = os.fork()",
     "except OSError as error:",
     "    record_stage('entered', 'resource' if error.errno in (errno.EAGAIN, errno.ENOMEM) else 'other')",
@@ -525,224 +523,251 @@ async function writeFixtures(root: string): Promise<{
   return { worker, delayedLauncher };
 }
 
-interface CapabilityLaunchResult {
-  exitCode: number | null;
-  signal: string | null;
-  stdout: string;
-  stdoutTruncated: boolean;
-  stderr: string;
-  rawStderr: Uint8Array;
-  stderrTruncated: boolean;
-  observedOwnedLoaded: boolean;
+async function writeAdapterFixtures(root: string): Promise<{
+  pi: string;
+  codex: string;
+  claude: string;
+  claudeReady: string;
+}> {
+  const pi = join(root, "pi-adapter-fixture");
+  const codex = join(root, "codex-adapter-fixture");
+  const claude = join(root, "claude-adapter-fixture");
+  const claudeReady = join(root, "claude-adapter-ready");
+  await writeFile(pi, [
+    "#!/usr/bin/python3",
+    "import json,sys,time",
+    "def emit(value): print(json.dumps(value,separators=(',',':')),flush=True)",
+    "for raw in sys.stdin:",
+    "    frame=json.loads(raw)",
+    "    kind=frame.get('type')",
+    "    if kind=='prompt':",
+    "        emit({'id':frame['id'],'type':'response','command':'prompt','success':True})",
+    "        emit({'type':'agent_settled'})",
+    "    elif kind=='get_last_assistant_text':",
+    "        emit({'id':frame['id'],'type':'response','command':kind,'success':True,'data':{'text':'pi-scope-ok'}})",
+    "    elif kind=='abort': emit({'id':frame['id'],'type':'response','command':'abort','success':True})",
+    "time.sleep(3600)",
+  ].join("\n"));
+  await writeFile(codex, [
+    "#!/usr/bin/python3",
+    "import json,os,sys,time",
+    "def emit(value): print(json.dumps(value,separators=(',',':')),flush=True)",
+    "for raw in sys.stdin:",
+    "    frame=json.loads(raw); method=frame.get('method')",
+    "    if method=='initialize': emit({'id':frame['id'],'result':{'serverInfo':{'name':'fixture'}}})",
+    "    elif method=='thread/start':",
+    "        emit({'id':frame['id'],'result':{'thread':{'id':'thread-scope','cwd':os.getcwd()},'cwd':os.getcwd(),'approvalPolicy':'never','sandbox':{'type':'dangerFullAccess'}}})",
+    "    elif method=='turn/start':",
+    "        emit({'id':frame['id'],'result':{'turn':{'id':'turn-scope','status':'inProgress','items':[]}}})",
+    "        answer={'type':'agentMessage','id':'answer','text':'codex-scope-ok'}",
+    "        emit({'method':'item/completed','params':{'threadId':'thread-scope','turnId':'turn-scope','item':answer}})",
+    "        emit({'method':'turn/completed','params':{'threadId':'thread-scope','turn':{'id':'turn-scope','status':'completed','items':[answer]}}})",
+    "    elif method=='turn/interrupt': emit({'id':frame['id'],'result':{}})",
+    "time.sleep(3600)",
+  ].join("\n"));
+  await writeFile(claude, [
+    "#!/usr/bin/python3",
+    "import os,time",
+    `handle=os.open(${JSON.stringify(claudeReady)},os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)`,
+    "os.write(handle,b'ready'); os.fsync(handle); os.close(handle)",
+    "time.sleep(3600)",
+  ].join("\n"));
+  await Promise.all([pi, codex, claude].map((path) => chmod(path, 0o700)));
+  return { pi, codex, claude, claudeReady };
 }
 
-async function launchCapabilityStep(
-  args: readonly string[],
-  cwd: string,
-  environment: Readonly<NodeJS.ProcessEnv>,
-  unit: string,
-  description: string,
-): Promise<CapabilityLaunchResult> {
-  const child = spawn("/usr/bin/systemd-run", [...args], {
-    cwd,
-    env: environment,
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-  });
-  const observedOwnedLoaded = observeOwnedLoadedScope(unit, description, child);
-  const stdout: Buffer[] = [];
-  const stderr: Buffer[] = [];
-  let stdoutBytes = 0;
-  let stderrBytes = 0;
-  let stdoutTruncated = false;
-  let stderrTruncated = false;
-  const collect = (
-    chunks: Buffer[],
-    limit: number,
-    bytes: () => number,
-    update: (value: number) => void,
-    truncate: () => void,
-  ) => (chunk: Buffer | string) => {
-    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    const remaining = limit - bytes();
-    if (remaining > 0) chunks.push(value.subarray(0, remaining));
-    update(Math.min(limit, bytes() + value.length));
-    if (value.length > remaining) truncate();
-  };
-  child.stdout?.on("data", collect(
-    stdout,
-    CAPABILITY_STDOUT_LIMIT,
-    () => stdoutBytes,
-    (value) => { stdoutBytes = value; },
-    () => { stdoutTruncated = true; },
-  ));
-  child.stderr?.on("data", collect(
-    stderr,
-    LAUNCHER_STDERR_LIMIT,
-    () => stderrBytes,
-    (value) => { stderrBytes = value; },
-    () => { stderrTruncated = true; },
-  ));
-  const closed = await new Promise<{ exitCode: number | null; signal: string | null }>(
-    (resolve) => {
-      let settled = false;
-      let forcedSignal: string | null = null;
-      const finish = (exitCode: number | null, signal: string | null) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timeout);
-        resolve({ exitCode, signal: signal ?? forcedSignal });
-      };
-      const timeout = setTimeout(() => {
-        forcedSignal = "SIGKILL";
-        child.kill("SIGKILL");
-      }, CAPABILITY_LAUNCH_TIMEOUT_MS);
-      child.once("error", () => finish(null, null));
-      child.once("close", finish);
-    },
-  );
-  const rawStderr = Buffer.concat(stderr, stderrBytes);
+function adapterProbe(
+  id: "pi" | "codex" | "claude-code",
+  path: string,
+): NativeHarnessProbeResult {
   return {
-    ...closed,
-    stdout: Buffer.concat(stdout, stdoutBytes).toString("utf8"),
-    stdoutTruncated,
-    stderr: rawStderr.toString("utf8"),
-    rawStderr,
-    stderrTruncated,
-    observedOwnedLoaded: await observedOwnedLoaded.catch(() => false),
+    id,
+    executable: { path, identity: `integration-${id}`, literalBoundary: true },
+    version: "integration",
+    authentication: id === "pi" ? "unknown" : "authenticated",
+    runtimeIdentity: `integration-${id}`,
   };
 }
 
-function exactAbsentStatus(status: StatusDiagnostic): boolean {
-  return status.exitCode === 0
-    && status.shape === "valid"
-    && status.id === "unit"
-    && status.loadState === "not-found"
-    && status.activeState === "inactive"
-    && status.description === "unit";
-}
-
-async function waitForCapabilityCollection(
-  unit: string,
-  description: string,
-): Promise<StatusDiagnostic> {
-  const deadline = Date.now() + CAPABILITY_COLLECTION_TIMEOUT_MS;
-  let status = await diagnosticScopeStatus(unit, description);
-  while (!exactAbsentStatus(status) && Date.now() < deadline) {
-    if (status.shape !== "valid"
-      || status.id !== "unit"
-      || status.loadState !== "loaded"
-      || status.description !== "receipt") return status;
-    await Bun.sleep(10);
-    status = await diagnosticScopeStatus(unit, description);
+class IntegrationClaudeSdkLoader extends ClaudeAgentSdkLoader {
+  constructor(private readonly sdk: ClaudeAgentSdkModule) {
+    super({ ownerHome: "/tmp" });
   }
-  return status;
+
+  override load(): Promise<ClaudeAgentSdkModule> {
+    return Promise.resolve(this.sdk);
+  }
 }
 
-async function cleanupCapabilityScope(
-  taskId: string,
-  ownership: NativeTaskOwnershipReceipt,
-  status: StatusDiagnostic,
-): Promise<StatusDiagnostic> {
-  if (exactAbsentStatus(status)) return status;
-  if (status.shape !== "valid"
-    || status.id !== "unit"
-    || status.loadState !== "loaded"
-    || status.description !== "receipt") return status;
-  const manager = new SystemdNativeTaskScopeManager({
-    controlEnvironment: process.env,
-    confirmationTimeoutMs: 10_000,
-  });
-  await manager.recoverAndConfirm(taskId, ownership);
-  return diagnosticScopeStatus(
-    nativeTaskScopeUnit(taskId),
-    nativeTaskScopeDescription(taskId, ownership),
-  );
+function integrationClaudeSdk(input: {
+  executable: string;
+  cwd: string;
+  ready: string;
+}): ClaudeAgentSdkModule {
+  return {
+    query: (({ prompt, options }: {
+      prompt: string | AsyncIterable<SDKUserMessage>;
+      options?: {
+        cwd?: string;
+        spawnClaudeCodeProcess?: (options: {
+          command: string;
+          args: string[];
+          cwd: string;
+          env: NodeJS.ProcessEnv;
+          signal: AbortSignal;
+        }) => ChildProcess;
+      };
+    }) => {
+      if (typeof prompt === "string" || !options?.spawnClaudeCodeProcess) {
+        throw new Error("Claude integration fixture was invoked incorrectly");
+      }
+      options.spawnClaudeCodeProcess({
+        command: input.executable,
+        args: ["--sdk-native"],
+        cwd: input.cwd,
+        env: taskEnvironment(),
+        signal: new AbortController().signal,
+      });
+      const iterator = prompt[Symbol.asyncIterator]();
+      const stream = (async function* (): AsyncGenerator<SDKMessage> {
+        await waitFor("Claude adapter scope spawn", async () => {
+          try { return (await readFile(input.ready, "utf8")) === "ready"; }
+          catch { return false; }
+        });
+        const initial = await iterator.next();
+        if (initial.done) throw new Error("Claude integration prompt was not delivered");
+        yield {
+          type: "system",
+          subtype: "init",
+          cwd: input.cwd,
+          permissionMode: "bypassPermissions",
+          session_id: "claude-scope-session",
+        } as SDKMessage;
+        yield {
+          type: "result",
+          subtype: "success",
+          is_error: false,
+          result: "claude-scope-ok",
+          session_id: "claude-scope-session",
+        } as SDKMessage;
+      })() as Query;
+      Object.assign(stream, {
+        async interrupt() {},
+        close() {},
+      });
+      return stream;
+    }) as ClaudeAgentSdkModule["query"],
+    createSdkMcpServer: (() => { throw new Error("unused"); }) as ClaudeAgentSdkModule["createSdkMcpServer"],
+    tool: (() => { throw new Error("unused"); }) as ClaudeAgentSdkModule["tool"],
+  };
 }
 
-async function proveScopeCapabilities(
+async function adapterScopeContext(
+  manager: SystemdNativeTaskScopeManager,
+  ownedUnits: OwnedUnits,
+): Promise<{
+  context: TaskAdapterContext;
+  control(): TaskAdapterControl;
+}> {
+  const taskId = randomTaskId();
+  const ownership = randomReceipt();
+  const unit = nativeTaskScopeUnit(taskId);
+  const description = nativeTaskScopeDescription(taskId, ownership);
+  const scope = await manager.reserve(taskId, ownership, new AbortController().signal);
+  ownedUnits.set(unit, description);
+  let registered: TaskAdapterControl | undefined;
+  const stopNative = async () => {
+    await scope.stopAndConfirm();
+    await waitFor("adapter scope collection", () => unitAbsent(unit));
+    ownedUnits.delete(unit);
+  };
+  return {
+    context: {
+      signal: new AbortController().signal,
+      async launchNative(_executables, launch) {
+        return launch((launchInput) => scope.spawn(launchInput));
+      },
+      stopNative,
+      register(control) {
+        if (registered) throw new Error("adapter registered twice");
+        registered = control;
+      },
+      async emit() {},
+    },
+    control() {
+      if (!registered) throw new Error("adapter did not register lifecycle control");
+      return registered;
+    },
+  };
+}
+
+async function proveAdapterSpawnSeams(
   root: string,
-  worker: string,
   ownedUnits: OwnedUnits,
 ): Promise<void> {
-  assertCapabilityDiagnosticEnvironment(process.env);
-  for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS) {
-    const taskId = randomTaskId();
-    const ownership = randomReceipt();
-    const unit = nativeTaskScopeUnit(taskId);
-    const description = nativeTaskScopeDescription(taskId, ownership);
-    const preflight = await diagnosticScopeStatus(unit, description);
-    if (!exactAbsentStatus(preflight)) {
-      process.stderr.write(`${serializeCapabilityDiagnostic({
-        version: 1,
-        step,
-        launcherExitCode: null,
-        launcherSignal: "none",
-        launcherFailure: "other",
-        scopeObservedOwnedLoaded: false,
-        scopeStatus: preflight,
-      })}\n`);
-      throw new Error("systemd scope capability preflight failed");
-    }
-    const stageReceipt = join(root, `capability-${step}-stage.json`);
-    const finiteEnvironment = step === "H" || step === "I"
-      ? taskEnvironment(step === "I" ? { GHOST_STAGE_RECEIPT: stageReceipt } : {})
-      : captureNativeTaskControlEnvironment(process.env);
-    ownedUnits.set(unit, description);
-    const result = await launchCapabilityStep(
-      systemdScopeCapabilityArgs({ step, unit, description, cwd: root, worker }),
-      root,
-      finiteEnvironment,
-      unit,
-      description,
-    );
-    const postLaunch = await waitForCapabilityCollection(unit, description);
-    let postCleanup = postLaunch;
-    let cleanupConfirmed = false;
-    try {
-      postCleanup = await cleanupCapabilityScope(taskId, ownership, postLaunch);
-      cleanupConfirmed = exactAbsentStatus(postCleanup);
-      if (cleanupConfirmed) ownedUnits.delete(unit);
-    } catch {
-      postCleanup = await diagnosticScopeStatus(unit, description);
-    }
-    const expectedOutput = step === "H" || step === "I" ? "{\"ready\":true}\n" : "";
-    const stageReady = step !== "I" || await readStageDiagnostic(stageReceipt).then(
-      (fixture) => fixture.state === "valid"
-        && fixture.private
-        && fixture.stage === "emitted"
-        && fixture.failure === "none",
-      () => false,
-    );
-    const succeeded = result.exitCode === 0
-      && result.signal === null
-      && !result.stdoutTruncated
-      && result.stdout === expectedOutput
-      && exactAbsentStatus(postLaunch)
-      && cleanupConfirmed
-      && stageReady;
-    if (!succeeded) {
-      const diagnostic: CapabilityDiagnostic = {
-        version: 1,
-        step,
-        launcherExitCode: result.exitCode,
-        launcherSignal: boundedSignal(result.signal),
-        launcherFailure: classifyLauncherStderr(result.stderr, result.stderrTruncated),
-        scopeObservedOwnedLoaded: result.observedOwnedLoaded,
-        scopeStatus: postLaunch,
-      };
-      const serialized = step === "A"
-        ? serializeStepARawDiagnostic({
-          ...diagnostic,
-          step: "A",
-          command: "/usr/bin/true",
-          stderr: result.rawStderr,
-          stderrTruncated: result.stderrTruncated,
-        })
-        : serializeCapabilityDiagnostic(diagnostic);
-      process.stderr.write(`${serialized}\n`);
-      throw new Error("systemd scope capability step failed");
-    }
+  const fixtures = await writeAdapterFixtures(root);
+  const binding: TaskBindingReceipt = {
+    version: 1,
+    root,
+    rootIdentity: "integration-root",
+    cwd: root,
+    cwdIdentity: "integration-cwd",
+    generation: 1,
+  };
+  const adapters: Array<{
+    id: string;
+    adapter: TaskAdapter;
+    expected: string;
+  }> = [
+    {
+      id: "pi",
+      adapter: new PiTaskAdapter({
+        catalog: { async readForStart() { return adapterProbe("pi", fixtures.pi); } },
+        environment: taskEnvironment(),
+      }),
+      expected: "pi-scope-ok",
+    },
+    {
+      id: "codex",
+      adapter: new CodexTaskAdapter({
+        catalog: { async readForStart() { return adapterProbe("codex", fixtures.codex); } },
+        environment: taskEnvironment(),
+      }),
+      expected: "codex-scope-ok",
+    },
+    {
+      id: "claude-code",
+      adapter: new ClaudeTaskAdapter({
+        catalog: {
+          async readForStart() { return adapterProbe("claude-code", fixtures.claude); },
+          async assertExecutable() {},
+        },
+        sdkLoader: new IntegrationClaudeSdkLoader(integrationClaudeSdk({
+          executable: fixtures.claude,
+          cwd: root,
+          ready: fixtures.claudeReady,
+        })),
+        environment: taskEnvironment(),
+      }),
+      expected: "claude-scope-ok",
+    },
+  ];
+
+  for (const entry of adapters) {
+    const manager = new SystemdNativeTaskScopeManager({
+      controlEnvironment: process.env,
+      confirmationTimeoutMs: 10_000,
+    });
+    const fixture = await adapterScopeContext(manager, ownedUnits);
+    const handle = await entry.adapter.start({
+      id: `integration-${entry.id}`,
+      task: "Prove inherited native task stdio.",
+      agent: null,
+      cwd: root,
+      binding,
+    }, fixture.context);
+    assert.equal(await handle.result, entry.expected);
+    await fixture.control().quiescence;
   }
 }
 
@@ -908,7 +933,6 @@ async function proveCollision(
     `--description=${foreignDescription}`,
     "--collect",
     "--quiet",
-    "--pipe",
     "--property=KillMode=control-group",
     "--property=SendSIGKILL=yes",
     "--property=TimeoutStopSec=1s",
@@ -1248,9 +1272,10 @@ async function main(): Promise<void> {
   try {
     await assertAbsentScopeStatusPreflight();
     const fixtures = await writeFixtures(root);
-    await proveScopeCapabilities(root, fixtures.worker, ownedUnits);
     sentinel = await startSentinel(root, ownedUnits);
     await proveLifecycle(root, fixtures.worker, ownedUnits);
+    await assertSentinel(sentinel);
+    await proveAdapterSpawnSeams(root, ownedUnits);
     await assertSentinel(sentinel);
     await proveCollision(root, ownedUnits);
     await assertSentinel(sentinel);

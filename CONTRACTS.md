@@ -588,7 +588,7 @@ environment expansion, is:
 ```
 /usr/bin/systemd-run --user --scope --unit=ghost-task-<durable UUID>.scope \
   --description=ghost-task-receipt:v1:<task-id>:<nonce> \
-  --slice-inherit --collect --quiet --pipe --expand-environment=no \
+  --slice-inherit --collect --quiet --expand-environment=no \
   --working-directory=<exact trusted cwd> \
   --property=KillMode=control-group --property=SendSIGKILL=yes \
   --property=TimeoutStopSec=1s -- <exact admitted executable> <native argv...>
@@ -597,15 +597,18 @@ environment expansion, is:
 The harness receives only its finite positive profile environment. User-manager
 queries and stops instead use a separate captured environment containing only
 `DBUS_SESSION_BUS_ADDRESS` and `XDG_RUNTIME_DIR`; provider values never enter
-that control process. JSONL stdin/stdout remain connected through `--pipe`.
+that control process. Scope mode is synchronous: the child inherits the exact
+stdin/stdout/stderr file descriptors already created by Ghost's Node spawn.
+The incompatible systemd-run `--pipe` option is forbidden on this inner scope
+launch; outer transient service-mode test controllers may use `--wait --pipe`.
 Stderr is drained or ignored without durable buffering. The transport accepts
 only bounded object frames, has a bounded queue, discards unrecognized
 protocol/tool payloads, and maps malformed, oversized, or unexpected traffic
 to a generic task failure.
 
 Cancellation first requests the harness-native interrupt, then strictly and
-boundedly reads exactly `LoadState`, `ActiveState`, and `Description`. Only an
-exact matching description authorizes literal
+boundedly reads exactly `Id`, `LoadState`, `ActiveState`, and `Description`.
+Only an exact unit id and matching description authorize literal
 `/usr/bin/systemctl --user stop --no-block <unit>`. A mismatch is a collision
 and no signal is sent. A missing unit is quiescent before spawn; after
 `systemd-run` is spawned, Ghost first waits for the shared launcher-settlement

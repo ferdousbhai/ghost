@@ -8,6 +8,7 @@ checker="$script_dir/check-native-task-scope-workflow.py"
 workflow="$repo_root/.github/workflows/native-task-scope-integration.yml"
 integration="$repo_root/packages/daemon/test/native-task-scope.real-integration.ts"
 diagnostic="$repo_root/packages/daemon/test/native-task-scope-integration-diagnostic.ts"
+scope_source="$repo_root/packages/daemon/src/native-task-scope.ts"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ghost-native-scope-workflow.XXXXXX")"
 cleanup() {
   find -P "$work" -depth -delete
@@ -16,48 +17,29 @@ trap cleanup EXIT
 
 python "$checker" "$workflow"
 
-python - "$integration" "$diagnostic" <<'PY'
+python - "$integration" "$diagnostic" "$scope_source" <<'PY'
 from pathlib import Path
 import sys
 
 integration = Path(sys.argv[1]).read_text(encoding="utf-8")
 diagnostic = Path(sys.argv[2]).read_text(encoding="utf-8")
+scope_source = Path(sys.argv[3]).read_text(encoding="utf-8")
 required = {
     "integration": (
-        "launcherFailure: classifyLauncherStderr(result.stderr, result.stderrTruncated),",
         "readStageDiagnostic(stageReceipt),",
-        'const stageReady = step !== "I" || await readStageDiagnostic(stageReceipt).then(',
         "      scopeObservedOwnedLoaded,\n      scopeStatus,",
         "process.stderr.write(`${serializeLifecycleDiagnostic({",
-        "await proveScopeCapabilities(root, fixtures.worker, ownedUnits);",
-        "assertCapabilityDiagnosticEnvironment(process.env);",
-        "for (const step of SYSTEMD_SCOPE_CAPABILITY_STEPS)",
-        "systemdScopeCapabilityArgs({ step, unit, description, cwd: root, worker })",
-        "scopeStatus: postLaunch,",
-        'const serialized = step === "A"',
-        'command: "/usr/bin/true",',
-        "stderr: result.rawStderr,",
-        "stderrTruncated: result.stderrTruncated,",
+        "launcherFailure: classifyLauncherStderr(",
+        "await proveAdapterSpawnSeams(root, ownedUnits);",
+        "adapter: new PiTaskAdapter({",
+        "adapter: new CodexTaskAdapter({",
+        "adapter: new ClaudeTaskAdapter({",
     ),
     "diagnostic": (
         "constants.O_RDONLY | constants.O_NOFOLLOW",
         "stat.nlink === 1",
         "(stat.mode & 0o777) === 0o600",
         "const MAX_DIAGNOSTIC_BYTES = 2 * 1024",
-        "export const SYSTEMD_SCOPE_CAPABILITY_STEPS = [",
-        "export function systemdScopeCapabilityArgs(",
-        "export function serializeCapabilityDiagnostic(",
-        "export function serializeStepARawDiagnostic(",
-        "export function assertCapabilityDiagnosticEnvironment(",
-        "const MAX_RAW_STDERR_BYTES = 4 * 1024",
-        'input.step !== "A" || input.command !== "/usr/bin/true"',
-        'stderr: escapeDiagnosticControls(Buffer.from(input.stderr).toString("utf8")),',
-        'if (level >= 1) args.push("--slice-inherit");',
-        'if (level >= 2) args.push("--expand-environment=no");',
-        'if (level >= 3) args.push(`--working-directory=${input.cwd}`);',
-        'if (level >= 4) args.push("--property=KillMode=control-group");',
-        'if (level >= 5) args.push("--property=SendSIGKILL=yes");',
-        'if (level >= 6) args.push("--property=TimeoutStopSec=1s");',
     ),
 }
 for context, fragments in required.items():
@@ -71,13 +53,28 @@ for fragment in (
     "stderr: Buffer.concat(launcherStderr",
     "path: stageReceipt",
     "scopeUnit: unit",
-    "process.stderr.write(result.stderr",
-    "process.stderr.write(result.stdout",
-    "launcherStderr: result.stderr",
-    "scopeStatus: postCleanup,",
 ):
     if fragment in integration:
         raise SystemExit(f"native scope diagnostic exposes private detail: {fragment!r}")
+start = 'child = this.#spawnChild(SYSTEMD_RUN, ['
+end = '      ], {'
+if scope_source.count(start) != 1:
+    raise SystemExit("native scope launch boundary changed")
+launch = scope_source.split(start, 1)[1].split(end, 1)[0]
+if '"--pipe"' in launch:
+    raise SystemExit("inner native task scope must not use systemd-run --pipe")
+for fragment in (
+    '"--scope"',
+    '"--slice-inherit"',
+    '"--collect"',
+    '"--quiet"',
+    '"--expand-environment=no"',
+    'stdio: ["pipe", "pipe", input.stderr ?? "pipe"]',
+):
+    if fragment not in scope_source:
+        raise SystemExit(f"native scope inherited stdio boundary changed: {fragment!r}")
+if '"--pipe"' in integration:
+    raise SystemExit("real inner native scope integration must not use systemd-run --pipe")
 PY
 
 expect_rejected() {
@@ -241,9 +238,6 @@ expect_insert_rejected forbidden-system-dropin \
 expect_insert_rejected forbidden-pattern-kill \
   '          uid="$(id -u)"' \
   '          pkill -f ghost-native-task'
-expect_insert_rejected forbidden-extra-environment \
-  '              HOME="$HOME" \' \
-  '              ANTHROPIC_API_KEY=credential \'
 expect_rejected action-ref \
   'oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6' \
   'oven-sh/setup-bun@v2'

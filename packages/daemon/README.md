@@ -263,7 +263,9 @@ inactive or safely absent after registration settles; user-manager failures
 never become synthetic success. The scope is lifecycle ownership, not a
 sandbox: a trusted harness that deliberately creates another systemd unit, or
 the same owner deliberately tampering with Ghost's reserved scope names, can
-escape this boundary. Native packages require systemd 254 or newer.
+escape this boundary. Scope-mode systemd-run inherits Ghost's already-open
+JSONL stdio descriptors; its incompatible `--pipe` option is forbidden. Native
+packages require systemd 254 or newer.
 pi's native `bash`, `edit`, `find`, `grep`, `ls`, `read`, and `write` plus
 Ghost's own tools (registered directly as pi custom tools) remain available;
 Ghost's own `bash`/`jobs` (background jobs) and `inspect_image` (the

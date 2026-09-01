@@ -412,7 +412,6 @@ export class SystemdNativeTaskScopeManager implements NativeTaskScopeManager {
         "--slice-inherit",
         "--collect",
         "--quiet",
-        "--pipe",
         "--expand-environment=no",
         `--working-directory=${input.cwd}`,
         "--property=KillMode=control-group",

@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -124,7 +124,6 @@ describe("systemd native task scope ownership", () => {
         "--slice-inherit",
         "--collect",
         "--quiet",
-        "--pipe",
         "--expand-environment=no",
         `--working-directory=${root}`,
         "--property=KillMode=control-group",
@@ -157,6 +156,92 @@ describe("systemd native task scope ownership", () => {
     expect(controlCalls.every((call) =>
       Object.keys(call.environment).sort().join(",")
         === "DBUS_SESSION_BUS_ADDRESS,XDG_RUNTIME_DIR")).toBe(true);
+  });
+
+  it("preserves JSONL stdio through a synchronous scope wrapper without --pipe", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-task-scope-stdio-"));
+    roots.push(root);
+    const wrapper = join(root, "systemd-run-wrapper.mjs");
+    const worker = join(root, "worker.mjs");
+    writeFileSync(wrapper, [
+      'import { spawn } from "node:child_process";',
+      "const args = process.argv.slice(2);",
+      'if (args.includes("--pipe")) process.exit(91);',
+      'const separator = args.indexOf("--");',
+      "const child = spawn(args[separator + 1], args.slice(separator + 2), {",
+      "  cwd: process.cwd(), env: process.env, stdio: ['inherit', 'inherit', 'inherit'],",
+      "});",
+      "child.once('error', () => process.exit(92));",
+      "child.once('close', (code, signal) => {",
+      "  if (signal) process.kill(process.pid, signal);",
+      "  else process.exit(code ?? 93);",
+      "});",
+    ].join("\n"));
+    writeFileSync(worker, [
+      'import { createInterface } from "node:readline";',
+      "for await (const line of createInterface({ input: process.stdin })) {",
+      "  const frame = JSON.parse(line);",
+      '  process.stderr.write("e".repeat(1024));',
+      "  process.stdout.write(JSON.stringify({ cwd: process.cwd(), frame }) + '\\n');",
+      "  break;",
+      "}",
+    ].join("\n"));
+
+    let state: "absent" | "active" = "absent";
+    let launchArgs: string[] = [];
+    const manager = new SystemdNativeTaskScopeManager({
+      controlEnvironment: {},
+      runControl: async () => ({
+        stdout: state === "absent"
+          ? status("not-found", "inactive")
+          : status("loaded", "active", DESCRIPTION),
+        exitCode: 0,
+      }),
+      spawnChild: ((command: string, args: string[], options: SpawnOptions) => {
+        expect(command).toBe("/usr/bin/systemd-run");
+        launchArgs = [...args];
+        state = "active";
+        const child = spawn(process.execPath, [wrapper, ...args], options);
+        child.once("close", () => { state = "absent"; });
+        children.push(child);
+        return child;
+      }) as typeof spawn,
+    });
+    const scope = await manager.reserve(TASK_ID, RECEIPT, new AbortController().signal);
+    const child = scope.spawn({
+      executable: process.execPath,
+      args: [worker],
+      cwd: root,
+      environment: { PATH: process.env.PATH },
+    });
+    const stdout = new Promise<Record<string, unknown>>((resolve, reject) => {
+      let source = "";
+      child.stdout?.on("data", (chunk: Buffer | string) => {
+        source += chunk.toString();
+        if (Buffer.byteLength(source) > 4 * 1024) reject(new Error("stdout exceeded bound"));
+        const newline = source.indexOf("\n");
+        if (newline >= 0) resolve(JSON.parse(source.slice(0, newline)));
+      });
+      child.once("error", reject);
+      child.once("close", () => {
+        if (!source.includes("\n")) reject(new Error("wrapper exited before JSONL output"));
+      });
+    });
+    const stderr = new Promise<string>((resolve, reject) => {
+      let source = "";
+      child.stderr?.on("data", (chunk: Buffer | string) => {
+        source += chunk.toString();
+        if (Buffer.byteLength(source) > 1024) reject(new Error("stderr exceeded bound"));
+      });
+      child.once("error", reject);
+      child.once("close", () => resolve(source));
+    });
+    child.stdin?.end(`${JSON.stringify({ ping: "literal" })}\n`);
+
+    await expect(stdout).resolves.toEqual({ cwd: root, frame: { ping: "literal" } });
+    await expect(stderr).resolves.toBe("e".repeat(1024));
+    expect(launchArgs).not.toContain("--pipe");
+    await scope.stopAndConfirm();
   });
 
   it("models control-group teardown of a setsid resistant descendant without touching a sentinel", async () => {
