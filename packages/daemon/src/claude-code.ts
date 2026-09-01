@@ -2782,10 +2782,12 @@ export class ClaudeCodeRuntime {
           const abortController = new AbortController();
           const input = claudeInputChannel();
           // Exactly one exit source exists: the test seam, or the real
-          // subprocess boundary. Capturing the seam here lets every later use
-          // narrow without an optional call that would fail silently.
-          const observeQueryExit = this.observeQueryExit;
-          const processExit = observeQueryExit ? undefined : claudeProcessExitBoundary();
+          // subprocess boundary. The union shape lets every later use narrow
+          // without an optional call that would fail silently.
+          const exitSource = this.observeQueryExit
+            ? { observe: this.observeQueryExit, boundary: undefined }
+            : { observe: undefined, boundary: claudeProcessExitBoundary() };
+          const processExit = exitSource.boundary;
           if (processExit) {
             await this.probe.assertExecutable(probed, options.signal);
             this.assertTurnAdmitted(options.signal);
@@ -2871,11 +2873,9 @@ export class ClaudeCodeRuntime {
           }
           let exited: Promise<void>;
           try {
-            // The seam and the boundary are mutually exclusive by the
-            // construction above; the assertion keeps a broken invariant loud.
-            exited = observeQueryExit
-              ? Promise.resolve(observeQueryExit(created))
-              : processExit!.exited;
+            exited = exitSource.observe
+              ? Promise.resolve(exitSource.observe(created))
+              : exitSource.boundary.exited;
           } catch (cause) {
             exited = Promise.reject(cause);
           }
