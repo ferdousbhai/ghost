@@ -819,34 +819,22 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
-    // Plan mode, progress phases (`todo` on the wire), and jobs are one
-    // conversation-scoped work view.
-    // The GETs stay separate so neither a slow plan-file read nor a large job
-    // output tail holds the other row back, while the stamps make both caches
-    // retire together when the selected conversation changes.
-    property bool workPlanning: false
-    property var workPlan: null
-    property var workTodo: []
+    // Background jobs are conversation-scoped runtime state.
     property var workJobs: []
-    property bool workPlanLoaded: false
     property bool workJobsLoaded: false
-    readonly property bool workPlanLoading: root.workPlanRequest !== null
     readonly property bool workJobsLoading: root.workJobsRequest !== null
     readonly property bool workMutating: root.workMutationRequest !== null
-    property string workPlanError: ""
     property string workJobsError: ""
     property string workMutationError: ""
     property string workGhost: ""
     property string workSessionId: ""
     readonly property string workError: root.workMutationError !== ""
-        ? root.workMutationError
-        : (root.workPlanError !== "" ? root.workPlanError : root.workJobsError)
+        ? root.workMutationError : root.workJobsError
     readonly property int workRunningJobCount: root.workJobs.filter(function (job) {
         return job && job.status === "running";
     }).length
     readonly property bool workHasRunningJobs: root.workRunningJobCount > 0
-    readonly property bool workHasContent: root.workPlanning || root.workPlan !== null
-        || root.workTodo.length > 0 || root.workJobs.length > 0
+    readonly property bool workHasContent: root.workJobs.length > 0 || root.workError !== ""
 
     property var liveStatus: ({ phase: "idle" })
     property bool liveLoading: false
@@ -1018,7 +1006,6 @@ Singleton {
     property var commandsRequest: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
-    property var workPlanRequest: null
     property var workJobsRequest: null
     property var workMutationRequest: null
     /** Test seam; production constructs native QML XHRs. */
@@ -2409,33 +2396,19 @@ Singleton {
     }
 
     /** Retire ownership before abort: the test XHR finishes abort synchronously. */
-    function retireWorkRequest(kind: string): void {
-        let request = null;
-        if (kind === "plan") {
-            request = root.workPlanRequest;
-            root.workPlanRequest = null;
-        } else if (kind === "jobs") {
-            request = root.workJobsRequest;
-            root.workJobsRequest = null;
-        } else {
-            return;
-        }
+    function retireWorkRequest(): void {
+        const request = root.workJobsRequest;
+        root.workJobsRequest = null;
         if (request && request.readyState !== 4) request.abort();
     }
 
     /** Retire ownership before abort: the test XHR finishes abort synchronously. */
     function clearWork(): void {
         const mutationRequest = root.workMutationRequest;
-        root.retireWorkRequest("plan");
-        root.retireWorkRequest("jobs");
+        root.retireWorkRequest();
         root.workMutationRequest = null;
-        root.workPlanning = false;
-        root.workPlan = null;
-        root.workTodo = [];
         root.workJobs = [];
-        root.workPlanLoaded = false;
         root.workJobsLoaded = false;
-        root.workPlanError = "";
         root.workJobsError = "";
         root.workMutationError = "";
         root.workGhost = "";
@@ -2448,39 +2421,6 @@ Singleton {
             root.clearWork();
         root.workGhost = ghost;
         root.workSessionId = sessionId;
-    }
-
-    function validWorkTask(task: var): bool {
-        return !!task && typeof task === "object" && !Array.isArray(task)
-            && ["pending", "in_progress", "completed", "abandoned", "blocked"]
-                .indexOf(task.status) >= 0;
-    }
-
-    function validWorkTodo(todo: var): bool {
-        return Array.isArray(todo) && todo.every(function (phase) {
-            return !!phase && typeof phase === "object" && !Array.isArray(phase)
-                && typeof phase.name === "string" && Array.isArray(phase.tasks)
-                && phase.tasks.every(root.validWorkTask);
-        });
-    }
-
-    function validApprovedPlan(plan: var): bool {
-        return plan === null || (!!plan && typeof plan === "object"
-            && !Array.isArray(plan) && typeof plan.path === "string"
-            && typeof plan.title === "string");
-    }
-
-    function applyWorkPlan(body: var): bool {
-        if (!body || typeof body !== "object" || Array.isArray(body)
-                || typeof body.planning !== "boolean"
-                || !root.validApprovedPlan(body.plan) || !root.validWorkTodo(body.todo))
-            return false;
-        root.workPlanning = body.planning;
-        root.workPlan = body.plan;
-        root.workTodo = body.todo;
-        root.workPlanLoaded = true;
-        root.workPlanError = "";
-        return true;
     }
 
     function validWorkJob(job: var): bool {
@@ -2504,66 +2444,33 @@ Singleton {
         return true;
     }
 
-    function fetchWorkResource(kind: string, force: bool,
-            ghost: string, sessionId: string): void {
-        if (kind !== "plan" && kind !== "jobs") return;
-        const isPlan = kind === "plan";
-        const loading = isPlan ? root.workPlanLoading : root.workJobsLoading;
-        const loaded = isPlan ? root.workPlanLoaded : root.workJobsLoaded;
-        if (!force && (loading || loaded)) return;
-        root.retireWorkRequest(kind);
+    function fetchWorkJobs(force: bool, ghost: string, sessionId: string): void {
+        if (!force && (root.workJobsLoading || root.workJobsLoaded)) return;
+        root.retireWorkRequest();
         const xhr = root.makeWorkRequest();
-        if (isPlan) {
-            root.workPlanRequest = xhr;
-            root.workPlanError = "";
-        } else {
-            root.workJobsRequest = xhr;
-            root.workJobsError = "";
-        }
+        root.workJobsRequest = xhr;
+        root.workJobsError = "";
         xhr.onreadystatechange = function () {
-            const current = isPlan ? root.workPlanRequest : root.workJobsRequest;
-            if (xhr.readyState !== 4 || xhr !== current) return;
-            if (isPlan) root.workPlanRequest = null;
-            else root.workJobsRequest = null;
+            if (xhr.readyState !== 4 || xhr !== root.workJobsRequest) return;
+            root.workJobsRequest = null;
             if (!root.workIdentityCurrent(ghost, sessionId)) return;
             if (xhr.status === 200) {
                 try {
-                    const body = JSON.parse(xhr.responseText);
-                    const applied = isPlan
-                        ? root.applyWorkPlan(body) : root.applyWorkJobs(body);
-                    if (!applied) throw new Error("invalid work state");
+                    if (!root.applyWorkJobs(JSON.parse(xhr.responseText)))
+                        throw new Error("invalid work state");
                     root.reachable = true;
                 } catch (error) {
-                    if (isPlan) {
-                        root.workPlanLoaded = false;
-                        root.workPlanning = false;
-                        root.workPlan = null;
-                        root.workTodo = [];
-                        root.workPlanError = "ghostd sent malformed plan state";
-                    } else {
-                        root.workJobsLoaded = false;
-                        root.workJobs = [];
-                        root.workJobsError = "ghostd sent malformed background jobs";
-                    }
+                    root.workJobsLoaded = false;
+                    root.workJobs = [];
+                    root.workJobsError = "ghostd sent malformed background jobs";
                 }
             } else {
-                if (isPlan) {
-                    root.workPlanLoaded = false;
-                    root.workPlanError = root.describeError(xhr, "GET plan");
-                } else {
-                    root.workJobsLoaded = false;
-                    root.workJobsError = root.describeError(xhr, "GET jobs");
-                }
+                root.workJobsLoaded = false;
+                root.workJobsError = root.describeError(xhr, "GET jobs");
             }
         };
-        root.dispatch(xhr, "GET", root.workRoute(ghost, sessionId) + "/" + kind, ({}), null,
-            function () {
-                return xhr === (isPlan ? root.workPlanRequest : root.workJobsRequest);
-            });
-    }
-
-    function fetchWorkJobs(force: bool, ghost: string, sessionId: string): void {
-        root.fetchWorkResource("jobs", force, ghost, sessionId);
+        root.dispatch(xhr, "GET", root.workRoute(ghost, sessionId) + "/jobs", ({}), null,
+            function () { return xhr === root.workJobsRequest; });
     }
 
     function fetchWork(force: bool): void {
@@ -2574,41 +2481,7 @@ Singleton {
         }
         const sessionId = root.ensureSession(ghost);
         root.prepareWorkIdentity(ghost, sessionId);
-        root.fetchWorkResource("plan", force, ghost, sessionId);
-        root.fetchWorkResource("jobs", force, ghost, sessionId);
-    }
-
-    function planAction(action: string): void {
-        if (["start", "stop", "clear"].indexOf(action) < 0 || root.workMutating)
-            return;
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const sessionId = root.ensureSession(ghost);
-        root.prepareWorkIdentity(ghost, sessionId);
-        root.retireWorkRequest("plan");
-        const xhr = root.makeWorkRequest();
-        root.workMutationRequest = xhr;
-        root.workMutationError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.workMutationRequest) return;
-            root.workMutationRequest = null;
-            if (!root.workIdentityCurrent(ghost, sessionId)) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                try {
-                    if (!root.applyWorkPlan(JSON.parse(xhr.responseText)))
-                        throw new Error("invalid plan state");
-                    root.workMutationError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.workMutationError = "ghostd sent malformed plan state";
-                }
-            } else {
-                root.workMutationError = root.describeError(xhr, "POST plan");
-            }
-        };
-        root.dispatch(xhr, "POST", root.workRoute(ghost, sessionId) + "/plan",
-            ({ "Content-Type": "application/json" }), JSON.stringify({ action: action }),
-            function () { return xhr === root.workMutationRequest; });
+        root.fetchWorkJobs(force, ghost, sessionId);
     }
 
     function cancelWorkJob(jobId: string): void {

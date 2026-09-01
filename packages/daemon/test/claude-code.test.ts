@@ -1489,8 +1489,6 @@ fi
       "The owner expects idle sessions to refresh.\n",
       "utf8",
     );
-    mkdirSync(temp!.documentsDir, { recursive: true });
-    writeFileSync(join(temp!.documentsDir, "idle-session-document.txt"), "owner bytes", "utf8");
 
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(lifecycle.closed).toBe(1);
@@ -1505,7 +1503,6 @@ fi
     const resumedPrompt = JSON.stringify(seenOptions[1]?.systemPrompt);
     expect(resumedPrompt).toContain("bookbinder");
     expect(resumedPrompt).toContain("idle-session-memory");
-    expect(resumedPrompt).toContain("idle-session-document.txt");
   });
 
   it("claims a warm query before async setup can cross its idle deadline", async () => {
@@ -1701,9 +1698,6 @@ fi
 
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {
     const { paths, scheduleUnitDir, seenOptions, lifecycle } = setupClaudeHost();
-    mkdirSync(temp!.documentsDir, { recursive: true });
-    mkdirSync(join(temp!.documentsDir, ".obsidian"));
-    writeFileSync(join(temp!.documentsDir, "owner-plan.pdf"), "owner bytes");
     mkdirSync(join(paths.home, "docs"), { recursive: true });
     writeFileSync(join(paths.home, "docs", "legacy.md"), "# Legacy home doc\n");
     const first: PiMessagesEvent[] = [];
@@ -1729,15 +1723,13 @@ fi
     });
     expect(seenOptions[0]?.env?.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     expect(seenOptions[0]?.env?.CLAUDE_CODE_SUBPROCESS_ENV_SCRUB).toBeUndefined();
-    // Scheduling, plan mode, and asking the owner are Ghost-owned; Claude's own
-    // versions would keep state or reach the owner outside Ghost's surfaces.
+    // Scheduling and asking the owner are Ghost-owned; Claude's own versions
+    // would keep state or reach the owner outside Ghost's surfaces.
     for (const tool of [
       "AskUserQuestion",
       "CronCreate",
       "CronDelete",
       "CronList",
-      "EnterPlanMode",
-      "ExitPlanMode",
       "PushNotification",
       "RemoteTrigger",
       "ScheduleWakeup",
@@ -1765,8 +1757,6 @@ fi
       || typeof systemPrompt.append !== "string"
     ) throw new Error("Claude Code did not receive Ghost's appended persona.");
     const appended = systemPrompt.append;
-    expect(appended).toContain(temp!.documentsDir);
-    expect(appended).toContain("owner-plan.pdf");
     expect(appended).toContain("## Shared Obsidian");
     expect(appended).toContain(
       join(temp!.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),

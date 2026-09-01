@@ -129,12 +129,12 @@ describe("tailnet identity", () => {
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
       .toMatchObject({ login: "owner@example.com", role: "owner" });
-    const plan = await fetch(`${base}/api/ghosts/casper/sessions/${encodeURIComponent("pi:conv-1")}/plan`, {
+    const create = await fetch(`${base}/api/ghosts`, {
       method: "POST",
       headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
-      body: JSON.stringify({ action: "start" }),
+      body: JSON.stringify({ name: "owner-created" }),
     });
-    expect(plan.status).toBe(200);
+    expect(create.status).toBe(201);
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com", { origin: "https://evil.example" }) })).status).toBe(403);
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: { authorization: `Bearer ${TOKEN}` } })).json())

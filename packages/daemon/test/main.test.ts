@@ -68,7 +68,6 @@ describe("ghostd help", () => {
 
     expect(output).not.toContain("ghostd import");
     for (const command of [
-      "place-legacy-documents",
       "login",
       "relay-token",
       "api-token",

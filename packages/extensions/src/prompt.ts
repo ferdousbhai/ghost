@@ -5,10 +5,9 @@ import {
   MAX_MEMORY_FILE_CONTENT_LENGTH,
   type MemoryIndex,
 } from "./memory-file.js";
-import type { CharacterFile, DocumentsIndex } from "./types.js";
+import type { CharacterFile } from "./types.js";
 import { fenceUntrusted } from "./untrusted.js";
 
-const DOCUMENTS_INDEX_FENCE_NONCE = "ghost-documents-index";
 const MEMORY_INDEX_FENCE_NONCE = "ghost-memory-index";
 
 export interface GhostSystemPromptInput {
@@ -16,7 +15,6 @@ export interface GhostSystemPromptInput {
   readonly character: CharacterFile | null;
   readonly memoryRoot: string;
   readonly memory: MemoryIndex;
-  readonly docs: DocumentsIndex;
   readonly extraSections?: readonly string[];
 }
 
@@ -89,34 +87,11 @@ function memorySection(input: GhostSystemPromptInput): string[] {
   ];
 }
 
-function docsSection(input: GhostSystemPromptInput): string[] {
-  const lines = input.docs.lines.length > 0
-    ? [...input.docs.lines]
-    : ["(no top-level documents yet)"];
-  if (input.docs.omitted > 0) {
-    lines.push(`(+${input.docs.omitted} more)`);
-  }
-  return [
-    "## Documents",
-    "The owner's own files, shared with the owner and every ghost; not a place for this "
-      + `ghost's notes. Top-level names under ${JSON.stringify(input.docs.root)}, newest first; `
-      + "a trailing `/` marks a directory, and directories are not expanded. It is a snapshot "
-      + "taken when this session started, so list the directory yourself when currency "
-      + "matters. Read an entry when relevant.",
-    "",
-    fenceUntrusted(lines.join("\n"), {
-      source: "Documents index",
-      nonce: DOCUMENTS_INDEX_FENCE_NONCE,
-    }),
-  ];
-}
-
 export function buildGhostSystemPrompt(input: GhostSystemPromptInput): string {
   const sections: string[] = [
     characterSection(input),
     characterPolicySection(input).join("\n"),
     memorySection(input).join("\n"),
-    docsSection(input).join("\n"),
   ];
   for (const extra of input.extraSections ?? []) {
     const trimmed = extra.trim();

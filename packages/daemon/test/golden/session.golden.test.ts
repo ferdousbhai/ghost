@@ -16,7 +16,6 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { MachineDocuments } from "@ghost/extensions";
 import { afterEach, describe, expect, it } from "vitest";
 import { resolveGhostExtensions } from "../../src/extensions.js";
 import {
@@ -52,22 +51,12 @@ const CHARACTER = `# casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-const PRESS_DOC = `# Restoring the Vandercook
-
-Pull the roller bearings before you soak anything.
-`;
-
-const LEDGER_DOC = `# Ledger
-
-The Heidelberg cost more than it should have.
-`;
-
 /**
  * Additional Pi tool names worth auditing beside the phase-1 minimum. Ghost does
  * not contract for these. `task` is included specifically to pin the deliberate
  * phase-1 subtraction while the fixture records the rest of the harness.
  */
-const OTHER_AUDITED_PI_TOOLS = ["ask", "eval", "inspect_image", "task", "todo"] as const;
+const OTHER_AUDITED_PI_TOOLS = ["ask", "eval", "inspect_image", "task"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and holds the session's system prompt fixed", async () => {
@@ -98,10 +87,6 @@ describe("golden: session", () => {
       character: CHARACTER,
       provider: { baseUrl: provider.url, modelId: provider.modelId },
     });
-    const documentsRoot = join(temp.root, ".documents");
-    mkdirSync(documentsRoot);
-    writeFileSync(join(documentsRoot, "press.md"), PRESS_DOC);
-    writeFileSync(join(documentsRoot, "ledger.md"), LEDGER_DOC);
     const machineSkills = join(temp.ownerHome, ".agents", "skills");
     const omarchySkill = join(machineSkills, "omarchy");
     mkdirSync(omarchySkill, { recursive: true });
@@ -109,7 +94,6 @@ describe("golden: session", () => {
       join(omarchySkill, "SKILL.md"),
       "---\nname: omarchy\ndescription: Control this Omarchy laptop through its CLI.\n---\n\nUse the stable CLI routes.\n",
     );
-    const documents = new MachineDocuments(documentsRoot);
     const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
     host = new SessionHost({
       registry: temp.registry,
@@ -117,7 +101,6 @@ describe("golden: session", () => {
       scheduleUnitDir,
       machineSkillPaths: [machineSkills],
       offline: true,
-      extensionOptions: { documents },
       // Titling is a background smol completion; pin it rather than let a
       // second model call race the fixture.
       title: { generate: async () => "Remembering how you like answers" },
@@ -128,7 +111,6 @@ describe("golden: session", () => {
     const normalizer = new Normalizer()
       .path(provider.url, "<mock-provider>")
       .path(dir, "<ghost-home>")
-      .path(documentsRoot, "<documents-root>")
       .path(temp.ownerHome, "<owner-home>")
       .path(temp.root, "<ghosts-root>");
     const sections: GoldenSection[] = [];
@@ -191,7 +173,7 @@ describe("golden: session", () => {
     const universe = [
       ...PI_NATIVE_TOOL_NAMES,
       ...OTHER_AUDITED_PI_TOOLS,
-      ...resolveGhostExtensions({ documents }, dir, { vision: false }).toolNames,
+      ...resolveGhostExtensions({}, dir, { vision: false }).toolNames,
     ];
     sections.push({
       title: "tool surface",

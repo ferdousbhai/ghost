@@ -77,16 +77,8 @@ describe("ghost CLI against a real daemon server", () => {
     });
   });
 
-  it("reports no ask and empty plan, todo, and jobs", async () => {
+  it("reports no ask and empty jobs", async () => {
     expect(JSON.parse((await cli(["ask", "-g", "casper", "-s", "conv", "--json"])).stdout)).toEqual({ ask: null });
-    expect(JSON.parse((await cli(["plan", "-g", "casper", "-s", "conv", "--json"])).stdout)).toMatchObject({
-      planning: false,
-      todo: [],
-    });
-    expect(await cli(["todo", "-g", "casper", "-s", "conv", "--json"])).toMatchObject({
-      code: 0,
-      stdout: "{\"todo\":[]}\n",
-    });
     expect(await cli(["jobs", "-g", "casper", "-s", "conv", "--json"])).toMatchObject({
       code: 0,
       stdout: "{\"jobs\":[]}\n",
@@ -153,14 +145,10 @@ describe("ghost CLI against a real daemon server", () => {
     expect(result.stderr).toContain("cannot reach ghostd");
   });
 
-  it("returns empty work projections for a valid unknown public conversation id", async () => {
+  it("returns empty jobs for a valid unknown public conversation id", async () => {
     const headers = { authorization: `Bearer ${API_TOKEN}` };
     const base = `http://127.0.0.1:${listening!.port}/api/ghosts/casper/sessions/${encodeURIComponent("pi:unknown")}`;
-    const [plan, jobs] = await Promise.all([
-      fetchNoReuse(`${base}/plan`, { headers }),
-      fetchNoReuse(`${base}/jobs`, { headers }),
-    ]);
-    expect(await plan.json()).toEqual({ planning: false, plan: null, todo: [] });
+    const jobs = await fetchNoReuse(`${base}/jobs`, { headers });
     expect(await jobs.json()).toEqual({ jobs: [] });
   });
 });

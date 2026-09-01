@@ -6,7 +6,6 @@ import { afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { MachineDocuments } from "@ghost/extensions";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
@@ -21,37 +20,31 @@ export interface TempGhosts {
   xdgDataHome: string;
   /** The freedesktop home trash under it — where a deleted ghost lands. */
   trashDir: string;
-  documentsDir: string;
   ownerHome: string;
   registry: GhostRegistry;
   cleanup(): void;
 }
 
 /**
- * A temp ghosts root, plus temp XDG data and Documents roots for the duration.
+ * A temp ghosts root plus disposable XDG data for the duration.
  *
  * Deleting a ghost moves it into the freedesktop home trash, so every test
  * that can reach `trash()` must have `XDG_DATA_HOME` pointed somewhere
  * disposable: a leak here would put test ghosts in the developer's own
- * `~/.local/share/Trash`. Session prompts must likewise never index the
- * developer's real Documents. `cleanup()` restores both previous values.
+ * `~/.local/share/Trash`. `cleanup()` restores the previous value.
  */
 export function makeTempGhosts(): TempGhosts {
   const root = mkdtempSync(join(tmpdir(), "ghostd-test-"));
   const xdgDataHome = mkdtempSync(join(tmpdir(), "ghostd-test-xdg-"));
   const previousXdg = process.env.XDG_DATA_HOME;
-  const previousDocuments = process.env.XDG_DOCUMENTS_DIR;
-  const documentsDir = join(root, ".documents");
   const ownerHome = join(root, ".owner");
   mkdirSync(ownerHome, { recursive: true });
   process.env.XDG_DATA_HOME = xdgDataHome;
-  process.env.XDG_DOCUMENTS_DIR = documentsDir;
   let restored = false;
   return {
     root,
     xdgDataHome,
     trashDir: join(xdgDataHome, "Trash"),
-    documentsDir,
     ownerHome,
     registry: new GhostRegistry(root),
     cleanup: () => {
@@ -60,8 +53,6 @@ export function makeTempGhosts(): TempGhosts {
         restored = true;
         if (previousXdg === undefined) delete process.env.XDG_DATA_HOME;
         else process.env.XDG_DATA_HOME = previousXdg;
-        if (previousDocuments === undefined) delete process.env.XDG_DOCUMENTS_DIR;
-        else process.env.XDG_DOCUMENTS_DIR = previousDocuments;
       }
       rmSync(root, { recursive: true, force: true });
       rmSync(xdgDataHome, { recursive: true, force: true });
@@ -151,7 +142,6 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     homeOperations,
     ownerHome: temp.ownerHome,
     offline: true,
-    extensionOptions: { documents: new MachineDocuments(temp.documentsDir) },
   });
   const listening = await startDaemonServer({
     registry: temp.registry,

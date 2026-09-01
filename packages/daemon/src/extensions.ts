@@ -3,17 +3,11 @@ import {
   closeBrowserSession as closeExtensionBrowserSession,
   createGhostExtension,
   deriveMemoryIndex,
-  deriveDocumentsIndex,
-  DOCUMENT_INDEX_MAX_ENTRIES,
   ghostToolNames,
-  MachineDocuments,
-  openMachineDocuments,
   openGhostHome,
   relayBackend,
   type BrowserBackendFactory,
   type CharacterFile,
-  type DocumentDirectoryPage,
-  type DocumentsIndex,
   type GhostExtensionFactory,
   type GhostToolCapabilitiesSource,
   type GhostToolCapabilitiesResolver,
@@ -40,7 +34,6 @@ export async function ensureGhostHomeLayout(homeDir: string): Promise<void> {
 
 export interface GhostExtensionOptions {
   ghostName?: string;
-  documents?: MachineDocuments | string;
   /**
    * The daemon's relay hub, adapted as a transport; the browser backend is built
    * from it per session. Absent only when `GHOSTD_RELAY` is off, which leaves the
@@ -97,7 +90,6 @@ export function resolveGhostExtensions(
   const extensionOptions = {
     ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
-    ...(options.documents === undefined ? {} : { documents: options.documents }),
     backend: browserBackend(options.relayTransport),
     ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
     capabilities,
@@ -112,25 +104,21 @@ export function resolveGhostExtensions(
  * What the persona prompt is assembled from, read once outside any session.
  *
  * The greeting generator needs the same material the persona extension derives
- * at session start, but it has no `AgentSession` to derive it inside of — so the
- * read crosses the seam here rather than in `greeting.ts`, which never imports
- * `@ghost/extensions` directly.
+ * at session start, but it has no `AgentSession` to derive it inside of.
  *
  * Derived, never stored, exactly as it is in a session.
  */
 export interface GhostHomeDigest {
   character: string | null;
   memoryLines: readonly string[];
-  documents: DocumentsIndex;
 }
 
-export type GhostHomeDigestInput = "character" | "memory" | "documents";
+export type GhostHomeDigestInput = "character" | "memory";
 
 /** Injectable input readers for deterministic failure and isolation tests. */
 export interface GhostHomeDigestReaders {
   readonly character?: () => Promise<CharacterFile | null>;
   readonly memory?: () => Promise<MemoryListing>;
-  readonly documents?: () => Promise<DocumentDirectoryPage>;
 }
 
 export interface GhostHomeDigestReadOptions {
@@ -140,7 +128,6 @@ export interface GhostHomeDigestReadOptions {
 
 export async function readGhostHomeDigest(
   homeDir: string,
-  configuredDocuments?: MachineDocuments | string,
   options: GhostHomeDigestReadOptions = {},
 ): Promise<GhostHomeDigest> {
   const home = openGhostHome(homeDir);
@@ -149,29 +136,17 @@ export async function readGhostHomeDigest(
       options.readers?.character ? options.readers.character() : home.readCharacter()),
     Promise.resolve().then(() =>
       options.readers?.memory ? options.readers.memory() : home.listMemory()),
-    Promise.resolve().then(() => {
-      if (options.readers?.documents) return options.readers.documents();
-      const documents = configuredDocuments instanceof MachineDocuments
-        ? configuredDocuments
-        : openMachineDocuments(configuredDocuments);
-      return documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES });
-    }),
   ]);
-  const [characterResult, memoryResult, documentsResult] = settled;
+  const [characterResult, memoryResult] = settled;
   if (characterResult.status === "rejected") options.onUnavailable?.("character");
   if (memoryResult.status === "rejected") options.onUnavailable?.("memory");
-  if (documentsResult.status === "rejected") options.onUnavailable?.("documents");
 
   const character = characterResult.status === "fulfilled" ? characterResult.value : null;
   const memory = memoryResult.status === "fulfilled"
     ? memoryResult.value
     : { files: [], skipped: [] };
-  const documentPage = documentsResult.status === "fulfilled"
-    ? documentsResult.value
-    : { root: "", path: "", entries: [], total: 0 };
   return {
     character: character?.body ?? null,
     memoryLines: deriveMemoryIndex(memory.files).lines,
-    documents: deriveDocumentsIndex(documentPage),
   };
 }

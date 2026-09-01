@@ -39,7 +39,6 @@ const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
-const START_IN_PLAN_MODE = flag("--plan");
 const NO_JOBS = flag("--no-jobs");
 const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
@@ -419,7 +418,6 @@ function memorySlug(text) {
 function seedMockHome(name) {
   const dir = join(GHOSTS_ROOT, name);
   mkdirSync(join(dir, "memory"), { recursive: true });
-  mkdirSync(join(dir, "plans"), { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
@@ -433,11 +431,6 @@ function seedMockHome(name) {
   writeFileSync(
     join(dir, "memory", "current-project.md"),
     `${MOCK_MEMORY[1].content}\n`,
-    "utf8",
-  );
-  writeFileSync(
-    join(dir, "plans", "hud-work-strip.md"),
-    "# HUD work strip\n\nShow the conversation plan, progress phases, and background jobs above the queue.\n",
     "utf8",
   );
 }
@@ -473,7 +466,7 @@ const entry = (message) => ({ ...message, entryId: nextEntryId() });
 const SEEDED_QUESTION = {
   id: "q-notes",
   header: "Launch notes",
-  question: "Three sections in shared Documents/Projects/roadmap.md are unfinished. Which do you want me to draft first?",
+  question: "Three sections in the Obsidian roadmap note are unfinished. Which do you want me to draft first?",
   recommended: 1,
   options: [
     { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
@@ -513,19 +506,19 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
         entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
         entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
-        entry({ role: "user", content: "open the current HUD plan and tell me what's left", timestamp: now - 3_608_000 }),
+        entry({ role: "user", content: "open the current project brief and tell me what's left", timestamp: now - 3_608_000 }),
         entry({
           role: "assistant",
           timestamp: now - 3_607_000,
           content: [
-            { type: "text", text: "Opening the current HUD plan" },
+            { type: "text", text: "Opening the current project brief" },
             // A restored call has no live intent and no summary, so the card
             // falls back to the arguments: they have to say what it was for.
             {
               type: "toolCall",
               id: "call-seed-browser",
               name: "read",
-              arguments: { path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md") },
+              arguments: { path: join(SESSION_CWD, "project-brief.md") },
               cwd: SESSION_CWD,
               failed: true,
             },
@@ -660,97 +653,25 @@ const sessionSummary = (s) => ({
 });
 
 
-// Plan/todo and jobs are keyed by the full runtime-qualified conversation id,
-// just like their routes. Every conversation gets an independent fixture the
-// first time the HUD asks for it, including unpublished client-side drafts.
-const planStore = new Map();
+// Jobs are keyed by the full runtime-qualified conversation id, like the route.
 const jobStore = new Map();
 const workKey = (name, conversationId) => JSON.stringify([name, conversationId]);
 
 function dropWork(name, conversationId = null) {
-  for (const store of [planStore, jobStore]) {
-    for (const key of [...store.keys()]) {
-      const [storedName, storedConversation] = JSON.parse(key);
-      if (storedName === name && (conversationId === null || storedConversation === conversationId))
-        store.delete(key);
-    }
+  for (const key of [...jobStore.keys()]) {
+    const [storedName, storedConversation] = JSON.parse(key);
+    if (storedName === name && (conversationId === null || storedConversation === conversationId))
+      jobStore.delete(key);
   }
 }
 
 function moveWorkGhost(from, to) {
-  for (const store of [planStore, jobStore]) {
-    for (const [key, value] of [...store.entries()]) {
-      const [storedName, conversationId] = JSON.parse(key);
-      if (storedName !== from) continue;
-      store.delete(key);
-      if (store === planStore && value.plan) {
-        value.plan.path = join(GHOSTS_ROOT, to, "plans", basename(value.plan.path));
-      }
-      store.set(workKey(to, conversationId), value);
-    }
+  for (const [key, value] of [...jobStore.entries()]) {
+    const [storedName, conversationId] = JSON.parse(key);
+    if (storedName !== from) continue;
+    jobStore.delete(key);
+    jobStore.set(workKey(to, conversationId), value);
   }
-}
-
-const MOCK_TODO = [
-  {
-    name: "Build",
-    tasks: [
-      { content: "Read the shell contract", status: "completed" },
-      { content: "Wire the daemon state", status: "completed" },
-      { content: "Build the HUD work strip", status: "in_progress" },
-    ],
-  },
-  {
-    name: "Verify",
-    tasks: [
-      { content: "Add focused QML coverage", status: "completed" },
-      { content: "Capture an isolated preview", status: "blocked", blocker: "Waiting for the nested compositor" },
-      { content: "Run shell checks", status: "pending" },
-      { content: "Review the final diff", status: "pending" },
-    ],
-  },
-];
-
-const MOCK_PLAN_CONTENT = [
-  "# HUD work strip",
-  "",
-  "Show the current conversation's plan, progress phases, and background jobs directly above the queue.",
-  "",
-  "1. Fetch plan and job state with the active conversation identity.",
-  "2. Keep the strip keyboard-accessible and quiet when empty.",
-  "3. Poll only while a visible HUD has a running job.",
-].join("\n");
-
-function planFor(name, conversationId) {
-  const key = workKey(name, conversationId);
-  if (!planStore.has(key)) {
-    planStore.set(key, {
-      planning: START_IN_PLAN_MODE,
-      plan: {
-        path: join(GHOSTS_ROOT, name, "plans", "hud-work-strip.md"),
-        title: "HUD work strip",
-        approvedAt: new Date(MOCK_STARTED_AT - 10 * 60_000).toISOString(),
-        content: MOCK_PLAN_CONTENT,
-      },
-      todo: structuredClone(MOCK_TODO),
-    });
-  }
-  return planStore.get(key);
-}
-
-function planSnapshot(name, conversationId) {
-  return structuredClone(planFor(name, conversationId));
-}
-
-function setPlanAction(name, conversationId, action) {
-  const current = planFor(name, conversationId);
-  const next = {
-    planning: action === "start",
-    plan: action === "clear" ? null : current.plan,
-    todo: current.todo,
-  };
-  planStore.set(workKey(name, conversationId), next);
-  return planSnapshot(name, conversationId);
 }
 
 function initialJobs() {
@@ -959,7 +880,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
 const GREETINGS = {
   casper: {
     greeting:
-      "You left Launch notes.md half-written in shared Documents, and the kettle is still on in Projects/roadmap.md. "
+      "You left the Obsidian launch note half-written, and the roadmap still has an open section. "
       + "Want to pick that thread back up? I can also just sit here quietly.",
     onboarding: false,
   },
@@ -1197,7 +1118,7 @@ const LIVE_QUESTION = {
       description: "One concise memory file.",
       preview: "memory/what-the-owner-asked-for.md",
     },
-    { label: "Answer and draft a doc", description: "A new file in shared Documents, yours to edit after." },
+    { label: "Answer and save a note", description: "A shared Obsidian note, yours to edit after." },
     { label: "Neither — forget I asked", description: "No answer, no files." },
   ],
 };
@@ -1250,7 +1171,7 @@ function* script(name, prompt, sessionId) {
     const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
     const args = {
       step: step + 1,
-      path: join(GHOSTS_ROOT, name, "plans", `step-${step + 1}.md`),
+      path: join(SESSION_CWD, `step-${step + 1}.md`),
     };
     yield { type: "toolcall_start", contentIndex: index, id, toolName };
     yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
@@ -2205,39 +2126,6 @@ const mockServer = createServer(async (req, res) => {
         reason: "reloaded",
       }));
     }
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "plan") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    if (req.method === "GET") return json(res, 200, planSnapshot(name, conversation.id));
-    if (req.method !== "POST") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { code: "session_busy", message: "Wait for this answer to finish." },
-      });
-    }
-    const body = await readBody(req).catch(() => null);
-    if (!body || !["start", "stop", "clear"].includes(body.action)) {
-      return json(res, 400, {
-        error: { code: "invalid_request", message: '"action" must be "start", "stop", or "clear".' },
-      });
-    }
-    const state = setPlanAction(name, conversation.id, body.action);
-    publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
-      new Date().toISOString(), "plan");
-    return json(res, 200, state);
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "todo"
-      && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    return json(res, 200, { todo: planSnapshot(name, conversation.id).todo });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
       && req.method === "GET") {

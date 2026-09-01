@@ -636,7 +636,6 @@ describe("Ghost slash commands", () => {
       availability: "unsupported",
       unavailableReason: expect.stringContaining("interactive terminal UI"),
     }));
-    expect(commands).toContainEqual(expect.objectContaining({ name: "plan", availability: "available" }));
   });
 
   it("reports that an active Claude Code runtime has no Ghost command catalog", async () => {
@@ -7907,86 +7906,6 @@ describe("passive session recovery during whole-home moves", () => {
     });
   });
 
-  it("holds a plan read through rename and blocks old-name reuse", async () => {
-    const plan = pauseConversationFile("plan-read");
-    const conversationId = "plan-read-race";
-    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
-      title: { enabled: false },
-      conversationFileProbe: plan.probe,
-    });
-    await host!.runTurn("casper", { sessionId: conversationId, prompt: "remember", emit: () => {} });
-    await host!.close("casper", conversationId);
-    const coordinator = homeOperationsFor(temp!.registry);
-
-    const reading = host!.planState("casper", conversationId);
-    await plan.entered.promise;
-    const reserved = await reserveBlockedMove(coordinator);
-    expect(reserved.ready()).toBe(false);
-
-    plan.resume.resolve();
-    await expect(reading).resolves.toEqual({ planning: false, plan: null, todo: [] });
-    const releaseMove = await reserved.move;
-    try {
-      await host!.renameGhost("casper", "wisp");
-      expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
-    } finally {
-      releaseMove();
-    }
-    expect(existsSync(dir)).toBe(false);
-    const replacement = host!.createGhost("casper");
-
-    expect(await host!.planState("wisp", conversationId))
-      .toEqual({ planning: false, plan: null, todo: [] });
-    expect(existsSync(join(
-      ghostPaths(replacement.dir).sessionDir,
-      sessionFileNameFor(conversationId),
-    ))).toBe(false);
-  });
-
-  it("publishes plan mode before delete and cannot write into a reused old name", async () => {
-    const plan = pauseConversationFile("plan-write");
-    const conversationId = "plan-write-race";
-    const { dir } = await setup([{ kind: "text", text: "persisted" }], {
-      title: { enabled: false },
-      conversationFileProbe: plan.probe,
-    });
-    await host!.runTurn("casper", { sessionId: conversationId, prompt: "remember", emit: () => {} });
-    await host!.close("casper", conversationId);
-    const coordinator = homeOperationsFor(temp!.registry);
-
-    const starting = host!.setPlanMode("casper", conversationId, "start");
-    await plan.entered.promise;
-    const reserved = await reserveBlockedMove(coordinator);
-    expect(reserved.ready()).toBe(false);
-
-    plan.resume.resolve();
-    await expect(starting).resolves.toMatchObject({ planning: true });
-    const releaseMove = await reserved.move;
-    let trash = "";
-    try {
-      ({ trash } = await host!.deleteGhost("casper"));
-      expect(() => host!.createGhost("casper")).toThrowError(/finish moving/);
-    } finally {
-      releaseMove();
-    }
-    expect(existsSync(dir)).toBe(false);
-    const replacement = host!.createGhost("casper");
-    const transcript = readFileSync(
-      join(ghostPaths(trash).sessionDir, sessionFileNameFor(conversationId)),
-      "utf8",
-    ).trim().split("\n").map((line) => JSON.parse(line) as {
-      customType?: string;
-      data?: { state?: { planning?: boolean } };
-    });
-
-    expect(transcript.some((entry) =>
-      entry.customType === "ghost-plan" && entry.data?.state?.planning === true)).toBe(true);
-    expect(existsSync(join(
-      ghostPaths(replacement.dir).sessionDir,
-      sessionFileNameFor(conversationId),
-    ))).toBe(false);
-  });
-
   it("publishes a title before rename and cannot append into a reused old name", async () => {
     const title = pauseConversationFile("title-write");
     const conversationId = "title-write-race";
@@ -8756,83 +8675,6 @@ describe("background jobs", () => {
 
     await host!.close("casper", "conv-cancel-jobs");
     expect(host!.listJobs("casper", "conv-cancel-jobs")).toEqual([]);
-  });
-});
-
-describe("plan mode", () => {
-  it("keeps the world read-only while planning, pins the approved plan, and lists the todo", async () => {
-    const { dir } = await setup([
-      { kind: "tool", name: "bash", args: { command: "touch plan-mode-must-not-run" } },
-      { kind: "tool", name: "propose_plan", args: { title: "Fix the leak", content: "# Plan\n1. patch\n2. test" } },
-      { kind: "text", text: "Plan approved, starting." },
-      { kind: "tool", name: "todo", args: { op: "init", items: ["patch", "test"] } },
-      { kind: "text", text: "Tracking it." },
-    ]);
-    await host!.setPlanMode("casper", "conv-plan", "start");
-    expect(await host!.planState("casper", "conv-plan")).toEqual({ planning: true, plan: null, todo: [] });
-
-    const directEvents: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-plan",
-      prompt: "!printf direct-owner-command",
-      emit: (event) => directEvents.push(event),
-    });
-    expect(provider!.requests).toHaveLength(0);
-    expect(directEvents.some((event) => event.type === "text_delta"
-      && event.delta.includes("direct-owner-command"))).toBe(true);
-    expect((await host!.planState("casper", "conv-plan")).planning).toBe(true);
-
-    const events: PiMessagesEvent[] = [];
-    const turn = host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Plan the fix.", emit: (event) => events.push(event) });
-    const pending = await waitFor(() => host!.pendingAsk("casper", "conv-plan"), 10_000);
-    expect(pending.questions[0]?.question).toContain("Fix the leak");
-    host!.answerAsk("casper", "conv-plan", pending.id, { kind: "submit", results: [{ id: "plan", selectedOptions: ["Approve"] }] });
-    await turn;
-
-    expect(existsSync(join(temp!.ownerHome, "plan-mode-must-not-run"))).toBe(false);
-    expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: true, summary: expect.stringContaining("Plan mode") }));
-    expect(provider!.requests[0]?.system).toContain("# Plan mode");
-    const state = await host!.planState("casper", "conv-plan");
-    expect(state.planning).toBe(false);
-    expect(state.plan).toMatchObject({ title: "Fix the leak", content: "# Plan\n1. patch\n2. test\n", path: expect.stringContaining(join(dir, "plans")) });
-
-    const listed: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "Start on it.", emit: (event) => listed.push(event) });
-    expect(provider!.requests.at(-1)?.system).toContain("# Current plan: Fix the leak");
-    expect(provider!.requests.at(-1)?.system).toContain("2. test");
-    expect((await host!.planState("casper", "conv-plan")).todo).toEqual([
-      { name: "Tasks", tasks: [{ content: "patch", status: "in_progress" }, { content: "test", status: "pending" }] },
-    ]);
-
-    const shown: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-plan", prompt: "/todo", emit: (event) => shown.push(event) });
-    expect(shown).toContainEqual(expect.objectContaining({ type: "command_output", command: "/todo", output: "## Tasks\n[>] patch\n[ ] test" }));
-    expect(await host!.setPlanMode("casper", "conv-plan", "clear")).toMatchObject({ planning: false, plan: null });
-  });
-
-  it("refuses to start while a background job runs and succeeds after the owner settles it", async () => {
-    await setup([
-      { kind: "tool", name: "bash", args: { command: "sleep 30", background: true, label: "blocking plan" } },
-      { kind: "text", text: "The job is running." },
-      { kind: "text", text: "The job was cancelled." },
-    ]);
-    await host!.runTurn("casper", { sessionId: "conv-plan-job", prompt: "Start the job.", emit: () => {} });
-    const [job] = host!.listJobs("casper", "conv-plan-job");
-    expect(job).toMatchObject({ status: "running", label: "blocking plan" });
-
-    await expect(host!.setPlanMode("casper", "conv-plan-job", "start")).rejects.toMatchObject({
-      code: "session_busy",
-      status: 409,
-    });
-    expect(host!.listJobs("casper", "conv-plan-job")[0]).toMatchObject({ status: "running" });
-    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(false);
-
-    expect(host!.cancelJob("casper", "conv-plan-job", job!.id)).toMatchObject({ outcome: "cancelled" });
-    await waitFor(() => host!.listJobs("casper", "conv-plan-job")[0]?.status === "cancelled"
-      ? true
-      : null, 10_000);
-    await host!.setPlanMode("casper", "conv-plan-job", "start");
-    expect((await host!.planState("casper", "conv-plan-job")).planning).toBe(true);
   });
 });
 

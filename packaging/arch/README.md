@@ -15,9 +15,8 @@ toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
 tree. Ghost, pi, provider, and MCP application code plus required static assets
 remain packaged for offline use.
 
-`fd` and `ripgrep` are explicit runtime dependencies because pi's native
-`find` and `grep` tools invoke them. Providing the system binaries prevents a
-read-only planning turn from downloading either tool into pi's cache. The
+`fd` and `ripgrep` are explicit runtime dependencies because Pi's native
+`find` and `grep` tools invoke them. The
 stable `ghost` release-source machinery lives under `packaging/release/`; its
 v3 runtime source carries the same bundles, launchers, and exact bundled-license
 closure.

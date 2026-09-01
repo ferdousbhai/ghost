@@ -26,7 +26,7 @@ import {
 export const GHOST_DESKTOP = "ghost_desktop";
 
 export const GHOST_DESKTOP_TOOL_NAMES = [GHOST_DESKTOP] as const;
-/** Actions that only look: what a read-only conversation (plan mode) may still run. */
+/** Actions that only observe desktop state. */
 export const READ_ONLY_DESKTOP_ACTIONS: ReadonlySet<string> = new Set([
   "state", "see", "layers", "ax_query", "ax_roles", "hit_test",
 ]);

@@ -250,7 +250,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
   });
 
   for (const code of ["EACCES", "EIO"] as const) {
-    it(`keeps the route at 200 and preserves memory/Documents when character reads fail with ${code}`, async () => {
+    it(`keeps the route at 200 and preserves memory when character reads fail with ${code}`, async () => {
       const logger = recordingLogger("warn");
       const failure = () => {
         throw Object.assign(new Error("SENSITIVE-/owner/ghosts/casper/character.md"), { code });
@@ -275,7 +275,6 @@ describe("POST /api/ghosts/:name/greeting", () => {
               }],
               skipped: [],
             }),
-            documents: async () => documentPage("DOCUMENT_SURVIVES"),
           },
         },
       });
@@ -288,7 +287,6 @@ describe("POST /api/ghosts/:name/greeting", () => {
       });
       expect(seen?.character).toBeNull();
       expect(seen?.memoryLines).toEqual(["survives"]);
-      expect(seen?.documents.lines).toEqual(["DOCUMENT_SURVIVES"]);
       expect(JSON.stringify(logger.records)).toContain('"input":"character"');
       expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
       expect(JSON.stringify(logger.records)).not.toContain("character.md");
@@ -296,19 +294,8 @@ describe("POST /api/ghosts/:name/greeting", () => {
   }
 
   for (const testCase of [
-    { label: "memory EIO", memoryFails: true, documentsFail: false, code: "EIO" },
-    {
-      label: "Documents EACCES",
-      memoryFails: false,
-      documentsFail: true,
-      code: "EACCES",
-    },
-    {
-      label: "memory and Documents EIO",
-      memoryFails: true,
-      documentsFail: true,
-      code: "EIO",
-    },
+    { label: "memory EACCES", code: "EACCES" },
+    { label: "memory EIO", code: "EIO" },
   ]) {
     it(`preserves every successful greeting input when ${testCase.label} is unavailable`, async () => {
       const logger = recordingLogger("warn");
@@ -318,19 +305,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
       let seen: Parameters<GreetingGenerator>[0]["context"] | undefined;
       const readers: GhostHomeDigestReaders = {
         character: async () => ({ title: "Casper", body: "CHARACTER_SURVIVES" }),
-        memory: testCase.memoryFails
-          ? failed
-          : async () => ({
-            files: [{
-              slug: "survives",
-              content: "kept",
-              updated: "2026-08-27",
-            }],
-            skipped: [],
-          }),
-        documents: testCase.documentsFail
-          ? failed
-          : async () => documentPage("DOCUMENT_SURVIVES"),
+        memory: failed,
       };
       const base = await serve({
         written: true,
@@ -346,18 +321,8 @@ describe("POST /api/ghosts/:name/greeting", () => {
       expect(status).toBe(200);
       expect(body.greeting).toBe("Hello despite a missing input.");
       expect(seen?.character).toBe("CHARACTER_SURVIVES");
-      expect(seen?.memoryLines).toEqual(
-        testCase.memoryFails ? [] : ["survives"],
-      );
-      expect(seen?.documents.lines).toEqual(
-        testCase.documentsFail ? [] : ["DOCUMENT_SURVIVES"],
-      );
-      if (testCase.memoryFails) {
-        expect(JSON.stringify(logger.records)).toContain('"input":"memory"');
-      }
-      if (testCase.documentsFail) {
-        expect(JSON.stringify(logger.records)).toContain('"input":"documents"');
-      }
+      expect(seen?.memoryLines).toEqual([]);
+      expect(JSON.stringify(logger.records)).toContain('"input":"memory"');
       expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
     });
   }
@@ -372,7 +337,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
         readRawCharacter: () => {
           throw Object.assign(new Error("SENSITIVE-RAW-CHARACTER"), { code: "EACCES" });
         },
-        inputReaders: { character: failed, memory: failed, documents: failed },
+        inputReaders: { character: failed, memory: failed },
       },
     });
 
@@ -381,22 +346,3 @@ describe("POST /api/ghosts/:name/greeting", () => {
     expect(body).toEqual({ greeting: null, onboarding: false });
   });
 });
-
-function documentPage(name: string) {
-  return {
-    root: "/owner/Documents",
-    path: "",
-    entries: [{
-      name,
-      path: name,
-      kind: "file" as const,
-      size: 0,
-      modifiedAt: "2026-08-27T00:00:00.000Z",
-    }],
-    total: 1,
-    fileCount: 1,
-    directoryCount: 0,
-    truncated: false,
-    skipped: [],
-  };
-}

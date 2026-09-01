@@ -30,26 +30,6 @@ export {
 } from "./memory-file.js";
 
 export {
-  deriveDocumentsIndex,
-  DOC_CATALOG_BUDGET_CHARS,
-} from "./catalog.js";
-
-export {
-  DOCUMENT_INDEX_BUDGET_CHARS,
-  DOCUMENT_INDEX_MAX_ENTRIES,
-  MachineDocuments,
-  normalizeDocumentsDirectoryPath,
-  openMachineDocuments,
-  resolveDocumentsDirectory,
-  type DocumentDirectoryEntry,
-  type DocumentDirectoryPage,
-  type DocumentEntryKind,
-  type ListDocumentDirectoryOptions,
-  type ResolveDocumentsDirectoryOptions,
-  type SkippedDocumentEntry,
-} from "./documents.js";
-
-export {
   CHARACTER_FILENAME,
   MAX_CHARACTER_BODY_LENGTH,
   GhostHome,
@@ -83,7 +63,6 @@ export {
   GHOST_HOME_FORMAT,
   type CharacterFile,
   type MemoryRecord,
-  type DocumentsIndex,
 } from "./types.js";
 
 export {

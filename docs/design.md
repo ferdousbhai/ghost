@@ -1,106 +1,68 @@
-# Ghost — Design
+# Ghost — design
 
-Durable vision, positioning, and decisions. Status and open work live in the
-issue tracker (#17 is the beta gate); contracts live in `../CONTRACTS.md`.
+Ghost is a local AI persona for one owner: character, private continuity,
+conversations, tools, and access to the owner's real Omarchy desktop. It runs on
+the owner's machine; no Ghost service holds a cloud copy.
 
-## Vision
+Status and unfinished work live in GitHub issues (#17 is the beta gate). Stable
+storage, wire, runtime, and package boundaries live in
+[`CONTRACTS.md`](../CONTRACTS.md). Code owns behavior.
 
-A ghost is an AI persona — character, private memory, tools, access to the
-owner's Documents, and shared knowledge through Obsidian — that lives entirely
-on its owner's machine as an Omarchy-native
-desktop app: a pi engine over owner-readable files, summoned with a keystroke,
-and extended with bounded declarative skills and project context. It is an
-owner-local desktop application, not a network-facing agent service. No server
-holds a copy. "Your ghost, not our copy of it."
+## Desired end state
 
-## Design goal: modifiable, infinitely extensible
+An owner installs Ghost, creates a named persona, chooses a provider, and talks
+through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
+Code is an optional native runtime. Both feel like the same ghost because they
+receive the same character, private memory policy, machine skills, Obsidian
+policy, and trusted-project snapshot. The runtime still owns its native way of
+working.
 
-The official repo is the point of collaboration on a narrow, opinionated core —
-ghost home, daemon, shell, and built-in extensions. An owner can modify the
-visible instructions, skills, rules, Markdown commands and prompts, model roles,
-and MCP owned by a ghost or explicitly trusted project. Executable project
-plugins, hooks, custom tools, LSP, and pi subagents stay disabled until #31
-supplies a per-session isolation boundary; trusted visible ghost hook factories
-are the narrow in-process exception. Core stays small and holds the contracts.
-A capability generic enough for every ghost graduates into core or upstream pi;
-private executable additions follow the isolation boundary rather than being
-discovered implicitly from cwd. The measure of success is what owners can
-extend without surrendering the local trust model.
+The official repository stays a narrow, opinionated core. Owners extend a ghost
+with readable instructions, skills, rules, Markdown commands/prompts, models,
+and MCP. Executable project extensions wait for a real per-session isolation
+boundary. Generic capabilities should graduate into core or upstream rather
+than becoming parallel Ghost frameworks.
 
-## Positioning
+## Decisions that are not obvious from code
 
-The product shape Grok Bot validated — always-on AI teammates with a messenger
-UI, per-bot screens, teach-by-demonstration — but **local, private, open source
-(Apache-2.0), and on the OS they skipped (Linux/Omarchy)**. Ghosts are hired
-teammates, not configured assistants: name, job, a chat thread, check-ins.
-Where Grok Bot gives every bot one shared cloud computer and pooled
-credentials, each ghost works on your actual Hyprland desktop, with a per-ghost
-home and explicit credential policy over machine Secret Service accounts, no
-ambient credential discovery, and no cloud custody.
+- **Three persistence scopes.** Character and subjective continuity are
+  ghost-private. Owner-visible knowledge, preferences, decisions, notes, plans,
+  and tasks are shared through Obsidian. Projects and machine artifacts remain
+  owned by their native facility.
+- **Obsidian owns shared state.** Ghost links the upstream `obsidian-cli` skill
+  and uses the official CLI exclusively. It has no notes database, task store,
+  plan mode, Documents index, vault-path convention, or raw vault-file adapter.
+- **Files over an application database.** Personas and inspectable policy stay
+  greppable and backup-friendly. Derived runtime state is isolated under
+  `.pi/`; credential values live only in Linux Secret Service.
+- **Runtime-native behavior wins.** Ghost projects policy through Pi and Claude
+  Code's supported settings/hooks. It adds machinery only for product boundaries
+  the runtimes do not own: persona lifecycle, daemon sessions, the HUD, browser
+  relay, desktop sidecar, shared authentication policy, and recoverable moves.
+- **One visible browser.** Ghost drives the owner's signed-in Chromium through
+  the opt-in relay. A second ghost profile was removed because the owner could
+  not see it and the tab is the useful isolation unit.
+- **Quickshell, not a web-app window.** The HUD and bar indicator belong to the
+  Omarchy desktop. The remote viewer is deliberately narrower and opt-in over
+  Tailscale Serve.
+- **Owner-local trust.** There is one owner role. Remote guests are read-only;
+  project trust is explicit and filesystem-identity bound; ambient provider
+  credentials and executable project code are not discovered.
+- **No artificial throttles.** Ghost surfaces provider/runtime limits and uses
+  their retry/fallback chains. It does not impose turn, concurrency, hosted
+  session, or spend caps.
+- **Apache-2.0 and a fresh public history.** The predecessor history carried
+  private identifiers; this repository is the open collaboration boundary.
 
-## Key decisions (one-line rationales)
+## Product shape
 
-- **Build on upstream pi at explicit runtime boundaries** — `createAgentSession`
-  plus explicit Ghost snapshots express the normal path. `claude-code/default`
-  is the narrow exception: the official Claude Agent SDK invokes an installed,
-  unmodified Claude Code so the owner can use its native authentication and
-  provider routes. Both receive the same Ghost persona, memory, Documents,
-  shared Obsidian policy, and declarative layers and emit the pi-messages wire,
-  while each keeps its native tool harness. Deviations from pi are named in
-  `CONTRACTS.md` with the invariant that licenses them (#3).
-- **Model-agnostic; bring any provider.** Named requirements: existing **OpenAI
-  Codex/ChatGPT subscriptions usable as auth** through pi's Codex OAuth,
-  **Claude Code's native authentication through the Claude Code harness** (a
-  separate runtime from pi's Anthropic provider; never promise plan accounting
-  for API, cloud, or router auth), and **OpenRouter first-class** with its free
-  models as a zero-cost onboarding option.
-- **Owner-readable files, not an application database** — Markdown content and
-  inspectable JSON/YAML policy remain greppable and backup-friendly. Derived
-  runtime/catalog state stays isolated under `.pi/`; credential values live in
-  Linux Secret Service and secret-free coordination metadata lives under
-  Ghost's XDG state, never in the content store.
-- **No stored indexes** — the memory index and shallow owner Documents index
-  are derived per session; files edited out-of-band cannot go stale against a
-  persisted catalog.
-- **Three persistence scopes** — per-ghost memory is private persona context;
-  Obsidian is durable owner-visible knowledge and task state shared by every
-  ghost; Documents hold owner-wide files and finished artifacts. Obsidian's
-  application and CLI select the vault. Ghost links the upstream `obsidian-cli`
-  skill in both runtime prompts and never infers a vault from Documents,
-  searches for `.obsidian`, or bypasses the CLI with raw file access.
-- **One browser** — the owner's real signed-in Chromium, reached by an MV3
-  extension over `chrome.debugger`, behind a backend-agnostic tool surface. A
-  second, ghost-owned profile was tried and removed: it doubled the code for a
-  browser the owner never sees, and the tab is a better isolation unit than a
-  profile. Prefer a CLI over a web UI wherever one exists.
-- **Quickshell shell surfaces, not a webapp window** — Omarchy's own shell is
-  Quickshell; an xdg-toplevel HUD plus a layer-shell bar widget stays native to
-  the desktop. A chromium "deep workspace" view must earn its way in.
-- **Owner-local product boundary** — core does not expose ghosts to remote
-  users, meter calls, or operate a money path.
-- **Env scrubbing** — a ghost only sees credentials deliberately referenced and
-  allowed by its `models.json`; stray shell API keys must never leak cloud
-  models into a sovereign ghost.
-- **No Ghost-owned notes database** — Obsidian's existing ecosystem owns shared
-  notes, tasks, links, properties, and vault selection; Ghost owns only the
-  prompt policy and install/readiness contract that make both runtimes use its
-  CLI consistently.
-- **Apache-2.0, fresh repo** — the predecessor repo's history carries private
-  identifiers; the open contribution is this codebase.
+The useful idea is an always-available AI teammate with a name, a chat thread,
+tools, and continuity. Ghost's distinction is local custody: the persona works
+on the owner's actual Linux desktop, its private state is readable, shared notes
+remain the owner's Obsidian vault, and credentials remain in machine-native
+stores.
 
-## Onboarding
-
-Install the Arch package → create a ghost (name + job → seeded `character.md`)
-→ pick a model: OpenRouter free model (zero cost, just an account), an OpenAI
-Codex/ChatGPT subscription sign-in, an externally authenticated Claude Code
-harness, any API key, or a local model → Super+Ctrl+G, start talking.
-
-## Undesigned
-
-- **Teach-by-demonstration** (#21) — Wayland-native screen capture + input
-  observation → draft skill; v1 fallback is "save this session as a skill".
-- **Ghost-to-ghost** (#15) — local interaction and trust model.
-- **Always-on** (#18) — laptop lids close; "keep working while I'm away" on
-  the same machine.
-- **Packaging** — non-Omarchy Linux support: works anywhere Hyprland+Quickshell
-  runs, but supported where?
+Onboarding is: install and verify Obsidian CLI/skill → create a ghost → choose a
+free, subscription, API-key, or local model → summon the HUD → talk. Packaging
+must not call this supported until the owner-level Obsidian readiness gate in
+#54 is implemented.

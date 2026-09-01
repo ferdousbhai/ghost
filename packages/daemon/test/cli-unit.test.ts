@@ -189,36 +189,6 @@ describe("CLI API adaptation", () => {
     expect(daemon.posted()).toBeUndefined();
   });
 
-  it("matches the shell todo glyphs", async () => {
-    const fetch: CliFetch = async (input) => {
-      const path = new URL(input).pathname;
-      if (path === "/api/ghosts/casper/sessions") {
-        return jsonResponse({ sessions: [session("conv")] });
-      }
-      return jsonResponse({
-        todo: [{
-          name: "Tasks",
-          tasks: [
-            { content: "pending", status: "pending" },
-            { content: "active", status: "in_progress" },
-            { content: "done", status: "completed" },
-            { content: "blocked", status: "blocked" },
-            { content: "dropped", status: "abandoned" },
-          ],
-        }],
-      });
-    };
-    const response = await runCli(["todo", "-g", "casper", "-s", "conv"], {
-      env: { GHOSTD_PORT: "7718" },
-      home: "/tmp/ghost-cli-unit",
-      fetch,
-    });
-    expect(response).toMatchObject({
-      code: 0,
-      stdout: "· pending\n▸ active\n✓ done\n⊘ blocked\n− dropped\n",
-    });
-  });
-
   it("reports the CLI version without requesting a version route", async () => {
     const paths: string[] = [];
     const fetch: CliFetch = async (input) => {

@@ -33,14 +33,6 @@ The index is a snapshot taken when this session started, so list the directory y
 (nothing yet)
 </untrusted id="ghost-memory-index">
 
-## Documents
-The owner's own files, shared with the owner and every ghost; not a place for this ghost's notes. Top-level names under "<documents-root>", newest first; a trailing `/` marks a directory, and directories are not expanded. It is a snapshot taken when this session started, so list the directory yourself when currency matters. Read an entry when relevant.
-
-<untrusted source="Documents index" id="ghost-documents-index">
-ledger.md
-press.md
-</untrusted id="ghost-documents-index">
-
 ## Computer use
 For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
 Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
@@ -146,14 +138,6 @@ The index is a snapshot taken when this session started, so list the directory y
 (nothing yet)
 </untrusted id="ghost-memory-index">
 
-## Documents
-The owner's own files, shared with the owner and every ghost; not a place for this ghost's notes. Top-level names under "<documents-root>", newest first; a trailing `/` marks a directory, and directories are not expanded. It is a snapshot taken when this session started, so list the directory yourself when currency matters. Read an entry when relevant.
-
-<untrusted source="Documents index" id="ghost-documents-index">
-ledger.md
-press.md
-</untrusted id="ghost-documents-index">
-
 ## Computer use
 For laptop, shell, and Omarchy-system actions, first inspect `omarchy commands --json` or the relevant `omarchy <group> --help`, then use the stable `omarchy <group> <action>` route through Bash.
 Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.
@@ -232,7 +216,6 @@ inspect_image  registry=yes  wire=yes  invokable=yes
 ls             registry=yes  wire=yes  invokable=yes
 read           registry=yes  wire=yes  invokable=yes
 task           registry=no   wire=no   invokable=no
-todo           registry=yes  wire=yes  invokable=yes
 write          registry=yes  wire=yes  invokable=yes
 (tools outside this universe are not compared)
 

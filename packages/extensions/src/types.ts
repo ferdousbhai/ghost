@@ -11,11 +11,3 @@ export interface MemoryRecord {
   readonly content: string;
   readonly updated: string;
 }
-
-export interface DocumentsIndex {
-  readonly root: string;
-  readonly lines: readonly string[];
-  readonly chars: number;
-  readonly omitted: number;
-  readonly total: number;
-}

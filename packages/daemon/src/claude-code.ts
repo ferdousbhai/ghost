@@ -8,7 +8,7 @@
  * licensed Claude adapter (`apps/server/src/provider/Layers/ClaudeAdapter.ts`).
  *
  * One conversation keeps one streamed query warm across owner turns. Its
- * character and memory/Documents indexes are session-start state; idle expiry
+ * character and private-memory index are session-start state; idle expiry
  * or an explicit close drops both the query and that snapshot, and Claude's
  * opaque session id supplies continuity when the next query resumes cold.
  */
@@ -55,11 +55,7 @@ import { validateServerName } from "./mcp-config.js";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
-  DOCUMENT_INDEX_MAX_ENTRIES,
   deriveMemoryIndex,
-  deriveDocumentsIndex,
-  MachineDocuments,
-  openMachineDocuments,
   openGhostHome,
   openRegularFileNoFollow,
   type GhostToolCapabilities,
@@ -153,10 +149,7 @@ export const CLAUDE_CODE_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: tr
  * surfaces. Scheduling is a systemd user timer the ghost writes itself and the
  * owner can see in `systemctl --user list-timers`; a Claude cron job would live
  * in Claude's private store, fire outside ghostd with no persona, and survive
- * the ghost's deletion. Plan mode is Ghost-owned and pi-only — this runtime
- * answers `409 not_supported` for it — so leaving Claude's own plan mode in the
- * preset would contradict that contract, and under `bypassPermissions` its
- * approval step has no surface anyway. `AskUserQuestion` has no handler in the
+ * the ghost's deletion. `AskUserQuestion` has no handler in the
  * daemon and no HUD surface, and it would bypass Ghost's deliberate policy that
  * a timed-out ask is never answered by a guessing model. Push and remote
  * triggers are claude.ai session infrastructure with nothing behind them here.
@@ -170,8 +163,6 @@ export const CLAUDE_CODE_DISALLOWED_TOOLS = [
   "CronCreate",
   "CronDelete",
   "CronList",
-  "EnterPlanMode",
-  "ExitPlanMode",
   "PushNotification",
   "RemoteTrigger",
   "ScheduleWakeup",
@@ -1519,23 +1510,17 @@ async function buildPersona(
   ghostName: string,
   ownerHome: string,
   scheduleUnitDir: string,
-  configuredDocuments?: MachineDocuments | string,
 ): Promise<string> {
   const home = openGhostHome(homeDir);
-  const documents = configuredDocuments instanceof MachineDocuments
-    ? configuredDocuments
-    : openMachineDocuments(configuredDocuments);
-  const [character, memory, documentPage] = await Promise.all([
+  const [character, memory] = await Promise.all([
     home.readCharacter(),
     home.listMemory(),
-    documents.listDirectory("", { limit: DOCUMENT_INDEX_MAX_ENTRIES }),
   ]);
   return buildGhostSystemPrompt({
     ghostName,
     character,
     memoryRoot: home.memoryDir,
     memory: deriveMemoryIndex(memory.files),
-    docs: deriveDocumentsIndex(documentPage),
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
@@ -2195,7 +2180,7 @@ export class ClaudeCodeRuntime {
     string,
     { controller: AbortController; promise: Promise<void> }
   >();
-  // The character file and memory/Documents indexes are session-start state,
+  // The character file and private-memory index are session-start state,
   // not per-turn state. Explicit close and idle expiry drop this snapshot so
   // the next cold resume starts from disk. Live truth remains available there
   // through the native file tools throughout the session.
@@ -2962,7 +2947,6 @@ export class ClaudeCodeRuntime {
       ghostName,
       this.ownerHome,
       this.scheduleUnitDir,
-      this.extensionOptions.documents,
     );
     // A turn racing another turn of the same conversation is already refused by
     // `busy`, so the first derivation wins and there is nothing to reconcile.

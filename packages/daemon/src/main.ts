@@ -1,13 +1,11 @@
 #!/usr/bin/env bun
 import { pathToFileURL } from "node:url";
 import { homedir } from "node:os";
-import { openMachineDocuments } from "@ghost/extensions";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { ClaudeCodeProbe } from "./claude-code.js";
 import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
-import { legacyDocumentsPlacementCommand } from "./legacy-documents-placement.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
@@ -37,7 +35,6 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
-  ghostd place-legacy-documents --source <legacy-docs> --documents-root <root> [--apply]
   ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
@@ -45,8 +42,6 @@ Usage:
   ghostd hook-smol-complete
 
 Subcommands:
-  place-legacy-documents   Dry-run or explicitly copy one retained legacy docs
-                           tree into Documents without following or overwriting.
   login                    Sign a ghost into a model provider from the terminal
                            (the same flow the shell drives over HTTP). Prompts
                            for the ghost and provider when not given; --api-key
@@ -322,9 +317,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "login") return loginCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
-  if (argv[0] === "place-legacy-documents") {
-    return legacyDocumentsPlacementCommand(argv.slice(1));
-  }
 
   let parsed: ParsedArgs;
   try {
@@ -433,7 +425,6 @@ async function serveDaemon(
   // is off — there is no second browser to fall back to, so `ghost_browser`
   // then reports that none is reachable.
   const relay = createRelayHub({ logger });
-  const machineDocuments = openMachineDocuments();
   const homeOperations = new HomeOperationCoordinator(registry);
   const claudeAgentSdk = new ClaudeAgentSdkLoader({ ownerHome });
   const loadClaudeAgentSdk = () => claudeAgentSdk.load();
@@ -453,7 +444,6 @@ async function serveDaemon(
     askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
     extensionOptions: {
-      documents: machineDocuments,
       ...(relay ? { relayTransport: relay } : {}),
     },
     claudeCode: {
