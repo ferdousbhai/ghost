@@ -208,9 +208,31 @@ Item {
             ColorAnimation { duration: Theme.durMed }
         }
 
+        // The prompt. summonghost.com puts a `$` in the ghost's amber ahead of
+        // its install line for the same reason: it says, before anything is
+        // typed, that this is a place you say things to a machine. `❯` rather
+        // than `$` because what follows is addressed to the ghost, not to a
+        // shell — Ghost has its own prefixes for those.
+        Text {
+            id: promptGlyph
+
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.leftMargin: Theme.controlPaddingX
+            anchors.topMargin: Theme.pad / 2
+            text: "❯"
+            color: field.enabled ? Theme.ghostAmber : Theme.foregroundFaint
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
+            font.weight: Font.Bold
+        }
+
         Flickable {
             anchors.fill: parent
             anchors.margins: Theme.pad / 2
+            // One column of air after the prompt, the way a shell leaves one.
+            anchors.leftMargin: promptGlyph.anchors.leftMargin
+                + promptGlyph.implicitWidth + Theme.charWidth
             contentWidth: width
             contentHeight: field.implicitHeight
             clip: true
@@ -229,6 +251,23 @@ Item {
                 selectionColor: Theme.selection
                 selectedTextColor: Theme.foregroundBright
                 enabled: Ghostd.pendingAsk === null
+
+                // A block the width of one column, not a hairline between two.
+                // Qt gives the delegate the cursor's height and position; the
+                // width is ours, and in a fixed-width face there is exactly one
+                // right answer for it.
+                cursorDelegate: Rectangle {
+                    width: Theme.charWidth
+                    color: Theme.ghostAmber
+                    opacity: 0.75
+
+                    SequentialAnimation on opacity {
+                        running: field.activeFocus && !Theme.reducedMotion
+                        loops: Animation.Infinite
+                        NumberAnimation { to: 0; duration: 530 }
+                        NumberAnimation { to: 0.75; duration: 530 }
+                    }
+                }
 
                 Keys.onPressed: event => {
                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;

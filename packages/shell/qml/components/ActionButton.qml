@@ -1,6 +1,11 @@
 // ActionButton — the pane button: a label on a film, brighter when primary,
 // rose-bordered when it destroys something. Enter/Space and a click are the
 // same gesture.
+//
+// The label is set in small bold capitals because that is what a button looks
+// like everywhere else in this world: omarchy.org and summonghost.com both
+// uppercase theirs at weight 700. In a fixed-width face it also separates an
+// action from the prose around it without a second typeface to do it with.
 import QtQuick
 import qs.services
 
@@ -12,7 +17,7 @@ Rectangle {
     property bool danger: false
     signal clicked()
 
-    implicitWidth: buttonLabel.implicitWidth + Theme.pad * 1.5
+    implicitWidth: buttonLabel.implicitWidth + Theme.controlPaddingX * 2
     implicitHeight: Theme.controlHeight
     radius: Theme.radius
     color: button.primary
@@ -34,7 +39,9 @@ Rectangle {
                 : (button.primary ? Theme.ghostAmberBright : Theme.foreground))
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeSmall
-        font.weight: button.primary ? Font.DemiBold : Font.Normal
+        font.weight: Font.Bold
+        font.capitalization: Font.AllUppercase
+        font.letterSpacing: 0.5
     }
 
     MouseArea {
