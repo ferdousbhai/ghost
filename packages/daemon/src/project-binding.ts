@@ -801,10 +801,10 @@ export class ProjectBindingStore {
     conversationId: string,
     expectedGeneration: number,
     stored: StoredProjectBinding,
-    admit?: () => void,
+    admit: () => void,
   ): Promise<void> {
     await this.withBindingLock(path, async () => {
-      admit?.();
+      admit();
       let generation = 0;
       try {
         const current: unknown = JSON.parse(await readDaemonControlFile(
@@ -822,9 +822,27 @@ export class ProjectBindingStore {
           409,
         );
       }
-      admit?.();
+      admit();
       await atomicJson(path, parseStoredBinding(stored, runtime, conversationId, path));
     });
+  }
+
+  private bindingAdmission(
+    scope: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    path: string,
+  ): () => void {
+    if (!scope) {
+      throw new GhostError(
+        "invalid_request",
+        "A project binding publisher requires its exact ghost scope.",
+        400,
+      );
+    }
+    const key = this.key(scope, runtime, conversationId);
+    this.bindingPaths.set(key, path);
+    return () => this.assertNotRevoked(scope, key);
   }
 
   async read(
@@ -1109,7 +1127,7 @@ export class ProjectBindingStore {
     status?: "unbound" | "ready" | "degraded";
     error?: { code: string; message: string } | null;
     mcpStatus?: "off" | "ready" | "degraded";
-    scope?: string;
+    scope: string;
   }): Promise<void> {
     if (input.cwd !== undefined && !isAbsolute(input.cwd)) {
       throw new GhostError("invalid_request", "A project working directory must be absolute.", 400);
@@ -1136,7 +1154,7 @@ export class ProjectBindingStore {
         if (preview.expiresAtMs < this.now()) {
           throw new GhostError("trust_token_expired", "The project preview expired; preview it again.", 403);
         }
-        if (preview.key !== this.key(input.scope ?? "", input.runtime, input.conversationId)
+        if (preview.key !== this.key(input.scope, input.runtime, input.conversationId)
           || preview.incarnation !== (this.incarnations.get(preview.key) ?? 0)
           || preview.root !== identity.root || preview.dev !== identity.dev || preview.ino !== identity.ino) {
           throw new GhostError("trust_token_invalid", "That preview does not authorize this project.", 403);
@@ -1207,12 +1225,13 @@ export class ProjectBindingStore {
       input.runtime,
       input.conversationId,
     );
-    this.bindingPaths.set(
-      this.key(input.scope ?? "", input.runtime, input.conversationId),
+    const admit = this.bindingAdmission(
+      input.scope,
+      input.runtime,
+      input.conversationId,
       bindingPath,
     );
-    const bindingKey = this.key(input.scope ?? "", input.runtime, input.conversationId);
-    this.assertNotRevoked(input.scope ?? "", bindingKey);
+    admit();
     try {
       await this.publishBinding(
         bindingPath,
@@ -1220,7 +1239,7 @@ export class ProjectBindingStore {
         input.conversationId,
         input.current.generation,
         stored,
-        () => this.assertNotRevoked(input.scope ?? "", bindingKey),
+        admit,
       );
     } catch (error) {
       if (snapshotPath) await rm(snapshotPath, { force: true }).catch(() => {});
@@ -1253,11 +1272,14 @@ export class ProjectBindingStore {
       error: { code: string; message: string } | null;
       mcpStatus: "off" | "ready" | "degraded";
     },
+    scope: string,
   ): Promise<boolean> {
     if (!current.root) return false;
     const identity = await this.assertTrusted(current.root);
     const path = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, path);
     return this.withBindingLock(path, async () => {
+      admit();
       let disk: unknown;
       try {
         disk = JSON.parse(await readDaemonControlFile(path, PROJECT_BINDING_MAX_BYTES));
@@ -1280,6 +1302,7 @@ export class ProjectBindingStore {
         mcpStatus: input.mcpStatus,
         identity: { dev: identity.dev, ino: identity.ino },
       };
+      admit();
       await atomicJson(path, parseStoredBinding(stored, runtime, conversationId, path));
       return true;
     });
@@ -1290,6 +1313,7 @@ export class ProjectBindingStore {
     runtime: ConversationRuntime,
     conversationId: string,
     source: ProjectBindingState,
+    scope: string,
     destinationPath = projectBindingPath(sessionDir, runtime, conversationId),
     snapshotDestinationPath?: string,
   ): Promise<void> {
@@ -1328,15 +1352,36 @@ export class ProjectBindingStore {
       reason: "resumed",
       identity: identity ? { dev: identity.dev, ino: identity.ino } : null,
     };
+    const finalPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, finalPath);
     try {
-      await this.withBindingLock(destinationPath, () => atomicJson(
-        destinationPath,
-        parseStoredBinding(stored, runtime, conversationId, destinationPath),
-      ));
+      await this.withBindingLock(finalPath, async () => {
+        admit();
+        await atomicJson(
+          destinationPath,
+          parseStoredBinding(stored, runtime, conversationId, destinationPath),
+        );
+      });
     } catch (error) {
       if (destinationSnapshot) await rm(destinationSnapshot, { force: true }).catch(() => {});
       throw error;
     }
+  }
+
+  /** Publish one already-validated staged clone under its authoritative name. */
+  async publishCloneDestination(
+    sessionDir: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+    scope: string,
+    stagedPath: string,
+  ): Promise<void> {
+    const destinationPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, destinationPath);
+    await this.withBindingLock(destinationPath, async () => {
+      admit();
+      await rename(stagedPath, destinationPath);
+    });
   }
 
   async resolveOperationalCwd(current: ProjectBindingState, cwd: string): Promise<string> {
@@ -1373,6 +1418,7 @@ export class ProjectBindingStore {
     conversationId: string,
     current: ProjectBindingState,
     cwd: string,
+    scope: string,
   ): Promise<void> {
     const resolvedCwd = await this.resolveOperationalCwd(current, cwd);
     const identity = current.root ? await this.assertTrusted(current.root) : null;
@@ -1411,6 +1457,8 @@ export class ProjectBindingStore {
       identity: identity ? { dev: identity.dev, ino: identity.ino } : null,
     };
     const bindingPath = projectBindingPath(sessionDir, runtime, conversationId);
+    const admit = this.bindingAdmission(scope, runtime, conversationId, bindingPath);
+    admit();
     try {
       await this.publishBinding(
         bindingPath,
@@ -1418,6 +1466,7 @@ export class ProjectBindingStore {
         conversationId,
         current.generation,
         stored,
+        admit,
       );
     } catch (error) {
       if (snapshotPath) await rm(snapshotPath, { force: true }).catch(() => {});

@@ -170,13 +170,17 @@ function writeConversation(home: string, conversationId: string): string {
   return path;
 }
 
-async function attachTasks(adapter = controlledAdapter().adapter): Promise<void> {
+async function attachTasks(
+  adapter = controlledAdapter().adapter,
+  createStore?: (home: string) => TaskStore,
+): Promise<void> {
   host!.attachTaskServices({
     adapters: new Map([
       ["pi", adapter],
       ["claude-code", adapter],
     ]),
     ownership: fakeTaskScopeManager(),
+    ...(createStore ? { createStore } : {}),
   });
   await host!.restoreTaskServices();
 }
@@ -627,27 +631,14 @@ describe("SessionHost delegated task composition", () => {
     expect(principal.ghost.name).toBe("alpha");
     const taskList = principal.session.getToolDefinition("task_list");
     expect(taskList).toBeDefined();
-    await expect(taskList!.execute(
-      "failed-recovery",
-      {},
-      undefined,
-      undefined,
-      {} as never,
-    )).rejects.toMatchObject({
+    const principalParent = conversationIdentity("pi", "principal-still-starts");
+    await expect(host.listTasks("alpha", principalParent)).rejects.toMatchObject({
       code: "tasks_unavailable",
       message: "Delegated coding tasks are unavailable.",
     });
 
     ownership.unconfirmed.delete(first.id);
-    await expect(taskList!.execute(
-      "retry-recovery",
-      {},
-      undefined,
-      undefined,
-      {} as never,
-    )).resolves.toMatchObject({
-      details: expect.objectContaining({ tasks: expect.any(Array) }),
-    });
+    await expect(host.listTasks("alpha", principalParent)).resolves.toEqual([]);
     await expect(host.task("alpha", first.parent, first.id)).resolves.toMatchObject({
       state: "interrupted",
       generation: 3,
@@ -988,6 +979,56 @@ describe("SessionHost delegated task composition", () => {
           expect.objectContaining({ artifact: "delegated-tasks", count: records.length }),
         ]),
       });
+  });
+
+  it("holds grouped extraction against an unrelated post-readdir task list", async () => {
+    const { home } = setup();
+    const deletingParent = conversationIdentity("pi", "inventory-delete");
+    const readingParent = conversationIdentity("pi", "inventory-reader");
+    writeConversation(home, deletingParent.conversationId);
+    writeConversation(home, readingParent.conversationId);
+    const deletingTask = taskRecord(home, deletingParent, "completed");
+    const readingTask = taskRecord(home, readingParent, "completed");
+    await writeTask(home, deletingTask);
+    await writeTask(home, readingTask);
+
+    const readerListed = Promise.withResolvers<void>();
+    const releaseReader = Promise.withResolvers<void>();
+    let pauseNextList = false;
+    const store = new TaskStore(ghostPaths(home).home, {
+      inventoryProbe: async () => {
+        if (!pauseNextList) return;
+        pauseNextList = false;
+        readerListed.resolve();
+        await releaseReader.promise;
+      },
+    });
+    await attachTasks(undefined, () => store);
+    pauseNextList = true;
+    const unrelatedList = host!.listTasks("casper", readingParent);
+    await readerListed.promise;
+
+    let deletionSettled = false;
+    const deletion = host!.deleteSession(
+      "casper",
+      deletingParent.conversationId,
+      "pi",
+    ).finally(() => { deletionSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(deletionSettled).toBe(false);
+    releaseReader.resolve();
+
+    await expect(unrelatedList).resolves.toEqual([
+      expect.objectContaining({ id: readingTask.id }),
+    ]);
+    await expect(deletion).resolves.toMatchObject({
+      artifacts: expect.arrayContaining([
+        expect.objectContaining({ artifact: "delegated-tasks", count: 1 }),
+      ]),
+    });
+    await expect(host!.listTasks("casper", readingParent)).resolves.toEqual([
+      expect.objectContaining({ id: readingTask.id }),
+    ]);
   });
 
   it("fails closed when recorded task bytes change before recovery", async () => {

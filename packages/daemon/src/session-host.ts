@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   lstat,
   mkdir,
@@ -183,6 +184,7 @@ import {
   TaskController,
   TaskControllerPoisonedError,
   TaskStore,
+  type TaskInventoryView,
   type TaskRecord,
 } from "./tasks.js";
 import { GhostMcpManager } from "./mcp-manager.js";
@@ -636,6 +638,8 @@ export interface SessionHostOptions {
   transactionWriter?: typeof writeTransaction;
   /** Test seam for marker lstat failures; production always uses fs.lstat. */
   transactionMarkerLstat?: (path: string) => Promise<unknown>;
+  /** Test seam for classifying a registry move that threw. */
+  ghostHomeLstat?: (path: string) => Promise<unknown>;
   logger?: Logger;
   offline?: boolean;
   /**
@@ -934,11 +938,26 @@ interface ParentTaskOperationLane {
   resolveDrained(): void;
 }
 
+interface PrincipalTaskContextIdentity {
+  readonly ghostName: string;
+  readonly parentId: string;
+  readonly runtime: ConversationRuntime;
+  readonly conversationId: string;
+  readonly incarnation: number;
+}
+
 interface PrincipalTaskCapability {
   readonly ghostName: string;
   readonly parentId: string;
   readonly runtime: ConversationRuntime;
   readonly conversationId: string;
+  readonly generation: number;
+  context: PrincipalTaskContextIdentity | null;
+}
+
+interface PrincipalTaskAdmission {
+  readonly context: PrincipalTaskContextIdentity;
+  readonly capability: PrincipalTaskCapability | null;
 }
 
 class ParentTaskOperationGate {
@@ -1691,6 +1710,7 @@ export class SessionHost {
   private readonly transactionProbe: NonNullable<SessionHostOptions["transactionProbe"]>;
   private readonly transactionWriter: typeof writeTransaction;
   private readonly transactionMarkerLstat: NonNullable<SessionHostOptions["transactionMarkerLstat"]>;
+  private readonly ghostHomeLstat: NonNullable<SessionHostOptions["ghostHomeLstat"]>;
   private readonly logger: Logger;
   private readonly offline: boolean;
   private readonly extensionOptions: GhostExtensionOptions;
@@ -1715,7 +1735,11 @@ export class SessionHost {
   private readonly taskControllerInstances = new Map<string, TaskController>();
   private readonly taskAdmissions = new Set<Promise<unknown>>();
   private readonly taskParentOperations = new ParentTaskOperationGate();
-  private readonly principalTaskCapabilities = new WeakSet<PrincipalTaskCapability>();
+  private readonly principalTaskContexts = new Map<string, PrincipalTaskContextIdentity>();
+  private readonly principalTaskCapabilities = new Map<string, PrincipalTaskCapability>();
+  private readonly principalTaskTurn = new AsyncLocalStorage<PrincipalTaskCapability>();
+  private principalTaskGeneration = 0;
+  private principalTaskIncarnation = 0;
   private taskRecovery: Promise<void> | undefined;
   private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
@@ -1789,6 +1813,7 @@ export class SessionHost {
     this.transactionProbe = options.transactionProbe ?? (() => {});
     this.transactionWriter = options.transactionWriter ?? writeTransaction;
     this.transactionMarkerLstat = options.transactionMarkerLstat ?? lstat;
+    this.ghostHomeLstat = options.ghostHomeLstat ?? lstat;
     this.logger = options.logger ?? silentLogger;
     this.offline = options.offline ?? false;
     this.extensionOptions = options.extensionOptions ?? {};
@@ -2021,6 +2046,65 @@ export class SessionHost {
     });
   }
 
+  private principalTaskKey(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+  ): string {
+    return deletionKeyOf(ghostName, runtime, conversationId);
+  }
+
+  private beginPrincipalTaskTurn(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+  ): PrincipalTaskCapability {
+    const key = this.principalTaskKey(ghostName, runtime, conversationId);
+    const parent = conversationIdentity(runtime, conversationId);
+    const capability: PrincipalTaskCapability = {
+      ghostName,
+      parentId: parent.id,
+      runtime,
+      conversationId,
+      generation: ++this.principalTaskGeneration,
+      context: this.principalTaskContexts.get(key) ?? null,
+    };
+    this.principalTaskCapabilities.set(key, capability);
+    return capability;
+  }
+
+  private finishPrincipalTaskTurn(capability: PrincipalTaskCapability): void {
+    const key = this.principalTaskKey(
+      capability.ghostName,
+      capability.runtime,
+      capability.conversationId,
+    );
+    if (this.principalTaskCapabilities.get(key) === capability) {
+      this.principalTaskCapabilities.delete(key);
+    }
+  }
+
+  private invalidatePrincipalTaskParent(
+    ghostName: string,
+    runtime: ConversationRuntime,
+    conversationId: string,
+  ): void {
+    const key = this.principalTaskKey(ghostName, runtime, conversationId);
+    this.principalTaskCapabilities.delete(key);
+    this.principalTaskContexts.delete(key);
+  }
+
+  private invalidatePrincipalTaskScope(ghostName: string): void {
+    for (const [key, context] of this.principalTaskContexts) {
+      if (context.ghostName !== ghostName) continue;
+      this.principalTaskContexts.delete(key);
+      this.principalTaskCapabilities.delete(key);
+    }
+    for (const [key, capability] of this.principalTaskCapabilities) {
+      if (capability.ghostName === ghostName) this.principalTaskCapabilities.delete(key);
+    }
+  }
+
   private principalTaskContext(
     ghostName: string,
     runtime: ConversationRuntime,
@@ -2029,20 +2113,27 @@ export class SessionHost {
   ): Promise<PrincipalTaskContext> {
     const parent = conversationIdentity(runtime, conversationId);
     const paths = ghostPaths(this.registry.get(ghostName).dir);
-    const capability = Object.freeze({
+    const key = this.principalTaskKey(ghostName, runtime, conversationId);
+    const context = Object.freeze({
       ghostName,
       parentId: parent.id,
       runtime,
       conversationId,
+      incarnation: ++this.principalTaskIncarnation,
     });
-    this.principalTaskCapabilities.add(capability);
+    this.principalTaskContexts.set(key, context);
+    const active = this.principalTaskCapabilities.get(key);
+    if (active) active.context = context;
     this.assertTaskAdmissionOpen();
     return Promise.resolve({
       controller: () => this.taskController(ghostName),
       parent,
       cwd,
       operation: <T>(action: () => Promise<T>) =>
-        this.withParentTaskOperation(ghostName, parent, action, capability),
+        this.withParentTaskOperation(ghostName, parent, action, {
+          context,
+          capability: this.principalTaskTurn.getStore() ?? null,
+        }),
       mintBinding: async (cwd, signal) => {
         this.assertTaskAdmissionOpen();
         const binding = await this.projectBindings.mintTaskBinding(
@@ -2091,7 +2182,7 @@ export class SessionHost {
     ghostName: string,
     parent: ConversationIdentity,
     action: () => Promise<T>,
-    principal?: PrincipalTaskCapability,
+    principal?: PrincipalTaskAdmission,
   ): Promise<T> {
     this.assertTaskAdmissionOpen();
     return this.homeOperations.withLease(ghostName, () =>
@@ -2103,7 +2194,7 @@ export class SessionHost {
     ghostName: string,
     parent: ConversationIdentity,
     action: () => Promise<T>,
-    principal?: PrincipalTaskCapability,
+    principal?: PrincipalTaskAdmission,
   ): Promise<T> {
     this.assertTaskAdmissionOpen();
     const key = deletionKeyOf(ghostName, parent.runtime, parent.conversationId);
@@ -2134,6 +2225,23 @@ export class SessionHost {
           409,
         );
       }
+      if (principal) {
+        const active = this.principalTaskCapabilities.get(key);
+        if (active !== principal.capability
+          || active === undefined
+          || active.context !== principal.context
+          || this.principalTaskContexts.get(key) !== principal.context
+          || active.ghostName !== ghostName
+          || active.parentId !== parent.id
+          || active.runtime !== parent.runtime
+          || active.conversationId !== parent.conversationId) {
+          throw new GhostError(
+            "task_parent_unpublished",
+            "Delegated tasks require this exact active owner turn.",
+            409,
+          );
+        }
+      }
       const published = parent.runtime === "pi"
         ? await this.publishedPiTaskParent(sessionDir, parent.conversationId)
         : await readPublishedClaudeSessionMetadata(
@@ -2141,16 +2249,7 @@ export class SessionHost {
             parent.conversationId,
           ) !== null;
       if (!published) {
-        const validPrincipal = principal !== undefined
-          && this.principalTaskCapabilities.has(principal)
-          && principal.ghostName === ghostName
-          && principal.parentId === parent.id
-          && principal.runtime === parent.runtime
-          && principal.conversationId === parent.conversationId
-          && (parent.runtime === "pi"
-            ? this.turnAdmissions.has(this.keyOf(ghostName, parent.conversationId))
-            : this.claudeCode.isBusy(ghostName, parent.conversationId));
-        if (!validPrincipal) {
+        if (!principal) {
           throw new GhostError(
             "task_parent_unpublished",
             "Delegated tasks require a published conversation or its active first owner turn.",
@@ -3156,6 +3255,7 @@ export class SessionHost {
           409,
         );
       }
+      this.invalidatePrincipalTaskParent(ghostName, runtime, conversationId);
       const ghost = this.registry.get(ghostName);
       const sessionDir = ghostPaths(ghost.dir).sessionDir;
       mkdirSync(sessionDir, { recursive: true });
@@ -3415,6 +3515,7 @@ export class SessionHost {
         sessionKey,
         project,
         projectMcpRuntimeStatus(mcpResult.result),
+        ghostName,
       );
       project = await (homeLeaseHeld
         ? this.projectStateLeased(ghostName, "pi", sessionKey)
@@ -4588,6 +4689,7 @@ export class SessionHost {
       conversationId,
       hosted.project,
       projectMcpRuntimeStatus(result),
+      hosted.ghost.name,
     );
     if (!changed) return;
     hosted.project = await this.projectState(hosted.ghost.name, "pi", conversationId);
@@ -4932,6 +5034,7 @@ export class SessionHost {
             conversationId,
             hosted.project,
             nextCwd,
+            ghostName,
           );
           hosted.project = await this.projectState(ghostName, "pi", conversationId);
           await this.announceConversationUpdated(ghostName, "pi", conversationId, "project");
@@ -5138,6 +5241,7 @@ export class SessionHost {
                 conversationId,
                 project,
                 status,
+                ghostName,
               );
               if (changed) {
                 await this.announceConversationUpdated(
@@ -5280,6 +5384,33 @@ export class SessionHost {
   }
 
   private async runAdmittedTurn(
+    ghostName: string,
+    options: RunTurnOptions,
+    selected: SelectedTurnRuntime,
+    finishMaintenance: (turn?: SettledMaintenanceTurn) => Promise<void>,
+  ): Promise<void> {
+    const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
+    const capability = this.beginPrincipalTaskTurn(
+      ghostName,
+      selected.runtime,
+      conversationId,
+    );
+    try {
+      await this.principalTaskTurn.run(
+        capability,
+        () => this.runAdmittedTurnWithPrincipalCapability(
+          ghostName,
+          options,
+          selected,
+          finishMaintenance,
+        ),
+      );
+    } finally {
+      this.finishPrincipalTaskTurn(capability);
+    }
+  }
+
+  private async runAdmittedTurnWithPrincipalCapability(
     ghostName: string,
     options: RunTurnOptions,
     selected: SelectedTurnRuntime,
@@ -6383,10 +6514,13 @@ export class SessionHost {
   private async liveParentTaskEntries(
     ghostName: string,
     parent: ConversationIdentity,
+    inventory?: TaskInventoryView,
   ): Promise<Array<{ id: string; path: string; sha256: string; record: TaskRecord }>> {
     if (!this.taskServices) return [];
     const home = ghostPaths(this.registry.get(ghostName).dir).home;
-    const records = (await (await this.taskController(ghostName)).list())
+    const records = (await (inventory
+      ? inventory.list()
+      : (await this.taskController(ghostName)).list()))
       .filter((record) => record.parent.id === parent.id
         && record.parent.runtime === parent.runtime
         && record.parent.conversationId === parent.conversationId)
@@ -6461,8 +6595,9 @@ export class SessionHost {
     ghostName: string,
     parent: ConversationIdentity,
     group: DeleteTaskGroup,
+    inventory: TaskInventoryView,
   ): Promise<void> {
-    const source = await this.liveParentTaskEntries(ghostName, parent);
+    const source = await this.liveParentTaskEntries(ghostName, parent, inventory);
     if (source.some((entry) => !isTerminalTaskState(entry.record.state))) {
       throw this.taskDeleteFailure("A nonterminal delegated task entered deletion recovery.");
     }
@@ -6514,7 +6649,7 @@ export class SessionHost {
       await fsyncDirectory(trashRoot);
       await fsyncDirectory(sourceRoot);
     }
-    const remaining = await this.liveParentTaskEntries(ghostName, parent);
+    const remaining = await this.liveParentTaskEntries(ghostName, parent, inventory);
     trashed = await this.trashedParentTaskEntries(group.trash, parent);
     this.validateDeleteTaskBundle(group, remaining, trashed);
     if (remaining.length !== 0 || trashed.length !== group.count) {
@@ -6529,11 +6664,38 @@ export class SessionHost {
     ghostDir: string,
     record: DeleteTransactionRecord,
   ): Promise<DeleteTaskGroup | null> {
+    if (!this.taskServices) return null;
+    const controller = await this.taskController(ghostName);
+    return controller.withExclusiveInventory((inventory) =>
+      this.prepareDeleteTaskGroupExclusive(
+        ghostName,
+        parent,
+        marker,
+        ghostDir,
+        record,
+        inventory,
+      )
+    );
+  }
+
+  private async prepareDeleteTaskGroupExclusive(
+    ghostName: string,
+    parent: ConversationIdentity,
+    marker: string,
+    ghostDir: string,
+    record: DeleteTransactionRecord,
+    inventory: TaskInventoryView,
+  ): Promise<DeleteTaskGroup | null> {
     if (record.delegatedTasks) {
-      await this.reconcileDeleteTaskGroup(ghostName, parent, record.delegatedTasks);
+      await this.reconcileDeleteTaskGroup(
+        ghostName,
+        parent,
+        record.delegatedTasks,
+        inventory,
+      );
       return record.delegatedTasks;
     }
-    const entries = await this.liveParentTaskEntries(ghostName, parent);
+    const entries = await this.liveParentTaskEntries(ghostName, parent, inventory);
     if (entries.length === 0) return null;
     if (entries.some((entry) => !isTerminalTaskState(entry.record.state))) {
       throw new GhostError(
@@ -6558,7 +6720,7 @@ export class SessionHost {
     record.delegatedTasks = group;
     await this.transactionWriter(marker, record);
     await this.transactionProbe("delete-task-group-recorded", group.trash);
-    await this.reconcileDeleteTaskGroup(ghostName, parent, group);
+    await this.reconcileDeleteTaskGroup(ghostName, parent, group, inventory);
     return group;
   }
 
@@ -7160,6 +7322,7 @@ export class SessionHost {
           "pi",
           forkId,
           source.project,
+          ghostName,
           temporaryProjectBinding,
           temporaryProjectSnapshot ?? undefined,
         ),
@@ -7185,9 +7348,12 @@ export class SessionHost {
       if (temporaryProjectSnapshot && forkProjectSnapshot) {
         await rename(temporaryProjectSnapshot, forkProjectSnapshot);
       }
-      await rename(
+      await this.projectBindings.publishCloneDestination(
+        paths.sessionDir,
+        "pi",
+        forkId,
+        ghostName,
         temporaryProjectBinding,
-        projectBindingPath(paths.sessionDir, "pi", forkId),
       );
       await rename(temporaryToolCwds, toolCwdsPath(paths.sessionDir, forkId));
       // The transcript is the publication barrier: list/open cannot see the
@@ -7258,6 +7424,7 @@ export class SessionHost {
 
   private async discardForkLeased(ghostName: string, forkId: string): Promise<void> {
     try {
+      this.invalidatePrincipalTaskParent(ghostName, "pi", forkId);
       const ghost = this.registry.get(ghostName);
       const paths = ghostPaths(ghost.dir);
       await this.closePi(ghostName, forkId);
@@ -7584,7 +7751,7 @@ export class SessionHost {
     this.assertNoProjectTransition(ghostName, conversationId);
     const releaseAdmission = this.reserveLifecycleAdmission(ghostName, conversationId);
     try {
-      await this.claudeCode.close(ghostName, conversationId);
+      await this.closeClaude(ghostName, conversationId);
       await this.closePi(ghostName, conversationId);
     } finally {
       releaseAdmission();
@@ -7654,6 +7821,7 @@ export class SessionHost {
           409,
         );
       }
+      this.invalidatePrincipalTaskParent(ghostName, runtime, id);
       revocation = await this.projectBindings.beginRevocation(
         paths.sessionDir,
         ghostName,
@@ -7741,7 +7909,7 @@ export class SessionHost {
       if (background.length > 0) await Promise.allSettled(background);
 
       if (runtime === "pi") await this.closePi(ghostName, sessionId);
-      else await this.claudeCode.close(ghostName, id);
+      else await this.closeClaude(ghostName, id);
       const piPath = join(paths.sessionDir, sessionFileNameFor(id));
       const claudePath = claudeSessionMetadataPath(paths.sessionDir, id);
       const claudeResumeMarkers = Object.values(
@@ -7898,6 +8066,32 @@ export class SessionHost {
     return this.registry.create(name);
   }
 
+  private async ghostMovePathState(
+    path: string,
+  ): Promise<"present" | "absent" | "indeterminate"> {
+    try {
+      await this.ghostHomeLstat(path);
+      return "present";
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === "ENOENT"
+        ? "absent"
+        : "indeterminate";
+    }
+  }
+
+  private async settleFailedGhostMove(
+    ghost: Ghost,
+    revocation: BindingRevocationLease,
+  ): Promise<"pending" | "moved" | "indeterminate"> {
+    const pathState = await this.ghostMovePathState(ghost.dir);
+    if (pathState === "present") return "pending";
+    revocation.commit();
+    if (pathState === "indeterminate") return "indeterminate";
+    this.forgetGhost(ghost.name);
+    revocation.retire();
+    return "moved";
+  }
+
   /**
    * Trash one whole ghost: close its conversations, then move its home aside.
    *
@@ -7911,24 +8105,27 @@ export class SessionHost {
     this.reserveGhosts([ghost.name], "deleting it");
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
     let revocation: BindingRevocationLease | undefined;
-    let moved = false;
+    let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
       await maintenanceReservation?.drained;
       await this.disposeGhostTaskController(ghost.name);
+      this.invalidatePrincipalTaskScope(ghost.name);
       revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "deleted");
       let trashed: { trash: string };
       try {
         trashed = this.registry.trash(ghost.name);
-        moved = true;
+        moveState = "moved";
         revocation.commit();
       } catch (error) {
-        if (!existsSync(ghost.dir)) {
-          moved = true;
-          revocation.commit();
-          this.forgetGhost(ghost.name);
-          revocation.retire();
+        moveState = await this.settleFailedGhostMove(ghost, revocation);
+        if (moveState === "indeterminate") {
+          throw new GhostError(
+            "ghost_move_recovery_pending",
+            "The ghost home move outcome could not be confirmed safely; retry after checking its path.",
+            503,
+          );
         }
         throw error;
       }
@@ -7938,7 +8135,7 @@ export class SessionHost {
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
-      if (revocation && !moved) revocation.rollback();
+      if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       maintenanceReservation?.release();
     }
@@ -7973,24 +8170,27 @@ export class SessionHost {
     this.reserveGhosts([ghost.name, nextName], "renaming it");
     let maintenanceReservation: MaintenanceDrainReservation | undefined;
     let revocation: BindingRevocationLease | undefined;
-    let moved = false;
+    let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
       maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
       await maintenanceReservation?.drained;
       await this.disposeGhostTaskController(ghost.name);
+      this.invalidatePrincipalTaskScope(ghost.name);
       revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "renamed");
       let renamed: Ghost;
       try {
         renamed = this.registry.rename(ghost.name, nextName);
-        moved = true;
+        moveState = "moved";
         revocation.commit();
       } catch (error) {
-        if (!existsSync(ghost.dir)) {
-          moved = true;
-          revocation.commit();
-          this.forgetGhost(ghost.name);
-          revocation.retire();
+        moveState = await this.settleFailedGhostMove(ghost, revocation);
+        if (moveState === "indeterminate") {
+          throw new GhostError(
+            "ghost_move_recovery_pending",
+            "The ghost home move outcome could not be confirmed safely; retry after checking its path.",
+            503,
+          );
         }
         throw error;
       }
@@ -8000,7 +8200,7 @@ export class SessionHost {
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
-      if (revocation && !moved) revocation.rollback();
+      if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
       maintenanceReservation?.release();
@@ -8152,8 +8352,18 @@ export class SessionHost {
   }
 
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {
+    this.invalidatePrincipalTaskParent(
+      ghostName,
+      "pi",
+      sessionId ?? DEFAULT_SESSION_KEY,
+    );
     const key = this.keyOf(ghostName, sessionId);
     await this.closeHostedSession(key, "conversation closed");
+  }
+
+  private closeClaude(ghostName: string, conversationId: string): Promise<void> {
+    this.invalidatePrincipalTaskParent(ghostName, "claude-code", conversationId);
+    return this.claudeCode.close(ghostName, conversationId);
   }
 
   private closeHostedSession(

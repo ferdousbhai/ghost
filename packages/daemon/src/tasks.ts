@@ -318,14 +318,90 @@ export async function inspectTaskRecordFile(path: string): Promise<InspectedTask
   }
 }
 
+export interface TaskInventoryView {
+  list(): Promise<TaskRecord[]>;
+}
+
+export interface TaskStoreOptions {
+  /** Deterministic test seam inside one shared enumeration window. */
+  inventoryProbe?: (stage: "after-readdir") => void | Promise<void>;
+}
+
+class TaskInventoryGate {
+  #readers = 0;
+  #writer = false;
+  readonly #waiters: Array<{
+    kind: "read" | "write";
+    resolve: (release: () => void) => void;
+  }> = [];
+
+  #releaseRead = (): void => {
+    this.#readers -= 1;
+    this.#drain();
+  };
+
+  #releaseWrite = (): void => {
+    this.#writer = false;
+    this.#drain();
+  };
+
+  #drain(): void {
+    if (this.#writer || this.#readers > 0 || this.#waiters.length === 0) return;
+    if (this.#waiters[0]?.kind === "write") {
+      this.#writer = true;
+      this.#waiters.shift()?.resolve(this.#releaseWrite);
+      return;
+    }
+    while (this.#waiters[0]?.kind === "read") {
+      this.#readers += 1;
+      this.#waiters.shift()?.resolve(this.#releaseRead);
+    }
+  }
+
+  #acquire(kind: "read" | "write"): Promise<() => void> {
+    if (kind === "read"
+      && !this.#writer
+      && !this.#waiters.some((waiter) => waiter.kind === "write")) {
+      this.#readers += 1;
+      return Promise.resolve(this.#releaseRead);
+    }
+    if (kind === "write" && !this.#writer && this.#readers === 0 && this.#waiters.length === 0) {
+      this.#writer = true;
+      return Promise.resolve(this.#releaseWrite);
+    }
+    return new Promise((resolve) => this.#waiters.push({ kind, resolve }));
+  }
+
+  async read<T>(action: () => Promise<T>): Promise<T> {
+    const release = await this.#acquire("read");
+    try {
+      return await action();
+    } finally {
+      release();
+    }
+  }
+
+  async exclusive<T>(action: () => Promise<T>): Promise<T> {
+    const release = await this.#acquire("write");
+    try {
+      return await action();
+    } finally {
+      release();
+    }
+  }
+}
+
 export class TaskStore {
   readonly #ghostHome: string;
   #home?: FileHandle;
   #directory?: FileHandle;
   readonly #identities = new WeakMap<TaskRecord, PrivateFileIdentity>();
-  constructor(ghostHome: string) {
+  readonly #inventory = new TaskInventoryGate();
+  readonly #inventoryProbe: NonNullable<TaskStoreOptions["inventoryProbe"]>;
+  constructor(ghostHome: string, options: TaskStoreOptions = {}) {
     if (!isAbsolute(ghostHome) || resolve(ghostHome) !== ghostHome) fail("invalid_task_store", "The ghost home must be canonical.");
     this.#ghostHome = ghostHome;
+    this.#inventoryProbe = options.inventoryProbe ?? (() => {});
   }
   async initialize(): Promise<void> {
     if (this.#directory && this.#home) return;
@@ -372,7 +448,7 @@ export class TaskStore {
     if (!live.isDirectory() || live.isSymbolicLink() || live.dev !== admitted.dev || live.ino !== admitted.ino || (live.mode & 0o777n) !== 0o700n) fail("unsafe_task_store", "The task directory changed.");
     return directory;
   }
-  async read(id: string): Promise<TaskRecord> {
+  async #read(id: string): Promise<TaskRecord> {
     if (!ID.test(id)) fail("invalid_task_id", "The task id is invalid.");
     const path = descriptorPath(await this.#verifyDirectory(), `${id}.json`);
     const stats = await lstat(path, { bigint: true }).catch((error: unknown) => {
@@ -387,23 +463,50 @@ export class TaskStore {
       const record = parseRecord(JSON.parse(source.text)); this.#identities.set(record, source.identity); return record;
     } catch (error) { if (error instanceof GhostError) throw error; fail("invalid_task_record", "The task record is invalid."); }
   }
+  read(id: string): Promise<TaskRecord> {
+    return this.#inventory.read(() => this.#read(id));
+  }
   async write(record: TaskRecord): Promise<void> {
     parseRecord(record);
     const path = descriptorPath(await this.#verifyDirectory(), `${record.id}.json`);
     writePrivateJsonAtomicCas(path, record, this.#identities.get(record) ?? null);
   }
-  async list(): Promise<TaskRecord[]> {
+  async #list(): Promise<TaskRecord[]> {
     const directory = await this.#verifyDirectory(); const records: TaskRecord[] = [];
     const initial = await readdir(descriptorPath(directory));
     for (const name of initial) {
       const base = CAS_SIDECAR.exec(name)?.[1];
       if (base) recoverPrivateJsonAtomicCas(descriptorPath(directory, base));
     }
-    for (const name of (await readdir(descriptorPath(directory))).sort()) {
+    const names = (await readdir(descriptorPath(directory))).sort();
+    await this.#inventoryProbe("after-readdir");
+    for (const name of names) {
       const id = FILE.exec(name)?.[1];
-      if (id) records.push(await this.read(id));
+      if (id) records.push(await this.#read(id));
     }
     return records;
+  }
+  list(): Promise<TaskRecord[]> {
+    return this.#inventory.read(() => this.#list());
+  }
+  withExclusiveInventory<T>(action: (view: TaskInventoryView) => Promise<T>): Promise<T> {
+    return this.#inventory.exclusive(async () => {
+      let active = true;
+      const assertActive = () => {
+        if (!active) fail("task_inventory_closed", "The task inventory window has closed.", 500);
+      };
+      const view: TaskInventoryView = Object.freeze({
+        list: () => {
+          assertActive();
+          return this.#list();
+        },
+      });
+      try {
+        return await action(view);
+      } finally {
+        active = false;
+      }
+    });
   }
   async recover(
     at: string,
@@ -577,6 +680,9 @@ export class TaskController {
       this.#ready();
       return this.store.list();
     });
+  }
+  withExclusiveInventory<T>(action: (view: TaskInventoryView) => Promise<T>): Promise<T> {
+    return this.#operations.run(() => this.store.withExclusiveInventory(action));
   }
   #actor<T>(id: string, action: () => Promise<T>): Promise<T> {
     const prior = this.#actors.get(id) ?? Promise.resolve(); const result = prior.catch(() => {}).then(action);
@@ -906,6 +1012,7 @@ export class TaskController {
     ownership: NativeTaskOwnershipReceipt,
     final: "cancelled" | "interrupted",
   ): Promise<TaskRecord> {
+    if (this.#shuttingDown) final = "interrupted";
     if (final === "interrupted" || !this.#stopTargets.has(id)) this.#stopTargets.set(id, final);
     const launch = this.#launches.get(id); launch?.abort.abort();
     const existing = this.#stops.get(id); if (existing) return existing;

@@ -466,6 +466,13 @@ indeterminate marker, or a home path already moved after a registry error,
 commits and remains retry-only. Whole-home browser, schedule, and pre-move
 failures roll back; failures after the registry move never restore the old
 name's authority.
+Every final-name binding publisher carries the exact ghost scope and checks
+both exact-parent and scope revocation inside the authoritative binding-path
+mutex immediately before publication. This includes ordinary binding writes,
+runtime-health and operational-cwd updates, staged clone creation, and the
+staged clone's final rename. A publisher that already owns that mutex may
+finish before a later revocation drains it; a pending or committed token that
+wins admission rejects publication, and no write clears the token.
 The receipt is minted only from that parent's current durable, trusted project
 binding; an unbound conversation cannot delegate coding work. Root and cwd are
 canonical, byte-bounded, and cwd is lexically within a non-null root; receipt comparison
@@ -535,7 +542,9 @@ destination precedence over an in-flight owner cancellation: either ordering
 settles as `interrupted`. The destination remains authoritative through record
 publication; an upgrade that arrives while a `cancelled` write is blocked is
 rechecked and durably advances that record to `interrupted` before either
-caller resolves. Shutdown synchronously snapshots every admitted launch and
+caller resolves. A cancellation admitted before the shutdown fence but delayed
+in its durable read also selects `interrupted` when it registers its shared
+stop after the fence. Shutdown synchronously snapshots every admitted launch and
 live native control before its first await, retains those ids after transient
 trackers settle, and starts one shared idempotent abort, force, and quiescence
 operation per control before awaiting admission persistence or reading task
@@ -754,12 +763,26 @@ the exact durable Pi transcript or strictly parsed Claude sidecar; an arbitrary
 raw id or a binding alone is not a task parent and returns bounded
 `409 task_parent_unpublished`. The principal bridge may act during a first turn
 before that publication only through a private, unforgeable capability bound
-to the exact ghost, runtime-qualified identity, and currently admitted owner
-turn; the capability is neither an API value nor reusable after that turn.
+to the exact ghost, runtime-qualified identity, runtime context incarnation,
+and currently admitted owner turn. There is exactly one current capability
+object and monotonically newer generation for that parent; validation requires
+the same current object from the turn's private asynchronous execution context
+and the same runtime context identity, not merely runtime busy state or a
+lookup of whichever turn is current.
+Turn `finally`, close, deletion, draft abandonment, and context reincarnation
+invalidate it with an identity guard so a stale `finally` cannot clear a newer
+turn. An old tool callback cannot act during a recreated same-id turn on either
+runtime. The capability is neither an API value nor reusable after its turn.
 Fork publication/recovery, draft abandonment, and deletion take the exclusive
 side of the same parent lane. Draft abandonment requires zero task records in
 every state; `409 tasks_present` directs the owner to full conversation DELETE,
 which is the only operation that moves terminal worker history.
+Task-store reads and enumerations share a concurrent inventory window. A
+conversation deletion takes its exclusive side across the complete terminal
+bundle enumeration, pinned-byte inspection, rename reconciliation, and final
+inventory proof. This does not serialize ordinary task mutations or unrelated
+work, but an unrelated list that already read directory names finishes before
+the bundle can move one of those files.
 Responses use the same bounded task list/detail projections as principal tools:
 they omit the project binding identities, durable assignment body, and native
 protocol and include at most the retained bounded event preview. A task id
@@ -1531,7 +1554,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   Browser/schedule/pre-move failure rolls that pending token back. The registry
   move is the commit barrier: once the old path is absent, even if the registry
   call or later cleanup reports failure, old-name binding authority remains
-  revoked and is retired only after the old identity is unaddressable.
+  revoked and is retired only after the old identity is unaddressable. After a
+  registry exception, only `lstat` `ENOENT` proves that absence; a present old
+  path rolls back, while permission, I/O, or other indeterminate results commit
+  without retirement and require recovery.
 - `PUT  /api/ghosts/:name/name` `{ name: "<new>" }` → `{ ok: true, name }` — the
   ghost's name IS its home directory's name, so renaming one is anchored by a
   same-filesystem rename of `<root>/<old>/` to `<root>/<new>/`. Persona, memory,
@@ -1564,7 +1590,10 @@ daemon. Failure to discover Claude does not prevent a pi or `--no-turn` smoke.
   uses the same controller drain and tokenized scope-revocation boundary as
   delete: pre-move failure rolls back only its pending token, while an observed
   registry move commits synchronously and no later error restores old-name
-  launch authority.
+  launch authority. If the registry call throws, only an exact `ENOENT` from
+  `lstat` proves the old path moved and permits retirement; a present path rolls
+  back the pending token, while permission, I/O, or any indeterminate result
+  commits without retirement and returns recovery-pending.
 - `GET  /api/ghosts/:name/memory` → `{ memory, skipped }` — the owner's
   memory list, read from the plain files on each request and never stored.
   `memory` holds `{ path: "memory/<slug>.md", slug, content, updated }` in the

@@ -635,6 +635,47 @@ describe("durable task foundation", () => {
     expect((await readPersistedTask(current.home, task.id)).state).toBe("interrupted");
   });
 
+  it("upgrades a late registered cancellation after shutdown begins", async () => {
+    const home = await mkdtemp(join(tmpdir(), "ghost-task-"));
+    const readEntered = deferred<void>();
+    const releaseRead = deferred<void>();
+    let pauseRead = false;
+    class DelayedReadStore extends TaskStore {
+      override async read(id: string): Promise<TaskRecord> {
+        if (pauseRead) {
+          pauseRead = false;
+          readEntered.resolve();
+          await releaseRead.promise;
+        }
+        return super.read(id);
+      }
+    }
+    const store = new DelayedReadStore(home);
+    stores.push(store);
+    const controller = new TaskController(
+      store,
+      new Map(),
+      authority,
+      fakeTaskScopeManager(),
+    );
+    await controller.initialize();
+    const cancelling = record("cancelling");
+    await store.write(cancelling);
+    pauseRead = true;
+
+    const cancellation = controller.cancel(cancelling.id);
+    await readEntered.promise;
+    const shutdown = controller.beginShutdown();
+    releaseRead.resolve();
+
+    await expect(cancellation).resolves.toMatchObject({ state: "interrupted" });
+    await expect(shutdown).resolves.toBeUndefined();
+    await expect(store.read(cancelling.id)).resolves.toMatchObject({
+      state: "interrupted",
+      error: { code: "daemon_shutdown" },
+    });
+  });
+
   it("keeps an upgraded shutdown target authoritative across a blocked cancelled write", async () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-task-")); const blocked = deferred<void>(); const release = deferred<void>(); let blockCancelled = false;
     class BlockingStore extends TaskStore {

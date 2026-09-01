@@ -221,9 +221,13 @@ All delegated-task reads and mutations share one runtime-qualified parent lane
 with fork, draft-abandon, and delete lifecycle operations. HTTP task access
 requires the exact durable Pi transcript or Claude sidecar; only the private
 principal bridge may delegate during its still-active first owner turn before
-publication. Draft abandonment requires no task history in any state; finished
-worker history moves only with full conversation deletion. Home moves close and
-drain controller operations before native shutdown and store closure.
+publication. That bridge is bound to the current runtime-context incarnation
+and exact admitted turn; an old callback cannot follow a deleted and recreated
+same-id conversation. Draft abandonment requires no task history in any state;
+finished worker history moves only with full conversation deletion, under an
+exclusive inventory window that lets already-admitted unrelated reads finish
+before files move. Home moves close and drain controller operations before
+native shutdown and store closure.
 
 `SessionManager.open` receives the explicit transcript file, per-ghost session
 directory, and cwd, so nothing lands in `~/.pi`.

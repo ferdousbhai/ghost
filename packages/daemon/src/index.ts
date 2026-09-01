@@ -497,6 +497,8 @@ export {
   type TaskBindingReceipt,
   type TaskEvent,
   type TaskFailure,
+  type TaskInventoryView,
   type TaskRecord,
   type TaskState,
+  type TaskStoreOptions,
 } from "./tasks.js";

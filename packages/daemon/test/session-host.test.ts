@@ -103,6 +103,7 @@ import {
 } from "./helpers/mock-provider.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 import type { TaskAdapter } from "../src/tasks.js";
+import type { PrincipalTaskContext } from "../src/principal-task-tools.js";
 import { fakeTaskScopeManager } from "./helpers/task-scope.js";
 
 const inertTaskServices = () => ({
@@ -113,6 +114,29 @@ const inertTaskServices = () => ({
     },
   }]]),
 });
+
+function withActivePrincipalTaskTurn<T>(
+  ghostName: string,
+  runtime: "pi" | "claude-code",
+  conversationId: string,
+  action: () => T,
+): T {
+  const internals = host as unknown as {
+    principalTaskCapabilities: Map<string, {
+      ghostName: string;
+      runtime: "pi" | "claude-code";
+      conversationId: string;
+    }>;
+    principalTaskTurn: { run<R>(store: unknown, callback: () => R): R };
+  };
+  const capability = [...internals.principalTaskCapabilities.values()].find((candidate) =>
+    candidate.ghostName === ghostName
+    && candidate.runtime === runtime
+    && candidate.conversationId === conversationId
+  );
+  if (!capability) throw new Error("No active principal task turn.");
+  return internals.principalTaskTurn.run(capability, action);
+}
 
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
@@ -226,6 +250,7 @@ async function setup(
     | "conversationFileProbe"
     | "transactionProbe"
     | "transactionMarkerLstat"
+    | "ghostHomeLstat"
     | "logger"
     | "maintenance"
     | "jobs"
@@ -1887,12 +1912,17 @@ describe("SessionHost.open", () => {
     const transcript = join(ghostPaths(dir).sessionDir, sessionFileNameFor(conversationId));
     unlinkSync(transcript);
 
-    await expect(list!.execute(
-      "active-call",
-      {},
-      undefined,
-      undefined,
-      {} as never,
+    await expect(withActivePrincipalTaskTurn(
+      "casper",
+      "pi",
+      conversationId,
+      () => list!.execute(
+        "active-call",
+        {},
+        undefined,
+        undefined,
+        {} as never,
+      ),
     )).resolves.toBeDefined();
     barrier.release();
     await turn;
@@ -1907,6 +1937,84 @@ describe("SessionHost.open", () => {
     )).rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
   });
 
+  it.each(["pi", "claude-code"] as const)(
+    "rejects a stale %s principal callback during a new same-id first turn",
+    async (runtime) => {
+      await setup([{ kind: "text", text: "unused" }]);
+      host!.attachTaskServices(inertTaskServices());
+      await host!.restoreTaskServices();
+      const conversationId = `reincarnated-${runtime}`;
+      const internals = host as unknown as {
+        beginPrincipalTaskTurn(
+          ghostName: string,
+          selectedRuntime: typeof runtime,
+          id: string,
+        ): unknown;
+        finishPrincipalTaskTurn(capability: unknown): void;
+        principalTaskTurn: { run<R>(store: unknown, callback: () => R): R };
+        invalidatePrincipalTaskParent(
+          ghostName: string,
+          selectedRuntime: typeof runtime,
+          id: string,
+        ): void;
+        principalTaskContext(
+          ghostName: string,
+          selectedRuntime: typeof runtime,
+          id: string,
+          cwd: string,
+        ): Promise<PrincipalTaskContext>;
+      };
+      const oldCapability = internals.beginPrincipalTaskTurn(
+        "casper",
+        runtime,
+        conversationId,
+      );
+      const oldContext = await internals.principalTaskContext(
+        "casper",
+        runtime,
+        conversationId,
+        temp!.ownerHome,
+      );
+      await expect(internals.principalTaskTurn.run(
+        oldCapability,
+        () => oldContext.operation(async () => "old turn"),
+      ))
+        .resolves.toBe("old turn");
+
+      internals.invalidatePrincipalTaskParent("casper", runtime, conversationId);
+      const currentCapability = internals.beginPrincipalTaskTurn(
+        "casper",
+        runtime,
+        conversationId,
+      );
+      const currentContext = await internals.principalTaskContext(
+        "casper",
+        runtime,
+        conversationId,
+        temp!.ownerHome,
+      );
+      // A late finally from the old incarnation cannot clear the newer turn.
+      internals.finishPrincipalTaskTurn(oldCapability);
+      await expect(internals.principalTaskTurn.run(
+        oldCapability,
+        () => oldContext.operation(async () => "stale"),
+      ))
+        .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
+      await expect(internals.principalTaskTurn.run(
+        currentCapability,
+        () => currentContext.operation(async () => "current turn"),
+      ))
+        .resolves.toBe("current turn");
+
+      internals.finishPrincipalTaskTurn(currentCapability);
+      await expect(internals.principalTaskTurn.run(
+        currentCapability,
+        () => currentContext.operation(async () => "after turn"),
+      ))
+        .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
+    },
+  );
+
   it("refuses task-service attachment after session activity", async () => {
     await setup([{ kind: "text", text: "hello" }]);
     await host!.open("casper", "already-open");
@@ -1915,7 +2023,8 @@ describe("SessionHost.open", () => {
   });
 
   it("keeps the principal usable when its private task store is unsafe", async () => {
-    const { dir } = await setup([{ kind: "text", text: "hello" }]);
+    const barrier = createMockProviderBarrier();
+    const { dir } = await setup([{ kind: "text", text: "hello", barrier }]);
     const taskDir = join(ghostPaths(dir).home, ".tasks");
     mkdirSync(taskDir, { mode: 0o755 });
     chmodSync(taskDir, 0o755);
@@ -1924,17 +2033,33 @@ describe("SessionHost.open", () => {
     expect(handle.session.getToolDefinition("read")).toBeDefined();
     const list = handle.session.getToolDefinition("task_list");
     expect(list).toBeDefined();
-    await expect(list!.execute(
-      "call",
-      {},
-      undefined,
-      undefined,
-      {} as never,
-    )).rejects.toMatchObject({
-      code: "tasks_unavailable",
-      message: "Delegated coding tasks are unavailable.",
-      status: 503,
+    const turn = host!.runTurn("casper", {
+      sessionId: "unsafe-task-store",
+      prompt: "hold this owner turn",
+      emit: () => {},
     });
+    await barrier.waitForArrivals();
+    try {
+      await expect(withActivePrincipalTaskTurn(
+        "casper",
+        "pi",
+        "unsafe-task-store",
+        () => list!.execute(
+          "call",
+          {},
+          undefined,
+          undefined,
+          {} as never,
+        ),
+      )).rejects.toMatchObject({
+        code: "tasks_unavailable",
+        message: "Delegated coding tasks are unavailable.",
+        status: 503,
+      });
+    } finally {
+      barrier.release();
+      await turn;
+    }
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {
@@ -3793,6 +3918,7 @@ lines.on("line", (line) => {
         error: { code: "preserve_project_health", message: "Project health sentinel." },
         mcpStatus: "degraded",
       },
+      "casper",
     )).resolves.toBe(true);
     const updates: ConversationUpdatedEvent[] = [];
     const unsubscribe = host!.subscribeConversationEvents("casper", (event) => {
@@ -8437,6 +8563,80 @@ describe("SessionHost.renameGhost", () => {
       () => "must-not-launch",
     )).rejects.toBeInstanceOf(Error);
   });
+
+  it("rolls back a registry-error revocation only when lstat proves the old home remains", async () => {
+    const { dir } = await setup([{ kind: "text", text: "unused" }]);
+    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+      .projectBindings;
+    const project = join(temp!.ownerHome, "present-registry-error-project");
+    mkdirSync(project);
+    const conversationId = "present-registry-error";
+    const preview = await host!.previewProject("casper", conversationId, "pi", project);
+    await host!.bindProject("casper", conversationId, "pi", {
+      root: project,
+      trustToken: preview.trustToken,
+      expectedGeneration: 0,
+    });
+    const parent = conversationIdentity("pi", conversationId);
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
+    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
+    vi.spyOn(temp!.registry, "rename").mockImplementationOnce(() => {
+      throw new Error("registry failed before moving");
+    });
+
+    await expect(host!.renameGhost("casper", "wisp"))
+      .rejects.toThrow("registry failed before moving");
+    expect(existsSync(dir)).toBe(true);
+    await expect(authority.launchNative(
+      receipt,
+      new AbortController().signal,
+      parent,
+      () => "old authority remains",
+    )).resolves.toBe("old authority remains");
+  });
+
+  it.each(["before", "after"] as const)(
+    "keeps scope authority revoked when the registry %s-move outcome is unreadable",
+    async (phase) => {
+      const ioError = Object.assign(new Error("injected lstat I/O failure"), { code: "EIO" });
+      const { dir } = await setup([{ kind: "text", text: "unused" }], {
+        ghostHomeLstat: async () => { throw ioError; },
+      });
+      const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
+        .projectBindings;
+      const project = join(temp!.ownerHome, `indeterminate-${phase}-project`);
+      mkdirSync(project);
+      const conversationId = `indeterminate-${phase}`;
+      const preview = await host!.previewProject("casper", conversationId, "pi", project);
+      await host!.bindProject("casper", conversationId, "pi", {
+        root: project,
+        trustToken: preview.trustToken,
+        expectedGeneration: 0,
+      });
+      const parent = conversationIdentity("pi", conversationId);
+      const sessionDir = ghostPaths(dir).sessionDir;
+      const receipt = await bindings.mintTaskBinding(sessionDir, parent);
+      const authority = bindings.taskBindingAuthority(sessionDir, "casper");
+      const rename = temp!.registry.rename.bind(temp!.registry);
+      vi.spyOn(temp!.registry, "rename").mockImplementationOnce((from, to) => {
+        if (phase === "after") rename(from, to);
+        throw new Error(`registry ${phase}-move failure`);
+      });
+
+      await expect(host!.renameGhost("casper", "wisp")).rejects.toMatchObject({
+        code: "ghost_move_recovery_pending",
+        status: 503,
+      });
+      expect(existsSync(dir)).toBe(phase === "before");
+      await expect(authority.launchNative(
+        receipt,
+        new AbortController().signal,
+        parent,
+        () => "must not launch",
+      )).rejects.toMatchObject({ code: "task_binding_changed" });
+    },
+  );
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {
     const moveDrained = deferred();

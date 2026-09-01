@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,7 +19,7 @@ import {
   PROJECT_TRUST_MAX_BYTES,
   PROJECT_TRUST_MAX_ROOTS,
   PROJECT_TRUST_ROOT_MAX_BYTES,
-  ProjectBindingStore,
+  ProjectBindingStore as ProductionProjectBindingStore,
   projectBindingPath,
   summarizeProject,
 } from "../src/project-binding.js";
@@ -35,6 +36,60 @@ import {
 } from "../src/project-snapshot.js";
 
 const roots: string[] = [];
+
+class ProjectBindingStore extends ProductionProjectBindingStore {
+  override preview(
+    runtime: Parameters<ProductionProjectBindingStore["preview"]>[0],
+    conversationId: string,
+    path: string,
+    scope = "casper",
+  ): ReturnType<ProductionProjectBindingStore["preview"]> {
+    return super.preview(runtime, conversationId, path, scope);
+  }
+
+  override write(
+    input: Omit<Parameters<ProductionProjectBindingStore["write"]>[0], "scope">
+      & { scope?: string },
+  ): Promise<void> {
+    return super.write({ ...input, scope: input.scope ?? "casper" });
+  }
+
+  override updateRuntimeStatus(
+    sessionDir: string,
+    runtime: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[1],
+    conversationId: string,
+    current: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[3],
+    input: Parameters<ProductionProjectBindingStore["updateRuntimeStatus"]>[4],
+    scope = "casper",
+  ): Promise<boolean> {
+    return super.updateRuntimeStatus(
+      sessionDir,
+      runtime,
+      conversationId,
+      current,
+      input,
+      scope,
+    );
+  }
+
+  override writeOperationalCwd(
+    sessionDir: string,
+    runtime: Parameters<ProductionProjectBindingStore["writeOperationalCwd"]>[1],
+    conversationId: string,
+    current: Parameters<ProductionProjectBindingStore["writeOperationalCwd"]>[3],
+    cwd: string,
+    scope = "casper",
+  ): Promise<void> {
+    return super.writeOperationalCwd(
+      sessionDir,
+      runtime,
+      conversationId,
+      current,
+      cwd,
+      scope,
+    );
+  }
+}
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -329,6 +384,123 @@ describe("ProjectBindingStore", () => {
     await expect(store.preview(
       parent.runtime, parent.conversationId, project, "casper",
     )).resolves.toMatchObject({ root: project });
+  });
+
+  it("fences every final-name binding publisher under exact and scope revocation", async () => {
+    const { sessionDir, project, store } = fixture();
+    const source = conversationIdentity("pi", "publisher-source");
+    const initial = await store.read(
+      sessionDir,
+      source.id,
+      source.runtime,
+      source.conversationId,
+    );
+    const preview = await store.preview(
+      source.runtime,
+      source.conversationId,
+      project,
+      "casper",
+    );
+    await store.write({
+      sessionDir,
+      runtime: source.runtime,
+      conversationId: source.conversationId,
+      current: initial,
+      root: project,
+      trustToken: preview.trustToken,
+      reason: "bound",
+      scope: "casper",
+    });
+    const current = await store.read(
+      sessionDir,
+      source.id,
+      source.runtime,
+      source.conversationId,
+    );
+
+    const exact = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      source.runtime,
+      source.conversationId,
+    );
+    await expect(store.updateRuntimeStatus(
+      sessionDir,
+      source.runtime,
+      source.conversationId,
+      current,
+      { status: "ready", error: null, mcpStatus: "off" },
+      "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    exact.rollback();
+
+    const scope = await store.beginScopeRevocation("casper");
+    await expect(store.writeOperationalCwd(
+      sessionDir,
+      source.runtime,
+      source.conversationId,
+      current,
+      project,
+      "casper",
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    scope.rollback();
+
+    const target = conversationIdentity("pi", "publisher-target");
+    const staged = `${projectBindingPath(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+    )}.pending`;
+    const targetRevocation = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      target.runtime,
+      target.conversationId,
+    );
+    await expect(store.clone(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      current,
+      "casper",
+      staged,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    targetRevocation.rollback();
+    await store.clone(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      current,
+      "casper",
+      staged,
+    );
+    const publicationRevocation = await store.beginRevocation(
+      sessionDir,
+      "casper",
+      target.runtime,
+      target.conversationId,
+    );
+    await expect(store.publishCloneDestination(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      "casper",
+      staged,
+    )).rejects.toMatchObject({ code: "task_binding_changed" });
+    expect(existsSync(staged)).toBe(true);
+    expect(existsSync(projectBindingPath(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+    ))).toBe(false);
+    publicationRevocation.rollback();
+    await store.publishCloneDestination(
+      sessionDir,
+      target.runtime,
+      target.conversationId,
+      "casper",
+      staged,
+    );
   });
 
   it("rejects unbound, outside, replaced, and stale-generation task contexts", async () => {
