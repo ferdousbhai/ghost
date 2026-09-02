@@ -84,9 +84,9 @@ otherwise Ghost derives a stable identity from the admitted command fields.
 An optional top-level `builtin` object tunes hooks that Ghost registers in
 code. Each key names one built-in hook — the `settingsKey` on its status row
 — and holds `{ "idleSeconds": <integer 1..86400> }`. `memory_upkeep` tunes
-the idle interval before memory maintenance runs (default 60). `anti_slop`
-names the built-in anti-slop review but takes no `hooks.json` tuning today:
-its per-ghost mode and rule list live in the ghost's own `settings.yml` (see
+the idle interval before memory maintenance runs (default 60). `anti_slop` and
+`advisor` name the two built-in stop reviews but take no `hooks.json` tuning
+today: their per-ghost settings live in the ghost's own `settings.yml` (see
 below). The section is validated with the rest of the file and applies at the
 next daemon start, not live: a built-in idle registration's identity includes
 its interval and persisted retry state refers to that identity.
@@ -230,11 +230,13 @@ context; an informational notification alone is not.
 
 Trusted command hooks that need a fast classifier can invoke
 `ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",
-"prompt": "..." }` from stdin and returns `{ "text": "..." }`. The command
-resolves that home's `smol_model` lane (including Ghost's normal cheapest-usable
-fallback) and performs one raw completion. It does not create a session, expose
-tools, name a concrete provider model, or override the model's default
-reasoning level.
+"prompt": "...", "role": "smol_model" }` from stdin and returns
+`{ "text": "..." }`. `role` may be `smol_model` or `advisor_model` and defaults
+to `smol_model`, preserving the cheapest-usable behavior for existing callers.
+An unbound advisor role follows Ghost's advisor preference list instead of the
+cheap-model fallback. The command performs one raw completion. It does not
+create a session, expose tools, name a concrete provider model, or override the
+model's default reasoning level.
 
 Ghost's built-in anti-slop review is a `session_stop` hook (`settingsKey:
 anti_slop`) that deterministically lints the final assistant reply with the
@@ -278,6 +280,69 @@ each offending turn produces at most one nudge. A clean final pass clears any
 pending nudge. The state is in-process rule-id counts only — never reply text
 — bounded to 64 conversations, and non-durable: a daemon restart forgets it,
 which merely skips one nudge.
+
+### Built-in advisor policy supervisor
+
+The `advisor` built-in runs one model review at `session_stop` on both principal
+runtimes. It is off unless the ghost home's `settings.yml` enables it:
+
+```yaml
+advisor:
+  mode: strict          # off (default) | advisory | strict
+  immuneTurns: 3        # non-negative integer; 0 disables the cooldown
+```
+
+The model comes from `advisor_model`. An explicit role binding wins; otherwise
+Ghost uses its existing advisor preference list. The review reads a bounded
+tail of the runtime-native `transcript_path`, rebuilds the active Pi `parentId`
+or Claude Code `parentUuid` chain, and sends only the current owner-turn delta.
+That includes persisted reasoning, tool calls, and tool results. Known secret
+forms are redacted first. A missing transcript uses the final assistant text;
+malformed JSONL, invalid UTF-8, a read failure, or a missing owner-turn boundary
+also falls back to that text and never fails the owner turn.
+
+`WATCHDOG.md` at the ghost-home root is the owner-level policy. A conversation
+with a currently valid project-binding receipt also loads project
+`WATCHDOG.md` and `.ghost/WATCHDOG.md` files from its trusted Git root down to
+the operational cwd. When no nested Git root can be resolved, discovery starts
+at the trusted binding root. Ordering is ghost first, then project ancestor to
+leaf. Merely running inside a Git repository is not trust: project policy is
+omitted unless `ProjectBindingStore` revalidates the binding against the
+identity-bound trust ledger. Unreadable or malformed files are skipped.
+`WATCHDOG.yml` rosters are not part of this phase.
+
+Delivery adapts the channel policy in oh-my-pi's
+[`docs/advisor-watchdog.md`](https://github.com/can1357/oh-my-pi/blob/main/docs/advisor-watchdog.md)
+to Ghost's awaited stop and consume-once prompt hooks:
+
+| Mode and accepted severity | Ghost delivery |
+|---|---|
+| `off` or unknown | No model call or context |
+| `advisory`: `nit`, `concern`, or `blocker` | One consume-once `before_prompt` advisory |
+| `strict`: `nit` or `concern` | One consume-once `before_prompt` advisory |
+| `strict`: `blocker`, cooldown clear, `stop_hook_active: false` | One hidden continuation in the current owner turn |
+| `strict`: `blocker` during cooldown or on a continuation pass | Consume-once `before_prompt` advisory when the note is new |
+
+After a strict blocker continuation, the next `advisor.immuneTurns` owner turns
+downgrade otherwise interrupting findings to next-turn feedback. The
+`stop_hook_active` check is absolute: the advisor never requests a second
+continuation for the same owner turn. This is Ghost's one-continuation
+invariant even though oh-my-pi's live steering channel exempts blockers from
+its concern cooldown.
+
+Advisor output must be bounded structured JSON. Output-only prompt-injection
+and destructive-command combinations are quarantined before any note reaches
+the primary model. A FIFO emission guard suppresses normalized duplicates,
+content-free self-talk, and all but one accepted note per model update; the
+note ledger additionally admits only strict severity escalation for an
+already-delivered finding. Anti-slop rule ids from the final assistant reply are
+included as already-owned findings, and the advisor is instructed not to
+re-raise those prose nits.
+
+Next-turn feedback, cooldown, dedupe, and ledger state are bounded and
+in-process. A daemon restart drops them: it never replays an advisory or resumes
+a policy continuation. Per-advisor transcripts, WATCHDOG rosters, and a
+mid-turn interruption seam remain outside this phase.
 
 ## `conversation_idle` protocol
 

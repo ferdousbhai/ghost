@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -55,6 +56,22 @@ describe("WATCHDOG discovery", () => {
     writeFileSync(join(project, "WATCHDOG.md"), "project", "utf8");
     expect((await collectConfigCandidates(leaf, ghostHome, ["WATCHDOG.md"]))
       .map((item) => item.content)).toEqual(["user"]);
+  });
+
+  it("stops project discovery at a nested Git root inside the trusted binding", async () => {
+    const { ghostHome, project } = fixture();
+    const nestedRepo = join(project, "nested");
+    const leaf = join(nestedRepo, "src");
+    mkdirSync(leaf, { recursive: true });
+    execFileSync("git", ["init", "-q", nestedRepo]);
+    writeFileSync(join(project, "WATCHDOG.md"), "outer", "utf8");
+    writeFileSync(join(nestedRepo, "WATCHDOG.md"), "repo", "utf8");
+    writeFileSync(join(leaf, "WATCHDOG.md"), "leaf", "utf8");
+
+    const items = await collectConfigCandidates(leaf, ghostHome, ["WATCHDOG.md"], {
+      trustedProjectRoot: project,
+    });
+    expect(items.map((item) => item.content)).toEqual(["repo", "leaf"]);
   });
 
   it("filters standalone files owned by hidden directories", async () => {

@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
+import { createAdvisorHook } from "./advisor-hook.js";
 import { createAntiSlopHook } from "./anti-slop-hook.js";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
@@ -505,6 +506,7 @@ async function serveDaemon(
     ]),
   });
   await host.restoreTaskServices();
+  await hooks.register(createAdvisorHook({ logger, ownerHome }));
   await hooks.register(createAntiSlopHook({ logger }));
   const maintenance = new ConversationMaintenance({
     registry,

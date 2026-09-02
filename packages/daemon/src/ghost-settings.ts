@@ -11,6 +11,7 @@ import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from ".
 export interface GhostSettings {
   getString(path: string): string | undefined;
   getStringList(path: string): string[] | undefined;
+  getNumber(path: string): number | undefined;
 }
 
 function ghostSettingsFrom(document: unknown): GhostSettings {
@@ -31,6 +32,10 @@ function ghostSettingsFrom(document: unknown): GhostSettings {
     getStringList: (path) => {
       const value = get(path);
       return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
+    },
+    getNumber: (path) => {
+      const value = get(path);
+      return typeof value === "number" ? value : undefined;
     },
   };
 }

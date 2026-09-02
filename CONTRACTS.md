@@ -283,6 +283,20 @@ continuation and never replaces text already shown. When enabled it also adds
 a session-static style-contract prompt section on both runtimes and one
 non-durable next-turn nudge naming the previous reply's rule ids.
 
+The built-in advisor policy supervisor also runs at `session_stop` on both
+runtimes. Per ghost, `settings.yml` selects `advisor.mode` (`off` default,
+`advisory`, `strict`) and non-negative `advisor.immuneTurns` (default 3); its
+model is the `advisor_model` role. It reviews a bounded, secret-redacted current
+turn delta from the runtime-native transcript against ghost-home `WATCHDOG.md`
+and project `WATCHDOG.md`/`.ghost/WATCHDOG.md` files admitted only through the
+conversation's identity-validated project binding. `nit` and `concern` notes,
+all advisory-mode notes, and strict blockers inside the cooldown cross the
+consume-once `before_prompt` bridge. A strict blocker outside the cooldown may
+request exactly one continuation when `stop_hook_active` is false; a
+continuation pass never continues again. The feedback bridge, cooldown, and
+dedupe state are bounded and non-durable, so restart drops rather than replays
+them. Transcript, model, parse, discovery, and quarantine failures fail open.
+
 ## Daemon HTTP API
 
 `ghostd` is the only session owner. All `/api/*` routes require the bearer token

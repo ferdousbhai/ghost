@@ -20,7 +20,11 @@ describe("loadGhostSettings", () => {
     const paths = ghostPaths(home);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(join(home, ".omp"), { recursive: true });
-    writeFileSync(paths.settingsFile, "collab:\n  relayUrl: wss://relay.example\nttsr:\n  disabledRules: [noisy]\n", "utf8");
+    writeFileSync(
+      paths.settingsFile,
+      "collab:\n  relayUrl: wss://relay.example\nttsr:\n  disabledRules: [noisy]\nadvisor:\n  immuneTurns: 3\n",
+      "utf8",
+    );
     writeFileSync(join(paths.agentDir, "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
     writeFileSync(join(home, ".omp", "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
     vi.stubEnv("PI_CONFIG_FILES", join(home, ".omp", "config.yml"));
@@ -29,8 +33,10 @@ describe("loadGhostSettings", () => {
 
     expect(settings.getString("collab.relayUrl")).toBe("wss://relay.example");
     expect(settings.getStringList("ttsr.disabledRules")).toEqual(["noisy"]);
+    expect(settings.getNumber("advisor.immuneTurns")).toBe(3);
     expect(settings.getString("missing.key")).toBeUndefined();
     expect(settings.getStringList("collab.relayUrl")).toBeUndefined();
+    expect(settings.getNumber("collab.relayUrl")).toBeUndefined();
   });
 
   it("is empty when settings.yml is absent", () => {
