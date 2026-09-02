@@ -912,6 +912,8 @@ Singleton {
     property alias transcript: transcriptModel
     property var commandExchanges: ({})
     property int hydratedRowCount: 0
+    /** True when the open conversation's stored history has an unavailable prefix. */
+    property bool transcriptHistoryTruncated: false
     property string commandTurnKey: ""
     property int commandTurnIndex: -1
     property int commandTurnAnchor: 0
@@ -1826,6 +1828,7 @@ Singleton {
             published: false,
             rows: [],
             hydratedRowCount: 0,
+            historyTruncated: false,
             commandTurnKey: "",
             commandTurnIndex: -1,
             commandTurnAnchor: 0,
@@ -1896,6 +1899,7 @@ Singleton {
     function captureTurnProjection(state: var): void {
         state.rows = root.visibleTranscriptRows();
         state.hydratedRowCount = root.hydratedRowCount;
+        state.historyTruncated = root.transcriptHistoryTruncated;
         state.commandTurnKey = root.commandTurnKey;
         state.commandTurnIndex = root.commandTurnIndex;
         state.commandTurnAnchor = root.commandTurnAnchor;
@@ -1928,6 +1932,7 @@ Singleton {
 
     function projectTurnProjection(state: var): void {
         root.hydratedRowCount = state.hydratedRowCount;
+        root.transcriptHistoryTruncated = state.historyTruncated === true;
         root.commandTurnKey = state.commandTurnKey;
         root.commandTurnIndex = state.commandTurnIndex;
         root.commandTurnAnchor = state.commandTurnAnchor;
@@ -1956,6 +1961,7 @@ Singleton {
     function clearTurnProjection(): void {
         transcriptModel.clear();
         root.hydratedRowCount = 0;
+        root.transcriptHistoryTruncated = false;
         root.commandTurnKey = "";
         root.commandTurnIndex = -1;
         root.commandTurnAnchor = 0;
@@ -2035,6 +2041,7 @@ Singleton {
         if (state) {
             state.rows = [];
             state.hydratedRowCount = 0;
+            state.historyTruncated = false;
             state.commandTurnKey = "";
             state.commandTurnIndex = -1;
             state.commandTurnAnchor = 0;
@@ -3678,6 +3685,7 @@ Singleton {
             generation: state.transcriptGeneration,
             allowNotFound: allowNotFound,
             total: -1,
+            historyTruncated: null,
             nextOffset: 0,
             pageCount: 0,
             messages: [],
@@ -3702,6 +3710,7 @@ Singleton {
                 || state.transcriptGeneration !== load.generation || state.streaming) return;
         state.transcriptRequest = null;
         state.transcriptLoad = null;
+        state.historyTruncated = load.historyTruncated === true;
         root.rehydrateTurn(state, load.messages);
         root.reachable = true;
         if (root.isActiveTurn(state)) root.sessionsError = "";
@@ -3723,6 +3732,7 @@ Singleton {
             if (xhr.readyState !== 4 || !root.transcriptLoadIsCurrent(state, load, xhr)) return;
             if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
                 load.messages = [];
+                load.historyTruncated = false;
                 root.completeTranscriptLoad(state, load);
                 return;
             }
@@ -3741,6 +3751,12 @@ Singleton {
                     throw new Error("invalid transcript total");
                 if (typeof body.truncated !== "boolean")
                     throw new Error("invalid transcript truncation marker");
+                if (typeof body.historyTruncated !== "boolean")
+                    throw new Error("invalid transcript history marker");
+                if (load.historyTruncated === null)
+                    load.historyTruncated = body.historyTruncated;
+                else if (load.historyTruncated !== body.historyTruncated)
+                    throw new Error("transcript history marker changed between pages");
                 if (load.total < 0) load.total = body.total;
                 else if (load.total !== body.total)
                     throw new Error("transcript changed between pages");
@@ -3787,12 +3803,11 @@ Singleton {
     /**
      * Replace the transcript view with a conversation's stored messages.
      *
-     * Storage gives a turn one message per content block — the Claude Code
-     * runtime puts every tool call in a message of its own — while the live
-     * stream renders a whole turn as one row. Consecutive assistant messages
+     * Older storage projections may give one turn several consecutive assistant
+     * messages, while the live stream renders the whole turn as one row. They
      * are therefore regrouped before the split, or a restored answer scatters
-     * across five rows and a preamble is severed from the tool call that made
-     * it one.
+     * across several rows and a preamble is severed from the tool call that
+     * made it one.
      *
      * A text-less row survives when it still carries tool activity. That is the
      * only thing standing between an unanswered `ask` and a dead conversation:
@@ -3809,7 +3824,8 @@ Singleton {
         for (const row of rows) {
             hydrated.push({
                 role: row.role,
-                text: row.text,
+                text: row.text + (row.contentTruncated
+                    ? "\n\n*[Saved message truncated]*" : ""),
                 tools: "",
                 toolActivity: row.role === "assistant"
                     ? root.messageTools({ content: row.parts }) : [],

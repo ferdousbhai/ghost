@@ -681,6 +681,16 @@ FloatingWindow {
                     Layout.fillHeight: true
                     spacing: Theme.gap
 
+                    Text {
+                        visible: Ghostd.transcriptHistoryTruncated
+                        Layout.fillWidth: true
+                        text: "Earlier conversation history is unavailable."
+                        color: Theme.foregroundDim
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                        wrapMode: Text.Wrap
+                    }
+
                     ListView {
                         id: transcriptView
 

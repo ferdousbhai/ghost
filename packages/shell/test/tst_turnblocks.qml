@@ -145,7 +145,7 @@ TestCase {
     }
 
     function test_oneTurnSplitAcrossMessagesBecomesOneRow(): void {
-        // The Claude Code runtime gives every tool call its own message.
+        // Older projections may give each tool call its own message.
         const rows = TurnBlocks.rows([
             { role: "user", content: [{ type: "text", text: "check my repos" }], entryId: "u1" },
             { role: "assistant", content: [{ type: "text", text: "Looking now." }], entryId: "a1" },
@@ -184,6 +184,17 @@ TestCase {
         const rows = TurnBlocks.rows([{ role: "user", content: "plain string", entryId: "u1" }]);
         compare(rows.length, 1);
         compare(rows[0].text, "plain string");
+    }
+
+    function test_savedTextTruncationSurvivesAssistantGrouping(): void {
+        const rows = TurnBlocks.rows([
+            { role: "user", content: "whole prompt", entryId: "u1" },
+            { role: "assistant", content: "first", entryId: "a1" },
+            { role: "assistant", content: "second", entryId: "a2", contentTruncated: true }
+        ]);
+        compare(rows.length, 2);
+        verify(!rows[0].contentTruncated);
+        verify(rows[1].contentTruncated);
     }
 
     function test_unknownRolesAreSkippedWithoutBreakingTheGrouping(): void {

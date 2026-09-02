@@ -332,7 +332,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/recap` | Non-persisted bounded Pi recap; failure returns `recap:null`. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
-| `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal, with `historyTruncated` marking an unavailable prefix. |
+| `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue Pi steering or follow-up text. |
 | `GET\|POST /sessions/:id/tasks` | List bounded task projections or start one trusted-project native worker. |

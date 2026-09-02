@@ -614,11 +614,11 @@ function ghostSessions(name) {
         entry({ role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 }),
       ],
     };
-    // The Claude Code resume sidecar. It lists like any other conversation, but
-    // that runtime owns both its title and its transcript, so the mock holds
-    // neither: renaming it is 409 and reading it is 404. Its `messageCount` is
-    // a number the sidecar reports rather than one derived from messages the
-    // daemon has, so it is stored instead of counted.
+    // The seeded Claude Code resume sidecar predates Ghost presentation
+    // history, so reading it succeeds with an explicitly unavailable prefix
+    // (renaming it stays 409). Its `messageCount` is reported by the sidecar
+    // rather than derived from renderable messages, so it is stored instead
+    // of counted.
     const sidecar = {
       ...conversationIdentity("claude-code", `sess-${name}-claude`),
       title: "Claude Code",
@@ -626,6 +626,7 @@ function ghostSessions(name) {
       updatedAt: new Date(now - 1_500_000).toISOString(),
       messageCount: 18,
       messages: [],
+      historyTruncated: true,
     };
     seed.set(titled.id, titled);
     seed.set(untitled.id, untitled);
@@ -656,6 +657,7 @@ const transcriptOf = (s, params) => {
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
+    historyTruncated: s.historyTruncated === true,
   };
 };
 
@@ -2633,14 +2635,9 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     const s = ghostSessions(name).get(conversation.id);
-    // A Claude Code conversation's transcript lives in that runtime's storage,
-    // so there is nothing here to read even though the row is in the listing.
-    if (!s || s.runtime === "claude-code") {
-      return json(res, s ? 409 : 404, {
-        error: {
-          message: s ? "Claude Code owns this transcript" : "no such session",
-          code: s ? "not_supported" : "session_not_found",
-        },
+    if (!s) {
+      return json(res, 404, {
+        error: { message: "no such session", code: "session_not_found" },
       });
     }
     return json(res, 200, transcriptOf(s, url.searchParams));

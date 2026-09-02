@@ -69,7 +69,8 @@ TestCase {
         return result;
     }
 
-    function page(state: var, rows: var, total: int, truncated: bool): var {
+    function page(state: var, rows: var, total: int, truncated: bool,
+            historyTruncated: var): var {
         return {
             id: state.sessionId,
             conversationId: state.conversationId,
@@ -77,7 +78,8 @@ TestCase {
             title: null,
             messages: rows,
             total: total,
-            truncated: truncated
+            truncated: truncated,
+            historyTruncated: historyTruncated === true
         };
     }
 
@@ -168,6 +170,56 @@ TestCase {
         const ids = new Set(state.rows.map(function (row) { return row.entryId; }));
         compare(ids.size, 1005);
         compare(Ghostd.sessionsError, "");
+        verify(!Ghostd.transcriptHistoryTruncated);
+    }
+
+    function test_historyMarkerIsRequiredConsistentAndProjected(): void {
+        const state = activeState("legacy-claude");
+        Ghostd.loadConversationTranscript(state, false);
+        const missingMarker = page(state, [], 0, false, false);
+        delete missingMarker.historyTruncated;
+        requests[0].complete(200, missingMarker);
+        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
+
+        requests = [];
+        Ghostd.sessionsError = "";
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200,
+            page(state, messages(0, 1000), 1001, true, true));
+        compare(requests.length, 2);
+        requests[1].complete(200,
+            page(state, messages(1000, 1), 1001, true, false));
+        compare(state.rows.length, 0);
+        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
+
+        requests = [];
+        Ghostd.sessionsError = "";
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [], 0, false, true));
+        verify(state.historyTruncated);
+        verify(Ghostd.transcriptHistoryTruncated);
+
+        // Reloading a complete history clears the marker again.
+        requests = [];
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [], 0, false, false));
+        verify(!state.historyTruncated);
+        verify(!Ghostd.transcriptHistoryTruncated);
+    }
+
+    function test_savedTextTruncationIsVisibleAfterRehydration(): void {
+        const state = activeState("bounded");
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [{
+            role: "user",
+            content: "bounded text",
+            contentTruncated: true,
+            entryId: "bounded-owner"
+        }], 1, false, false));
+
+        compare(state.rows.length, 1);
+        compare(state.rows[0].text,
+            "bounded text\n\n*[Saved message truncated]*");
     }
 
     function test_deepBranchLoadsCompleteHistoryInsteadOfAdoptingInlinePage(): void {
