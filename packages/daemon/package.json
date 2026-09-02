@@ -16,7 +16,7 @@
     "bun": ">=1.3.14"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && mkdir -p dist/prompts && cp src/prompts/*.md dist/prompts/",
+    "build": "tsc -p tsconfig.build.json",
     "build:runtime": "bash scripts/build-runtime.sh",
     "typecheck": "tsc -p tsconfig.json",
     "test": "bun --bun ./node_modules/vitest/vitest.mjs run",
