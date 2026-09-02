@@ -4,7 +4,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 ## Authoritative contract
 
-`CONTRACTS.md` defines the ghost-home layout, daemon API, model roles, package boundaries, and harness invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments.
+`CONTRACTS.md` defines the ghost-home layout, daemon API, model roles, package boundaries, and harness invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
 
 ## Glossary
 
@@ -16,7 +16,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 ## Taste
 
-Find the real constraint, then the smallest model that makes the correct behavior unsurprising. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. When a runtime (pi, Claude Code) can own a behavior, it owns it: project policy through its settings and hooks rather than building a parallel loop; read its source in `node_modules` before writing a workaround, and name any deliberate exception in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors plus the runtime's retry and fallback chains.
+Find the real constraint, then the simplest design under which the correct behavior is obvious. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. The runtimes (pi, Claude Code) already ship retries, permission policy, hooks, and tool loops — when one of them can own a behavior, it owns it, because a ghostd copy of the same machinery ends up fighting the runtime's version: express project policy through the runtime's settings and hooks rather than building a parallel loop, read its source in `node_modules` before writing a workaround, and name any deliberate exception in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors plus the runtime's retry and fallback chains.
 
 If a rule here fights the task in front of you, say so loudly and get sign-off before breaking it.
 
