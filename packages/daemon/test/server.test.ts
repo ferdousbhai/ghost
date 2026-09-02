@@ -2182,8 +2182,21 @@ describe("GET /api/ghosts/:name/sessions", () => {
     const claudeTranscript = await fetch(
       `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/transcript`,
     );
-    expect(claudeTranscript.status).toBe(409);
-    expect(await claudeTranscript.json()).toMatchObject({ error: { code: "not_supported" } });
+    expect(claudeTranscript.status).toBe(200);
+    // The sidecar predates presentation history: readable, empty, and honest
+    // about the missing prefix.
+    expect(await claudeTranscript.json()).toMatchObject({
+      id: "claude-code:default",
+      conversationId: "default",
+      runtime: "claude-code",
+      messages: [],
+      total: 0,
+      truncated: false,
+      historyTruncated: true,
+    });
+    expect((await fetch(
+      `${base}/api/ghosts/casper/sessions/${claudeSegment("missing")}/transcript`,
+    )).status).toBe(404);
 
     expect((await fetch(
       `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/pin`,

@@ -102,6 +102,11 @@ import {
   type SettledMaintenanceTurn,
 } from "./conversation-maintenance.js";
 import {
+  PresentationHistoryStore,
+  presentationHistoryPath,
+  type PresentationHistoryV1,
+} from "./presentation-history.js";
+import {
   homeOperationsFor,
   type HomeMoveParticipantReservation,
   type HomeOperationCoordinator,
@@ -702,6 +707,7 @@ export interface SessionHostOptions {
   collaboration?: CollaborationManager;
   hooks?: GhostHookRunner;
   maintenance?: SessionConversationMaintenance;
+  presentationHistory?: PresentationHistoryStore;
   homeOperations?: HomeOperationCoordinator;
   retention?: SessionRetentionConfig;
 }
@@ -769,8 +775,8 @@ export interface QueuedMessages {
 }
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
-  artifact: "omp-transcript" | "claude-sidecar"
-    | "project-binding" | "project-snapshot" | "tool-cwds" | "maintenance-state";
+  artifact: "omp-transcript" | "claude-sidecar" | "project-binding"
+    | "project-snapshot" | "tool-cwds" | "maintenance-state" | "presentation-history";
   source: string;
 }
 
@@ -1072,6 +1078,7 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"
   "project-snapshot",
   "tool-cwds",
   "maintenance-state",
+  "presentation-history",
 ]);
 
 interface DeleteMoveIntent extends TrashedConversationFileArtifact {}
@@ -1283,6 +1290,8 @@ function exactDeleteStaticSource(
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
     case "maintenance-state":
       return artifact.source === maintenanceStatePath(sessionDir, runtime, conversationId);
+    case "presentation-history":
+      return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
     case "project-snapshot": {
       if (runtime !== "pi" || artifact.source !== join(sessionDir, basename(artifact.source))) {
         return false;
@@ -1398,6 +1407,8 @@ export interface TranscriptMessage {
   timestamp?: number;
   entryId: string;
   parentId: string | null;
+  /** Present when the stored text was cut at the journal's per-text bound. */
+  contentTruncated?: true;
 }
 
 export type AskSettlement = "submitted" | "cancelled" | "timedOut" | "chat";
@@ -1435,11 +1446,13 @@ function askSettlement(details: AskToolDetails | null | undefined): AskSettlemen
 export interface Transcript {
   id: string;
   conversationId: string;
-  runtime: "pi";
+  runtime: ConversationRuntime;
   title: string | null;
   messages: TranscriptMessage[];
   total: number;
   truncated: boolean;
+  /** True when turns before `messages[0]`'s page existed but are unavailable. */
+  historyTruncated: boolean;
 }
 
 export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
@@ -1453,6 +1466,70 @@ function clampTranscriptLimit(limit: number | undefined): number {
 function clampTranscriptOffset(offset: number | undefined): number {
   if (typeof offset !== "number" || !Number.isFinite(offset) || offset < 0) return 0;
   return Math.floor(offset);
+}
+
+/**
+ * One paging rule for every transcript projection. The shell verifies `total`
+ * and `truncated` across pages, so the arithmetic must not drift between
+ * runtimes.
+ */
+function pageTranscript(
+  all: TranscriptMessage[],
+  options: { limit?: number; offset?: number },
+): Pick<Transcript, "messages" | "total" | "truncated"> {
+  const total = all.length;
+  const limit = clampTranscriptLimit(options.limit);
+  const offset = Math.min(clampTranscriptOffset(options.offset), total);
+  const messages = all.slice(offset, offset + limit);
+  return {
+    messages,
+    total,
+    truncated: offset > 0 || offset + messages.length < total,
+  };
+}
+
+/** The daemon holds no Claude titles; listing rows and transcripts agree. */
+const CLAUDE_CONVERSATION_TITLE = "Claude Code";
+
+/**
+ * Project a Claude conversation's presentation journal to the paged transcript
+ * shape: two messages per settled turn, both stamped with the turn's settle
+ * time. A conversation with no journal (it predates presentation history)
+ * reads as empty with its earlier history marked unavailable, never as a
+ * conversation that said nothing.
+ */
+function transcriptFromPresentation(
+  id: string,
+  presentation: PresentationHistoryV1 | null,
+  options: { limit?: number; offset?: number } = {},
+): Transcript {
+  const all = presentation?.turns.flatMap((turn): TranscriptMessage[] => {
+    const timestamp = Date.parse(turn.settledAt);
+    return [
+      {
+        role: "user",
+        content: [{ type: "text", text: turn.ownerText }],
+        timestamp,
+        entryId: `presentation:${turn.sequence}:owner`,
+        parentId: null,
+        ...(turn.ownerTextTruncated ? { contentTruncated: true as const } : {}),
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: turn.assistantText }],
+        timestamp,
+        entryId: `presentation:${turn.sequence}:assistant`,
+        parentId: `presentation:${turn.sequence}:owner`,
+        ...(turn.assistantTextTruncated ? { contentTruncated: true as const } : {}),
+      },
+    ];
+  }) ?? [];
+  return {
+    ...conversationIdentity("claude-code", id),
+    title: CLAUDE_CONVERSATION_TITLE,
+    ...pageTranscript(all, options),
+    historyTruncated: presentation?.historyPrefixOmitted ?? true,
+  };
 }
 
 /**
@@ -1760,6 +1837,7 @@ export class SessionHost {
   private sessionActivityStarted = false;
   private readonly liveVoice: LiveVoiceManager;
   private readonly collaboration: CollaborationManager;
+  private readonly presentationHistory: PresentationHistoryStore;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly sessions = new Map<string, HostedSession>();
   private readonly conversationListeners = new Map<string, Set<ConversationEventSubscription>>();
@@ -1853,6 +1931,7 @@ export class SessionHost {
     this.createGreetingRuntime = options.greeting?.createRuntime ?? createGhostPiRuntime;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.maintenance = options.maintenance;
+    this.presentationHistory = options.presentationHistory ?? new PresentationHistoryStore();
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.unregisterHomeMoveParticipant = this.homeOperations.registerMoveParticipant({
       preclaim: (ghostName) => {
@@ -4205,7 +4284,7 @@ export class SessionHost {
       || this.liveVoiceOwnsSession(hosted);
   }
 
-  private maintenanceFinisher(
+  private settledTurnFinisher(
     identity: MaintenanceIdentity,
     admission: MaintenanceOwnerAdmission | undefined,
     release: () => void = () => admission?.release(),
@@ -4215,6 +4294,9 @@ export class SessionHost {
       if (finished) return;
       finished = true;
       try {
+        if (turn && identity.runtime === "claude-code") {
+          await this.journalSettledClaudeTurn(identity, turn);
+        }
         await admission?.finish(turn);
       } catch {
         if (turn) {
@@ -4233,6 +4315,35 @@ export class SessionHost {
         release();
       }
     };
+  }
+
+  /**
+   * Journal one settled Claude turn so the HUD can read the conversation. The
+   * write fails open: the turn is already durable in Claude's own storage, and
+   * the store's ordinal-gap detection marks a missed turn as an omitted prefix
+   * on the next successful write, so the journal self-heals into an honest gap
+   * instead of failing the turn.
+   */
+  private async journalSettledClaudeTurn(
+    identity: MaintenanceIdentity,
+    turn: SettledMaintenanceTurn,
+  ): Promise<void> {
+    try {
+      const sessionDir = ghostPaths(this.registry.get(identity.ghostName).dir).sessionDir;
+      await this.homeOperations.withLease(identity.ghostName, () =>
+        this.presentationHistory.recordSettledTurn(
+          sessionDir,
+          { runtime: identity.runtime, conversationId: identity.conversationId },
+          turn,
+        ));
+    } catch (error) {
+      this.logger
+        .child({ ghost: identity.ghostName, conversation: identity.conversationId })
+        .warn("conversation presentation history was not recorded", {
+          runtime: identity.runtime,
+          error: error instanceof Error ? error.message : String(error),
+        });
+    }
   }
 
   private async preparePiOwnerPass(
@@ -4254,7 +4365,7 @@ export class SessionHost {
     let finish = input.finish;
     if (!finish) {
       const admission = this.maintenance?.admitOwnerAction(identity);
-      finish = this.maintenanceFinisher(identity, admission);
+      finish = this.settledTurnFinisher(identity, admission);
       try {
         await admission?.ready;
       } catch (error) {
@@ -4413,6 +4524,7 @@ export class SessionHost {
     await pass.finish({
       source: { runtime: "pi", createdAt },
       sourceRevision: { kind: "pi-leaf", value: assistantEntry.id },
+      sourceOrdinal: pass.turnId,
       cwd: hosted.session.sessionManager.getCwd(),
       ownerPrompt: pass.ownerPrompt,
       assistantText: entryText(assistant.content),
@@ -5402,7 +5514,7 @@ export class SessionHost {
             throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
           }
           started = true;
-          const finishMaintenance = this.maintenanceFinisher(
+          const finishMaintenance = this.settledTurnFinisher(
             { ghostName, runtime: selected.runtime, conversationId },
             maintenanceAdmission,
             releaseMaintenance,
@@ -7056,7 +7168,7 @@ export class SessionHost {
       ...piSessions,
       ...claudeSessions.filter((info) => isValidConversationId(info.conversationId)).map((info) => ({
         ...conversationIdentity("claude-code", info.conversationId),
-        title: "Claude Code",
+        title: CLAUDE_CONVERSATION_TITLE,
         createdAt: info.created,
         updatedAt: info.modified,
         messageCount: info.messageCount,
@@ -7090,9 +7202,8 @@ export class SessionHost {
     options: { limit?: number; offset?: number } = {},
     runtime: ConversationRuntime = "pi",
   ): Promise<Transcript> {
-    assertPiConversation(runtime, "Transcript reading");
     return this.homeOperations.withLease(ghostName, () =>
-      this.readTranscriptLeased(ghostName, conversationId, options)
+      this.readTranscriptLeased(ghostName, conversationId, options, runtime)
     );
   }
 
@@ -7100,10 +7211,28 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     options: { limit?: number; offset?: number },
+    runtime: ConversationRuntime,
   ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
+    if (runtime === "claude-code") {
+      // Only the resume sidecar publishes a Claude conversation id; a
+      // presentation journal on its own never makes an id readable.
+      const native = await this.claudeCode.readSession(ghost, id);
+      if (!native) {
+        throw new GhostError(
+          "not_found",
+          `This ghost has no conversation ${JSON.stringify(id)}.`,
+          404,
+        );
+      }
+      const presentation = await this.presentationHistory.read(
+        paths.sessionDir,
+        { runtime, conversationId: id },
+      );
+      return transcriptFromPresentation(id, presentation, options);
+    }
     const path = join(paths.sessionDir, sessionFileNameFor(id));
     await this.conversationFileProbe("transcript-read", path);
     if (!existsSync(path)) {
@@ -7154,16 +7283,12 @@ export class SessionHost {
       const message = projectTranscriptMessage(entry, askBranches, failedToolCalls, toolCwds);
       if (message) all.push(message);
     }
-    const total = all.length;
-    const limit = clampTranscriptLimit(options.limit);
-    const offset = Math.min(clampTranscriptOffset(options.offset), total);
-    const messages = all.slice(offset, offset + limit);
     return {
       ...conversationIdentity("pi", id),
       title: manager.getSessionName() ?? null,
-      messages,
-      total,
-      truncated: offset > 0 || offset + messages.length < total,
+      ...pageTranscript(all, options),
+      // Pi's own JSONL is the complete durable history.
+      historyTruncated: false,
     };
   }
 
@@ -7604,7 +7729,7 @@ export class SessionHost {
       conversationId,
     };
     const maintenanceAdmission = this.maintenance?.admitOwnerAction(maintenanceIdentity);
-    const finishMaintenance = this.maintenanceFinisher(
+    const finishMaintenance = this.settledTurnFinisher(
       maintenanceIdentity,
       maintenanceAdmission,
     );
@@ -7985,6 +8110,7 @@ export class SessionHost {
       const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
       const maintenancePath = maintenanceStatePath(paths.sessionDir, runtime, id);
+      const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
       const projectSnapshots = runtime === "pi"
         ? await piProjectSnapshotPaths(paths.sessionDir, id)
         : [];
@@ -8005,6 +8131,7 @@ export class SessionHost {
               artifact: "project-snapshot" as const,
               path,
             })),
+            { artifact: "presentation-history", path: presentationPath },
           ]
         : [
             { artifact: "claude-sidecar", path: claudePath },
@@ -8014,6 +8141,7 @@ export class SessionHost {
             })),
             { artifact: "project-binding", path: bindingPath },
             { artifact: "maintenance-state", path: maintenancePath },
+            { artifact: "presentation-history", path: presentationPath },
           ];
       const artifacts = [...deleteRecord.artifacts];
       const recorded = new Set(artifacts.map((entry) =>

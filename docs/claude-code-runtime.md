@@ -140,15 +140,16 @@ chat-redirect behavior do not depend on which principal runtime is active.
 | Skills, rules, prompts | Admitted declarative snapshot | The same admitted bytes appended to Claude's native prompt |
 | MCP | Ghost-home and trusted-project rows through Ghost's MCP manager | Credential-free trusted-project rows only |
 | Ghost-home executable hook extensions | Pi-native extension factories | Not admitted |
-| Transcript, branches, commands, job API | Daemon-visible Pi session state | Native opaque Claude session state; these daemon APIs are unsupported |
+| Transcript, branches, commands, job API | Daemon-visible Pi session state | Native opaque Claude session state; the transcript API serves a thin settled-turn presentation journal, the rest stays unsupported |
 
 The last three differences are boundaries, not substitute tools. MCP is a
 real remaining capability gap: the current Claude snapshot cannot persist
 secret-bearing rows and the SDK configuration cannot express Ghost's
 per-server cwd. Ghost-home executable hook extensions are coupled to Pi's
-extension API. Transcript, branching, command expansion, and background-task
-state are runtime mechanics that Ghost does not emulate on top of Claude's
-opaque session.
+extension API. Branching, command expansion, and background-task state are
+runtime mechanics that Ghost does not emulate on top of Claude's opaque
+session; the presentation journal is a daemon-owned display record, not an
+emulation of Claude's transcript.
 
 Filesystem setting sources, SDK plugin/skill discovery, and ambient MCP are
 empty. Ghost supplies only the explicit machine/ghost/project declarative
@@ -193,8 +194,14 @@ TTL, explicit close, project transition, ghost move, runtime change, or daemon
 shutdown. A failed turn is retired unless its result was fully settled.
 
 Ghost stores an opaque Claude session id and resume fence under the ghost
-home. The actual Claude transcript remains in Claude Code's own storage, so the
-Ghost transcript endpoint and Pi branching are not available for this runtime.
+home. The actual Claude transcript remains in Claude Code's own storage; Pi
+branching stays unavailable for this runtime. The Ghost transcript endpoint,
+however, serves a presentation journal the daemon appends after each settled
+turn: the owner prompt and the final assistant text, without tool activity or
+intermediate messages. A conversation that predates the journal reads as empty
+with `historyTruncated: true`, which the HUD renders as an
+earlier-history-unavailable notice; a failed journal write never fails the
+turn and surfaces the same way.
 Project binding is fixed after Claude's first published message; changing it
 requires a new conversation. Background jobs exposed by Claude's native harness
 remain native; Ghost's own process-local job API applies to Pi sessions.

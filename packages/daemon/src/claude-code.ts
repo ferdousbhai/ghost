@@ -3005,6 +3005,7 @@ export class ClaudeCodeRuntime {
             resumeId: completed.session_id,
           },
           sourceRevision: { kind: "claude-owner-turn", value: ownerTurnId },
+          sourceOrdinal: ownerTurnId,
           cwd: runtimeCwd,
           ownerPrompt: options.prompt,
           assistantText: resultText,
@@ -3101,6 +3102,20 @@ export class ClaudeCodeRuntime {
       this.armSessionIdle(key);
     }
     if (terminalEmissionFailure) throw terminalEmissionFailure.cause;
+  }
+
+  /**
+   * Point-read one conversation's resume sidecar (recovering a settling write
+   * exactly as a listing would), or null when the conversation does not exist.
+   */
+  async readSession(ghost: Ghost, conversationId: string): Promise<ClaudeSessionMetadata | null> {
+    requireRawConversationId(conversationId);
+    const { sessionDir } = ghostPaths(ghost.dir);
+    const loaded = await readMetadata(sessionDir, conversationId);
+    if (!loaded) return null;
+    const metadata: ClaudeSessionMetadata = { ...loaded };
+    delete (metadata as LoadedClaudeSessionMetadata).resumeBlocked;
+    return metadata;
   }
 
   async listSessions(ghost: Ghost): Promise<ClaudeSessionMetadata[]> {

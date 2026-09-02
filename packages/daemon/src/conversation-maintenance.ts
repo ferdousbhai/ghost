@@ -92,6 +92,8 @@ export interface MaintenanceOwnerActivity {
 export interface SettledMaintenanceTurn {
   source: MaintenanceSourceIdentity;
   sourceRevision: MaintenanceSourceRevision;
+  /** 1-based position of this owner turn in its native conversation. */
+  sourceOrdinal: number;
   cwd: string;
   ownerPrompt: string;
   assistantText: string;
@@ -266,7 +268,7 @@ function validSourceRevision(value: unknown): value is MaintenanceSourceRevision
     : value.kind === "claude-owner-turn" && Number.isSafeInteger(value.value) && (value.value as number) >= 1;
 }
 
-function validRuntimeSourceRevision(
+export function validRuntimeSourceRevision(
   runtime: MaintenanceRuntime,
   value: unknown,
 ): value is MaintenanceSourceRevision {
@@ -522,7 +524,8 @@ async function markerMayExist(path: string): Promise<boolean> {
   }
 }
 
-function sourceKey(source: MaintenanceSourceRevision): string {
+/** One string per revision identity, for equality and dedup across stores. */
+export function sourceKey(source: MaintenanceSourceRevision): string {
   return `${source.kind}:${String(source.value)}`;
 }
 
@@ -1041,7 +1044,8 @@ export class ConversationMaintenance {
           return;
         }
         await this.homeOperations.withLease(identity.ghostName, async () => {
-          if (!validRuntimeSourceRevision(identity.runtime, turn.sourceRevision)) {
+          if (!validRuntimeSourceRevision(identity.runtime, turn.sourceRevision)
+            || !Number.isSafeInteger(turn.sourceOrdinal) || turn.sourceOrdinal < 1) {
             throw invalidState(this.path(identity));
           }
           const owner = truncate(turn.ownerPrompt);

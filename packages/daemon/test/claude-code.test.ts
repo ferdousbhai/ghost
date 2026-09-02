@@ -55,6 +55,10 @@ import type {
   SettledMaintenanceTurn,
 } from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
+import {
+  PresentationHistoryStore,
+  presentationHistoryPath,
+} from "../src/presentation-history.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
@@ -3940,7 +3944,7 @@ fi
     expect({ resolutions, authReads }).toEqual({ resolutions: 2, authReads: 2 });
   });
 
-  it("deletes a Claude Code resume sidecar", async () => {
+  it("deletes a Claude Code resume sidecar and its presentation journal", async () => {
     const { paths } = setupClaudeHost();
     await host!.runTurn("casper", {
       sessionId: "conversation-delete",
@@ -3949,16 +3953,108 @@ fi
     });
     expect(await host!.listSessions("casper")).toHaveLength(1);
     const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-delete");
+    const journal = presentationHistoryPath(paths.sessionDir, "claude-code", "conversation-delete");
+    expect(existsSync(journal)).toBe(true);
     writeFileSync(`${sidecar}.started`, `${JSON.stringify({
       version: 1,
       runtime: "claude-code",
       conversationId: "conversation-delete",
     })}\n`, { mode: 0o600 });
 
-    await host!.deleteSession("casper", "conversation-delete", "claude-code");
+    const trashed = await host!.deleteSession("casper", "conversation-delete", "claude-code");
+    const journalArtifact = trashed.artifacts.find((artifact) =>
+      artifact.artifact === "presentation-history"
+    );
+    expect(journalArtifact).toMatchObject({ source: journal });
+    expect(existsSync((journalArtifact as { trash: string }).trash)).toBe(true);
     expect(await host!.listSessions("casper")).toEqual([]);
     expect(existsSync(sidecar)).toBe(false);
     expect(existsSync(`${sidecar}.started`)).toBe(false);
+    expect(existsSync(journal)).toBe(false);
+  });
+
+  it("reads a pre-journal Claude sidecar as empty history with the prefix marked", async () => {
+    const { paths } = setupClaudeHost();
+    mkdirSync(paths.sessionDir, { recursive: true });
+    writeFileSync(
+      claudeSessionMetadataPath(paths.sessionDir, "legacy-claude"),
+      storedClaudeV1("legacy-claude"),
+      { mode: 0o600 },
+    );
+    await expect(host!.readTranscript("casper", "legacy-claude", {}, "claude-code"))
+      .resolves.toMatchObject({
+        id: "claude-code:legacy-claude",
+        runtime: "claude-code",
+        messages: [],
+        total: 0,
+        truncated: false,
+        historyTruncated: true,
+      });
+  });
+
+  it("never publishes a conversation from a presentation journal alone", async () => {
+    const { paths } = setupClaudeHost();
+    mkdirSync(paths.sessionDir, { recursive: true });
+    const store = new PresentationHistoryStore();
+    await store.recordSettledTurn(
+      paths.sessionDir,
+      { runtime: "claude-code", conversationId: "journal-only" },
+      {
+        source: {
+          runtime: "claude-code",
+          createdAt: "2026-01-01T00:00:00.000Z",
+          resumeId: "sdk-journal-only",
+        },
+        sourceRevision: { kind: "claude-owner-turn", value: 1 },
+        sourceOrdinal: 1,
+        cwd: temp!.ownerHome,
+        ownerPrompt: "orphaned",
+        assistantText: "orphaned answer",
+        outcome: "completed",
+      },
+    );
+    expect(await host!.listSessions("casper")).toEqual([]);
+    await expect(host!.readTranscript("casper", "journal-only", {}, "claude-code"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
+  });
+
+  it("fails open on a journal write failure and heals into an honest gap", async () => {
+    const logger = recordingLogger("warn");
+    const { paths } = setupClaudeHost({ logger });
+    mkdirSync(paths.sessionDir, { recursive: true });
+    const journal = presentationHistoryPath(paths.sessionDir, "claude-code", "journal-broken");
+    writeFileSync(journal, "not json\n", { mode: 0o600 });
+
+    const events: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "journal-broken",
+      prompt: "first",
+      emit: (event) => events.push(event),
+    });
+    expect(events.at(-1)?.type).toBe("done");
+    expect(logger.records).toContainEqual(expect.objectContaining({
+      level: "warn",
+      message: "conversation presentation history was not recorded",
+    }));
+    expect(readFileSync(journal, "utf8")).toBe("not json\n");
+
+    // Once the broken file is out of the way, the next settled turn journals
+    // with the missed ordinal marked as an omitted prefix.
+    rmSync(journal);
+    const retry: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "journal-broken",
+      prompt: "second",
+      emit: (event) => retry.push(event),
+    });
+    expect(retry.at(-1)?.type).toBe("done");
+    expect(JSON.parse(readFileSync(journal, "utf8"))).toMatchObject({
+      historyPrefixOmitted: true,
+      lastSourceOrdinal: 2,
+      turns: [{ sourceOrdinal: 2, ownerText: "second" }],
+    });
+    await expect(host!.readTranscript("casper", "journal-broken", {}, "claude-code"))
+      .resolves.toMatchObject({ total: 2, historyTruncated: true });
   });
 
   it("publishes a first-turn settling candidate before listing the session", async () => {
@@ -4319,10 +4415,45 @@ fi
         resumeId: metadata.sessionId,
       },
       sourceRevision: { kind: "claude-owner-turn", value: 1 },
+      sourceOrdinal: 1,
       cwd: temp!.ownerHome,
       ownerPrompt: "Keep the source exact.",
       assistantText: "Hello from the plan.",
       outcome: "completed",
+    });
+    // The presentation journal is written before maintenance settles, so a
+    // settled Claude turn is already readable from the transcript API.
+    expect(JSON.parse(readFileSync(presentationHistoryPath(
+      paths.sessionDir,
+      "claude-code",
+      "conversation-maintenance-source",
+    ), "utf8"))).toMatchObject({
+      historyPrefixOmitted: false,
+      lastSourceOrdinal: 1,
+      turns: [{ ownerText: "Keep the source exact.", assistantText: "Hello from the plan." }],
+    });
+    await expect(host!.readTranscript(
+      "casper",
+      "conversation-maintenance-source",
+      {},
+      "claude-code",
+    )).resolves.toMatchObject({
+      id: "claude-code:conversation-maintenance-source",
+      runtime: "claude-code",
+      historyTruncated: false,
+      total: 2,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Keep the source exact." }],
+          entryId: "presentation:1:owner",
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Hello from the plan." }],
+          entryId: "presentation:1:assistant",
+        },
+      ],
     });
     expect(releases).toBe(0);
     expect(events.at(-1)?.type).not.toBe("done");
@@ -5200,6 +5331,10 @@ fi
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
     expect(existsSync(
       claudeSessionMetadataPath(paths.sessionDir, "conversation-wedged"),
+    )).toBe(false);
+    // An aborted turn never settled, so nothing may enter the journal.
+    expect(existsSync(
+      presentationHistoryPath(paths.sessionDir, "claude-code", "conversation-wedged"),
     )).toBe(false);
   });
 

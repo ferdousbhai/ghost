@@ -121,6 +121,15 @@ storage and Ghost keeps only its resume metadata. Pins, read timestamps,
 project bindings/snapshots, tool-call cwd records, idle-maintenance journals,
 and crash markers are bounded sidecars under `sessions/`.
 
+Each Claude conversation also gets a bounded presentation-journal sidecar
+(`*.claude-code.presentation.json`): one owner prompt plus final assistant text
+per settled turn, so the HUD can render the conversation. It is display state,
+never runtime resume state — a journal alone never publishes a conversation id,
+a journal-write failure only logs and marks the missed prefix unavailable on
+the next write, and the sidecar moves to Trash with its conversation. Pi
+conversations write no journal; their JSONL is already the durable history.
+See [`presentation-history.ts`](packages/daemon/src/presentation-history.ts).
+
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
 to recoverable Trash. Fork and delete use durable markers so an unpublished or
@@ -214,8 +223,9 @@ runtime supplies the implementation: owner questions, image understanding,
 browser/screen/desktop control, and supervised delegation are available on
 both principal paths. Runtime mechanics remain native. Pi exposes its
 transcript, branches, commands, steering, and `GhostJob` state through daemon
-APIs; Claude owns the corresponding session and background-task state inside
-its opaque warm query.
+APIs; Claude serves a thin settled-turn presentation transcript and otherwise
+owns the corresponding session and background-task state inside its opaque
+warm query.
 
 Two deliberate capability gaps remain. Pi's MCP manager admits ghost-home MCP
 plus trusted-project MCP, including secret resolution and per-server cwd;
@@ -322,7 +332,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/recap` | Non-persisted bounded Pi recap; failure returns `recap:null`. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
-| `GET /sessions/:id/transcript` | Paged renderable Pi history; Claude history stays native. |
+| `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal, with `historyTruncated` marking an unavailable prefix. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue Pi steering or follow-up text. |
 | `GET\|POST /sessions/:id/tasks` | List bounded task projections or start one trusted-project native worker. |
