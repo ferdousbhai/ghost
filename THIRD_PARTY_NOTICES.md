@@ -57,6 +57,11 @@ from it under the MIT license: the shape of the `ask` tool
 (`packages/daemon/src/mcp-config.ts`), taken from Oh My Pi commit
 `160ed439ac0df594347e7d7018b813a7ffdb5e81`.
 
+Portions of `packages/daemon/src/advisor-*.ts`, `watchdog-files.ts`, and
+`prompts/advisor-system.md` are adapted from oh-my-pi
+([github.com/can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)),
+© Stencil Labs, Inc., MIT.
+
 MIT License
 
 Copyright (c) 2025 Mario Zechner
