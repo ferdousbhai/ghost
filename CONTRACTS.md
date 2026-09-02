@@ -269,7 +269,9 @@ Obsidian during ordinary runtime work. The built-in anti-slop review runs at
 `session_stop` on both runtimes over only the final assistant text: per ghost,
 `settings.yml` selects `antiSlop.mode` (`off` default, `advisory`, `strict`)
 and `antiSlop.disabledRules`; strict mode is bounded to one visible rewrite
-continuation and never replaces text already shown.
+continuation and never replaces text already shown. When enabled it also adds
+a session-static style-contract prompt section on both runtimes and one
+non-durable next-turn nudge naming the previous reply's rule ids.
 
 ## Daemon HTTP API
 

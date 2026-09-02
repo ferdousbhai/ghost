@@ -92,6 +92,8 @@ import {
   type OwnedCommandResult,
 } from "./owned-process.js";
 import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
+import { antiSlopPromptSection } from "./anti-slop-hook.js";
+import { loadGhostSettings } from "./ghost-settings.js";
 import {
   resolveGhostExtensions,
   type GhostExtensionOptions,
@@ -1462,6 +1464,8 @@ async function buildPersona(
     home.readCharacter(),
     home.listMemory(),
   ]);
+  // Session-static like the rest of the prompt; the stop hook reads live.
+  const antiSlopSection = antiSlopPromptSection(loadGhostSettings(homeDir));
   return buildGhostSystemPrompt({
     ghostName,
     character,
@@ -1473,6 +1477,7 @@ async function buildPersona(
       SHARED_OBSIDIAN_POLICY,
       ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
+      ...(antiSlopSection ? [antiSlopSection] : []),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
         ? [FIRST_MEETING_SECTION]

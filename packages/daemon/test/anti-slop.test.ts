@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   analyzeSlop,
   analyzeSlopProse,
+  renderAntiSlopPromptSection,
   SLOP_RULE_IDS,
   slopRuleInstruction,
   type SlopFinding,
@@ -96,6 +97,27 @@ describe("analyzeSlop", () => {
     const elapsed = performance.now() - startedAt;
     expect(findings.length).toBeGreaterThan(0);
     expect(elapsed).toBeLessThan(1_000);
+  });
+});
+
+describe("renderAntiSlopPromptSection", () => {
+  it("digests every rule id into one bounded section", () => {
+    const section = renderAntiSlopPromptSection();
+    expect(section).toContain("## Style contract");
+    for (const ruleId of SLOP_RULE_IDS) expect(section).toContain(ruleId);
+    expect(section.length).toBeLessThan(2_000);
+  });
+
+  it("drops disabled rule ids and whole groups", () => {
+    const section = renderAntiSlopPromptSection(["chatbot-phrase", "em-dash-density"]);
+    expect(section).not.toContain("chatbot-phrase");
+    expect(section).not.toContain("canned assistant phrasing");
+    expect(section).not.toContain("em-dash-density");
+    expect(section).toContain("hedging-ratio");
+  });
+
+  it("renders nothing when every rule is disabled", () => {
+    expect(renderAntiSlopPromptSection(SLOP_RULE_IDS)).toBe("");
   });
 });
 

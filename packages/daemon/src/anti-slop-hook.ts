@@ -6,15 +6,43 @@
  * `antiSlop.disabledRules`. Strict mode requests at most one visible rewrite
  * continuation; every failure fails open.
  */
-import { analyzeSlopProse, type SlopFinding } from "./anti-slop.js";
-import { loadGhostSettings } from "./ghost-settings.js";
-import type { GhostHookFactory, GhostSessionStopEvent, GhostSessionStopResult } from "./hooks.js";
+import { analyzeSlopProse, renderAntiSlopPromptSection, type SlopFinding } from "./anti-slop.js";
+import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
+import type {
+  GhostBeforePromptResult,
+  GhostHookEvent,
+  GhostHookFactory,
+  GhostSessionStopEvent,
+  GhostSessionStopResult,
+} from "./hooks.js";
 import { silentLogger, type Logger } from "./log.js";
 
 export const ANTI_SLOP_SETTINGS_KEY = "anti_slop";
 
 const MAX_EXCERPT_CHARS = 80;
 const MAX_CONTEXT_CHARS = 2000;
+const MAX_FEEDBACK_RECORDS = 64;
+
+export type AntiSlopMode = "off" | "advisory" | "strict";
+
+export function antiSlopMode(settings: GhostSettings): AntiSlopMode {
+  const mode = settings.getString("antiSlop.mode");
+  return mode === "advisory" || mode === "strict" ? mode : "off";
+}
+
+/**
+ * The style-contract section for a session's system prompt, or undefined when
+ * this ghost's anti-slop mode is off. Session prompts are assembled once at
+ * open, so the section follows a settings.yml edit at the next session while
+ * the stop-time review follows it at the next reply.
+ */
+export function antiSlopPromptSection(settings: GhostSettings): string | undefined {
+  if (antiSlopMode(settings) === "off") return undefined;
+  const section = renderAntiSlopPromptSection(
+    settings.getStringList("antiSlop.disabledRules") ?? [],
+  );
+  return section === "" ? undefined : section;
+}
 
 /** The joined `text` content blocks of an assistant message; nothing else. */
 function assistantText(message: unknown): string {
@@ -66,19 +94,73 @@ function continuationContext(findings: readonly SlopFinding[], text: string): st
   return [header, ...lines, trailer].join("\n");
 }
 
-function review(event: GhostSessionStopEvent, logger: Logger): GhostSessionStopResult {
+/**
+ * Rule-id counts from each conversation's last reviewed reply, keyed by ghost
+ * and conversation. Bounded, in-process, and free of reply text; a daemon
+ * restart forgets it, which only skips one nudge.
+ */
+class FeedbackRecords {
+  private readonly records = new Map<string, Record<string, number>>();
+
+  private key(event: GhostHookEvent): string {
+    return `${event.ghost_name}\u0000${event.conversation_id}`;
+  }
+
+  set(event: GhostHookEvent, counts: Record<string, number>): void {
+    const key = this.key(event);
+    this.records.delete(key);
+    this.records.set(key, counts);
+    if (this.records.size > MAX_FEEDBACK_RECORDS) {
+      const oldest = this.records.keys().next().value;
+      if (oldest !== undefined) this.records.delete(oldest);
+    }
+  }
+
+  clear(event: GhostHookEvent): void {
+    this.records.delete(this.key(event));
+  }
+
+  /** Consume the record: each reviewed reply produces at most one nudge. */
+  take(event: GhostHookEvent): Record<string, number> | undefined {
+    const key = this.key(event);
+    const counts = this.records.get(key);
+    this.records.delete(key);
+    return counts;
+  }
+}
+
+function nudge(counts: Record<string, number>): GhostBeforePromptResult {
+  const list = Object.entries(counts)
+    .map(([ruleId, count]) => (count > 1 ? `${ruleId} ×${count}` : ruleId))
+    .join(", ");
+  return {
+    additionalContext: "Ghost's anti-slop review flagged your previous reply: "
+      + `${list}. Avoid these patterns in this reply.`,
+  };
+}
+
+function review(
+  event: GhostSessionStopEvent,
+  logger: Logger,
+  feedback: FeedbackRecords,
+): GhostSessionStopResult {
   const log = logger.child({ ghost: event.ghost_name, conversation: event.conversation_id });
   try {
     const settings = loadGhostSettings(event.ghost_home);
-    const rawMode = settings.getString("antiSlop.mode");
-    const mode = rawMode === "advisory" || rawMode === "strict" ? rawMode : "off";
+    const mode = antiSlopMode(settings);
     if (mode === "off") return {};
     const text = assistantText(event.last_assistant_message);
     if (!text.trim()) return {};
     const findings = analyzeSlopProse(text, {
       disabledRules: settings.getStringList("antiSlop.disabledRules") ?? [],
     });
-    if (findings.length === 0) return {};
+    // The last pass of the turn owns the record, so a clean rewrite un-nudges.
+    if (findings.length === 0) {
+      feedback.clear(event);
+      return {};
+    }
+    const counts = ruleCounts(findings);
+    feedback.set(event, counts);
     const major = findings.filter((f) => f.severity === "major").length;
     // One rewrite at most: a continuation pass is accepted whatever it says.
     const rewrite = mode === "strict" && !event.stop_hook_active && major > 0;
@@ -88,7 +170,7 @@ function review(event: GhostSessionStopEvent, logger: Logger): GhostSessionStopR
       rewrite,
       findings: findings.length,
       major,
-      rules: ruleCounts(findings),
+      rules: counts,
     });
     return rewrite
       ? { continue: true, additionalContext: continuationContext(findings, text) }
@@ -103,8 +185,16 @@ function review(event: GhostSessionStopEvent, logger: Logger): GhostSessionStopR
 
 export function createAntiSlopHook(options: { logger?: Logger } = {}): GhostHookFactory {
   const logger = options.logger ?? silentLogger;
+  const feedback = new FeedbackRecords();
   return (api) => {
-    api.on("session_stop", (event) => review(event, logger), {
+    api.on("before_prompt", (event) => {
+      const counts = feedback.take(event);
+      return counts && nudge(counts);
+    }, {
+      name: "Anti-slop feedback",
+      description: "Reminds the ghost once which anti-slop rules its previous reply broke.",
+    });
+    api.on("session_stop", (event) => review(event, logger, feedback), {
       name: "Anti-slop review",
       description: "Deterministically lints the final assistant reply; in strict mode it may request one visible rewrite continuation.",
       settingsKey: ANTI_SLOP_SETTINGS_KEY,

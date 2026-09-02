@@ -299,6 +299,77 @@ const rules: readonly Rule[] = [
   },
 ];
 
+/**
+ * The prompt-side digest of the rule catalog: each group compresses related
+ * rules into one line of style contract, keeping the rule ids so a strict
+ * continuation can reference them. Every id in `SLOP_RULE_IDS` appears in
+ * exactly one group.
+ */
+const PROMPT_GROUPS: ReadonlyArray<{ ruleIds: readonly string[]; contract: string }> = [
+  {
+    ruleIds: ["chatbot-phrase"],
+    contract: "No canned assistant phrasing — no \"I'd be happy to\", \"great question\", "
+      + "\"feel free to\", or closing offers of further help.",
+  },
+  {
+    ruleIds: ["puffery", "landscape-cliche", "ai-vocabulary"],
+    contract: "State facts without hype or stock AI vocabulary: no \"testament\", \"pivotal\", "
+      + "\"delve\", \"leverage\", \"seamless\", or \"navigating the evolving landscape\".",
+  },
+  {
+    ruleIds: ["vague-attribution"],
+    contract: "Name sources; never \"experts believe\" or \"studies show\".",
+  },
+  {
+    ruleIds: ["throat-clearing", "faux-insight", "rhetorical-setup", "colon-reveal", "dramatic-fragment"],
+    contract: "Open with the substantive point — no \"here's the thing\", \"what if I told you\", "
+      + "staged colon reveals, or fragment drama.",
+  },
+  {
+    ruleIds: ["essay-connective", "recap-ending", "filler-phrase", "inflated-verb"],
+    contract: "Cut essay filler: no \"moreover\"/\"furthermore\", no closing recap, "
+      + "\"to\" over \"in order to\", plain verbs over \"serves as\".",
+  },
+  {
+    ruleIds: ["binary-contrast"],
+    contract: "Make claims directly, not as \"not just X, but Y\" contrasts.",
+  },
+  {
+    ruleIds: ["ing-explainer"],
+    contract: "No trailing \"-ing\" clauses pretending to explain significance.",
+  },
+  {
+    ruleIds: ["em-dash-density", "hedging-ratio", "triad-adjectives", "uniform-sentences"],
+    contract: "Vary sentence rhythm, and go easy on em dashes, hedges, and adjective triads.",
+  },
+  {
+    ruleIds: ["emoji-bullets"],
+    contract: "Use plain list bullets, never emoji bullets.",
+  },
+];
+
+/**
+ * A bounded system-prompt section asking the model to write clean the first
+ * time. Groups whose rules are all disabled are dropped; an all-disabled
+ * configuration renders the empty string.
+ */
+export function renderAntiSlopPromptSection(disabledRules: Iterable<string> = []): string {
+  const disabled = new Set(disabledRules);
+  const lines: string[] = [];
+  for (const { ruleIds, contract } of PROMPT_GROUPS) {
+    const ids = ruleIds.filter((id) => !disabled.has(id));
+    if (ids.length === 0) continue;
+    lines.push(`- ${contract} (${ids.join(", ")})`);
+  }
+  if (lines.length === 0) return "";
+  return [
+    "## Style contract",
+    "Write like a person, not a press release. An automatic reviewer lints your replies "
+      + "against these rules (rule ids in parentheses) and may ask for a rewrite:",
+    ...lines,
+  ].join("\n");
+}
+
 export interface AnalyzeSlopOptions {
   /** Rule ids whose findings are dropped; unknown ids are ignored. */
   disabledRules?: Iterable<string>;

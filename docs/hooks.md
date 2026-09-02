@@ -261,9 +261,23 @@ and other content parts never reach the linter, and fenced code blocks inside
 the text are skipped. Streamed honesty: the review context itself is injected
 hidden like any continuation, but the rewritten reply streams as a visible
 continuation of the same turn — text already shown to the owner is never
-replaced. Settings or engine failures log once and fail open. The `settings.yml`
-file is read at each stop boundary, so mode changes apply to the next reply
-without a restart.
+replaced. Settings or engine failures log once and fail open.
+
+The review also prevents slop before it streams. When the mode is `advisory`
+or `strict` at session open, both runtimes append a bounded style-contract
+section to the session system prompt — a digest of the rule catalog, minus
+`disabledRules`, keeping the rule ids a strict continuation references. That
+section is session-static like the rest of the prompt: a `settings.yml` edit
+reaches the prompt at the next session open, while the stop-time review reads
+the file at each stop boundary and follows the edit at the next reply.
+
+Each reviewed reply with findings also arms one next-turn nudge: the hook's
+`before_prompt` handler adds a single line of rule ids and counts from the
+previous reply ("chatbot-phrase ×2, hedging-ratio") and clears the record, so
+each offending turn produces at most one nudge. A clean final pass clears any
+pending nudge. The state is in-process rule-id counts only — never reply text
+— bounded to 64 conversations, and non-durable: a daemon restart forgets it,
+which merely skips one nudge.
 
 ## `conversation_idle` protocol
 
