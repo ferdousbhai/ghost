@@ -47,7 +47,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   agents/<name>.md
   commands/<name>.md
   rules/  prompts/  hooks/
-  AGENTS.md  CLAUDE.md
+  AGENTS.md  CLAUDE.md  WATCHDOG.md
   settings.yml
   models.json
   mcp.json
