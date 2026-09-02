@@ -171,7 +171,10 @@ runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
 automatic credential discovery, themes, prompt templates, executable project
 code, and native task tool do not enter the session. Ghost keeps Pi's native
-file, search, Bash, compaction, steering/follow-up, and branch behavior, and
+file, search, Bash, compaction, steering/follow-up, and branch behavior —
+supplying its own summary instructions and pinning Pi's raw retained-tail
+target to 500 tokens (Pi may keep more to respect message and tool-call
+boundaries; Claude Code's native compaction is unaffected) — and
 adds `ask`, supervised native-worker delegation, background jobs, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their

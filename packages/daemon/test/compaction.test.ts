@@ -9,6 +9,7 @@ describe("nativeCompactionSettings", () => {
     expect(nativeCompactionSettings({ enabled: true }, 100_000)).toEqual({
       enabled: true,
       reserveTokens: 20_000,
+      keepRecentTokens: 500,
     });
   });
 
@@ -16,6 +17,7 @@ describe("nativeCompactionSettings", () => {
     expect(nativeCompactionSettings({ enabled: true, thresholdFraction: 0.625 }, 80_000)).toEqual({
       enabled: true,
       reserveTokens: 30_000,
+      keepRecentTokens: 500,
     });
   });
 
@@ -24,12 +26,22 @@ describe("nativeCompactionSettings", () => {
       enabled: true,
       thresholdTokens: 50_000,
       thresholdFraction: 0.5,
-    }, 200_000)).toEqual({ enabled: true, reserveTokens: 150_000 });
+    }, 200_000)).toEqual({
+      enabled: true,
+      reserveTokens: 150_000,
+      keepRecentTokens: 500,
+    });
   });
 
-  it("keeps only the master switch when the window is unknown or compaction is off", () => {
-    expect(nativeCompactionSettings({ enabled: true }, undefined)).toEqual({ enabled: true });
-    expect(nativeCompactionSettings({ enabled: false }, 100_000)).toEqual({ enabled: false });
+  it("pins pi's retained tail even without a threshold projection", () => {
+    expect(nativeCompactionSettings({ enabled: true }, undefined)).toEqual({
+      enabled: true,
+      keepRecentTokens: 500,
+    });
+    expect(nativeCompactionSettings({ enabled: false }, 100_000)).toEqual({
+      enabled: false,
+      keepRecentTokens: 500,
+    });
   });
 });
 

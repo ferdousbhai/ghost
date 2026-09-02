@@ -19,6 +19,7 @@ Cover, under clear headings:
 5. Key facts and references — specific names, paths, identifiers, values, and other concrete details referenced in the conversation that a continuation would need.`;
 
 export const DEFAULT_THRESHOLD_FRACTION = 0.8;
+const GHOST_COMPACTION_KEEP_RECENT_TOKENS = 500;
 
 export interface CompactionConfig {
   enabled: boolean;
@@ -38,10 +39,19 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = { enabled: true };
 export function nativeCompactionSettings(
   config: CompactionConfig,
   contextWindow: number | undefined,
-): { enabled: boolean; reserveTokens?: number } {
-  if (!config.enabled || !contextWindow) return { enabled: config.enabled };
+): { enabled: boolean; reserveTokens?: number; keepRecentTokens: number } {
+  if (!config.enabled || !contextWindow) {
+    return {
+      enabled: config.enabled,
+      keepRecentTokens: GHOST_COMPACTION_KEEP_RECENT_TOKENS,
+    };
+  }
   const threshold = config.thresholdTokens !== undefined
     ? Math.min(config.thresholdTokens, contextWindow)
     : contextWindow * (config.thresholdFraction ?? DEFAULT_THRESHOLD_FRACTION);
-  return { enabled: true, reserveTokens: Math.max(1, Math.round(contextWindow - threshold)) };
+  return {
+    enabled: true,
+    reserveTokens: Math.max(1, Math.round(contextWindow - threshold)),
+    keepRecentTokens: GHOST_COMPACTION_KEEP_RECENT_TOKENS,
+  };
 }
