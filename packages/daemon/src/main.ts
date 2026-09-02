@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
+import { createAntiSlopHook } from "./anti-slop-hook.js";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
@@ -504,6 +505,7 @@ async function serveDaemon(
     ]),
   });
   await host.restoreTaskServices();
+  await hooks.register(createAntiSlopHook({ logger }));
   const maintenance = new ConversationMaintenance({
     registry,
     homeOperations,

@@ -65,7 +65,8 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
 replaces it; the shell's Hooks pane edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
-needs a restart. Groups and handlers run in file order.
+needs a restart. Groups and handlers run in file order, after any built-in
+hooks Ghost registers in code for the same event.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds) must be greater than 0 and at most 600.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
@@ -82,9 +83,11 @@ otherwise Ghost derives a stable identity from the admitted command fields.
 
 An optional top-level `builtin` object tunes hooks that Ghost registers in
 code. Each key names one built-in hook — the `settingsKey` on its status row
-— and holds `{ "idleSeconds": <integer 1..86400> }`. Today the one key is
-`memory_upkeep`, the idle interval before memory maintenance runs (default
-60). The section is validated with the rest of the file and applies at the
+— and holds `{ "idleSeconds": <integer 1..86400> }`. `memory_upkeep` tunes
+the idle interval before memory maintenance runs (default 60). `anti_slop`
+names the built-in anti-slop review but takes no `hooks.json` tuning today:
+its per-ghost mode and rule list live in the ghost's own `settings.yml` (see
+below). The section is validated with the rest of the file and applies at the
 next daemon start, not live: a built-in idle registration's identity includes
 its interval and persisted retry state refers to that identity.
 
@@ -232,6 +235,35 @@ resolves that home's `smol_model` lane (including Ghost's normal cheapest-usable
 fallback) and performs one raw completion. It does not create a session, expose
 tools, name a concrete provider model, or override the model's default
 reasoning level.
+
+Ghost's built-in anti-slop review is a `session_stop` hook (`settingsKey:
+anti_slop`) that deterministically lints the final assistant reply with the
+engine ported from `ferdousbhai/slop-detector`. It is configured per ghost in
+the ghost home's `settings.yml`, not in `hooks.json`:
+
+```yaml
+antiSlop:
+  mode: strict          # off (default) | advisory | strict
+  disabledRules:        # optional rule ids to skip
+    - em-dash-density
+```
+
+`off` (also absent or unknown) does nothing. `advisory` logs one bounded line
+of rule ids and counts — never reply text — and accepts the pass. `strict`
+with at least one major finding returns one continuation whose context lists
+the findings (rule id, message, fix instruction, short excerpt, capped near
+2,000 characters) and instructs the model to rewrite the reply or keep it and
+state an overrule reason in one sentence. Minor-only findings in strict mode
+log like advisory and accept. The rewrite is bounded to one pass:
+`stop_hook_active: true` accepts unconditionally. Only the `text` content
+blocks of the final assistant message are analyzed — tool payloads, thinking,
+and other content parts never reach the linter, and fenced code blocks inside
+the text are skipped. Streamed honesty: the review context itself is injected
+hidden like any continuation, but the rewritten reply streams as a visible
+continuation of the same turn — text already shown to the owner is never
+replaced. Settings or engine failures log once and fail open. The `settings.yml`
+file is read at each stop boundary, so mode changes apply to the next reply
+without a restart.
 
 ## `conversation_idle` protocol
 

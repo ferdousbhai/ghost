@@ -265,7 +265,11 @@ Awaited harness hooks are `before_prompt`, `session_stop`, and
 `conversation_idle`. Their JSON protocol, failure behavior, and settings are
 defined in [`docs/hooks.md`](docs/hooks.md). Built-in idle maintenance may write
 or consolidate only private memory; shared knowledge and task maintenance uses
-Obsidian during ordinary runtime work.
+Obsidian during ordinary runtime work. The built-in anti-slop review runs at
+`session_stop` on both runtimes over only the final assistant text: per ghost,
+`settings.yml` selects `antiSlop.mode` (`off` default, `advisory`, `strict`)
+and `antiSlop.disabledRules`; strict mode is bounded to one visible rewrite
+continuation and never replaces text already shown.
 
 ## Daemon HTTP API
 
