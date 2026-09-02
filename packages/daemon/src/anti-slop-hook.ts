@@ -8,9 +8,9 @@
  */
 import { analyzeSlopProse, renderAntiSlopPromptSection, type SlopFinding } from "./anti-slop.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
+import { FeedbackRecords } from "./hook-feedback.js";
 import type {
   GhostBeforePromptResult,
-  GhostHookEvent,
   GhostHookFactory,
   GhostSessionStopEvent,
   GhostSessionStopResult,
@@ -21,7 +21,6 @@ export const ANTI_SLOP_SETTINGS_KEY = "anti_slop";
 
 const MAX_EXCERPT_CHARS = 80;
 const MAX_CONTEXT_CHARS = 2000;
-const MAX_FEEDBACK_RECORDS = 64;
 
 export type AntiSlopMode = "off" | "advisory" | "strict";
 
@@ -94,41 +93,6 @@ function continuationContext(findings: readonly SlopFinding[], text: string): st
   return [header, ...lines, trailer].join("\n");
 }
 
-/**
- * Rule-id counts from each conversation's last reviewed reply, keyed by ghost
- * and conversation. Bounded, in-process, and free of reply text; a daemon
- * restart forgets it, which only skips one nudge.
- */
-class FeedbackRecords {
-  private readonly records = new Map<string, Record<string, number>>();
-
-  private key(event: GhostHookEvent): string {
-    return `${event.ghost_name}\u0000${event.conversation_id}`;
-  }
-
-  set(event: GhostHookEvent, counts: Record<string, number>): void {
-    const key = this.key(event);
-    this.records.delete(key);
-    this.records.set(key, counts);
-    if (this.records.size > MAX_FEEDBACK_RECORDS) {
-      const oldest = this.records.keys().next().value;
-      if (oldest !== undefined) this.records.delete(oldest);
-    }
-  }
-
-  clear(event: GhostHookEvent): void {
-    this.records.delete(this.key(event));
-  }
-
-  /** Consume the record: each reviewed reply produces at most one nudge. */
-  take(event: GhostHookEvent): Record<string, number> | undefined {
-    const key = this.key(event);
-    const counts = this.records.get(key);
-    this.records.delete(key);
-    return counts;
-  }
-}
-
 function nudge(counts: Record<string, number>): GhostBeforePromptResult {
   const list = Object.entries(counts)
     .map(([ruleId, count]) => (count > 1 ? `${ruleId} ×${count}` : ruleId))
@@ -142,7 +106,7 @@ function nudge(counts: Record<string, number>): GhostBeforePromptResult {
 function review(
   event: GhostSessionStopEvent,
   logger: Logger,
-  feedback: FeedbackRecords,
+  feedback: FeedbackRecords<Record<string, number>>,
 ): GhostSessionStopResult {
   const log = logger.child({ ghost: event.ghost_name, conversation: event.conversation_id });
   try {
@@ -185,7 +149,7 @@ function review(
 
 export function createAntiSlopHook(options: { logger?: Logger } = {}): GhostHookFactory {
   const logger = options.logger ?? silentLogger;
-  const feedback = new FeedbackRecords();
+  const feedback = new FeedbackRecords<Record<string, number>>();
   return (api) => {
     api.on("before_prompt", (event) => {
       const counts = feedback.take(event);

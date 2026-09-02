@@ -1,12 +1,16 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
+import { preferredRoleModel } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
+export const ADVISOR_MODEL_ROLE = "advisor_model";
+export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
 
 
 export type SmolModel = Pick<Model<Api>, "provider" | "id">
-  & Partial<Pick<Model<Api>, "name" | "cost">>;
+  & Partial<Pick<Model<Api>, "name" | "cost">>
+  & { priority?: number };
 
 export interface SmolCandidate {
   readonly model: SmolModel;
@@ -30,7 +34,7 @@ export interface SmolModelCatalog {
 
 export interface ResolvedSmolModel {
   readonly model: SmolModel;
-  readonly via: "role" | "cheapest";
+  readonly via: "role" | "cheapest" | "preferred";
 }
 
 /**
@@ -99,26 +103,42 @@ export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidat
 export function resolveSmolModel(
   catalog: SmolModelCatalog,
   ref?: GhostModelRoleBinding | null,
+  role: HookModelRole = SMOL_MODEL_ROLE,
 ): ResolvedSmolModel {
   if (ref?.provider && ref.modelId) {
     const candidate = catalog.find(ref.provider, ref.modelId);
     if (!candidate) {
       throw new SmolModelUnavailableError(
-        `This ghost's ${SMOL_MODEL_ROLE} role names ${ref.provider}/${ref.modelId}, `
-        + "which is not in its model catalogue. Fix roles.smol_model in "
+        `This ghost's ${role} role names ${ref.provider}/${ref.modelId}, `
+        + `which is not in its model catalogue. Fix roles.${role} in `
         + "models.json, or declare that provider and model there.",
         "unknown_model",
       );
     }
     if (!catalog.hasCredentials(candidate)) {
       throw new SmolModelUnavailableError(
-        `This ghost's ${SMOL_MODEL_ROLE} role names ${smolModelLabel(candidate.model)}, but `
+        `This ghost's ${role} role names ${smolModelLabel(candidate.model)}, but `
         + `there are no credentials for "${candidate.model.provider}". Sign that provider `
-        + "in, or point roles.smol_model at one that is authenticated.",
+        + `in, or point roles.${role} at one that is authenticated.`,
         "no_credentials",
       );
     }
     return { model: candidate.model, via: "role" };
+  }
+
+  if (role === ADVISOR_MODEL_ROLE) {
+    const preferred = preferredRoleModel(
+      "advisor",
+      catalog.usable().map((candidate) => candidate.model),
+    );
+    if (!preferred) {
+      throw new SmolModelUnavailableError(
+        "This ghost has no usable preferred advisor model. Configure roles.advisor_model "
+        + "in models.json or authenticate a supported advisor provider.",
+        "none_available",
+      );
+    }
+    return { model: preferred, via: "preferred" };
   }
 
   const cheapest = rankSmolModels(catalog)[0];

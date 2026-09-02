@@ -69,4 +69,51 @@ describe("completeHookSmol", () => {
       temp.cleanup();
     }
   });
+
+  it("selects the explicit advisor role when requested", async () => {
+    const temp = makeTempGhosts();
+    try {
+      const home = join(temp.root, "casper");
+      mkdirSync(join(home, ".pi"), { recursive: true });
+      writeFileSync(join(home, "character.md"), "# Casper\n", "utf8");
+      writeFileSync(
+        join(home, "models.json"),
+        JSON.stringify({
+          providers: {},
+          roles: { advisor_model: { provider: "local", modelId: "advisor" } },
+        }),
+        "utf8",
+      );
+      const models: SmolModel[] = [
+        { provider: "local", id: "smol", cost: cost(0) },
+        { provider: "local", id: "advisor", cost: cost(2) },
+      ];
+      let selectedModel = "";
+      const runtime: HookSmolRuntime = {
+        getModels: () => models as never,
+        getModel: (provider, id) => models.find((model) =>
+          model.provider === provider && model.id === id) as never,
+        hasConfiguredAuth: () => true,
+        isUsingSubscription: () => false,
+        isUsingOAuth: () => false,
+        complete: async (model) => {
+          selectedModel = `${model.provider}/${model.id}`;
+          return {
+            role: "assistant",
+            content: [{ type: "text", text: '{"notes":[]}' }],
+            stopReason: "stop",
+          } as never;
+        },
+        close: () => {},
+      };
+
+      await expect(completeHookSmol(
+        { ghost_home: home, prompt: "review", role: "advisor_model" },
+        { runtimeFactory: async () => runtime },
+      )).resolves.toBe('{"notes":[]}');
+      expect(selectedModel).toBe("local/advisor");
+    } finally {
+      temp.cleanup();
+    }
+  });
 });

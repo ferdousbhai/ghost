@@ -474,6 +474,15 @@ export function resolveSmolModelRef(
   return null;
 }
 
+/** The explicit binding for one Ghost model role, or null when it is automatic. */
+export function resolveModelRoleRef(
+  file: GhostModelsFile | null,
+  role: GhostModelRole,
+): GhostModelRoleBinding | null {
+  const bound = file?.roles?.[role];
+  return bound?.provider && bound.modelId ? bound : null;
+}
+
 /**
  * One serialized read-mutate-persist of the ghost's models.json, creating the
  * file when the ghost has none yet. Every role and fallback writer goes

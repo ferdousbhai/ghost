@@ -7,12 +7,14 @@ import {
   ghostAuthPath,
   ghostModelsPath,
   readGhostModels,
+  resolveModelRoleRef,
   resolveSmolModelRef,
 } from "./models.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
   assistantText,
   resolveSmolModel,
+  type HookModelRole,
   smolCatalogFromRuntime,
   smolModelLabel,
   SmolModelUnavailableError,
@@ -25,6 +27,7 @@ export const HOOK_SMOL_TIMEOUT_MS = 180_000;
 export interface HookSmolInput {
   ghost_home: string;
   prompt: string;
+  role?: HookModelRole;
 }
 
 export interface HookSmolRuntime extends SmolRuntime {
@@ -65,10 +68,11 @@ export async function completeHookSmol(
 
   try {
     const models = readGhostModels(paths.home);
-    const resolved = resolveSmolModel(
-      smolCatalogFromRuntime(runtime),
-      resolveSmolModelRef(models),
-    );
+    const role = input.role ?? "smol_model";
+    const ref = role === "smol_model"
+      ? resolveSmolModelRef(models)
+      : resolveModelRoleRef(models, role);
+    const resolved = resolveSmolModel(smolCatalogFromRuntime(runtime), ref, role);
     const model = runtime.getModel(resolved.model.provider, resolved.model.id);
     if (!model) {
       throw new SmolModelUnavailableError(
@@ -129,7 +133,14 @@ function parseInput(raw: string): HookSmolInput {
   if (typeof input.ghost_home !== "string" || typeof input.prompt !== "string") {
     throw new Error("stdin must contain string ghost_home and prompt fields.");
   }
-  return { ghost_home: input.ghost_home, prompt: input.prompt };
+  if (input.role !== undefined && input.role !== "smol_model" && input.role !== "advisor_model") {
+    throw new Error("stdin role must be smol_model or advisor_model.");
+  }
+  return {
+    ghost_home: input.ghost_home,
+    prompt: input.prompt,
+    ...(input.role ? { role: input.role } : {}),
+  };
 }
 
 export async function hookSmolCompleteCommand(argv: string[]): Promise<number> {

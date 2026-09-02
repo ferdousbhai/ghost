@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  ADVISOR_MODEL_ROLE,
   resolveSmolModel,
   smolCatalogFromRuntime,
   SmolModelUnavailableError,
@@ -99,6 +100,25 @@ describe("resolveSmolModel", () => {
     } catch (error) {
       expect((error as SmolModelUnavailableError).reason).toBe("none_available");
     }
+  });
+
+  it("uses Ghost's advisor preference order for an unbound advisor role", () => {
+    const catalog = catalogOf([
+      { provider: "local", id: "cheap", cost: cost(0) },
+      { provider: "anthropic", id: "claude-sonnet-4", cost: cost(5) },
+      { provider: "openai", id: "gpt-5.4", cost: cost(8) },
+    ]);
+    const resolved = resolveSmolModel(catalog, null, ADVISOR_MODEL_ROLE);
+    expect(resolved).toMatchObject({
+      via: "preferred",
+      model: { provider: "openai", id: "gpt-5.4" },
+    });
+  });
+
+  it("does not silently use a cheap non-advisor model for an unbound advisor role", () => {
+    const catalog = catalogOf([{ provider: "local", id: "cheap", cost: cost(0) }]);
+    expect(() => resolveSmolModel(catalog, null, ADVISOR_MODEL_ROLE))
+      .toThrow("no usable preferred advisor model");
   });
 });
 
