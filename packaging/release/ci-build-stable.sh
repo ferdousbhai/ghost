@@ -44,9 +44,16 @@ SOURCE_DATE_EPOCH="$epoch" \
 bash "$source_tree/packaging/release/prepare-pnpm-engine.sh" "$source_tree"
 pnpm --dir "$source_tree" fetch --frozen-lockfile
 # The SDK boundary fixture's graph is deliberately not a workspace dependency
-# (the daemon loads the owner-installed SDK), so the offline boundary test
-# below can only pass if this online phase seeds its tarballs into the store.
+# (the daemon loads the owner-installed SDK), so the offline boundary test can
+# only pass if this online phase seeds its tarballs first — into an explicit
+# store, because pnpm silently substitutes a device-local store for a project
+# on another filesystem and the test would otherwise read a different one.
+# --ignore-workspace is load-bearing: without it pnpm walks up from the
+# fixture to the repository workspace and fetches the workspace lockfile
+# instead of the fixture's.
+sdk_boundary_store="$release_work/claude-sdk-store"
 pnpm --dir "$source_tree/packaging/release/fixtures/claude-agent-sdk" \
+  --ignore-workspace --store-dir "$sdk_boundary_store" \
   fetch --frozen-lockfile
 (
   # shellcheck source=offline-env.sh
@@ -62,6 +69,7 @@ GHOST_RELEASE_WORK_ROOT="$release_work" \
     "$release_out/$runtime" "$source_tree" "$version" x86_64 \
       "$commit" "$epoch"
 GHOST_CLAUDE_SDK_BOUNDARY_TEST_ROOT="$release_work" \
+  GHOST_CLAUDE_SDK_STORE_DIR="$sdk_boundary_store" \
   bash "$source_tree/packaging/release/test-claude-sdk-boundary.sh"
 
 # Ordinary push/PR CI proves the destination-independent source and runtime

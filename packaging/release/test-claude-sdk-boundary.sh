@@ -7,7 +7,10 @@ install_fixture="$source_root/packaging/release/fixtures/claude-agent-sdk"
 bun_bin="$(realpath -e -- "$(command -v bun)")"
 pnpm_bin="$(realpath -e -- "$(command -v pnpm)")"
 node_bin="$(realpath -e -- "$(command -v node)")"
-store_dir="$(realpath -e -- "$(pnpm store path --silent)")"
+# The seeding fetch and this offline install must agree on one store: pnpm
+# silently selects a device-local store for a project on another filesystem,
+# so the caller passes the exact store it seeded.
+store_dir="$(realpath -e -- "${GHOST_CLAUDE_SDK_STORE_DIR:-$(pnpm store path --silent)}")"
 scratch_parent="${GHOST_CLAUDE_SDK_BOUNDARY_TEST_ROOT:-${TMPDIR:-/tmp}}"
 
 if [[ ! -d "$scratch_parent" || -L "$scratch_parent" ]]; then
