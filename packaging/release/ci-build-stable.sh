@@ -43,6 +43,11 @@ SOURCE_DATE_EPOCH="$epoch" \
     "$source_tree" "$source_archive" "$version" HEAD
 bash "$source_tree/packaging/release/prepare-pnpm-engine.sh" "$source_tree"
 pnpm --dir "$source_tree" fetch --frozen-lockfile
+# The SDK boundary fixture's graph is deliberately not a workspace dependency
+# (the daemon loads the owner-installed SDK), so the offline boundary test
+# below can only pass if this online phase seeds its tarballs into the store.
+pnpm --dir "$source_tree/packaging/release/fixtures/claude-agent-sdk" \
+  fetch --frozen-lockfile
 (
   # shellcheck source=offline-env.sh
   source "$source_tree/packaging/release/offline-env.sh"
