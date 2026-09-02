@@ -355,9 +355,15 @@ describe("native harness probes", () => {
         },
       });
 
-      expect((await catalog.list())[0]).toEqual({
+      const statuses = await catalog.list();
+      expect(statuses[0]).toEqual({
         id: "claude-code",
         availability: "unavailable",
+        authentication: "unknown",
+      });
+      expect(statuses[2]).toEqual({
+        id: "pi",
+        availability: "available",
         authentication: "unknown",
       });
       expect(existsSync(log)).toBe(false);

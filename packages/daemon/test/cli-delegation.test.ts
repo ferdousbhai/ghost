@@ -101,6 +101,25 @@ describe("ghost delegation", () => {
     expect(existsSync(home)).toBe(false);
   });
 
+  it("summarizes bounded availability in quiet mode without daemon or ghost-home effects", async () => {
+    const { home, list, fetch } = fixture();
+    const result = await runCli(["delegation", "-q"], {
+      home,
+      env: { HOME: home },
+      fetch,
+      nativeHarnesses: { list },
+    });
+
+    expect(result).toEqual({
+      code: 0,
+      stderr: "",
+      stdout: "2/3 available\n",
+    });
+    expect(list).toHaveBeenCalledOnce();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(existsSync(home)).toBe(false);
+  });
+
   it("keeps help offline and rejects positionals and unknown verbs before probing", async () => {
     const { home, list, fetch } = fixture();
     const options = { home, env: { HOME: home }, fetch, nativeHarnesses: { list } };

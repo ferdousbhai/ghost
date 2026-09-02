@@ -4600,6 +4600,40 @@ fi
     expect(lifecycle.queries).toBe(4);
   });
 
+  it("revalidates the SDK boundary before reusing a warm Claude query", async () => {
+    const removed = new Error("SDK install changed; restart required");
+    let installed = true;
+    const probe = new ClaudeCodeProbe({
+      binaryPath: process.execPath,
+      readVersion: readSupportedClaudeVersion,
+      resolveExecutable: async () => process.execPath,
+      inspectExecutable: async (path) => `test:${path}`,
+      readAuthStatus: async () => ({
+        loggedIn: true,
+        authMethod: "claude.ai",
+        accountFingerprint: STABLE_TEST_ACCOUNT,
+      }),
+      loadSdk: async () => {
+        if (!installed) throw removed;
+        return testClaudeAgentSdk;
+      },
+    });
+    const { lifecycle, seenPrompts } = setupClaudeHost({ probe });
+    const turn = (prompt: string, events: PiMessagesEvent[] = []) => host!.runTurn("casper", {
+      sessionId: "sdk-removal-warm-query",
+      prompt,
+      emit: (event) => events.push(event),
+    });
+
+    await turn("start the warm query");
+    installed = false;
+    const events: PiMessagesEvent[] = [];
+    await turn("do not reuse it after SDK removal", events);
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+    expect(lifecycle.queries).toBe(1);
+    expect(seenPrompts).toHaveLength(1);
+  });
+
   it("retires warm state when the executable changes without changing its path", async () => {
     let executableIdentity = "executable-v1";
     const probe = new ClaudeCodeProbe({
