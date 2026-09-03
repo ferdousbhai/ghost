@@ -154,14 +154,22 @@ TestCase {
         compare(replaced.tail, "Something else entirely.");
     }
 
-    // The final block of a turn has no newline after it, so the block before it
-    // is still open when the stream stops: the tail carries both, and the last
-    // flush settles them together.
-    function test_lastBlockWithoutANewlineKeepsItsPredecessorOpen(): void {
+    // While the turn is open its last line may still grow, so the block before
+    // it has to stay open too. Once the turn settles that line is finished, and
+    // the answer closes down to its final block.
+    function test_settlingClosesTheBlockTheLastLineWasHolding(): void {
         const run = tc.stream("Alpha.\n\nBeta.\n\nGamma.", 3);
         compare(run.segments.length, 1);
         compare(run.segments[0], "Alpha.\n\n");
         compare(run.tail, "Beta.\n\nGamma.");
+
+        const cursor = MarkdownSegments.begin();
+        MarkdownSegments.advance("Alpha.\n\nBeta.\n\nGamma.", cursor, false);
+        const settled = MarkdownSegments.advance("Alpha.\n\nBeta.\n\nGamma.", cursor, true);
+        verify(!settled.reset);
+        compare(settled.segments.length, 1);
+        compare(settled.segments[0], "Beta.\n\n");
+        compare(settled.tail, "Gamma.");
     }
 
     function test_emptyBodyIsEmpty(): void {

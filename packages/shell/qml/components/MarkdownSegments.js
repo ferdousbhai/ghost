@@ -27,8 +27,8 @@
 //
 // A block closes only once the first line of the block after it has arrived
 // whole, because that line is what decides whether the two may be parted. The
-// last block of a turn therefore keeps its predecessor company in the tail
-// until the turn ends, which costs one extra parse at the final flush.
+// last line of a turn never gets its newline, so a caller that knows the turn
+// has settled says so and the scan reads that line as the finished thing it is.
 //
 // The segments are cuts of the body, not a rewrite of it: joined back together
 // they are the body, character for character, so the reader sees what a single
@@ -50,9 +50,17 @@ function begin() {
  *              once it settled. The caller drops what it has rendered first.
  *   `segments` newly closed segments, in order, each already final.
  *   `tail`     everything not closed yet; the only part still worth re-reading.
+ *
+ * `settled` says the body will not grow again, which is what lets the last line
+ * of the turn close the block before it.
  */
-function advance(body, cursor) {
+function advance(body, cursor, settled) {
     var text = String(body || "");
+    // Whether this body still starts with what has been closed. It compares the
+    // settled prefix on every call, which is the one thing here that is not
+    // bounded by the new characters — but it is a string compare, not a parse,
+    // and it is what stands between a reused row and someone else's answer
+    // stitched onto the blocks already on screen.
     var reset = text.length < cursor.closed.length
         || text.lastIndexOf(cursor.closed, 0) !== 0;
     if (reset) {
@@ -64,18 +72,27 @@ function advance(body, cursor) {
     }
 
     var segments = [];
+    function close(boundary) {
+        if (boundary < 0) return;
+        var segment = text.substring(cursor.closed.length, boundary);
+        segments.push(segment);
+        // Appended, not re-sliced from the start: the prefix is already right,
+        // and re-cutting it would copy the whole answer at every boundary.
+        cursor.closed += segment;
+    }
+
     var from = cursor.at;
     for (;;) {
         // A line without its newline is still arriving: what it starts cannot
         // be classified yet, so the scan stops here and resumes on it.
         var end = text.indexOf("\n", from);
         if (end < 0) break;
-        var boundary = step(cursor, text.substring(from, end), from);
-        if (boundary >= 0) {
-            segments.push(text.substring(cursor.closed.length, boundary));
-            cursor.closed = text.substring(0, boundary);
-        }
+        close(step(cursor, text.substring(from, end), from));
         from = end + 1;
+    }
+    if (settled && from < text.length) {
+        close(step(cursor, text.substring(from), from));
+        from = text.length;
     }
     cursor.at = from;
 

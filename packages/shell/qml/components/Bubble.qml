@@ -7,20 +7,13 @@ pragma ComponentBehavior: Bound
 // lists, headings) without shipping a parser. User text renders plain so a
 // prompt containing backticks or underscores survives verbatim.
 //
-// Qt's markdown renderer owns the parts of the type scale we cannot reach from
-// QML: heading sizes are hard-coded multiples of font.pixelSize (h1 2.0, h2
-// 1.5, h3 1.2), code spans take the system fixed font rather than
-// Theme.fontFamilyMono, and links are underlined with no property to undo it.
-// The reading pass is therefore confined to what Text exposes — family, size,
-// lineHeight, colour, linkColor — and must not grow a markdown post-processor
-// to reach the rest.
-//
 // Only the user's prompt gets a surface: the warm capsule, 16px round with one
 // 2px tail corner. A ghost's reply stays unboxed and full width — the reading
 // column is the ghost's, not a bubble in it.
 import QtQuick
 import Quickshell
 import qs.services
+import "MarkdownSegments.js" as MarkdownSegments
 
 Item {
     id: root
@@ -38,7 +31,77 @@ Item {
 
     readonly property bool mine: root.speaker === "user"
     readonly property bool commandOutput: root.speaker === "command"
+    // A prompt and a command's output render verbatim: a prompt carrying
+    // backticks or underscores has to survive as it was typed.
+    readonly property bool plainBody: root.mine || root.commandOutput
     readonly property int contentInset: root.mine ? 12 : 0
+
+    /**
+     * The reply, cut into the blocks that can no longer change and the tail
+     * that still can. Qt parses whatever markdown it is handed, whole, so a
+     * turn that hands over its accumulated body on every flush tick pays for
+     * the whole answer every tick. The settled blocks below are laid out once
+     * and then left alone; only `liveTail` is re-read as the reply grows.
+     */
+    property var blockScan: MarkdownSegments.begin()
+    property string liveTail: ""
+
+    ListModel { id: bodyBlocks }
+
+    function renderBody(): void {
+        if (root.plainBody) {
+            // Verbatim text arrives whole and has no blocks to settle.
+            root.blockScan = MarkdownSegments.begin();
+            bodyBlocks.clear();
+            root.liveTail = root.body;
+            return;
+        }
+        // A settled row will not grow, and saying so lets the answer's last
+        // block close instead of riding in the tail with the one before it.
+        const step = MarkdownSegments.advance(root.body, root.blockScan, !root.busy);
+        // A row the list reused for another message, or a turn re-split once it
+        // settled, is not a continuation of what is on screen.
+        if (step.reset) bodyBlocks.clear();
+        for (const segment of step.segments) bodyBlocks.append({ markdown: segment });
+        root.liveTail = step.tail;
+    }
+
+    onBodyChanged: root.renderBody()
+    onPlainBodyChanged: root.renderBody()
+    onBusyChanged: root.renderBody()
+
+    // One block of the body, in the reading column's own type.
+    //
+    // Qt's markdown renderer owns the parts of the type scale we cannot reach
+    // from QML: heading sizes are hard-coded multiples of font.pixelSize (h1
+    // 2.0, h2 1.5, h3 1.2), code spans take the system fixed font rather than
+    // Theme.fontFamilyMono, and links are underlined with no property to undo
+    // it. What is set here is therefore all that Text exposes, and must not
+    // grow a markdown post-processor to reach the rest.
+    component BodyBlock: Text {
+        id: blockText
+
+        textFormat: root.plainBody ? Text.PlainText : Text.MarkdownText
+        color: root.mine ? Theme.foregroundBright : Theme.foreground
+        // Links wear the ghost's own amber, never Theme.accent — the inherited
+        // Omarchy accent is blue in most themes, and reading copy is not a web
+        // page.
+        linkColor: Theme.ghostAmber
+        font.family: root.commandOutput ? Theme.fontFamilyMono : Theme.fontFamily
+        font.pixelSize: Theme.fontSize
+        lineHeight: Theme.lineHeight
+        wrapMode: Text.Wrap
+        onLinkActivated: link => ExternalLinks.openModelUrl(link)
+
+        // Hover affordance only: Qt.NoButton lets the press fall through to
+        // the Text so link activation still fires.
+        MouseArea {
+            anchors.fill: parent
+            acceptedButtons: Qt.NoButton
+            cursorShape: blockText.hoveredLink !== ""
+                ? Qt.PointingHandCursor : Qt.ArrowCursor
+        }
+    }
 
     /**
      * Which tool cards this row shows. Which tools ran is not what a reply is
@@ -68,6 +131,23 @@ Item {
     readonly property int quietToolCount:
         root.allActivities.length - root.loudActivities.length
 
+    /**
+     * What the row has to show: text, and the actions it earns — a reply to
+     * copy or edit, or a trail it is holding back, which is all a turn spent
+     * entirely on tool calls has.
+     *
+     * Asked of the row rather than of the items that show it. An item's
+     * `visible` is its *effective* visibility, so a parent that asks a child
+     * whether to show itself latches shut: a child inside a hidden parent is
+     * hidden whatever it is set to, and Qt emits nothing when that does not
+     * change. A row appended empty and filled a moment later — which is every
+     * streaming reply — would never open again.
+     */
+    readonly property bool hasBody: root.body !== ""
+    readonly property bool hasActions: !root.busy && (root.mine
+        ? (root.hasBody && root.sourceEntryId !== "")
+        : (root.hasBody || root.quietToolCount > 0))
+
     implicitHeight: card.implicitHeight
 
     // Only rows created at the live end of the transcript animate in;
@@ -82,6 +162,9 @@ Item {
     }
 
     Component.onCompleted: {
+        // A row the list hands a body before this point — every restored row —
+        // has already missed onBodyChanged.
+        root.renderBody();
         if (Theme.reducedMotion || !root.atLiveEnd())
             return;
         root.opacity = 0;
@@ -131,8 +214,8 @@ Item {
         // HUD. The measure only bites past that width.
         width: root.mine
             ? Math.min(parent.width * 0.82,
-                Math.max(bodyText.implicitWidth
-                    + (messageActions.visible
+                Math.max(tailText.implicitWidth
+                    + (root.hasActions
                         ? messageActions.implicitWidth + Theme.gap : 0)
                     + root.contentInset * 2, 72))
             : Math.min(parent.width, Theme.readingMeasure + root.contentInset * 2)
@@ -175,10 +258,10 @@ Item {
 
                 width: parent.width
                 height: implicitHeight
-                visible: bodyText.visible || messageActions.visible
+                visible: root.hasBody || root.hasActions
                 implicitHeight: Math.max(
-                    bodyText.visible ? bodyText.implicitHeight : 0,
-                    messageActions.visible
+                    root.hasBody ? bodyView.implicitHeight : 0,
+                    root.hasActions
                         ? messageActions.y + messageActions.height : 0)
 
                 HoverHandler {
@@ -186,40 +269,46 @@ Item {
                     acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 }
 
-                Text {
-                    id: bodyText
+                // The settled blocks, then the one still being written. Each
+                // is its own document, which is the whole point — and which is
+                // why the space markdown would have left between two blocks
+                // has to be put back between them here.
+                Column {
+                    id: bodyView
 
                     width: parent.width
-                    visible: root.body !== ""
-                    text: root.body
-                    textFormat: root.mine || root.commandOutput
-                        ? Text.PlainText : Text.MarkdownText
-                    color: root.mine ? Theme.foregroundBright : Theme.foreground
-                    // Links wear the ghost's own amber, never Theme.accent — the
-                    // inherited Omarchy accent is blue in most themes, and reading
-                    // copy is not a web page.
-                    linkColor: Theme.ghostAmber
-                    font.family: root.commandOutput
-                        ? Theme.fontFamilyMono : Theme.fontFamily
-                    font.pixelSize: Theme.fontSize
-                    lineHeight: Theme.lineHeight
-                    wrapMode: Text.Wrap
-                    onLinkActivated: link => ExternalLinks.openModelUrl(link)
+                    visible: root.hasBody
+                    spacing: Theme.markdownBlockGap
 
-                    // Hover affordance only: Qt.NoButton lets the press fall
-                    // through to the Text so link activation still fires.
-                    MouseArea {
-                        anchors.fill: parent
-                        acceptedButtons: Qt.NoButton
-                        cursorShape: bodyText.hoveredLink !== ""
-                            ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    Repeater {
+                        model: bodyBlocks
+                        // Named so a test can watch that a block already on
+                        // screen is the same object, with the same text, after
+                        // the reply has grown past it.
+                        delegate: BodyBlock {
+                            required property string markdown
+                            objectName: "replyBlock"
+                            width: bodyView.width
+                            text: markdown
+                        }
+                    }
+
+                    BodyBlock {
+                        id: tailText
+                        objectName: "replyTail"
+                        width: bodyView.width
+                        visible: root.liveTail !== ""
+                        text: root.liveTail
                     }
                 }
 
                 // QQuickText does not expose cursor geometry for rich text,
                 // and lineLaidOut only reports its plain-text path. A hidden,
                 // read-only document gives us the horizontal end cursor for
-                // both formats without changing the rendered typography.
+                // both formats without changing the rendered typography. Only
+                // the tail is measured: the body's last line is in it, and
+                // re-measuring the settled blocks would cost what rendering
+                // them a block at a time was meant to save.
                 TextEdit {
                     id: bodyMeasure
 
@@ -235,8 +324,8 @@ Item {
                     width: parent.width
                     visible: false
                     readOnly: true
-                    text: root.body
-                    textFormat: root.mine || root.commandOutput
+                    text: root.liveTail
+                    textFormat: root.plainBody
                         ? TextEdit.PlainText : TextEdit.MarkdownText
                     font.family: root.commandOutput
                         ? Theme.fontFamilyMono : Theme.fontFamily
@@ -251,31 +340,26 @@ Item {
                     id: messageActions
 
                     readonly property real finalLineHeight:
-                        bodyMeasure.endRect.height * bodyText.lineHeight
+                        bodyMeasure.endRect.height * Theme.lineHeight
                     readonly property real inlineX: bodyMeasure.endRect.x
                         + Theme.gap
-                    readonly property bool fitsInline: root.body !== ""
+                    readonly property bool fitsInline: root.hasBody
                         && messageActions.inlineX + messageActions.implicitWidth
                             <= message.width
 
-                    // A ghost's row earns actions for its reply or for the
-                    // trail it is holding back. A turn spent entirely on tool
-                    // calls has only the latter.
-                    visible: !root.busy && (root.mine
-                        ? (root.body !== "" && root.sourceEntryId !== "")
-                        : (root.body !== "" || root.quietToolCount > 0))
+                    visible: root.hasActions
                     spacing: Theme.gap
                     x: messageActions.fitsInline ? messageActions.inlineX : 0
                     y: messageActions.fitsInline
-                        ? bodyText.implicitHeight
+                        ? bodyView.implicitHeight
                             - (messageActions.finalLineHeight + height) / 2
-                        : (bodyText.visible
-                            ? bodyText.implicitHeight + Theme.gap / 2 : 0)
+                        : (root.hasBody
+                            ? bodyView.implicitHeight + Theme.gap / 2 : 0)
 
                     Item {
                         id: copyAction
 
-                        visible: !root.mine && root.body !== ""
+                        visible: !root.mine && root.hasBody
                         width: 16
                         height: 16
                         Accessible.role: Accessible.Button

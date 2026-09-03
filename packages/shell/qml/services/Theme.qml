@@ -1,11 +1,16 @@
 pragma Singleton
+// Bound so the block-gap probe below can read the type scale off `root`.
+pragma ComponentBehavior: Bound
 
 // Theme — Omarchy's own design system, as Omarchy publishes it.
 //
 // Ghost is an Omarchy app, so it does not invent a parallel set of sizes,
 // spacings and states. Omarchy 4 publishes the whole system and every stock
-// surface is built from it; this file reads it and adds nothing but the
-// ghost's own identity colours on top.
+// surface is built from it; this file reads it and adds only the ghost's own
+// identity colours and the handful of measurements Omarchy cannot publish
+// because they belong to the renderer — what one character of the resolved face
+// is worth, and what Qt leaves between two markdown blocks. Those are measured
+// here, once, rather than guessed at each surface that needs them.
 //
 // Omarchy (>= 4.0 "Quattro") keeps the active theme as a *copy* at
 // ~/.local/state/omarchy/current/theme/. Two files matter to us:
@@ -352,6 +357,39 @@ Singleton {
      * flush with the conversations under it, not because a ghost name needs it.
      */
     readonly property int sidebarMeasure: root.ch(30)
+
+    /**
+     * The space Qt's markdown renderer leaves between two blocks.
+     *
+     * A streaming reply is rendered one settled block at a time rather than as
+     * one document (see components/MarkdownSegments.js), and separate documents
+     * do not know about each other's margins — so the gap has to be put back
+     * between them. Asked of the renderer rather than guessed: it is Qt's own
+     * number, and it moves with the face and size the theme hands it.
+     *
+     * It is exact for prose, headings, lists and quotes, which is what a reply
+     * is mostly made of. Fenced code, tables and rules carry margins of their
+     * own that collapse against whatever they sit beside, so those sit a few
+     * pixels off where one document would have put them. Reproducing that would
+     * mean modelling Qt's margin collapsing, which is a lot of machinery for a
+     * space no reader is measuring.
+     */
+    component BlockProbe: Text {
+        visible: false
+        // A width the probe never fills, because the two measurements only
+        // agree on the margin when the text has a column to lay out in.
+        width: 64
+        wrapMode: Text.Wrap
+        textFormat: Text.MarkdownText
+        font.family: root.fontFamily
+        font.pixelSize: root.fontSize
+        lineHeight: root.lineHeight
+    }
+    BlockProbe { id: blockPair; text: "a\n\nb" }
+    BlockProbe { id: blockFirst; text: "a" }
+    BlockProbe { id: blockSecond; text: "b" }
+    readonly property real markdownBlockGap: Math.max(0,
+        blockPair.implicitHeight - blockFirst.implicitHeight - blockSecond.implicitHeight)
 
     // A deliberately small parser. Omarchy's theme files are generated from
     // templates and only ever contain `key = "value"`, `key = number`,
