@@ -69,6 +69,8 @@ describe("advisor turn-delta reconstruction", () => {
     expect(result.text).not.toContain("Old answer.");
     expect(result.text).not.toContain("super-secret-value");
     expect(result.text).toContain("[REDACTED_SECRET]");
+    expect(result.commands).toEqual(["test -f result"]);
+    expect(result.paths).toEqual([]);
   });
 
   it("reconstructs the active Claude SDK parentUuid chain", async () => {
@@ -93,6 +95,8 @@ describe("advisor turn-delta reconstruction", () => {
     expect(result.text).toContain("file_path");
     expect(result.text).toContain("source text");
     expect(result.text).not.toContain("Old answer.");
+    expect(result.commands).toEqual([]);
+    expect(result.paths).toEqual(["source.ts"]);
   });
 
   it("falls back to final assistant text when any JSONL line is malformed", async () => {
@@ -102,6 +106,8 @@ describe("advisor turn-delta reconstruction", () => {
     writeFileSync(path, '{"type":"session"}\nnot-json\n', "utf8");
     const result = await reconstructAdvisorTurnDelta(stopEvent(path, "pi"));
     expect(result).toMatchObject({ source: "assistant-fallback", fallbackReason: "parse" });
+    expect(result.commands).toEqual([]);
+    expect(result.paths).toEqual([]);
     expect(result.text).toContain("Fallback answer.");
     expect(result.text).not.toContain("not-json");
   });

@@ -191,6 +191,7 @@ interface RegisteredHook {
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
+const BUILTIN_SETTINGS_KEYS = new Set(["memory_upkeep", "review"]);
 
 /**
  * The `builtin` section of a `hooks.json` document: per-key tuning for hooks
@@ -210,9 +211,15 @@ function parseBuiltinHookSettings(
     if (!SETTINGS_KEY.test(key)) {
       throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
     }
+    if (!BUILTIN_SETTINGS_KEYS.has(key)) {
+      throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
+    }
     if (!isObject(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
     for (const field of Object.keys(raw)) {
       if (field !== "idleSeconds") throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
+      if (key !== "memory_upkeep") {
+        throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
+      }
     }
     settings[key] = raw.idleSeconds === undefined
       ? {}

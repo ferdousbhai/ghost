@@ -148,7 +148,6 @@ export {
 };
 import { pathIsWithin } from "./path-within.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
-import { antiSlopPromptSection } from "./anti-slop-hook.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { loadGhostHookExtensions } from "./hook-extensions.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
@@ -3553,8 +3552,6 @@ export class SessionHost {
     const declarativeSection = renderPiDeclarativePrompt(effectiveDeclarative, {
       disabledRules: settings.getStringList("ttsr.disabledRules"),
     });
-    // Session-static like the rest of the prompt; the stop hook reads live.
-    const antiSlopSection = antiSlopPromptSection(settings);
     // A seeded character marks a first meeting until the ghost writes its own.
     const extraSections = [
       ...(this.extensionOptions.extraSections ?? []),
@@ -3563,7 +3560,6 @@ export class SessionHost {
       SHARED_OBSIDIAN_POLICY,
       ...(this.taskServices ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
-      ...(antiSlopSection ? [antiSlopSection] : []),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]

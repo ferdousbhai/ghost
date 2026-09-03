@@ -46,7 +46,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   skills/<name>/SKILL.md
   agents/<name>.md
   commands/<name>.md
-  rules/  prompts/  hooks/
+  rules/  prompts/  hooks/  lint/
   AGENTS.md  CLAUDE.md  WATCHDOG.md
   settings.yml
   models.json
@@ -275,27 +275,33 @@ Awaited harness hooks are `before_prompt`, `session_stop`, and
 `conversation_idle`. Their JSON protocol, failure behavior, and settings are
 defined in [`docs/hooks.md`](docs/hooks.md). Built-in idle maintenance may write
 or consolidate only private memory; shared knowledge and task maintenance uses
-Obsidian during ordinary runtime work. The built-in anti-slop review runs at
-`session_stop` on both runtimes over only the final assistant text: per ghost,
-`settings.yml` selects `antiSlop.mode` (`off` default, `advisory`, `strict`)
-and `antiSlop.disabledRules`; strict mode is bounded to one visible rewrite
-continuation and never replaces text already shown. When enabled it also adds
-a session-static style-contract prompt section on both runtimes and one
-non-durable next-turn nudge naming the previous reply's rule ids.
+Obsidian during ordinary runtime work.
 
-The built-in advisor policy supervisor also runs at `session_stop` on both
-runtimes. Per ghost, `settings.yml` selects `advisor.mode` (`off` default,
-`advisory`, `strict`) and non-negative `advisor.immuneTurns` (default 3); its
-model is the `advisor_model` role. It reviews a bounded, secret-redacted current
-turn delta from the runtime-native transcript against ghost-home `WATCHDOG.md`
-and project `WATCHDOG.md`/`.ghost/WATCHDOG.md` files admitted only through the
-conversation's identity-validated project binding. `nit` and `concern` notes,
-all advisory-mode notes, and strict blockers inside the cooldown cross the
-consume-once `before_prompt` bridge. A strict blocker outside the cooldown may
-request exactly one continuation when `stop_hook_active` is false; a
-continuation pass never continues again. The feedback bridge, cooldown, and
-dedupe state are bounded and non-durable, so restart drops rather than replays
-them. Transcript, model, parse, discovery, and quarantine failures fail open.
+One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
+`settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
+`strict`) and non-negative `review.immuneTurns` (default 3). Its deterministic
+producer lints final-assistant prose outside fenced code plus command and path
+strings recovered from current-turn tool-call arguments. Built-in rules are
+augmented by `<ghost-home>/lint/*.yml` and, only for an identity-validated
+project binding, ancestor `.ghost/lint/*.yml` packs; packs may disable built-in
+rule ids. Transcript fallback still lints prose and skips command/path targets.
+The model producer runs only in `advisory` and `strict`, uses `advisor_model`,
+and judges the bounded, secret-redacted current turn against ghost-home and
+trusted-project `WATCHDOG.md` policy. Lint findings enter delivery on their own
+deterministic authority and the model is told which rule ids were already
+delivered; it never re-judges them.
+
+Both producers feed the same severity, emission-guard, note-ledger, channel,
+and consume-once feedback path. `lint` and `advisory` always send accepted
+`nit`, `concern`, and `blocker` notes through the next-turn `before_prompt`
+bridge. In `strict`, `nit`/`concern` use that bridge; a blocker with cooldown
+clear may request exactly one continuation when `stop_hook_active` is false,
+while cooldown and continuation-pass blockers become next-turn feedback. A
+strict continuation starts the `review.immuneTurns` cooldown. The feedback,
+cooldown, dedupe, and ledger state are bounded and non-durable, so restart drops
+rather than replays them. Transcript, model, parse, discovery, and quarantine
+failures fail open; a model failure never discards lint notes. Built-in hook
+settings keys are only `memory_upkeep` and `review`.
 
 ## Daemon HTTP API
 

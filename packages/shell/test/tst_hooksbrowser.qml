@@ -256,6 +256,22 @@ TestCase {
         compare(tc.requests.length, 0);
     }
 
+    function test_reviewSettingsKeyDoesNotMakeTheBuiltinEditable(): void {
+        Ghostd.activeHooks = [
+            { event: "session_stop", source: "builtin", name: "Review",
+              description: "Reviews the pass.", settingsKey: "review" }
+        ];
+        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
+        Ghostd.activeHookCount = 1;
+        Ghostd.hookConfig = { hooks: {} };
+        Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
+        const browser = createTemporaryObject(browserComponent, tc);
+        tryVerify(function () { return hookCards(browser).length === 1; });
+        mouseClick(hookCards(browser)[0]);
+        verify(!browser.editing);
+        compare(tc.requests.length, 0);
+    }
+
     function test_builtinIntervalIsSavedToTheFileAndPendingUntilRestart(): void {
         const browser = editableBrowser();
         const cards = hookCards(browser);

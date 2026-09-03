@@ -1106,14 +1106,29 @@ let hooksDocument = {
     }] }],
   },
 };
-const BUILTIN_HOOKS = [{
-  event: "conversation_idle",
-  source: "builtin",
-  name: "Idle upkeep",
-  description: "Runs after the current conversation remains inactive.",
-  idleSeconds: 60,
-  settingsKey: "memory_upkeep",
-}];
+const BUILTIN_HOOKS = [
+  {
+    event: "before_prompt",
+    source: "builtin",
+    name: "Review feedback",
+    description: "Delivers consume-once lint and model-review notes from the previous turn.",
+  },
+  {
+    event: "session_stop",
+    source: "builtin",
+    name: "Review",
+    description: "Runs deterministic lint, then optional WATCHDOG model review, through one delivery policy.",
+    settingsKey: "review",
+  },
+  {
+    event: "conversation_idle",
+    source: "builtin",
+    name: "Idle upkeep",
+    description: "Runs after the current conversation remains inactive.",
+    idleSeconds: 60,
+    settingsKey: "memory_upkeep",
+  },
+];
 
 function hooksDocumentProblem(document) {
   const path = HOOKS_CONFIG_PATH;
@@ -1125,9 +1140,11 @@ function hooksDocumentProblem(document) {
     if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
     for (const [key, raw] of Object.entries(builtin)) {
       if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
+      if (key !== "memory_upkeep" && key !== "review") return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
       for (const field of Object.keys(raw)) {
         if (field !== "idleSeconds") return `${path}: builtin.${key}.${field} is not a setting.`;
+        if (key !== "memory_upkeep") return `${path}: builtin.${key}.${field} is not a setting.`;
       }
       if (raw.idleSeconds !== undefined
           && !(Number.isSafeInteger(raw.idleSeconds) && raw.idleSeconds >= 1 && raw.idleSeconds <= 86_400)) {

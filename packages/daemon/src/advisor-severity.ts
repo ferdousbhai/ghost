@@ -10,9 +10,12 @@ export interface AdvisorNote {
   note: string;
   severity?: AdvisorSeverity;
   advisor?: string;
+  /** Lint notes are deterministic findings, not model judgment. */
+  authority?: "lint" | "advisor";
 }
 
 const ADVISOR_GUIDANCE = "weigh, don't blindly obey";
+const LINT_GUIDANCE = "deterministic finding; fix or explicitly overrule";
 
 function escapeXmlAttribute(value: string): string {
   return value
@@ -35,7 +38,9 @@ export function formatAdvisorBatchContent(notes: readonly AdvisorNote[]): string
     .map((note) => {
       const severity = note.severity ? ` severity="${note.severity}"` : "";
       const who = note.advisor ? ` advisor="${escapeXmlAttribute(note.advisor)}"` : "";
-      return `<advisory${who}${severity} guidance="${ADVISOR_GUIDANCE}">\n${escapeXmlText(note.note)}\n</advisory>`;
+      const authority = note.authority === "lint" ? ' authority="lint"' : "";
+      const guidance = note.authority === "lint" ? LINT_GUIDANCE : ADVISOR_GUIDANCE;
+      return `<advisory${who}${authority}${severity} guidance="${guidance}">\n${escapeXmlText(note.note)}\n</advisory>`;
     })
     .join("\n");
 }

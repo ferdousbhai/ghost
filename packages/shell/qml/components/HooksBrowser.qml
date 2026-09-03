@@ -48,7 +48,8 @@ Rectangle {
     }
 
     function canEdit(card: var): bool {
-        return !!card && (card.source === "config" || card.settingsKey !== "");
+        return !!card && (card.source === "config"
+            || (card.settingsKey !== "" && card.event === "conversation_idle"));
     }
 
     /** Open one card's form over a frozen list, starting from `fields` as typed. */

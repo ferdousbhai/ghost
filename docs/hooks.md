@@ -82,14 +82,14 @@ stable when its delivery identity must survive configuration reordering;
 otherwise Ghost derives a stable identity from the admitted command fields.
 
 An optional top-level `builtin` object tunes hooks that Ghost registers in
-code. Each key names one built-in hook — the `settingsKey` on its status row
-— and holds `{ "idleSeconds": <integer 1..86400> }`. `memory_upkeep` tunes
-the idle interval before memory maintenance runs (default 60). `anti_slop` and
-`advisor` name the two built-in stop reviews but take no `hooks.json` tuning
-today: their per-ghost settings live in the ghost's own `settings.yml` (see
-below). The section is validated with the rest of the file and applies at the
-next daemon start, not live: a built-in idle registration's identity includes
-its interval and persisted retry state refers to that identity.
+code. Each key names one built-in hook — the `settingsKey` on its status row.
+`memory_upkeep` accepts `{ "idleSeconds": <integer 1..86400> }` and defaults to
+60. `review` names the built-in stop review but takes no `hooks.json` fields;
+its per-ghost settings live in the ghost's own `settings.yml` (see below).
+These are the only built-in keys. The section is validated with the rest of the
+file and applies at the next daemon start, not live: a built-in idle
+registration's identity includes its interval and persisted retry state refers
+to that identity.
 
 ```json
 { "hooks": {}, "builtin": { "memory_upkeep": { "idleSeconds": 900 } } }
@@ -238,111 +238,103 @@ cheap-model fallback. The command performs one raw completion. It does not
 create a session, expose tools, name a concrete provider model, or override the
 model's default reasoning level.
 
-Ghost's built-in anti-slop review is a `session_stop` hook (`settingsKey:
-anti_slop`) that deterministically lints the final assistant reply with the
-engine ported from `ferdousbhai/slop-detector`. It is configured per ghost in
-the ghost home's `settings.yml`, not in `hooks.json`:
+### Built-in review
+
+`review` is one `session_stop` pipeline (`settingsKey: review`) on both
+principal runtimes. It has two producers: deterministic lint runs first, then
+an optional model advisor judges only what lint cannot express. Both producers
+feed the same severity policy, emission guard, note ledger, delivery-channel
+decision, and consume-once `before_prompt` feedback bridge. Lint findings are
+delivered on their own deterministic authority. They are never passed to the
+advisor for approval or re-judgment; the advisor prompt receives only the ids
+already delivered and must not duplicate them.
+
+The ghost home's `settings.yml` selects the ladder:
 
 ```yaml
-antiSlop:
-  mode: strict          # off (default) | advisory | strict
-  disabledRules:        # optional rule ids to skip
-    - em-dash-density
-```
-
-`off` (also absent or unknown) does nothing. `advisory` logs one bounded line
-of rule ids and counts — never reply text — and accepts the pass. `strict`
-with at least one major finding returns one continuation whose context lists
-the findings (rule id, message, fix instruction, short excerpt, capped near
-2,000 characters) and instructs the model to rewrite the reply or keep it and
-state an overrule reason in one sentence. Minor-only findings in strict mode
-log like advisory and accept. The rewrite is bounded to one pass:
-`stop_hook_active: true` accepts unconditionally. Only the `text` content
-blocks of the final assistant message are analyzed — tool payloads, thinking,
-and other content parts never reach the linter, and fenced code blocks inside
-the text are skipped. Streamed honesty: the review context itself is injected
-hidden like any continuation, but the rewritten reply streams as a visible
-continuation of the same turn — text already shown to the owner is never
-replaced. Settings or engine failures log once and fail open.
-
-The review also prevents slop before it streams. When the mode is `advisory`
-or `strict` at session open, both runtimes append a bounded style-contract
-section to the session system prompt — a digest of the rule catalog, minus
-`disabledRules`, keeping the rule ids a strict continuation references. That
-section is session-static like the rest of the prompt: a `settings.yml` edit
-reaches the prompt at the next session open, while the stop-time review reads
-the file at each stop boundary and follows the edit at the next reply.
-
-Each reviewed reply with findings also arms one next-turn nudge: the hook's
-`before_prompt` handler adds a single line of rule ids and counts from the
-previous reply ("chatbot-phrase ×2, hedging-ratio") and clears the record, so
-each offending turn produces at most one nudge. A clean final pass clears any
-pending nudge. The state is in-process rule-id counts only — never reply text
-— bounded to 64 conversations, and non-durable: a daemon restart forgets it,
-which merely skips one nudge.
-
-### Built-in advisor policy supervisor
-
-The `advisor` built-in runs one model review at `session_stop` on both principal
-runtimes. It is off unless the ghost home's `settings.yml` enables it:
-
-```yaml
-advisor:
-  mode: strict          # off (default) | advisory | strict
+review:
+  mode: strict          # off (default) | lint | advisory | strict
   immuneTurns: 3        # non-negative integer; 0 disables the cooldown
 ```
 
-The model comes from `advisor_model`. An explicit role binding wins; otherwise
-Ghost uses its existing advisor preference list. The review reads a bounded
-tail of the runtime-native `transcript_path`, rebuilds the active Pi `parentId`
-or Claude Code `parentUuid` chain, and sends only the current owner-turn delta.
-That includes persisted reasoning, tool calls, and tool results. Known secret
-forms are redacted first. A missing transcript uses the final assistant text;
-malformed JSONL, invalid UTF-8, a read failure, or a missing owner-turn boundary
-also falls back to that text and never fails the owner turn.
-
-`WATCHDOG.md` at the ghost-home root is the owner-level policy. A conversation
-with a currently valid project-binding receipt also loads project
-`WATCHDOG.md` and `.ghost/WATCHDOG.md` files from its trusted Git root down to
-the operational cwd. When no nested Git root can be resolved, discovery starts
-at the trusted binding root. Ordering is ghost first, then project ancestor to
-leaf. Merely running inside a Git repository is not trust: project policy is
-omitted unless `ProjectBindingStore` revalidates the binding against the
-identity-bound trust ledger. Unreadable or malformed files are skipped.
-`WATCHDOG.yml` rosters are not part of this phase.
-
-Delivery adapts the channel policy in oh-my-pi's
-[`docs/advisor-watchdog.md`](https://github.com/can1357/oh-my-pi/blob/main/docs/advisor-watchdog.md)
-to Ghost's awaited stop and consume-once prompt hooks:
-
-| Mode and accepted severity | Ghost delivery |
+| Mode and accepted severity | Producers and delivery |
 |---|---|
-| `off` or unknown | No model call or context |
-| `advisory`: `nit`, `concern`, or `blocker` | One consume-once `before_prompt` advisory |
-| `strict`: `nit` or `concern` | One consume-once `before_prompt` advisory |
+| `off` or unknown | Nothing runs; no model call or context |
+| `lint`: `nit`, `concern`, or `blocker` | Lint only; consume-once next-turn context |
+| `advisory`: `nit`, `concern`, or `blocker` | Lint plus model; consume-once next-turn context |
+| `strict`: `nit` or `concern` | Lint plus model; consume-once next-turn context |
 | `strict`: `blocker`, cooldown clear, `stop_hook_active: false` | One hidden continuation in the current owner turn |
-| `strict`: `blocker` during cooldown or on a continuation pass | Consume-once `before_prompt` advisory when the note is new |
+| `strict`: `blocker` during cooldown or on a continuation pass | Consume-once next-turn context when the note is new |
 
-After a strict blocker continuation, the next `advisor.immuneTurns` owner turns
-downgrade otherwise interrupting findings to next-turn feedback. The
-`stop_hook_active` check is absolute: the advisor never requests a second
-continuation for the same owner turn. This is Ghost's one-continuation
-invariant even though oh-my-pi's live steering channel exempts blockers from
-its concern cooldown.
+The deterministic producer runs prose rules over final-assistant text, skipping
+fenced code. It runs command and path rules over string-valued tool-call
+arguments recovered from the current owner-turn transcript delta. When the
+bounded transcript reader falls back to final assistant text, prose lint still
+runs and command/path lint is skipped. Lint is post-hoc review, never a pre-tool
+gate. Inputs, rule counts, and findings are bounded. Excerpts contain at most 80
+Unicode code points. Unsafe regular expressions are rejected and warned once.
 
-Advisor output must be bounded structured JSON. Output-only prompt-injection
-and destructive-command combinations are quarantined before any note reaches
-the primary model. A FIFO emission guard suppresses normalized duplicates,
-content-free self-talk, and all but one accepted note per model update; the
-note ledger additionally admits only strict severity escalation for an
-already-delivered finding. Anti-slop rule ids from the final assistant reply are
-included as already-owned findings, and the advisor is instructed not to
-re-raise those prose nits.
+The built-in pack contains the 21 rules inherited from `slop-detector`. Owner
+packs are direct `*.yml` files in `<ghost-home>/lint/`. With a currently valid,
+identity-bound project binding, Ghost also loads direct `*.yml` files from
+`.ghost/lint/` along the trusted project ancestor chain, ordered root to leaf.
+Project packs never load merely because cwd happens to be in a Git repository.
+A malformed pack is skipped with one warning per file version. Oversized,
+unreadable, or invalid-UTF-8 files are also skipped with a warning; none fail
+the owner turn. A pack has this shape:
 
-Next-turn feedback, cooldown, dedupe, and ledger state are bounded and
-in-process. A daemon restart drops them: it never replays an advisory or resumes
-a policy continuation. Per-advisor transcripts, WATCHDOG rosters, and a
-mid-turn interruption seam remain outside this phase.
+```yaml
+disable:                    # optional; disables built-in ids only
+  - chatbot-phrase
+rules:
+  - id: destructive-shell
+    target: command         # prose | command | path
+    kind: pattern
+    pattern: 'rm\\s+-rf'
+    flags: i                # optional: i, m, s, and/or u
+    severity: blocker       # nit | concern | blocker
+    message: Destructive recursive removal.
+    fix: Use a recoverable, explicitly scoped operation.
+  - id: uniform-prose
+    target: prose
+    kind: stat
+    check: sentence-uniformity # em-dash-density | hedging-ratio | sentence-uniformity
+    threshold: 0.3          # optional; check-specific default otherwise
+    severity: nit
+    message: Sentence lengths are too uniform.
+```
+
+Rules are data only. Pattern messages may use `{match}`; the three built-in
+statistical checks also supply `{per100}` or `{lengths}` where applicable.
+Unknown fields, checks, targets, severities, or flags make the pack malformed.
+
+In `advisory` and `strict`, the model comes from `advisor_model`. An explicit
+role binding wins; otherwise Ghost uses its advisor preference list. The model
+receives a bounded, secret-redacted current owner-turn delta reconstructed from
+Pi's `parentId` or Claude Code's `parentUuid` chain, including persisted
+reasoning, tool calls, and tool results. `WATCHDOG.md` at the ghost-home root is
+owner policy. An identity-validated project binding additionally admits
+project `WATCHDOG.md` and `.ghost/WATCHDOG.md` from trusted root to operational
+cwd. When no nested Git root resolves, the binding root is the boundary.
+Unreadable policy is skipped; `WATCHDOG.yml` rosters remain outside this phase.
+
+Model output is bounded structured JSON. Output-only prompt-injection and
+destructive-command combinations are quarantined before model notes enter the
+shared delivery core. The FIFO guard suppresses normalized duplicates,
+content-free self-talk, and all but one accepted model note per update; the
+ledger admits only severity escalation for an already-delivered note. Model,
+parse, discovery, transcript, and quarantine failures fail open, and model
+failure never discards accepted lint notes.
+
+After a strict blocker continuation, the next `review.immuneTurns` owner turns
+downgrade otherwise interrupting notes to next-turn feedback. The
+`stop_hook_active` check is absolute: neither producer can request a second
+continuation for that owner turn. Text already streamed remains visible; a
+continuation adds visible text rather than replacing it. Feedback, cooldown,
+dedupe, and ledger state are bounded and in-process. Restart drops them, so no
+advisory is replayed and no policy continuation is resumed. Per-advisor
+transcripts, WATCHDOG rosters, and mid-turn interruption remain outside this
+phase.
 
 ## `conversation_idle` protocol
 

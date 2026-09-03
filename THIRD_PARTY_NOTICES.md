@@ -87,8 +87,8 @@ SOFTWARE.
 
 ## slop-detector
 
-The daemon's anti-slop engine
-(`packages/daemon/src/anti-slop.ts`) is a TypeScript port of the rule engine
+The daemon's built-in prose lint pack
+(`packages/daemon/src/lint-rules.ts`) is a TypeScript port of the rule engine
 from [slop-detector](https://github.com/ferdousbhai/slop-detector)
 (`extension/engine.js`, commit
 `6e2733726bae8e22d46fbe87a7f28e0e40969e5a`), which credits

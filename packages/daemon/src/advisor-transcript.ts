@@ -11,6 +11,8 @@ interface TranscriptRecord {
 export interface AdvisorTurnDelta {
   text: string;
   source: "transcript" | "assistant-fallback";
+  commands: string[];
+  paths: string[];
   fallbackReason?: "missing" | "read" | "parse" | "owner-boundary";
 }
 
@@ -130,8 +132,66 @@ function fallback(event: GhostSessionStopEvent, reason: AdvisorTurnDelta["fallba
   return {
     text: `assistant: ${redactMemorySecrets(JSON.stringify(advisorAssistantText(event.last_assistant_message)))}`,
     source: "assistant-fallback",
+    commands: [],
+    paths: [],
     fallbackReason: reason,
   };
+}
+
+const MAX_TOOL_ARGUMENT_VALUES = 128;
+const MAX_TOOL_ARGUMENT_DEPTH = 8;
+
+function argumentKind(key: string): "command" | "path" | undefined {
+  const normalized = key.replace(/([a-z0-9])([A-Z])/gu, "$1_$2").toLowerCase();
+  if (normalized === "command" || normalized === "commands" || normalized === "cmd") {
+    return "command";
+  }
+  if (normalized === "path" || normalized === "paths" || normalized === "cwd"
+    || normalized === "workdir" || normalized === "directory"
+    || normalized.endsWith("_path") || normalized.endsWith("_paths")) {
+    return "path";
+  }
+  return undefined;
+}
+
+function collectArgumentValues(
+  value: unknown,
+  key: string,
+  output: { commands: string[]; paths: string[] },
+  depth = 0,
+): void {
+  if (depth > MAX_TOOL_ARGUMENT_DEPTH
+    || output.commands.length + output.paths.length >= MAX_TOOL_ARGUMENT_VALUES) return;
+  const kind = argumentKind(key);
+  if (typeof value === "string") {
+    if (kind) output[kind === "command" ? "commands" : "paths"].push(redactMemorySecrets(value));
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) collectArgumentValues(item, key, output, depth + 1);
+    return;
+  }
+  const object = record(value);
+  if (!object) return;
+  for (const [childKey, child] of Object.entries(object)) {
+    collectArgumentValues(child, childKey, output, depth + 1);
+  }
+}
+
+function toolArguments(records: readonly TranscriptRecord[]): { commands: string[]; paths: string[] } {
+  const output = { commands: [] as string[], paths: [] as string[] };
+  for (const item of records) {
+    const message = messageFrom(item);
+    if (!message || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      const block = record(part);
+      if (block?.type === "toolCall") collectArgumentValues(block.arguments, "", output);
+      else if (block?.type === "tool_use" || block?.type === "mcp_tool_use") {
+        collectArgumentValues(block.input, "", output);
+      }
+    }
+  }
+  return output;
 }
 
 export async function reconstructAdvisorTurnDelta(
@@ -163,10 +223,11 @@ export async function reconstructAdvisorTurnDelta(
     }
   }
   if (ownerIndex < 0) return fallback(event, "owner-boundary");
-  const rendered = records.slice(ownerIndex).flatMap((item) => {
+  const activeTurn = records.slice(ownerIndex);
+  const rendered = activeTurn.flatMap((item) => {
     const line = renderRecord(item);
     return line ? [line] : [];
   });
   if (rendered.length === 0) return fallback(event, "parse");
-  return { text: rendered.join("\n"), source: "transcript" };
+  return { text: rendered.join("\n"), source: "transcript", ...toolArguments(activeTurn) };
 }

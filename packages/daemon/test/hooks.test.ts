@@ -318,11 +318,11 @@ describe("GhostHookRunner", () => {
     const config = join(directory, "hooks.json");
     writeFileSync(config, JSON.stringify({
       hooks: {},
-      builtin: { memory_upkeep: { idleSeconds: 900 }, other: {} },
+      builtin: { memory_upkeep: { idleSeconds: 900 }, review: {} },
     }));
     const runner = GhostHookRunner.fromConfig(config);
     expect(runner.builtinSettings("memory_upkeep")).toEqual({ idleSeconds: 900 });
-    expect(runner.builtinSettings("other")).toEqual({});
+    expect(runner.builtinSettings("review")).toEqual({});
     expect(runner.builtinSettings("absent")).toEqual({});
     expect(new GhostHookRunner().builtinSettings("memory_upkeep")).toEqual({});
 
@@ -349,7 +349,9 @@ describe("GhostHookRunner", () => {
     for (const [document, message] of [
       [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],
       [{ hooks: {}, builtin: { "Bad-Key": {} } }, /must match \[a-z\]/u],
+      [{ hooks: {}, builtin: { other: {} } }, /unsupported builtin key/u],
       [{ hooks: {}, builtin: { memory_upkeep: 5 } }, /builtin\.memory_upkeep must be an object/u],
+      [{ hooks: {}, builtin: { review: { idleSeconds: 5 } } }, /builtin\.review\.idleSeconds is not a setting/u],
       [{ hooks: {}, builtin: { memory_upkeep: { timeout: 5 } } }, /builtin\.memory_upkeep\.timeout is not a setting/u],
       [{ hooks: {}, builtin: { memory_upkeep: { idleSeconds: 0 } } }, /idleSeconds must be an integer in \[1, 86400\]/u],
     ] as const) {
