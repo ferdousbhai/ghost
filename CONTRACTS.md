@@ -46,8 +46,8 @@ The default root is `~/ghosts`; each direct child is one ghost:
   skills/<name>/SKILL.md
   agents/<name>.md
   commands/<name>.md
-  rules/  prompts/  hooks/  lint/
-  AGENTS.md  CLAUDE.md  WATCHDOG.md
+  rules/  prompts/  hooks/
+  AGENTS.md  CLAUDE.md  WATCHDOG.md  LINT.yml
   settings.yml
   models.json
   mcp.json
@@ -282,9 +282,10 @@ One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
 `strict`) and non-negative `review.immuneTurns` (default 3). Its deterministic
 producer lints final-assistant prose outside fenced code plus command and path
 strings recovered from current-turn tool-call arguments. Built-in rules are
-augmented by `<ghost-home>/lint/*.yml` and, only for an identity-validated
-project binding, ancestor `.ghost/lint/*.yml` packs; packs may disable built-in
-rule ids. Transcript fallback still lints prose and skips command/path targets.
+augmented by `<ghost-home>/LINT.yml` and, only for an identity-validated project
+binding, ancestor `LINT.yml` and `.ghost/LINT.yml` files discovered in the same
+order as `WATCHDOG.md`; a file may disable built-in rule ids. Transcript
+fallback still lints prose and skips command/path targets.
 The model producer runs only in `advisory` and `strict`, uses `advisor_model`,
 and judges the bounded, secret-redacted current turn against ghost-home and
 trusted-project `WATCHDOG.md` policy. Lint findings enter delivery on their own

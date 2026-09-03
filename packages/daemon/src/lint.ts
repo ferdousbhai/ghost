@@ -1,7 +1,7 @@
 import { parse as parseYaml } from "yaml";
 import * as z from "zod";
 import {
-  collectLintPackCandidates,
+  collectConfigCandidates,
   type ConfigCandidate,
   type WatchdogDiscoveryOptions,
 } from "./watchdog-files.js";
@@ -206,7 +206,7 @@ export async function loadLintRules(
   ghostHome: string,
   options: WatchdogDiscoveryOptions & { warn?: (path: string) => void } = {},
 ): Promise<LoadedLintRules> {
-  const candidates = await collectLintPackCandidates(cwd, ghostHome, options);
+  const candidates = await collectConfigCandidates(cwd, ghostHome, ["LINT.yml"], options);
   const disabledBuiltinRuleIds = new Set<string>();
   const rules: CompiledLintRule[] = [];
   for (const candidate of candidates) {

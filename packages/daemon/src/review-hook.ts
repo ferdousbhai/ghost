@@ -63,7 +63,7 @@ interface ReviewConversationState {
 export interface ReviewHookOptions {
   logger?: Logger;
   complete?: AdvisorCompletion;
-  /** Enables validated project WATCHDOG and lint-pack discovery. */
+  /** Enables validated project WATCHDOG.md and LINT.yml discovery. */
   ownerHome?: string;
   projectBindings?: Pick<ProjectBindingStore, "read">;
 }
@@ -271,10 +271,10 @@ async function review(
   try {
     ownerRules = await loadLintRules(event.cwd, event.ghost_home, {
       ...(projectRoot ? { trustedProjectRoot: projectRoot } : {}),
-      warn: () => log.warn("lint rule pack was skipped"),
+      warn: () => log.warn("LINT.yml was skipped"),
     });
   } catch {
-    log.warn("lint rule-pack discovery failed open");
+    log.warn("LINT.yml discovery failed open");
   }
   let findings: LintFinding[] = [];
   try {

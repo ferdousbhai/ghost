@@ -24,8 +24,8 @@ function fixture(): { ghostHome: string; project: string; cwd: string } {
   const ghostHome = join(temp.path, "ghost");
   const project = join(temp.path, "project");
   const cwd = join(project, "src");
-  mkdirSync(join(ghostHome, "lint"), { recursive: true });
-  mkdirSync(join(project, ".ghost", "lint"), { recursive: true });
+  mkdirSync(ghostHome, { recursive: true });
+  mkdirSync(join(project, ".ghost"), { recursive: true });
   mkdirSync(cwd, { recursive: true });
   return { ghostHome, project, cwd };
 }
@@ -179,11 +179,20 @@ describe("lint engine bounds", () => {
   });
 });
 
-describe("owner lint packs", () => {
-  it("skips a malformed pack with one warning and keeps valid command/path rules", async () => {
+describe("LINT.yml loading", () => {
+  it("skips a malformed file with one warning", async () => {
     const { ghostHome, cwd } = fixture();
-    writeFileSync(join(ghostHome, "lint", "broken.yml"), "rules: [not: valid", "utf8");
-    writeFileSync(join(ghostHome, "lint", "valid.yml"), [
+    writeFileSync(join(ghostHome, "LINT.yml"), "rules: [not: valid", "utf8");
+    const warnings: string[] = [];
+    await expect(loadLintRules(cwd, ghostHome, { warn: (path) => warnings.push(path) }))
+      .resolves.toMatchObject({ rules: [] });
+    await loadLintRules(cwd, ghostHome, { warn: (path) => warnings.push(path) });
+    expect(warnings).toEqual([join(ghostHome, "LINT.yml")]);
+  });
+
+  it("loads command and path rules from the owner file", async () => {
+    const { ghostHome, cwd } = fixture();
+    writeFileSync(join(ghostHome, "LINT.yml"), [
       "rules:",
       "  - id: unsafe-command",
       "    target: command",
@@ -198,21 +207,18 @@ describe("owner lint packs", () => {
       "    severity: concern",
       "    message: System path.",
     ].join("\n"), "utf8");
-    const warnings: string[] = [];
-    const loaded = await loadLintRules(cwd, ghostHome, { warn: (path) => warnings.push(path) });
+    const loaded = await loadLintRules(cwd, ghostHome);
     const findings = runLint([builtins, loaded], {
       prose: "Plain.",
       commands: ["rm -rf build"],
       paths: ["/etc/passwd"],
     });
     expect(findings.map((finding) => finding.ruleId)).toEqual(["unsafe-command", "secret-path"]);
-    await loadLintRules(cwd, ghostHome, { warn: (path) => warnings.push(path) });
-    expect(warnings.filter((path) => path.endsWith("broken.yml"))).toHaveLength(1);
   });
 
   it("honors disable lists only for built-ins", async () => {
     const { ghostHome, cwd } = fixture();
-    writeFileSync(join(ghostHome, "lint", "override.yml"), [
+    writeFileSync(join(ghostHome, "LINT.yml"), [
       "disable: [chatbot-phrase]",
       "rules:",
       "  - id: chatbot-phrase",
@@ -233,9 +239,37 @@ describe("owner lint packs", () => {
     })]);
   });
 
-  it("discovers project packs only with a trusted project root", async () => {
+  it("orders owner and trusted project files like WATCHDOG.md", async () => {
     const { ghostHome, project, cwd } = fixture();
-    writeFileSync(join(project, ".ghost", "lint", "project.yml"), [
+    const ruleFile = (id: string) => [
+      "rules:",
+      `  - id: ${id}`,
+      "    target: path",
+      "    kind: pattern",
+      `    pattern: '${id}'`,
+      "    severity: nit",
+      `    message: ${id}`,
+    ].join("\n");
+    mkdirSync(join(cwd, ".ghost"), { recursive: true });
+    writeFileSync(join(ghostHome, "LINT.yml"), ruleFile("owner"), "utf8");
+    writeFileSync(join(project, ".ghost", "LINT.yml"), ruleFile("root-dot"), "utf8");
+    writeFileSync(join(project, "LINT.yml"), ruleFile("root"), "utf8");
+    writeFileSync(join(cwd, ".ghost", "LINT.yml"), ruleFile("leaf-dot"), "utf8");
+    writeFileSync(join(cwd, "LINT.yml"), ruleFile("leaf"), "utf8");
+
+    const loaded = await loadLintRules(cwd, ghostHome, { trustedProjectRoot: project });
+    expect(loaded.rules.map((rule) => rule.id)).toEqual([
+      "owner",
+      "root-dot",
+      "root",
+      "leaf-dot",
+      "leaf",
+    ]);
+  });
+
+  it("ignores project files without a trusted project root", async () => {
+    const { ghostHome, project, cwd } = fixture();
+    writeFileSync(join(project, ".ghost", "LINT.yml"), [
       "rules:",
       "  - id: project-only",
       "    target: path",
@@ -245,7 +279,5 @@ describe("owner lint packs", () => {
       "    message: Generated path.",
     ].join("\n"), "utf8");
     expect((await loadLintRules(cwd, ghostHome)).rules).toEqual([]);
-    expect((await loadLintRules(cwd, ghostHome, { trustedProjectRoot: project })).rules)
-      .toHaveLength(1);
   });
 });

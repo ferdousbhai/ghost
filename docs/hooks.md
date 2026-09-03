@@ -275,13 +275,14 @@ gate. Inputs, rule counts, and findings are bounded. Excerpts contain at most 80
 Unicode code points. Unsafe regular expressions are rejected and warned once.
 
 The built-in pack contains the 21 rules inherited from `slop-detector`. Owner
-packs are direct `*.yml` files in `<ghost-home>/lint/`. With a currently valid,
-identity-bound project binding, Ghost also loads direct `*.yml` files from
-`.ghost/lint/` along the trusted project ancestor chain, ordered root to leaf.
-Project packs never load merely because cwd happens to be in a Git repository.
-A malformed pack is skipped with one warning per file version. Oversized,
-unreadable, or invalid-UTF-8 files are also skipped with a warning; none fail
-the owner turn. A pack has this shape:
+rules live in `<ghost-home>/LINT.yml`. With a currently valid, identity-bound
+project binding, Ghost also loads `LINT.yml` and `.ghost/LINT.yml` while walking
+from the trusted Git root to the operational cwd. Ordering is ghost first, then
+project root to leaf, with `.ghost/LINT.yml` before `LINT.yml` at each depth.
+Project files never load merely because cwd happens to be in a Git repository.
+A malformed file is skipped with one warning per file version. Unreadable or
+invalid-UTF-8 files are also skipped with a warning; none fail the owner turn.
+One `LINT.yml` has this shape:
 
 ```yaml
 disable:                    # optional; disables built-in ids only
@@ -306,7 +307,11 @@ rules:
 
 Rules are data only. Pattern messages may use `{match}`; the three built-in
 statistical checks also supply `{per100}` or `{lengths}` where applicable.
-Unknown fields, checks, targets, severities, or flags make the pack malformed.
+Unknown fields, checks, targets, severities, or flags make the file malformed.
+
+`WATCHDOG.md` and `LINT.yml` are the two halves of one review policy: prose the
+model reads and rules the machine executes. They therefore use the same
+discovery order, project trust gate, and precedence at every level.
 
 In `advisory` and `strict`, the model comes from `advisor_model`. An explicit
 role binding wins; otherwise Ghost uses its advisor preference list. The model
