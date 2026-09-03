@@ -279,9 +279,10 @@ legacy `major` findings map to `concern` and `minor` findings map to `nit`, so
 prose style alone never requests a strict continuation. Owner rules, including
 rules with `blocker` severity, live in `<ghost-home>/LINT.yml`. With a
 currently valid, identity-bound project binding, Ghost also loads `LINT.yml`
-and `.ghost/LINT.yml` while walking from the trusted Git root to the
-operational cwd. Ordering is ghost first, then
-project root to leaf, with `.ghost/LINT.yml` before `LINT.yml` at each depth.
+alongside `.ghost/LINT.yml` and `.omp/LINT.yml` while walking from the trusted
+Git root to the operational cwd. Ordering is ghost home first, then project
+root to leaf, with `.ghost/LINT.yml`, `.omp/LINT.yml`, and `LINT.yml` in that
+order at each depth.
 Project files never load merely because cwd happens to be in a Git repository.
 A malformed file is skipped with one warning per file version. Unreadable or
 invalid-UTF-8 files are also skipped with a warning; none fail the owner turn.
@@ -322,9 +323,12 @@ receives a bounded, secret-redacted current owner-turn delta reconstructed from
 Pi's `parentId` or Claude Code's `parentUuid` chain, including persisted
 reasoning, tool calls, and tool results. `WATCHDOG.md` at the ghost-home root is
 owner policy. An identity-validated project binding additionally admits
-project `WATCHDOG.md` and `.ghost/WATCHDOG.md` from trusted root to operational
-cwd. When no nested Git root resolves, the binding root is the boundary.
-Unreadable policy is skipped; `WATCHDOG.yml` rosters remain outside this phase.
+project `.ghost/WATCHDOG.md`, `.omp/WATCHDOG.md`, and `WATCHDOG.md`, in that
+order at each depth from trusted root to operational cwd. The `.omp/` probe
+preserves oh-my-pi compatibility: Ghost's `WATCHDOG.md` format and its `nit`,
+`concern`, and `blocker` severities match OMP's, so an existing OMP policy works
+as-is. OMP's `WATCHDOG.yml` advisor roster is not read yet. When no nested Git
+root resolves, the binding root is the boundary. Unreadable policy is skipped.
 
 Model output is bounded structured JSON. Output-only prompt-injection and
 destructive-command combinations are quarantined before model notes enter the

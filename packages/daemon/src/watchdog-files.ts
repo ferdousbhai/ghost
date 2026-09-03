@@ -10,6 +10,7 @@ import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
+const PROJECT_DOT_DIRS: readonly string[] = [".ghost", ".omp"];
 
 export interface ConfigCandidate {
   path: string;
@@ -81,8 +82,9 @@ function sortConfigCandidates(items: ConfigCandidate[]): void {
 /**
  * Walk the review-policy search path shared by WATCHDOG.md and LINT.yml: ghost
  * home first, then each directory from the trusted project cwd up to its Git
- * root (or trusted binding root), probing both `<F>` and `.ghost/<F>`. Project
- * candidates are impossible unless the caller supplies a validated binding.
+ * root (or trusted binding root), probing `.ghost/<F>`, `.omp/<F>`, then `<F>`.
+ * Project candidates are impossible unless the caller supplies a validated
+ * binding.
  */
 export async function collectConfigCandidates(
   cwd: string,
@@ -106,7 +108,9 @@ export async function collectConfigCandidates(
     : undefined;
   for (const current of await projectSearchDirectories(resolvedCwd, trustedRoot)) {
     for (const filename of filenames) {
-      candidates.add(resolve(current, ".ghost", filename));
+      for (const dotDir of PROJECT_DOT_DIRS) {
+        candidates.add(resolve(current, dotDir, filename));
+      }
       candidates.add(resolve(current, filename));
     }
   }
@@ -118,9 +122,10 @@ export async function collectConfigCandidates(
       const parent = dirname(candidate);
       const baseName = basename(parent);
       const isUser = userPaths.has(candidate);
-      const ownerDir = baseName === ".ghost" ? dirname(parent) : parent;
+      const isProjectDotDir = PROJECT_DOT_DIRS.includes(baseName);
+      const ownerDir = isProjectDotDir ? dirname(parent) : parent;
       const ownerBaseName = basename(ownerDir);
-      if (isUser || !ownerBaseName.startsWith(".") || baseName === ".ghost") {
+      if (isUser || !ownerBaseName.startsWith(".") || isProjectDotDir) {
         const rel = relative(resolvedCwd, ownerDir);
         const depth = rel === "" ? 0 : rel.split(sep).filter(Boolean).length;
         items.push({

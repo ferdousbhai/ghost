@@ -284,15 +284,20 @@ producer lints final-assistant prose outside fenced code plus command and path
 strings recovered from current-turn tool-call arguments. Built-in rules emit
 only `nit` and `concern`; owner and trusted-project `LINT.yml` rules may also
 emit `blocker`. They augment the built-in pack and, only for an
-identity-validated project binding, ancestor `LINT.yml` and `.ghost/LINT.yml`
-files discovered in the same order as `WATCHDOG.md`; a file may disable
-built-in rule ids. Transcript
+identity-validated project binding, ancestor `.ghost/LINT.yml`, `.omp/LINT.yml`,
+and `LINT.yml` files discovered in the same order as `WATCHDOG.md`; a file may
+disable built-in rule ids. Transcript
 fallback still lints prose and skips command/path targets.
 The model producer runs only in `advisory` and `strict`, uses `advisor_model`,
 and judges the bounded, secret-redacted current turn against ghost-home and
 trusted-project `WATCHDOG.md` policy. Lint findings enter delivery on their own
 deterministic authority and the model is told which rule ids were already
-delivered; it never re-judges them.
+delivered; it never re-judges them. Review-policy discovery is ghost home first,
+then trusted project root to leaf. At every project level Ghost probes
+`.ghost/<FILE>`, `.omp/<FILE>`, then `<FILE>`; `.omp/` preserves oh-my-pi
+compatibility. Ghost's `WATCHDOG.md` format and `nit`, `concern`, and `blocker`
+severities match OMP's, so an existing OMP policy works as-is. OMP's
+`WATCHDOG.yml` advisor roster is not read yet.
 
 Both producers feed the same severity, emission-guard, note-ledger, channel,
 and consume-once feedback path. `lint` and `advisory` always send accepted
