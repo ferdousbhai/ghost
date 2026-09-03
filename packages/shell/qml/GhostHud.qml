@@ -108,13 +108,13 @@ FloatingWindow {
     // The file pane sits beside the chat when both columns can still be read,
     // and takes the chat's place when they cannot. The test is on the width
     // actually left for the two of them, not on the window: an open sidebar
-    // costs a fixed 244px that a raw window-width threshold would ignore.
-    readonly property int sidebarWidth: 220
+    // costs its list column plus the gap beside it, which a raw window-width
+    // threshold would ignore.
     readonly property int chatMinimumWidth: 380
     readonly property int paneMinimumWidth: 320
     readonly property int bodyWidth: hud.width - Theme.pad * 2
         - hud.navigationWidth - Theme.sectionGap
-        - (hud.sidebarOpen ? hud.sidebarWidth + Theme.sectionGap : 0)
+        - (hud.sidebarOpen ? Theme.sidebarMeasure + Theme.sectionGap : 0)
     readonly property bool workbenchOpen: Workbench.filePath !== ""
     readonly property bool workbenchSplit: hud.workbenchOpen
         && hud.bodyWidth >= hud.chatMinimumWidth + hud.paneMinimumWidth + Theme.sectionGap
@@ -557,9 +557,9 @@ FloatingWindow {
                     // would let the sidebar swallow the whole row and crush the
                     // transcript; pin it to a fixed column instead.
                     Layout.fillWidth: false
-                    Layout.preferredWidth: hud.sidebarWidth
-                    Layout.minimumWidth: hud.sidebarWidth
-                    Layout.maximumWidth: hud.sidebarWidth
+                    Layout.preferredWidth: Theme.sidebarMeasure
+                    Layout.minimumWidth: Theme.sidebarMeasure
+                    Layout.maximumWidth: Theme.sidebarMeasure
                     Layout.fillHeight: true
                     spacing: Theme.sectionGap
 

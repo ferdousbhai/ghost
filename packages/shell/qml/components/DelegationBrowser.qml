@@ -389,8 +389,8 @@ Rectangle {
             spacing: Theme.pad
 
             Rectangle {
-                Layout.preferredWidth: 260
-                Layout.minimumWidth: 190
+                Layout.preferredWidth: Theme.sidebarMeasure
+                Layout.minimumWidth: Theme.sidebarMeasure
                 Layout.fillHeight: true
                 radius: Theme.radius
                 color: Theme.surface

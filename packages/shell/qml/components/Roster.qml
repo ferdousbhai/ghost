@@ -48,7 +48,7 @@ Item {
     // roster would re-emerge on each refresh.
     property var summoned: ({})
 
-    implicitWidth: Theme.ch(26)
+    implicitWidth: Theme.sidebarMeasure
     implicitHeight: column.implicitHeight
 
     Column {
