@@ -361,8 +361,14 @@ Singleton {
             const eq = line.indexOf("=");
             if (eq < 0) continue;
             const key = line.slice(0, eq).trim();
-            let value = line.slice(eq + 1).trim().replace(/\s+#.*$/u, "");
-            if (/^["']/u.test(value)) value = value.slice(1, -1);
+            let value = line.slice(eq + 1).trim();
+            const quote = value.charAt(0);
+            const close = quote === "\"" || quote === "'" ? value.indexOf(quote, 1) : -1;
+            // A quoted value ends at its own closing quote, so a `#` inside it
+            // is content rather than a comment. An unbalanced quote is not a
+            // string at all: it stays verbatim rather than losing its last
+            // character to a closing quote nobody wrote.
+            value = close > 0 ? value.slice(1, close) : value.replace(/\s+#.*$/u, "");
             out[section + key] = value;
         }
         return out;
