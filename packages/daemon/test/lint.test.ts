@@ -35,28 +35,28 @@ function lintProse(prose: string) {
 }
 
 describe("built-in lint rules", () => {
-  const fixtures: ReadonlyArray<[ruleId: string, severity: "nit" | "blocker", text: string]> = [
+  const fixtures: ReadonlyArray<[ruleId: string, severity: "nit" | "concern", text: string]> = [
     ["ai-vocabulary", "nit", "We delve into the data."],
-    ["binary-contrast", "blocker", "It's not just a tool, but a platform."],
-    ["chatbot-phrase", "blocker", "I'd be happy to help with that."],
-    ["colon-reveal", "blocker", "The best part: it works."],
-    ["dramatic-fragment", "blocker", "That's it. That's the tweet."],
+    ["binary-contrast", "concern", "It's not just a tool, but a platform."],
+    ["chatbot-phrase", "concern", "I'd be happy to help with that."],
+    ["colon-reveal", "concern", "The best part: it works."],
+    ["dramatic-fragment", "concern", "That's it. That's the tweet."],
     ["em-dash-density", "nit", "One two three four five six seven eight nine ten eleven twelve thirteen fourteen — fifteen."],
-    ["emoji-bullets", "blocker", "✨ Fast startup\n🔥 Simple config"],
-    ["essay-connective", "blocker", "Moreover, the cache warms itself."],
-    ["faux-insight", "blocker", "Here's what nobody tells you about pricing."],
+    ["emoji-bullets", "concern", "✨ Fast startup\n🔥 Simple config"],
+    ["essay-connective", "concern", "Moreover, the cache warms itself."],
+    ["faux-insight", "concern", "Here's what nobody tells you about pricing."],
     ["filler-phrase", "nit", "In order to win, we must try."],
     ["hedging-ratio", "nit", "Perhaps the team will ship the new build tomorrow if the tests pass and the review lands on time early."],
     ["inflated-verb", "nit", "The tool serves as a bridge."],
-    ["ing-explainer", "blocker", "Sales rose, highlighting strong demand."],
-    ["landscape-cliche", "blocker", "We navigate the complex world of tech."],
-    ["puffery", "blocker", "This marks a pivotal moment for the team."],
-    ["recap-ending", "blocker", "In conclusion, we win."],
-    ["rhetorical-setup", "blocker", "What if I told you it scales?"],
-    ["throat-clearing", "blocker", "Here's the thing about pricing."],
+    ["ing-explainer", "concern", "Sales rose, highlighting strong demand."],
+    ["landscape-cliche", "concern", "We navigate the complex world of tech."],
+    ["puffery", "concern", "This marks a pivotal moment for the team."],
+    ["recap-ending", "concern", "In conclusion, we win."],
+    ["rhetorical-setup", "concern", "What if I told you it scales?"],
+    ["throat-clearing", "concern", "Here's the thing about pricing."],
     ["triad-adjectives", "nit", "The design is elegant, minimal, and useful."],
     ["uniform-sentences", "nit", "The team shipped the release on Monday before lunch. The users tested the build on Tuesday after breakfast. The board reviewed the numbers on Wednesday before dinner. The devs planned the sprint on Thursday after standup."],
-    ["vague-attribution", "blocker", "Experts believe this is fine."],
+    ["vague-attribution", "concern", "Experts believe this is fine."],
   ];
 
   it("reports nothing on plain prose", () => {
@@ -72,6 +72,10 @@ describe("built-in lint rules", () => {
 
   it("covers all 21 inherited rule ids", () => {
     expect(fixtures.map(([id]) => id).toSorted()).toEqual(BUILTIN_LINT_RULE_IDS.toSorted());
+  });
+
+  it("never assigns blocker severity to built-in prose rules", () => {
+    expect(BUILTIN_LINT_RULES.some((rule) => rule.severity === "blocker")).toBe(false);
   });
 
   it("preserves messages, fixes, and code-point-safe excerpts", () => {
@@ -213,7 +217,10 @@ describe("LINT.yml loading", () => {
       commands: ["rm -rf build"],
       paths: ["/etc/passwd"],
     });
-    expect(findings.map((finding) => finding.ruleId)).toEqual(["unsafe-command", "secret-path"]);
+    expect(findings.map(({ ruleId, severity }) => [ruleId, severity])).toEqual([
+      ["unsafe-command", "blocker"],
+      ["secret-path", "concern"],
+    ]);
   });
 
   it("honors disable lists only for built-ins", async () => {

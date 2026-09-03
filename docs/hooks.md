@@ -274,9 +274,12 @@ runs and command/path lint is skipped. Lint is post-hoc review, never a pre-tool
 gate. Inputs, rule counts, and findings are bounded. Excerpts contain at most 80
 Unicode code points. Unsafe regular expressions are rejected and warned once.
 
-The built-in pack contains the 21 rules inherited from `slop-detector`. Owner
-rules live in `<ghost-home>/LINT.yml`. With a currently valid, identity-bound
-project binding, Ghost also loads `LINT.yml` and `.ghost/LINT.yml` while walking
+The built-in pack contains the 21 rules inherited from `slop-detector`; its
+legacy `major` findings map to `concern` and `minor` findings map to `nit`, so
+prose style alone never requests a strict continuation. Owner rules, including
+rules with `blocker` severity, live in `<ghost-home>/LINT.yml`. With a
+currently valid, identity-bound project binding, Ghost also loads `LINT.yml`
+and `.ghost/LINT.yml` while walking
 from the trusted Git root to the operational cwd. Ordering is ghost first, then
 project root to leaf, with `.ghost/LINT.yml` before `LINT.yml` at each depth.
 Project files never load merely because cwd happens to be in a Git repository.

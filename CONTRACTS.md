@@ -281,9 +281,11 @@ One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
 `settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
 `strict`) and non-negative `review.immuneTurns` (default 3). Its deterministic
 producer lints final-assistant prose outside fenced code plus command and path
-strings recovered from current-turn tool-call arguments. Built-in rules are
-augmented by `<ghost-home>/LINT.yml` and, only for an identity-validated project
-binding, ancestor `LINT.yml` and `.ghost/LINT.yml` files discovered in the same
+strings recovered from current-turn tool-call arguments. Built-in rules emit
+only `nit` and `concern`; owner and trusted-project `LINT.yml` rules may also
+emit `blocker`. They augment the built-in pack and, only for an
+identity-validated project binding, ancestor `LINT.yml` and `.ghost/LINT.yml`
+files discovered in the same
 order as `WATCHDOG.md`; a file may disable built-in rule ids. Transcript
 fallback still lints prose and skips command/path targets.
 The model producer runs only in `advisory` and `strict`, uses `advisor_model`,

@@ -160,13 +160,13 @@ describe("review hook", () => {
     expect(calls).toHaveLength(2);
   });
 
-  it("strict nits remain next-turn feedback", async () => {
+  it("strict built-in prose findings remain next-turn feedback", async () => {
     const home = scratchGhostHome("review:\n  mode: strict\n");
     const { runner } = await runnerWith(['{"notes":[]}']);
-    const result = await runner.emitSessionStop(withAssistant(home, "In order to win, we must try."));
+    const result = await runner.emitSessionStop(withAssistant(home, "Great question!"));
     expect(ghostSessionStopContinuation(result)).toBeUndefined();
     expect((await runner.emitBeforePrompt(promptEvent(home)))?.additionalContext)
-      .toContain("filler-phrase");
+      .toContain("chatbot-phrase");
   });
 
   it("downgrades strict blockers during cooldown and re-enables continuation afterward", async () => {
@@ -200,8 +200,9 @@ describe("review hook", () => {
     const home = scratchGhostHome("review:\n  mode: strict\n");
     const { runner } = await runnerWith([new Error("unavailable")], logger);
     const result = await runner.emitSessionStop(withAssistant(home, "Great question!"));
-    expect(result?.continue).toBe(true);
-    expect(ghostSessionStopContinuation(result)).toContain("chatbot-phrase");
+    expect(ghostSessionStopContinuation(result)).toBeUndefined();
+    expect((await runner.emitBeforePrompt(promptEvent(home)))?.additionalContext)
+      .toContain("chatbot-phrase");
     expect(logger.records.filter((record) => record.message === "model review failed open"))
       .toHaveLength(1);
   });
