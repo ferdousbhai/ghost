@@ -285,8 +285,8 @@ strings recovered from current-turn tool-call arguments. Built-in rules emit
 only `nit` and `concern`; owner and trusted-project `LINT.yml` rules may also
 emit `blocker`. They augment the built-in pack and, only for an
 identity-validated project binding, ancestor `LINT.yml` and `.ghost/LINT.yml`
-files discovered in the same
-order as `WATCHDOG.md`; a file may disable built-in rule ids. Transcript
+files discovered in the same order as `WATCHDOG.md`; a file may disable
+built-in rule ids. Transcript
 fallback still lints prose and skips command/path targets.
 The model producer runs only in `advisory` and `strict`, uses `advisor_model`,
 and judges the bounded, secret-redacted current turn against ghost-home and
