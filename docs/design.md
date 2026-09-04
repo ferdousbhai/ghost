@@ -44,6 +44,19 @@ than becoming parallel Ghost frameworks.
   owner's installed Pi, Codex, or Claude Code as independent work. Ghost owns
   admission, durable lifecycle, bounded status, and exact process cleanup; the
   harness owns its coding behavior and project resources.
+- **Self-maintenance through the machine's own facilities.** A ghost may edit,
+  build, and restart its own source. The clone it is allowed to touch is named
+  by `self.checkout` in its `settings.yml` and is bound like any other trusted
+  project; git is the code history and the rollback, journald
+  (`journalctl --user -t ghostd`) is the lifecycle history, systemd is the
+  guardian (`systemd-run --user` hands off `systemctl --user restart ghostd`,
+  so the restarter outlives the daemon it restarts), and Omarchy's snapper
+  snapshots are the system rewind. Taking the direction from
+  [exo](https://github.com/exoharness/exo) but not its machinery, Ghost
+  deliberately builds no container sandbox with snapshot and rewind, no
+  rebuild-and-restart tool, no event-log subsystem, no self-map beyond
+  `CLAUDE.md` and `CONTRACTS.md`, and no canary automation. The runbook is
+  [`docs/self-maintenance.md`](self-maintenance.md).
 - **One visible browser.** Ghost drives the owner's signed-in Chromium through
   the opt-in relay. A second ghost profile was removed because the owner could
   not see it and the tab is the useful isolation unit.
@@ -65,7 +78,8 @@ The useful idea is an always-available AI teammate with a name, a chat thread,
 tools, and continuity. Ghost's distinction is local custody: the persona works
 on the owner's actual Linux desktop, its private state is readable, shared notes
 remain the owner's Obsidian vault, and credentials remain in machine-native
-stores.
+stores. That custody covers Ghost's own source: a ghost maintains the clone the
+owner names for it, and every way back is a facility the machine already has.
 
 Onboarding is: install and verify Obsidian CLI/skill → create a ghost → choose a
 free, subscription, API-key, or local model → summon the HUD → talk. Packaging

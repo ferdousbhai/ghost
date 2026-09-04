@@ -27,7 +27,10 @@ owner-visible persistent state shared by every ghost; they never infer that the
 vault is `~/Documents` or access it as raw files. Claude keeps its complete,
 unfiltered native tool preset and receives the same Ghost-owned context as an
 append; Ghost tools are added only for capabilities that preset lacks. Browser
-and desktop capabilities remain available. The Quickshell client renders live
+and desktop capabilities remain available. A ghost can also maintain the code it
+runs on: it edits the clone named by `self.checkout`, builds it, and hands the
+restart to systemd, as in
+[docs/self-maintenance.md](docs/self-maintenance.md). The Quickshell client renders live
 tool activity beside the recovered summoning orb from the earlier summon-ghost
 interface, naming the call the ghost is inside of while it runs.
 
