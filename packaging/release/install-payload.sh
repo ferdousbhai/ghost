@@ -74,7 +74,7 @@ install -Dm644 "$source_root/README.md" "$pkgdir/usr/share/doc/ghost/README.md"
 install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
 # The installed README, CONTRACTS.md, and ARCH.md link into docs/. Ship those
 # link targets so the relative references resolve inside the package.
-for doc in claude-code-runtime.md hooks.md keyring.md; do
+for doc in claude-code-runtime.md hooks.md keyring.md self-maintenance.md; do
   install -Dm644 "$source_root/docs/$doc" "$pkgdir/usr/share/doc/ghost/docs/$doc"
 done
 install -Dm644 "$source_root/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

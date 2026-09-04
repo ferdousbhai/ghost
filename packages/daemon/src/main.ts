@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createReviewHook } from "./review-hook.js";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
@@ -36,6 +38,7 @@ import { PiTaskAdapter } from "./pi-task-adapter.js";
 import type { TaskAdapter } from "./tasks.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
+import { resolveRunningSource } from "./running-source.js";
 import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
@@ -433,6 +436,11 @@ async function serveDaemon(
   const ownerHome = homedir();
   const scheduleUnitDir = resolveScheduleUnitDirectory(ownerHome);
   const scheduleRuntimeUnitDir = resolveScheduleRuntimeUnitDirectory();
+  // What is running: the source checkout behind this process, if it has one.
+  const runningSource = resolveRunningSource(
+    await readVersion(),
+    dirname(fileURLToPath(import.meta.url)),
+  );
   registry.ensureRoot();
   try {
     await Promise.all(registry.list().map(async (ghost) => {
@@ -472,6 +480,7 @@ async function serveDaemon(
     ownerHome,
     scheduleUnitDir,
     scheduleRuntimeUnitDir,
+    runningSource,
     logger,
     offline: config.offline,
     compaction: config.compaction,
@@ -569,6 +578,7 @@ async function serveDaemon(
       nativeHarnesses,
       mcp,
       hooks,
+      runningSource,
       logger,
       port: config.port,
       address: config.host,
@@ -596,6 +606,9 @@ async function serveDaemon(
     url: `http://${config.host}:${listening.port}`,
     ghostsRoot: config.ghostsRoot,
     ghosts: registry.list().length,
+    version: runningSource.version,
+    commit: runningSource.commit,
+    source: runningSource.root,
     offline: config.offline,
     config: config.configPath,
     hooks: hooksPath,

@@ -147,6 +147,8 @@ export {
   sessionFileNameFor,
 };
 import { pathIsWithin } from "./path-within.js";
+import type { RunningSource } from "./running-source.js";
+import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { loadGhostHookExtensions } from "./hook-extensions.js";
@@ -622,6 +624,8 @@ export interface SessionHostOptions {
   scheduleUnitDir?: string;
   /** Runtime systemd user-unit directory; main supplies the XDG-resolved path. */
   scheduleRuntimeUnitDir?: string;
+  /** What runs this daemon, for the self-maintenance policy. Unknown when absent. */
+  runningSource?: RunningSource;
   /** Test seam over schedule lifecycle's `systemctl --user` calls. */
   scheduleCommandRunner?: CommandRunner;
   /** Test seam; production discovers the standard owner-machine skill paths. */
@@ -700,6 +704,7 @@ export interface SessionHostOptions {
     | "machineSkillPaths"
     | "ownerHome"
     | "scheduleUnitDir"
+    | "runningSource"
     | "askTimeoutMs"
   >;
   liveVoice?: LiveVoiceManager;
@@ -1790,6 +1795,7 @@ export class SessionHost {
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
   private readonly scheduleRuntimeUnitDir: string;
+  private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly machineSkills: string[];
   private readonly projectBindings: ProjectBindingStore;
@@ -1890,6 +1896,7 @@ export class SessionHost {
       throw new TypeError("scheduleRuntimeUnitDir must be absolute");
     }
     this.scheduleRuntimeUnitDir = resolve(scheduleRuntimeUnitDir);
+    this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
@@ -1967,6 +1974,7 @@ export class SessionHost {
       hooks: this.hooks,
       ...(options.claudeCode ?? {}),
       scheduleUnitDir: this.scheduleUnitDir,
+      ...(this.runningSource ? { runningSource: this.runningSource } : {}),
       askTimeoutMs: () => this.askTimeoutSeconds * 1000,
     });
     this.liveVoice = options.liveVoice ?? new LiveVoiceManager();
@@ -3560,6 +3568,12 @@ export class SessionHost {
       SHARED_OBSIDIAN_POLICY,
       ...(this.taskServices ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
+      renderSelfMaintenancePolicy({
+        ghostName,
+        checkout: resolveSelfCheckout(settings, this.ownerHome),
+        running: this.runningSource,
+        sessionId: sessionKey,
+      }),
       ...(declarativeSection ? [declarativeSection] : []),
       ...(isSeededCharacter(ghostName, sessionCharacter?.body ?? null)
         ? [FIRST_MEETING_SECTION]

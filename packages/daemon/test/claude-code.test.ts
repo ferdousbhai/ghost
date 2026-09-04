@@ -2188,6 +2188,7 @@ fi
     );
     for (const prompt of [casperPrompt, minaPrompt]) {
       expect(prompt).toContain("## Shared Obsidian");
+      expect(prompt).toContain("## Self-maintenance");
       expect(prompt).toContain(sharedSkill);
       expect(prompt).toContain("Use the CLI-selected current vault by default");
       expect(prompt.split(sharedSkill)).toHaveLength(2);
@@ -2328,6 +2329,7 @@ fi
     ) throw new Error("Claude Code did not receive Ghost's appended persona.");
     const appended = systemPrompt.append;
     expect(appended).toContain("## Shared Obsidian");
+    expect(appended).toContain("## Self-maintenance");
     expect(appended).not.toContain(".agents/skills/obsidian-cli/SKILL.md");
     expect(appended).toContain("Never infer or scan for a vault path");
     expect(appended).toContain("do not fall back to direct vault-file access");

@@ -73,6 +73,25 @@ WantedBy=timers.target
 Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.
 Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.
 
+## Self-maintenance
+What runs you is unknown to this process: no version, commit, or source root resolved.
+No self checkout is configured. Your source is https://github.com/ferdousbhai/ghost; the owner can point you at a clone under their home by putting `self:` with a nested `checkout: <absolute path>` in your `settings.yml`.
+Never edit a checkout you were not given.
+To restart yourself, finish the turn and tell the owner first — the daemon drains for 5 seconds and then forces. Then:
+```sh
+systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \
+  --description="<reason>" \
+  sh -c 'systemctl --user restart ghostd.service; \
+         for i in $(seq 30); do ghost status -q >/dev/null 2>&1 && break; sleep 1; done; \
+         ghost say --ghost casper --session conv-golden "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'
+```
+The timestamp keeps two restarts from colliding on the same transient unit name.
+The wait loop covers the daemon not listening yet when systemd already considers it started.
+The transient unit survives the restart because it is its own unit, not a child of yours.
+A HUD change needs `systemctl --user restart ghost-shell.service` instead; reloading that unit only refetches daemon data, it does not reload QML.
+Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.
+To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.
+
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.
 - obsidian-cli: Official Obsidian CLI skill. (<owner-home>/.agents/skills/obsidian-cli/SKILL.md)
@@ -178,6 +197,25 @@ WantedBy=timers.target
 ```
 Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.
 Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.
+
+## Self-maintenance
+What runs you is unknown to this process: no version, commit, or source root resolved.
+No self checkout is configured. Your source is https://github.com/ferdousbhai/ghost; the owner can point you at a clone under their home by putting `self:` with a nested `checkout: <absolute path>` in your `settings.yml`.
+Never edit a checkout you were not given.
+To restart yourself, finish the turn and tell the owner first — the daemon drains for 5 seconds and then forces. Then:
+```sh
+systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \
+  --description="<reason>" \
+  sh -c 'systemctl --user restart ghostd.service; \
+         for i in $(seq 30); do ghost status -q >/dev/null 2>&1 && break; sleep 1; done; \
+         ghost say --ghost casper --session conv-golden "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'
+```
+The timestamp keeps two restarts from colliding on the same transient unit name.
+The wait loop covers the daemon not listening yet when systemd already considers it started.
+The transient unit survives the restart because it is its own unit, not a child of yours.
+A HUD change needs `systemctl --user restart ghost-shell.service` instead; reloading that unit only refetches daemon data, it does not reload QML.
+Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.
+To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.
 
 ## Skills
 When a skill matches, read its listed `SKILL.md` before acting.

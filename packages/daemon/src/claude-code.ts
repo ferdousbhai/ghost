@@ -125,6 +125,9 @@ import {
 } from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { pathIsWithin } from "./path-within.js";
+import { loadGhostSettings } from "./ghost-settings.js";
+import type { RunningSource } from "./running-source.js";
+import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
   loadProjectDeclarativeSnapshot,
@@ -289,6 +292,8 @@ export interface ClaudeCodeProbeOptions {
 export interface ClaudeCodeRuntimeOptions {
   ownerHome?: string;
   scheduleUnitDir?: string;
+  /** What runs this daemon, for the self-maintenance policy. Unknown when absent. */
+  runningSource?: RunningSource;
   machineSkillPaths?: readonly string[];
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
@@ -1456,6 +1461,7 @@ async function buildPersona(
   ghostName: string,
   scheduleUnitDir: string,
   includeTaskDelegation: boolean,
+  self: { ownerHome: string; running: RunningSource | null; sessionId: string },
 ): Promise<string> {
   const home = openGhostHome(homeDir);
   const [character, memory] = await Promise.all([
@@ -1473,6 +1479,12 @@ async function buildPersona(
       SHARED_OBSIDIAN_POLICY,
       ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
+      renderSelfMaintenancePolicy({
+        ghostName,
+        checkout: resolveSelfCheckout(loadGhostSettings(homeDir), self.ownerHome),
+        running: self.running,
+        sessionId: self.sessionId,
+      }),
       // A seeded character.md means this ghost has not met its owner yet.
       ...(isSeededCharacter(ghostName, character?.body ?? null)
         ? [FIRST_MEETING_SECTION]
@@ -2269,6 +2281,7 @@ export class ClaudeCodeRuntime {
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly runningSource: RunningSource | null;
   private readonly warmIdleTtlMs: number;
   private readonly exitWaitTimeoutMs: number;
   private readonly observeQueryExit: ClaudeCodeQueryExitObserver | undefined;
@@ -2308,6 +2321,7 @@ export class ClaudeCodeRuntime {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    this.runningSource = options.runningSource ?? null;
     this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
     const warmIdleTtlMs = options.warmIdleTtlMs ?? CLAUDE_WARM_QUERY_IDLE_TTL_MS;
     if (!Number.isFinite(warmIdleTtlMs) || warmIdleTtlMs <= 0) {
@@ -2581,7 +2595,7 @@ export class ClaudeCodeRuntime {
         ? metadata.sessionId
         : randomUUID();
       const [persona, machineSkills, ghostDeclarative] = await Promise.all([
-        this.sessionPersona(key, paths.home, ghost.name),
+        this.sessionPersona(key, paths.home, ghost.name, conversationId),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
         loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
       ]);
@@ -3237,6 +3251,7 @@ export class ClaudeCodeRuntime {
     key: string,
     home: string,
     ghostName: string,
+    conversationId: string,
   ): Promise<string> {
     const cached = this.personas.get(key);
     if (cached !== undefined) return cached.prompt;
@@ -3245,6 +3260,7 @@ export class ClaudeCodeRuntime {
       ghostName,
       this.scheduleUnitDir,
       this.principalTaskContext !== undefined,
+      { ownerHome: this.ownerHome, running: this.runningSource, sessionId: conversationId },
     );
     // A turn racing another turn of the same conversation is already refused by
     // `busy`, so the first derivation wins and there is nothing to reconcile.

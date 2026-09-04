@@ -189,7 +189,7 @@ describe("CLI API adaptation", () => {
     expect(daemon.posted()).toBeUndefined();
   });
 
-  it("reports the CLI version without requesting a version route", async () => {
+  it("still prints against a daemon too old to answer /api/status", async () => {
     const paths: string[] = [];
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
@@ -208,6 +208,9 @@ describe("CLI API adaptation", () => {
           problem: null,
         });
       }
+      if (path === "/api/status") {
+        return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
+      }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
     const response = await runCli(["status", "--json"], {
@@ -215,7 +218,31 @@ describe("CLI API adaptation", () => {
       home: "/tmp/ghost-cli-unit",
       fetch,
     });
-    expect(JSON.parse(response.stdout)).toMatchObject({ version: "3.2.1", ghostCount: 0 });
-    expect(paths.sort()).toEqual(["/api/ghosts", "/api/remote"]);
+    const body = JSON.parse(response.stdout);
+    expect(body).toMatchObject({ version: "3.2.1", ghostCount: 0 });
+    expect(body).not.toHaveProperty("source");
+    expect(paths.sort()).toEqual(["/api/ghosts", "/api/remote", "/api/status"]);
+  });
+
+  it("reports the running daemon's version, commit, and source root", async () => {
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts") return jsonResponse([]);
+      if (path === "/api/status") {
+        return jsonResponse({
+          version: "1.4.0",
+          source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
+        });
+      }
+      return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
+    };
+    const response = await runCli(["status"], {
+      env: { GHOSTD_PORT: "7718", GHOSTD_VERSION: "3.2.1" },
+      home: "/tmp/ghost-cli-unit",
+      fetch,
+    });
+    expect(response.stdout).toContain("daemon version 1.4.0");
+    expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
+    expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
   });
 });

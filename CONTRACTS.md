@@ -67,6 +67,12 @@ The lifecycle implementation and crash recovery are in
 [`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
+`settings.yml` may name the ghost's own git clone of this repository, as a
+`self:` mapping with a `checkout:` value that is an absolute path under the
+owner home; any other value reads as unset. It feeds the self-maintenance
+policy only. It is never auto-bound: the owner trusts and binds that checkout
+through the same explicit project boundary as any other project.
+
 ### Character and memory
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
@@ -195,7 +201,8 @@ backup: Trash and snapper are undo, not retention.
 ## Runtime contract
 
 Both runtimes receive the same Ghost character, private memory index, first
-meeting policy, Omarchy computer-use policy, scheduled-work policy, shared
+meeting policy, Omarchy computer-use policy, scheduled-work policy,
+self-maintenance policy, shared
 Obsidian policy, and—when native worker services are configured—delegation
 policy and tools. Normal machine-skill discovery admits the owner-installed
 `obsidian-cli` skill into each runtime's standard skill index; the shared-state
@@ -372,6 +379,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/harnesses` | Bounded availability/authentication for native Pi, Codex, and Claude Code workers. |
+| `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |

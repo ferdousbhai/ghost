@@ -57,6 +57,7 @@ import {
   MAX_LISTED_TASKS,
   taskProjection,
 } from "./principal-task-tools.js";
+import type { RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
 import { isValidTaskAgent, MAX_TASK_TEXT } from "./tasks.js";
 
@@ -86,6 +87,8 @@ export interface ServerOptions {
   catalog?: ModelCatalog;
   /** Read-only, sanitized native coding-worker availability. */
   nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
+  /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
+  runningSource?: RunningSource;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -2053,6 +2056,30 @@ export function createDaemonServer(options: ServerOptions): Server {
         }
         if (segments.length === 2 && segments[1] === "harnesses") {
           return await handleNativeHarnesses(method, response);
+        }
+        if (segments.length === 2 && segments[1] === "status") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          // `root` is a filesystem path, so the whole row is the owner's alone.
+          if (admission.identity?.role === "guest") {
+            errorResponse(
+              response,
+              403,
+              "owner_only",
+              "Daemon source paths are visible only to the owner.",
+            );
+            return;
+          }
+          jsonResponse(response, 200, {
+            version: options.runningSource?.version ?? null,
+            source: {
+              commit: options.runningSource?.commit ?? null,
+              root: options.runningSource?.root ?? null,
+            },
+          });
+          return;
         }
         if (segments[1] !== "ghosts") {
           errorResponse(response, 404, "not_found", "Not found.");

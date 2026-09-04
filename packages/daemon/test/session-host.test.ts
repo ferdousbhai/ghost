@@ -7119,6 +7119,7 @@ describe("multi-ghost", () => {
       for (const system of systems) {
         expect(system.includes("set type") && system.includes("keep bees")).toBe(false);
         expect(system).toContain("## Shared Obsidian");
+        expect(system).toContain("## Self-maintenance");
         expect(system).toContain(
           join(obsidianSkill, "SKILL.md"),
         );

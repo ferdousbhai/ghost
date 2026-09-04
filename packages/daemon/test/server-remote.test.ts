@@ -6,6 +6,7 @@ import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
 import { REMOTE_MANIFEST } from "../src/remote-viewer.js";
 import { SessionHost } from "../src/session-host.js";
+import type { RunningSource } from "../src/running-source.js";
 import { RemoteAccess, type RemoteAccessOptions } from "../src/tailscale-identity.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
@@ -27,6 +28,7 @@ afterEach(stop);
 async function serve(
   remote: RemoteAccessOptions | null = {},
   remoteServe?: (root: string) => RemoteServe,
+  runningSource?: RunningSource,
 ): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
@@ -41,6 +43,7 @@ async function serve(
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", ...remote }),
     ...(remoteServe ? { remoteServe: remoteServe(temp.root) } : {}),
+    ...(runningSource ? { runningSource } : {}),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -150,6 +153,32 @@ describe("tailnet identity", () => {
 
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: { code: "owner_only" } });
+  });
+
+  it("shows the owner what runs the daemon and refuses a guest the source path", async () => {
+    const runningSource: RunningSource = {
+      version: "1.4.0",
+      commit: "0123456789abcdef0123456789abcdef01234567",
+      root: "/home/owner/src/ghost",
+    };
+    const base = await serve({}, undefined, runningSource);
+
+    const owner = await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(owner.status).toBe(200);
+    expect(await owner.json()).toEqual({
+      version: "1.4.0",
+      source: { commit: runningSource.commit, root: runningSource.root },
+    });
+
+    const guest = await fetch(`${base}/api/status`, { headers: asTailnet("guest@example.com") });
+    expect(guest.status).toBe(403);
+    expect(await guest.json()).toMatchObject({ error: { code: "owner_only" } });
+  });
+
+  it("reports an unknown source when the daemon was started without one", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/status`, { headers: { authorization: `Bearer ${TOKEN}` } });
+    expect(await response.json()).toEqual({ version: null, source: { commit: null, root: null } });
   });
 
   it("honours guests: none and a configured owner login", async () => {
