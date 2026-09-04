@@ -96,7 +96,8 @@ remain the owner's Obsidian vault, and credentials remain in machine-native
 stores. That custody covers Ghost's own source: a ghost maintains the clone the
 owner names for it, and every way back is a facility the machine already has.
 
-Onboarding is: install and verify Obsidian CLI/skill → create a ghost → choose a
-free, subscription, API-key, or local model → summon the HUD → talk. Packaging
+Onboarding is: install and verify Obsidian CLI/skill → create a ghost → bind a
+local or open-source driver, then optionally a subscription or API key for the
+teacher and specialist roles → summon the HUD → talk. Packaging
 must not call this supported until the owner-level Obsidian readiness gate in
 #54 is implemented.
