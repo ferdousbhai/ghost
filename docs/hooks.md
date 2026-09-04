@@ -352,8 +352,9 @@ phase.
 Setting `review.journal: true` (default off) additionally records every reviewed
 turn to the conversation's `*.<runtime>.review-journal.json` sidecar: the
 sequence and turn id, when it was reviewed, the review mode, the turn delta
-(text, commands, paths, and whether it came from the transcript or the assistant
-fallback), the lint findings, the advisor notes actually delivered, the highest
+(text, commands, paths, how many times the turn delegated to a specialist, and
+whether it came from the transcript or the assistant fallback), the lint
+findings, the advisor notes actually delivered, the highest
 severity, whether they went out as a continuation, as next-turn feedback, or not
 at all, and whether this turn was itself a continuation pass — in which case its
 rewritten text is also attached to the entry that asked for it, so the attempt,

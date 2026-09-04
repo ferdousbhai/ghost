@@ -320,6 +320,10 @@ resumes prior work. The lifecycle is implemented by
 [`tasks.ts`](packages/daemon/src/tasks.ts), the three native adapters, and
 [`native-task-scope.ts`](packages/daemon/src/native-task-scope.ts).
 
+The principal delegation policy names when to escalate: the ghost drives its
+own turn and hands a specialist only work it cannot finish reliably, and the
+review journal records how many times each reviewed turn escalated.
+
 The installed harness owns its native project discovery, skills, agents, MCP,
 tools, model/auth behavior, and session semantics. Ghost owns only admission,
 bounded protocol projection, durable lifecycle, and exact process-tree cleanup;

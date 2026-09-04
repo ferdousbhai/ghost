@@ -71,6 +71,30 @@ describe("advisor turn-delta reconstruction", () => {
     expect(result.text).toContain("[REDACTED_SECRET]");
     expect(result.commands).toEqual(["test -f result"]);
     expect(result.paths).toEqual([]);
+    expect(result.delegations).toBe(0);
+  });
+
+  it("counts only the escalating task tool, under either runtime's name", async () => {
+    const piPath = writeJsonl([
+      { type: "message", id: "c", parentId: null, message: { role: "user", content: "Fix it." } },
+      { type: "message", id: "d", parentId: "c", message: { role: "assistant", content: [
+        { type: "toolCall", name: "task", arguments: { task: "port the module" } },
+        { type: "toolCall", name: "task", arguments: { task: "write the tests" } },
+        { type: "toolCall", name: "task_get", arguments: { id: "task-1" } },
+      ] } },
+    ]);
+    expect((await reconstructAdvisorTurnDelta(stopEvent(piPath, "pi"))).delegations).toBe(2);
+
+    const claudePath = writeJsonl([
+      { type: "user", uuid: "c", parentUuid: null, message: { role: "user", content: "Fix it." } },
+      { type: "assistant", uuid: "d", parentUuid: "c", message: { role: "assistant", content: [
+        { type: "tool_use", name: "mcp__ghost__task", input: { task: "port the module" } },
+        { type: "tool_use", name: "mcp__ghost__task", input: { task: "write the tests" } },
+        { type: "tool_use", name: "mcp__ghost__task_get", input: { id: "task-1" } },
+      ] } },
+    ]);
+    const claude = await reconstructAdvisorTurnDelta(stopEvent(claudePath, "claude-code"));
+    expect(claude.delegations).toBe(2);
   });
 
   it("reconstructs the active Claude SDK parentUuid chain", async () => {
@@ -119,7 +143,7 @@ describe("advisor turn-delta reconstruction", () => {
       { type: "message", id: "d", parentId: "c", message: { role: "assistant", content: [{ type: "text", text: "Tail answer." }] } },
     ]);
     const result = await reconstructAdvisorTurnDelta(stopEvent(path, "pi"), { maxBytes: 300 });
-    expect(result).toMatchObject({ source: "transcript" });
+    expect(result).toMatchObject({ source: "transcript", delegations: 0 });
     expect(result.text).toContain("Tail answer.");
   });
 });

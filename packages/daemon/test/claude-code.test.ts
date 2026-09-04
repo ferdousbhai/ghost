@@ -3962,7 +3962,13 @@ fi
     await new ReviewJournalStore().record(paths.sessionDir, identity, {
       turnId: 1,
       mode: "advisory",
-      delta: { text: "user: remember this", commands: [], paths: [], source: "transcript" },
+      delta: {
+        text: "user: remember this",
+        commands: [],
+        paths: [],
+        source: "transcript",
+        delegations: 0,
+      },
       lint: [],
       notes: [],
       delivered: "none",

@@ -13,6 +13,8 @@ export interface AdvisorTurnDelta {
   source: "transcript" | "assistant-fallback";
   commands: string[];
   paths: string[];
+  /** How often the turn escalated to a specialist through the `task` tool. */
+  delegations: number;
   fallbackReason?: "missing" | "read" | "parse" | "owner-boundary";
 }
 
@@ -134,6 +136,7 @@ function fallback(event: GhostSessionStopEvent, reason: AdvisorTurnDelta["fallba
     source: "assistant-fallback",
     commands: [],
     paths: [],
+    delegations: 0,
     fallbackReason: reason,
   };
 }
@@ -178,17 +181,28 @@ function collectArgumentValues(
   }
 }
 
-function toolArguments(records: readonly TranscriptRecord[]): { commands: string[]; paths: string[] } {
-  const output = { commands: [] as string[], paths: [] as string[] };
+/**
+ * The escalation tool: bare `task` under Pi, and `mcp__<server>__task` under
+ * Claude Code, where Ghost's internal MCP server is `ghost` unless a project
+ * server took that name. Its siblings (`task_get` and the rest) only follow up.
+ */
+function isEscalation(name: unknown): boolean {
+  return typeof name === "string" && (name === "task" || /^mcp__.+__task$/u.test(name));
+}
+
+function toolArguments(
+  records: readonly TranscriptRecord[],
+): { commands: string[]; paths: string[]; delegations: number } {
+  const output = { commands: [] as string[], paths: [] as string[], delegations: 0 };
   for (const item of records) {
     const message = messageFrom(item);
     if (!message || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
       const block = record(part);
-      if (block?.type === "toolCall") collectArgumentValues(block.arguments, "", output);
-      else if (block?.type === "tool_use" || block?.type === "mcp_tool_use") {
-        collectArgumentValues(block.input, "", output);
-      }
+      const pi = block?.type === "toolCall";
+      if (!pi && block?.type !== "tool_use" && block?.type !== "mcp_tool_use") continue;
+      collectArgumentValues(pi ? block.arguments : block.input, "", output);
+      if (isEscalation(block.name)) output.delegations += 1;
     }
   }
   return output;

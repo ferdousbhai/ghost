@@ -262,12 +262,33 @@ describe("review hook", () => {
       sequence: 1,
       turnId: 1,
       mode: "lint",
-      delta: { text: expect.stringContaining("Implemented the change"), source: "assistant-fallback" },
+      delta: {
+        text: expect.stringContaining("Implemented the change"),
+        source: "assistant-fallback",
+        delegations: 0,
+      },
       lint: [],
       notes: [],
       delivered: "none",
       continuationPass: false,
     }]);
+  });
+
+  it("journals how often the turn escalated to a specialist", async () => {
+    const home = scratchGhostHome("review:\n  mode: lint\n  journal: true\n");
+    const transcript = join(home, "session.jsonl");
+    writeFileSync(transcript, `${[
+      { type: "message", id: "a", parentId: null, message: { role: "user", content: "Implement the change." } },
+      { type: "message", id: "b", parentId: "a", message: { role: "assistant", content: [
+        { type: "toolCall", name: "task", arguments: { task: "port the module" } },
+        { type: "toolCall", name: "task_get", arguments: { id: "task-1" } },
+      ] } },
+    ].map((line) => JSON.stringify(line)).join("\n")}\n`, "utf8");
+    const { runner } = await runnerWith([]);
+    await runner.emitSessionStop(stopEvent(home, { transcript_path: transcript }));
+    expect(await journalEntries(home)).toMatchObject([
+      { delta: { source: "transcript", delegations: 1 } },
+    ]);
   });
 
   it("journals a strict continuation and attaches the rewritten turn to it", async () => {

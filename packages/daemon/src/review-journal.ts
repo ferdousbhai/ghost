@@ -28,7 +28,7 @@ export interface ReviewJournalEntry {
   turnId: number;
   recordedAt: string;
   mode: "lint" | "advisory" | "strict";
-  delta: Pick<AdvisorTurnDelta, "text" | "commands" | "paths" | "source">;
+  delta: Pick<AdvisorTurnDelta, "text" | "commands" | "paths" | "source" | "delegations">;
   lint: ReviewJournalLintFinding[];
   notes: AdvisorNote[];
   severity?: AdvisorSeverity;
@@ -179,6 +179,7 @@ export class ReviewJournalStore {
         commands: text.cleanAll(entry.delta.commands),
         paths: text.cleanAll(entry.delta.paths),
         source: entry.delta.source,
+        delegations: entry.delta.delegations,
       };
       const lint = entry.lint.map((finding) => ({
         ruleId: finding.ruleId,

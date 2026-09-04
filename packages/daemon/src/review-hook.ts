@@ -342,6 +342,7 @@ async function review(
       mode,
       lintFindings: findings.length,
       notes: delivered.length,
+      delegations: delta.delegations,
       severity,
       channel: delivery,
       immune,

@@ -29,7 +29,13 @@ function entry(overrides: Partial<NewReviewJournalEntry> = {}): NewReviewJournal
   return {
     turnId: 1,
     mode: "advisory",
-    delta: { text: "user: fix it", commands: ["ls"], paths: ["src/a.ts"], source: "transcript" },
+    delta: {
+      text: "user: fix it",
+      commands: ["ls"],
+      paths: ["src/a.ts"],
+      source: "transcript",
+      delegations: 0,
+    },
     lint: [],
     notes: [],
     delivered: "none",
@@ -58,7 +64,7 @@ function seededEntry(sequence: number, text: string): Record<string, unknown> {
     turnId: sequence,
     recordedAt: "2026-01-01T00:00:00.000Z",
     mode: "lint",
-    delta: { text, commands: [], paths: [], source: "transcript" },
+    delta: { text, commands: [], paths: [], source: "transcript", delegations: 0 },
     lint: [],
     notes: [],
     delivered: "none",
@@ -82,6 +88,7 @@ describe("review journal", () => {
       notes: [{ note: "Exercise the error path.", severity: "concern" }],
       severity: "concern",
       delivered: "next-turn",
+      delta: { ...entry().delta, delegations: 2 },
     }));
 
     const journal = await store.read(sessionDir, identity);
@@ -96,7 +103,13 @@ describe("review journal", () => {
     expect(journal?.entries[0]).toMatchObject({
       turnId: 1,
       recordedAt: "2026-02-03T04:05:06.000Z",
-      delta: { text: "user: fix it", commands: ["ls"], paths: ["src/a.ts"], source: "transcript" },
+      delta: {
+        text: "user: fix it",
+        commands: ["ls"],
+        paths: ["src/a.ts"],
+        source: "transcript",
+        delegations: 0,
+      },
       delivered: "none",
       continuationPass: false,
       truncated: false,
@@ -107,6 +120,7 @@ describe("review journal", () => {
       delivered: "next-turn",
       lint: [{ ruleId: "chatbot-phrase", severity: "nit", message: "Remove canned phrasing." }],
       notes: [{ note: "Exercise the error path.", severity: "concern" }],
+      delta: { delegations: 2 },
     });
   });
 
@@ -119,6 +133,7 @@ describe("review journal", () => {
         commands: ["curl -H 'Authorization: Bearer sk-abcdefgh12345678'"],
         paths: ["/home/casper/api_key=abcdefgh"],
         source: "transcript",
+        delegations: 0,
       },
       lint: [{ ruleId: "secret", severity: "concern", message: "password: swordfish" }],
       notes: [{ note: "Drop the ghp_abcdefgh12345678 you pasted.", severity: "blocker" }],
@@ -147,7 +162,13 @@ describe("review journal", () => {
     }));
     await store.record(sessionDir, identity, entry({
       turnId: 2,
-      delta: { text: "assistant: awaited the write", commands: [], paths: [], source: "transcript" },
+      delta: {
+        text: "assistant: awaited the write",
+        commands: [],
+        paths: [],
+        source: "transcript",
+        delegations: 0,
+      },
       delivered: "none",
       continuationPass: true,
     }));
@@ -187,7 +208,7 @@ describe("review journal", () => {
       seededEntry(index + 1, filler)));
     const store = new ReviewJournalStore();
     await store.record(sessionDir, identity, entry({
-      delta: { text: filler, commands: [], paths: [], source: "transcript" },
+      delta: { text: filler, commands: [], paths: [], source: "transcript", delegations: 0 },
     }));
 
     const path = reviewJournalPath(sessionDir, identity.runtime, identity.conversationId);
