@@ -203,6 +203,8 @@ export function renderScheduledWorkPolicy(
     "[Install]",
     "WantedBy=timers.target",
     "```",
+    "`Persistent=true` runs one catch-up when slots were missed, however many were missed; `Persistent=false` drops them.",
+    "Running *every* missed slot is not a timer primitive — the service would have to compute them from its own watermark — so prefer one of the first two.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.",
     "Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.",
   ].join("\n");

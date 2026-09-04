@@ -118,6 +118,13 @@ describe("which units belong to a ghost", () => {
     expect(policy).toContain("[a-z0-9]+(?:-[a-z0-9]+)*");
     expect(policy).not.toContain("~/.config/systemd/user");
   });
+
+  it("names what happens to missed slots under each Persistent= setting", () => {
+    const policy = renderScheduledWorkPolicy("aria", "/home/owner/.config/systemd/user");
+    expect(policy).toContain("`Persistent=true` runs one catch-up");
+    expect(policy).toContain("`Persistent=false` drops them");
+    expect(policy).toContain("not a timer primitive");
+  });
 });
 
 describe("sweeping a deleted ghost's schedules", () => {
