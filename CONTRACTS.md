@@ -454,9 +454,13 @@ persisted as an assistant answer.
 The terminal client is an HTTP client only; it never edits a ghost home
 directly. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
-ask, job, model, memory, status, and skill operations. `ghost delegation` is
-the one daemon-free read-only command: it probes installed native-worker
-harnesses without opening ghost data. There are no plan or todo commands.
+ask, job, model, memory, status, and skill operations. `ghost model login`,
+`ghost model logout`, and `ghost model --providers` are thin clients of the
+`/login`, `/providers`, and account routes above: the daemon owns the whole
+flow and the CLI holds no secret, only rendering each polled `LoginView` and
+posting the answer the owner types. `ghost delegation` is the one daemon-free
+read-only command: it probes installed native-worker harnesses without opening
+ghost data. There are no plan or todo commands.
 
 ## Models and credentials
 

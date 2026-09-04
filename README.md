@@ -48,6 +48,7 @@ shows.
 ghost say "What should I focus on today?"
 ghost sessions
 ghost show -s cli-abc
+ghost model login <provider>
 ghost delegation
 ```
 

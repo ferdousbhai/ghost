@@ -4,7 +4,16 @@ import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
-import type { CliContext, CliRuntime } from "./types.js";
+import type { CliContext, CliRuntime, CliStdin } from "./types.js";
+
+export async function stdinText(stdin: CliStdin): Promise<string> {
+  if (typeof stdin === "string") return stdin;
+  return (await Array.fromAsync(stdin, String)).join("");
+}
+
+export function stdinIsTty(stdin: CliStdin): boolean {
+  return typeof stdin !== "string" && stdin.isTTY === true;
+}
 
 interface CliConfigFile {
   ghost?: unknown;

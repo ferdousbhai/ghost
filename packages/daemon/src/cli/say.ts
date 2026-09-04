@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { EXIT_CODE } from "./client.js";
-import { latestSession, listSessions, resolveGhost, resolveSessionPrefix, resolveTarget } from "./common.js";
+import {
+  latestSession,
+  listSessions,
+  resolveGhost,
+  resolveSessionPrefix,
+  resolveTarget,
+  stdinIsTty,
+  stdinText,
+} from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -12,15 +20,6 @@ interface StreamEvent {
 
 export function newConversationId(now = Date.now()): string {
   return `cli-${now.toString(36)}-${randomBytes(4).toString("hex")}`;
-}
-
-async function stdinText(stdin: CliStdin): Promise<string> {
-  if (typeof stdin === "string") return stdin;
-  return (await Array.fromAsync(stdin, String)).join("");
-}
-
-function stdinIsTty(stdin: CliStdin): boolean {
-  return typeof stdin !== "string" && stdin.isTTY === true;
 }
 
 async function messageText(

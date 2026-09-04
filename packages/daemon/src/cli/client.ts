@@ -31,6 +31,7 @@ export const EXIT_CODE = {
   unauthorized: 4,
   notFound: 5,
   conflict: 6,
+  interrupted: 130,
 } as const;
 
 export const EXIT_CODES = [
@@ -41,6 +42,7 @@ export const EXIT_CODES = [
   { code: EXIT_CODE.unauthorized, meaning: "unauthorized" },
   { code: EXIT_CODE.notFound, meaning: "not found" },
   { code: EXIT_CODE.conflict, meaning: "busy or conflict" },
+  { code: EXIT_CODE.interrupted, meaning: "interrupted at the terminal (Ctrl-C)" },
 ] as const;
 
 export function notFound(what: string): CliError {

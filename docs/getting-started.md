@@ -131,14 +131,25 @@ waiting for that.
 Terminal:
 
 ```sh
+ghost model --providers            # who you can sign in to
+ghost model login openrouter -g sage
+printf %s "$KEY" | ghost model login openrouter --key-stdin -g sage
+```
+
+`ghost model login` goes through the running daemon, which owns the whole flow.
+`--oauth` chooses the browser flow where the provider offers both; the default
+is the paste-a-key flow. `--account <name>` picks the machine keyring account
+(default `personal`), `--key-stdin` reads one key from stdin so a script never
+puts it in argv, and `ghost model logout <provider>` removes the account again.
+The credential goes straight into the Secret Service under Ghost's own schema;
+`models.json` keeps only a `keyring:` reference.
+
+With the daemon stopped, `ghostd login` does the same thing offline:
+
+```sh
 ghostd login                    # prompts for ghost and provider
 ghostd login sage --provider openrouter
 ```
-
-`--api-key` chooses the paste-a-key flow where the provider offers both; the
-default is OAuth. `--account <name>` picks the machine keyring account
-(default `personal`). The credential goes straight into the Secret Service
-under Ghost's own schema; `models.json` keeps only a `keyring:` reference.
 
 In the HUD, the same flow: click the model pill in the chat header (it reads
 **Choose a model** when nothing is set) → **Connect provider**. Each provider

@@ -14,6 +14,9 @@ export type CliFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** One interactive answer read from the terminal during `ghost model login`. */
+export type CliPrompt = (request: { query: string; secret: boolean }) => Promise<string>;
+
 export interface GhostCliOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -23,6 +26,8 @@ export interface GhostCliOptions {
   stdin?: CliStdin;
   /** Test/embedding seam for the local read-only delegation catalogue. */
   nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
+  /** Test/embedding seam for terminal prompts; defaults to a readline over the real TTY. */
+  prompt?: CliPrompt;
 }
 
 export interface CliRuntime {
@@ -33,6 +38,7 @@ export interface CliRuntime {
   fetch: CliFetch;
   stdin: CliStdin;
   nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
+  prompt?: CliPrompt;
 }
 
 export interface CliContext {

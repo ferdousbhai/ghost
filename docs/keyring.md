@@ -44,6 +44,20 @@ another ghost uses it. Rename and delete never touch the item. Restoring a
 trashed home restores only its references and policy, which can use the same
 machine account again.
 
+## Signing in from the terminal
+
+`ghost model login <provider>` runs the same login the HUD's model switcher
+does, against the running daemon: it starts the login, renders each state the
+daemon publishes — an auth URL, a device code, a prompt — and posts the answer
+back. The key never reaches argv or the CLI's own storage; `--key-stdin` pipes
+it in for a scripted setup, and `--json` emits only the final login and refuses
+any prompt that piped key cannot answer. Ctrl-C exits 130 and abandons the
+login, which the daemon times out on its own. `ghost model --providers` lists
+the providers and their signed-in accounts, and `ghost model logout <provider>`
+removes one. `ghostd login` is the offline equivalent for a machine whose
+daemon is stopped: it takes the ghosts-root reservation itself and refuses to
+run while `ghostd.service` holds it.
+
 Logging out removes the selected whole service/account item, not one ghost's
 permission line. Other accounts remain valid; every ghost that references the
 logged-out machine account fails closed until that account signs in again.

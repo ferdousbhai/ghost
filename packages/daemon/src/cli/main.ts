@@ -12,6 +12,7 @@ import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { delegationCommand } from "./delegation.js";
 import { ghostsCommand } from "./ghosts.js";
+import { LOGIN_BOOLEAN_FLAGS, LOGIN_VALUE_FLAGS } from "./login.js";
 import { memoryCommand } from "./memory.js";
 import { modelCommand } from "./model.js";
 import { sayCommand } from "./say.js";
@@ -45,8 +46,10 @@ const CLI_ARGS: ArgsSpec = {
     "exit-on-first",
     "keep",
     "no-turn",
+    "providers",
+    ...LOGIN_BOOLEAN_FLAGS,
   ],
-  value: ["ghost", "session", "message", "limit", "offset", "q", "model"],
+  value: ["ghost", "session", "message", "limit", "offset", "q", "model", ...LOGIN_VALUE_FLAGS],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -156,10 +159,20 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "model",
-    usage: "model [provider/id] [--list] [--q <text>] [-g <name>] [--json] [-q]",
-    summary: "Show, set, or search chat models.",
+    usage: "model [provider/id] [--list] [--q <text>] [--providers] [-g <name>] [--json] [-q]",
+    summary: "Show, set, or search chat models; sign a provider in or out.",
     example: "ghost model --list --q claude",
-    positionals: [0, 1],
+    details: `Sign-in forms:
+  ghost model login <provider> [--account <name>] [--oauth|--api-key] [--key-stdin]
+  ghost model logout <provider> [--account <name>]
+
+--providers lists the providers, auth types, and signed-in accounts to choose
+from. Login defaults to the api-key flow where a provider offers one. --key-stdin
+reads one key from stdin and answers the first secret prompt with it, so a script
+never puts a key in argv; --json emits only the final login and refuses any
+prompt --key-stdin cannot answer. Ctrl-C exits ${EXIT_CODE.interrupted}: the daemon has no cancel
+route, so the abandoned login times out on its own.`,
+    positionals: [0, 2],
     run: modelCommand,
   },
   {
@@ -255,6 +268,7 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
     ...(options.nativeHarnesses === undefined
       ? {}
       : { nativeHarnesses: options.nativeHarnesses }),
+    ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
   };
 }
 
