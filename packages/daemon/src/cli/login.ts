@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import type { AuthType, LoginPromptView, LoginView, ProviderInfo } from "../auth.js";
-import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
+import { ArgsError, flagBoolean, flagString, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { resolveGhost, stdinIsTty, stdinText } from "./common.js";
 import { emit, table } from "./output.js";
@@ -16,12 +16,14 @@ const POLL_INTERVAL_MS = 1_000;
 /** The daemon's own default when a start body omits `account`. */
 const DEFAULT_ACCOUNT = "personal";
 /**
- * Flags only the sign-in subcommands accept. `main.ts` declares them on the
- * one flat argv spec and `model.ts` rejects them on the plain model forms, so
- * both read the set from here.
+ * Flags only the sign-in verbs accept. `main.ts` merges them into the argv spec
+ * for `login` and `logout` alone, so they stay unknown options on every other
+ * verb.
  */
-export const LOGIN_BOOLEAN_FLAGS = ["oauth", "api-key", "key-stdin"] as const;
-export const LOGIN_VALUE_FLAGS = ["account"] as const;
+export const LOGIN_ARGS: ArgsSpec = {
+  boolean: ["oauth", "api-key", "key-stdin"],
+  value: ["account"],
+};
 
 function providersPath(ghost: string): string {
   return `/api/ghosts/${encodeURIComponent(ghost)}/providers`;
@@ -167,9 +169,8 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-export async function providersCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const providers = await listProviders(ctx, name);
+/** The `ghost login --list` table: what there is to sign in to, and as whom. */
+function renderProviders(ctx: CliContext, providers: readonly ProviderInfo[]): number {
   emit(ctx, { providers }, () => providers.length === 0
     ? "No login-capable providers.\n"
     : `${table(providers.map((provider) => [
@@ -184,12 +185,15 @@ export async function providersCommand(parsed: ParsedCliArgs, ctx: CliContext): 
 }
 
 export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const requested = parsed.positionals[1];
+  const requested = parsed.positionals[0];
+  const listing = flagBoolean(parsed, "list");
+  if (listing && requested) throw new ArgsError("ghost login --list takes no provider");
   const account = flagString(parsed, "account") ?? DEFAULT_ACCOUNT;
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const providers = await listProviders(ctx, name);
+  if (listing) return renderProviders(ctx, providers);
   if (!requested) {
-    throw new ArgsError(`ghost model login needs a provider; ghostd offers ${providerIds(providers)}.`);
+    throw new ArgsError(`ghost login needs a provider; ghostd offers ${providerIds(providers)}.`);
   }
   const provider = providers.find((candidate) => candidate.id === requested);
   if (!provider) {
@@ -248,8 +252,8 @@ export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
 }
 
 export async function logoutCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const provider = parsed.positionals[1];
-  if (!provider) throw new ArgsError("ghost model logout needs a provider; see `ghost model --providers`.");
+  const provider = parsed.positionals[0];
+  if (!provider) throw new ArgsError("ghost logout needs a provider; see `ghost login --list`.");
   const account = flagString(parsed, "account") ?? DEFAULT_ACCOUNT;
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const body = (await ctx.client.request(

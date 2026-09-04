@@ -77,7 +77,7 @@ function options(daemon: FakeDaemon, extra: Partial<GhostCliOptions> = {}): Ghos
   };
 }
 
-describe("ghost model login", () => {
+describe("ghost login", () => {
   it("spends a piped key on the first secret prompt and never echoes it", async () => {
     const daemon = loginDaemon([OPENROUTER], [
       view({ status: "starting" }),
@@ -91,7 +91,7 @@ describe("ghost model login", () => {
       }),
     ]);
     const result = await runCli(
-      ["model", "login", "openrouter", "--key-stdin", "-g", "casper"],
+      ["login", "openrouter", "--key-stdin", "-g", "casper"],
       options(daemon, { stdin: "sk-piped-secret\n" }),
     );
 
@@ -126,7 +126,7 @@ describe("ghost model login", () => {
       }),
       view({ providerId: "anthropic", authType: "oauth", status: "succeeded" }),
     ]);
-    const result = await runCli(["model", "login", "anthropic", "-g", "casper"], options(daemon));
+    const result = await runCli(["login", "anthropic", "-g", "casper"], options(daemon));
 
     expect(result.code).toBe(0);
     expect(daemon.bodies[0]).toMatchObject({ providerId: "anthropic", authType: "oauth" });
@@ -152,7 +152,7 @@ describe("ghost model login", () => {
       view({ status: "succeeded" }),
     ]);
     const result = await runCli(
-      ["model", "login", "openrouter", "--account", "work", "-g", "casper"],
+      ["login", "openrouter", "--account", "work", "-g", "casper"],
       options(daemon, { prompt: async () => "2" }),
     );
 
@@ -167,7 +167,7 @@ describe("ghost model login", () => {
       view({ status: "working", message: "Contacting OpenRouter." }),
       view({ status: "failed", error: "That key was rejected." }),
     ]);
-    const result = await runCli(["model", "login", "openrouter", "-g", "casper"], options(daemon));
+    const result = await runCli(["login", "openrouter", "-g", "casper"], options(daemon));
 
     expect(result.code).toBe(1);
     expect(result.stderr).toContain("That key was rejected.");
@@ -179,7 +179,7 @@ describe("ghost model login", () => {
       view({ status: "succeeded", modelBound: { provider: "openrouter", modelId: "auto" } }),
     ]);
     const quiet = await runCli(
-      ["model", "login", "openrouter", "-g", "casper", "--json"],
+      ["login", "openrouter", "-g", "casper", "--json"],
       options(succeeded),
     );
     expect(quiet.code).toBe(0);
@@ -189,7 +189,7 @@ describe("ghost model login", () => {
       view({ status: "awaiting_input", prompt: { kind: "secret", message: "API key", secret: true } }),
     ]);
     const refused = await runCli(
-      ["model", "login", "openrouter", "-g", "casper", "--json"],
+      ["login", "openrouter", "-g", "casper", "--json"],
       options(asking),
     );
     expect(refused.code).toBe(2);
@@ -200,24 +200,36 @@ describe("ghost model login", () => {
   it("names the auth types a provider does offer, and the providers it knows", async () => {
     const daemon = loginDaemon([ANTHROPIC], []);
     const wrongType = await runCli(
-      ["model", "login", "anthropic", "--api-key", "-g", "casper"],
+      ["login", "anthropic", "--api-key", "-g", "casper"],
       options(daemon),
     );
     expect(wrongType.code).toBe(2);
     expect(wrongType.stderr).toContain("does not offer api_key login; it offers oauth");
 
-    const unknown = await runCli(["model", "login", "openrouter", "-g", "casper"], options(daemon));
+    const unknown = await runCli(["login", "openrouter", "-g", "casper"], options(daemon));
     expect(unknown.code).toBe(2);
     expect(unknown.stderr).toContain("ghostd offers anthropic");
     expect(daemon.calls).not.toContain("POST /api/ghosts/casper/login");
   });
+
+  it("needs a provider to sign in to, and lends its flags to no other verb", async () => {
+    const daemon = loginDaemon([OPENROUTER], []);
+    const bare = await runCli(["login", "-g", "casper"], options(daemon));
+    expect(bare.code).toBe(2);
+    expect(bare.stderr).toContain("ghost login needs a provider; ghostd offers openrouter");
+
+    const elsewhere = await runCli(["model", "--oauth", "-g", "casper"], options(daemon));
+    expect(elsewhere.code).toBe(2);
+    expect(elsewhere.stderr).toContain("Unknown option: --oauth");
+    expect(daemon.calls).toEqual(["GET /api/ghosts/casper/providers"]);
+  });
 });
 
-describe("ghost model logout", () => {
+describe("ghost logout", () => {
   it("removes one account and says what stops working", async () => {
     const daemon = loginDaemon([OPENROUTER], []);
     const result = await runCli(
-      ["model", "logout", "openrouter", "--account", "work", "-g", "casper"],
+      ["logout", "openrouter", "--account", "work", "-g", "casper"],
       options(daemon),
     );
 
@@ -228,22 +240,14 @@ describe("ghost model logout", () => {
   });
 });
 
-describe("ghost model --providers", () => {
+describe("ghost login --list", () => {
   it("tabulates ids, auth types, and signed-in accounts", async () => {
     const daemon = loginDaemon([OPENROUTER, ANTHROPIC], []);
-    const result = await runCli(["model", "--providers", "-g", "casper"], options(daemon));
+    const result = await runCli(["login", "--list", "-g", "casper"], options(daemon));
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("PROVIDER");
     expect(result.stdout).toContain("openrouter  OpenRouter  api_key  —");
     expect(result.stdout).toContain("anthropic   Anthropic   oauth    personal");
-  });
-
-  it("keeps the plain model forms free of the sign-in flags", async () => {
-    const daemon = loginDaemon([OPENROUTER], []);
-    const result = await runCli(["model", "--key-stdin", "-g", "casper"], options(daemon));
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain("--key-stdin applies to");
-    expect(daemon.calls).toEqual([]);
   });
 });

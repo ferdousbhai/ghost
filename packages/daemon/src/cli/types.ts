@@ -14,7 +14,7 @@ export type CliFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-/** One interactive answer read from the terminal during `ghost model login`. */
+/** One interactive answer read from the terminal during `ghost login`. */
 export type CliPrompt = (request: { query: string; secret: boolean }) => Promise<string>;
 
 export interface GhostCliOptions {

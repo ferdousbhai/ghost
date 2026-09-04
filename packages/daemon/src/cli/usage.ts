@@ -3,8 +3,6 @@ export interface CommandDocumentation {
   usage: string;
   summary: string;
   example: string;
-  /** Longer help for a verb with more forms than its one-line usage can hold. */
-  details?: string;
 }
 
 export interface ExitCodeDocumentation {
@@ -43,9 +41,7 @@ worker ownership); ghost talks to a ghost.
 }
 
 export function renderCommandHelp(command: CommandDocumentation): string {
-  return `Usage: ghost ${command.usage}\n\n${command.summary}\n`
-    + (command.details ? `\n${command.details}\n` : "")
-    + `\nExample: ${command.example}\n`;
+  return `Usage: ghost ${command.usage}\n\n${command.summary}\n\nExample: ${command.example}\n`;
 }
 
 export function renderExitCodes(exitCodes: readonly ExitCodeDocumentation[]): string {
@@ -61,10 +57,6 @@ export function markdownCommandTable(commands: readonly CommandDocumentation[]):
     "|---|---|---|",
     ...commands.map((command) =>
       `| \`ghost ${command.verb}\` | ${command.summary} | \`${command.example}\` |`),
-    // A verb with more forms than one table row can hold spells them out below
-    // it, so the agent-facing reference stays as complete as `ghost help`.
-    ...commands.flatMap((command) =>
-      command.details ? [`\n### \`ghost ${command.verb}\`\n\n${command.details}`] : []),
   ].join("\n");
 }
 

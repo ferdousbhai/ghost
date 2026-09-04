@@ -12,7 +12,7 @@ import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { delegationCommand } from "./delegation.js";
 import { ghostsCommand } from "./ghosts.js";
-import { LOGIN_BOOLEAN_FLAGS, LOGIN_VALUE_FLAGS } from "./login.js";
+import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
 import { memoryCommand } from "./memory.js";
 import { modelCommand } from "./model.js";
 import { sayCommand } from "./say.js";
@@ -32,6 +32,8 @@ import { jobsCommand } from "./work.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
+  /** Flags this verb alone accepts, on top of `CLI_ARGS`. */
+  flags?: ArgsSpec;
   run(parsed: ParsedCliArgs, ctx: CliContext): number | Promise<number>;
 }
 
@@ -46,10 +48,8 @@ const CLI_ARGS: ArgsSpec = {
     "exit-on-first",
     "keep",
     "no-turn",
-    "providers",
-    ...LOGIN_BOOLEAN_FLAGS,
   ],
-  value: ["ghost", "session", "message", "limit", "offset", "q", "model", ...LOGIN_VALUE_FLAGS],
+  value: ["ghost", "session", "message", "limit", "offset", "q", "model"],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -159,21 +159,29 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "model",
-    usage: "model [provider/id] [--list] [--q <text>] [--providers] [-g <name>] [--json] [-q]",
-    summary: "Show, set, or search chat models; sign a provider in or out.",
+    usage: "model [provider/id] [--list] [--q <text>] [-g <name>] [--json] [-q]",
+    summary: "Show, set, or search chat models.",
     example: "ghost model --list --q claude",
-    details: `Sign-in forms:
-  ghost model login <provider> [--account <name>] [--oauth|--api-key] [--key-stdin]
-  ghost model logout <provider> [--account <name>]
-
---providers lists the providers, auth types, and signed-in accounts to choose
-from. Login defaults to the api-key flow where a provider offers one. --key-stdin
-reads one key from stdin and answers the first secret prompt with it, so a script
-never puts a key in argv; --json emits only the final login and refuses any
-prompt --key-stdin cannot answer. Ctrl-C exits ${EXIT_CODE.interrupted}: the daemon has no cancel
-route, so the abandoned login times out on its own.`,
-    positionals: [0, 2],
+    positionals: [0, 1],
     run: modelCommand,
+  },
+  {
+    verb: "login",
+    usage: "login <provider>|--list [--account <name>] [--oauth|--api-key] [--key-stdin] [-g <name>] [--json] [-q]",
+    summary: "Sign a provider account in, or list the providers.",
+    example: "ghost login openrouter",
+    flags: LOGIN_ARGS,
+    positionals: [0, 1],
+    run: loginCommand,
+  },
+  {
+    verb: "logout",
+    usage: "logout <provider> [--account <name>] [-g <name>] [--json] [-q]",
+    summary: "Remove a provider account from the keyring.",
+    example: "ghost logout openrouter",
+    flags: LOGIN_ARGS,
+    positionals: [0, 1],
+    run: logoutCommand,
   },
   {
     verb: "memory",
@@ -239,6 +247,21 @@ route, so the abandoned login times out on its own.`,
   },
 ];
 
+/** The common flags plus one verb's own. */
+function argsWith(extra: ArgsSpec | undefined): ArgsSpec {
+  if (!extra) return CLI_ARGS;
+  return {
+    boolean: [...CLI_ARGS.boolean ?? [], ...extra.boolean ?? []],
+    value: [...CLI_ARGS.value ?? [], ...extra.value ?? []],
+  };
+}
+
+/** Every verb's flags at once: enough to find the verb, not to validate it. */
+const EVERY_ARG = argsWith({
+  boolean: COMMANDS.flatMap((command) => command.flags?.boolean ?? []),
+  value: COMMANDS.flatMap((command) => command.flags?.value ?? []),
+});
+
 export const USAGE = renderUsage(COMMANDS);
 export const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
 
@@ -273,19 +296,24 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
 }
 
 async function dispatch(argv: readonly string[], runtime: CliRuntime): Promise<number> {
-  const all = parseArgs(argv, CLI_ARGS);
-  if (flagBoolean(all, "version")) {
+  // Two passes: the first knows every verb's flags and is trusted only for the
+  // verb, the second holds that verb to its own, so a sign-in flag on any other
+  // verb is the unknown option it is.
+  const scouted = parseArgs(argv, EVERY_ARG);
+  if (flagBoolean(scouted, "version")) {
     runtime.stdout.write(`${version(runtime)}\n`);
     return EXIT_CODE.success;
   }
 
-  const [verb, ...positionals] = all.positionals;
+  const [verb] = scouted.positionals;
   if (!verb) {
     runtime.stdout.write(USAGE);
     return EXIT_CODE.success;
   }
   const command = COMMANDS.find((candidate) => candidate.verb === verb);
   if (!command) throw new ArgsError(`Unknown command: ${verb}`);
+  const all = parseArgs(argv, argsWith(command.flags));
+  const [, ...positionals] = all.positionals;
   const parsed = { ...all, positionals };
   if (flagBoolean(parsed, "help")) {
     runtime.stdout.write(renderCommandHelp(command));

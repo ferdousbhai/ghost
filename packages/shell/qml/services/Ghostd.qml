@@ -1472,7 +1472,7 @@ Singleton {
         // A start has no login id to recover after the route moves. Established
         // flows are safe to rebind; this short window must settle first.
         if (root.loginStartRequest !== null && root.loginRouteGhost === from) {
-            root.ghostRenameError = "Wait for the model login to start before renaming this ghost.";
+            root.ghostRenameError = "Wait for the provider login to start before renaming this ghost.";
             return false;
         }
         // The daemon holds a project transition lease through its atomic write;

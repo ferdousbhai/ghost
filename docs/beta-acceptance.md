@@ -383,14 +383,14 @@ reports `reachable yes`, `authenticated yes`, and the token file path.
 ### 3.5 Provider login and model selection
 
 ```sh
-ghost model --providers            # provider ids, auth types, signed-in accounts
-ghost model login <provider>       # or drive the same flow from the HUD
+ghost login --list                 # provider ids, auth types, signed-in accounts
+ghost login <provider>             # or drive the same flow from the HUD
 ghost model --list --q <substring> # available models for the ghost
 ghost model <provider>/<id>
 ghost model
 ```
 
-`ghost model login` runs through the daemon started in 3.2. `ghostd login` is
+`ghost login` runs through the daemon started in 3.2. `ghostd login` is
 the offline path and refuses to run while `ghostd.service` holds the ghosts-root
 reservation, so use it only with the unit stopped.
 
