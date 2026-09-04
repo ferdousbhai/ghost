@@ -36,7 +36,11 @@ than becoming parallel Ghost frameworks.
   `advisor_model`, `task_model`, and `slow_model`, and are reached through the
   review hook's advisor pass on `session_stop` and through the durable task
   system. Those supervisor hooks are the training signal for the
-  continual-learning flywheel in #64.
+  continual-learning flywheel in #64. The adapter trains on the owner's GPU
+  when there is one and otherwise, per ghost and by opt-in, on Fireworks AI
+  through the owner's own account with only the redacted review journal
+  leaving the machine; the adapter stays downloadable so it can be served
+  locally later, behind one provider-agnostic adapter-host seam.
 - **Lean core, adaptive ghost.** The core ships sensible defaults and stops
   there. A ghost fits its owner through character, memory, hooks, and its own
   checkout (#65), not through the core growing a feature per preference. The
