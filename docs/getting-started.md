@@ -1,0 +1,275 @@
+# Getting started
+
+Ten minutes from a bare Omarchy machine to a named ghost answering you in the
+HUD and in the terminal. Every command below is the real one; nothing here is
+a placeholder.
+
+For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
+of — this page.
+
+> **Development install.** There is no public Ghost package or repository yet:
+> the release is on hold until [#17](https://github.com/ferdousbhai/ghost/issues/17)
+> closes, and the supported Omarchy install flow is
+> [#54](https://github.com/ferdousbhai/ghost/issues/54). Today you build the
+> rolling `ghost-dev` package from a checkout, as below.
+
+## 0. What you need
+
+- **Omarchy** (Hyprland + Quickshell). Ghost depends on that desktop shape;
+  there is no generic Arch/Hyprland support promise.
+- **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
+  pacman installs them with the package.
+- **A running, unlocked Secret Service** (`gnome-keyring` is the usual one).
+  Provider and MCP credentials go there; the daemon does not prompt, unlock, or
+  fall back to a file. See [keyring.md](keyring.md).
+- **Obsidian 1.12.7+**, set up as in step 2. Obsidian is the owner-wide shared
+  knowledge and task store for every ghost, and Ghost is not considered
+  installed until it works.
+- **A model provider you can sign into** — an OpenRouter account is enough, and
+  its free models cost nothing — or an installed, authenticated Claude Code
+  ([claude-code-runtime.md](claude-code-runtime.md)).
+
+## 1. Build and install the package
+
+```sh
+git clone https://github.com/ferdousbhai/ghost.git
+cd ghost/packaging/arch
+makepkg --cleanbuild
+sudo pacman -U ghost-dev-*.pkg.tar.zst
+```
+
+`makepkg` builds from a fresh clone of the branch, runs the full test suite in
+`check()`, and stages the payload. Installing it puts `/usr/bin/ghostd` and
+`/usr/bin/ghost` on your PATH, the Quickshell config at
+`/usr/share/ghost/quickshell` (exposed as the system config `ghost`), the
+browser relay at `/usr/share/ghost/chromium-extension`, and the two user units
+under `/usr/lib/systemd/user/`. It creates nothing in your home directory.
+
+The post-install hook prints the Obsidian steps below, the relay path, and the
+enable command. Details, dependency reasoning, and the uninstall path are in
+[`packaging/arch/README.md`](../packaging/arch/README.md).
+
+## 2. Finish the required Obsidian setup
+
+The package hook runs as root and can only *report* this; you do it as the
+desktop owner.
+
+1. Open Obsidian and enable **Settings → General → Command line interface**
+   (Obsidian's [official CLI registration](https://obsidian.md/help/cli)).
+2. Install the upstream skill:
+
+   ```sh
+   npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+     --global --yes --skill obsidian-cli
+   ```
+
+3. With Obsidian still open, verify both boundaries:
+
+   ```sh
+   obsidian version
+   test -f ~/.agents/skills/obsidian-cli/SKILL.md
+   ```
+
+Some Arch repackagings of Obsidian omit the standalone CLI payload, so the GUI
+alone does not satisfy `obsidian version`. Ghost never guesses a vault path,
+so without this a ghost simply has no shared notes or tasks — it does not fall
+back to reading vault files.
+
+## 3. Start the services
+
+```sh
+systemctl --user enable --now ghostd.service ghost-shell.service
+systemctl --user status ghostd.service ghost-shell.service --no-pager
+```
+
+Both units are `PartOf=graphical-session.target`: they come up with your
+compositor and die with it. `ghostd` binds `127.0.0.1:7717`; `ghost-shell` runs
+`qs -c ghost --no-duplicate`.
+
+Confirm the client can reach and authenticate to the daemon:
+
+```sh
+ghost status
+```
+
+It prints the daemon URL, `reachable yes`, `authenticated yes`, the token file
+path, the ghost count, and remote-access state. The bearer token is minted on
+first run at `~/.local/state/ghost/api-token` (mode 0600); the HUD and CLI read
+that file themselves, and `ghostd api-token` prints it for curl or debugging.
+
+**Summon key.** Packaging deliberately never edits `~/.config/hypr` or
+`~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
+`/usr/share/doc/ghost/shell-contrib/` — `hyprland/ghost.lua` for Omarchy 4's
+Lua config, `hyprland/ghost.conf` for plain Hyprland. Until you do, open the
+HUD from the tray icon, from your app launcher, or with `ghost-launch open`.
+
+## 4. Create a ghost
+
+Terminal:
+
+```sh
+ghost new sage
+ghost use sage        # save it as your default ghost (~/.config/ghost/cli.json)
+ghost list
+```
+
+HUD: in the left sidebar (`Ctrl+B` toggles it), click the `+` in the **Ghosts**
+header, type a name, press Enter.
+
+Either route posts to the same daemon route and writes exactly two things:
+`~/ghosts/sage/character.md` (a seed) and an empty `~/ghosts/sage/memory/`.
+Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, and may not
+start with a dot. The directory name *is* the ghost's name.
+
+While `character.md` is still the seed, the ghost knows it has not met you: it
+helps with what you asked first, learns about you in the gaps, and offers a
+character draft for your approval before writing itself. Nothing is blocked
+waiting for that.
+
+## 5. Connect a provider and pick a model
+
+Terminal:
+
+```sh
+ghostd login                    # prompts for ghost and provider
+ghostd login sage --provider openrouter
+```
+
+`--api-key` chooses the paste-a-key flow where the provider offers both; the
+default is OAuth. `--account <name>` picks the machine keyring account
+(default `personal`). The credential goes straight into the Secret Service
+under Ghost's own schema; `models.json` keeps only a `keyring:` reference.
+
+In the HUD, the same flow: click the model pill in the chat header (it reads
+**Choose a model** when nothing is set) → **Connect provider**. Each provider
+row's primary button is **Sign in**, or the provider's own label — Anthropic's
+reads *Sign in (extra usage)*, because third-party harness calls draw
+per-token usage rather than an included Claude plan. Where a provider offers
+only an API key the button says **Paste API key**; where it offers both, a
+separate **API key** button sits beside the OAuth one.
+
+A successful login binds a usable chat model if the role is still unset, so you
+may already be done. To look and choose explicitly:
+
+```sh
+ghost model                        # what is bound now
+ghost model --list --q free        # models this ghost can use, filtered
+ghost model openrouter/<model-id>  # bind one
+```
+
+A model is always written as `provider/id`, split at the *first* slash — an id
+that itself contains slashes is fine. `--q` only works with `--list`.
+
+In the HUD, the same pill opens the switcher: the models your logins make
+available, a search box over the whole catalog, and a **Routing** toggle for the
+other model roles and their fallback chains.
+
+To run the conversation on Claude Code instead, set
+`ghost model claude-code/default` — that path additionally needs an installed,
+authenticated `claude` and the exact SDK closure described in
+[claude-code-runtime.md](claude-code-runtime.md).
+
+## 6. First conversation in the HUD
+
+Summon the HUD (`SUPER+CTRL+G`, the tray icon, or `ghost-launch open`). An
+empty conversation shows the ghost's glyph, its name, and the static line
+`What's on your mind?`. A greeting in that ghost's own voice — written by its
+`smol_model` — crossfades over the static line a moment later if it arrives; a
+failed greeting is silently no greeting, never an error.
+
+Type, and:
+
+| Key | Effect |
+|---|---|
+| `Enter` | send |
+| `Shift+Enter` | newline |
+| `Enter` *(mid-turn)* | steer the turn that is already running |
+| `Ctrl+Enter` *(mid-turn)* | queue the text as a follow-up instead of steering |
+| `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
+| `Ctrl+B` | show or hide the ghosts/conversations sidebar |
+
+The 64-pixel rail on the right switches sections: **Chat**, **Character**,
+**Memory**, **Commands**, **Delegation**, **Hooks**, **Resources**, **MCP**, and
+**Phone access**. Left-clicking the tray icon toggles the HUD; its menu carries
+a ghost switcher when you have more than one, five recent conversations, **New
+conversation**, **Choose a model**, and **Quit ghost shell**.
+
+## 7. The same ghost from the terminal
+
+```sh
+ghost say "What should I focus on today?"
+ghost say --new "Start fresh"
+ghost sessions
+ghost show -s cli-abc
+ghost memory
+```
+
+`ghost say` streams the turn; tool activity goes to stderr so stdout stays the
+answer. It continues the most recently updated conversation unless you pass
+`--new` or `-s <id>` (an id or any unique prefix). While a turn is running,
+`--steer` and `--follow-up` queue text into it.
+
+The CLI picks its ghost in this order: `-g/--ghost`, `$GHOST`, the default
+saved by `ghost use`, then the sole installed ghost. It is an HTTP client and
+nothing else — it never edits a ghost home directly, so the HUD sees everything
+it does immediately, and the reverse.
+
+`--json` gives you the raw API shape (one event object per line for streams),
+`-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
+codes. `ghost skill` prints this command reference as an installable agent
+skill, so another agent on this machine can drive the same client.
+
+## 8. Where everything lives
+
+| Path | What |
+|---|---|
+| `~/ghosts/<name>/` | the ghost home: `character.md`, `memory/`, `sessions/`, `models.json`, and whatever else that ghost uses |
+| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, ask timeout, remote) — optional; a missing file is fine, a malformed one is an error |
+| `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
+| `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
+| `~/.local/state/ghost/api-token` | the daemon bearer token |
+| `~/.local/state/ghost/relay-token` | the browser-relay pairing token |
+| Secret Service | every provider and MCP credential value |
+| XDG Pictures | `ghost-<ghost>-{screen,browser}-<timestamp>.png` screenshots |
+
+`GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
+`GHOSTD_API_TOKEN_FILE` / `GHOSTD_RELAY_TOKEN_FILE` the token files.
+`GHOSTD_HOST` and `GHOSTD_PORT` move the endpoint the daemon binds and the CLI
+and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
+host).
+
+Nothing in that list is owned by pacman. Upgrading or removing the package
+leaves personas, memory, conversations, credentials, tokens, the Obsidian skill,
+and every vault untouched.
+
+## 9. Optional, once you are talking
+
+- **Lend the ghost your browser.** It has none until you pair the relay:
+  `ghostd relay-token`, then load `/usr/share/ghost/chromium-extension` unpacked
+  in your own Chromium and paste the token. Read
+  [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
+  first — the ghost acts in the session you are signed into.
+- **Delegated coding work.** `ghost delegation` reports which native harnesses
+  (pi, Codex, Claude Code) are installed and authenticated. It is the one
+  command that needs no daemon and opens no ghost data.
+- **Hooks and the review pass.** [hooks.md](hooks.md).
+- **Phone access.** `ghostd remote status` (or the HUD's Phone access pane)
+  controls the opt-in Tailscale Serve viewer. Guests are read-only.
+
+## 10. If something is wrong
+
+| Symptom | Check |
+|---|---|
+| `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
+| `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
+| A keyring error on login or when a session opens | the Secret Service must be running with its default collection unlocked — see [keyring.md](keyring.md) |
+| Obsidian operations fail | Obsidian must be *running*; re-check `obsidian version` and the skill file from step 2 |
+| The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
+| You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
+
+After an upgrade, re-enable rather than restart, so an installation made with
+an older unit moves onto the graphical-session lifecycle:
+
+```sh
+systemctl --user reenable --now ghostd.service ghost-shell.service
+```
