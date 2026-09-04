@@ -157,6 +157,41 @@ allowlists, and recovery state machines live beside their focused tests in
   ghost home's mode-0700 `.tasks/` directory. Records move to Trash with their
   parent conversation and are not portable runtime configuration.
 
+### State survival
+
+What each kind of state does under the events that move it. "The home" is the
+ghost home directory, which moves as one unit.
+
+| State | Daemon restart | Ghost rename | Ghost delete | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
+| --- | --- | --- | --- | --- | --- | --- |
+| `character.md`, `memory/*.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
+| Conversations and sidecars under `sessions/` | survives; Pi JSONL is the durable history | moves with the home; Claude transcripts stay in Claude Code's own storage, only resume metadata moves | to Trash with the home | unchanged | unchanged | preserved |
+| `.tasks/` records | survive; a non-terminal record becomes `interrupted` with `daemon_restarted` after its scope is quiesced | moves with the home | to Trash with the home | as a restart | unchanged | preserved |
+| `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
+| `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
+| Project trust ledger (`$XDG_STATE_HOME/ghost/project-trust.json`) | survives | untouched; the ledger is owner-wide and identity-bound, never ghost-scoped | untouched | unchanged | unchanged | preserved |
+| Keyring credentials | survive | never touched | never touched | unchanged | unchanged; the store is `~/.local/share/keyrings` | preserved |
+| Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
+| Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
+| Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
+| The ghost's `self.checkout` clone | untouched | untouched | untouched | it is the source | unchanged | unchanged |
+| The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
+
+The rollback column assumes Omarchy's btrfs layout, where `/` is the `@`
+subvolume and `/home` is `@home` with no snapper config of its own. Confirm it
+before relying on the column:
+
+```sh
+findmnt -no SOURCE / /home
+ls /etc/snapper/configs
+```
+
+Where `/home` is a separate subvolume that snapper does not cover, a rollback of
+`/` restores the packaged install and system configuration and leaves every
+ghost home, the trust ledger, the keyring store, the persistent timer units, and
+the ghost's own checkout exactly as they were. Nothing in this table is a
+backup: Trash and snapper are undo, not retention.
+
 ## Runtime contract
 
 Both runtimes receive the same Ghost character, private memory index, first
@@ -489,6 +524,18 @@ fail-closed state machine lives in
   requirement; issue #54 owns the supported user-level readiness gate.
 - Package removal preserves ghost homes, XDG config/state, Secret Service
   items, the Obsidian skill, and all vaults.
+- Reversible by default. Disable before delete, Trash instead of `rm`,
+  checkpoint before rewrite. Every destructive move has a named way back and a
+  way to see it; an audit record of an unrecoverable action is not a substitute
+  for undo.
+- Self-restart is a systemd handoff. The daemon never restarts itself in
+  process, and there is no guardian process and no rebuild-and-restart tool. A
+  ghost restarts ghostd by scheduling `systemctl --user restart ghostd.service`
+  in a transient `systemd-run --user` unit whose `--description` carries the
+  reason, and the same reason is in the commit. That is the principal acting
+  through its own Bash, so the delegated-task rule against inventing a Git
+  worktree, branch, or commit does not apply to it. See
+  [`docs/self-maintenance.md`](docs/self-maintenance.md).
 
 Focused tests beside the implementation are part of these contracts. GitHub
 issues track unfinished work and release evidence; this file describes the

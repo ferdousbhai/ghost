@@ -10,8 +10,9 @@ storage, wire, runtime, and package boundaries live in
 
 ## Desired end state
 
-An owner installs Ghost, creates a named persona, chooses a provider, and talks
-through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
+An owner installs Ghost, creates a named persona, binds a local or open-source
+model as its driver, adds a subscription or API key for the frontier teacher and
+specialists, and talks through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
 Code is an optional native runtime. Both feel like the same ghost because they
 receive the same character, private memory policy, machine skills, Obsidian
 policy, and trusted-project snapshot. The runtime still owns its native way of
@@ -25,6 +26,20 @@ than becoming parallel Ghost frameworks.
 
 ## Decisions that are not obvious from code
 
+- **Local-first driver.** The ghost's main model, the `chat_model` role, is an
+  open-source model: local on the owner's device, or hosted with one LoRA
+  adapter per ghost. `openAiCompatiblePreset` already binds Ollama, vLLM,
+  llama.cpp, or LM Studio at zero cost, so a local endpoint needs no new
+  machinery. Frontier models bind only to the teacher and specialist roles,
+  `advisor_model`, `task_model`, and `slow_model`, and are reached through the
+  review hook's advisor pass on `session_stop` and through the durable task
+  system. Those supervisor hooks are the training signal for the
+  continual-learning flywheel in #64.
+- **Lean core, adaptive ghost.** The core ships sensible defaults and stops
+  there. A ghost fits its owner through character, memory, hooks, and its own
+  checkout (#65), not through the core growing a feature per preference. The
+  system prompt is a budget rather than a place to put things, because it is
+  what the adapter has to absorb.
 - **Three persistence scopes.** Character and subjective continuity are
   ghost-private. Owner-visible knowledge, preferences, decisions, notes, plans,
   and tasks are shared through Obsidian. Projects and machine artifacts remain
