@@ -49,15 +49,14 @@ Do not mirror the transcript or private ghost memory into Obsidian by default. T
 The CLI requires Obsidian to be running. If the required machine skill, command, or application is unavailable, report that Obsidian setup is incomplete; do not fall back to direct vault-file access.
 
 ## Scheduled work
-To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
-Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
-Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted or renamed; an older or differently named unit is left untouched.
-The service runs the `ghost` CLI, which authenticates itself:
+For clock work write a systemd **user timer** through Bash; Ghost has no scheduler. A timer is a text file the owner can edit, and stop with `systemctl --user disable --now`.
+Write both units in "<owner-home>/.xdg-config/systemd/user", named `ghost-timer-v1-6-casper-<slug>`, where `<slug>` is 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`. That versioned prefix is how your timers are swept when your ghost is deleted or renamed; nothing else is touched.
+The `ghost` CLI authenticates itself:
 ```ini
 # ghost-timer-v1-6-casper-<slug>.service
 [Service]
 Type=oneshot
-# Without this the turn is SIGTERMed after ~90s and dies mid-answer.
+# Or the turn is SIGTERMed after ~90s, mid-answer.
 TimeoutStartSec=infinity
 ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 ```
@@ -65,15 +64,14 @@ ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 # ghost-timer-v1-6-casper-<slug>.timer
 [Timer]
 OnCalendar=Mon..Fri 09:00 America/New_York
-# Catch up after the laptop was asleep or off at the scheduled moment.
+# Catch up after sleep or downtime.
 Persistent=true
 [Install]
 WantedBy=timers.target
 ```
-`Persistent=true` runs one catch-up when slots were missed, however many were missed; `Persistent=false` drops them.
-Running *every* missed slot is not a timer primitive — the service would have to compute them from its own watermark — so prefer one of the first two.
-Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.
-Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.
+`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running *every* missed slot is not a timer primitive: the service would have to track its own watermark.
+Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.
+Timers fire only while the owner is logged in — the daemon runs in their graphical session — so promise no check-ins overnight or while they are away.
 
 ## Self-maintenance
 What runs you is unknown to this process: no version, commit, or source root resolved.
@@ -176,15 +174,14 @@ Do not mirror the transcript or private ghost memory into Obsidian by default. T
 The CLI requires Obsidian to be running. If the required machine skill, command, or application is unavailable, report that Obsidian setup is incomplete; do not fall back to direct vault-file access.
 
 ## Scheduled work
-To do something on a clock, write a systemd **user timer** through Bash — Ghost has no scheduler of its own, and a timer is something the owner can see in `systemctl --user list-timers`, stop with `systemctl --user disable --now`, and edit in a text file.
-Write both unit files in this exact absolute directory: "<owner-home>/.xdg-config/systemd/user".
-Name both units `ghost-timer-v1-6-casper-<slug>`. The `<slug>` must be 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`: lowercase ASCII letters or digits, separated only by single hyphens. That exact versioned prefix is how your timers are found and removed if your ghost is deleted or renamed; an older or differently named unit is left untouched.
-The service runs the `ghost` CLI, which authenticates itself:
+For clock work write a systemd **user timer** through Bash; Ghost has no scheduler. A timer is a text file the owner can edit, and stop with `systemctl --user disable --now`.
+Write both units in "<owner-home>/.xdg-config/systemd/user", named `ghost-timer-v1-6-casper-<slug>`, where `<slug>` is 1–64 characters matching `[a-z0-9]+(?:-[a-z0-9]+)*`. That versioned prefix is how your timers are swept when your ghost is deleted or renamed; nothing else is touched.
+The `ghost` CLI authenticates itself:
 ```ini
 # ghost-timer-v1-6-casper-<slug>.service
 [Service]
 Type=oneshot
-# Without this the turn is SIGTERMed after ~90s and dies mid-answer.
+# Or the turn is SIGTERMed after ~90s, mid-answer.
 TimeoutStartSec=infinity
 ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 ```
@@ -192,15 +189,14 @@ ExecStart=/usr/bin/ghost say --new --ghost casper "<the prompt>"
 # ghost-timer-v1-6-casper-<slug>.timer
 [Timer]
 OnCalendar=Mon..Fri 09:00 America/New_York
-# Catch up after the laptop was asleep or off at the scheduled moment.
+# Catch up after sleep or downtime.
 Persistent=true
 [Install]
 WantedBy=timers.target
 ```
-`Persistent=true` runs one catch-up when slots were missed, however many were missed; `Persistent=false` drops them.
-Running *every* missed slot is not a timer primitive — the service would have to compute them from its own watermark — so prefer one of the first two.
-Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`, and confirm with `systemctl --user list-timers`.
-Timers only fire while the owner is logged in, because the daemon runs with their graphical session. Do not promise check-ins overnight or while they are away.
+`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running *every* missed slot is not a timer primitive: the service would have to track its own watermark.
+Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.
+Timers fire only while the owner is logged in — the daemon runs in their graphical session — so promise no check-ins overnight or while they are away.
 
 ## Self-maintenance
 What runs you is unknown to this process: no version, commit, or source root resolved.

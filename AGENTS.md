@@ -68,6 +68,6 @@ pnpm test
 pnpm build
 ```
 
-Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test -- <file>`) plus `typecheck` for the packages you changed. Run the repo-wide suite only when asked. Behavior changes ship with a focused test. The root workspace commands do not cover `packages/desktop-helper`; run its `uv` checks from that package when it changes.
+Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test -- <file>`) plus `typecheck` for the packages you changed. Run the repo-wide suite only when asked. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by `packages/daemon/test/prompt-budget.test.ts`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message. The root workspace commands do not cover `packages/desktop-helper`; run its `uv` checks from that package when it changes.
 
 The daemon runs on Bun (`engines.bun`), not Node. After a build, the live install picks up changes only via `systemctl --user restart ghostd` — that is the owner's call, not yours.
