@@ -255,6 +255,7 @@ The ghost home's `settings.yml` selects the ladder:
 review:
   mode: strict          # off (default) | lint | advisory | strict
   immuneTurns: 3        # non-negative integer; 0 disables the cooldown
+  journal: true         # off by default; records reviewed turns for training
 ```
 
 | Mode and accepted severity | Producers and delivery |
@@ -347,6 +348,23 @@ dedupe, and ledger state are bounded and in-process. Restart drops them, so no
 advisory is replayed and no policy continuation is resumed. Per-advisor
 transcripts, WATCHDOG rosters, and mid-turn interruption remain outside this
 phase.
+
+Setting `review.journal: true` (default off) additionally records every reviewed
+turn to the conversation's `*.<runtime>.review-journal.json` sidecar: the
+sequence and turn id, when it was reviewed, the review mode, the turn delta
+(text, commands, paths, and whether it came from the transcript or the assistant
+fallback), the lint findings, the advisor notes actually delivered, the highest
+severity, whether they went out as a continuation, as next-turn feedback, or not
+at all, and whether this turn was itself a continuation pass — in which case its
+rewritten text is also attached to the entry that asked for it, so the attempt,
+the critique, and the rewrite read as one sample. A clean turn is journalled
+too. Nothing is written while `review.mode` is `off`, every text field is
+secret-redacted and capped at 32k characters (the entry then carries
+`truncated`), the file is bounded at 1000 entries and 16 MiB with the oldest
+dropped first, an unusable file is logged and replaced, and a write failure only
+warns: journalling never changes a review outcome. This is the phase-0 training
+dataset for the per-ghost adapter in issue #64 — display and training state that
+nothing reads back at runtime.
 
 ## `conversation_idle` protocol
 

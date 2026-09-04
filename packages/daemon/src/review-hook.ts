@@ -36,6 +36,11 @@ import {
 import { BUILTIN_LINT_RULES } from "./lint-rules.js";
 import { silentLogger, type Logger } from "./log.js";
 import { ProjectBindingStore } from "./project-binding.js";
+import {
+  ReviewJournalStore,
+  type NewReviewJournalEntry,
+  type ReviewJournalDelivery,
+} from "./review-journal.js";
 import { discoverWatchdogFiles } from "./watchdog-files.js";
 
 export const REVIEW_SETTINGS_KEY = "review";
@@ -66,11 +71,17 @@ export interface ReviewHookOptions {
   /** Enables validated project WATCHDOG.md and LINT.yml discovery. */
   ownerHome?: string;
   projectBindings?: Pick<ProjectBindingStore, "read">;
+  journal?: ReviewJournalStore;
 }
 
 export function reviewMode(settings: GhostSettings): ReviewMode {
   const mode = settings.getString("review.mode");
   return mode === "lint" || mode === "advisory" || mode === "strict" ? mode : "off";
+}
+
+/** Opt-in: the journal only records while the review pass itself is running. */
+export function reviewJournalEnabled(settings: GhostSettings): boolean {
+  return settings.getBoolean("review.journal") === true;
 }
 
 export function reviewImmuneTurns(settings: GhostSettings): number {
@@ -235,6 +246,7 @@ async function review(
     complete: AdvisorCompletion;
     feedback: FeedbackRecords<AdvisorNote[]>;
     state: ReviewConversationState;
+    journal: ReviewJournalStore;
     projectBindings?: Pick<ProjectBindingStore, "read">;
   },
 ): Promise<GhostSessionStopResult> {
@@ -301,54 +313,92 @@ async function review(
   }
 
   const delivered = options.state.delivered.slice();
+  const severity = highestSeverity(delivered);
+  let result: GhostSessionStopResult = {};
+  let delivery: ReviewJournalDelivery = "none";
   if (delivered.length === 0) {
     options.feedback.clear(event);
-    return {};
+  } else {
+    const immune = isAdvisorInterruptImmuneTurnActive({
+      completedTurns: event.turn_id,
+      immuneTurnStart: options.state.immuneTurnStart,
+      immuneTurns: reviewImmuneTurns(settings),
+    });
+    const channel = resolveAdvisorDeliveryChannel({
+      severity,
+      autoResumeSuppressed: false,
+      streaming: false,
+      aborting: false,
+      terminalAnswerNoQueuedWork: true,
+      interruptImmuneTurnActive: immune,
+    });
+    const continuation = mode === "strict"
+      && severity === "blocker"
+      && channel === "steer"
+      && !immune
+      && !event.stop_hook_active;
+    delivery = continuation ? "continuation" : "next-turn";
+    log.info("review completed", {
+      mode,
+      lintFindings: findings.length,
+      notes: delivered.length,
+      severity,
+      channel: delivery,
+      immune,
+      continuationPass: event.stop_hook_active,
+    });
+    if (continuation) {
+      options.feedback.clear(event);
+      options.state.immuneTurnStart = event.turn_id + 1;
+      result = { continue: true, additionalContext: formatAdvisorBatchContent(delivered) };
+    } else {
+      options.feedback.set(event, delivered);
+    }
   }
-  const severity = highestSeverity(delivered);
-  const immune = isAdvisorInterruptImmuneTurnActive({
-    completedTurns: event.turn_id,
-    immuneTurnStart: options.state.immuneTurnStart,
-    immuneTurns: reviewImmuneTurns(settings),
-  });
-  const channel = resolveAdvisorDeliveryChannel({
-    severity,
-    autoResumeSuppressed: false,
-    streaming: false,
-    aborting: false,
-    terminalAnswerNoQueuedWork: true,
-    interruptImmuneTurnActive: immune,
-  });
-  const continuation = mode === "strict"
-    && severity === "blocker"
-    && channel === "steer"
-    && !immune
-    && !event.stop_hook_active;
-  log.info("review completed", {
-    mode,
-    lintFindings: findings.length,
-    notes: delivered.length,
-    severity,
-    channel: continuation ? "continuation" : "next-turn",
-    immune,
-    continuationPass: event.stop_hook_active,
-  });
-  if (continuation) {
-    options.feedback.clear(event);
-    options.state.immuneTurnStart = event.turn_id + 1;
-    return {
-      continue: true,
-      additionalContext: formatAdvisorBatchContent(delivered),
-    };
+  if (reviewJournalEnabled(settings)) {
+    await recordReviewJournal(event, options.journal, log, {
+      turnId: event.turn_id,
+      mode,
+      delta,
+      lint: findings.map((finding) => ({
+        ruleId: finding.ruleId,
+        severity: finding.severity,
+        message: finding.message,
+      })),
+      notes: delivered,
+      severity,
+      delivered: delivery,
+      continuationPass: event.stop_hook_active,
+    });
   }
-  options.feedback.set(event, delivered);
-  return {};
+  return result;
+}
+
+/** Journalling is training data, never review policy: a failure only warns. */
+async function recordReviewJournal(
+  event: GhostSessionStopEvent,
+  journal: ReviewJournalStore,
+  log: Logger,
+  entry: NewReviewJournalEntry,
+): Promise<void> {
+  try {
+    await journal.record(
+      ghostPaths(event.ghost_home).sessionDir,
+      { runtime: event.runtime, conversationId: event.conversation_id },
+      entry,
+    );
+  } catch (error) {
+    log.warn("review journal write failed open", {
+      error: error instanceof Error ? error.name : "unknown",
+    });
+  }
 }
 
 export function createReviewHook(options: ReviewHookOptions = {}): GhostHookFactory {
   const logger = options.logger ?? silentLogger;
   const complete = options.complete ?? completeHookSmol;
   const feedback = new FeedbackRecords<AdvisorNote[]>();
+  const journal = options.journal ?? new ReviewJournalStore({ logger });
   const states = new Map<string, ReviewConversationState>();
   const projectBindings = options.projectBindings
     ?? (options.ownerHome ? new ProjectBindingStore({ ownerHome: options.ownerHome }) : undefined);
@@ -390,6 +440,7 @@ export function createReviewHook(options: ReviewHookOptions = {}): GhostHookFact
       complete,
       feedback,
       state: stateFor(event),
+      journal,
       ...(projectBindings ? { projectBindings } : {}),
     }), {
       name: "Review",

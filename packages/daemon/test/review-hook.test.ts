@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
@@ -6,6 +6,7 @@ import {
   parseAdvisorReply,
   reviewImmuneTurns,
 } from "../src/review-hook.js";
+import { ReviewJournalStore, reviewJournalPath } from "../src/review-journal.js";
 import { loadGhostSettings } from "../src/ghost-settings.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
@@ -23,8 +24,17 @@ const cleanups = useCleanups();
 function scratchGhostHome(settings?: string): string {
   const temp = tempDir("ghost-review-hook-");
   cleanups.push(temp.cleanup);
+  mkdirSync(ghostPaths(temp.path).sessionDir, { recursive: true });
   if (settings !== undefined) writeFileSync(ghostPaths(temp.path).settingsFile, settings, "utf8");
   return temp.path;
+}
+
+async function journalEntries(home: string) {
+  const journal = await new ReviewJournalStore().read(
+    ghostPaths(home).sessionDir,
+    { runtime: "pi", conversationId: "session-1" },
+  );
+  return journal?.entries ?? [];
 }
 
 function stopEvent(
@@ -232,6 +242,62 @@ describe("review hook", () => {
     expect(feedback?.additionalContext).not.toContain(hazardous);
     expect(logger.records.filter((record) => record.message === "advisor output was quarantined"))
       .toHaveLength(1);
+  });
+
+  it("journals nothing until the owner opts in", async () => {
+    for (const settings of ["review:\n  mode: lint\n", "review:\n  journal: true\n"]) {
+      const home = scratchGhostHome(settings);
+      const { runner } = await runnerWith([]);
+      await runner.emitSessionStop(withAssistant(home, "Great question!"));
+      expect(existsSync(reviewJournalPath(ghostPaths(home).sessionDir, "pi", "session-1")))
+        .toBe(false);
+    }
+  });
+
+  it("journals a clean turn as its own training sample", async () => {
+    const home = scratchGhostHome("review:\n  mode: lint\n  journal: true\n");
+    const { runner } = await runnerWith([]);
+    await runner.emitSessionStop(stopEvent(home));
+    expect(await journalEntries(home)).toMatchObject([{
+      sequence: 1,
+      turnId: 1,
+      mode: "lint",
+      delta: { text: expect.stringContaining("Implemented the change"), source: "assistant-fallback" },
+      lint: [],
+      notes: [],
+      delivered: "none",
+      continuationPass: false,
+    }]);
+  });
+
+  it("journals a strict continuation and attaches the rewritten turn to it", async () => {
+    const home = scratchGhostHome("review:\n  mode: strict\n  journal: true\n");
+    const { runner } = await runnerWith([
+      reply("blocker", "The write is not awaited and can lose data."),
+      reply("blocker", "The rewrite still drops the error path."),
+    ]);
+    expect((await runner.emitSessionStop(stopEvent(home)))?.continue).toBe(true);
+    await runner.emitSessionStop(withAssistant(home, "Awaited the write.", {
+      turn_id: 1,
+      stop_hook_active: true,
+    }));
+
+    expect(await journalEntries(home)).toMatchObject([
+      {
+        sequence: 1,
+        delivered: "continuation",
+        severity: "blocker",
+        notes: [{ note: "The write is not awaited and can lose data.", severity: "blocker" }],
+        continuationPass: false,
+        continuation: { turnId: 1, text: expect.stringContaining("Awaited the write.") },
+      },
+      {
+        sequence: 2,
+        delivered: "next-turn",
+        continuationPass: true,
+        notes: [{ note: "The rewrite still drops the error path." }],
+      },
+    ]);
   });
 
   it("registers one built-in review status key", async () => {

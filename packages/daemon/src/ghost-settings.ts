@@ -12,6 +12,7 @@ export interface GhostSettings {
   getString(path: string): string | undefined;
   getStringList(path: string): string[] | undefined;
   getNumber(path: string): number | undefined;
+  getBoolean(path: string): boolean | undefined;
 }
 
 function ghostSettingsFrom(document: unknown): GhostSettings {
@@ -36,6 +37,11 @@ function ghostSettingsFrom(document: unknown): GhostSettings {
     getNumber: (path) => {
       const value = get(path);
       return typeof value === "number" ? value : undefined;
+    },
+    // Only a real YAML boolean counts; "true" as a quoted string does not.
+    getBoolean: (path) => {
+      const value = get(path);
+      return typeof value === "boolean" ? value : undefined;
     },
   };
 }

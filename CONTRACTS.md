@@ -136,6 +136,17 @@ the next write, and the sidecar moves to Trash with its conversation. Pi
 conversations write no journal; their JSONL is already the durable history.
 See [`presentation-history.ts`](packages/daemon/src/presentation-history.ts).
 
+Opting in with `review.journal: true` adds a second bounded sidecar on both
+runtimes (`*.<runtime>.review-journal.json`): one entry per reviewed turn
+holding the turn delta, the lint findings and advisor notes it drew, where they
+were delivered, and the rewrite a strict continuation produced. It is written
+only while `review.mode` is not `off`, every text field is secret-redacted and
+capped before disk, oldest entries are dropped at its bounds, a write failure
+only warns, and it moves to Trash with its conversation. Like the presentation
+journal it is display and training state, never runtime state; nothing reads it
+back at runtime. See
+[`review-journal.ts`](packages/daemon/src/review-journal.ts).
+
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
 to recoverable Trash. Fork and delete use durable markers so an unpublished or
@@ -180,6 +191,7 @@ ghost home directory, which moves as one unit.
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
+| Review-journal sidecars (opt-in) | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
 | The ghost's `self.checkout` clone | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
@@ -321,7 +333,9 @@ Obsidian during ordinary runtime work.
 
 One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
 `settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
-`strict`) and non-negative `review.immuneTurns` (default 3). Its deterministic
+`strict`), non-negative `review.immuneTurns` (default 3), and the opt-in
+`review.journal` boolean (default off) that records each reviewed turn to the
+conversation's review-journal sidecar. Its deterministic
 producer lints final-assistant prose outside fenced code plus command and path
 strings recovered from current-turn tool-call arguments. Built-in rules emit
 only `nit` and `concern`; owner and trusted-project `LINT.yml` rules may also
