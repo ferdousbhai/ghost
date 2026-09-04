@@ -75,6 +75,25 @@ restarts, systemd user timers under `~/.config/systemd/user`, and real provider
 turns. Everything else in #17 — candidate freeze, version selection, remote
 publication, Omarchy submission, lifting the hold — stays out of scope here.
 
+### 0.4 Candidate worktree
+
+Every build and scan from §1.3 on runs from a dedicated worktree at the
+candidate SHA, never from the working checkout:
+
+```sh
+git worktree add ~/ghost-beta/src "$SHA"
+SRC=~/ghost-beta/src
+```
+
+Why: `packaging/release/make-source-archive.sh:43` snapshots the tree with
+`git ls-files -co --exclude-standard`, and `-o` means **untracked files enter
+the source archive**, so a stray scratch file left in the working checkout would
+ship inside the public source tarball; a fresh worktree at `$SHA` has none.
+
+**Pass:** `git -C "$SRC" rev-parse HEAD` equals `$SHA` and
+`git -C "$SRC" status --porcelain` is empty.
+**Record:** `$EV/00-worktree.txt`.
+
 ---
 
 ## Phase 1 — Build and inspect the candidate, no install
@@ -122,13 +141,15 @@ the grep prints `owns no user state`.
 ### 1.3 Runtime source, determinism, and SDK exclusion
 
 ```sh
-cd ~/github.com/ferdousbhai/ghost
+cd "$SRC"
 version=$(bash packaging/release/verify-release-version.sh .)
 epoch=$(git show -s --format=%ct "$SHA")
 bash packaging/release/prepare-pnpm-engine.sh .
 pnpm fetch --frozen-lockfile
 SOURCE_DATE_EPOCH="$epoch" bash packaging/release/build-runtime-source.sh \
   . packaging/release/out "$version" x86_64 "$SHA"
+SOURCE_DATE_EPOCH="$epoch" bash packaging/release/make-source-archive.sh \
+  . "packaging/release/out/ghost-$version.tar.gz" "$version" "$SHA"
 bash packaging/release/smoke-runtime-source.sh \
   "packaging/release/out/ghost-runtime-$version-linux-x86_64.tar.zst" \
   . "$version" x86_64 "$SHA" "$epoch" 2>&1 | tee "$EV/01-runtime-smoke.log"
@@ -140,14 +161,18 @@ closure, bundled-license closure, the launcher/scratch-daemon smoke, the Claude
 Agent SDK source-byte regression against `lib/ghostd.js` and `lib/ghost.js`, and
 byte-identical repacking.
 
+The `make-source-archive.sh` call takes `"$SHA"` rather than `--worktree`, so
+the snapshot comes from `git archive` at the frozen commit; nothing untracked
+can reach it. Both archives are inputs to §1.5.
+
 **Pass:** `Runtime source smoke test passed`.
 **Record:** the log, plus `sha256sum` of the runtime archive and of
-`packaging/release/out/ghost-$version.tar.gz` if you also built the source
-snapshot.
+`packaging/release/out/ghost-$version.tar.gz`.
 
 ### 1.4 Claude SDK boundary harness (offline)
 
 ```sh
+cd "$SRC"
 store=$(mktemp -d)
 pnpm --dir packaging/release/fixtures/claude-agent-sdk \
   --ignore-workspace --store-dir "$store" fetch --frozen-lockfile
@@ -161,13 +186,97 @@ offline behind dead proxies and can only resolve from a store seeded first.
 **Pass:** `Claude Agent SDK external-boundary test passed`.
 **Record:** the log.
 
-### 1.5 Candidate freeze and final secret scan — stops here
+### 1.5 Secret scan of the candidate and its artifacts
 
-Rendering a stable package, producing a public candidate, and the final secret
-scan all require `GHOST_RELEASE_REPOSITORY` and an approved destination, which
-the release hold forbids. Record that Phase 1 verified the destination-independent
-source and runtime only, and that the candidate freeze, version selection, and
-final secret scan remain owner actions outside this runbook.
+The scan needs no publication destination and no `GHOST_RELEASE_REPOSITORY`:
+§1.1 produced the package and §1.3 produced the source snapshot and the runtime
+archive, all destination-free. Only *rendering the stable package* and
+*publishing* need a destination, and those stop at §1.6.
+
+Ghost pins no scanner in the tree. Use `gitleaks` from the Arch `extra`
+repository (8.30.1 at the time of writing):
+
+```sh
+sudo pacman -S --needed gitleaks
+gitleaks version
+```
+
+Scan the candidate worktree's git history first. The public snapshot is a
+*selection* from that history, so a credential that was committed and later
+deleted is still worth finding:
+
+```sh
+gitleaks git "$SRC" -c "$SRC/.gitleaks.toml" --no-banner --redact -v \
+  2>&1 | tee "$EV/01-secret-scan.txt"
+```
+
+Then scan each artifact **after extraction** — gitleaks does not descend into
+archives by default, so pointing it at the `.tar.gz`, `.tar.zst`, or
+`.pkg.tar.zst` file proves nothing:
+
+```sh
+scan=~/ghost-beta/scan; rm -rf "$scan"; mkdir -p "$scan"/source "$scan"/runtime "$scan"/pkg
+bsdtar -xf "$SRC/packaging/release/out/ghost-$version.tar.gz" -C "$scan/source"
+bsdtar -xf "$SRC/packaging/release/out/ghost-runtime-$version-linux-x86_64.tar.zst" \
+  -C "$scan/runtime"
+bsdtar -xf "$PKG" -C "$scan/pkg"
+
+for target in source runtime pkg; do
+  printf '\n=== %s ===\n' "$target"
+  gitleaks dir "$scan/$target" -c "$SRC/.gitleaks.toml" --no-banner --redact -v
+done 2>&1 | tee -a "$EV/01-secret-scan.txt"
+```
+
+`git` and `dir` are the gitleaks 8.x subcommand names; `detect` and
+`detect --no-git` are the deprecated 8.18-and-earlier spellings, still accepted
+but hidden. `gitleaks --help` names the subcommands on the installed build —
+check it once before the first scan.
+
+**Pass:** all four invocations exit 0 and report no leaks.
+**Fail:** any non-zero exit — gitleaks exits 1 both for a finding and for a scan
+error, and 126 for an unknown flag, so read the output rather than the code
+alone. Triage every finding by hand against the file and line it names. Never
+add a finding to `.gitleaks.toml` to make the run pass.
+**Record:** `$EV/01-secret-scan.txt`, plus a triage note per finding.
+
+`.gitleaks.toml` at the repo root extends the default ruleset, disables no rule,
+and allowlists exactly one thing: the credential-shaped literals in five
+redaction tests (`packages/daemon/test/pi-runtime.test.ts`,
+`principal-task-tools.test.ts`, `tasks.test.ts`,
+`packages/extensions/test/home.test.ts`, `memory-file.test.ts`). It is
+conditioned on the file *and* the exact fixture string, so it is not a path
+exemption for tests in general, and a finding in any other file — or a new
+fixture in these — is a hand-triage item.
+
+### 1.6 Candidate freeze and stable rendering — stops here
+
+Rendering the stable `ghost` package and producing a public candidate require
+`GHOST_RELEASE_REPOSITORY` and an approved destination
+(`packaging/release/render-arch-package.sh` refuses without one), which the
+release hold forbids. Record that Phase 1 verified the destination-independent
+source, runtime, and secret scan only, and that the candidate freeze and version
+selection remain owner actions outside this runbook.
+
+**What a version bump actually touches.** Not the PKGBUILDs.
+`packaging/arch/PKGBUILD` states in a comment that its committed `pkgver` is not
+authoritative and is regenerated by `pkgver()` from `package.json` on every
+build, so it — and `packaging/arch/.SRCINFO` with it — is expected to lag HEAD.
+The stable PKGBUILD is not committed at all; it is rendered from
+`packaging/omarchy/pkgbuilds/ghost/PKGBUILD.in` with `@@VERSION@@` substituted at
+render time. The bump is the six manifests
+`packaging/release/verify-release-version.sh` enumerates — `package.json` at the
+root and in `packages/{daemon,extensions,shell,chromium-extension}`, plus
+`packages/chromium-extension/extension/manifest.json` — which must all carry the
+same version:
+
+```sh
+bash "$SRC/packaging/release/verify-release-version.sh" "$SRC"   # prints the version
+bash "$SRC/packaging/release/test-release-version.sh"           # rejects drift and 0.0.0
+```
+
+The current `0.0.1` is a **valid** release version: the checker rejects only
+non-semver strings, components above 65535, and the all-zero `0.0.0`. Picking a
+different number for the first beta is a naming choice, not a blocker.
 
 ---
 
@@ -700,11 +809,25 @@ gate as blocked on the hold, not as failed.
 
 ## Phase 8 — Evidence roll-up for #17
 
+`$EV/` is the record; the candidate worktree and the extraction scratch are not.
+Retire them once the evidence above is captured, from the working checkout:
+
+```sh
+cd ~/github.com/ferdousbhai/ghost
+rm -rf ~/ghost-beta/scan
+git worktree remove ~/ghost-beta/src
+git worktree list          # no ~/ghost-beta/src row
+```
+
 Paste this into #17, one line per gate, filling in the evidence pointer:
 
 ```text
 Candidate SHA: <sha>   Package: ghost-dev-<pkgver>-1-x86_64.pkg.tar.zst (sha256 <…>)
 Machine: <host>, systemd <ver>, Omarchy <ver>
+
+Candidate build
+[ ] built from a clean worktree at the candidate SHA           — 00-worktree.txt
+[ ] gitleaks: history + source/runtime/pkg extractions clean   — 01-secret-scan.txt
 
 Obsidian readiness
 [ ] clean-account install + official CLI registration       — 02-obsidian-version.txt, screenshot
@@ -746,7 +869,7 @@ Packaged owner acceptance
 
 ## Not covered here
 
-- **Owner decisions:** candidate freeze, version and scope selection,
+- **Owner decisions:** candidate freeze, version and scope selection (§1.6),
   authorizing live mutation, configuring a publication destination, lifting the
   release hold.
 - **GUI steps:** Obsidian's CLI registration pane, HUD/tray appearance, the
@@ -756,9 +879,9 @@ Packaged owner acceptance
   A deterministic script cannot stand in for a real provider turn.
 - **`systemd < 254` refusal:** needs a separate pre-254 image; only the declared
   direct dependency is provable here.
-- **Comprehensive final secret scan:** the repo ships no approved scanner
-  command; the owner supplies one against the frozen candidate and its extracted
-  artifacts.
+- **Publication-time re-scan:** §1.5 scans the candidate worktree's history and
+  the three extracted artifacts here. Re-running it against whatever a
+  publication step finally uploads is out of scope because publication is.
 - **Publication and Omarchy:** staging, publishing, anonymous URL verification,
   and the contribution's review/build/sign/promotion are external and
   hold-blocked.
