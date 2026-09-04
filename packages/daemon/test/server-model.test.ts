@@ -14,6 +14,7 @@ import {
   ClaudeCodeProbe,
   ClaudeCodeProcessError,
 } from "../src/claude-code.js";
+import type { DetectedLocalProvider } from "../src/local-models.js";
 import {
   DEFAULT_MODELS_LIMIT,
   MAX_MODELS_LIMIT,
@@ -59,6 +60,7 @@ interface ServeOptions {
     subscriptionType?: string;
   };
   claudeProbe?: ClaudeCodeProbe;
+  localProviders?: readonly DetectedLocalProvider[];
 }
 
 async function serve(options: ServeOptions = {}): Promise<string> {
@@ -81,6 +83,7 @@ async function serve(options: ServeOptions = {}): Promise<string> {
     models: options.models ?? sampleCatalog(),
     ...(options.credentialed ? { credentialed: options.credentialed } : {}),
     ...(options.oauth ? { oauth: options.oauth } : {}),
+    ...(options.localProviders ? { localProviders: options.localProviders } : {}),
   });
   const catalog = new ModelCatalog({
     registry: temp.registry,
@@ -280,6 +283,81 @@ describe("GET /api/ghosts/:name/model", () => {
     const base = await serve({ credentialed: [] });
     const { body } = await getJson(`${base}/api/ghosts/casper/model`);
     expect(body).toEqual({ current: null, source: "none" });
+  });
+});
+
+/**
+ * A detected endpoint is a runtime fact: it reaches the switcher as an
+ * ordinary provider and drives the ghost only while nothing else is bound.
+ */
+describe("detected local endpoints", () => {
+  const detected: DetectedLocalProvider[] = [
+    {
+      provider: "local-ollama",
+      config: { baseUrl: "http://127.0.0.1:11434/v1", models: [{ id: "qwen3:8b" }] },
+    },
+  ];
+
+  const withLocal = (overrides: Partial<ServeOptions> = {}) => serve({
+    models: [
+      ...sampleCatalog(),
+      { provider: "local-ollama", id: "qwen3:8b", contextWindow: 40_960 },
+    ],
+    credentialed: ["local-ollama", "openai-codex"],
+    localProviders: detected,
+    ...overrides,
+  });
+
+  it("drives from the detected endpoint when nothing is bound", async () => {
+    const base = await withLocal();
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body).toMatchObject({
+      source: "default",
+      origin: "local",
+      current: { provider: "local-ollama", id: "qwen3:8b", contextWindow: 40_960 },
+    });
+  });
+
+  it("keeps an explicit binding, with no local origin", async () => {
+    const base = await withLocal();
+    setGhostModelRole(agentDir(), "chat_model", "openai-codex", "gpt-5-codex");
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body.source).toBe("role");
+    expect(body.origin).toBeUndefined();
+    expect(body.current).toMatchObject({ provider: "openai-codex", id: "gpt-5-codex" });
+  });
+
+  it("leaves the catalogue default alone when no endpoint answered", async () => {
+    const base = await serve({ credentialed: ["anthropic"] });
+    const { body } = await getJson(`${base}/api/ghosts/casper/model`);
+    expect(body).toEqual({
+      source: "default",
+      current: { provider: "anthropic", id: "claude-opus-4", name: "Claude Opus 4", hasVision: true, contextWindow: 200_000 },
+    });
+  });
+
+  it("lists a detected model in both scopes and persists a pick like any provider", async () => {
+    const base = await withLocal();
+    for (const scope of ["available", "catalog"]) {
+      const { body } = await getJson(
+        `${base}/api/ghosts/casper/models?scope=${scope}&provider=local-ollama`,
+      );
+      expect(body.models).toEqual([
+        expect.objectContaining({ provider: "local-ollama", id: "qwen3:8b", current: true }),
+      ]);
+    }
+
+    const response = await fetch(`${base}/api/ghosts/casper/model`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ provider: "local-ollama", id: "qwen3:8b" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, usable: true, source: "role" });
+    expect(readGhostModels(agentDir())?.roles?.chat_model).toEqual({
+      provider: "local-ollama",
+      modelId: "qwen3:8b",
+    });
   });
 });
 

@@ -1,4 +1,6 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { keyringModelsDocument } from "../src/model-config-view.js";
@@ -267,5 +269,63 @@ describe("GhostPiRuntime", () => {
     await runtime.logout("anthropic", "work");
     expect(client.items.has("anthropic/work")).toBe(false);
     expect(runtime.hasConfiguredAuth("anthropic")).toBe(false);
+  });
+
+  it("registers a detected local endpoint like a configured provider, writing nothing", async () => {
+    const machine = tempRoot();
+    const home = join(machine, "ghost");
+    mkdirSync(home);
+    const endpoint = createServer((_request, response) => {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "qwen3:8b", context_length: 40_960 }] }));
+    });
+    cleanups.push(() => new Promise<void>((resolve) => endpoint.close(() => resolve())));
+    await new Promise<void>((resolve) => endpoint.listen(0, "127.0.0.1", resolve));
+    const port = (endpoint.address() as AddressInfo).port;
+
+    const runtime = await GhostPiRuntime.create({
+      home,
+      agentDir: join(home, ".pi"),
+      allowModelNetwork: false,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(machine, "state.sqlite"),
+      localRunners: [{ provider: "local-ollama", label: "Ollama", port }],
+    });
+    cleanups.push(() => runtime.close());
+
+    expect(runtime.localProviders.map((provider) => provider.provider)).toEqual(["local-ollama"]);
+    expect(runtime.getModel("local-ollama", "qwen3:8b")).toMatchObject({ contextWindow: 40_960 });
+    expect((await runtime.getAvailable("local-ollama")).map((model) => model.id)).toEqual(["qwen3:8b"]);
+    expect(existsSync(join(home, "models.json"))).toBe(false);
+  });
+
+  it("skips detection when the daemon is offline", async () => {
+    const machine = tempRoot();
+    const home = join(machine, "ghost");
+    mkdirSync(home);
+    let probed = 0;
+    const endpoint = createServer((_request, response) => {
+      probed += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ id: "qwen3:8b" }] }));
+    });
+    cleanups.push(() => new Promise<void>((resolve) => endpoint.close(() => resolve())));
+    await new Promise<void>((resolve) => endpoint.listen(0, "127.0.0.1", resolve));
+
+    const runtime = await GhostPiRuntime.create({
+      home,
+      agentDir: join(home, ".pi"),
+      allowModelNetwork: false,
+      offline: true,
+      client: new MemorySecretServiceClient(),
+      metadataPath: join(machine, "state.sqlite"),
+      localRunners: [
+        { provider: "local-ollama", label: "Ollama", port: (endpoint.address() as AddressInfo).port },
+      ],
+    });
+    cleanups.push(() => runtime.close());
+
+    expect(runtime.localProviders).toEqual([]);
+    expect(probed).toBe(0);
   });
 });

@@ -20,6 +20,12 @@ import type {
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { GhostSecretContext, ProviderAccountStatus } from "./keyring-credential-store.js";
 import {
+  detectLocalModelProviders,
+  withLocalProviders,
+  type DetectedLocalProvider,
+  type LocalRunner,
+} from "./local-models.js";
+import {
   collectKeyringProviders,
   mergeConfiguredAccounts,
   providerAccountName,
@@ -42,10 +48,13 @@ export interface GhostPiRuntimeInput {
   /** The ghost home holding `models.json`. */
   home: string;
   allowModelNetwork: boolean;
+  /** Offline skips local-endpoint detection along with the catalog refresh. */
+  offline?: boolean;
   /** Test seams: the legacy plaintext auth file the keyring migration retires, and the Secret Service boundary. */
   authPath?: string;
   client?: SecretServiceClient;
   metadataPath?: string;
+  localRunners?: readonly LocalRunner[];
 }
 
 export interface GhostProviderSummary {
@@ -61,6 +70,8 @@ export class GhostPiRuntime {
   readonly secretResolver: GhostSecretContext;
   /** pi's own runtime, for the session that streams through it. */
   readonly runtime: ModelRuntime;
+  /** Local endpoints this runtime's own detection pass found, in preference order. */
+  readonly localProviders: readonly DetectedLocalProvider[];
   private readonly credentialStore: GhostPiCredentialStore;
   private readonly providerConfigAccounts: ReadonlyMap<string, ReadonlySet<string>>;
   private closed = false;
@@ -70,11 +81,13 @@ export class GhostPiRuntime {
     credentialStore: GhostPiCredentialStore,
     secretResolver: GhostSecretContext,
     providerConfigAccounts: ReadonlyMap<string, ReadonlySet<string>>,
+    localProviders: readonly DetectedLocalProvider[],
   ) {
     this.runtime = runtime;
     this.credentialStore = credentialStore;
     this.secretResolver = secretResolver;
     this.providerConfigAccounts = providerConfigAccounts;
+    this.localProviders = localProviders;
   }
 
   static async create(input: GhostPiRuntimeInput): Promise<GhostPiRuntime> {
@@ -90,9 +103,15 @@ export class GhostPiRuntime {
         authorizeAccounts: (accounts) => authorizeGhostAccounts(input.home, secretResolver, accounts),
       });
       const models = readGhostModels(input.home) ?? { providers: {} };
+      // The detection pass rides this runtime's catalog refresh: a local
+      // endpoint reaches pi as an ordinary provider, and nothing is persisted.
+      const localProviders = await detectLocalModelProviders({
+        offline: input.offline ?? false,
+        ...(input.localRunners ? { runners: input.localRunners } : {}),
+      });
       const runtime = await ModelRuntime.create({
         credentials: credentialStore,
-        modelsPath: syncModelsView(models, input.agentDir, PI_MODELS_VIEW),
+        modelsPath: syncModelsView(withLocalProviders(models, localProviders), input.agentDir, PI_MODELS_VIEW),
         modelsStorePath: join(input.agentDir, "models-store.json"),
         // One catalog pass, after the keyring providers are registered.
         refreshOnCreate: false,
@@ -108,7 +127,13 @@ export class GhostPiRuntime {
         allowNetwork: input.allowModelNetwork,
         ...(input.allowModelNetwork ? { signal: AbortSignal.timeout(NETWORK_REFRESH_TIMEOUT_MS) } : {}),
       });
-      return new GhostPiRuntime(runtime, credentialStore, secretResolver, providerConfigAccounts);
+      return new GhostPiRuntime(
+        runtime,
+        credentialStore,
+        secretResolver,
+        providerConfigAccounts,
+        localProviders,
+      );
     } catch (error) {
       secretResolver.close();
       throw error;
@@ -226,11 +251,13 @@ export function createGhostPiRuntime(input: {
   authPath: string;
   modelsPath: string;
   allowModelNetwork: boolean;
+  offline?: boolean;
 }): Promise<GhostPiRuntime> {
   return GhostPiRuntime.create({
     agentDir: dirname(input.authPath),
     home: dirname(input.modelsPath),
     authPath: input.authPath,
     allowModelNetwork: input.allowModelNetwork,
+    ...(input.offline === undefined ? {} : { offline: input.offline }),
   });
 }

@@ -41,6 +41,7 @@ import {
   type ClaudeCodeAuthStatus,
 } from "./claude-code.js";
 import { GhostError, ghostPaths, type GhostRegistry } from "./ghosts.js";
+import { chatModelChoice, type DetectedLocalProvider } from "./local-models.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -76,6 +77,8 @@ export interface ModelCatalogRuntime {
   getProviderAuthStatus(providerId: string): { configured: boolean };
   isUsingOAuth(providerId: string): boolean;
   close(): void;
+  /** Local endpoints the runtime detected, in preference order. */
+  localProviders: readonly DetectedLocalProvider[];
 }
 
 export type CatalogModel = Pick<Model<Api>, "provider" | "id">
@@ -104,6 +107,12 @@ export interface CurrentModel {
    * `current` is null.
    */
   source: CurrentModelSource;
+  /**
+   * Present only on a `default` the daemon detected rather than read from
+   * pi's catalogue: a local endpoint answering on a well-known port
+   * (`local-models.ts`).
+   */
+  origin?: "local";
 }
 
 export interface ModelListItem {
@@ -213,6 +222,7 @@ export interface ModelCatalogOptions {
     authPath: string;
     modelsPath: string;
     allowModelNetwork: boolean;
+    offline: boolean;
   }) => Promise<ModelCatalogRuntime>;
   claudeCodeStatus?: () => Promise<ClaudeCodeAuthStatus | null>;
   claudeCodeProbe?: ClaudeCodeProbe;
@@ -273,12 +283,9 @@ async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
   allowModelNetwork: boolean;
+  offline: boolean;
 }): Promise<ModelCatalogRuntime> {
-  return createGhostPiRuntime({
-    authPath: input.authPath,
-    modelsPath: input.modelsPath,
-    allowModelNetwork: input.allowModelNetwork,
-  });
+  return createGhostPiRuntime(input);
 }
 
 function hasVision(model: CatalogModel): boolean {
@@ -394,9 +401,9 @@ export class ModelCatalog {
   private automaticDefaultView(
     file: GhostModelsFile | null,
     available: readonly Model<Api>[],
+    localProviders: readonly DetectedLocalProvider[],
   ): ModelRouteModel | null {
-    const ref = resolveChatModelRef(file);
-    const model = resolveChatModel(ref, available);
+    const model = resolveChatModel(chatModelChoice(file, localProviders).ref, available);
     return model
       ? { ...modelView(model), resolved: true, usable: true }
       : null;
@@ -411,9 +418,10 @@ export class ModelCatalog {
     file: GhostModelsFile | null,
     role: GhostModelRole,
     available: readonly Model<Api>[],
+    localProviders: readonly DetectedLocalProvider[],
   ): ModelRouteModel | null {
     if (CHAT_INHERITING_ROLES.has(role)) {
-      const effectiveDefault = this.automaticDefaultView(file, available);
+      const effectiveDefault = this.automaticDefaultView(file, available, localProviders);
       // Claude Code is a separate harness, not a model a task role can invoke.
       if (role === "task_model" && effectiveDefault?.provider === CLAUDE_CODE_PROVIDER_ID) return null;
       return effectiveDefault;
@@ -455,7 +463,7 @@ export class ModelCatalog {
       const primaryView = primary ? this.routeModelView(runtime, primary, claudeCode) : null;
       const effective = explicit
         ? primaryView
-        : this.automaticRoleView(file, role, available);
+        : this.automaticRoleView(file, role, available, runtime.localProviders);
       roles.push({
         role,
         ompRole: GHOST_TO_OMP_MODEL_ROLE[role],
@@ -535,7 +543,9 @@ export class ModelCatalog {
         setGhostModelRole(configDir, role, model.provider, model.id);
       } else {
         const file = this.readModelsFile(configDir, ghostName);
-        const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
+        const primary = role === "chat_model"
+          ? chatModelChoice(file, runtime.localProviders).ref
+          : file?.roles?.[role];
         if (primary?.provider === model.provider && primary.modelId === model.id) {
           throw new GhostError(
             "duplicate_route_model",
@@ -587,7 +597,9 @@ export class ModelCatalog {
     }
     return this.withRuntime(ghostName, async ({ runtime, configDir }) => {
       const file = this.readModelsFile(configDir, ghostName);
-      const primary = role === "chat_model" ? resolveChatModelRef(file) : file?.roles?.[role];
+      const primary = role === "chat_model"
+        ? chatModelChoice(file, runtime.localProviders).ref
+        : file?.roles?.[role];
       const bindings: GhostModelRoleBinding[] = [];
       const seen = new Set<string>();
       for (const selection of selections) {
@@ -657,6 +669,7 @@ export class ModelCatalog {
       // Off when offline: gates only catalogue refresh, never a read of the
       // already-cached static catalogue.
       allowModelNetwork: !this.offline,
+      offline: this.offline,
     });
     return { runtime, configDir };
   }
@@ -683,6 +696,7 @@ export class ModelCatalog {
         this.readModelsFile(configDir, ghostName),
         available,
         claudeCodeAvailability(claudeStatus),
+        runtime.localProviders,
       );
     });
   }
@@ -691,6 +705,7 @@ export class ModelCatalog {
     file: GhostModelsFile | null,
     availableModels: readonly Model<Api>[],
     claudeCode: ClaudeCodeAvailability,
+    localProviders: readonly DetectedLocalProvider[],
   ): CurrentModel {
     const role = file?.roles?.chat_model;
     if (role?.provider && role.modelId) {
@@ -717,9 +732,17 @@ export class ModelCatalog {
       if (model) return { current: modelView(model), source: "default" };
       return { current: null, source: "none" };
     }
-    const model = resolveChatModel(resolveChatModelRef(file), availableModels);
-    if (model) return { current: modelView(model), source: "default" };
-    return { current: null, source: "none" };
+    const choice = chatModelChoice(file, localProviders);
+    const model = resolveChatModel(choice.ref, availableModels);
+    if (!model) return { current: null, source: "none" };
+    const drivenLocally = choice.origin === "local"
+      && choice.ref?.provider === model.provider
+      && choice.ref.modelId === model.id;
+    return {
+      current: modelView(model),
+      source: "default",
+      ...(drivenLocally ? { origin: "local" as const } : {}),
+    };
   }
 
   /**
@@ -750,7 +773,7 @@ export class ModelCatalog {
       this.claudeCodeStatus(),
     ]);
     const claudeCode = claudeCodeAvailability(claudeStatus);
-    const current = this.resolveCurrent(file, available, claudeCode);
+    const current = this.resolveCurrent(file, available, claudeCode, runtime.localProviders);
     const piSource = scope === "catalog"
       ? runtime.getModels(providerFilter)
       : providerFilter

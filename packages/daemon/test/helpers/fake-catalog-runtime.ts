@@ -6,6 +6,7 @@
  * call.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { DetectedLocalProvider } from "../../src/local-models.js";
 import type { CatalogModel, ModelCatalogRuntime } from "../../src/model-catalog.js";
 
 export interface FakeCatalogModel extends CatalogModel {
@@ -17,6 +18,8 @@ export interface FakeCatalogOptions {
   models: FakeCatalogModel[];
   credentialed?: string[];
   oauth?: string[];
+  /** Endpoints a real runtime would have detected at construction. */
+  localProviders?: readonly DetectedLocalProvider[];
 }
 
 export function fakePiModel(model: FakeCatalogModel): Model<Api> {
@@ -58,6 +61,7 @@ export function makeFakeCatalogRuntime(options: FakeCatalogOptions): ModelCatalo
       return oauth.has(providerId);
     },
     close() {},
+    localProviders: options.localProviders ?? [],
   };
 }
 

@@ -190,6 +190,7 @@ import {
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
+import { chatModelChoice } from "./local-models.js";
 import { resolveChatModel } from "./model-routing.js";
 import { buildRecapPrompt, normalizeRecap } from "./recap.js";
 import { assistantText } from "./smol.js";
@@ -2568,6 +2569,7 @@ export class SessionHost {
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
+      offline: this.offline,
     });
     try {
       return await use(runtime);
@@ -3614,6 +3616,7 @@ export class SessionHost {
       modelsPath: ghostModelsPath(paths.home),
       // Provider catalogs are fetched only when the daemon is not offline.
       allowModelNetwork: !this.offline,
+      offline: this.offline,
     });
 
     let mcp: HostedMCP | undefined;
@@ -3698,7 +3701,7 @@ export class SessionHost {
     }
     const liveMcp = mcp;
     extensionFactories.push(mcpToolsExtension(liveMcp));
-    const chatRef = resolveChatModelRef(readGhostModels(paths.home));
+    const chatRef = chatModelChoice(readGhostModels(paths.home), modelRuntime.localProviders).ref;
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
     if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {
       logger.warn("configured chat model is not available", {
@@ -5113,7 +5116,7 @@ export class SessionHost {
   ): Promise<{ provider: string; id: string } | null> {
     let ref: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      ref = resolveChatModelRef(readGhostModels(configDir));
+      ref = chatModelChoice(readGhostModels(configDir), modelRuntime.localProviders).ref;
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,
@@ -6106,6 +6109,7 @@ export class SessionHost {
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
+      offline: this.offline,
     });
     try {
       return await use(runtime);

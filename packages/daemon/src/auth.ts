@@ -181,7 +181,8 @@ export interface LoginManagerOptions {
   logger?: Logger;
   loginTtlMs?: number;
   retainSettledMs?: number;
-  createRuntime?: (input: { authPath: string; modelsPath: string }) => Promise<LoginRuntime>;
+  offline?: boolean;
+  createRuntime?: (input: { authPath: string; modelsPath: string; offline: boolean }) => Promise<LoginRuntime>;
   onLoginSucceeded?: (ghostName: string, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
@@ -195,6 +196,7 @@ export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Cla
 async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
+  offline: boolean;
 }): Promise<LoginRuntime> {
   // allowModelNetwork stays false: it gates only catalog refresh, not the
   // provider's own OAuth HTTP, so a login works offline. create() still
@@ -204,6 +206,7 @@ async function defaultCreateRuntime(input: {
     authPath: input.authPath,
     modelsPath: input.modelsPath,
     allowModelNetwork: false,
+    offline: input.offline,
   });
 }
 
@@ -324,6 +327,7 @@ export class LoginManager {
   private readonly logger: Logger;
   private readonly loginTtlMs: number;
   private readonly retainSettledMs: number;
+  private readonly offline: boolean;
   private readonly createRuntime: NonNullable<LoginManagerOptions["createRuntime"]>;
   private readonly onLoginSucceeded: NonNullable<LoginManagerOptions["onLoginSucceeded"]>;
   private readonly now: () => number;
@@ -338,6 +342,7 @@ export class LoginManager {
     this.logger = options.logger ?? silentLogger;
     this.loginTtlMs = options.loginTtlMs ?? DEFAULT_LOGIN_TTL_MS;
     this.retainSettledMs = options.retainSettledMs ?? DEFAULT_RETAIN_SETTLED_MS;
+    this.offline = options.offline ?? false;
     this.createRuntime = options.createRuntime ?? defaultCreateRuntime;
     this.onLoginSucceeded = options.onLoginSucceeded ?? (async () => {});
     this.now = options.now ?? Date.now;
@@ -348,6 +353,7 @@ export class LoginManager {
     return this.createRuntime({
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
+      offline: this.offline,
     });
   }
 

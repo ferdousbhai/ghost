@@ -29,8 +29,10 @@ than becoming parallel Ghost frameworks.
 - **Local-first driver.** The ghost's main model, the `chat_model` role, is an
   open-source model: local on the owner's device, or hosted with one LoRA
   adapter per ghost. `openAiCompatiblePreset` already binds Ollama, vLLM,
-  llama.cpp, or LM Studio at zero cost, so a local endpoint needs no new
-  machinery. Frontier models bind only to the teacher and specialist roles,
+  llama.cpp, or LM Studio at zero cost, and a runner listening on its
+  well-known loopback port is detected automatically and drives the ghost when
+  nothing else is bound. Frontier models bind only to the teacher and
+  specialist roles,
   `advisor_model`, `task_model`, and `slow_model`, and are reached through the
   review hook's advisor pass on `session_stop` and through the durable task
   system. Those supervisor hooks are the training signal for the

@@ -22,6 +22,7 @@ import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation 
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { createJournalSink } from "./journal.js";
+import { detectLocalModelProviders } from "./local-models.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
@@ -552,6 +553,7 @@ async function serveDaemon(
     registry,
     homeOperations,
     logger,
+    offline: config.offline,
     onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
   });
   const modelCatalog = new ModelCatalog({
@@ -602,8 +604,13 @@ async function serveDaemon(
     else logger.warn("remote access is unavailable", { problem: status.problem });
   }
 
+  // One start-time reading of the well-known local ports; every later runtime
+  // detects again as part of its own catalog refresh.
+  const localModels = await detectLocalModelProviders({ offline: config.offline });
+
   logger.info("listening", {
     url: `http://${config.host}:${listening.port}`,
+    localModels: localModels.length,
     ghostsRoot: config.ghostsRoot,
     ghosts: registry.list().length,
     version: runningSource.version,

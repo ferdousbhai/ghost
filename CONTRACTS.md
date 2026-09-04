@@ -404,7 +404,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT\|DELETE /api/ghosts/:name/memory` | List, write, or trash private memory. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
-| `GET /api/ghosts/:name/models` | Paginated available/catalog model rows; `q` is at most 256 characters. |
+| `GET /api/ghosts/:name/models` | Paginated available/catalog model rows, detected local endpoints included in both scopes; `q` is at most 256 characters. |
 | `GET\|PUT /api/ghosts/:name/model-routing` | Read or replace role primaries/fallbacks. |
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and accounts. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. |
@@ -481,6 +481,22 @@ unset, it chooses the cheapest usable model, treating an authenticated
 subscription as zero marginal cost. An explicit unusable smol binding fails
 loudly rather than silently switching models. Conversation titles are one
 persisted Pi `session_info` name after the first turn; owner titles win.
+
+Local OpenAI-compatible endpoints are detected, not configured. Every Pi
+runtime construction probes `127.0.0.1` on the well-known runner ports —
+`local-ollama` 11434, `local-lm-studio` 1234, `local-llama-cpp` 8080,
+`local-vllm` 8000 — in parallel with a short timeout, and publishes each
+answering endpoint as a zero-cost provider of every model id it lists. A
+refused connection, a timeout, a non-JSON body, or an empty list is silence,
+not an error. Detected providers are runtime facts: they appear in both
+`scope=available` and `scope=catalog` rows and a switcher pick persists like
+any other, but detection itself never writes `models.json`. With no
+`chat_model` binding and no configured provider, the first model of the first
+detected endpoint drives the ghost, in the runner order above, and the
+current-model response marks it `source: "default"` with `origin: "local"`.
+Any explicit binding or configured provider wins, a ghost whose principal
+runtime is Claude Code keeps its own model and is unaffected, and `offline`
+skips the probe in every daemon-owned runtime.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
