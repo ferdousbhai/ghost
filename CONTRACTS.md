@@ -421,7 +421,9 @@ hosted-session, concurrency, or spend cap.
   talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
-  owner's explicit direction.
+  owner's explicit direction. Dictation is Omarchy's Voxtype: the shell runs
+  `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
+  ships no speech stack of its own.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
   opt-in MV3 relay into the owner's Chromium. Pairing and workspace ownership
   are capability-scoped; there is no second browser backend. Client text

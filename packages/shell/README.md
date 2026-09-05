@@ -45,6 +45,9 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   disclosure.
 - Context panels expose character, commands, hooks, resources, MCP, the bound
   model, remote access, and connection state.
+- Dictation is Omarchy's Voxtype. The composer shows a toggle only while its
+  state file exists, hands focus back to the field after toggling, and says
+  when Voxtype is listening.
 
 ## Theme
 

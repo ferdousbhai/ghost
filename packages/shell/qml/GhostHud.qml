@@ -164,6 +164,7 @@ FloatingWindow {
         hud.loginOpen = false;
         hud.currentSection = "chat";
         Ghostd.refresh();
+        Dictation.refresh();
         composer.take();
     }
 

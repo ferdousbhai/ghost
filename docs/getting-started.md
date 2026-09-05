@@ -229,6 +229,11 @@ and any skill you installed untouched.
   in your own Chromium and paste the token. Read
   [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
   first — the ghost acts in the session you are signed into.
+- **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
+  Install → AI → Dictation, which sets up Voxtype). With the composer focused,
+  hold `F9` and speak, or click the dot at the right of the composer; the
+  composer says when it is listening. Ghost adds nothing else: no speech
+  stack, no voice of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Phone access.** `ghostd remote status` (or the HUD's Phone access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only.

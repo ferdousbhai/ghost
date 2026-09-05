@@ -227,12 +227,73 @@ Item {
             font.weight: Font.Bold
         }
 
+        // Dictation: Omarchy's Voxtype types into whatever has the keyboard,
+        // so the button hands focus straight back to the field after toggling
+        // it. Hidden entirely when Voxtype is not running.
+        Item {
+            id: micButton
+
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.rightMargin: Theme.controlPaddingX
+            anchors.topMargin: Theme.pad / 2
+            width: Theme.charWidth * 2
+            height: Theme.fontSize * 1.4
+            visible: Dictation.available
+            activeFocusOnTab: true
+
+            Accessible.role: Accessible.Button
+            Accessible.name: Dictation.recording ? "Stop dictation" : "Start dictation"
+
+            Rectangle {
+                id: micDot
+                anchors.centerIn: parent
+                width: Theme.fontSize * 0.6
+                height: width
+                radius: width / 2
+                color: Dictation.recording ? Theme.ghostAmber
+                    : (Dictation.state === "transcribing" ? Theme.foregroundDim : "transparent")
+                border.width: Dictation.recording ? 0 : 1
+                border.color: micArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
+
+                SequentialAnimation on opacity {
+                    running: Dictation.recording && !Theme.reducedMotion
+                    loops: Animation.Infinite
+                    NumberAnimation { to: 0.35; duration: 600 }
+                    NumberAnimation { to: 1; duration: 600 }
+                }
+                onVisibleChanged: if (!Dictation.recording) opacity = 1
+            }
+
+            MouseArea {
+                id: micArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    Dictation.toggle();
+                    field.forceActiveFocus();
+                }
+            }
+
+            Keys.onPressed: event => {
+                if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                        || event.key === Qt.Key_Space) {
+                    Dictation.toggle();
+                    field.forceActiveFocus();
+                    event.accepted = true;
+                }
+            }
+        }
+
         Flickable {
             anchors.fill: parent
             anchors.margins: Theme.pad / 2
             // One column of air after the prompt, the way a shell leaves one.
             anchors.leftMargin: promptGlyph.anchors.leftMargin
                 + promptGlyph.implicitWidth + Theme.charWidth
+            anchors.rightMargin: Theme.pad / 2
+                + (micButton.visible ? micButton.width + Theme.charWidth : 0)
             contentWidth: width
             contentHeight: field.implicitHeight
             clip: true
@@ -304,10 +365,11 @@ Item {
                     visible: field.text === ""
                     text: Ghostd.activeGhost === ""
                         ? "No ghost selected"
-                        : (Ghostd.streaming
+                        : (Dictation.label !== "" ? Dictation.label
+                        : Ghostd.streaming
                             ? "Steer " + Ghostd.activeGhost + "…  ·  Ctrl+Enter follows up"
                             : "Message " + Ghostd.activeGhost + "…")
-                    color: Theme.foregroundDim
+                    color: Dictation.recording ? Theme.ghostAmber : Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize
                     elide: Text.ElideRight

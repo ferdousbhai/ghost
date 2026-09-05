@@ -227,6 +227,8 @@ If you expect one of these, it is missing on purpose:
 - **No summarizing compaction on pi.** A full context rolls over into a new
   window with the ghost's own handoff; earlier windows stay searchable through
   `history`.
+- **No speech stack.** Dictation is Omarchy's Voxtype; the HUD only toggles
+  it and mirrors its state file. The ghost does not speak.
 - **No built-in hooks, review pipeline, or model catalog.**
 - **No throttles**, as above.
 
