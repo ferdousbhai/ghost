@@ -51,7 +51,7 @@ const BUILTINS: readonly BuiltinSpec[] = [
   { name: "name", description: "Name the session", availability: "unsupported", reason: "Use Ghost's conversation rename API or UI so its title contract is preserved." },
   { name: "fork", description: "Fork the session", availability: "unsupported", reason: "Use Ghost's conversation fork API or UI." },
   { name: "clone", description: "Clone the session", availability: "unsupported", reason: "Use Ghost's conversation fork API or UI." },
-  { name: "share", description: "Share a snapshot", availability: "unsupported", reason: "Ghost does not publish conversation snapshots; use Remote collaboration for deliberate live access." },
+  { name: "share", description: "Share a snapshot", availability: "unsupported", reason: "Ghost does not publish conversation snapshots; use the tailnet viewer for deliberate remote access." },
   { name: "export", description: "Export the conversation", availability: "unsupported", reason: "Filesystem export is not enabled through the Ghost daemon." },
   { name: "dump", description: "Dump the raw request", availability: "unsupported", reason: "A raw request sidecar would contain context and secrets, so it is not exposed here." },
   { name: "stats", description: "Open the stats dashboard", availability: "unsupported", reason: "Ghost does not manage a separate dashboard server." },

@@ -1331,48 +1331,19 @@ describe("session Connect routes", () => {
     });
   });
 
-  it("reports session-scoped live and collaboration state without starting either", async () => {
+  it("does not expose live voice or a collaboration host", async () => {
     const base = await serve();
-    const live = `${base}/api/ghosts/casper/sessions/${piSegment("conv-connect")}/live`;
-    const collab = `${base}/api/ghosts/casper/sessions/${piSegment("conv-connect")}/collab`;
-
-    expect(await (await fetch(live)).json()).toMatchObject({
-      supported: true,
-      active: false,
-      phase: "idle",
-    });
-    expect(await (await fetch(collab)).json()).toEqual({
-      supported: true,
-      active: false,
-      participants: [],
-    });
-
-    const invalidLive = await fetch(live, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "listen harder" }),
-    });
-    expect(invalidLive.status).toBe(400);
-    const inactiveMute = await fetch(live, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "mute" }),
-    });
-    expect(inactiveMute.status).toBe(409);
-
-    const missingWritable = await fetch(collab, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "start", relayUrl: "wss://relay.example" }),
-    });
-    expect(missingWritable.status).toBe(400);
-    const stopped = await fetch(collab, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "stop" }),
-    });
-    expect(stopped.status).toBe(200);
-    expect(await stopped.json()).toMatchObject({ active: false });
+    const segment = piSegment("conv-connect");
+    for (const route of ["live", "collab"]) {
+      const url = `${base}/api/ghosts/casper/sessions/${segment}/${route}`;
+      expect((await fetch(url)).status).toBe(404);
+      const posted = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "start" }),
+      });
+      expect(posted.status).toBe(404);
+    }
   });
 });
 

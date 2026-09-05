@@ -687,103 +687,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, trash: artifacts });
   };
 
-  const handleLiveVoice = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method === "GET") {
-      jsonResponse(response, 200, options.host.liveVoiceStatus(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-      ));
-      return;
-    }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const action = (body as { action?: unknown }).action;
-    if (action !== "start" && action !== "mute" && action !== "unmute" && action !== "stop") {
-      errorResponse(
-        response,
-        400,
-        "invalid_request",
-        '"action" must be "start", "mute", "unmute", or "stop".',
-      );
-      return;
-    }
-    jsonResponse(
-      response,
-      action === "start" ? 201 : 200,
-      await options.host.liveVoiceAction(
-        ghostName,
-        conversation.conversationId,
-        action,
-        conversation.runtime,
-      ),
-    );
-  };
-
-  const handleCollaboration = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method === "GET") {
-      jsonResponse(response, 200, options.host.collaborationStatus(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-      ));
-      return;
-    }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { action, relayUrl, writable, confirmed } = body as {
-      action?: unknown;
-      relayUrl?: unknown;
-      writable?: unknown;
-      confirmed?: unknown;
-    };
-    if (action !== "start" && action !== "stop") {
-      errorResponse(response, 400, "invalid_request", '"action" must be "start" or "stop".');
-      return;
-    }
-    if (action === "start" && typeof writable !== "boolean") {
-      errorResponse(response, 400, "invalid_request", '"writable" must be a boolean.');
-      return;
-    }
-    if (relayUrl !== undefined && typeof relayUrl !== "string") {
-      errorResponse(response, 400, "invalid_request", '"relayUrl" must be a string.');
-      return;
-    }
-    jsonResponse(
-      response,
-      action === "start" ? 201 : 200,
-      await options.host.collaborationAction(
-        ghostName,
-        conversation.conversationId,
-        {
-          action,
-          ...(typeof relayUrl === "string" ? { relayUrl } : {}),
-          ...(typeof writable === "boolean" ? { writable } : {}),
-          confirmed: confirmed === true,
-        },
-        conversation.runtime,
-      ),
-    );
-  };
-
   /**
    * Pin or unpin one conversation. Idempotent, so the shell may send the state
    * it wants rather than a toggle it has to compute from a stale listing.
@@ -2290,24 +2193,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleRecap(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "live") {
-          return await handleLiveVoice(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "collab") {
-          return await handleCollaboration(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
             request,
             response,
           );

@@ -22,28 +22,28 @@ describe("loadGhostSettings", () => {
     mkdirSync(join(home, ".omp"), { recursive: true });
     writeFileSync(
       paths.settingsFile,
-      "collab:\n  relayUrl: wss://relay.example\nttsr:\n  disabledRules: [noisy]\nreview:\n  immuneTurns: 3\n  journal: true\n  mode: \"true\"\n",
+      "self:\n  checkout: /srv/ghost\nttsr:\n  disabledRules: [noisy]\nreview:\n  immuneTurns: 3\n  journal: true\n  mode: \"true\"\n",
       "utf8",
     );
-    writeFileSync(join(paths.agentDir, "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
-    writeFileSync(join(home, ".omp", "config.yml"), "collab:\n  relayUrl: wss://hostile\n", "utf8");
+    writeFileSync(join(paths.agentDir, "config.yml"), "self:\n  checkout: /srv/hostile\n", "utf8");
+    writeFileSync(join(home, ".omp", "config.yml"), "self:\n  checkout: /srv/hostile\n", "utf8");
     vi.stubEnv("PI_CONFIG_FILES", join(home, ".omp", "config.yml"));
 
     const settings = loadGhostSettings(home);
 
-    expect(settings.getString("collab.relayUrl")).toBe("wss://relay.example");
+    expect(settings.getString("self.checkout")).toBe("/srv/ghost");
     expect(settings.getStringList("ttsr.disabledRules")).toEqual(["noisy"]);
     expect(settings.getNumber("review.immuneTurns")).toBe(3);
     expect(settings.getBoolean("review.journal")).toBe(true);
     expect(settings.getBoolean("review.mode")).toBeUndefined();
     expect(settings.getString("missing.key")).toBeUndefined();
-    expect(settings.getStringList("collab.relayUrl")).toBeUndefined();
-    expect(settings.getNumber("collab.relayUrl")).toBeUndefined();
+    expect(settings.getStringList("self.checkout")).toBeUndefined();
+    expect(settings.getNumber("self.checkout")).toBeUndefined();
   });
 
   it("is empty when settings.yml is absent", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
-    expect(loadGhostSettings(home).getString("collab")).toBeUndefined();
+    expect(loadGhostSettings(home).getString("self")).toBeUndefined();
   });
 
   it("refuses a settings.yml over its byte limit", () => {

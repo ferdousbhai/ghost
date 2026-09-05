@@ -203,14 +203,6 @@ import {
   type GhostFileCommand,
 } from "./slash-commands.js";
 import {
-  LiveVoiceManager,
-  type LiveVoiceStatus,
-} from "./live-voice.js";
-import {
-  CollaborationManager,
-  type CollaborationStatus,
-} from "./collaboration.js";
-import {
   expandMcpServerConfig,
   normalizeMcpStdioCwd,
   readEffectiveProjectMcp,
@@ -284,7 +276,6 @@ function syncInspectImageTool(session: AgentSession): void {
 }
 
 const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
-const LIVE_DELEGATION_MESSAGE_TYPE = "live-delegation";
 
 /** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
 function isPersistentShellCdCommand(command: string): boolean {
@@ -419,7 +410,7 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
   return count;
 }
 
-type PiOwnerPassKind = "direct" | "steer" | "followUp" | "collaboration" | "voice" | "reanswer";
+type PiOwnerPassKind = "direct" | "steer" | "followUp" | "custom" | "reanswer";
 
 const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
 const DEFAULT_AUTO_BACKGROUND_MS = 60_000;
@@ -481,11 +472,8 @@ function piOwnerEntry(entry: SessionEntry): { kind: PiOwnerPassKind; prompt: str
   if (entry.customType === ASK_REANSWER_OWNER_MESSAGE_TYPE) {
     return { kind: "reanswer", prompt: entryText(entry.content) };
   }
-  if (entry.customType === LIVE_DELEGATION_MESSAGE_TYPE) {
-    return { kind: "voice", prompt: entryText(entry.content) };
-  }
   if (customMessageAttribution(entry) === "user") {
-    return { kind: "collaboration", prompt: entryText(entry.content) };
+    return { kind: "custom", prompt: entryText(entry.content) };
   }
   return null;
 }
@@ -494,7 +482,7 @@ function passEntryMatches(
   pass: PendingPiOwnerPass,
   owner: { kind: PiOwnerPassKind; prompt: string },
 ): boolean {
-  if (pass.kind === "direct") return owner.kind === "direct" || owner.kind === "collaboration";
+  if (pass.kind === "direct") return owner.kind === "direct" || owner.kind === "custom";
   // pi queues steer and follow-up text as ordinary user messages.
   if (pass.kind === "steer" || pass.kind === "followUp") {
     return owner.kind === "direct" && owner.prompt === pass.ownerPrompt;
@@ -709,8 +697,6 @@ export interface SessionHostOptions {
     | "runningSource"
     | "askTimeoutMs"
   >;
-  liveVoice?: LiveVoiceManager;
-  collaboration?: CollaborationManager;
   hooks?: GhostHookRunner;
   maintenance?: SessionConversationMaintenance;
   presentationHistory?: PresentationHistoryStore;
@@ -846,9 +832,6 @@ interface HostedSession extends GhostSessionHandle {
   /** Reconstructed from the persisted branch and reserved synchronously per owner action. */
   nextOwnerTurnId: number;
   settlingDeferred?: Promise<void>;
-  liveVoiceTransitions?: number;
-  /** Lets a concurrent stop wait for an admitted startup. */
-  liveVoiceStart?: Promise<LiveVoiceStatus>;
   ask: AskBroker;
   jobs: GhostJobManager;
   /** Jobs that settled while an owner held the session without streaming. */
@@ -862,8 +845,8 @@ interface HostedSession extends GhostSessionHandle {
   /** The ghost's own settings.yml, read when the session opened. */
   settings: GhostSettings;
   /**
-   * Set when a model switch arrived during a turn or live voice. The model is
-   * rebound after that exclusive owner releases the AgentSession.
+   * Set when a model switch arrived during a turn. The model is rebound after
+   * that exclusive owner releases the AgentSession.
    */
   pendingRebind?: boolean;
   pendingAuthRefresh?: boolean;
@@ -878,10 +861,6 @@ interface HostedSession extends GhostSessionHandle {
   titleAbort?: AbortController;
   /** One abortable, non-persisted completion over the current Pi context. */
   recap?: HostedRecap;
-  collaborationTransitions?: number;
-  rawCollaborationPrompts?: number;
-  rawCollaborationIdle?: Promise<void>;
-  releaseRawCollaborationIdle?: () => void;
   /** The short atomic manager/tool publication phase of an MCP transition. */
   mcpPublication?: Promise<void>;
   releaseMcpPublication?: () => void;
@@ -893,8 +872,6 @@ interface HostedSession extends GhostSessionHandle {
   abortCompleted?: boolean;
   askClosed?: boolean;
   ownershipDetached?: boolean;
-  voiceStopped?: boolean;
-  collaborationStopped?: boolean;
   toolCwdsFlushed?: boolean;
   titleAborted?: boolean;
   mcpReloadSettled?: boolean;
@@ -1846,8 +1823,6 @@ export class SessionHost {
   private taskRecovery: Promise<void> | undefined;
   private nativeTaskShutdown: Promise<void> | undefined;
   private sessionActivityStarted = false;
-  private readonly liveVoice: LiveVoiceManager;
-  private readonly collaboration: CollaborationManager;
   private readonly presentationHistory: PresentationHistoryStore;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly sessions = new Map<string, HostedSession>();
@@ -1983,19 +1958,6 @@ export class SessionHost {
       ...(this.runningSource ? { runningSource: this.runningSource } : {}),
       askTimeoutMs: () => this.askTimeoutSeconds * 1000,
     });
-    this.liveVoice = options.liveVoice ?? new LiveVoiceManager();
-    this.liveVoice.setOnInactive(async (key) => {
-      try {
-        await this.settleLiveVoiceSession(key);
-      } catch (error) {
-        const [ghost, conversation] = sessionKeyParts(key);
-        this.logger.child({ ghost, conversation }).warn("deferred session update after live voice failed", {
-          session: key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    });
-    this.collaboration = options.collaboration ?? new CollaborationManager();
     this.retentionIdleTtlMs = options.retention?.idleTtlMs
       ?? DEFAULT_SESSION_IDLE_TTL_MS;
     this.retentionMaxSessions = options.retention?.maxSessions
@@ -2601,8 +2563,6 @@ export class SessionHost {
       || hosted.session.isCompacting
       || hosted.title !== undefined
       || hosted.settlingDeferred !== undefined
-      || (hosted.collaborationTransitions ?? 0) > 0
-      || this.collaboration.status(hosted.sessionKey).active
       || hosted.pendingRebind === true
       || hosted.pendingAuthRefresh === true
       || hosted.pendingMcpReload === true
@@ -2631,20 +2591,20 @@ export class SessionHost {
       for (const hosted of oldestFirst()) {
         if (now - hosted.lastUsedAt < this.retentionIdleTtlMs) break;
         if (this.sessionProtectedFromRetention(hosted)) continue;
-        this.retireHostedSession(hosted.sessionKey, "idle retention expired");
+        this.retireHostedSession(hosted.sessionKey);
       }
     }
     while (this.sessions.size > this.retentionMaxSessions) {
       const candidate = oldestFirst()
         .find((hosted) => !this.sessionProtectedFromRetention(hosted));
       if (!candidate) break;
-      this.retireHostedSession(candidate.sessionKey, "session cache limit reached");
+      this.retireHostedSession(candidate.sessionKey);
     }
   }
 
   /** Remove cache admission synchronously; a failed teardown gates replacement opens. */
-  private retireHostedSession(key: string, reason: string): void {
-    void this.closeHostedSession(key, reason).catch((error) => {
+  private retireHostedSession(key: string): void {
+    void this.closeHostedSession(key).catch((error) => {
       const [ghost, conversation] = sessionKeyParts(key);
       this.logger.child({ ghost, conversation }).warn("retained session disposal failed", {
         session: key,
@@ -2761,7 +2721,7 @@ export class SessionHost {
     }
     if (this.cleanupRetries.has(key)) {
       try {
-        await this.closeHostedSession(key, "retrying incomplete session cleanup");
+        await this.closeHostedSession(key);
       } catch {
         throw new GhostError(
           "session_cleanup_pending",
@@ -2817,7 +2777,7 @@ export class SessionHost {
       .then(async (hosted) => {
         if (this.disposed) {
           this.cleanupRetries.set(key, hosted);
-          await this.closeHostedSession(key, "daemon stopped during session startup").catch(() => {});
+          await this.closeHostedSession(key).catch(() => {});
           throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
         }
         this.sessions.set(key, hosted);
@@ -2905,148 +2865,6 @@ export class SessionHost {
       // Match runTurn: malformed routing falls through to the catalogue default.
     }
     return ghost;
-  }
-
-  liveVoiceStatus(
-    ghostName: string,
-    sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
-  ): LiveVoiceStatus {
-    assertPiConversation(runtime, "Live voice");
-    this.assertPiRuntime(ghostName, "Live voice");
-    return this.liveVoice.status(this.keyOf(ghostName, sessionId));
-  }
-
-  async liveVoiceAction(
-    ghostName: string,
-    sessionId: string | null | undefined,
-    action: "start" | "mute" | "unmute" | "stop",
-    runtime: ConversationRuntime = "pi",
-  ): Promise<LiveVoiceStatus> {
-    assertPiConversation(runtime, "Live voice");
-    this.assertPiRuntime(ghostName, "Live voice");
-    const key = this.keyOf(ghostName, sessionId);
-    if (action === "stop") {
-      const hosted = this.sessions.get(key);
-      if (hosted) hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
-      try {
-        return await this.stopLiveVoiceThroughStart(key, hosted);
-      } finally {
-        if (hosted) {
-          hosted.liveVoiceTransitions = Math.max(0, (hosted.liveVoiceTransitions ?? 1) - 1);
-          await this.settleLiveVoiceSession(key);
-        }
-      }
-    }
-    if (action === "mute" || action === "unmute") {
-      return this.liveVoice.setMuted(key, action === "mute");
-    }
-
-    await this.cancelRecap(key);
-    const current = this.liveVoice.status(key);
-    const currentHosted = this.sessions.get(key);
-    if (current.active && (currentHosted?.liveVoiceTransitions ?? 0) === 0) return current;
-    const hosted = (await this.open(ghostName, sessionId)) as HostedSession;
-    if (this.sessionOwned(hosted)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation to finish before starting live voice.",
-        409,
-      );
-    }
-    await hosted.mcp?.reload;
-    const afterReload = this.liveVoice.status(key);
-    if (afterReload.active) return afterReload;
-    if (this.sessionOwned(hosted)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation to finish before starting live voice.",
-        409,
-      );
-    }
-
-    hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
-    const start = this.liveVoice.start(
-      key,
-      hosted.session,
-      (message, options) => this.runLiveVoicePrompt(hosted, message, options),
-    );
-    hosted.liveVoiceStart = start;
-    try {
-      return await start;
-    } finally {
-      if (hosted.liveVoiceStart === start) hosted.liveVoiceStart = undefined;
-      hosted.liveVoiceTransitions = Math.max(0, (hosted.liveVoiceTransitions ?? 1) - 1);
-      if (!this.liveVoice.status(key).active) await this.settleLiveVoiceSession(key);
-    }
-  }
-
-  collaborationStatus(
-    ghostName: string,
-    sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
-  ): CollaborationStatus {
-    assertPiConversation(runtime, "Live collaboration");
-    this.assertPiRuntime(ghostName, "Live collaboration");
-    return this.collaboration.status(this.keyOf(ghostName, sessionId));
-  }
-
-  async collaborationAction(
-    ghostName: string,
-    sessionId: string | null | undefined,
-    input: {
-      action: "start" | "stop";
-      relayUrl?: string;
-      writable?: boolean;
-      confirmed?: boolean;
-    },
-    runtime: ConversationRuntime = "pi",
-  ): Promise<CollaborationStatus> {
-    assertPiConversation(runtime, "Live collaboration");
-    this.assertPiRuntime(ghostName, "Live collaboration");
-    const key = this.keyOf(ghostName, sessionId);
-    if (input.action === "stop") {
-      const hosted = this.sessions.get(key);
-      if (hosted) hosted.collaborationTransitions = (hosted.collaborationTransitions ?? 0) + 1;
-      try {
-        return await this.collaboration.stop(key);
-      } finally {
-        if (hosted) {
-          hosted.collaborationTransitions = Math.max(
-            0,
-            (hosted.collaborationTransitions ?? 1) - 1,
-          );
-          this.touchSession(hosted);
-          await this.settleDeferredSession(hosted);
-        }
-      }
-    }
-    const hosted = await this.idleHostedSession(
-      ghostName,
-      sessionId,
-      "Wait for this conversation to finish before starting collaboration.",
-      true,
-    );
-    hosted.collaborationTransitions = (hosted.collaborationTransitions ?? 0) + 1;
-    try {
-      const relayUrl = input.relayUrl ?? hosted.settings.getString("collab.relayUrl") ?? "";
-      const webUrl = hosted.settings.getString("collab.webUrl");
-      return await this.collaboration.start({
-        sessionKey: key,
-        session: hosted.session,
-        promptGuest: (text) => this.runCollaborationPrompt(hosted, text),
-        ...(webUrl ? { webUrl } : {}),
-        relayUrl,
-        writable: input.writable === true,
-        confirmed: input.confirmed === true,
-      });
-    } finally {
-      hosted.collaborationTransitions = Math.max(
-        0,
-        (hosted.collaborationTransitions ?? 1) - 1,
-      );
-      await this.releaseSessionClaim(hosted, ghostName);
-    }
   }
 
   private async projectState(
@@ -3820,10 +3638,6 @@ export class SessionHost {
     };
     // A tool catalog change on a live server re-registers the MCP extension.
     liveMcp.manager.setOnToolsChanged(() => this.refreshHostedMcpTools(hosted));
-    // CollabHost receives the raw AgentSession, so a writable guest can start
-    // a turn without passing through runTurn() and setting hosted.busy. The
-    // terminal public agent_end is emitted only after prompt bookkeeping has
-    // unwound; that is the safe boundary for deferred model/MCP ownership.
     hosted.unsubscribeOwnership = this.watchExternalTurns(hosted);
     return hosted;
     } catch (error) {
@@ -3893,10 +3707,10 @@ export class SessionHost {
   }
 
   /**
-   * Settle turns that bypass `runTurn` (a writable collaboration guest or live
-   * voice drive the raw AgentSession). HTTP/ask owners publish their terminal
-   * frame after the same durability barrier; while one owns the session this
-   * watcher stays out so two settlement loops never race one attempt.
+   * Settle turns that bypass `runTurn` (a background job result drives the raw
+   * AgentSession). HTTP/ask owners publish their terminal frame after the same
+   * durability barrier; while one owns the session this watcher stays out so
+   * two settlement loops never race one attempt.
    */
   private watchExternalTurns(hosted: HostedSession): () => void {
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
@@ -3904,8 +3718,8 @@ export class SessionHost {
       this.touchSession(hosted);
       if (event.type === "agent_start") {
         hosted.runSignal = hosted.session.agent.signal;
-        // Raw collaboration, voice, and job turns bypass HTTP admission; they
-        // still win over a presentation-only recap.
+        // Job turns bypass HTTP admission; they still win over a
+        // presentation-only recap.
         hosted.recap?.controller.abort();
       }
       if (event.type === "tool_execution_start") {
@@ -4048,9 +3862,9 @@ export class SessionHost {
    * turn kept answering on the old one (there is no idle eviction).
    * `ModelCatalog.setChatModel` calls this right after the write.
    *
-   * A busy session is not yanked mid-turn or mid-voice — the active owner
-   * keeps the model it started on. It is flagged instead and rebound once that
-   * owner releases the AgentSession.
+   * A busy session is not yanked mid-turn — the active owner keeps the model
+   * it started on. It is flagged instead and rebound once that owner releases
+   * the AgentSession.
    *
    * Claude Code needs no eager rebinding: runTurn reads `roles.chat_model`
    * fresh, compares it with the warm query's startup identity, and retires a
@@ -4098,7 +3912,7 @@ export class SessionHost {
       refreshing.push(this.refreshSessionAuth(hosted, ghostName, signal)
         .catch((error) => {
           if (signal?.aborted) {
-            this.retireHostedSession(hosted.sessionKey, "cancelled auth refresh");
+            this.retireHostedSession(hosted.sessionKey);
           }
           throw error;
         })
@@ -4152,8 +3966,8 @@ export class SessionHost {
 
   /**
    * Re-read the ghost and bound-project MCP files for every open pi conversation.
-   * Turns and live voice coalesce changes into one deferred reload at their
-   * settle boundary; idle sessions reconnect immediately.
+   * Turns coalesce changes into one deferred reload at their settle boundary;
+   * idle sessions reconnect immediately.
    */
   async reloadMcp(ghostName: string): Promise<void> {
     await this.withMcpReload(ghostName, async () => {});
@@ -4286,20 +4100,13 @@ export class SessionHost {
     return tracked;
   }
 
-  private liveVoiceOwnsSession(hosted: HostedSession): boolean {
-    return (hosted.liveVoiceTransitions ?? 0) > 0
-      || this.liveVoice.status(hosted.sessionKey).active;
-  }
-
   private sessionOwned(hosted: HostedSession, includeRecap = true): boolean {
     return hosted.busy
       || (includeRecap && hosted.recap !== undefined)
-      || (hosted.rawCollaborationPrompts ?? 0) > 0
       || hosted.pendingOwnerPasses.length > 0
       || hosted.ownerPassSettlement !== undefined
       || hosted.session.isStreaming
-      || hosted.session.isBashRunning
-      || this.liveVoiceOwnsSession(hosted);
+      || hosted.session.isBashRunning;
   }
 
   private settledTurnFinisher(
@@ -4711,126 +4518,11 @@ export class SessionHost {
     }
   }
 
-  private async runCollaborationPrompt(hosted: HostedSession, text: string): Promise<void> {
-    while (hosted.mcpPublication) await hosted.mcpPublication;
-    const ownerPrompt = text.trim();
-    if (!ownerPrompt) {
-      throw new GhostError("invalid_prompt", "A writable collaboration prompt cannot be empty.", 400);
-    }
-    const pass = await this.preparePiOwnerPass(hosted, {
-      kind: "collaboration",
-      ownerPrompt,
-      ...(hosted.session.isStreaming ? { delivery: "steer" as const } : {}),
-    });
-    const settlementBarrier = this.deferPiSettlement(hosted);
-    hosted.rawCollaborationPrompts = (hosted.rawCollaborationPrompts ?? 0) + 1;
-    if (hosted.rawCollaborationPrompts === 1) {
-      const idle = Promise.withResolvers<void>();
-      hosted.rawCollaborationIdle = idle.promise;
-      hosted.releaseRawCollaborationIdle = idle.resolve;
-    }
-    try {
-      await hosted.session.sendCustomMessage({
-        customType: "collaboration-prompt",
-        content: ownerPrompt,
-        display: true,
-        details: { attribution: "user" },
-      }, { triggerTurn: true, ...(hosted.session.isStreaming ? { deliverAs: "steer" as const } : {}) });
-      const settlement = await settlementBarrier.settled;
-      if (settlement.toolCwdError !== undefined || settlement.settlementError !== undefined) {
-        throw new GhostError(
-          "session_settlement_failed",
-          "The collaboration turn could not be durably settled.",
-          500,
-        );
-      }
-    } catch (error) {
-      if (settlementBarrier.cancel()) {
-        hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter(
-          (candidate) => candidate !== pass,
-        );
-        await pass.finish();
-      } else {
-        await settlementBarrier.settled;
-      }
-      throw error;
-    } finally {
-      hosted.rawCollaborationPrompts = Math.max(
-        0,
-        (hosted.rawCollaborationPrompts ?? 1) - 1,
-      );
-      if (hosted.rawCollaborationPrompts === 0) {
-        hosted.releaseRawCollaborationIdle?.();
-        hosted.rawCollaborationIdle = undefined;
-        hosted.releaseRawCollaborationIdle = undefined;
-        this.touchSession(hosted);
-        await this.settleDeferredSession(hosted);
-      }
-    }
-  }
-
-  private async runLiveVoicePrompt(
-    hosted: HostedSession,
-    message: Parameters<AgentSession["sendCustomMessage"]>[0] | string,
-    options?: Parameters<AgentSession["sendCustomMessage"]>[1],
-  ): Promise<void> {
-    const ownerPrompt = (typeof message === "string" ? message : entryText(message.content)).trim();
-    if (!ownerPrompt) return;
-    const pass = await this.preparePiOwnerPass(hosted, {
-      kind: "voice",
-      ownerPrompt,
-      ...(hosted.session.isStreaming ? { delivery: "steer" as const } : {}),
-    });
-    const settlementBarrier = this.deferPiSettlement(hosted);
-    try {
-      await hosted.session.sendCustomMessage(
-        typeof message === "string"
-          ? {
-              customType: LIVE_DELEGATION_MESSAGE_TYPE,
-              content: message,
-              display: true,
-              details: { attribution: "user" },
-            }
-          : { ...message, details: { ...(message.details as object ?? {}), attribution: "user" } },
-        { triggerTurn: true, ...options },
-      );
-      const settlement = await settlementBarrier.settled;
-      if (settlement.toolCwdError !== undefined || settlement.settlementError !== undefined) {
-        throw new GhostError(
-          "session_settlement_failed",
-          "The live voice turn could not be durably settled.",
-          500,
-        );
-      }
-    } catch (error) {
-      if (settlementBarrier.cancel()) {
-        hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter(
-          (candidate) => candidate !== pass,
-        );
-        await pass.finish();
-      } else {
-        await settlementBarrier.settled;
-      }
-      throw error;
-    }
-  }
-
   private async publishMcpCandidate<T>(
     hosted: HostedSession,
     publish: () => Promise<T>,
   ): Promise<T> {
-    while (true) {
-      if ((hosted.rawCollaborationPrompts ?? 0) > 0) {
-        const idle = hosted.rawCollaborationIdle;
-        if (idle) await idle;
-        continue;
-      }
-      if (hosted.mcpPublication) {
-        await hosted.mcpPublication;
-        continue;
-      }
-      break;
-    }
+    while (hosted.mcpPublication) await hosted.mcpPublication;
     const publication = Promise.withResolvers<void>();
     hosted.mcpPublication = publication.promise;
     hosted.releaseMcpPublication = publication.resolve;
@@ -5054,15 +4746,9 @@ export class SessionHost {
     await this.settleDeferredSession(hosted);
   }
 
-  private async settleLiveVoiceSession(key: string): Promise<void> {
-    if (this.disposed) return;
-    const hosted = this.sessions.get(key);
-    if (hosted) await this.settleDeferredSession(hosted);
-  }
-
   /**
    * Drain model/MCP changes after an owner that bypassed SessionHost settles.
-   * One promise per hosted session prevents voice and agent_end boundaries from
+   * One promise per hosted session prevents two agent_end boundaries from
    * applying the same queued change concurrently.
    */
   private settleDeferredSession(hosted: HostedSession): Promise<void> {
@@ -5611,14 +5297,6 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const key = this.keyOf(ghostName, conversationId);
-    const liveHosted = this.sessions.get(key);
-    if (this.liveVoice.status(key).active || (liveHosted?.liveVoiceTransitions ?? 0) > 0) {
-      throw new GhostError(
-        "session_busy",
-        "Stop live voice before sending a separate turn in this conversation.",
-        409,
-      );
-    }
     const bashCommand = parseUserBashCommand(options.prompt);
     if (bashCommand) {
       if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
@@ -5676,13 +5354,6 @@ export class SessionHost {
       return;
     }
 
-    if (this.liveVoice.status(key).active) {
-      throw new GhostError(
-        "session_busy",
-        "Stop live voice before sending a separate chat turn in this conversation.",
-        409,
-      );
-    }
     if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
       throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
     }
@@ -7978,9 +7649,8 @@ export class SessionHost {
     const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
     const runtimeBusy = runtime === "pi"
       ? this.opening.has(piKey)
-        || (hosted
-          ? this.sessionOwned(hosted, false) || (hosted.mcpTransitions ?? 0) > 0
-          : this.liveVoice.status(piKey).active)
+        || (hosted !== undefined
+          && (this.sessionOwned(hosted, false) || (hosted.mcpTransitions ?? 0) > 0))
       : this.claudeCode.isBusy(ghostName, id);
     const busy = this.mcpReloadGhosts.has(ghostName)
       || (this.lifecycleAdmissions.get(piKey) ?? 0) > 0
@@ -8559,7 +8229,7 @@ export class SessionHost {
     const key = this.keyOf(ghostName, sessionId);
     if (!this.sessions.has(key) && !this.cleanupRetries.has(key)) return;
     try {
-      await this.closeHostedSession(key, "project binding changed");
+      await this.closeHostedSession(key);
     } catch {
       try {
         this.logger.child({ ghost: ghostName, conversation: sessionId }).warn("committed project session cleanup is pending retry", {
@@ -8578,7 +8248,7 @@ export class SessionHost {
       sessionId ?? DEFAULT_SESSION_KEY,
     );
     const key = this.keyOf(ghostName, sessionId);
-    await this.closeHostedSession(key, "conversation closed");
+    await this.closeHostedSession(key);
   }
 
   private closeClaude(ghostName: string, conversationId: string): Promise<void> {
@@ -8586,10 +8256,7 @@ export class SessionHost {
     return this.claudeCode.close(ghostName, conversationId);
   }
 
-  private closeHostedSession(
-    key: string,
-    reason: string,
-  ): Promise<void> {
+  private closeHostedSession(key: string): Promise<void> {
     const [ghostName, conversationId] = sessionKeyParts(key);
     this.invalidatePrincipalTaskParent(ghostName, "pi", conversationId);
     const alreadyClosing = this.closing.get(key);
@@ -8604,55 +8271,13 @@ export class SessionHost {
     this.sessions.delete(key);
     this.cleanupRetries.set(key, hosted);
     const closing = (async () => {
-      hosted.liveVoiceTransitions = (hosted.liveVoiceTransitions ?? 0) + 1;
-      const results = await Promise.allSettled([
-        this.stopHostedVoice(key, hosted),
-        this.stopHostedCollaboration(key, hosted, reason),
-        this.disposePiSession(hosted),
-      ]);
-      const failures = results.flatMap((result) =>
-        result.status === "rejected" ? [result.reason] : []
-      );
-      if (failures.length > 0) {
-        throw new AggregateError(failures, `Failed to fully close session ${key}.`);
-      }
+      await this.disposePiSession(hosted);
       if (this.cleanupRetries.get(key) === hosted) this.cleanupRetries.delete(key);
     })().finally(() => {
       if (this.closing.get(key)?.promise === closing) this.closing.delete(key);
     });
     this.closing.set(key, { hosted, promise: closing });
     return closing;
-  }
-
-  /**
-   * Stop live voice through a possibly in-flight start: stop, let the start
-   * settle, wait out the first stop, then stop again so a session the start
-   * raced into is also torn down.
-   */
-  private async stopLiveVoiceThroughStart(
-    key: string,
-    hosted: HostedSession | undefined,
-  ): Promise<LiveVoiceStatus> {
-    const stopping = this.liveVoice.stop(key);
-    await hosted?.liveVoiceStart?.catch(() => {});
-    await stopping;
-    return this.liveVoice.stop(key);
-  }
-
-  private async stopHostedVoice(key: string, hosted: HostedSession): Promise<void> {
-    if (hosted.voiceStopped) return;
-    await this.stopLiveVoiceThroughStart(key, hosted);
-    hosted.voiceStopped = true;
-  }
-
-  private async stopHostedCollaboration(
-    key: string,
-    hosted: HostedSession,
-    reason: string,
-  ): Promise<void> {
-    if (hosted.collaborationStopped) return;
-    await this.collaboration.stop(key, reason);
-    hosted.collaborationStopped = true;
   }
 
   private closeModelRuntime(hosted: HostedSession): void {
@@ -8858,8 +8483,6 @@ export class SessionHost {
     })();
     this.shutdownTasks = [
       ...(maintenanceDrain ? [maintenanceDrain] : []),
-      Promise.resolve().then(() => this.liveVoice.disposeAll()),
-      Promise.resolve().then(() => this.collaboration.disposeAll()),
       Promise.resolve().then(() => this.claudeCode.disposeAll()),
       this.nativeTaskShutdown,
     ];
@@ -8882,7 +8505,7 @@ export class SessionHost {
         ...this.cleanupRetries.keys(),
       ])];
       const sessionResults = await Promise.allSettled(
-        sessionKeys.map((key) => this.closeHostedSession(key, "daemon stopped")),
+        sessionKeys.map((key) => this.closeHostedSession(key)),
       );
       for (const [index, result] of sessionResults.entries()) {
         if (result.status === "rejected") {

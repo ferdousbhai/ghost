@@ -401,45 +401,6 @@ function validMcpConfig(config) {
   return false;
 }
 
-const liveStates = new Map();
-const collabStates = new Map();
-let collabSeq = 0;
-
-function ghostLive(name, sessionId) {
-  if (!liveStates.has(name)) liveStates.set(name, new Map());
-  const sessions = liveStates.get(name);
-  if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, {
-      phase: "idle",
-      muted: false,
-      inputLevel: 0,
-      transcript: [],
-      provider: "openai-codex",
-      remote: true,
-    });
-  }
-  return sessions.get(sessionId);
-}
-
-function setGhostLive(name, sessionId, state) {
-  if (!liveStates.has(name)) liveStates.set(name, new Map());
-  liveStates.get(name).set(sessionId, state);
-  return state;
-}
-
-function ghostCollab(name, sessionId) {
-  if (!collabStates.has(name)) collabStates.set(name, new Map());
-  const sessions = collabStates.get(name);
-  if (!sessions.has(sessionId)) sessions.set(sessionId, { active: false, phase: "idle" });
-  return sessions.get(sessionId);
-}
-
-function setGhostCollab(name, sessionId, state) {
-  if (!collabStates.has(name)) collabStates.set(name, new Map());
-  collabStates.get(name).set(sessionId, state);
-  return state;
-}
-
 const deletedContext = new Map();
 /** Per-ghost owner-written facts, layered over the seeded MOCK_MEMORY. */
 const writtenMemory = new Map();
@@ -2094,8 +2055,6 @@ const mockServer = createServer(async (req, res) => {
     writtenMemory.delete(name);
     writtenCharacter.delete(name);
     mcpStore.delete(name);
-    liveStates.delete(name);
-    collabStates.delete(name);
     roles.delete(name);
     routing.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
@@ -2121,7 +2080,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     for (const store of [sessionStore, projectStore, deletedContext, writtenMemory,
-        writtenCharacter, mcpStore, liveStates, collabStates, roles, routing]) {
+        writtenCharacter, mcpStore, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
@@ -2470,100 +2429,6 @@ const mockServer = createServer(async (req, res) => {
     return result
       ? json(res, 200, result)
       : json(res, 404, { error: { code: "not_found", message: "No such background job." } });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
-      && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no live voice" } });
-    }
-    return json(res, 200, ghostLive(name, conversation.id));
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "live"
-      && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no live voice" } });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    const action = body?.action;
-    const current = ghostLive(name, conversation.id);
-    if (!["start", "mute", "unmute", "stop"].includes(action)) {
-      return json(res, 400, {
-        error: { message: "Unknown live-voice action", code: "invalid_request" },
-      });
-    }
-    if (action === "start") {
-      return json(res, 200, setGhostLive(name, conversation.id, {
-        phase: "listening",
-        muted: false,
-        inputLevel: 0.42,
-        transcript: [
-          { role: "you", text: "Can you hear me?" },
-          { role: "ghost", text: "Clearly." },
-        ],
-        provider: "openai-codex",
-        remote: true,
-      }));
-    }
-    if (action === "stop") {
-      return json(res, 200, setGhostLive(name, conversation.id, {
-        ...current,
-        phase: "stopped",
-        muted: false,
-        inputLevel: 0,
-      }));
-    }
-    return json(res, 200, setGhostLive(name, conversation.id, {
-      ...current,
-      phase: action === "mute" ? "muted" : "listening",
-      muted: action === "mute",
-      inputLevel: action === "mute" ? 0 : 0.36,
-    }));
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "collab") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, { error: { code: "not_supported", message: "Claude Code has no collaboration host" } });
-    }
-    // One seeded ghost demonstrates a daemon that deliberately defers the
-    // feature. The UI should render this as product status, not a red HTTP dump.
-    if (name === "moaning-myrtle") {
-      return json(res, 501, {
-        error: {
-          message: "Remote collaboration is deferred in this daemon build.",
-          code: "not_supported",
-        },
-      });
-    }
-    if (req.method === "GET") return json(res, 200, ghostCollab(name, conversation.id));
-    if (req.method === "POST") {
-      const body = await readBody(req).catch(() => ({}));
-      if (body?.action === "stop") {
-        return json(res, 200, setGhostCollab(name, conversation.id,
-          { active: false, phase: "stopped" }));
-      }
-      if (body?.action !== "start" || body.confirmed !== true
-          || (body.writable !== true && body.writable !== false)) {
-        return json(res, 400, {
-          error: { message: "Unknown collaboration action", code: "invalid_request" },
-        });
-      }
-      const token = ++collabSeq;
-      const relay = typeof body.relayUrl === "string" && body.relayUrl.trim() !== ""
-        ? body.relayUrl.replace(/\/$/u, "") : "https://relay.example.test";
-      return json(res, 200, setGhostCollab(name, conversation.id, {
-        active: true,
-        phase: "connected",
-        writable: body.writable,
-        relayUrl: relay,
-        readOnlyUrl: `${relay}/read/demo-${token}`,
-        ...(body.writable ? { writableUrl: `${relay}/write/demo-${token}` } : {}),
-      }));
-    }
   }
   if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
     await readBody(req).catch(() => ({}));

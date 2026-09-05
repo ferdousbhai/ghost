@@ -31,7 +31,7 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
-import type { AgentSession, AgentSessionEvent } from "@earendil-works/pi-coding-agent";
+import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   browserSessionFor,
   closeAllBrowserSessions,
@@ -41,7 +41,6 @@ import {
 import { GhostMcpManager } from "../src/mcp-manager.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
-import type { LiveSessionControllerOptions } from "../src/live-voice.js";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
@@ -63,11 +62,6 @@ import {
   type GhostModelsFile,
 } from "../src/models.js";
 import { GhostHookRunner } from "../src/hooks.js";
-import { LiveVoiceManager, type LiveVoiceStatus } from "../src/live-voice.js";
-import {
-  CollaborationManager,
-  type CollaborationStatus,
-} from "../src/collaboration.js";
 import {
   PI_NATIVE_TOOL_NAMES,
   SessionHost,
@@ -236,8 +230,6 @@ async function setup(
     | "browserSessionClose"
     | "homeOperations"
     | "askTimeoutSeconds"
-    | "liveVoice"
-    | "collaboration"
     | "claudeCode"
     | "compaction"
     | "title"
@@ -322,84 +314,6 @@ async function establishHistoricalAsk(sessionId: string): Promise<string> {
     };
   if (!call.ghostAsk?.resultEntryId) throw new Error("fixture ask result was not persisted");
   return call.ghostAsk.resultEntryId;
-}
-
-function testLiveVoice(startGate?: Promise<void>, startError?: Error): {
-  manager: LiveVoiceManager;
-  startEntered: Promise<void>;
-} {
-  let callbacks: LiveSessionControllerOptions["callbacks"] | undefined;
-  let entered!: () => void;
-  const startEntered = new Promise<void>((resolve) => {
-    entered = resolve;
-  });
-  class TestLiveVoiceManager extends LiveVoiceManager {
-    override async start(sessionKey: string, session: AgentSession): Promise<LiveVoiceStatus> {
-      entered();
-      if (startGate) await startGate;
-      return super.start(sessionKey, session);
-    }
-  }
-  const manager = new TestLiveVoiceManager({
-    createController: (options) => {
-      callbacks = options.callbacks;
-      let muted = false;
-      return {
-        get phase() {
-          return muted ? "muted" as const : "listening" as const;
-        },
-        get muted() {
-          return muted;
-        },
-        async start() {
-          if (startError) throw startError;
-          callbacks?.onPhase("listening");
-        },
-        toggleMute() {
-          muted = !muted;
-        },
-        async stop() {
-          callbacks?.onTerminal();
-        },
-      };
-    },
-  });
-  return { manager, startEntered };
-}
-
-function testWritableCollaboration(): {
-  manager: CollaborationManager;
-  session(): AgentSession;
-  prompt(text: string): Promise<void>;
-} {
-  let collabSession: AgentSession | undefined;
-  let promptGuest: ((text: string) => Promise<void>) | undefined;
-  const manager = new CollaborationManager({
-    createHost: (context) => {
-      collabSession = context.session;
-      promptGuest = context.promptGuest;
-      return {
-        link: "omp-collab://relay/room#key.write",
-        webLink: "https://collab.example/room#key.write",
-        viewLink: "omp-collab://relay/room#key",
-        webViewLink: "https://collab.example/room#key",
-        participants: [{ name: "owner", role: "host" as const }],
-        async start() {},
-        async stop() {},
-      };
-    },
-  });
-  return {
-    manager,
-    session() {
-      if (!collabSession) throw new Error("test collaboration has not started");
-      return collabSession;
-    },
-    prompt(text: string) {
-      if (!promptGuest) throw new Error("test collaboration has not started");
-      return promptGuest(text);
-    },
-  };
 }
 
 async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
@@ -1287,25 +1201,8 @@ describe("SessionHost.open", () => {
   });
 
   it("commits bind and reload before retrying failed Pi teardown without serving a stale cache", async () => {
-    class FailingOnceCollaborationManager extends CollaborationManager {
-      failNext = false;
-      stopAttempts = 0;
-
-      override async stop(sessionKey: string, reason?: string): Promise<CollaborationStatus> {
-        this.stopAttempts += 1;
-        if (this.failNext) {
-          this.failNext = false;
-          throw new Error("injected background teardown failure");
-        }
-        return super.stop(sessionKey, reason);
-      }
-    }
-    const collaboration = new FailingOnceCollaborationManager();
     const logger = recordingLogger();
-    const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      collaboration,
-      logger,
-    });
+    const { dir } = await setup([{ kind: "text", text: "unused" }], { logger });
     writeMcpFixture(dir);
     const firstProject = join(temp!.root, "cleanup-first-project");
     const secondProject = join(temp!.root, "cleanup-second-project");
@@ -1361,9 +1258,7 @@ describe("SessionHost.open", () => {
         }
         await originalDispose();
       });
-      const collaborationAttempts = collaboration.stopAttempts;
-      collaboration.failNext = true;
-      return { abort, collaborationAttempts, disconnect, dispose };
+      return { abort, disconnect, dispose };
     };
     const expectCommittedCleanupRetry = async (
       oldSession: AgentSession,
@@ -1379,7 +1274,6 @@ describe("SessionHost.open", () => {
       expect(spies.disconnect).toHaveBeenCalledOnce();
       expect(spies.abort).toHaveBeenCalledOnce();
       expect(spies.dispose).toHaveBeenCalledOnce();
-      expect(collaboration.stopAttempts).toBe(spies.collaborationAttempts + 1);
 
       const reopened = await host!.open("casper", "post-commit-cleanup");
       expect(reopened.session).not.toBe(oldSession);
@@ -1387,7 +1281,6 @@ describe("SessionHost.open", () => {
       expect(spies.disconnect).toHaveBeenCalledTimes(2);
       expect(spies.abort).toHaveBeenCalledTimes(2);
       expect(spies.dispose).toHaveBeenCalledTimes(2);
-      expect(collaboration.stopAttempts).toBe(spies.collaborationAttempts + 2);
       return reopened;
     };
 
@@ -2907,79 +2800,31 @@ describe("SessionHost shutdown", () => {
   });
 
   it("keeps a ghost home immovable until a blocked session close settles", async () => {
-    const stopEntered = deferred();
-    const releaseStop = deferred();
-    class BlockingVoiceManager extends LiveVoiceManager {
-      override async stop(sessionKey: string): Promise<LiveVoiceStatus> {
-        stopEntered.resolve();
-        await releaseStop.promise;
-        return super.stop(sessionKey);
-      }
-    }
-    await setup([{ kind: "text", text: "unused" }], {
-      liveVoice: new BlockingVoiceManager(),
+    const disposeEntered = deferred();
+    const releaseDispose = deferred();
+    await setup([{ kind: "text", text: "unused" }]);
+    const opened = await host!.open("casper", "conv-closing-home");
+    const originalDispose = opened.session.dispose.bind(opened.session);
+    vi.spyOn(opened.session, "dispose").mockImplementation(async () => {
+      disposeEntered.resolve();
+      await releaseDispose.promise;
+      await originalDispose();
     });
-    await host!.open("casper", "conv-closing-home");
 
     const closing = host!.close("casper", "conv-closing-home");
-    await stopEntered.promise;
+    await disposeEntered.promise;
     await expect(host!.renameGhost("casper", "renamed"))
       .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
     await expect(host!.deleteGhost("casper"))
       .rejects.toMatchObject({ code: "ghost_busy", status: 409 });
 
-    releaseStop.resolve();
+    releaseDispose.resolve();
     await closing;
   });
 
-  it("disposes Pi and its runtime even when voice and collaboration cleanup fail", async () => {
-    class FailingVoiceManager extends LiveVoiceManager {
-      private failNext = true;
-
-      override async stop(sessionKey: string): Promise<LiveVoiceStatus> {
-        if (this.failNext) {
-          this.failNext = false;
-          throw new Error("voice teardown failed");
-        }
-        return super.stop(sessionKey);
-      }
-    }
-    class FailingCollaborationManager extends CollaborationManager {
-      private failNext = true;
-
-      override async stop(sessionKey: string): Promise<CollaborationStatus> {
-        if (this.failNext) {
-          this.failNext = false;
-          throw new Error("collaboration teardown failed");
-        }
-        return super.stop(sessionKey);
-      }
-    }
-    await setup([{ kind: "text", text: "unused" }], {
-      liveVoice: new FailingVoiceManager(),
-      collaboration: new FailingCollaborationManager(),
-    });
-    const handle = await host!.open("casper", "conv-failed-close");
-    const runtime = authRuntimeForTest(handle);
-    const closeRuntime = vi.spyOn(runtime, "close");
-
-    await expect(host!.close("casper", "conv-failed-close"))
-      .rejects.toBeInstanceOf(AggregateError);
-    expect(((handle as { sessionDisposed?: boolean }).sessionDisposed === true)).toBe(true);
-    expect(closeRuntime).toHaveBeenCalledOnce();
-    expect(host!.cachedSessionCount).toBe(0);
-
-    await expect(host!.close("casper", "conv-failed-close")).resolves.toBeUndefined();
-    expect(closeRuntime).toHaveBeenCalledOnce();
-  });
-
   it("retries every transient close stage before admitting a replacement session", async () => {
-    const voice = testLiveVoice();
-    const collaboration = testWritableCollaboration();
     let startups = 0;
     const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      liveVoice: voice.manager,
-      collaboration: collaboration.manager,
       sessionStartupProbe: (stage) => {
         if (stage === "model-runtime") startups += 1;
       },
@@ -2988,12 +2833,6 @@ describe("SessionHost shutdown", () => {
     const conversationId = "conv-retry-all-cleanup";
     const key = sessionKeyOf("casper", conversationId);
     const opened = await host!.open("casper", conversationId);
-    await host!.collaborationAction("casper", conversationId, {
-      action: "start",
-      relayUrl: "wss://relay.example",
-      writable: true,
-      confirmed: true,
-    });
     const internals = host as unknown as {
       cleanupRetries: Map<string, typeof opened>;
     };
@@ -3002,14 +2841,6 @@ describe("SessionHost shutdown", () => {
     };
     const oldRuntime = authRuntimeForTest(opened);
     const closeRuntime = vi.spyOn(oldRuntime, "close");
-    const originalVoiceStop = voice.manager.stop.bind(voice.manager);
-    const voiceStop = vi.spyOn(voice.manager, "stop")
-      .mockRejectedValueOnce(new Error("transient voice stop"))
-      .mockImplementation((sessionKey) => originalVoiceStop(sessionKey));
-    const originalCollaborationStop = collaboration.manager.stop.bind(collaboration.manager);
-    const collaborationStop = vi.spyOn(collaboration.manager, "stop")
-      .mockRejectedValueOnce(new Error("transient collaboration stop"))
-      .mockImplementation((sessionKey, reason) => originalCollaborationStop(sessionKey, reason));
     const originalAbort = opened.session.abort.bind(opened.session);
     const abort = vi.spyOn(opened.session, "abort")
       .mockRejectedValueOnce(new Error("transient session abort"))
@@ -3032,24 +2863,16 @@ describe("SessionHost shutdown", () => {
     expect(replacement.session).not.toBe(opened.session);
     expect(internals.cleanupRetries.has(key)).toBe(false);
     expect(startups).toBe(2);
-    expect(voiceStop.mock.calls.length).toBeGreaterThanOrEqual(2);
-    expect(collaborationStop).toHaveBeenCalledTimes(2);
     expect(abort.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(disconnect).toHaveBeenCalledTimes(2);
     expect(dispose).toHaveBeenCalledTimes(2);
     expect(closeRuntime).toHaveBeenCalledOnce();
-    expect(voice.manager.status(key).active).toBe(false);
-    expect(collaboration.manager.status(key).active).toBe(false);
     expect(replacement.session.getToolDefinition("mcp__reload_fixture_reload_echo")).toBeDefined();
   });
 
   it("keeps permanently failing cleanup as a typed replacement-open gate", async () => {
-    const voice = testLiveVoice();
-    const collaboration = testWritableCollaboration();
     let startups = 0;
     const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      liveVoice: voice.manager,
-      collaboration: collaboration.manager,
       sessionStartupProbe: (stage) => {
         if (stage === "model-runtime") startups += 1;
       },
@@ -3058,7 +2881,6 @@ describe("SessionHost shutdown", () => {
     const conversationId = "conv-permanent-cleanup";
     const key = sessionKeyOf("casper", conversationId);
     const opened = await host!.open("casper", conversationId);
-    await host!.liveVoiceAction("casper", conversationId, "start");
     const internals = host as unknown as {
       cleanupRetries: Map<string, typeof opened>;
       sessions: Map<string, typeof opened>;
@@ -3069,16 +2891,6 @@ describe("SessionHost shutdown", () => {
     const oldRuntime = authRuntimeForTest(opened);
     const closeRuntime = vi.spyOn(oldRuntime, "close");
     let fail = true;
-    const originalVoiceStop = voice.manager.stop.bind(voice.manager);
-    vi.spyOn(voice.manager, "stop").mockImplementation((sessionKey) => {
-      if (fail) return Promise.reject(new Error("permanent voice stop"));
-      return originalVoiceStop(sessionKey);
-    });
-    const originalCollaborationStop = collaboration.manager.stop.bind(collaboration.manager);
-    vi.spyOn(collaboration.manager, "stop").mockImplementation((sessionKey, reason) => {
-      if (fail) return Promise.reject(new Error("permanent collaboration stop"));
-      return originalCollaborationStop(sessionKey, reason);
-    });
     const originalAbort = opened.session.abort.bind(opened.session);
     vi.spyOn(opened.session, "abort").mockImplementation(() => {
       if (fail) return Promise.reject(new Error("permanent session abort"));
@@ -3126,13 +2938,13 @@ describe("SessionHost shutdown", () => {
       await originalDispose();
     });
     const internals = host as unknown as {
-      closeHostedSession(key: string, reason: string): Promise<void>;
+      closeHostedSession(key: string): Promise<void>;
       cleanupRetries: Map<string, typeof opened>;
     };
 
-    const first = internals.closeHostedSession(key, "first close");
+    const first = internals.closeHostedSession(key);
     await entered.promise;
-    const second = internals.closeHostedSession(key, "coalesced close");
+    const second = internals.closeHostedSession(key);
     expect(second).toBe(first);
     expect(internals.cleanupRetries.get(key)?.session).toBe(opened.session);
     release.resolve();
@@ -3143,311 +2955,7 @@ describe("SessionHost shutdown", () => {
 
 });
 
-describe("SessionHost live voice ownership", () => {
-  it("reserves a conversation before a delayed voice manager reports active", async () => {
-    let releaseStart!: () => void;
-    const startGate = new Promise<void>((resolve) => {
-      releaseStart = resolve;
-    });
-    const voice = testLiveVoice(startGate);
-    await setup([{ kind: "text", text: "must not run" }], { liveVoice: voice.manager });
-    await host!.open("casper", "conv-voice-race");
-
-    const starting = host!.liveVoiceAction("casper", "conv-voice-race", "start");
-    await voice.startEntered;
-
-    await expect(host!.runTurn("casper", {
-      sessionId: "conv-voice-race",
-      prompt: "race the microphone",
-      emit: () => {},
-    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host!.runTurn("casper", {
-      sessionId: "conv-voice-race",
-      prompt: "!printf should-not-run",
-      emit: () => {},
-    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(provider!.requests).toHaveLength(0);
-
-    const stopping = host!.liveVoiceAction("casper", "conv-voice-race", "stop");
-    releaseStart();
-    await expect(starting).resolves.toMatchObject({ active: true, phase: "listening" });
-    await expect(stopping).resolves.toMatchObject({ active: false, phase: "stopped" });
-    expect(host!.liveVoiceStatus("casper", "conv-voice-race").active).toBe(false);
-  });
-});
-
 describe("SessionHost.reloadMcp", () => {
-  it("publishes prepared reload and reconnect candidates only after a writable collab turn", async () => {
-    const collaboration = testWritableCollaboration();
-    const { dir } = await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Reload",
-            question: "Finish the collab turn?",
-            options: [
-              { label: "Yes", description: "Finish this turn" },
-              { label: "No", description: "Keep this turn open" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Reload turn finished." },
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Reconnect",
-            question: "Finish the reconnect turn?",
-            options: [
-              { label: "Yes", description: "Finish this turn" },
-              { label: "No", description: "Keep this turn open" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Reconnect turn finished." },
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Publish",
-            question: "Finish the publication-first turn?",
-            options: [
-              { label: "Yes", description: "Finish this turn" },
-              { label: "No", description: "Keep this turn open" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Publication-first turn finished." },
-    ], { collaboration: collaboration.manager });
-    const conversationId = "collab-mcp-publication";
-    const opened = await host!.open("casper", conversationId);
-    await host!.collaborationAction("casper", conversationId, {
-      action: "start",
-      relayUrl: "wss://relay.example",
-      writable: true,
-      confirmed: true,
-    });
-    const collabPrompt = (text: string) => collaboration.prompt(text);
-    const managerOf = () => (opened as unknown as {
-      mcp: { manager: GhostMcpManager };
-    }).mcp.manager;
-    const originalConnect = GhostMcpManager.prototype.connectServers;
-    let barrier: {
-      entered: ReturnType<typeof Promise.withResolvers<void>>;
-      release: ReturnType<typeof Promise.withResolvers<void>>;
-      prepared: ReturnType<typeof Promise.withResolvers<void>>;
-    } | undefined;
-    const connectSpy = vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementation(async function (
-      this: GhostMcpManager,
-      configs,
-    ) {
-      const active = barrier;
-      if (active) {
-        barrier = undefined;
-        active.entered.resolve();
-        await active.release.promise;
-      }
-      try {
-        return await originalConnect.call(this, configs);
-      } finally {
-        active?.prepared.resolve();
-      }
-    });
-    const blockNextCandidate = () => {
-      const next = {
-        entered: Promise.withResolvers<void>(),
-        release: Promise.withResolvers<void>(),
-        prepared: Promise.withResolvers<void>(),
-      };
-      barrier = next;
-      return next;
-    };
-
-    const initialManager = managerOf();
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(opened.session.getToolDefinition(toolName)).toBeUndefined();
-    writeMcpFixture(dir);
-    const reloadBarrier = blockNextCandidate();
-    let reloadSettled = false;
-    const reload = host!.reloadMcp("casper").finally(() => {
-      reloadSettled = true;
-    });
-    await reloadBarrier.entered.promise;
-    const reloadTurn = collabPrompt("Hold reload publication.");
-    const reloadAsk = await waitFor(() => host!.pendingAsk("casper", conversationId));
-    reloadBarrier.release.resolve();
-    await reloadBarrier.prepared.promise;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(reloadSettled).toBe(false);
-    expect(managerOf()).toBe(initialManager);
-    expect(opened.session.getToolDefinition(toolName)).toBeUndefined();
-    host!.answerAsk("casper", conversationId, reloadAsk.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
-    });
-    await reloadTurn;
-    await reload;
-    expect(managerOf()).not.toBe(initialManager);
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-
-    const reloadedManager = managerOf();
-    const disconnect = vi.spyOn(reloadedManager, "disconnectAll");
-    const reconnectBarrier = blockNextCandidate();
-    let reconnectSettled = false;
-    const reconnect = host!.reconnectMcp("casper", "reload_fixture").finally(() => {
-      reconnectSettled = true;
-    });
-    await reconnectBarrier.entered.promise;
-    const reconnectTurn = collabPrompt("Hold reconnect publication.");
-    const reconnectAsk = await waitFor(() => host!.pendingAsk("casper", conversationId));
-    reconnectBarrier.release.resolve();
-    await reconnectBarrier.prepared.promise;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(reconnectSettled).toBe(false);
-    expect(managerOf()).toBe(reloadedManager);
-    expect(disconnect).not.toHaveBeenCalled();
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-    host!.answerAsk("casper", conversationId, reconnectAsk.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
-    });
-    await reconnectTurn;
-    await reconnect;
-    expect(managerOf()).not.toBe(reloadedManager);
-    expect(disconnect).toHaveBeenCalledTimes(1);
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-
-    const publicationManager = managerOf();
-    const publicationEntered = Promise.withResolvers<void>();
-    const releasePublication = Promise.withResolvers<void>();
-    const originalRefresh = opened.session.reload.bind(opened.session);
-    const refreshSpy = vi.spyOn(opened.session, "reload").mockImplementationOnce(
-      async (...args) => {
-        publicationEntered.resolve();
-        await releasePublication.promise;
-        return originalRefresh(...args);
-      },
-    );
-    const publication = host!.reloadMcp("casper");
-    await publicationEntered.promise;
-    const requestsBeforePrompt = provider!.requests.length;
-    let publicationFirstTurnSettled = false;
-    const publicationFirstTurn = collabPrompt("Wait behind publication.").finally(() => {
-      publicationFirstTurnSettled = true;
-    });
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(provider!.requests).toHaveLength(requestsBeforePrompt);
-    expect(host!.pendingAsk("casper", conversationId)).toBeNull();
-    expect(publicationFirstTurnSettled).toBe(false);
-    releasePublication.resolve();
-    await publication;
-    expect(managerOf()).not.toBe(publicationManager);
-    const publicationAsk = await waitFor(() => host!.pendingAsk("casper", conversationId));
-    host!.answerAsk("casper", conversationId, publicationAsk.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
-    });
-    await publicationFirstTurn;
-    expect(refreshSpy).toHaveBeenCalled();
-    connectSpy.mockRestore();
-  });
-
-  it("releases writable collaboration prompt ownership on error, abort, and shutdown", async () => {
-    const collaboration = testWritableCollaboration();
-    const recorded = recordMaintenanceTurns();
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Abort",
-            question: "Wait for abort?",
-            options: [
-              { label: "Yes", description: "Wait for abort" },
-              { label: "No", description: "Continue without waiting" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Shutdown",
-            question: "Wait for shutdown?",
-            options: [
-              { label: "Yes", description: "Wait for shutdown" },
-              { label: "No", description: "Continue without waiting" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-    ], { collaboration: collaboration.manager, maintenance: recorded.maintenance });
-    const conversationId = "collab-prompt-release";
-    const opened = await host!.open("casper", conversationId);
-    await host!.collaborationAction("casper", conversationId, {
-      action: "start",
-      relayUrl: "wss://relay.example",
-      writable: true,
-      confirmed: true,
-    });
-    const prompt = (text: string) => collaboration.prompt(text);
-    const hosted = (host as unknown as {
-      sessions: Map<string, {
-        rawCollaborationPrompts?: number;
-        rawCollaborationIdle?: Promise<void>;
-        mcpPublication?: Promise<void>;
-      }>;
-    }).sessions.get(sessionKeyOf("casper", conversationId));
-    const expectReleased = () => {
-      expect(hosted?.rawCollaborationPrompts ?? 0).toBe(0);
-      expect(hosted?.rawCollaborationIdle).toBeUndefined();
-      expect(hosted?.mcpPublication).toBeUndefined();
-    };
-
-    const failedPrompt = vi.spyOn(opened.session, "sendCustomMessage")
-      .mockRejectedValueOnce(new Error("injected collaboration prompt failure"));
-    await expect(prompt("Fail before dispatch."))
-      .rejects.toThrow("injected collaboration prompt failure");
-    failedPrompt.mockRestore();
-    expectReleased();
-    expect(recorded.finished).toEqual([undefined]);
-    expect(recorded.released.count).toBe(1);
-    await expect(host!.reloadMcp("casper")).resolves.toBeUndefined();
-
-    const aborted = prompt("Abort this turn.");
-    await waitFor(() => host!.pendingAsk("casper", conversationId));
-    await opened.session.abort();
-    await Promise.allSettled([aborted]);
-    expectReleased();
-    expect(recorded.finished).toEqual([undefined, undefined]);
-    expect(recorded.released.count).toBe(2);
-    await expect(host!.reloadMcp("casper")).resolves.toBeUndefined();
-
-    const interruptedByShutdown = prompt("Shutdown during this turn.");
-    await waitFor(() => host!.pendingAsk("casper", conversationId));
-    const shutdown = host!.disposeAll();
-    await Promise.allSettled([interruptedByShutdown, shutdown]);
-    host = null;
-    expectReleased();
-    expect(recorded.finished).toEqual([undefined, undefined, undefined]);
-    expect(recorded.released.count).toBe(3);
-  });
-
   it("preserves policy-protected MCP maps across open, reload, and reconnect", async () => {
     const requests: Array<{ authorization: string | undefined; method: string; url: string }> = [];
     const remote = createServer((request, response) => {
@@ -4216,7 +3724,7 @@ lines.on("line", (line) => {
     expect(handle.session.getToolDefinition(toolName)).toBeDefined();
   });
 
-  it("defers reload and reconnect across a raw collaboration-style turn", async () => {
+  it("defers reload and reconnect across a raw external turn", async () => {
     const { dir } = await setup([
       {
         kind: "tool",
@@ -4238,9 +3746,9 @@ lines.on("line", (line) => {
     const handle = await host!.open("casper", "conv-mcp-remote");
     const toolName = "mcp__reload_fixture_reload_echo";
 
-    // CollabHost calls AgentSession directly, bypassing SessionHost.runTurn()
-    // and therefore never setting HostedSession.busy.
-    const remoteTurn = handle.session.prompt("Ask from the writable room.");
+    // A raw AgentSession turn bypasses SessionHost.runTurn() and therefore
+    // never sets HostedSession.busy.
+    const remoteTurn = handle.session.prompt("Ask outside runTurn.");
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-mcp-remote"));
     expect(handle.session.isStreaming).toBe(true);
 
@@ -4258,24 +3766,6 @@ lines.on("line", (line) => {
     expect(host!.mcpConnectionStatus("casper", "reload_fixture")).toBe("connected");
   });
 
-  it("defers reload and reconnect while voice owns the session, then applies them on stop", async () => {
-    const voice = testLiveVoice();
-    const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      liveVoice: voice.manager,
-    });
-    const handle = await host!.open("casper", "conv-mcp-voice");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    await host!.liveVoiceAction("casper", "conv-mcp-voice", "start");
-
-    writeMcpFixture(dir);
-    await host!.reloadMcp("casper");
-    expect(handle.session.getToolDefinition(toolName)).toBeUndefined();
-    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("deferred");
-
-    await host!.liveVoiceAction("casper", "conv-mcp-voice", "stop");
-    expect(handle.session.getToolDefinition(toolName)).toBeDefined();
-    expect(host!.mcpConnectionStatus("casper", "reload_fixture")).toBe("connected");
-  });
 });
 
 describe("SessionHost.runTurn", () => {
@@ -5131,248 +4621,6 @@ describe("SessionHost.runTurn", () => {
     expect(recorded.released.count).toBe(3);
   });
 
-  it("admits and settles a writable collaboration prompt as its own persisted owner pass", async () => {
-    const collaboration = testWritableCollaboration();
-    const recorded = recordMaintenanceTurns();
-    const finishEntered = deferred();
-    const allowFinish = deferred();
-    const admitOwnerAction = recorded.maintenance.admitOwnerAction.bind(recorded.maintenance);
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      ...recorded.maintenance,
-      admitOwnerAction: (identity) => {
-        const admission = admitOwnerAction(identity);
-        return {
-          ...admission,
-          finish: async (turn) => {
-            finishEntered.resolve();
-            await allowFinish.promise;
-            await admission.finish(turn);
-          },
-        };
-      },
-    };
-    const hooks = new GhostHookRunner();
-    const before: string[] = [];
-    const stopped: string[] = [];
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        before.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stopped.push(event.owner_prompt);
-      });
-    });
-    await setup([{ kind: "text", text: "Collaboration answer." }], {
-      collaboration: collaboration.manager,
-      hooks,
-      maintenance,
-    });
-    await host!.collaborationAction("casper", "same-raw-id", {
-      action: "start",
-      relayUrl: "wss://relay.example",
-      writable: true,
-      confirmed: true,
-    });
-
-    let publicAgentEnds = 0;
-    collaboration.session().subscribe((event) => {
-      if (event.type === "agent_end") publicAgentEnds += 1;
-    });
-    const remoteTurn = collaboration.prompt("Set this collaboratively.");
-    await finishEntered.promise;
-    allowFinish.resolve();
-    await remoteTurn;
-    await waitFor(() => publicAgentEnds === 1 ? true : null);
-
-    expect(before).toEqual(["Set this collaboratively."]);
-    expect(stopped).toEqual(["Set this collaboratively."]);
-    expect(recorded.admitted).toEqual([{
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "same-raw-id",
-    }]);
-    expect(recorded.finished).toEqual([
-      expect.objectContaining({
-        ownerPrompt: "Set this collaboratively.",
-        assistantText: expect.stringContaining("Collaboration answer."),
-        sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(1);
-    expect(publicAgentEnds).toBe(1);
-  });
-
-  it("publishes a generic raw collaboration error when maintenance persistence rejects", async () => {
-    const collaboration = testWritableCollaboration();
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn) throw new Error("sensitive collaboration persistence failure");
-    });
-    await setup([{ kind: "text", text: "Persisted collaboration answer." }], {
-      collaboration: collaboration.manager,
-      maintenance: recorded.maintenance,
-    });
-    await host!.collaborationAction("casper", "strict-collaboration", {
-      action: "start",
-      relayUrl: "wss://relay.example",
-      writable: true,
-      confirmed: true,
-    });
-    const agentEnds: AgentSessionEvent[] = [];
-    collaboration.session().subscribe((event) => {
-      if (event.type === "agent_end") agentEnds.push(event);
-    });
-
-    await expect(collaboration.prompt("Persist this remote owner turn."))
-      .rejects.toMatchObject({ code: "session_settlement_failed", status: 500 });
-
-    expect(agentEnds).toHaveLength(1);
-    expect(JSON.stringify(agentEnds)).not.toContain("sensitive collaboration persistence failure");
-    expect(recorded.finished).toEqual([expect.objectContaining({
-      assistantText: expect.stringContaining("Persisted collaboration answer."),
-    })]);
-    expect(recorded.released.count).toBe(1);
-    expect(JSON.stringify(await host!.readTranscript("casper", "strict-collaboration")))
-      .toContain("Persisted collaboration answer.");
-  });
-
-  it("admits a live-voice delegation before its model pass and settles its durable leaf", async () => {
-    class DelegatingVoiceManager extends LiveVoiceManager {
-      override async start(
-        _sessionKey: string,
-        _session: AgentSession,
-        sendCustomMessage?: AgentSession["sendCustomMessage"],
-      ): Promise<LiveVoiceStatus> {
-        await sendCustomMessage?.({
-          customType: "live-delegation",
-          content: "Handle this spoken request.",
-          display: true,
-          details: { attribution: "agent" },
-        }, { triggerTurn: true });
-        return {
-          supported: true,
-          active: true,
-          phase: "listening",
-          muted: false,
-          inputLevel: 0,
-          outputLevel: 0,
-          transcript: [],
-        };
-      }
-    }
-    const recorded = recordMaintenanceTurns();
-    const finishEntered = deferred();
-    const allowFinish = deferred();
-    const admitOwnerAction = recorded.maintenance.admitOwnerAction.bind(recorded.maintenance);
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      ...recorded.maintenance,
-      admitOwnerAction: (identity) => {
-        const admission = admitOwnerAction(identity);
-        return {
-          ...admission,
-          finish: async (turn) => {
-            finishEntered.resolve();
-            await allowFinish.promise;
-            await admission.finish(turn);
-          },
-        };
-      },
-    };
-    const hooks = new GhostHookRunner();
-    const before: string[] = [];
-    const stopped: string[] = [];
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        before.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stopped.push(event.owner_prompt);
-      });
-    });
-    await setup([{ kind: "text", text: "Voice answer." }], {
-      liveVoice: new DelegatingVoiceManager(),
-      hooks,
-      maintenance,
-    });
-
-    const opened = await host!.open("casper", "same-raw-id");
-    let publicAgentEnds = 0;
-    opened.session.subscribe((event) => {
-      if (event.type === "agent_end") publicAgentEnds += 1;
-    });
-    const start = host!.liveVoiceAction("casper", "same-raw-id", "start");
-    await finishEntered.promise;
-    allowFinish.resolve();
-    await start;
-    await waitFor(() => publicAgentEnds === 1 ? true : null);
-
-    expect(before).toEqual(["Handle this spoken request."]);
-    expect(stopped).toEqual(["Handle this spoken request."]);
-    expect(recorded.admitted).toEqual([{
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "same-raw-id",
-    }]);
-    expect(recorded.finished).toEqual([
-      expect.objectContaining({
-        ownerPrompt: "Handle this spoken request.",
-        assistantText: expect.stringContaining("Voice answer."),
-        sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(1);
-    expect(publicAgentEnds).toBe(1);
-  });
-
-  it("publishes a generic raw voice error when maintenance persistence rejects", async () => {
-    class DelegatingVoiceManager extends LiveVoiceManager {
-      override async start(
-        _sessionKey: string,
-        _session: AgentSession,
-        sendCustomMessage?: AgentSession["sendCustomMessage"],
-      ): Promise<LiveVoiceStatus> {
-        await sendCustomMessage?.({
-          customType: "live-delegation",
-          content: "Persist this spoken request.",
-          display: true,
-          details: { attribution: "agent" },
-        }, { triggerTurn: true });
-        return {
-          supported: true,
-          active: true,
-          phase: "listening",
-          muted: false,
-          inputLevel: 0,
-          outputLevel: 0,
-          transcript: [],
-        };
-      }
-    }
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn) throw new Error("sensitive voice persistence failure");
-    });
-    await setup([{ kind: "text", text: "Persisted voice answer." }], {
-      liveVoice: new DelegatingVoiceManager(),
-      maintenance: recorded.maintenance,
-    });
-    const opened = await host!.open("casper", "strict-live-voice");
-    const agentEnds: AgentSessionEvent[] = [];
-    opened.session.subscribe((event) => {
-      if (event.type === "agent_end") agentEnds.push(event);
-    });
-
-    await expect(host!.liveVoiceAction("casper", "strict-live-voice", "start"))
-      .rejects.toMatchObject({ code: "session_settlement_failed", status: 500 });
-
-    expect(agentEnds).toHaveLength(1);
-    expect(JSON.stringify(agentEnds)).not.toContain("sensitive voice persistence failure");
-    expect(recorded.finished).toEqual([expect.objectContaining({
-      assistantText: expect.stringContaining("Persisted voice answer."),
-    })]);
-    expect(recorded.released.count).toBe(1);
-    expect(JSON.stringify(await host!.readTranscript("casper", "strict-live-voice")))
-      .toContain("Persisted voice answer.");
-  });
-
   it("awaits session_stop and sends only the current assistant pass", async () => {
     const hookContinuationPasses = 12;
     const hooks = new GhostHookRunner();
@@ -6194,7 +5442,7 @@ describe("SessionHost.runTurn", () => {
     });
   });
 
-  it("refuses conversation and whole-home moves during a raw collaboration-style turn", async () => {
+  it("refuses conversation and whole-home moves during a raw external turn", async () => {
     await setup([
       {
         kind: "tool",
@@ -6214,7 +5462,7 @@ describe("SessionHost.runTurn", () => {
       { kind: "text", text: "Finished remotely." },
     ]);
     const handle = await host!.open("casper", "conv-remote-delete");
-    const remoteTurn = handle.session.prompt("Writable collaboration prompt.");
+    const remoteTurn = handle.session.prompt("Raw external prompt.");
     const pending = await waitFor(() => host!.pendingAsk("casper", "conv-remote-delete"));
     expect(handle.session.isStreaming).toBe(true);
 
@@ -9452,7 +8700,7 @@ describe("model switch reaches a live cached session", () => {
     expect(provider.requests.at(-1)?.model).toBe("model-b");
   });
 
-  it("defers a model rebind until a raw collaboration-style turn settles", async () => {
+  it("defers a model rebind until a raw external turn settles", async () => {
     temp = makeTempGhosts();
     provider = await startMockProvider({
       script: [
@@ -9495,61 +8743,6 @@ describe("model switch reaches a live cached session", () => {
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
   });
 
-  it("defers a switch while voice is active and applies it when voice stops", async () => {
-    temp = makeTempGhosts();
-    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
-    const dir = seedGhost(temp.root, { name: "casper" });
-    const paths = ghostPaths(dir);
-    writeGhostModels(paths.home, twoModelFile(provider.url));
-    const voice = testLiveVoice();
-    host = new SessionHost({
-      registry: temp.registry,
-      offline: true,
-      liveVoice: voice.manager,
-    });
-    const handle = await host.open("casper", "conv-voice-model");
-    await host.liveVoiceAction("casper", "conv-voice-model", "start");
-
-    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
-    await host.rebindModel("casper");
-    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
-
-    await host.liveVoiceAction("casper", "conv-voice-model", "stop");
-    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
-  });
-
-  it("applies a deferred switch after voice startup fails", async () => {
-    let releaseStart!: () => void;
-    const startGate = new Promise<void>((resolve) => {
-      releaseStart = resolve;
-    });
-    temp = makeTempGhosts();
-    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
-    const dir = seedGhost(temp.root, { name: "casper" });
-    const paths = ghostPaths(dir);
-    writeGhostModels(paths.home, twoModelFile(provider.url));
-    const voice = testLiveVoice(startGate, new Error("microphone unavailable"));
-    host = new SessionHost({
-      registry: temp.registry,
-      offline: true,
-      liveVoice: voice.manager,
-    });
-    const handle = await host.open("casper", "conv-voice-start-failure");
-    const starting = host.liveVoiceAction("casper", "conv-voice-start-failure", "start");
-    await voice.startEntered;
-
-    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
-    await host.rebindModel("casper");
-    releaseStart();
-    await expect(starting).rejects.toMatchObject({ code: "live_start_failed", status: 502 });
-
-    expect(host.liveVoiceStatus("casper", "conv-voice-start-failure")).toMatchObject({
-      active: false,
-      phase: "error",
-      error: "microphone unavailable",
-    });
-    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
-  });
 });
 
 describe("transcript resume", () => {

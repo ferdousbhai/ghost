@@ -12,9 +12,8 @@ matching Claude Code's native `AskUserQuestion`, supervised native
 Pi/Codex/Claude Code workers, model roles and fallback
 chains, bounded declarative skills, rules,
 Markdown commands/prompts, and MCP from the visible ghost home plus one
-explicitly trusted project. Live voice remains deferred; remote sharing uses
-the built-in tailnet viewer over Tailscale Serve, and no separate collaboration
-relay is planned. Project plugins, agent definitions, custom code tools, and
+explicitly trusted project. Remote sharing uses the built-in tailnet viewer
+over Tailscale Serve. Project plugins, agent definitions, custom code tools, and
 LSP remain disabled in principal sessions pending a per-session isolation
 boundary; trusted visible `hooks/pre` and `hooks/post` files in the ghost home
 remain the explicit in-process extension surface. Native delegated workers and

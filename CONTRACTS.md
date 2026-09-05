@@ -440,13 +440,13 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
-| `GET\|POST /sessions/:id/live` | Reserved voice boundary; default is not supported. |
-| `GET\|POST /sessions/:id/collab` | Legacy injected-host boundary; Ghost ships no host. |
 | `GET /api/remote/whoami` | Effective owner/guest identity. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 
-There are intentionally no `/plan` or `/todo` session routes.
+There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
+routes: Ghost ships no live-voice controller and no collaboration host, and
+remote access is the tailnet viewer alone.
 
 ### pi-messages wire
 
@@ -580,9 +580,9 @@ fail-closed state machine lives in
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a session. A conversation rejects conflicting owners;
   queued Pi steering/follow-ups are the explicit exception.
-- Home rename/delete, project transitions, MCP mutation, model refresh, live
-  voice, collaboration, maintenance, fork, and conversation deletion use
-  explicit leases and publish only durable state.
+- Home rename/delete, project transitions, MCP mutation, model refresh,
+  maintenance, fork, and conversation deletion use explicit leases and publish
+  only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.

@@ -112,10 +112,8 @@ stop the mock separately.
   or injected context, and opening it does not create a conversation. MCP lists
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
   enable/disable, and confirmed deletion without ever returning the seeded
-  secret values. Remote exercises the OpenAI live-voice lifecycle and the
-  legacy collaboration compatibility UI, including distinct read-only/writable
-  mock links and a structured `not_supported` state. Those links are
-  fixture-only; shipped remote sharing uses the Tailscale viewer.
+  secret values. Remote exercises the Tailscale viewer lifecycle, including the
+  off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.
 - On `ask`: the spectral summoning orb saying "Checking what I remember about
