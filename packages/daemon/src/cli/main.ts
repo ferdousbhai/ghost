@@ -11,6 +11,7 @@ import {
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { delegationCommand } from "./delegation.js";
+import { FLYWHEEL_ARGS, flywheelCommand } from "./flywheel.js";
 import { ghostsCommand } from "./ghosts.js";
 import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
 import { memoryCommand } from "./memory.js";
@@ -206,6 +207,17 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost delegation --json",
     positionals: [0, 0],
     run: delegationCommand,
+  },
+  {
+    verb: "flywheel",
+    usage: "flywheel export --out <dir> [--since <iso>] [--holdout <fraction>]"
+      + " [--system full|character] [--context-turns <n>] [--max-tool-result-chars <n>]"
+      + " [-g <name>] [--json] [-q]",
+    summary: "Export reviewed turns as training data, without the daemon.",
+    example: "ghost flywheel export --out ./dataset",
+    flags: FLYWHEEL_ARGS,
+    positionals: [1, 1],
+    run: flywheelCommand,
   },
   {
     verb: "status",

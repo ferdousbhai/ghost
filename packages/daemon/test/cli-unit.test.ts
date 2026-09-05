@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatDuration } from "../src/jobs.js";
 import type { SessionSummary } from "../src/session-host.js";
@@ -9,6 +11,7 @@ import { relativeTime } from "../src/cli/output.js";
 import { renderSkillText } from "../src/cli/skill.js";
 import type { CliFetch } from "../src/cli/types.js";
 import { runCli } from "./helpers/cli.js";
+import { seedGhost, tempDir, useCleanups } from "./helpers/fixtures.js";
 
 function session(id: string, runtime: SessionSummary["runtime"] = "pi"): SessionSummary {
   return {
@@ -244,5 +247,72 @@ describe("CLI API adaptation", () => {
     expect(response.stdout).toContain("daemon version 1.4.0");
     expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
     expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
+  });
+});
+
+describe("ghost flywheel export", () => {
+  const cleanups = useCleanups();
+
+  function scratchGhost(): { env: NodeJS.ProcessEnv; home: string; out: string } {
+    const temp = tempDir("ghost-flywheel-cli-");
+    cleanups.push(temp.cleanup);
+    const root = join(temp.path, "ghosts");
+    mkdirSync(root, { recursive: true });
+    seedGhost(root, { name: "casper" });
+    return {
+      env: { HOME: temp.path, GHOSTS_ROOT: root, XDG_CONFIG_HOME: join(temp.path, ".config") },
+      home: temp.path,
+      out: join(temp.path, "dataset"),
+    };
+  }
+
+  it("exports a manifest from the ghost home without contacting the daemon", async () => {
+    const { env, home, out } = scratchGhost();
+    const fetch: CliFetch = async () => {
+      throw new Error("flywheel export must not contact ghostd");
+    };
+    const result = await runCli(["flywheel", "export", "--out", out, "--json"], {
+      env,
+      home,
+      fetch,
+    });
+
+    expect(result.stderr).toBe("");
+    expect(result.code).toBe(0);
+    const manifest = JSON.parse(result.stdout) as { ghost: string; files: Record<string, number> };
+    expect(manifest.ghost).toBe("casper");
+    expect(manifest.files["sft-train.jsonl"]).toBe(0);
+    expect(existsSync(join(out, "manifest.json"))).toBe(true);
+  });
+
+  it("rejects a missing subcommand, a missing --out, and out-of-range flags before reading disk", async () => {
+    const { env, home, out } = scratchGhost();
+    const options = { env, home };
+    for (const [argv, message] of [
+      [["flywheel"], "Usage: ghost flywheel"],
+      [["flywheel", "list"], "Usage: ghost flywheel export --out <dir>"],
+      [["flywheel", "export"], "requires --out <dir>"],
+      [["flywheel", "export", "--out", out, "--since", "yesterday"], "--since must be an ISO timestamp."],
+      [["flywheel", "export", "--out", out, "--holdout", "2"], "--holdout must be a number between 0 and 1."],
+      [["flywheel", "export", "--out", out, "--system", "prose"], "--system must be full or character."],
+      [["flywheel", "export", "--out", out, "--context-turns", "1.5"], "--context-turns must be a whole number."],
+    ] as const) {
+      const result = await runCli(argv, options);
+      expect(result.code, argv.join(" ")).toBe(2);
+      expect(result.stderr, argv.join(" ")).toContain(message);
+    }
+    expect(existsSync(out)).toBe(false);
+    expect((await runCli(["status", "--out", out], options)).stderr)
+      .toContain("Unknown option: --out");
+  });
+
+  it("names the ghost it cannot find rather than falling back to another", async () => {
+    const { env, home, out } = scratchGhost();
+    const result = await runCli(["flywheel", "export", "-g", "nobody", "--out", out], {
+      env,
+      home,
+    });
+    expect(result.code).toBe(5);
+    expect(result.stderr).toContain('ghost "nobody" was not found');
   });
 });

@@ -27,6 +27,12 @@ exact id or unique public/raw-id prefix, then the most recently updated session.
 Destructive commands require \`--yes\`. Only \`ghost login\` prompts; under
 \`--json\` it refuses every prompt \`--key-stdin\` cannot answer.
 
+\`ghost delegation\` and \`ghost flywheel export\` are the daemon-free commands
+and work while ghostd is stopped: delegation probes installed native workers,
+and flywheel export reads the ghost home's review journals plus the runtime
+transcripts they name, writing the Fireworks SFT/DPO files and a manifest whose
+\`newestRecordedAt\` is the next round's \`--since\`.
+
 ## Commands
 
 ${markdownCommandTable(commands)}

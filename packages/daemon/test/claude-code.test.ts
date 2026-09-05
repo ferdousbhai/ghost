@@ -34,7 +34,6 @@ import {
   bridgeClaudeCodeTools,
   claudeCodeConnectionMethod,
   claudeCodeSubscriptionType,
-  claudeSdkTranscriptPath,
   claudeSessionMetadataPath,
   CLAUDE_SESSION_METADATA_MAX_BYTES,
   CLAUDE_CODE_BINARY_ENV,
@@ -49,6 +48,7 @@ import {
   type ClaudeCodeAuthStatus,
   type ClaudeCodeQueryInput,
 } from "../src/claude-code.js";
+import { claudeSdkTranscriptPath } from "../src/claude-sdk-files.js";
 import { captureClaudeCodeEnvironment } from "../src/env-scrub.js";
 import type {
   MaintenanceIdentity,

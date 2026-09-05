@@ -54,20 +54,35 @@ export async function listGhosts(client: DaemonClient): Promise<Ghost[]> {
   return (await client.request<Ghost[]>("GET", "/api/ghosts")).body;
 }
 
+/**
+ * The ghost the owner named, without asking anyone which ghosts exist: `-g`,
+ * then `$GHOST`, then the private `ghost use` default. This half of the
+ * addressing order is identical for daemon-backed and daemon-free verbs.
+ */
+export function preferredGhostName(
+  runtime: Pick<CliRuntime, "env" | "home">,
+  requested?: string,
+): string | undefined {
+  return requested?.trim() || runtime.env.GHOST?.trim() || readDefaultGhost(runtime);
+}
+
+/** The tail of the addressing order: the sole ghost, or make the owner choose. */
+export function soleGhostName(names: readonly string[]): string {
+  const only = names[0];
+  if (names.length === 1 && only) return only;
+  if (names.length === 0) throw new ArgsError("No ghosts exist. Create one with `ghost new <name>`.");
+  throw new ArgsError(`Choose a ghost with -g/--ghost. Available: ${names.join(", ")}`);
+}
+
 export async function resolveGhost(
   client: DaemonClient,
   runtime: CliRuntime,
   requested?: string,
 ): Promise<{ name: string }> {
-  const name = requested?.trim()
-    || runtime.env.GHOST?.trim()
-    || readDefaultGhost(runtime);
+  const name = preferredGhostName(runtime, requested);
   if (name) return { name };
   const ghosts = await listGhosts(client);
-  if (ghosts.length === 1) return { name: (ghosts[0] as Ghost).name };
-  if (ghosts.length === 0) throw new ArgsError("No ghosts exist. Create one with `ghost new <name>`.");
-  const names = ghosts.map((ghost) => ghost.name).join(", ");
-  throw new ArgsError(`Choose a ghost with -g/--ghost. Available: ${names}`);
+  return { name: soleGhostName(ghosts.map((ghost) => ghost.name)) };
 }
 
 export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {

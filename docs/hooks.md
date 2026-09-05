@@ -371,8 +371,10 @@ phase.
 Setting `review.journal: true` (default off) additionally records every reviewed
 turn to the conversation's `*.<runtime>.review-journal.json` sidecar: the
 sequence and turn id, when it was reviewed, the review mode, the turn delta
-(text, commands, paths, how many times the turn delegated to a specialist, and
-whether it came from the transcript or the assistant fallback), the lint
+(text, commands, paths, how many times the turn delegated to a specialist,
+whether it came from the transcript or the assistant fallback, and — when it
+did — `ownerRecordId`, the transcript id of the record holding that turn's
+owner prompt, which is the durable key back to the turn), the lint
 findings, the advisor notes actually delivered, the highest
 severity, whether they went out as a continuation, as next-turn feedback, or not
 at all, and whether this turn was itself a continuation pass — in which case its
@@ -385,6 +387,52 @@ dropped first, an unusable file is logged and replaced, and a write failure only
 warns: journalling never changes a review outcome. This is the phase-0 training
 dataset for the per-ghost adapter in issue #64 — display and training state that
 nothing reads back at runtime.
+
+### Exporting training data
+
+`ghost flywheel export --out <dir>` turns those journals into Fireworks
+training files. It is daemon-free and reads only the ghost home plus the
+runtime transcripts the journals name, so it works with ghostd stopped; both
+runtimes parse, and a Claude transcript that cannot be located or read is
+counted as missing rather than failing the export.
+
+The gate decides each journal entry:
+
+- **SFT sample**, weight `1.0`, when the turn was delivered `none` or
+  `next-turn` with no note or severity above `nit`, `delta.delegations` is `0`,
+  it is not itself a continuation pass, and no `continuation` was attached — a
+  turn somebody had to correct is not a positive example.
+- **DPO pair** for every entry carrying a `continuation`:
+  `non_preferred_output` is the entry's own `delta.text`, `preferred_output` is
+  the rewrite. The journal is the only place holding the pre-rewrite attempt,
+  since the transcript shows the whole owner turn after the correction landed.
+- **Skipped**, counted by reason: `before-watermark`, `truncated`,
+  `continuation-pass`, `escalated`, `unresolved-critique` (a concern or blocker
+  with no rewrite), and `transcript-missing` (no transcript, or an entry whose
+  `delta.ownerRecordId` is absent or no longer in it).
+
+Each entry is matched back to its turn by `delta.ownerRecordId`, never by
+re-deriving an owner-turn ordinal and never by matching `delta.text`, which is
+a display rendering. An entry written before that field existed, or one whose
+delta came from the assistant fallback, has no key and is counted as missing.
+
+Messages are rebuilt from the transcript: a system message (`--system
+character`, the default, is the ghost's `character.md` body alone, because
+folding the policy text into the adapter's weights is the point of training;
+`--system full` is the prompt the runtime actually sent), the last
+`--context-turns` owner/assistant exchanges as plain text, the owner prompt of
+the turn, then the turn's own assistant messages with `tool_calls` and `tool`
+results, ending in the final assistant text. Private reasoning blocks are never
+carried, every text field passes the memory redactor, and a tool result longer
+than `--max-tool-result-chars` is cut with a marker.
+
+`--holdout` splits by a hash of the conversation id, so a conversation is
+entirely in train or entirely held out and no context leaks across. The output
+directory (mode 0700) gets `sft-train.jsonl`, `sft-holdout.jsonl`,
+`dpo-train.jsonl`, `dpo-holdout.jsonl`, and `manifest.json` (all mode 0600).
+The manifest carries the counts per file, the skip reasons with counts, the
+`--since` watermark used, and the newest `recordedAt` seen — pass that as
+`--since` next round. An empty result still writes every file and exits 0.
 
 ## `conversation_idle` protocol
 

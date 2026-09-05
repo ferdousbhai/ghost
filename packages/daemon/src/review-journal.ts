@@ -28,7 +28,10 @@ export interface ReviewJournalEntry {
   turnId: number;
   recordedAt: string;
   mode: "lint" | "advisory" | "strict";
-  delta: Pick<AdvisorTurnDelta, "text" | "commands" | "paths" | "source" | "delegations">;
+  delta: Pick<
+    AdvisorTurnDelta,
+    "text" | "commands" | "paths" | "source" | "delegations" | "ownerRecordId"
+  >;
   lint: ReviewJournalLintFinding[];
   notes: AdvisorNote[];
   severity?: AdvisorSeverity;
@@ -84,17 +87,32 @@ function validEntry(value: unknown): value is ReviewJournalEntry {
       || value.delivered === "none");
 }
 
-function parseJournal(identity: ReviewJournalIdentity, value: unknown): ReviewJournalV1 | null {
+/**
+ * A journal read back off disk, identity taken from the file itself. The
+ * exporter walks `sessions/` without knowing which conversations it will find,
+ * so it needs the shape check without the identity check.
+ */
+export function parseReviewJournal(value: unknown): ReviewJournalV1 | null {
   return isRecord(value)
       && value.version === REVIEW_JOURNAL_VERSION
-      && value.runtime === identity.runtime
-      && value.conversationId === identity.conversationId
+      && (value.runtime === "pi" || value.runtime === "claude-code")
+      && typeof value.conversationId === "string"
+      && value.conversationId !== ""
       && Number.isSafeInteger(value.lastSequence)
       && Number.isSafeInteger(value.droppedThroughSequence)
       && Array.isArray(value.entries)
       && value.entries.length <= REVIEW_JOURNAL_MAX_ENTRIES
       && value.entries.every(validEntry)
     ? value as unknown as ReviewJournalV1
+    : null;
+}
+
+function parseJournal(identity: ReviewJournalIdentity, value: unknown): ReviewJournalV1 | null {
+  const journal = parseReviewJournal(value);
+  return journal
+      && journal.runtime === identity.runtime
+      && journal.conversationId === identity.conversationId
+    ? journal
     : null;
 }
 
@@ -132,13 +150,16 @@ function emptyJournal(identity: ReviewJournalIdentity): ReviewJournalV1 {
   };
 }
 
+/** What marks a file in `sessions/` as a review journal, for readers that scan. */
+export const REVIEW_JOURNAL_SUFFIX = ".review-journal.json";
+
 export function reviewJournalPath(
   sessionDir: string,
   runtime: ConversationRuntime,
   conversationId: string,
 ): string {
   const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
-  return join(sessionDir, `${stem}.${runtime}.review-journal.json`);
+  return join(sessionDir, `${stem}.${runtime}${REVIEW_JOURNAL_SUFFIX}`);
 }
 
 export class ReviewJournalStore {
@@ -180,6 +201,11 @@ export class ReviewJournalStore {
         paths: text.cleanAll(entry.delta.paths),
         source: entry.delta.source,
         delegations: entry.delta.delegations,
+        // An opaque transcript id, not owner text: carried verbatim so a later
+        // reader can find this exact turn again.
+        ...(entry.delta.ownerRecordId === undefined
+          ? {}
+          : { ownerRecordId: entry.delta.ownerRecordId }),
       };
       const lint = entry.lint.map((finding) => ({
         ruleId: finding.ruleId,

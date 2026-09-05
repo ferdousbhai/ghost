@@ -14,7 +14,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -128,6 +128,7 @@ import { pathIsWithin } from "./path-within.js";
 import { loadGhostSettings } from "./ghost-settings.js";
 import type { RunningSource } from "./running-source.js";
 import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
+import { claudeSdkTranscriptPath } from "./claude-sdk-files.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import {
   loadProjectDeclarativeSnapshot,
@@ -835,33 +836,6 @@ export function claudeSessionResumeMarkerPaths(
 ): { started: string; settling: string } {
   const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
   return { started: `${sidecar}.started`, settling: `${sidecar}.settling` };
-}
-
-/**
- * The Claude Code SDK's own session transcript for a resume id, when it exists.
- * The SDK persists under `$CLAUDE_CONFIG_DIR/projects/<encoded cwd>/<id>.jsonl`;
- * the directory name encoding is the SDK's, so the file is located by id.
- */
-export function claudeSdkTranscriptPath(
-  sessionId: string,
-  env: Readonly<NodeJS.ProcessEnv> = process.env,
-): string | undefined {
-  if (!/^[A-Za-z0-9-]{1,128}$/u.test(sessionId)) return undefined;
-  const projects = join(
-    env.CLAUDE_CONFIG_DIR || join(env.HOME || homedir(), ".claude"),
-    "projects",
-  );
-  let directories: string[];
-  try {
-    directories = readdirSync(projects);
-  } catch {
-    return undefined;
-  }
-  for (const directory of directories) {
-    const candidate = join(projects, directory, `${sessionId}.jsonl`);
-    if (existsSync(candidate)) return candidate;
-  }
-  return undefined;
 }
 
 function isBoundedScalarString(value: string, maximum: number): boolean {

@@ -1,12 +1,19 @@
 import { redactMemorySecrets } from "@ghost/extensions";
 import { open } from "node:fs/promises";
 import type { GhostSessionStopEvent } from "./hooks.js";
+import {
+  isRecord,
+  linkTranscriptRecords,
+  parseTranscriptLines,
+  transcriptBody,
+  transcriptMessage,
+  transcriptOwnerText,
+  transcriptRecordId,
+  transcriptText,
+  type TranscriptRecord,
+} from "./transcript-records.js";
 
 export const ADVISOR_TRANSCRIPT_MAX_BYTES = 1024 * 1024;
-
-interface TranscriptRecord {
-  [key: string]: unknown;
-}
 
 export interface AdvisorTurnDelta {
   text: string;
@@ -15,87 +22,25 @@ export interface AdvisorTurnDelta {
   paths: string[];
   /** How often the turn escalated to a specialist through the `task` tool. */
   delegations: number;
+  /**
+   * The transcript id of the record holding this turn's owner prompt, when the
+   * turn was reconstructed from a transcript. It is the durable key back to the
+   * turn: a later reader finds the same turn by id, without re-deriving an
+   * owner-turn ordinal or matching on `text`, which is a display rendering.
+   */
+  ownerRecordId?: string;
   fallbackReason?: "missing" | "read" | "parse" | "owner-boundary";
 }
 
-function record(value: unknown): TranscriptRecord | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as TranscriptRecord
-    : null;
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.flatMap((part) => {
-    const block = record(part);
-    if (block?.type !== "text" || typeof block.text !== "string") return [];
-    return [block.text];
-  }).join("");
-}
-
 export function advisorAssistantText(message: unknown): string {
-  const candidate = record(message);
-  return candidate?.role === "assistant" ? contentText(candidate.content) : "";
+  const candidate = isRecord(message) ? message : null;
+  return candidate?.role === "assistant" ? transcriptText(candidate.content) : "";
 }
 
-function messageFrom(recordValue: TranscriptRecord): TranscriptRecord | null {
-  const message = record(recordValue.message);
-  if (recordValue.type === "message") return message;
-  if (recordValue.type === "user" || recordValue.type === "assistant" || recordValue.type === "system") {
-    return message;
-  }
-  return null;
-}
-
-function ownerText(recordValue: TranscriptRecord): string | null {
-  const message = messageFrom(recordValue);
-  if (message?.role === "user") return contentText(message.content);
-  if (recordValue.type === "custom_message") return contentText(recordValue.content);
-  return null;
-}
-
-function renderRecord(recordValue: TranscriptRecord): string | null {
-  const message = messageFrom(recordValue);
-  if (message && typeof message.role === "string") {
-    const content = message.content;
-    if (typeof content !== "string" && !Array.isArray(content)) return null;
-    return `${message.role}: ${redactMemorySecrets(JSON.stringify(content))}`;
-  }
-  if (recordValue.type === "custom_message"
-    && (typeof recordValue.content === "string" || Array.isArray(recordValue.content))) {
-    return `context: ${redactMemorySecrets(JSON.stringify(recordValue.content))}`;
-  }
-  return null;
-}
-
-function linkedRecords(
-  records: readonly TranscriptRecord[],
-  runtime: GhostSessionStopEvent["runtime"],
-): TranscriptRecord[] {
-  const idKey = runtime === "pi" ? "id" : "uuid";
-  const parentKey = runtime === "pi" ? "parentId" : "parentUuid";
-  const byId = new Map<string, TranscriptRecord>();
-  let leaf: TranscriptRecord | undefined;
-  for (const item of records) {
-    const id = item[idKey];
-    if (typeof id !== "string" || id === "") continue;
-    byId.set(id, item);
-    if (renderRecord(item)) leaf = item;
-  }
-  if (!leaf) return [];
-  const path: TranscriptRecord[] = [];
-  const seen = new Set<string>();
-  let current: TranscriptRecord | undefined = leaf;
-  while (current) {
-    const id = current[idKey];
-    if (typeof id !== "string" || seen.has(id)) throw new Error("invalid transcript parent chain");
-    seen.add(id);
-    path.push(current);
-    const parent: unknown = current[parentKey];
-    current = typeof parent === "string" ? byId.get(parent) : undefined;
-  }
-  return path.reverse();
+/** One transcript record as an advisor-prompt line. */
+function renderTranscriptRecord(recordValue: TranscriptRecord): string | null {
+  const body = transcriptBody(recordValue);
+  return body ? `${body.label}: ${redactMemorySecrets(JSON.stringify(body.content))}` : null;
 }
 
 async function readTranscriptTail(path: string, maximum: number): Promise<string> {
@@ -117,17 +62,6 @@ async function readTranscriptTail(path: string, maximum: number): Promise<string
   } finally {
     await file.close();
   }
-}
-
-function parseJsonLines(text: string): TranscriptRecord[] {
-  const records: TranscriptRecord[] = [];
-  for (const line of text.split("\n")) {
-    if (!line.trim()) continue;
-    const parsed = record(JSON.parse(line));
-    if (!parsed) throw new Error("transcript line is not an object");
-    records.push(parsed);
-  }
-  return records;
 }
 
 function fallback(event: GhostSessionStopEvent, reason: AdvisorTurnDelta["fallbackReason"]): AdvisorTurnDelta {
@@ -174,8 +108,8 @@ function collectArgumentValues(
     for (const item of value) collectArgumentValues(item, key, output, depth + 1);
     return;
   }
-  const object = record(value);
-  if (!object) return;
+  if (!isRecord(value)) return;
+  const object = value;
   for (const [childKey, child] of Object.entries(object)) {
     collectArgumentValues(child, childKey, output, depth + 1);
   }
@@ -195,10 +129,10 @@ function toolArguments(
 ): { commands: string[]; paths: string[]; delegations: number } {
   const output = { commands: [] as string[], paths: [] as string[], delegations: 0 };
   for (const item of records) {
-    const message = messageFrom(item);
+    const message = transcriptMessage(item);
     if (!message || !Array.isArray(message.content)) continue;
     for (const part of message.content) {
-      const block = record(part);
+      const block = isRecord(part) ? part : null;
       const pi = block?.type === "toolCall";
       if (!pi && block?.type !== "tool_use" && block?.type !== "mcp_tool_use") continue;
       collectArgumentValues(pi ? block.arguments : block.input, "", output);
@@ -224,24 +158,32 @@ export async function reconstructAdvisorTurnDelta(
   }
   let records: TranscriptRecord[];
   try {
-    records = linkedRecords(parseJsonLines(text), event.runtime);
+    records = linkTranscriptRecords(parseTranscriptLines(text), event.runtime);
   } catch {
     return fallback(event, "parse");
   }
   let ownerIndex = -1;
   for (let index = records.length - 1; index >= 0; index -= 1) {
     const item = records[index];
-    if (item && ownerText(item) === event.owner_prompt) {
+    if (item && transcriptOwnerText(item) === event.owner_prompt) {
       ownerIndex = index;
       break;
     }
   }
   if (ownerIndex < 0) return fallback(event, "owner-boundary");
+  const owner = records[ownerIndex];
+  if (!owner) return fallback(event, "owner-boundary");
   const activeTurn = records.slice(ownerIndex);
   const rendered = activeTurn.flatMap((item) => {
-    const line = renderRecord(item);
+    const line = renderTranscriptRecord(item);
     return line ? [line] : [];
   });
   if (rendered.length === 0) return fallback(event, "parse");
-  return { text: rendered.join("\n"), source: "transcript", ...toolArguments(activeTurn) };
+  const ownerRecordId = transcriptRecordId(owner, event.runtime);
+  return {
+    text: rendered.join("\n"),
+    source: "transcript",
+    ...(ownerRecordId === undefined ? {} : { ownerRecordId }),
+    ...toolArguments(activeTurn),
+  };
 }

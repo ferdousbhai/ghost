@@ -139,7 +139,10 @@ See [`presentation-history.ts`](packages/daemon/src/presentation-history.ts).
 Opting in with `review.journal: true` adds a second bounded sidecar on both
 runtimes (`*.<runtime>.review-journal.json`): one entry per reviewed turn
 holding the turn delta, the lint findings and advisor notes it drew, where they
-were delivered, and the rewrite a strict continuation produced. It is written
+were delivered, and the rewrite a strict continuation produced. A delta
+reconstructed from a transcript also carries `ownerRecordId`, the transcript id
+of that turn's owner-prompt record — the durable key a later reader uses to
+find the turn again, since `delta.text` is a display rendering. It is written
 only while `review.mode` is not `off`, every text field is secret-redacted and
 capped before disk, oldest entries are dropped at its bounds, a write failure
 only warns, and it moves to Trash with its conversation. Like the presentation
@@ -458,17 +461,28 @@ persisted as an assistant answer.
 
 ### `ghost` CLI
 
-The terminal client is an HTTP client only; it never edits a ghost home
-directly. Its command catalog is defined in
+The terminal client never edits a ghost home; every command that changes ghost
+state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
 ask, job, model, memory, status, and skill operations. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the
 whole flow and the CLI holds no secret, only rendering each polled `LoginView`
-and posting the answer the owner types. `ghost delegation` is the one daemon-free
-read-only command: it probes installed native-worker harnesses without opening
-ghost data. There are no plan or todo commands.
+and posting the answer the owner types. There are no plan or todo commands.
+
+Two read-only commands are daemon-free and work while ghostd is stopped.
+`ghost delegation` probes installed native-worker harnesses without opening
+ghost data. `ghost flywheel export --out <dir>` reads the ghost home's review
+journals and the runtime transcripts they name — pi's JSONL under `sessions/`
+and, through the Claude resume sidecar's `sessionId`, Claude Code's own SDK
+transcript — and writes the training dataset in
+[`flywheel-export.ts`](packages/daemon/src/flywheel-export.ts). It is
+deliberately off the HTTP API: no route carries a transcript, and training data
+must be exportable with the daemon down. It resolves the ghosts root from the
+daemon config the same way ghostd does, reads nothing else, writes only under
+`--out` (directory 0700, files 0600), and never mutates a ghost home. The gate,
+the file names, and the manifest are in [`docs/hooks.md`](docs/hooks.md).
 
 ## Models and credentials
 
