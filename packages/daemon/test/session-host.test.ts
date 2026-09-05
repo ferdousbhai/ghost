@@ -5089,7 +5089,6 @@ describe("multi-ghost", () => {
         expect(system).toContain(
           join(obsidianSkill, "SKILL.md"),
         );
-        expect(system).toContain("A vault is a folder of Markdown");
         expect(system.split(join(obsidianSkill, "SKILL.md"))).toHaveLength(2);
       }
       expect(provider.requests[0]?.system).toContain("casper-private");

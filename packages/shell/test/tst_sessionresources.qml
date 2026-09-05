@@ -45,10 +45,9 @@ TestCase {
     function snapshot(): var {
         return {
             runtime: "pi",
-            obsidian: { path: "/home/owner/.agents/skills/obsidian-cli/SKILL.md", status: "admitted" },
             skills: [{
-                name: "obsidian-cli",
-                path: "/home/owner/.agents/skills/obsidian-cli/SKILL.md",
+                name: "research",
+                path: "/home/owner/.agents/skills/research/SKILL.md",
                 source: "machine",
                 precedence: 0,
                 status: "admitted"
@@ -97,8 +96,7 @@ TestCase {
         requests[0].complete(200, snapshot());
 
         verify(!Ghostd.sessionResourcesLoading);
-        compare(Ghostd.sessionResources.obsidian.status, "admitted");
-        compare(Ghostd.sessionResources.skills[0].name, "obsidian-cli");
+        compare(Ghostd.sessionResources.skills[0].name, "research");
         compare(Ghostd.sessionResources.mcpServers[0].status, "disabled");
         compare(Ghostd.sessionResourcesError, "");
     }
@@ -120,7 +118,7 @@ TestCase {
     function test_reportsMalformedAndColdClaudeResponses(): void {
         Ghostd.fetchSessionResources(false);
         const malformed = snapshot();
-        malformed.obsidian.status = "unknown";
+        malformed.skills = "nope";
         requests[0].complete(200, malformed);
         compare(Ghostd.sessionResources, null);
         compare(Ghostd.sessionResourcesError, "ghostd sent a malformed resource snapshot");

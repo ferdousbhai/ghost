@@ -2657,20 +2657,9 @@ export class SessionHost {
       },
       logger,
     );
-    const obsidianSkillPath = join(
-      this.ownerHome,
-      ".agents",
-      "skills",
-      "obsidian-cli",
-      "SKILL.md",
-    );
     const resources = buildSessionResourceView({
       runtime: "pi",
       skillGroups,
-      obsidian: {
-        path: obsidianSkillPath,
-        installed: existsSync(obsidianSkillPath),
-      },
       mcpGroups: mcpResult.admission,
     });
     mcp = { manager, configs: mcpResult.configs, sources: mcpResult.sources };

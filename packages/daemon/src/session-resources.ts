@@ -56,12 +56,6 @@ export interface SessionSkillView extends Omit<SessionSkillInput, "hidden"> {
   reason?: string;
 }
 
-export interface ObsidianSkillReadiness {
-  path: string;
-  status: "admitted" | "shadowed" | "skipped" | "missing";
-  reason?: string;
-}
-
 export interface SessionMcpGroup {
   source: Exclude<SessionResourceSource, "machine">;
   precedence: number;
@@ -84,7 +78,6 @@ export interface SessionResourceView {
   runtime: ConversationRuntime;
   skills: SessionSkillView[];
   diagnostics: SessionResourceDiagnostic[];
-  obsidian: ObsidianSkillReadiness;
   mcpServers: SessionMcpView[];
   mcpDiagnostics: SessionResourceDiagnostic[];
 }
@@ -135,40 +128,6 @@ function skillView(
     };
   });
   return rows.sort(byPrecedenceThenName);
-}
-
-function obsidianReadiness(
-  path: string,
-  installed: boolean,
-  skills: readonly SessionSkillView[],
-  diagnostics: readonly SessionResourceDiagnostic[],
-): ObsidianSkillReadiness {
-  const row = skills.find((skill) => skill.source === "machine" && skill.path === path);
-  if (row) {
-    const reason = row.shadowedBy ? `Shadowed by ${row.shadowedBy}.` : row.reason;
-    return {
-      path,
-      status: row.status,
-      ...(reason ? { reason } : {}),
-    };
-  }
-  const diagnostic = diagnostics.find((entry) => entry.path === path);
-  if (diagnostic) {
-    return {
-      path,
-      status: diagnostic.shadowedBy ? "shadowed" : "skipped",
-      reason: diagnostic.shadowedBy
-        ? `Shadowed by ${diagnostic.shadowedBy}.`
-        : diagnostic.reason,
-    };
-  }
-  return {
-    path,
-    status: installed ? "skipped" : "missing",
-    reason: installed
-      ? "The installed skill was not admitted by the machine skill loader."
-      : "The optional Obsidian CLI skill is not installed at its standard path.",
-  };
 }
 
 function skippedName(path: string): string | undefined {
@@ -269,7 +228,6 @@ function mcpViews(
 export function buildSessionResourceView(input: {
   runtime: ConversationRuntime;
   skillGroups: readonly SessionSkillGroup[];
-  obsidian: { path: string; installed: boolean };
   mcpGroups?: readonly SessionMcpGroup[];
   mcpServers?: readonly SessionMcpView[];
   mcpDiagnostics?: readonly SessionResourceDiagnostic[];
@@ -283,12 +241,6 @@ export function buildSessionResourceView(input: {
     runtime: input.runtime,
     skills,
     diagnostics,
-    obsidian: obsidianReadiness(
-      input.obsidian.path,
-      input.obsidian.installed,
-      skills,
-      diagnostics,
-    ),
     mcpServers: mcp.rows,
     mcpDiagnostics: mcp.diagnostics,
   };

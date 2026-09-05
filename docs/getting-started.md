@@ -50,17 +50,6 @@ it with its runtime's native file tools, and keeps its own private continuity
 in the ghost home instead. Ghost does not index the directory or read any of it
 until a request calls for it.
 
-An Obsidian vault is just a folder of Markdown, usually kept there. A ghost
-edits those notes as ordinary files and leaves `.obsidian/` alone, so Obsidian
-does not have to be installed or running. If you want a ghost to drive Obsidian
-itself, register its [official CLI](https://obsidian.md/help/cli) and install
-the upstream skill; ordinary skill discovery picks it up:
-
-```sh
-npx -y skills@latest add https://github.com/kepano/obsidian-skills \
-  --global --yes --skill obsidian-cli
-```
-
 ## 3. Start the services
 
 ```sh
@@ -254,7 +243,6 @@ and any skill you installed untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| `obsidian` CLI operations fail | the CLI is optional and needs Obsidian *running*; a ghost can always edit vault notes as plain files instead |
 | The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
 

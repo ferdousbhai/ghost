@@ -14,7 +14,6 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
 import {
   lstat,
   mkdir,
@@ -2616,17 +2615,9 @@ export class ClaudeCodeRuntime {
             }]
           : []),
       ];
-      const obsidianSkillPath = join(
-        this.ownerHome,
-        ".agents",
-        "skills",
-        "obsidian-cli",
-        "SKILL.md",
-      );
       const resources = buildSessionResourceView({
         runtime: "claude-code",
         skillGroups,
-        obsidian: { path: obsidianSkillPath, installed: existsSync(obsidianSkillPath) },
         mcpServers,
         mcpDiagnostics,
       });

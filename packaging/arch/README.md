@@ -35,29 +35,11 @@ daemon service environment; restart ghostd after changing that environment. A
 missing, malformed, logged-out, or SDK-incomplete Claude Code remains visibly
 unavailable instead of falling back.
 
-## Owner-shared state, and optional Obsidian
+## Owner-shared state
 
 Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
 Documents directory. Every ghost reads and writes it with its runtime's native
 file tools; the package installs nothing there and gates nothing on it.
-
-An Obsidian vault is a folder of Markdown, usually kept under Documents, and a
-ghost edits those notes as ordinary files while leaving `.obsidian/` alone. To
-let a ghost drive Obsidian itself instead, install the optional `obsidian`
-package, complete its [official CLI
-registration](https://obsidian.md/help/cli) in **Settings → General → Command
-line interface**, and install the upstream skill as the desktop owner:
-
-```sh
-npx -y skills@latest add https://github.com/kepano/obsidian-skills \
-  --global --yes --skill obsidian-cli
-```
-
-Normal machine-skill discovery then admits
-`~/.agents/skills/obsidian-cli/SKILL.md` like any other machine skill; the
-owner-context policy does not add a second link. The CLI needs Obsidian
-running, which is why it is a convenience rather than the shared-state path.
-Removing Ghost does not remove the owner-installed skill or any vault data.
 
 ## Optional CLI integrations
 

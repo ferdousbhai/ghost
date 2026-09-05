@@ -226,19 +226,7 @@ const MOCK_COMMANDS = [
 
 const MOCK_SESSION_RESOURCES = {
   runtime: "pi",
-  obsidian: {
-    path: "/tmp/ghost-shell-preview/.agents/skills/obsidian-cli/SKILL.md",
-    status: "admitted",
-  },
   skills: [
-    {
-      name: "obsidian-cli",
-      path: "/tmp/ghost-shell-preview/.agents/skills/obsidian-cli/SKILL.md",
-      description: "Use the official Obsidian CLI.",
-      source: "machine",
-      precedence: 0,
-      status: "admitted",
-    },
     {
       name: "research",
       path: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
@@ -496,7 +484,7 @@ const entry = (message) => ({ ...message, entryId: nextEntryId() });
 const SEEDED_QUESTION = {
   id: "q-notes",
   header: "Launch notes",
-  question: "Three sections in the Obsidian roadmap note are unfinished. Which do you want me to draft first?",
+  question: "Three sections in the roadmap note are unfinished. Which do you want me to draft first?",
   recommended: 1,
   options: [
     { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
@@ -912,7 +900,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
 const GREETINGS = {
   casper: {
     greeting:
-      "You left the Obsidian launch note half-written, and the roadmap still has an open section. "
+      "You left the launch note half-written, and the roadmap still has an open section. "
       + "Want to pick that thread back up? I can also just sit here quietly.",
     onboarding: false,
   },
@@ -1128,7 +1116,7 @@ const LIVE_QUESTION = {
       description: "One concise memory file.",
       preview: "memory/what-the-owner-asked-for.md",
     },
-    { label: "Answer and save a note", description: "A shared Obsidian note, yours to edit after." },
+    { label: "Answer and save a note", description: "A shared note in Documents, yours to edit after." },
     { label: "Neither — forget I asked", description: "No answer, no files." },
   ],
 };

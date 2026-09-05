@@ -33,9 +33,6 @@ describe("machine skills", () => {
     const policy = renderOwnerContextPolicy("/home/owner/Documents");
     expect(policy).toContain('"/home/owner/Documents"');
     expect(policy).toContain("shared by every ghost on this machine");
-    expect(policy).toContain("A vault is a folder of Markdown");
-    expect(policy).toContain("leave its `.obsidian/` directory alone");
-    expect(policy).toContain("only when the owner installed its machine skill");
     expect(policy).not.toContain("SKILL.md");
     expect(policy).not.toContain(".agents/skills");
   });

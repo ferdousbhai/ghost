@@ -126,10 +126,6 @@ require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
   "$work/ghost-dev.SRCINFO"
-# Obsidian is one optional way to reach a vault, never an install gate.
-require_srcinfo_entry optdepends \
-  'obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill' \
-  "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency npm "$work/ghost-dev.SRCINFO"
 # pi otherwise downloads these into its cache on the first grep/find call.
@@ -149,10 +145,6 @@ require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
 require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
-  "$work/ghost/.SRCINFO"
-# Obsidian is one optional way to reach a vault, never an install gate.
-require_srcinfo_entry optdepends \
-  'obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill' \
   "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
 require_srcinfo_dependency npm "$work/ghost/.SRCINFO"

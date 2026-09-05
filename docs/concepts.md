@@ -73,14 +73,6 @@ session start — the system prompt names the directory in one sentence, and the
 ghost reads it with the runtime's native file and search tools when a request
 may depend on it.
 
-An Obsidian vault is a folder of Markdown, usually under Documents. Ghost reads
-and writes those notes as ordinary files and leaves `.obsidian/` alone, so a
-ghost is useful whether or not Obsidian is installed or running. If the owner
-installed the `obsidian-cli` skill under `~/.agents/skills/`, ordinary
-machine-skill discovery admits it and the `obsidian` CLI becomes one more tool;
-the owner-context policy does not duplicate its contents. Vault content is
-unaffected by creating, renaming, deleting, or uninstalling a ghost.
-
 ## Surfaces
 
 | Surface | Owns | Code |

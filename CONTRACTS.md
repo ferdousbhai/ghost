@@ -28,11 +28,7 @@ hard-coded path. It is persistent owner context, not a Ghost-owned store: Ghost
 neither indexes it nor injects any part of it at session start, and the system
 prompt only names the directory.
 
-An Obsidian vault is a folder of Markdown, typically under Documents. Ghost
-reads and writes it as ordinary files and leaves `.obsidian/` alone. Obsidian
-itself is optional, and the `obsidian` CLI is reachable only through the
-owner-installed `obsidian-cli` machine skill, admitted by ordinary machine-skill
-discovery. Vault content is unaffected by creating, renaming, deleting, or
+Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.
 
 There is no Ghost plan mode, todo store, plan/todo API, or progress UI. Runtime
@@ -209,9 +205,8 @@ backup: Trash and snapper are undo, not retention.
 Both runtimes receive the same Ghost character, private memory index, first
 meeting policy, Omarchy computer-use policy, scheduled-work policy,
 self-maintenance policy, and owner-context policy. The owner-context policy names the
-Documents directory in one sentence and nothing else about it; ordinary
-machine-skill discovery separately admits an owner-installed `obsidian-cli`
-skill into each runtime's standard skill index. Owner documents are read only
+Documents directory in one sentence and nothing else about it. Owner
+documents are read only
 when relevant, with the runtime's own file and search tools, never injected
 automatically at session start.
 
@@ -372,7 +367,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT\|DELETE /sessions/:id/project…` | Read, preview, bind/reload/unbind, or abandon an unpublished trusted-project draft. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
-| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips, and the optional `obsidian-cli` skill's readiness. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
+| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
 | `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |

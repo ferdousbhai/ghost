@@ -23,11 +23,9 @@ export const OWNER_DELIVERABLE_POLICY = [
 export function renderOwnerContextPolicy(documentsDir: string): string {
   return [
     "## Owner context",
-    `${JSON.stringify(documentsDir)} is the owner's documents directory: their notes, files, `
-      + "and any Obsidian vault, shared by every ghost on this machine. A vault is a folder of "
-      + "Markdown — read and write its notes with the runtime's native file and search tools, "
-      + "and leave its `.obsidian/` directory alone. The `obsidian` CLI is available only when "
-      + "the owner installed its machine skill.",
+    `${JSON.stringify(documentsDir)} is the owner's documents directory: their notes and files, `
+      + "shared by every ghost on this machine. Read and write it with the runtime's native "
+      + "file and search tools.",
     "Nothing there is indexed for you. Search or read it when earlier owner-wide decisions, "
       + "projects, notes, or tasks may matter, and write durable owner-facing material there "
       + "rather than into private memory. Do not mirror the transcript or private memory into it.",

@@ -154,12 +154,9 @@ snapshot, credential-free project MCP, and its in-process tools. Executable
 project hooks/plugins/tools, LSP, and project agent definitions remain disabled
 pending the isolation boundary in #31.
 
-Claude reads and writes the owner's XDG Documents directory — an Obsidian vault
-there included — with its own native file and search tools; the owner-context
-policy names the directory and nothing more. Normal machine-skill discovery
-admits an owner-installed `obsidian-cli` skill into Claude's standard skill
-index, and the policy does not inject a second link. Neither Obsidian nor that
-skill is required.
+Claude reads and writes the owner's XDG Documents directory with its own
+native file and search tools; the owner-context policy names the directory and
+nothing more.
 
 ### As the advisor
 

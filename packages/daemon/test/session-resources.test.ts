@@ -63,7 +63,6 @@ describe("session resource admission", () => {
           { name: "project", path: "/work/project/.agents/skills/project/SKILL.md" },
         ]),
       ],
-      obsidian: { path: OBSIDIAN, installed: true },
       mcpGroups: [
         {
           source: "ghost",
@@ -100,7 +99,6 @@ describe("session resource admission", () => {
       ],
     });
 
-    expect(view.obsidian).toEqual({ path: OBSIDIAN, status: "admitted" });
     expect(view.skills).toContainEqual(expect.objectContaining({
       name: "shared",
       source: "machine",
@@ -127,42 +125,5 @@ describe("session resource admission", () => {
     }]);
   });
 
-  it("distinguishes a shadowed, malformed, and missing standard Obsidian skill", () => {
-    const shadowed = buildSessionResourceView({
-      runtime: "pi",
-      skillGroups: [
-        skills("machine", 0, [{ name: "obsidian-cli", path: OBSIDIAN }]),
-        skills("ghost", 1, [{ name: "obsidian-cli", path: "/ghost/skills/obsidian-cli/SKILL.md" }]),
-      ],
-      obsidian: { path: OBSIDIAN, installed: true },
-    });
-    expect(shadowed.obsidian).toEqual({
-      path: OBSIDIAN,
-      status: "shadowed",
-      reason: "Shadowed by /ghost/skills/obsidian-cli/SKILL.md.",
-    });
 
-    const skipped = buildSessionResourceView({
-      runtime: "claude-code",
-      skillGroups: [{
-        source: "machine",
-        precedence: 0,
-        skills: [],
-        diagnostics: [{ source: "machine", path: OBSIDIAN, reason: "Invalid frontmatter." }],
-      }],
-      obsidian: { path: OBSIDIAN, installed: true },
-    });
-    expect(skipped.obsidian).toEqual({
-      path: OBSIDIAN,
-      status: "skipped",
-      reason: "Invalid frontmatter.",
-    });
-
-    const missing = buildSessionResourceView({
-      runtime: "pi",
-      skillGroups: [],
-      obsidian: { path: OBSIDIAN, installed: false },
-    });
-    expect(missing.obsidian).toMatchObject({ status: "missing" });
-  });
 });

@@ -38,7 +38,7 @@ export function resolveUserDirectory(
   return join(home, fallback);
 }
 
-/** The owner's documents directory: their own files, and any Obsidian vault. */
+/** The owner's documents directory. */
 export function resolveDocumentsDirectory(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),

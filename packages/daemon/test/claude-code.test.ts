@@ -1226,10 +1226,6 @@ describe("Claude Code native harness runtime", () => {
     expect(await host!.admittedResources("casper", conversationId, "claude-code"))
       .toMatchObject({
         runtime: "claude-code",
-        obsidian: {
-          path: join(temp!.ownerHome, ".agents", "skills", "obsidian-cli", "SKILL.md"),
-          status: "admitted",
-        },
         skills: [expect.objectContaining({
           name: "obsidian-cli",
           source: "machine",
@@ -1759,7 +1755,7 @@ fi
     expect(append(1)).toContain("written-between-turns");
   });
 
-  it("shares the owner Obsidian contract while keeping two ghosts' memories private", async () => {
+  it("shares the owner documents contract while keeping two ghosts' memories private", async () => {
     const { paths, seenOptions } = setupClaudeHost({
       machineSkill: {
         name: "obsidian-cli",
@@ -1807,7 +1803,6 @@ fi
       expect(prompt).toContain("## Owner context");
       expect(prompt).toContain("## Self-maintenance");
       expect(prompt).toContain(sharedSkill);
-      expect(prompt).toContain("A vault is a folder of Markdown");
       expect(prompt.split(sharedSkill)).toHaveLength(2);
     }
     expect(casperPrompt).toContain("casper-private");
@@ -1948,7 +1943,6 @@ fi
     expect(appended).toContain("## Owner context");
     expect(appended).toContain("## Self-maintenance");
     expect(appended).not.toContain(".agents/skills/obsidian-cli/SKILL.md");
-    expect(appended).toContain("A vault is a folder of Markdown");
     expect(appended).toContain("Nothing there is indexed for you");
     expect(appended).toContain(scheduleUnitDir);
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");

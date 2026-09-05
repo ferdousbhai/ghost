@@ -52,9 +52,8 @@ than becoming parallel Ghost frameworks.
   and tasks live in the owner's Documents directory. Projects and machine
   artifacts remain owned by their native facility.
 - **The owner's documents are the shared store.** Ghost names that directory in
-  the prompt and reads it with the runtime's native file and search tools. An
-  Obsidian vault there is a folder of Markdown like any other. Ghost has no
-  notes database, task store, plan mode, document index, or vault adapter.
+  the prompt and reads it with the runtime's native file and search tools.
+  Ghost has no notes database, task store, plan mode, or document index.
 - **Files over an application database.** Personas and inspectable policy stay
   greppable and backup-friendly. Derived runtime state is isolated under
   `.pi/`, including pi's own 0600 credential file.

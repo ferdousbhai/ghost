@@ -2319,12 +2319,7 @@ Singleton {
                 || !body.mcpDiagnostics.every(function (row) {
                     return root.validSessionResourceDiagnostic(row);
                 })
-                || !body.obsidian || typeof body.obsidian !== "object"
-                || typeof body.obsidian.path !== "string"
-                || ["admitted", "shadowed", "skipped", "missing"]
-                    .indexOf(body.obsidian.status) < 0
-                || (body.obsidian.reason !== undefined
-                    && typeof body.obsidian.reason !== "string"))
+            )
             return false;
         root.sessionResources = body;
         root.sessionResourcesGhost = ghost;

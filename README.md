@@ -21,7 +21,7 @@ principal retains its own project discovery and subagents. Ghost replaces
 pi's coding-oriented system prompt with its character and bounded private
 memory index. Both runtimes treat the owner's XDG Documents directory as the
 persistent owner-visible state every ghost shares, reading and writing it with
-their native file tools; an Obsidian vault there is just a folder of Markdown.
+their native file tools.
 Nothing in it is indexed or injected at session start. Claude keeps its complete,
 unfiltered native tool preset and receives the same Ghost-owned context as an
 append; Ghost tools are added only for capabilities that preset lacks. Browser
