@@ -13,7 +13,7 @@ import {
   realpath,
   stat,
 } from "node:fs/promises";
-import { delimiter, isAbsolute, resolve } from "node:path";
+import { basename, delimiter, isAbsolute, resolve } from "node:path";
 import { runOwnedCommand, type OwnedCommandResult } from "./owned-process.js";
 
 export type NativeHarnessId = "claude-code" | "codex" | "pi";
@@ -143,11 +143,15 @@ async function unwrapMiseLauncher(
   timeoutMs: number,
   signal: AbortSignal | undefined,
 ): Promise<string> {
+  // mise ships two launcher shapes: a shebang script that execs `mise x <tool>`,
+  // and a shim that is a symlink named after the tool pointing at the mise
+  // binary itself, which dispatches on argv[0]. Realpathing the second one
+  // would hand back mise, so both are unwrapped through `mise which`.
   const prefix = await launcherPrefix(path, signal);
   const word = new RegExp(`\\b${binaryName.replaceAll("-", "\\-")}\\b`, "u");
-  if (!prefix.startsWith("#!") || !/\bmise\b/u.test(prefix) || !word.test(prefix)) {
-    return path;
-  }
+  const shebangLauncher = prefix.startsWith("#!") && /\bmise\b/u.test(prefix) && word.test(prefix);
+  const shimLink = basename(path) === binaryName && basename(await realpath(path)) === "mise";
+  if (!shebangLauncher && !shimLink) return path;
 
   const miseCandidate = await executableCandidate("mise", environment, signal);
   if (!miseCandidate) {

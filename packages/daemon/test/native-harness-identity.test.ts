@@ -104,6 +104,27 @@ describe("native harness executable identity", () => {
     expect(explicit).toMatchObject({ path: wrapper, literalBoundary: true });
   });
 
+  it("unwraps a mise shim that is a symlink to the mise binary", async () => {
+    const base = root();
+    const bin = join(base, "bin");
+    const shims = join(base, "shims");
+    mkdirSync(bin);
+    mkdirSync(shims);
+    const mise = join(bin, "mise");
+    const target = join(base, "claude-native");
+    writeExecutable(mise, "[ \"$1\" = which ] && printf '%s\\n' \"$MISE_TARGET\"");
+    writeExecutable(target);
+    symlinkSync(mise, join(shims, "claude"));
+    const environment = { PATH: `${shims}:${bin}`, MISE_TARGET: target };
+
+    const discovered = await resolveNativeHarnessExecutable({
+      harness: "claude-code",
+      environment,
+      timeoutMs: 1_000,
+    });
+    expect(discovered).toMatchObject({ path: target, literalBoundary: false });
+  });
+
   it("detects symlink retargeting and in-place literal-wrapper replacement", async () => {
     const base = root();
     const first = join(base, "first");
