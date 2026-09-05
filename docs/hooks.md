@@ -51,16 +51,14 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
 Ghost reads the file at startup and again whenever `PUT /api/hooks/config`
 replaces it; the shell's Hooks pane edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
-needs a restart. Groups and handlers run in file order, after any built-in
-hooks Ghost registers in code for the same event.
+needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds) must be greater than 0 and at most 600.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 
-An optional top-level `builtin` object is reserved for hooks Ghost registers
-in code. Ghost registers none today, so the section admits no keys; an empty
-object is accepted so an older `hooks.json` still parses.
+Ghost registers no built-in hooks. An optional top-level `builtin` object is
+accepted only when empty, so an older `hooks.json` still parses.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
@@ -210,10 +208,10 @@ model's default reasoning level.
 ## Status
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
-Event rows contain `{ event, count }`; hook rows
-contain `{ event, source, name, description }` plus `settingsKey` only for a
-built-in row, where `source` is `builtin` for an in-process registration and
-`config` for a `hooks.json` command. Commands, source paths, arguments, prompts,
+Event rows contain `{ event, count }`; hook rows contain
+`{ event, source, name, description }`, where `source` is `config` for a
+`hooks.json` command and `builtin` for an in-process registration made by a
+library embedder. Commands, source paths, arguments, prompts,
 injected context, errors, receipts, and scheduler state never cross that route.
 
 ## Editing
@@ -223,8 +221,7 @@ admitted `hooks.json` as one object and its absolute path. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
-`session_stop` changes apply at the next boundary. Built-in hooks are registered
-in code and are not editable through this route.
+`session_stop` changes apply at the next boundary.
 
 ## In-process API
 

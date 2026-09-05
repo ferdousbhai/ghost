@@ -106,9 +106,9 @@ installed executable.
 Ghost does not deny or replace any tool in Claude's native preset. Native
 scheduling, notifications, remote triggers, worktrees, agents, and every other
 preset tool retain Claude's own semantics and storage. Ghost's in-process
-browser/screen/desktop tools are additive. Claude auto-memory is disabled.
-Owner-visible durable knowledge, plans, and tasks live in the owner's documents;
-ghost-private continuity uses the ghost home's memory files.
+browser/screen/desktop tools are additive. Claude auto-memory is disabled;
+durable knowledge, plans, tasks, and the ghost's own notes live in the owner's
+documents.
 
 This is a native-first boundary: if the `claude_code` preset already provides a
 capability, Claude uses that native tool with its original name, input schema,
@@ -159,16 +159,15 @@ nothing more.
 
 ### As the advisor
 
-Claude Code also serves the review teacher, bound as `roles.advisor_model`.
-That query is not a principal session: no persona, no Ghost tools, no warm query, no resume metadata, and nothing written to Claude
+Claude Code can also serve `roles.advisor_model`, the frontier teacher that
+`ghostd hook-smol-complete --role advisor` and `inspect_image` reach. That
+query is not a principal session: no persona, no Ghost tools, no warm query, no resume metadata, and nothing written to Claude
 Code's own session storage. It goes through the same SDK loader, executable
 probe, and reviewed child environment as the principal path, and it is
 independent of which runtime drives the ghost — a Pi-driven ghost gets Claude
 as its teacher exactly as a Claude-driven one does. A missing or signed-out
 `claude` makes the binding raise the same unusable-model error an explicit
-unusable smol binding raises; the review pass around it then fails open.
-`CONTRACTS.md` states the exact query it runs; the pipeline it feeds is in
-[`docs/hooks.md`](hooks.md), and the code is
+unusable smol binding raises; a hook built on it then fails open. The code is
 [`hook-claude-complete.ts`](../packages/daemon/src/hook-claude-complete.ts).
 
 ## Environment and credential isolation

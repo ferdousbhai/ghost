@@ -1,11 +1,11 @@
 title = "Ghost secret-scan configuration"
 
-# Used by the acceptance secret scan (docs/beta-acceptance.md §1.5). It extends
-# the built-in gitleaks ruleset and disables nothing.
+# Used by the release secret scan. It extends the built-in gitleaks ruleset and
+# disables nothing.
 #
-# The single allowlist below exists because five test files deliberately carry
+# The single allowlist below exists because two test files deliberately carry
 # credential-shaped literals: they are the inputs that prove Ghost redacts
-# secrets out of memory files, task events, and task results. The allowlist is
+# secrets out of its logs and API responses. The allowlist is
 # conditioned on BOTH the exact file and the exact fixture string, so it is not
 # a path exemption for tests in general. Any other finding — including a new
 # fixture — is triaged by hand, never allowlisted to make a scan pass.
@@ -18,10 +18,7 @@ condition = "AND"
 regexTarget = "line"
 paths = [
   '''packages/daemon/test/pi-runtime\.test\.ts$''',
-  '''packages/daemon/test/principal-task-tools\.test\.ts$''',
-  '''packages/daemon/test/tasks\.test\.ts$''',
   '''packages/extensions/test/home\.test\.ts$''',
-  '''packages/extensions/test/memory-file\.test\.ts$''',
 ]
 regexes = [
   '''sk-ant-test''',

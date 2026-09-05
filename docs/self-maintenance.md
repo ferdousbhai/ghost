@@ -143,8 +143,7 @@ or reports a packaged install when there is no checkout behind it.
 ## Canary before adopting
 
 Never prove a build by restarting the daemon you depend on. Run a second one
-first, exactly the way [beta-acceptance.md](beta-acceptance.md) builds and
-smoke-tests a candidate: a scratch root, a throwaway ghost, a free port.
+first: a scratch root, a throwaway ghost, a free port.
 
 ```sh
 mkdir -p /tmp/ghost-canary/ghosts

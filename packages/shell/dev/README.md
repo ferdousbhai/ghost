@@ -54,7 +54,7 @@ The ready message prints `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
 drive that exact nested instance:
 
 ```sh
-qs -p qml/shell.qml ipc call ghost section memory
+qs -p qml/shell.qml ipc call ghost section hooks
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
@@ -93,13 +93,10 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Character / Memory / Commands /
-  Hooks / MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
-  launch-or-focus: reveal+focus when
-  hidden/unfocused, hide only when already focused.
-  Memory is read-only. Ghost/project custom agent definitions are preview-only.
-  Character edits `character.md`. Memory rows offer confirmed, recoverable
-  deletion.
+  bottom, and the permanent Chat / Character / Commands / Hooks / Resources /
+  MCP / Phone access rail at the right edge. `SUPER+CTRL+G` is
+  launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
+  focused. Character edits `character.md`.
   Commands shows the session's searchable Ghost catalog and stages a chosen slash
   command in chat; typing `/` opens its compact
   autocomplete, including clear partial/unsupported labels. Hooks shows the
@@ -112,11 +109,10 @@ stop the mock separately.
   off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.
-- On `ask`: the spectral summoning orb saying "Checking what I remember about
-  that" in the ghost's own words rather than a spectral phrase, then the reply
-  arriving word by word with `**bold**` rendered as bold. The narration never
-  reaches the transcript, and the `read_memory` call it announced settles behind
-  the row's quiet "1 step" toggle rather than into a card of its own.
+- On `ask`: the spectral summoning orb naming the tool call it is inside of,
+  then the reply arriving word by word with `**bold**` rendered as bold. The
+  narration never reaches the transcript, and the tool call settles behind the
+  row's quiet "1 step" toggle rather than into a card of its own.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not

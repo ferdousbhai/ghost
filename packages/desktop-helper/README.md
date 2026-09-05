@@ -23,7 +23,7 @@ by Fabio Pauli:
 Vision is **not** here: semantic (AT-SPI) access is preferred where it exists.
 A chat model that accepts images reads `ghost_screen`'s image block directly;
 a blind one hands the saved frame to Ghost's `inspect_image`, which resolves
-the `vision_model` the ghost binds in `models.json`. The strongest path uses
+the `advisor_model` the ghost binds in `models.json`. The strongest path uses
 both — try semantic, fall back to a screenshot + vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost

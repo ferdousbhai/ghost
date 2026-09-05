@@ -19,10 +19,10 @@ development guide.
   extension adapter
 - [`models.ts`](src/models.ts), [`model-selection.ts`](src/model-selection.ts) —
   roles and chat-model selection
-- [`mcp-manager.ts`](src/mcp-manager.ts) — explicit Ghost/project MCP
+- [`mcp-manager.ts`](src/mcp-manager.ts) — the ghost's MCP servers
 - [`hooks.ts`](src/hooks.ts) — awaited harness hooks
 - [`jobs.ts`](src/jobs.ts) — foreground/background Bash lifecycle
-  native protocol adapters
+- [`context-windows.ts`](src/context-windows.ts) — pi context rollover and `history`
 - [`cli/main.ts`](src/cli/main.ts) — `ghost` HTTP client commands
 
 Detailed external protocols have one home:
@@ -32,12 +32,11 @@ Detailed external protocols have one home:
 
 ## Persistent state
 
-Character and private memory live in the ghost home. Owner-visible knowledge,
-notes, plans, and tasks live in the owner's XDG Documents directory, which both
-runtimes read and write with their native file tools; an Obsidian vault there is
-a folder of Markdown. The daemon has no document index, notes API, plan mode, or
-todo store. Active background jobs remain
-conversation runtime state.
+The character and conversations live in the ghost home. Notes, knowledge,
+plans, and tasks live in the owner's XDG Documents directory, which both
+runtimes read and write with their native file tools. The daemon has no memory
+store, document index, notes API, plan mode, or todo store. Active background
+jobs remain conversation runtime state.
 
 ## Local development
 

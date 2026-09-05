@@ -46,9 +46,9 @@ The post-install hook prints the relay path and the enable command. Details, dep
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
-it with its runtime's native file tools, and keeps its own private continuity
-in the ghost home instead. Ghost does not index the directory or read any of it
-until a request calls for it.
+it with its runtime's native file tools, including its own notes under
+`notes/`. Ghost does not index the directory or read any of it until a request
+calls for it.
 
 ## 3. Start the services
 
@@ -229,7 +229,7 @@ and any skill you installed untouched.
   in your own Chromium and paste the token. Read
   [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
   first — the ghost acts in the session you are signed into.
-- **Hooks and the review pass.** [hooks.md](hooks.md).
+- **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Phone access.** `ghostd remote status` (or the HUD's Phone access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only.
 

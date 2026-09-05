@@ -43,7 +43,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ~/ghosts/<name>/
   character.md
   skills/<name>/SKILL.md
-  agents/<name>.md
   commands/<name>.md
   rules/  prompts/  hooks/
   AGENTS.md  CLAUDE.md
@@ -169,8 +168,8 @@ ls /etc/snapper/configs
 
 Where `/home` is a separate subvolume that snapper does not cover, a rollback of
 `/` restores the packaged install and system configuration and leaves every
-ghost home, the trust ledger, the persistent timer units, and
-the ghost's own checkout exactly as they were. Nothing in this table is a
+ghost home, the persistent timer units, and the ghost's own checkout exactly
+as they were. Nothing in this table is a
 backup: Trash and snapper are undo, not retention.
 
 ## Runtime contract

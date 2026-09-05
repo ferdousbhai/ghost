@@ -49,13 +49,13 @@ The common defect here is a change that works on the path you tested and is miss
 
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
-- `packages/daemon/src/models.ts` and `packages/daemon/src/model-catalog.ts` — model selection and catalog
+- `packages/daemon/src/models.ts` and `packages/daemon/src/model-selection.ts` — model roles and the chat-model binding
 - `packages/daemon/src/hooks.ts` and `packages/daemon/src/claude-code.ts` — harness hooks and Claude Code runtime
 - `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
-- `docs/hooks.md`, `docs/claude-code-runtime.md`, and `docs/desktop-helper.md` — runtime protocols
+- `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md`, `docs/claude-code-runtime.md`, and `docs/desktop-helper.md` — runtime protocols
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
 
