@@ -68,6 +68,10 @@ screenshot or an empty tree dressed up as success.
 
 ## Ops
 
+The op vocabulary, arguments, and error codes are the contract in
+[`docs/desktop-helper.md`](../../docs/desktop-helper.md); `hello` advertises
+the ops a running helper actually supports. The table below is a summary.
+
 | Op | Args | Result |
 |----|------|--------|
 | `see` | `{name?}` | windows matching (address, title, class, workspace, geometry, focused) |

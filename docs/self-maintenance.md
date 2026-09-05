@@ -106,26 +106,16 @@ What the ghost does:
 4. `pnpm build`.
 5. Tell you it is going down, finish the turn, then schedule the restart.
 
-The restart is one command. It runs in its own transient unit, so the daemon
-stopping cannot take the restarter with it:
-
-```sh
-systemd-run --user --on-active=5 --unit=ghost-restart-<unix-ts> \
-  --description="<reason>" \
-  sh -c 'systemctl --user restart ghostd.service; \
-         for i in $(seq 30); do ghost status -q && break; sleep 1; done; \
-         ghost say --ghost <name> --session <id> "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'
-```
-
-The timestamp in the unit name avoids collisions with an earlier restart still
-in the manager. The wait loop covers `Type=simple`, which reports the service
-started before the daemon is listening. `--session` sends the wake back into the
-conversation that asked for it rather than whichever is newest, and that wake is
-how the ghost reports the result to you.
-
-On shutdown the daemon stops admitting work, cancels active turns, waits 5s for
-a clean drain, then forces for 2s more. `TimeoutStopSec=10s` and `KillMode=mixed`
-in the unit are the outer bound behind that.
+The restart is one `systemd-run --user` command in its own transient unit, so
+the daemon stopping cannot take the restarter with it. The exact command,
+including the wait for the daemon to listen again and the `ghost say` wake back
+into the asking conversation, is the policy text the ghost is given: read
+`renderSelfMaintenancePolicy` in
+[`self-maintenance.ts`](../packages/daemon/src/self-maintenance.ts). The
+shutdown drain is in [`main.ts`](../packages/daemon/src/main.ts) and the unit's
+`TimeoutStopSec` in
+[`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the
+outer bound behind it.
 
 ## Verify
 

@@ -106,9 +106,11 @@ export const MAX_MODEL_QUERY_LENGTH = 256;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
-const TURN_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,64}$/;
-const LIVE_STREAMS = Symbol.for("ghostd.liveStreams");
-const RELAY_HUB = Symbol.for("ghostd.relayHub");
+/** What `close()` needs from a server `createDaemonServer` built: streams to end and the relay to hang up. */
+const serverState = new WeakMap<Server, {
+  liveStreams: Set<ServerResponse>;
+  relay: RelayHub | null | undefined;
+}>();
 
 /**
  * Same-origin is the intended deployment (the Omarchy webapp wraps
@@ -236,8 +238,7 @@ function applyCors(request: IncomingMessage, response: ServerResponse): void {
   response.setHeader("access-control-allow-origin", origin);
   response.setHeader("vary", "origin");
   response.setHeader("access-control-allow-methods", "GET, POST, PUT, DELETE, OPTIONS");
-  response.setHeader("access-control-allow-headers", "content-type, authorization, x-ghost-turn-id");
-  response.setHeader("access-control-expose-headers", "x-ghost-turn-id");
+  response.setHeader("access-control-allow-headers", "content-type, authorization");
 }
 
 async function readJsonBody(
@@ -1051,13 +1052,8 @@ export function createDaemonServer(options: ServerOptions): Server {
     response: ServerResponse,
     run: (emit: (event: PiMessagesEvent) => void, signal: AbortSignal) => Promise<void>,
   ): Promise<void> => {
-    const requestedTurnId = request.headers["x-ghost-turn-id"];
-    const turnId = typeof requestedTurnId === "string" && TURN_ID_PATTERN.test(requestedTurnId)
-      ? requestedTurnId
-      : crypto.randomUUID();
-
     const connection = abortOnClose(request, response);
-    response.writeHead(200, { ...SSE_HEADERS, "x-ghost-turn-id": turnId });
+    response.writeHead(200, SSE_HEADERS);
     response.write(SSE_KEEPALIVE_COMMENT);
     // A turn can idle behind a slow model; keep the connection warm. Ghost's
     // in-repo SSE parsers skip frames without a `data:` line, so a comment costs
@@ -1763,12 +1759,12 @@ export function createDaemonServer(options: ServerOptions): Server {
   }
 
   // Exposed so close() can end streams that would otherwise hold shutdown open.
-  Object.assign(server, { [LIVE_STREAMS]: liveStreams, [RELAY_HUB]: relay });
+  serverState.set(server, { liveStreams, relay });
   return server;
 }
 
 export function relayHubOf(server: Server): RelayHub | undefined {
-  return (server as unknown as Record<symbol, RelayHub | null | undefined>)[RELAY_HUB] ?? undefined;
+  return serverState.get(server)?.relay ?? undefined;
 }
 
 export async function startDaemonServer(
@@ -1798,8 +1794,7 @@ export async function startDaemonServer(
       // an open connection, and `server.close()` waits for those.
       await relay?.close();
       await new Promise<void>((resolvePromise, rejectPromise) => {
-        const streams = (server as unknown as Record<symbol, Set<ServerResponse>>)[LIVE_STREAMS];
-        for (const stream of streams ?? []) {
+        for (const stream of serverState.get(server)?.liveStreams ?? []) {
           if (!stream.writableEnded) stream.end();
         }
         server.close((error) => {

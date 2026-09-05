@@ -145,6 +145,16 @@ that itself contains slashes is fine. Ghost keeps no catalog: pi validates the
 model when the next turn runs. The HUD pill shows the binding and opens the
 provider login.
 
+To drive the ghost with a local model, install Ollama or LM Studio from the
+Omarchy menu (Install → AI). A local runner is an ordinary provider entry in
+`~/ghosts/<name>/models.json`, an OpenAI-compatible endpoint with the models it
+serves (the shape is `GhostProviderConfig` in
+[`models.ts`](../packages/daemon/src/models.ts)); the easiest way to add one is
+to ask the ghost, which has the file and the schema. Then `ghost model
+<provider>/<model>` makes it the chat model. Keep a frontier model on
+`advisor_model` for the hard questions and for reading images when the local
+model cannot.
+
 To run the conversation on Claude Code instead, set
 `ghost model claude-code/default` — that path additionally needs an installed,
 authenticated `claude` and the exact SDK closure described in

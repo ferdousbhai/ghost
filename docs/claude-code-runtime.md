@@ -14,34 +14,28 @@ This is distinct from selecting an Anthropic model through Pi:
 
 ## Setup
 
-Install Claude Code 2.1.251 or newer and authenticate it outside Ghost:
+Install Claude Code at or above `CLAUDE_CODE_MINIMUM_VERSION`
+([`claude-code.ts`](../packages/daemon/src/claude-code.ts)) and authenticate it
+outside Ghost:
 
 ```sh
 claude auth login
 claude auth status --json
 ```
 
-Install the exact SDK closure under Ghost's versioned XDG data root:
-
-```text
-$XDG_DATA_HOME/ghost/claude-agent-sdk/0.3.170/
-  package.json
-  node_modules/@anthropic-ai/claude-agent-sdk
-```
-
-The required versions are `@anthropic-ai/claude-agent-sdk@0.3.170`,
-`@anthropic-ai/sdk@0.93.0`, `@modelcontextprotocol/sdk@1.29.0`, and
-`zod@4.4.3`. When `XDG_DATA_HOME` is not absolute, the root is
-`~/.local/share/ghost/claude-agent-sdk/0.3.170`.
-
-Select the runtime through the model API or HUD:
+Then select the runtime:
 
 ```sh
-curl -X PUT http://127.0.0.1:7717/api/ghosts/casper/model \
-  -H "authorization: Bearer $(ghostd api-token --quiet)" \
-  -H 'content-type: application/json' \
-  --data '{"provider":"claude-code","id":"default"}'
+ghost model claude-code/default
+ghost say --new "hello"
 ```
+
+The Claude Agent SDK is not packaged with Ghost. The first Claude turn without
+it fails with the exact `pnpm add --dir …` command that installs the pinned
+graph under Ghost's versioned XDG data root; the versions are
+`CLAUDE_AGENT_SDK_VERSION` and its peers in
+[`claude-agent-sdk-loader.ts`](../packages/daemon/src/claude-agent-sdk-loader.ts),
+and the daemon refuses a mismatched or partial graph rather than loading it.
 
 The stored role is:
 

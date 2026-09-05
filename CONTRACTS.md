@@ -74,9 +74,10 @@ starts in, under the same absolute-and-under-the-owner-home rule.
 ### Character and notes
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
-with a heading naming the persona. Its complete body (maximum 20,000
-JavaScript UTF-16 code units) is the persona. A seeded or blank character marks onboarding; the ghost
-shows the owner a draft and waits for confirmation before replacing it.
+with a heading naming the persona. Its complete body, bounded by
+`MAX_CHARACTER_BODY_LENGTH` in [`home.ts`](packages/extensions/src/home.ts),
+is the persona. A seeded or blank character marks onboarding; the ghost shows
+the owner a draft and waits for confirmation before replacing it.
 
 There is no ghost-private memory store. A ghost's notes — owner facts,
 decisions, tasks, and its own reflections — are Markdown files under the
@@ -201,7 +202,8 @@ Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
 `session_before_compact` handler returns a compaction whose summary is a
 bounded recovery record (owner inputs of the current window, the unconsumed
 tool batch, the prior checkpoint) and no model is called; Pi's retained tail
-stays pinned at 500 tokens. One checkpoint reminder is steered in before the
+is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
+[`compaction.ts`](packages/daemon/src/compaction.ts). One checkpoint reminder is steered in before the
 line, `new_context` rolls over on demand with the ghost's own handoff, and
 `history` searches and reads the transcript across windows
 ([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
@@ -271,8 +273,8 @@ questions, two to four described options per question, `multiSelect`, optional
 previews and metadata, answers keyed by question text, and optional per-question
 annotations. The internal wire name remains `ask` for both runtimes so the HUD
 has one predictable interaction. A pending question is pollable and the first
-valid response wins. The daemon-wide timeout defaults to 120 seconds; zero
-waits forever. A model-facing timeout returns an empty answer map and never
+valid response wins. The daemon-wide timeout is `DEFAULT_ASK_TIMEOUT_SECONDS`
+in [`config.ts`](packages/daemon/src/config.ts); zero waits forever. A model-facing timeout returns an empty answer map and never
 invents an owner selection.
 
 In Pi, every Bash command is represented by a `GhostJob`. Foreground commands
@@ -427,7 +429,8 @@ hosted-session, concurrency, or spend cap.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
   opt-in MV3 relay into the owner's Chromium. Pairing and workspace ownership
   are capability-scoped; there is no second browser backend. Client text
-  frames are capped at 32 MiB of UTF-8 before JSON parsing.
+  frames are capped at `MAX_RELAY_MESSAGE_BYTES`
+  ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
   it. Its startup handshake and the extensions client agree on desktop-helper

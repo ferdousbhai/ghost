@@ -1249,13 +1249,11 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(events.some((event) => event.type.startsWith("thinking"))).toBe(false);
   });
 
-  it("echoes the caller's turn id and mints one otherwise", async () => {
+  it("ignores a caller-supplied turn id header", async () => {
     const base = await serve();
-    const echoed = await postTurn(base, TURN_BODY, { "x-ghost-turn-id": "turn-abc.1" });
-    expect(echoed.headers.get("x-ghost-turn-id")).toBe("turn-abc.1");
-
-    const minted = await postTurn(base, TURN_BODY, { "x-ghost-turn-id": "not a valid id!" });
-    expect(minted.headers.get("x-ghost-turn-id")).toMatch(/^[0-9a-f-]{36}$/);
+    const response = await postTurn(base, TURN_BODY, { "x-ghost-turn-id": "turn-abc.1" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-ghost-turn-id")).toBeNull();
   });
 
   it("keeps separate conversations in separate sessions", async () => {
