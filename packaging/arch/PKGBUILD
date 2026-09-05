@@ -16,7 +16,6 @@ depends=(
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
-  'npm'
   'python>=3.11'
   'python-dbus>=1.4'
   'python-gobject>=3.50'
@@ -43,8 +42,8 @@ checkdepends=(
   'python-yaml'
 )
 optdepends=(
-  'basecamp-cli: Basecamp CLI and embedded pi skill'
   'chromium: the browser the relay drives, and the browser-relay smoke test'
+  'npm: npx-launched MCP servers and other owner-installed pi integrations'
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime'
   'pnpm: install the optional owner-local Claude Agent SDK boundary'
 )

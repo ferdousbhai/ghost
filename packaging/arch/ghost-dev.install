@@ -15,24 +15,9 @@ Enable Ghost for the current graphical login with:
 
   systemctl --user enable --now ghostd.service ghost-shell.service
 
-Other optional pi integrations are installed from upstream as this desktop
-user; Ghost packages none of their CLIs or skills:
-
-  npx -y firecrawl-cli@latest init --all --skip-auth
-  hey skill install
-  omarchy pkg add basecamp-cli
-  basecamp skill install
-  npm install -g @googleworkspace/cli
-  npx -y skills@latest add https://github.com/googleworkspace/cli \
-    --global --yes --skill gws-calendar gws-chat gws-docs gws-drive gws-forms \
-    gws-gmail gws-keep gws-meet gws-people gws-shared gws-sheets gws-slides \
-    gws-tasks gws-workflow
-
-Exact skill selections, authentication commands, and upstream sources:
-
-  /usr/share/doc/ghost/ARCH.md
-
-Current Omarchy supplies hey through mise; run omarchy update if hey is missing.
+Skills, MCP servers, and other pi integrations are yours to install from
+upstream as this desktop user; Ghost packages none of them. Many MCP servers
+launch through npx, which the optional npm package provides.
 
 Ghost homes, credentials, browser profiles, and daemon state live in your home
 directory. Pacman does not own or remove them.

@@ -27,7 +27,7 @@ Build the checkout package without installing it:
 makepkg --cleanbuild
 ```
 
-## Native coding workers
+## Claude Code
 
 Ghost does not install Claude Code or the optional Claude Agent SDK graph.
 `GHOST_CLAUDE_BINARY` may select an explicit owner executable or wrapper in the
@@ -41,46 +41,12 @@ Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
 Documents directory. Every ghost reads and writes it with its runtime's native
 file tools; the package installs nothing there and gates nothing on it.
 
-## Optional CLI integrations
+## Optional integrations
 
-Install only the integrations you want as the desktop user; the upstream
-installer then owns its files and updates. npm is already a Ghost dependency.
-
-[Firecrawl](https://github.com/firecrawl/cli) provides keyless web search and
-scraping plus its official skills:
-
-```sh
-npx -y firecrawl-cli@latest init --all --skip-auth
-```
-
-Replace `--skip-auth` with `--browser` to sign in during setup.
-
-[HEY](https://github.com/basecamp/hey-cli) is installed by current Omarchy
-through its mise wrapper. If `hey` is missing, run `omarchy update` to receive
-that migration. [Basecamp](https://github.com/basecamp/basecamp-cli) is in
-Omarchy's package repository. Both CLIs embed their own skills:
-
-```sh
-hey skill install
-hey auth login
-
-omarchy pkg add basecamp-cli
-basecamp skill install
-basecamp auth login
-```
-
-Google publishes both the
-[Google Workspace CLI](https://github.com/googleworkspace/cli) and its skills:
-
-```sh
-npm install -g @googleworkspace/cli
-npx -y skills@latest add https://github.com/googleworkspace/cli \
-  --global --yes \
-  --skill gws-calendar gws-chat gws-docs gws-drive gws-forms gws-gmail \
-    gws-keep gws-meet gws-people gws-shared gws-sheets gws-slides gws-tasks \
-    gws-workflow
-gws auth setup
-```
+Skills, MCP servers, and CLI integrations are yours to install from upstream
+as the desktop user; the upstream installer then owns its files and updates,
+and Ghost packages none of them. Many are launched through `npx`, which the
+optional `npm` package provides.
 
 Open a new pi session after installing skills. Ghost uses pi's native parser to
 snapshot every valid skill visible under `~/.agents/skills/` and
@@ -88,11 +54,10 @@ snapshot every valid skill visible under `~/.agents/skills/` and
 There is no hardcoded skill-name allowlist or integration-specific package path.
 
 The Claude Code path uses the owner's complete, unmodified Claude Code harness
-(CLI 2.1.251 or newer) and any native authentication/provider path that its CLI
-reports logged in. The package does not ship the Claude Agent SDK. To use that
-path, follow the exact versioned installation and Option C environment boundary
-in
-[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#runtime-and-security-boundary).
+and any native authentication path its CLI reports logged in. The package does
+not ship the Claude Agent SDK; the minimum CLI version, the SDK pins, and the
+environment boundary are in
+[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost` package uses the
@@ -124,7 +89,7 @@ edits `~/.config/hypr` or `~/.config/omarchy`.
 The package owns only files under `/usr`, plus the system Quickshell symlink at
 `/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
-leaves personas, docs, memory, sessions, provider credentials, and API tokens
+leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 

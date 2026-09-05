@@ -20,7 +20,6 @@ pkgbase = ghost-dev
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
-	depends = npm
 	depends = python>=3.11
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
@@ -33,8 +32,8 @@ pkgbase = ghost-dev
 	depends = wtype>=0.4
 	depends = xdg-utils>=1.2
 	depends = ydotool>=1.0
-	optdepends = basecamp-cli: Basecamp CLI and embedded pi skill
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
+	optdepends = npm: npx-launched MCP servers and other owner-installed pi integrations
 	optdepends = claude-code>=2.1.251: owner-installed Claude Code harness runtime
 	optdepends = pnpm: install the optional owner-local Claude Agent SDK boundary
 	provides = ghost

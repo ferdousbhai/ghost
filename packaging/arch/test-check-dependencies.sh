@@ -127,7 +127,7 @@ require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
   "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
-require_srcinfo_dependency npm "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry optdepends 'npm: npx-launched MCP servers and other owner-installed pi integrations' "$work/ghost-dev.SRCINFO"
 # pi otherwise downloads these into its cache on the first grep/find call.
 require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
@@ -147,7 +147,7 @@ require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
   "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
-require_srcinfo_dependency npm "$work/ghost/.SRCINFO"
+require_srcinfo_entry optdepends 'npm: npx-launched MCP servers and other owner-installed pi integrations' "$work/ghost/.SRCINFO"
 require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
 require_srcinfo_dependency systemd "$work/ghost/.SRCINFO"
