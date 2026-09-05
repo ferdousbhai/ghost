@@ -1088,7 +1088,7 @@ function assertPiConversation(runtime: ConversationRuntime, feature: string): vo
   if (runtime !== "pi") {
     throw new GhostError(
       "not_supported",
-      `${feature} is unavailable for a Claude Code conversation.`,
+      `${feature}: pi only, not available for a Claude Code conversation.`,
       409,
     );
   }

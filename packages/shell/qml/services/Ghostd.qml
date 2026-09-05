@@ -60,7 +60,7 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    // Phone access is daemon-global rather than ghost- or conversation-scoped,
+    // Remote access is daemon-global rather than ghost- or conversation-scoped,
     // so its owner/request state survives ghost and conversation switches.
 
     function makeRemoteRequest(): var {
@@ -439,6 +439,8 @@ Singleton {
     property var commands: []
     property bool commandsLoading: false
     property string commandsError: ""
+    /** Why there is no catalog to show, when that is not an error: pi-only on a Claude conversation. */
+    property string commandsNotice: ""
     property string commandsGhost: ""
     property string commandsSessionId: ""
 
@@ -1683,6 +1685,7 @@ Singleton {
         root.commands = [];
         root.commandsLoading = false;
         root.commandsError = "";
+        root.commandsNotice = "";
         root.commandsGhost = "";
         root.commandsSessionId = "";
     }
@@ -1817,6 +1820,20 @@ Singleton {
                 && root.commandsSessionId === sessionId) return;
         if (root.commandsRequest && root.commandsRequest.readyState !== 4)
             root.commandsRequest.abort();
+        // Slash commands are pi's; a Claude Code conversation has none to
+        // list, and the daemon would only say so with a 409.
+        const identity = root.parseConversationActionId(sessionId);
+        if (identity && identity.runtime === "claude-code") {
+            root.commandsRequest = null;
+            root.commands = [];
+            root.commandsLoading = false;
+            root.commandsError = "";
+            root.commandsNotice = "Slash commands are pi's. This conversation runs on Claude Code.";
+            root.commandsGhost = ghost;
+            root.commandsSessionId = sessionId;
+            return;
+        }
+        root.commandsNotice = "";
 
         const xhr = new XMLHttpRequest();
         root.commandsRequest = xhr;
@@ -2094,6 +2111,16 @@ Singleton {
         }
         const sessionId = root.ensureSession(ghost);
         root.prepareWorkIdentity(ghost, sessionId);
+        // Background jobs are Ghost's pi runtime state; Claude keeps its own
+        // and the daemon answers 409, which is not an error worth a banner.
+        const identity = root.parseConversationActionId(sessionId);
+        if (identity && identity.runtime === "claude-code") {
+            root.retireWorkRequest();
+            root.workJobs = [];
+            root.workJobsError = "";
+            root.workJobsLoaded = true;
+            return;
+        }
         root.fetchWorkJobs(force, ghost, sessionId);
     }
 

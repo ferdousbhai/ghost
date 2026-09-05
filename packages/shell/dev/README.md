@@ -94,7 +94,7 @@ stop the mock separately.
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
   bottom, and the permanent Chat / Character / Commands / Hooks / Resources /
-  MCP / Phone access rail at the right edge. `SUPER+CTRL+G` is
+  MCP / Remote access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`.
   Commands shows the session's searchable Ghost catalog and stages a chosen slash

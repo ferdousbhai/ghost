@@ -181,7 +181,7 @@ Type, and:
 
 The 64-pixel rail on the right switches sections: **Chat**, **Character**,
 **Commands**, **Hooks**, **Resources**, **MCP**, and
-**Phone access**. Left-clicking the tray icon toggles the HUD; its menu carries
+**Remote access**. Left-clicking the tray icon toggles the HUD; its menu carries
 a ghost switcher when you have more than one, five recent conversations, **New
 conversation**, **Choose a model**, and **Quit ghost shell**.
 
@@ -245,7 +245,7 @@ and any skill you installed untouched.
   composer says when it is listening. Ghost adds nothing else: no speech
   stack, no voice of its own.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
-- **Phone access.** `ghostd remote status` (or the HUD's Phone access pane)
+- **Remote access.** `ghostd remote status` (or the HUD's Remote access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only.
 
 ## 10. If something is wrong

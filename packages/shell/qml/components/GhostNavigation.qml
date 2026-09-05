@@ -49,7 +49,7 @@ FocusScope {
         },
         {
             id: "remote",
-            label: "Phone access",
+            label: "Remote access",
             icon: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10 5h4M11 18h2"
         }
     ]

@@ -148,7 +148,7 @@ Rectangle {
         Text {
             objectName: "remoteTitle"
             width: parent.width
-            text: "Reach me from my phone"
+            text: "Reach me from another device"
             textFormat: Text.PlainText
             color: Theme.foregroundBright
             font.family: Theme.fontFamily
@@ -221,7 +221,7 @@ Rectangle {
 
                             Text {
                                 width: parent.width
-                                text: "Phone access"
+                                text: "Remote access"
                                 textFormat: Text.PlainText
                                 color: Theme.foregroundBright
                                 font.family: Theme.fontFamily
@@ -268,7 +268,7 @@ Rectangle {
                             opacity: enabled ? 1 : 0.55
 
                             Accessible.role: Accessible.CheckBox
-                            Accessible.name: "Remote phone access"
+                            Accessible.name: "Remote access"
                             Accessible.description: root.statusLine
                             Accessible.checked: remoteSwitch.checked
 
@@ -366,7 +366,7 @@ Rectangle {
 
                     Text {
                         width: parent.width
-                        text: "Open on your phone"
+                        text: "Open on another device"
                         textFormat: Text.PlainText
                         color: Theme.foregroundBright
                         font.family: Theme.fontFamily

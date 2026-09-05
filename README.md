@@ -14,7 +14,7 @@ owner's Documents directory, shared by every ghost and the owner; nothing there
 is indexed or injected. An installed Claude Code can drive a ghost instead of
 pi with the same character and policy. A ghost can also maintain the code it
 runs on ([docs/self-maintenance.md](docs/self-maintenance.md)), and the opt-in
-tailnet viewer reaches it from a phone over Tailscale Serve.
+tailnet viewer reaches it from a phone or any other device over Tailscale Serve.
 
 The `ghost` terminal client talks only to ghostd's authenticated HTTP API and
 has a named verb for everything the HUD can do:

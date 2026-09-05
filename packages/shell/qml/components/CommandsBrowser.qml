@@ -216,6 +216,16 @@ Rectangle {
             width: catalogScroll.width - Theme.pad * 2
             spacing: Theme.sectionGap
 
+            Text {
+                width: parent.width
+                visible: Ghostd.commandsNotice !== ""
+                text: Ghostd.commandsNotice
+                color: Theme.foregroundDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                wrapMode: Text.WordWrap
+            }
+
             Rectangle {
                 width: parent.width
                 height: errorText.implicitHeight + Theme.pad
