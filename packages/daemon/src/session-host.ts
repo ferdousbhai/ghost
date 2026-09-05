@@ -575,6 +575,8 @@ export interface SessionHostOptions {
   ownerHome?: string;
   /** One absolute systemd user-unit directory for prompts and lifecycle. */
   scheduleUnitDir?: string;
+  /** The `ghost` executable timer units name; defaults to the one on the daemon's PATH. */
+  scheduleCliPath?: string;
   /** Runtime systemd user-unit directory; main supplies the XDG-resolved path. */
   scheduleRuntimeUnitDir?: string;
   /** What runs this daemon, for the self-maintenance policy. Unknown when absent. */
@@ -656,6 +658,7 @@ export interface SessionHostOptions {
     | "machineSkillPaths"
     | "ownerHome"
     | "scheduleUnitDir"
+    | "scheduleCliPath"
     | "runningSource"
     | "askTimeoutMs"
   >;
@@ -1439,6 +1442,7 @@ export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly scheduleCliPath: string;
   private readonly scheduleRuntimeUnitDir: string;
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
@@ -1518,6 +1522,7 @@ export class SessionHost {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
     const scheduleRuntimeUnitDir = options.scheduleRuntimeUnitDir
       ?? join(this.ownerHome, ".runtime", "systemd", "user");
     if (!isAbsolute(scheduleRuntimeUnitDir)) {
@@ -1598,6 +1603,7 @@ export class SessionHost {
       hooks: this.hooks,
       ...(options.claudeCode ?? {}),
       scheduleUnitDir: this.scheduleUnitDir,
+      scheduleCliPath: this.scheduleCliPath,
       ...(this.runningSource ? { runningSource: this.runningSource } : {}),
       askTimeoutMs: () => this.askTimeoutSeconds * 1000,
     });
@@ -2051,7 +2057,7 @@ export class SessionHost {
       CONTEXT_WINDOW_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),
-      renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir, ghostCliPath()),
+      renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir, this.scheduleCliPath),
       renderSelfMaintenancePolicy({
         ghostName,
         checkout: resolveSelfCheckout(settings, this.ownerHome),

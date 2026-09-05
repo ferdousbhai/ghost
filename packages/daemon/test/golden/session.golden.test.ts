@@ -104,6 +104,7 @@ describe("golden: session", () => {
       registry: temp.registry,
       ownerHome: temp.ownerHome,
       scheduleUnitDir,
+      scheduleCliPath: "/usr/bin/ghost",
       machineSkillPaths: [machineSkills],
       offline: true,
       // Titling is a background smol completion; pin it rather than let a

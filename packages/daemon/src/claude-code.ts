@@ -261,6 +261,8 @@ export interface ClaudeCodeProbeOptions {
 export interface ClaudeCodeRuntimeOptions {
   ownerHome?: string;
   scheduleUnitDir?: string;
+  /** The `ghost` executable timer units name; defaults to the one on the daemon's PATH. */
+  scheduleCliPath?: string;
   /** What runs this daemon, for the self-maintenance policy. Unknown when absent. */
   runningSource?: RunningSource;
   machineSkillPaths?: readonly string[];
@@ -1152,7 +1154,7 @@ async function removeResumeMarkers(metadataPath: string): Promise<void> {
 async function buildPersona(
   homeDir: string,
   ghostName: string,
-  scheduleUnitDir: string,
+  schedule: { unitDir: string; cliPath: string },
   self: { ownerHome: string; running: RunningSource | null; sessionId: string },
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -1166,7 +1168,7 @@ async function buildPersona(
       OWNER_DELIVERABLE_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
-      renderScheduledWorkPolicy(ghostName, scheduleUnitDir, ghostCliPath()),
+      renderScheduledWorkPolicy(ghostName, schedule.unitDir, schedule.cliPath),
       renderSelfMaintenancePolicy({
         ghostName,
         checkout: resolveSelfCheckout(loadGhostSettings(homeDir), self.ownerHome),
@@ -1832,6 +1834,7 @@ export class ClaudeCodeRuntime {
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
+  private readonly scheduleCliPath: string;
   private readonly runningSource: RunningSource | null;
   private readonly warmIdleTtlMs: number;
   private readonly exitWaitTimeoutMs: number;
@@ -1872,6 +1875,7 @@ export class ClaudeCodeRuntime {
       throw new TypeError("scheduleUnitDir must be absolute");
     }
     this.scheduleUnitDir = resolve(scheduleUnitDir);
+    this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
     this.runningSource = options.runningSource ?? null;
     this.environment = captureClaudeCodeEnvironment(options.environment ?? process.env);
     const warmIdleTtlMs = options.warmIdleTtlMs ?? CLAUDE_WARM_QUERY_IDLE_TTL_MS;
@@ -2691,7 +2695,7 @@ export class ClaudeCodeRuntime {
     const prompt = await buildPersona(
       home,
       ghostName,
-      this.scheduleUnitDir,
+      { unitDir: this.scheduleUnitDir, cliPath: this.scheduleCliPath },
       { ownerHome: this.ownerHome, running: this.runningSource, sessionId: conversationId },
     );
     // A turn racing another turn of the same conversation is already refused by
