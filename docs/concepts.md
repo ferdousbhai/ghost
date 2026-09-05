@@ -118,7 +118,7 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
 - **Pi** is the default. Ghost builds the session explicitly: its own model
   runtime, credential store, settings, and resource snapshot, with pi's
   inherited system prompt, ambient config/MCP, and automatic credential
-  discovery kept out. Pi's native file, search, Bash, compaction, steering,
+  discovery kept out. Pi's native file, search, Bash, steering,
   and branch behavior is kept; Ghost adds `ask`, background jobs,
   browser, screen, desktop, and MCP.
 - **Claude Code** is optional and native-first: `claude-code/default` runs the

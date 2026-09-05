@@ -43,7 +43,6 @@ import {
 } from "./control-file.js";
 import {
   DEFAULT_COMPACTION_CONFIG,
-  GHOST_COMPACTION_PROMPT,
   nativeCompactionSettings,
   type CompactionConfig,
 } from "./compaction.js";
@@ -158,6 +157,7 @@ import {
 } from "./jobs.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
 import { createInspectImageTool } from "./inspect-image.js";
+import { CONTEXT_WINDOW_POLICY, ghostContextWindowsExtension } from "./context-windows.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
@@ -333,15 +333,6 @@ async function promptPiSession(
   // was given (`promptsOverride`); everything else is the owner's message.
   await session.prompt(prompt);
 }
-
-/** Ghost's summary briefing replaces pi's default compaction instructions. */
-const ghostCompactionExtension: ExtensionFactory = (api) => {
-  api.on("session_before_compact", (event) => {
-    if (event.customInstructions !== undefined) return undefined;
-    (event as { customInstructions?: string }).customInstructions = GHOST_COMPACTION_PROMPT;
-    return undefined;
-  });
-};
 
 /** Registers whichever manager the hosted MCP slot holds when pi (re)loads. */
 function mcpToolsExtension(mcp: HostedMCP): ExtensionFactory {
@@ -2610,6 +2601,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      CONTEXT_WINDOW_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       renderSelfMaintenancePolicy({
@@ -2639,7 +2631,6 @@ export class SessionHost {
     const personaSections = await renderPersonaPrompt(ghostExtension, { cwd: runtimeCwd });
     const extensionFactories: ExtensionFactory[] = [
       piExtensionFromGhost(ghostExtension),
-      ghostCompactionExtension,
     ];
 
     const modelRuntime = await createGhostPiRuntime({
@@ -2733,6 +2724,8 @@ export class SessionHost {
     extensionFactories.push(mcpToolsExtension(liveMcp));
     const chatRef = chatModelChoice(readGhostModels(paths.home), modelRuntime.localProviders).ref;
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
+    const compaction = nativeCompactionSettings(this.compactionConfig, chatModel?.contextWindow);
+    extensionFactories.push(ghostContextWindowsExtension(compaction));
     if (chatRef && (chatModel?.provider !== chatRef.provider || chatModel.id !== chatRef.modelId)) {
       logger.warn("configured chat model is not available", {
         provider: chatRef.provider,
@@ -2740,7 +2733,7 @@ export class SessionHost {
       });
     }
     const settingsManager = SettingsManager.inMemory({
-      compaction: nativeCompactionSettings(this.compactionConfig, chatModel?.contextWindow),
+      compaction,
       defaultTools: [...PI_NATIVE_TOOL_NAMES],
       enableSkillCommands: false,
     }, { projectTrusted: false });

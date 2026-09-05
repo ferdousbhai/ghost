@@ -227,11 +227,17 @@ runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
 automatic credential discovery, themes, prompt templates, executable project
 code, and native task tool do not enter the session. Ghost keeps Pi's native
-file, search, Bash, compaction, steering/follow-up, and branch behavior —
-supplying its own summary instructions and pinning Pi's raw retained-tail
-target to 500 tokens (Pi may keep more to respect message and tool-call
-boundaries; Claude Code's native compaction is unaffected) — and
-adds `ask`, background jobs, browser,
+file, search, Bash, steering/follow-up, and branch behavior. Compaction is
+Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
+`session_before_compact` handler returns a compaction whose summary is a
+bounded recovery record (owner inputs of the current window, the unconsumed
+tool batch, the prior checkpoint) and no model is called; Pi's retained tail
+stays pinned at 500 tokens. One checkpoint reminder is steered in before the
+line, `new_context` rolls over on demand with the ghost's own handoff, and
+`history` searches and reads the transcript across windows
+([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
+pi-posthorse). Claude Code's native compaction is unaffected. Ghost adds
+`ask`, background jobs, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their
 native image understanding. The exact assembly is

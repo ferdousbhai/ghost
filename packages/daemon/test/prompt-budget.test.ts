@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "@ghost/extensions";
 import { FIRST_MEETING_SECTION } from "../src/greeting.js";
+import { CONTEXT_WINDOW_POLICY } from "../src/context-windows.js";
 import {
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
@@ -64,6 +65,7 @@ function renderStablePolicy(): Record<string, string> {
     Memory: promptSection("## Memory"),
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
+    "Context windows": CONTEXT_WINDOW_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
@@ -82,13 +84,14 @@ const CEILINGS: Record<string, number> = {
   Memory: 1537,
   "Computer use": 415,
   "Finished work": 404,
+  "Context windows": 665,
   "Owner context": 765,
   "Scheduled work": 1399,
   "Self-maintenance": 2116,
   "First meeting": 470,
 };
 
-const TOTAL_CEILING = 8046;
+const TOTAL_CEILING = 8711;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

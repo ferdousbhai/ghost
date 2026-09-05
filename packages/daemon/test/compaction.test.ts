@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  GHOST_COMPACTION_PROMPT,
-  nativeCompactionSettings,
-} from "../src/compaction.js";
+import { nativeCompactionSettings } from "../src/compaction.js";
 
 describe("nativeCompactionSettings", () => {
   it("reserves the last 20% of the model's window by default", () => {
@@ -45,9 +42,3 @@ describe("nativeCompactionSettings", () => {
   });
 });
 
-describe("GHOST_COMPACTION_PROMPT", () => {
-  it("is a summary hand-off rather than a continuation instruction", () => {
-    expect(GHOST_COMPACTION_PROMPT).toContain("only produce the briefing");
-    expect(GHOST_COMPACTION_PROMPT).toContain("Open threads and next steps");
-  });
-});
