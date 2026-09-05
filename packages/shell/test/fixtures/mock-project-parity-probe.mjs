@@ -151,17 +151,13 @@ try {
   const hooks = await hooksResponse.json();
   assert.deepEqual(Object.keys(hooks), ["active", "total", "events", "hooks"]);
   assert.equal(hooks.active, true);
-  assert.equal(hooks.total, 4);
+  assert.equal(hooks.total, 2);
   assert.deepEqual(hooks.events, [
-    { event: "before_prompt", count: 2 },
-    { event: "session_stop", count: 2 },
+    { event: "before_prompt", count: 1 },
+    { event: "session_stop", count: 1 },
   ]);
   assert.equal(hooks.hooks.length, hooks.total);
   assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "source", "name", "description"]);
-  assert.deepEqual(Object.keys(hooks.hooks[2]), [
-    "event", "source", "name", "description", "settingsKey",
-  ]);
-  assert.equal(hooks.hooks[2].settingsKey, "review");
   const serializedHooks = JSON.stringify(hooks);
   for (const forbidden of [
     "command", "commands", "args", "arguments", "path", "paths", "prompt", "prompts",

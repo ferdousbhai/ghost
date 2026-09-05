@@ -33,14 +33,15 @@ than becoming parallel Ghost frameworks.
   well-known loopback port is detected automatically and drives the ghost when
   nothing else is bound. Frontier models bind only to the teacher and
   specialist roles,
-  `advisor_model`, `task_model`, and `slow_model`, and are reached through the
-  review hook's advisor pass on `session_stop` and through the specialist CLIs
-  the ghost runs from Bash. Those supervisor hooks are the training signal for the
-  continual-learning flywheel in #64. The adapter trains on the owner's GPU
-  when there is one and otherwise, per ghost and by opt-in, on Fireworks AI
-  through the owner's own account with only the redacted review journal
-  leaving the machine; the adapter stays downloadable so it can be served
-  locally later, behind one provider-agnostic adapter-host seam.
+  `advisor_model`, `task_model`, and `slow_model`, and are reached through
+  `ghostd hook-smol-complete --role advisor` from an owner `session_stop` hook
+  and through the specialist CLIs the ghost runs from Bash. Those owner hooks
+  are the training signal for the continual-learning flywheel in #64; the
+  core keeps no review pipeline or training journal of its own. The adapter
+  trains on the owner's GPU when there is one and otherwise, per ghost and by
+  opt-in, on Fireworks AI through the owner's own account with only redacted
+  hook output leaving the machine; the adapter stays downloadable so it can
+  be served locally later, behind one provider-agnostic adapter-host seam.
 - **Lean core, adaptive ghost.** The core ships sensible defaults and stops
   there. A ghost fits its owner through character, memory, hooks, and its own
   checkout (#65), not through the core growing a feature per preference. The

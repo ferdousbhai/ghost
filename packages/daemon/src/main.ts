@@ -3,7 +3,6 @@ import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createReviewHook } from "./review-hook.js";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
@@ -17,7 +16,7 @@ import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
-import { completeHookSmol, hookSmolCompleteCommand } from "./hook-smol-complete.js";
+import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { createJournalSink } from "./journal.js";
 import { detectLocalModelProviders } from "./local-models.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
@@ -474,16 +473,6 @@ async function serveDaemon(
     },
     claudeCode,
   });
-  await hooks.register(createReviewHook({
-    logger,
-    ownerHome,
-    // An `advisor_model` bound to Claude Code answers through the same
-    // install, probe, and child environment as the principal runtime.
-    complete: (input, options) => completeHookSmol(input, {
-      ...options,
-      claude: { ...claudeCode, logger },
-    }),
-  }));
   const login = new LoginManager({
     registry,
     homeOperations,

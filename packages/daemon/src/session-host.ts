@@ -97,7 +97,6 @@ import {
   type PresentationHistoryV1,
   type SettledTurn,
 } from "./presentation-history.js";
-import { reviewJournalPath } from "./review-journal.js";
 import {
   homeOperationsFor,
   type HomeMoveParticipantReservation,
@@ -720,7 +719,7 @@ export interface QueuedMessages {
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
   artifact: "omp-transcript" | "claude-sidecar" | "project-binding"
-    | "project-snapshot" | "tool-cwds" | "presentation-history" | "review-journal";
+    | "project-snapshot" | "tool-cwds" | "presentation-history";
   source: string;
 }
 
@@ -914,7 +913,6 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"
   "project-snapshot",
   "tool-cwds",
   "presentation-history",
-  "review-journal",
 ]);
 
 interface DeleteMoveIntent extends TrashedConversationFileArtifact {}
@@ -1080,8 +1078,6 @@ function exactDeleteStaticSource(
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
     case "presentation-history":
       return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
-    case "review-journal":
-      return artifact.source === reviewJournalPath(sessionDir, runtime, conversationId);
     case "project-snapshot": {
       if (runtime !== "pi" || artifact.source !== join(sessionDir, basename(artifact.source))) {
         return false;
@@ -6388,7 +6384,6 @@ export class SessionHost {
       const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
       const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
-      const reviewJournal = reviewJournalPath(paths.sessionDir, runtime, id);
       const projectSnapshots = runtime === "pi"
         ? await piProjectSnapshotPaths(paths.sessionDir, id)
         : [];
@@ -6409,7 +6404,6 @@ export class SessionHost {
               path,
             })),
             { artifact: "presentation-history", path: presentationPath },
-            { artifact: "review-journal", path: reviewJournal },
           ]
         : [
             { artifact: "claude-sidecar", path: claudePath },
@@ -6419,7 +6413,6 @@ export class SessionHost {
             })),
             { artifact: "project-binding", path: bindingPath },
             { artifact: "presentation-history", path: presentationPath },
-            { artifact: "review-journal", path: reviewJournal },
           ];
       const artifacts = [...deleteRecord.artifacts];
       const recorded = new Set(artifacts.map((entry) =>

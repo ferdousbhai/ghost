@@ -175,10 +175,10 @@ describe("GhostHookRunner", () => {
     expect(runner.hasHandlers("before_prompt")).toBe(true);
   });
 
-  it("admits only the known builtin section and names it on status", async () => {
+  it("refuses every builtin key and still names a code-registered hook on status", async () => {
     const directory = temporaryDirectory();
     const config = join(directory, "hooks.json");
-    writeFileSync(config, JSON.stringify({ hooks: {}, builtin: { review: {} } }));
+    writeFileSync(config, JSON.stringify({ hooks: {}, builtin: {} }));
     const runner = GhostHookRunner.fromConfig(config);
 
     await runner.register((api) => {
@@ -188,7 +188,7 @@ describe("GhostHookRunner", () => {
       event: "session_stop",
       source: "builtin",
       name: "Review",
-      description: "Reviews the current assistant pass and may continue it.",
+      description: "Runs after the assistant pass and may continue it.",
       settingsKey: "review",
     }]);
 
@@ -196,12 +196,11 @@ describe("GhostHookRunner", () => {
       [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],
       [{ hooks: {}, builtin: { "Bad-Key": {} } }, /must match \[a-z\]/u],
       [{ hooks: {}, builtin: { memory_upkeep: {} } }, /unsupported builtin key/u],
-      [{ hooks: {}, builtin: { review: 5 } }, /builtin\.review must be an object/u],
-      [{ hooks: {}, builtin: { review: { idleSeconds: 5 } } }, /builtin\.review\.idleSeconds is not a setting/u],
+      [{ hooks: {}, builtin: { review: {} } }, /unsupported builtin key/u],
     ] as const) {
       await expect(runner.replaceConfig(document)).rejects.toThrow(message);
     }
-    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ hooks: {}, builtin: { review: {} } });
+    expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ hooks: {}, builtin: {} });
     await expect(new GhostHookRunner().register((api) => {
       api.on("before_prompt", () => {}, { settingsKey: "Nope" });
     })).rejects.toThrow(/settingsKey must match/u);

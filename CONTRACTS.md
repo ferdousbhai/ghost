@@ -52,7 +52,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   agents/<name>.md
   commands/<name>.md
   rules/  prompts/  hooks/
-  AGENTS.md  CLAUDE.md  WATCHDOG.md  LINT.yml
+  AGENTS.md  CLAUDE.md
   settings.yml
   models.json
   mcp.json
@@ -144,20 +144,6 @@ the next write, and the sidecar moves to Trash with its conversation. Pi
 conversations write no journal; their JSONL is already the durable history.
 See [`presentation-history.ts`](packages/daemon/src/presentation-history.ts).
 
-Opting in with `review.journal: true` adds a second bounded sidecar on both
-runtimes (`*.<runtime>.review-journal.json`): one entry per reviewed turn
-holding the turn delta, the lint findings and advisor notes it drew, where they
-were delivered, and the rewrite a strict continuation produced. A delta
-reconstructed from a transcript also carries `ownerRecordId`, the transcript id
-of that turn's owner-prompt record — the durable key a later reader uses to
-find the turn again, since `delta.text` is a display rendering. It is written
-only while `review.mode` is not `off`, every text field is secret-redacted and
-capped before disk, oldest entries are dropped at its bounds, a write failure
-only warns, and it moves to Trash with its conversation. Like the presentation
-journal it is display and training state, never runtime state; nothing reads it
-back at runtime. See
-[`review-journal.ts`](packages/daemon/src/review-journal.ts).
-
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
 to recoverable Trash. Fork and delete use durable markers so an unpublished or
@@ -200,7 +186,6 @@ ghost home directory, which moves as one unit.
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
-| Review-journal sidecars (opt-in) | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
 | The ghost's `self.checkout` clone | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
@@ -296,12 +281,12 @@ extension factories are Pi-native executable extensions and do not enter
 Claude. These exceptions must stay visible in the resource/API surfaces and
 must not be presented as shared capabilities.
 
-Claude Code also serves the review teacher, independently of which runtime
-drives the ghost: a Pi-driven ghost and a Claude-driven ghost both reach it by
-binding `roles.advisor_model` to `claude-code/default`. That teacher query is
-not a principal session — no persona, no project snapshot, no Ghost tools, no
-warm query, no resume metadata — and it is admitted through the same SDK loader,
-executable probe, and reviewed child environment as the principal path.
+Claude Code can also serve the `advisor_model` role, independently of which
+runtime drives the ghost: both bind `roles.advisor_model` to
+`claude-code/default`. That query is not a principal session — no persona, no
+project snapshot, no Ghost tools, no warm query, no resume metadata — and it is
+admitted through the same SDK loader, executable probe, and reviewed child
+environment as the principal path.
 
 ### Ask, jobs, and hooks
 
@@ -324,8 +309,7 @@ the `GhostJob` API.
 
 There is no Ghost-owned delegation system. A ghost that wants a specialist
 runs the owner's installed `pi`, `codex`, or `claude -p` from its own Bash;
-that harness owns its project discovery, tools, auth, and session semantics,
-and the review journal records how many times each reviewed turn did so.
+that harness owns its project discovery, tools, auth, and session semantics.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in
@@ -333,41 +317,9 @@ protocol, failure behavior, and settings are defined in
 with its memory tools during ordinary turns; shared knowledge goes to the
 owner's documents the same way. Ghost runs no background memory pass of its own.
 
-One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
-`settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
-`strict`), non-negative `review.immuneTurns` (default 3), and the opt-in
-`review.journal` boolean (default off) that records each reviewed turn to the
-conversation's review-journal sidecar. Its deterministic
-producer lints final-assistant prose outside fenced code plus command and path
-strings recovered from current-turn tool-call arguments. Built-in rules emit
-only `nit` and `concern`; owner and trusted-project `LINT.yml` rules may also
-emit `blocker`. They augment the built-in pack and, only for an
-identity-validated project binding, ancestor `.ghost/LINT.yml`, `.omp/LINT.yml`,
-and `LINT.yml` files discovered in the same order as `WATCHDOG.md`; a file may
-disable built-in rule ids. Transcript
-fallback still lints prose and skips command/path targets.
-The model producer runs only in `advisory` and `strict`, uses `advisor_model`,
-and judges the bounded, secret-redacted current turn against ghost-home and
-trusted-project `WATCHDOG.md` policy. Lint findings enter delivery on their own
-deterministic authority and the model is told which rule ids were already
-delivered; it never re-judges them. Review-policy discovery is ghost home first,
-then trusted project root to leaf. At every project level Ghost probes
-`.ghost/<FILE>`, `.omp/<FILE>`, then `<FILE>`; `.omp/` preserves oh-my-pi
-compatibility. Ghost's `WATCHDOG.md` format and `nit`, `concern`, and `blocker`
-severities match OMP's, so an existing OMP policy works as-is. OMP's
-`WATCHDOG.yml` advisor roster is not read yet.
-
-Both producers feed the same severity, emission-guard, note-ledger, channel,
-and consume-once feedback path. `lint` and `advisory` always send accepted
-`nit`, `concern`, and `blocker` notes through the next-turn `before_prompt`
-bridge. In `strict`, `nit`/`concern` use that bridge; a blocker with cooldown
-clear may request exactly one continuation when `stop_hook_active` is false,
-while cooldown and continuation-pass blockers become next-turn feedback. A
-strict continuation starts the `review.immuneTurns` cooldown. The feedback,
-cooldown, dedupe, and ledger state are bounded and non-durable, so restart drops
-rather than replays them. Transcript, model, parse, discovery, and quarantine
-failures fail open; a model failure never discards lint notes. `review` is the
-only built-in hook settings key.
+Ghost registers no built-in hook of its own; every `session_stop` and
+`before_prompt` behavior is a `hooks.json` command the owner chooses, and the
+`builtin` section of that file admits no keys.
 
 ## Daemon HTTP API
 
@@ -454,18 +406,6 @@ account, not a model, so it is the top-level `ghost login <provider>`,
 whole flow and the CLI holds no secret, only rendering each polled `LoginView`
 and posting the answer the owner types. There are no plan or todo commands.
 
-One read-only command is daemon-free and works while ghostd is stopped:
-`ghost flywheel export --out <dir>` reads the ghost home's review
-journals and the runtime transcripts they name — pi's JSONL under `sessions/`
-and, through the Claude resume sidecar's `sessionId`, Claude Code's own SDK
-transcript — and writes the training dataset in
-[`flywheel-export.ts`](packages/daemon/src/flywheel-export.ts). It is
-deliberately off the HTTP API: no route carries a transcript, and training data
-must be exportable with the daemon down. It resolves the ghosts root from the
-daemon config the same way ghostd does, reads nothing else, writes only under
-`--out` (directory 0700, files 0600), and never mutates a ghost home. The gate,
-the file names, and the manifest are in [`docs/hooks.md`](docs/hooks.md).
-
 ## Models and credentials
 
 `models.json` owns provider policy, roles, and retry chains; pi's
@@ -482,16 +422,11 @@ Roles are `chat_model`, `smol_model`, `slow_model`, `vision_model`,
 `advisor_model`. Each may have an ordered fallback chain where the runtime
 supports it. `claude-code/default` is valid as the primary chat runtime and, as
 the one exception, as the primary `advisor_model`; it is not a Pi provider model
-and is never a role fallback. As the advisor it is the review teacher: one
-non-interactive Claude Agent SDK query per reviewed turn, whose only user
-message is the assembled advisor batch prompt (the advisor system prompt heads
-it, so the SDK system prompt is a one-line stub that only keeps Claude Code's
-coding-agent preset from loading), with no tools, no MCP, no skills, no
-plugins, no filesystem settings, no project discovery, and no session
-persistence, capped at one turn. Its reply text is the completion, under
-the same byte bound as any advisor reply. When Claude Code is missing or
-unauthenticated the explicit binding fails loudly, exactly like an unusable
-explicit smol binding, and the review pass then fails open with a warning.
+and is never a role fallback. As the advisor it answers one non-interactive Claude Agent SDK query per
+completion with no tools, MCP, skills, plugins, filesystem settings, project
+discovery, or session persistence, capped at one turn; when Claude Code is
+missing or unauthenticated the explicit binding fails loudly, exactly like an
+unusable explicit smol binding.
 
 `chat_model` uses an explicit usable selection or Pi's catalog default.
 `smol_model` serves titles, greetings, and trusted command-hook completions. If

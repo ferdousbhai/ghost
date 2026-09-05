@@ -151,12 +151,12 @@ interface RegisteredHook {
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
-const BUILTIN_SETTINGS_KEYS = new Set(["review"]);
+const BUILTIN_SETTINGS_KEYS = new Set<string>();
 
 /**
  * The `builtin` section of a `hooks.json` document names the hooks Ghost
- * registers in code. No built-in takes a `hooks.json` field today, so the
- * section only admits a known key with an empty object.
+ * registers in code. Ghost registers no built-in hook today, so any key is
+ * refused; the section stays so an older `hooks.json` still parses when empty.
  */
 function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: string): void {
   const builtin = parsed.builtin;
@@ -204,7 +204,7 @@ function defaultHookName(event: GhostHookEvent["type"], kind: "command" | "exten
 function defaultHookDescription(event: GhostHookEvent["type"]): string {
   return event === "before_prompt"
     ? "Adds context before the owner prompt is sent."
-    : "Reviews the current assistant pass and may continue it.";
+    : "Runs after the assistant pass and may continue it.";
 }
 
 function displayText(value: unknown, fallback: string, label: string, maximum: number): string {

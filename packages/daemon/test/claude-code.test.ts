@@ -54,7 +54,6 @@ import {
   PresentationHistoryStore,
   presentationHistoryPath,
 } from "../src/presentation-history.js";
-import { ReviewJournalStore, reviewJournalPath } from "../src/review-journal.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { ModelCatalog } from "../src/model-catalog.js";
@@ -3532,7 +3531,7 @@ fi
     expect({ resolutions, authReads }).toEqual({ resolutions: 2, authReads: 2 });
   });
 
-  it("deletes a Claude Code resume sidecar, its presentation journal, and its review journal", async () => {
+  it("deletes a Claude Code resume sidecar and its presentation journal", async () => {
     const { paths } = setupClaudeHost();
     await host!.runTurn("casper", {
       sessionId: "conversation-delete",
@@ -3543,24 +3542,6 @@ fi
     const sidecar = claudeSessionMetadataPath(paths.sessionDir, "conversation-delete");
     const journal = presentationHistoryPath(paths.sessionDir, "claude-code", "conversation-delete");
     expect(existsSync(journal)).toBe(true);
-    const identity = { runtime: "claude-code", conversationId: "conversation-delete" } as const;
-    await new ReviewJournalStore().record(paths.sessionDir, identity, {
-      turnId: 1,
-      mode: "advisory",
-      delta: {
-        text: "user: remember this",
-        commands: [],
-        paths: [],
-        source: "transcript",
-        delegations: 0,
-      },
-      lint: [],
-      notes: [],
-      delivered: "none",
-      continuationPass: false,
-    });
-    const reviewJournal = reviewJournalPath(paths.sessionDir, "claude-code", "conversation-delete");
-    expect(existsSync(reviewJournal)).toBe(true);
     writeFileSync(`${sidecar}.started`, `${JSON.stringify({
       version: 1,
       runtime: "claude-code",
@@ -3573,16 +3554,10 @@ fi
     );
     expect(journalArtifact).toMatchObject({ source: journal });
     expect(existsSync((journalArtifact as { trash: string }).trash)).toBe(true);
-    const reviewArtifact = trashed.artifacts.find((artifact) =>
-      artifact.artifact === "review-journal"
-    );
-    expect(reviewArtifact).toMatchObject({ source: reviewJournal });
-    expect(existsSync((reviewArtifact as { trash: string }).trash)).toBe(true);
     expect(await host!.listSessions("casper")).toEqual([]);
     expect(existsSync(sidecar)).toBe(false);
     expect(existsSync(`${sidecar}.started`)).toBe(false);
     expect(existsSync(journal)).toBe(false);
-    expect(existsSync(reviewJournal)).toBe(false);
   });
 
   it("reads a pre-journal Claude sidecar as empty history with the prefix marked", async () => {

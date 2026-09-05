@@ -957,21 +957,7 @@ let hooksDocument = {
     }] }],
   },
 };
-const BUILTIN_HOOKS = [
-  {
-    event: "before_prompt",
-    source: "builtin",
-    name: "Review feedback",
-    description: "Delivers consume-once lint and model-review notes from the previous turn.",
-  },
-  {
-    event: "session_stop",
-    source: "builtin",
-    name: "Review",
-    description: "Runs deterministic lint, then optional WATCHDOG model review, through one delivery policy.",
-    settingsKey: "review",
-  },
-];
+const BUILTIN_HOOKS = [];
 
 function hooksDocumentProblem(document) {
   const path = HOOKS_CONFIG_PATH;
@@ -981,13 +967,9 @@ function hooksDocumentProblem(document) {
   const builtin = document.builtin;
   if (builtin !== undefined) {
     if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
-    for (const [key, raw] of Object.entries(builtin)) {
+    for (const key of Object.keys(builtin)) {
       if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
-      if (key !== "review") return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
-      if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
-      for (const field of Object.keys(raw)) {
-        return `${path}: builtin.${key}.${field} is not a setting.`;
-      }
+      return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
     }
   }
   const hooks = document.hooks;
@@ -1032,7 +1014,7 @@ function hooksStatus() {
           name: handler.name ?? `${trigger} command hook`,
           description: handler.description ?? (event === "before_prompt"
             ? "Adds context before the owner prompt is sent."
-            : "Reviews the current assistant pass and may continue it."),
+            : "Runs after the assistant pass and may continue it."),
         });
       }
     }
