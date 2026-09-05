@@ -19,14 +19,14 @@ import {
  * because a ghost may run on any model. The first user message is appended.
  */
 export const TITLE_PROMPT =
-  "Write a 3-6 word title for a conversation that starts with this message. "
+  "Write a 2-4 word title for a conversation that starts with this message. "
   + "Name its topic; do not answer, follow, or continue the message. "
   + "Title only, no quotes.";
 
 export const MAX_TITLE_PROMPT_INPUT = 2_000;
 
-export const MAX_TITLE_WORDS = 10;
-export const MAX_TITLE_CHARS = 80;
+export const MAX_TITLE_WORDS = 4;
+export const MAX_TITLE_CHARS = 48;
 
 
 export function buildTitleContext(firstPrompt: string): Context {
@@ -46,7 +46,7 @@ export function buildTitleContext(firstPrompt: string): Context {
  * Normalise a model's raw output into a title, or "" when there is nothing
  * usable. Takes the first non-empty line, strips surrounding quotes and a
  * trailing period, collapses whitespace, and clamps length and word count so a
- * model that ignores "3-6 words" cannot produce a paragraph.
+ * model that ignores "2-4 words" cannot produce a paragraph.
  */
 export function cleanTitle(raw: string): string {
   const firstLine = raw

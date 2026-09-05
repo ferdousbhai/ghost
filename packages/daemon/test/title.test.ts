@@ -24,7 +24,7 @@ describe("cleanTitle", () => {
   it("clamps a run-on response to a bounded length", () => {
     const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
     const title = cleanTitle(long);
-    expect(title.split(" ").length).toBeLessThanOrEqual(10);
+    expect(title.split(" ").length).toBeLessThanOrEqual(4);
   });
 
   it("returns empty for blank input", () => {
