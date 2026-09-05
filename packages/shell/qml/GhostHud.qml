@@ -136,7 +136,6 @@ FloatingWindow {
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
-        projectChip.hide();
         hud.currentSection = section;
         if (section === "chat") {
             composer.take();
@@ -154,7 +153,6 @@ FloatingWindow {
     }
 
     function open(): void {
-        projectChip.hide();
         hud.shown = true;
         // The "focus" half of launch-or-focus. A freshly mapped toplevel is
         // auto-focused by Hyprland; this also pulls an already-open window
@@ -170,13 +168,11 @@ FloatingWindow {
     }
 
     function close(): void {
-        projectChip.hide();
         hud.loginOpen = false;
         hud.shown = false;
     }
 
     function openLogin(): void {
-        projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
         hud.loginOpen = true;
@@ -251,9 +247,6 @@ FloatingWindow {
                 event.accepted = true;
             } else if (hud.pendingBranchEntryId !== "") {
                 hud.dismissBranch();
-                event.accepted = true;
-            } else if (projectChip.panelOpen) {
-                projectChip.hide();
                 event.accepted = true;
             } else if (Ghostd.streaming) {
                 Ghostd.cancel();
@@ -393,15 +386,6 @@ FloatingWindow {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.pad
-
-                    ProjectChip {
-                        id: projectChip
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: Ghostd.activeGhost !== ""
-                        compact: hud.bodyWidth < 760
-                        availableWidth: Math.max(300, hud.bodyWidth - Theme.pad)
-                        availableHeight: Math.max(260, hud.height - Theme.pad * 2 - 44)
-                    }
 
                     // Current-model indicator → opens the login pane. Shows the
                     // model name (or id), Claude subscription when applicable,

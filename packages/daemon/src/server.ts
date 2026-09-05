@@ -1,6 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { isAbsolute } from "node:path";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
 import { assertLoopback } from "./config.js";
 import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
@@ -1231,113 +1230,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { accepted: true });
   };
 
-  const handleProject = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method === "GET") {
-      jsonResponse(response, 200, await options.host.getProject(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-      ));
-      return;
-    }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { root, cwd, trustToken, expectedGeneration } = body;
-    if (root !== null && (typeof root !== "string" || root === "" || !isAbsolute(root))) {
-      errorResponse(response, 400, "invalid_request", '"root" must be an absolute path string or null.');
-      return;
-    }
-    if (cwd !== undefined && (typeof cwd !== "string" || cwd === "" || !isAbsolute(cwd))) {
-      errorResponse(response, 400, "invalid_request", '"cwd" must be an absolute path string when present.');
-      return;
-    }
-    if (trustToken !== undefined && (typeof trustToken !== "string" || trustToken === "")) {
-      errorResponse(response, 400, "invalid_request", '"trustToken" must be a non-empty string when present.');
-      return;
-    }
-    if (!Number.isSafeInteger(expectedGeneration) || (expectedGeneration as number) < 0) {
-      errorResponse(response, 400, "invalid_request", '"expectedGeneration" must be a non-negative integer.');
-      return;
-    }
-    jsonResponse(response, 200, await options.host.bindProject(
-      ghostName,
-      conversation.conversationId,
-      conversation.runtime,
-      {
-        root: root as string | null,
-        ...(cwd === undefined ? {} : { cwd: cwd as string }),
-        ...(trustToken === undefined ? {} : { trustToken: trustToken as string }),
-        expectedGeneration: expectedGeneration as number,
-      },
-    ));
-  };
-
-  const handleProjectAction = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    action: "preview" | "reload",
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    if (action === "preview") {
-      const path = (body as { path?: unknown }).path;
-      if (typeof path !== "string" || path === "" || !isAbsolute(path)) {
-        errorResponse(response, 400, "invalid_request", '"path" must be a non-empty absolute path string.');
-        return;
-      }
-      jsonResponse(response, 200, await options.host.previewProject(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-        path,
-      ));
-      return;
-    }
-    const expectedGeneration = (body as { expectedGeneration?: unknown }).expectedGeneration;
-    if (!Number.isSafeInteger(expectedGeneration) || (expectedGeneration as number) < 0) {
-      errorResponse(response, 400, "invalid_request", '"expectedGeneration" must be a non-negative integer.');
-      return;
-    }
-    jsonResponse(response, 200, await options.host.reloadProject(
-      ghostName,
-      conversation.conversationId,
-      conversation.runtime,
-      expectedGeneration as number,
-    ));
-  };
-
-  const handleProjectDraft = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "DELETE") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    jsonResponse(response, 200, await options.host.abandonProjectDraft(
-      ghostName,
-      conversation.conversationId,
-      conversation.runtime,
-    ));
-  };
-
   const handleQueue = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -1701,35 +1593,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
             url,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "project") {
-          return await handleProject(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 7 && segments[3] === "sessions" && segments[5] === "project"
-          && (segments[6] === "preview" || segments[6] === "reload")) {
-          return await handleProjectAction(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            segments[6],
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 7 && segments[3] === "sessions" && segments[5] === "project"
-          && segments[6] === "draft") {
-          return await handleProjectDraft(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
             response,
           );
         }

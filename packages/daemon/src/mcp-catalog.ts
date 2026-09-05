@@ -126,41 +126,41 @@ const defaultWriter: McpCatalogWriter = {
   remove: removeMCPServer,
 };
 
-export interface ProjectMcpConfigSource {
+export interface McpFileSource {
   kind: McpConfigSource;
   absolutePath: string;
   relativePath: McpServerView["path"];
 }
 
-export interface EffectiveProjectMcpServer {
+export interface EffectiveMcpServer {
   name: string;
-  source: ProjectMcpConfigSource;
+  source: McpFileSource;
   config: unknown;
   errors: string[];
 }
 
-export interface EffectiveProjectMcpDisabled {
+export interface EffectiveMcpDisabled {
   name: string;
-  source: ProjectMcpConfigSource;
+  source: McpFileSource;
 }
 
-export interface EffectiveProjectMcpRead {
+export interface EffectiveMcpRead {
   claimedNames: string[];
   /** Optional because released Pi snapshots predate disabled-row diagnostics. */
-  disabled?: EffectiveProjectMcpDisabled[];
-  servers: EffectiveProjectMcpServer[];
+  disabled?: EffectiveMcpDisabled[];
+  servers: EffectiveMcpServer[];
   skipped: McpCatalogSkipped[];
 }
 
-export interface EffectiveProjectMcpInput {
-  source: ProjectMcpConfigSource;
+export interface EffectiveMcpInput {
+  source: McpFileSource;
   content?: string;
   error?: string;
 }
 
-interface ParsedProjectMcpInputs {
-  effective: EffectiveProjectMcpRead;
-  configured: EffectiveProjectMcpServer[];
+interface ParsedMcpInputs {
+  effective: EffectiveMcpRead;
+  configured: EffectiveMcpServer[];
 }
 
 export function normalizeMcpStdioCwd(
@@ -290,8 +290,8 @@ export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfi
   };
 }
 
-/** Revalidate one already-confined project row before loading a durable snapshot. */
-export function projectMcpValidationErrors(name: string, value: unknown): string[] {
+/** Revalidate one already-confined row before loading a durable snapshot. */
+export function mcpRowValidationErrors(name: string, value: unknown): string[] {
   return mcpServerValidationErrors(name, value);
 }
 
@@ -306,7 +306,7 @@ function validateMutation(name: string, value: unknown): asserts value is MCPSer
   }
 }
 
-function ghostMcpSource(home: string): ProjectMcpConfigSource {
+function ghostMcpSource(home: string): McpFileSource {
   return {
     kind: "canonical",
     absolutePath: join(home, "mcp.json"),
@@ -317,19 +317,17 @@ function ghostMcpSource(home: string): ProjectMcpConfigSource {
 /**
  * Parse already-read MCP bytes without reopening their source paths.
  *
- * The caller owns descriptor confinement and byte limits. Keeping this parser
- * separate lets a trusted-project declarative scan hand the exact validated
- * rows to both runtimes while the visible Ghost MCP catalog retains its own
- * independently mutable source.
+ * The caller owns descriptor confinement and byte limits, so the same parser
+ * serves the catalog and the per-session admission read.
  */
-function parseProjectMcpInputs(
-  inputs: readonly EffectiveProjectMcpInput[],
-): ParsedProjectMcpInputs {
+function parseMcpInputs(
+  inputs: readonly EffectiveMcpInput[],
+): ParsedMcpInputs {
   const claimed = new Set<string>();
   const claimedNames: string[] = [];
-  const configured: EffectiveProjectMcpServer[] = [];
-  const disabled: EffectiveProjectMcpDisabled[] = [];
-  const servers: EffectiveProjectMcpServer[] = [];
+  const configured: EffectiveMcpServer[] = [];
+  const disabled: EffectiveMcpDisabled[] = [];
+  const servers: EffectiveMcpServer[] = [];
   const skipped: McpCatalogSkipped[] = [];
 
   for (const input of inputs) {
@@ -389,21 +387,18 @@ function parseProjectMcpInputs(
   };
 }
 
-export function parseEffectiveProjectMcpInputs(
-  inputs: readonly EffectiveProjectMcpInput[],
-): EffectiveProjectMcpRead {
-  return parseProjectMcpInputs(inputs).effective;
+export function parseEffectiveMcpInputs(
+  inputs: readonly EffectiveMcpInput[],
+): EffectiveMcpRead {
+  return parseMcpInputs(inputs).effective;
 }
 
-/**
- * Resolve the visible ghost source. Trusted-project MCP bytes are admitted by
- * the project declarative scan and enter through parseEffectiveProjectMcpInputs.
- */
-async function readProjectMcp(
+/** Read and parse the ghost's visible `mcp.json`. */
+async function readGhostMcpFile(
   home: string,
   probe?: PrivateReadProbe,
-): Promise<ParsedProjectMcpInputs> {
-  const inputs: EffectiveProjectMcpInput[] = [];
+): Promise<ParsedMcpInputs> {
+  const inputs: EffectiveMcpInput[] = [];
   const source = ghostMcpSource(home);
   try {
     inputs.push({ source, content: readPrivateFileText(source.absolutePath, probe) });
@@ -411,7 +406,7 @@ async function readProjectMcp(
     if (error instanceof PrivateReadError
       && error.refusal === "open"
       && (error.cause as NodeJS.ErrnoException).code === "ENOENT") {
-      return parseProjectMcpInputs(inputs);
+      return parseMcpInputs(inputs);
     }
     const reason = error instanceof PrivateReadError && error.refusal === "too_large"
       ? "MCP config exceeds the 1 MiB limit"
@@ -421,11 +416,11 @@ async function readProjectMcp(
     inputs.push({ source, error: reason });
   }
 
-  return parseProjectMcpInputs(inputs);
+  return parseMcpInputs(inputs);
 }
 
-export async function readEffectiveProjectMcp(home: string): Promise<EffectiveProjectMcpRead> {
-  return (await readProjectMcp(home)).effective;
+export async function readEffectiveMcp(home: string): Promise<EffectiveMcpRead> {
+  return (await readGhostMcpFile(home)).effective;
 }
 
 function translateWriterError(error: unknown, name: string): never {
@@ -471,14 +466,14 @@ export class McpCatalog {
 
   private sources(
     ghostName: string,
-  ): [ProjectMcpConfigSource] {
+  ): [McpFileSource] {
     return [ghostMcpSource(this.registry.get(ghostName).dir)];
   }
 
-  private async effective(ghostName: string): Promise<ParsedProjectMcpInputs> {
+  private async effective(ghostName: string): Promise<ParsedMcpInputs> {
     const home = this.registry.get(ghostName).dir;
     await this.readProbe(home);
-    return readProjectMcp(home, this.privateReadProbe);
+    return readGhostMcpFile(home, this.privateReadProbe);
   }
 
   async list(ghostName: string): Promise<McpCatalogSnapshot> {

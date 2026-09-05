@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { EffectiveProjectMcpRead } from "../src/mcp-catalog.js";
+import type { EffectiveMcpRead } from "../src/mcp-catalog.js";
 import {
   buildSessionResourceView,
   type SessionSkillGroup,
@@ -21,7 +21,7 @@ function mcp(
     servers?: Array<{ name: string; path: string; enabled?: boolean; errors?: string[] }>;
     skipped?: Array<{ path: string; reason: string }>;
   },
-): EffectiveProjectMcpRead {
+): EffectiveMcpRead {
   const configured = (input.servers ?? []).map((server) => ({
     name: server.name,
     source: {
@@ -48,7 +48,6 @@ function mcp(
 describe("session resource admission", () => {
   it("shows skill precedence, optional Obsidian readiness, and every MCP claim outcome", () => {
     const ghostMcp = "/home/owner/ghosts/casper/mcp.json";
-    const projectMcp = "/work/project/.omp/mcp.json";
     const view = buildSessionResourceView({
       runtime: "pi",
       skillGroups: [
@@ -59,9 +58,6 @@ describe("session resource admission", () => {
         skills("ghost", 1, [
           { name: "shared", path: "/home/owner/ghosts/casper/skills/shared/SKILL.md" },
         ]),
-        skills("project", 2, [
-          { name: "project", path: "/work/project/.agents/skills/project/SKILL.md" },
-        ]),
       ],
       mcpGroups: [
         {
@@ -69,29 +65,18 @@ describe("session resource admission", () => {
           precedence: 1,
           root: "/home/owner/ghosts/casper",
           effective: mcp({
-            claimedNames: ["alpha", "shared"],
+            claimedNames: ["alpha", "shared", "off", "broken"],
             servers: [
               { name: "alpha", path: ghostMcp },
               { name: "shared", path: ghostMcp },
-            ],
-          }),
-        },
-        {
-          source: "project",
-          precedence: 2,
-          root: "/work/project",
-          effective: mcp({
-            claimedNames: ["shared", "beta", "broken"],
-            servers: [
-              { name: "shared", path: projectMcp, enabled: false },
-              { name: "beta", path: projectMcp },
-              { name: "broken", path: projectMcp, errors: ["command is required"] },
+              { name: "off", path: ghostMcp, enabled: false },
+              { name: "broken", path: ghostMcp, errors: ["command is required"] },
             ],
             skipped: [{
-              path: ".omp/mcp.json#mcpServers.broken",
+              path: "mcp.json#mcpServers.broken",
               reason: "command is required",
             }, {
-              path: ".omp/.mcp.json",
+              path: ".mcp.json",
               reason: "MCP config is invalid JSON",
             }],
           }),
@@ -113,14 +98,13 @@ describe("session resource admission", () => {
     }));
     expect(view.mcpServers).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "alpha", source: "ghost", enabled: true, status: "admitted" }),
-      expect.objectContaining({ name: "shared", source: "ghost", status: "shadowed", shadowedBy: projectMcp }),
-      expect.objectContaining({ name: "shared", source: "project", enabled: false, status: "disabled" }),
-      expect.objectContaining({ name: "beta", source: "project", enabled: true, status: "admitted" }),
-      expect.objectContaining({ name: "broken", source: "project", enabled: false, status: "skipped", reason: "command is required" }),
+      expect.objectContaining({ name: "shared", source: "ghost", enabled: true, status: "admitted" }),
+      expect.objectContaining({ name: "off", source: "ghost", enabled: false, status: "disabled" }),
+      expect.objectContaining({ name: "broken", source: "ghost", enabled: false, status: "skipped", reason: "command is required" }),
     ]));
     expect(view.mcpDiagnostics).toEqual([{
-      source: "project",
-      path: "/work/project/.omp/.mcp.json",
+      source: "ghost",
+      path: "/home/owner/ghosts/casper/.mcp.json",
       reason: "MCP config is invalid JSON",
     }]);
   });

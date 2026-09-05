@@ -1,5 +1,4 @@
 import { readFileSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { resolveGhost, resolveTarget } from "./common.js";
 import { emit, table } from "./output.js";
@@ -91,49 +90,6 @@ export async function commandsCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     return rows.length > 0
       ? `${table(rows.map((row) => [`/${row.name}`, row.description ?? ""]), ["COMMAND", "DESCRIPTION"])}\n`
       : "No slash commands.\n";
-  });
-  return 0;
-}
-
-/** `ghost project [show|bind <path>|reload|unbind] -s <id>`: the conversation's trusted project. */
-export async function projectCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const [action = "show", target] = parsed.positionals;
-  const { path } = await resolveTarget(ctx.client, ctx, parsed);
-  const current = async () => (await ctx.client.request<{ generation: number }>("GET", `${path}/project`)).body;
-  let body: unknown;
-  switch (action) {
-    case "show":
-      body = await current();
-      break;
-    case "bind": {
-      if (!target) throw new ArgsError("ghost project bind needs a directory");
-      const root = resolve(target);
-      if (!isAbsolute(root)) throw new ArgsError("ghost project bind needs an absolute directory");
-      const preview = (await ctx.client.request<{ trustToken: string }>("POST", `${path}/project/preview`, { path: root })).body;
-      const { generation } = await current();
-      body = (await ctx.client.request("PUT", `${path}/project`, {
-        root,
-        trustToken: preview.trustToken,
-        expectedGeneration: generation,
-      })).body;
-      break;
-    }
-    case "reload": {
-      const { generation } = await current();
-      body = (await ctx.client.request("POST", `${path}/project/reload`, { expectedGeneration: generation })).body;
-      break;
-    }
-    case "unbind": {
-      const { generation } = await current();
-      body = (await ctx.client.request("PUT", `${path}/project`, { root: null, expectedGeneration: generation })).body;
-      break;
-    }
-    default:
-      throw new ArgsError(`ghost project does not know "${action}"; use show, bind <dir>, reload, or unbind.`);
-  }
-  emit(ctx, body, (result) => {
-    const state = result as { root: string | null; cwd: string };
-    return `${state.root ? `project ${state.root}` : "no project"}\ncwd ${state.cwd}\n`;
   });
   return 0;
 }

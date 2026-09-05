@@ -51,7 +51,6 @@ import type {
   MCPServerConfig as OmpMcpServerConfig,
   MCPStdioServerConfig as OmpMcpStdioServerConfig,
 } from "./mcp-config.js";
-import { validateServerName } from "./mcp-config.js";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
@@ -115,30 +114,23 @@ import {
   renderScheduledWorkPolicy,
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
-import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
+import { readEffectiveMcp, type EffectiveMcpRead } from "./mcp-catalog.js";
 import type { SettledTurn } from "./presentation-history.js";
 import type { RunTurnOptions } from "./session-host.js";
-import { pathIsWithin } from "./path-within.js";
 import { loadGhostSettings } from "./ghost-settings.js";
 import type { RunningSource } from "./running-source.js";
 import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
 import { claudeSdkTranscriptPath } from "./claude-sdk-files.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
-import {
-  loadProjectDeclarativeSnapshot,
-  type ProjectFilesystemIdentity,
-} from "./project-resources.js";
+import { loadDeclarativeSnapshot } from "./declarative-resources.js";
 import {
   declarativePromptSnapshot,
-  mergeDeclarativePromptSnapshots,
-  mergeProjectDeclarativeSnapshots,
+  mergeDeclarativeSnapshots,
   renderClaudeDeclarativePrompt,
-  type DeclarativePromptSnapshot,
 } from "./declarative-snapshot.js";
-import { parseFrontmatter } from "./declarative-types.js";
 import {
   buildSessionResourceView,
-  projectSessionSkillGroup,
+  sessionSkillGroup,
   type SessionMcpView,
   type SessionResourceDiagnostic,
   type SessionResourceView,
@@ -192,22 +184,11 @@ export interface ClaudeSessionMetadata {
   messageCount: number;
   ownerTurnCount: number;
   cwd?: string;
-  projectSnapshot?: ClaudePersistedProjectSnapshot;
 }
 
 type LoadedClaudeSessionMetadata = ClaudeSessionMetadata & { resumeBlocked?: true };
 
-export interface ClaudePersistedProjectSnapshot {
-  root: string | null;
-  identity?: ProjectFilesystemIdentity;
-  declarative: DeclarativePromptSnapshot;
-  mcpServers: Record<string, ClaudeMcpServerConfig>;
-  mcpResources?: ClaudeMcpResourceSnapshot[];
-  resourceWarnings: string[];
-  mcpWarnings: string[];
-}
-
-export interface ClaudeMcpResourceSnapshot {
+interface ClaudeMcpResourceSnapshot {
   name: string;
   path: string;
   status: "admitted" | "skipped" | "disabled";
@@ -221,18 +202,6 @@ function mcpServerRecord<T>(
   // JavaScript's inherited object names. Never assign an untrusted MCP name
   // through an ordinary `{}` dictionary.
   return Object.fromEntries(entries) as Record<string, T>;
-}
-
-export interface ClaudeProjectSnapshot {
-  root: string | null;
-  cwd: string;
-  identity?: ProjectFilesystemIdentity;
-  admittedSnapshot?: ClaudePersistedProjectSnapshot;
-  reportStatus?: (input: {
-    status: "ready" | "degraded";
-    error: { code: string; message: string } | null;
-    mcpStatus: "off" | "ready" | "degraded";
-  }) => Promise<void>;
 }
 
 export interface ClaudeCodeQueryInput {
@@ -861,94 +830,9 @@ function hasOnlyFields(
   return Object.keys(value).every((key) => allowed.has(key));
 }
 
-function stringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
-}
 
-function stringRecord(value: unknown): value is Record<string, string> {
-  const row = objectRecord(value);
-  return row !== null && Object.values(row).every((entry) => typeof entry === "string");
-}
 
-function optionalNonNegativeNumber(value: unknown): boolean {
-  return value === undefined
-    || (typeof value === "number" && Number.isFinite(value) && value >= 0);
-}
 
-function optionalBoolean(value: unknown): boolean {
-  return value === undefined || typeof value === "boolean";
-}
-
-const CLAUDE_MCP_STDIO_FIELDS = new Set([
-  "type",
-  "command",
-  "args",
-  "env",
-  "timeout",
-  "alwaysLoad",
-]);
-const CLAUDE_MCP_REMOTE_FIELDS = new Set([
-  "type",
-  "url",
-  "headers",
-  "tools",
-  "timeout",
-  "alwaysLoad",
-]);
-const CLAUDE_MCP_TOOL_POLICY_FIELDS = new Set(["name", "permission_policy"]);
-const CLAUDE_MCP_PERMISSION_POLICIES = new Set([
-  "always_allow",
-  "always_ask",
-  "always_deny",
-]);
-
-function validClaudeMcpToolPolicy(value: unknown): boolean {
-  const policy = objectRecord(value);
-  return policy !== null
-    && hasOnlyFields(policy, CLAUDE_MCP_TOOL_POLICY_FIELDS)
-    && typeof policy.name === "string"
-    && policy.name.length > 0
-    && typeof policy.permission_policy === "string"
-    && CLAUDE_MCP_PERMISSION_POLICIES.has(policy.permission_policy);
-}
-
-function validPersistedClaudeMcpConfig(value: unknown): value is ClaudeMcpServerConfig {
-  const config = objectRecord(value);
-  if (!config || containsEnvironmentExpansion(config)) return false;
-  const type = config.type ?? "stdio";
-  if (type === "stdio") {
-    return hasOnlyFields(config, CLAUDE_MCP_STDIO_FIELDS)
-      && (config.type === undefined || config.type === "stdio")
-      && typeof config.command === "string"
-      && config.command.length > 0
-      && (config.args === undefined || stringArray(config.args))
-      && (config.env === undefined
-        || (stringRecord(config.env) && Object.keys(config.env).length === 0))
-      && optionalNonNegativeNumber(config.timeout)
-      && optionalBoolean(config.alwaysLoad);
-  }
-  if (type !== "http" && type !== "sse") return false;
-  if (!hasOnlyFields(config, CLAUDE_MCP_REMOTE_FIELDS)
-    || typeof config.url !== "string"
-    || (config.headers !== undefined
-      && (!stringRecord(config.headers) || Object.keys(config.headers).length > 0))
-    || (config.tools !== undefined
-      && (!Array.isArray(config.tools) || !config.tools.every(validClaudeMcpToolPolicy)))
-    || !optionalNonNegativeNumber(config.timeout)
-    || !optionalBoolean(config.alwaysLoad)) {
-    return false;
-  }
-  try {
-    const url = new URL(config.url);
-    return (url.protocol === "http:" || url.protocol === "https:")
-      && !url.username
-      && !url.password
-      && !url.search
-      && !url.hash;
-  } catch {
-    return false;
-  }
-}
 
 const CLAUDE_METADATA_COMMON_FIELDS = [
   "version",
@@ -962,107 +846,13 @@ const CLAUDE_METADATA_COMMON_FIELDS = [
 ] as const;
 const CLAUDE_METADATA_V1_FIELDS = new Set(CLAUDE_METADATA_COMMON_FIELDS);
 const CLAUDE_METADATA_V2_FIELDS = new Set([...CLAUDE_METADATA_COMMON_FIELDS, "cwd"]);
+// Version 3 once carried a `projectSnapshot`; the field is tolerated and ignored.
 const CLAUDE_METADATA_V3_FIELDS = new Set([
   ...CLAUDE_METADATA_COMMON_FIELDS,
   "cwd",
   "projectSnapshot",
 ]);
 const CLAUDE_RESUME_STARTED_FIELDS = new Set(["version", "runtime", "conversationId"]);
-const CLAUDE_PROJECT_SNAPSHOT_FIELDS = new Set([
-  "root",
-  "identity",
-  "declarative",
-  "mcpServers",
-  "mcpResources",
-  "resourceWarnings",
-  "mcpWarnings",
-]);
-const CLAUDE_PROJECT_IDENTITY_FIELDS = new Set(["dev", "ino"]);
-const CLAUDE_MCP_RESOURCE_FIELDS = new Set(["name", "path", "status", "reason"]);
-const CLAUDE_DECLARATIVE_FIELDS = new Set([
-  "instructions",
-  "skills",
-  "rules",
-  "prompts",
-  "commands",
-]);
-const CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS = new Set(["path", "content"]);
-const CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS = new Set(["name", "path", "content"]);
-const CLAUDE_DECLARATIVE_RULE_FIELDS = new Set([
-  "name",
-  "path",
-  "content",
-  "alwaysApply",
-]);
-const CLAUDE_DECLARATIVE_NAMED_FIELDS = new Set(["name", "content"]);
-
-function uniqueNamedResources(values: readonly unknown[]): boolean {
-  const names = new Set<string>();
-  for (const value of values) {
-    const row = objectRecord(value);
-    if (!row || typeof row.name !== "string" || row.name.length === 0 || names.has(row.name)) {
-      return false;
-    }
-    names.add(row.name);
-  }
-  return true;
-}
-
-function validDeclarativePromptSnapshot(value: unknown, root: string | null): boolean {
-  const snapshot = objectRecord(value);
-  if (!snapshot
-    || !hasOnlyFields(snapshot, CLAUDE_DECLARATIVE_FIELDS)
-    || !Array.isArray(snapshot.instructions)
-    || !Array.isArray(snapshot.skills)
-    || !Array.isArray(snapshot.rules)
-    || !Array.isArray(snapshot.prompts)
-    || !Array.isArray(snapshot.commands)) {
-    return false;
-  }
-  const validPathResource = (
-    entry: unknown,
-    allowed: ReadonlySet<string>,
-    named: boolean,
-  ): boolean => {
-    const row = objectRecord(entry);
-    return Boolean(row
-      && hasOnlyFields(row, allowed)
-      && (!named || (typeof row.name === "string" && row.name.length > 0))
-      && typeof row.path === "string"
-      && root !== null
-      && pathIsWithin(root, row.path)
-      && typeof row.content === "string");
-  };
-  const validNamedResource = (entry: unknown): boolean => {
-    const row = objectRecord(entry);
-    return Boolean(row
-      && hasOnlyFields(row, CLAUDE_DECLARATIVE_NAMED_FIELDS)
-      && typeof row.name === "string"
-      && row.name.length > 0
-      && typeof row.content === "string");
-  };
-  const validRule = (entry: unknown): boolean => {
-    const row = objectRecord(entry);
-    return validPathResource(entry, CLAUDE_DECLARATIVE_RULE_FIELDS, true)
-      && (row?.alwaysApply === undefined || typeof row.alwaysApply === "boolean");
-  };
-  if (!snapshot.instructions.every((entry) =>
-    validPathResource(entry, CLAUDE_DECLARATIVE_INSTRUCTION_FIELDS, false))
-    || !snapshot.skills.every((entry) =>
-      validPathResource(entry, CLAUDE_DECLARATIVE_NAMED_PATH_FIELDS, true))
-    || !snapshot.rules.every(validRule)
-    || !snapshot.prompts.every(validNamedResource)
-    || !snapshot.commands.every(validNamedResource)
-    || !uniqueNamedResources(snapshot.skills)
-    || !uniqueNamedResources(snapshot.rules)
-    || !uniqueNamedResources(snapshot.prompts)
-    || !uniqueNamedResources(snapshot.commands)) {
-    return false;
-  }
-  return root !== null || Object.values(snapshot).every((entries) =>
-    Array.isArray(entries) && entries.length === 0);
-}
-
 function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
   let parsed: unknown;
   try {
@@ -1097,11 +887,9 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
         || !Number.isSafeInteger(value.ownerTurnCount)
         || value.ownerTurnCount < 0))
     || (value.ownerTurnCount === undefined && value.messageCount % 2 !== 0)
-    || (value.version === 1 && (value.cwd !== undefined || value.projectSnapshot !== undefined))
+    || (value.version === 1 && value.cwd !== undefined)
     || ((value.version === 2 || value.version === 3)
-      && (typeof value.cwd !== "string" || !isAbsolute(value.cwd)))
-    || (value.version === 2 && value.projectSnapshot !== undefined)
-    || (value.version === 3 && !validPersistedProjectSnapshot(value.projectSnapshot))) {
+      && (typeof value.cwd !== "string" || !isAbsolute(value.cwd)))) {
     throw new GhostError(
       "claude_session_invalid",
       `${path} does not match the claude-code session metadata contract.`,
@@ -1121,79 +909,6 @@ function exactIsoTimestamp(value: unknown): value is string {
   if (typeof value !== "string") return false;
   const milliseconds = Date.parse(value);
   return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
-}
-
-function validClaudeMcpResources(
-  resources: unknown,
-  root: string | null,
-  servers: Record<string, ClaudeMcpServerConfig>,
-): resources is ClaudeMcpResourceSnapshot[] | undefined {
-  if (resources === undefined) return true;
-  if (!Array.isArray(resources)) return false;
-  const admittedNames = new Set(Object.keys(servers));
-  if (root === null) return resources.length === 0 && admittedNames.size === 0;
-  const sourcePaths = new Set([
-    join(root, ".omp", "mcp.json"),
-    join(root, ".omp", ".mcp.json"),
-  ]);
-  const resourceNames = new Set<string>();
-  for (const resource of resources) {
-    const row = objectRecord(resource);
-    if (!row || !hasOnlyFields(row, CLAUDE_MCP_RESOURCE_FIELDS)
-      || typeof row.name !== "string" || validateServerName(row.name) !== undefined
-      || resourceNames.has(row.name)
-      || typeof row.path !== "string" || !sourcePaths.has(row.path)
-      || (row.status !== "admitted" && row.status !== "skipped" && row.status !== "disabled")
-      || (row.reason !== undefined && typeof row.reason !== "string")
-      || (row.status === "admitted") !== admittedNames.has(row.name)) {
-      return false;
-    }
-    resourceNames.add(row.name);
-  }
-  return [...admittedNames].every((name) => resourceNames.has(name));
-}
-
-function validPersistedProjectSnapshot(value: unknown): value is ClaudePersistedProjectSnapshot {
-  const record = objectRecord(value);
-  if (!record || !hasOnlyFields(record, CLAUDE_PROJECT_SNAPSHOT_FIELDS)) return false;
-  const snapshot = record as Partial<ClaudePersistedProjectSnapshot>;
-  if (snapshot.root !== null && (typeof snapshot.root !== "string" || !isAbsolute(snapshot.root))) {
-    return false;
-  }
-  if (!validDeclarativePromptSnapshot(snapshot.declarative, snapshot.root ?? null)
-    || !snapshot.mcpServers
-    || typeof snapshot.mcpServers !== "object"
-    || Array.isArray(snapshot.mcpServers)
-    || !Array.isArray(snapshot.resourceWarnings)
-    || !snapshot.resourceWarnings.every((warning) => typeof warning === "string")
-    || !Array.isArray(snapshot.mcpWarnings)
-    || !snapshot.mcpWarnings.every((warning) => typeof warning === "string")) {
-    return false;
-  }
-  if (!Object.entries(snapshot.mcpServers).every(([name, config]) =>
-    validateServerName(name) === undefined
-    && validPersistedClaudeMcpConfig(config))) {
-    return false;
-  }
-  if (!validClaudeMcpResources(
-    snapshot.mcpResources,
-    snapshot.root,
-    snapshot.mcpServers,
-  )) {
-    return false;
-  }
-  if (snapshot.root === null) {
-    return snapshot.identity === undefined
-      && Object.keys(snapshot.mcpServers).length === 0
-      && (snapshot.mcpResources === undefined || snapshot.mcpResources.length === 0)
-      && snapshot.resourceWarnings.length === 0
-      && snapshot.mcpWarnings.length === 0;
-  }
-  const identity = objectRecord(snapshot.identity);
-  return Boolean(identity
-    && hasOnlyFields(identity, CLAUDE_PROJECT_IDENTITY_FIELDS)
-    && typeof identity.dev === "string" && /^\d+$/u.test(identity.dev)
-    && typeof identity.ino === "string" && /^\d+$/u.test(identity.ino));
 }
 
 function invalidMetadataFile(path: string): GhostError {
@@ -1587,7 +1302,7 @@ function queryOptions(input: {
   newSessionId: string;
   abortController: AbortController;
   internalMcpServerName: string;
-  projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+  mcpServers: Record<string, ClaudeMcpServerConfig>;
   canUseTool: NonNullable<ClaudeQueryOptions["canUseTool"]>;
   environment: Readonly<NodeJS.ProcessEnv>;
   spawnClaudeCodeProcess?: (options: ClaudeSpawnOptions) => ClaudeSpawnedProcess;
@@ -1608,9 +1323,9 @@ function queryOptions(input: {
       append: input.systemPrompt,
     },
     title: `${input.ghostName} in Ghost`,
-    // The subprocess cwd must not implicitly authorize project settings,
-    // hooks, plugins, or MCP. Ghost injects the approved declarative snapshot
-    // and project MCP explicitly at the session boundary.
+    // The subprocess cwd must not implicitly authorize settings, hooks,
+    // plugins, or MCP found there. Ghost injects the ghost's declarative
+    // resources and MCP explicitly at the session boundary.
     settingSources: [],
     skills: [],
     plugins: [],
@@ -1628,7 +1343,7 @@ function queryOptions(input: {
     canUseTool: input.canUseTool,
     toolConfig: { askUserQuestion: { previewFormat: "markdown" } },
     mcpServers: mcpServerRecord([
-      ...Object.entries(input.projectMcpServers),
+      ...Object.entries(input.mcpServers),
       [input.internalMcpServerName, mcp],
     ]),
     includePartialMessages: true,
@@ -1690,13 +1405,19 @@ async function answerClaudeQuestion(
   }
 }
 
-function projectMcpServers(
-  effective: EffectiveProjectMcpRead,
+/**
+ * The ghost's `mcp.json` rows Claude Code can start: credential-free stdio,
+ * http, or sse rows without an explicit cwd. Everything else is reported as
+ * skipped; Claude's SDK would otherwise persist those values in its own files.
+ */
+function ghostMcpServers(
+  effective: EffectiveMcpRead,
   root: string,
 ): {
   servers: Record<string, ClaudeMcpServerConfig>;
   warnings: string[];
   resources: ClaudeMcpResourceSnapshot[];
+  diagnostics: SessionResourceDiagnostic[];
 } {
   const entries: Array<[string, ClaudeMcpServerConfig]> = [];
   const warnings: string[] = [];
@@ -1713,13 +1434,12 @@ function projectMcpServers(
     const config = server.config as OmpMcpServerConfig;
     if (config.enabled === false) continue;
     if (claudeMcpConfigCarriesSecrets(config)) {
-      throw new GhostError(
-        "claude_project_mcp_secrets_unsupported",
-        `Claude project MCP ${JSON.stringify(server.name)} uses environment expansion or `
-          + "secret-bearing env, header, auth, OAuth, or URL fields. Phase 1 does not persist "
-          + "those values in Claude resume metadata.",
-        409,
+      reject(
+        server.name,
+        "row skipped because Claude Code would persist its env, header, auth, OAuth, URL "
+          + "credentials, or environment expansion in its own session files.",
       );
+      continue;
     }
     if (config.timeout !== undefined && config.timeout < 1_000) {
       reject(
@@ -1734,7 +1454,7 @@ function projectMcpServers(
       if (stdio.cwd) {
         reject(
           server.name,
-          "row rejected because Claude project MCP does not support an explicit cwd.",
+          "row rejected because Claude Code MCP rows cannot set an explicit cwd.",
         );
         continue;
       }
@@ -1774,7 +1494,7 @@ function projectMcpServers(
     const diagnostic = skipped.get(name);
     const diagnosticPath = diagnostic?.path.split("#", 1)[0];
     const path = server?.source.absolutePath ?? disabled?.source.absolutePath
-      ?? (diagnosticPath ? resolve(root, diagnosticPath) : join(root, ".omp", "mcp.json"));
+      ?? (diagnosticPath ? resolve(root, diagnosticPath) : join(root, "mcp.json"));
     if (admitted.has(name)) return { name, path, status: "admitted" };
     if (disabled) {
       return {
@@ -1791,16 +1511,23 @@ function projectMcpServers(
       reason: rejectionReasons.get(name) ?? diagnostic?.reason ?? "The server was not admitted.",
     };
   });
-  return { servers: mcpServerRecord(entries), warnings, resources };
+  const diagnostics = effective.skipped
+    .filter((diagnostic) => !diagnostic.path.includes("#mcpServers."))
+    .map((diagnostic) => ({
+      source: "ghost" as const,
+      path: resolve(root, diagnostic.path.split("#", 1)[0] ?? diagnostic.path),
+      reason: diagnostic.reason,
+    }));
+  return { servers: mcpServerRecord(entries), warnings, resources, diagnostics };
 }
 
 function internalMcpServerName(
-  projectMcpServers: Record<string, ClaudeMcpServerConfig>,
+  mcpServers: Record<string, ClaudeMcpServerConfig>,
 ): string {
   let suffix = 0;
   for (;;) {
     const candidate = suffix === 0 ? "ghost" : `ghost-${suffix}`;
-    if (!Object.hasOwn(projectMcpServers, candidate)) return candidate;
+    if (!Object.hasOwn(mcpServers, candidate)) return candidate;
     suffix += 1;
   }
 }
@@ -1810,13 +1537,6 @@ function containsEnvironmentExpansion(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsEnvironmentExpansion);
   if (!value || typeof value !== "object") return false;
   return Object.values(value as Record<string, unknown>).some(containsEnvironmentExpansion);
-}
-
-function projectMcpWarningPath(root: string | null, warning: string, fallback: string): string {
-  if (!root) return fallback;
-  const relativePath = [".omp/mcp.json", ".omp/.mcp.json"]
-    .find((candidate) => warning.startsWith(candidate));
-  return relativePath ? resolve(root, relativePath) : fallback;
 }
 
 function nonEmptyRecord(value: unknown): boolean {
@@ -1839,114 +1559,6 @@ function claudeMcpConfigCarriesSecrets(config: OmpMcpServerConfig): boolean {
     // unparsable value as unsafe instead of persisting an opaque credential.
     return true;
   }
-}
-
-async function loadClaudeProjectSnapshot(
-  root: string | null,
-  identity?: ProjectFilesystemIdentity,
-): Promise<ClaudePersistedProjectSnapshot> {
-  if (!root) {
-    return {
-      root: null,
-      declarative: mergeDeclarativePromptSnapshots([]),
-      mcpServers: mcpServerRecord([]),
-      resourceWarnings: [],
-      mcpWarnings: [],
-    };
-  }
-  if (!identity) {
-    throw new GhostError(
-      "project_identity_missing",
-      "A trusted filesystem identity is required for a bound Claude project.",
-      409,
-    );
-  }
-  const snapshot = await loadProjectDeclarativeSnapshot(root, {
-    level: "project",
-    expectedIdentity: identity,
-  });
-  const approvedMcp = projectMcpServers(snapshot.mcp, root);
-  const mcpWarningSet = new Set(snapshot.mcpWarnings);
-  return {
-    root,
-    identity: { dev: identity.dev, ino: identity.ino },
-    declarative: declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([snapshot])),
-    mcpServers: approvedMcp.servers,
-    mcpResources: approvedMcp.resources,
-    resourceWarnings: snapshot.warnings.filter((warning) => !mcpWarningSet.has(warning)),
-    mcpWarnings: [...snapshot.mcpWarnings, ...approvedMcp.warnings],
-  };
-}
-
-function withRepresentableClaudeMcpTimeouts(
-  snapshot: ClaudePersistedProjectSnapshot,
-): ClaudePersistedProjectSnapshot {
-  const entries: Array<[string, ClaudeMcpServerConfig]> = [];
-  const mcpWarnings = [...snapshot.mcpWarnings];
-  const resources = snapshot.mcpResources
-    ? snapshot.mcpResources.map((resource) => ({ ...resource }))
-    : Object.keys(snapshot.mcpServers).map((name): ClaudeMcpResourceSnapshot => ({
-        name,
-        path: snapshot.root ? join(snapshot.root, ".omp", "mcp.json") : "",
-        status: "admitted",
-      }));
-  for (const [name, config] of Object.entries(snapshot.mcpServers)) {
-    const timeout = "timeout" in config ? config.timeout : undefined;
-    if (timeout !== undefined && timeout < 1_000) {
-      const warning = `${name}: row rejected because Claude Code cannot preserve MCP timeouts below 1000 ms.`;
-      if (!mcpWarnings.includes(warning)) mcpWarnings.push(warning);
-      const resource = resources.find((candidate) => candidate.name === name);
-      if (resource) {
-        resource.status = "skipped";
-        resource.reason = warning.slice(name.length + 2);
-      }
-      continue;
-    }
-    entries.push([name, config]);
-  }
-  return {
-    ...snapshot,
-    mcpServers: mcpServerRecord(entries),
-    ...(snapshot.root ? { mcpResources: resources } : {}),
-    mcpWarnings,
-  };
-}
-
-function requireMatchingClaudeProjectSnapshot(
-  metadata: ClaudeSessionMetadata | null,
-  project: Pick<ClaudeProjectSnapshot, "root" | "identity">,
-): Promise<ClaudePersistedProjectSnapshot> | ClaudePersistedProjectSnapshot {
-  if (!metadata) return loadClaudeProjectSnapshot(project.root, project.identity);
-  if (metadata.version !== 3 || !metadata.projectSnapshot) {
-    if (project.root) {
-      throw new GhostError(
-        "claude_project_snapshot_missing",
-        "This legacy Claude conversation cannot safely resume a bound project; start a new conversation.",
-        409,
-      );
-    }
-    return {
-      root: null,
-      declarative: mergeDeclarativePromptSnapshots([]),
-      mcpServers: mcpServerRecord([]),
-      resourceWarnings: [],
-      mcpWarnings: [],
-    };
-  }
-  const snapshot = metadata.projectSnapshot;
-  const identityMatches = snapshot.root === null
-    ? project.identity === undefined
-    : Boolean(project.identity
-      && snapshot.identity?.dev === project.identity.dev
-      && snapshot.identity.ino === project.identity.ino);
-  if (snapshot.root !== project.root || !identityMatches) {
-    throw new GhostError(
-      "project_metadata_mismatch",
-      "Claude resume metadata does not match the conversation's trusted project snapshot.",
-      409,
-    );
-  }
-  return withRepresentableClaudeMcpTimeouts(snapshot);
 }
 
 /**
@@ -2116,7 +1728,6 @@ interface WarmClaudeQuery {
   readonly terminateProcessGroup: () => void;
   readonly ask: AskBroker;
   readonly resources: SessionResourceView;
-  projectMcpFailed: boolean;
 }
 
 interface ClaudeSessionPersona {
@@ -2135,7 +1746,7 @@ function warmQueryIdentity(input: {
   modelId: string;
   systemPrompt: string;
   toolNames: readonly string[];
-  projectMcpServers: Record<string, ClaudeMcpServerConfig>;
+  mcpServers: Record<string, ClaudeMcpServerConfig>;
 }): string {
   return JSON.stringify([
     input.runtimeIdentity,
@@ -2143,8 +1754,8 @@ function warmQueryIdentity(input: {
     input.modelId,
     input.systemPrompt,
     [...input.toolNames].sort(),
-    Object.keys(input.projectMcpServers).sort()
-      .map((name) => [name, input.projectMcpServers[name]]),
+    Object.keys(input.mcpServers).sort()
+      .map((name) => [name, input.mcpServers[name]]),
   ]);
 }
 
@@ -2231,8 +1842,8 @@ export class ClaudeCodeRuntime {
   // through the native file tools throughout the session.
   private readonly personas = new Map<string, ClaudeSessionPersona>();
   // One live Claude process per warm conversation. Turn one starts it; later
-  // turns push into its open input channel, so the persona, the project MCP
-  // servers, and Claude's own transcript all stay loaded between turns.
+  // turns push into its open input channel, so the persona, the MCP servers,
+  // and Claude's own transcript all stay loaded between turns.
   private readonly warm = new Map<string, WarmClaudeQuery>();
   // Exit promises outlive warm-map removal. Whole-home moves must still wait
   // for every retired SDK subprocess to acknowledge exit.
@@ -2327,23 +1938,6 @@ export class ClaudeCodeRuntime {
     broker.answer(askId, answer);
   }
 
-  /** Cwd/rebind defaults derived solely from durable Claude resume metadata. */
-  async projectDefaults(
-    ghost: Ghost,
-    conversationId: string,
-  ): Promise<{ cwd?: string; canRebind: boolean }> {
-    requireRawConversationId(conversationId);
-    const paths = ghostPaths(ghost.dir);
-    const metadata = await readMetadata(paths.sessionDir, conversationId);
-    if (!metadata) return { canRebind: true };
-    return {
-      cwd: (metadata.version === 2 || metadata.version === 3) && metadata.cwd
-        ? resolve(metadata.cwd)
-        : paths.home,
-      canRebind: metadata.ownerTurnCount === 0,
-    };
-  }
-
   isGhostBusy(ghostName: string): boolean {
     for (const key of this.busy) {
       if (runtimeKeyGhost(key) === ghostName) return true;
@@ -2352,20 +1946,15 @@ export class ClaudeCodeRuntime {
   }
 
   /**
-   * Validate and capture the exact project inputs before an HTTP turn can
-   * publish its stream. A first turn scans once here; a resume validates and
-   * reuses its persisted v3 snapshot without reopening project resources.
+   * Validate the conversation's resume sidecar before an HTTP turn publishes
+   * its stream, so a corrupt or transplanted sidecar is a typed error, not a
+   * failure frame inside an already-open SSE response.
    */
-  async admitProjectSnapshot(
-    ghost: Ghost,
-    conversationId: string,
-    project: Pick<ClaudeProjectSnapshot, "root" | "cwd" | "identity">,
-  ): Promise<ClaudePersistedProjectSnapshot> {
+  async assertResumable(ghost: Ghost, conversationId: string): Promise<void> {
     this.assertTurnAdmitted();
     requireRawConversationId(conversationId);
-    const metadata = await readMetadata(ghostPaths(ghost.dir).sessionDir, conversationId);
+    await readMetadata(ghostPaths(ghost.dir).sessionDir, conversationId);
     this.assertTurnAdmitted();
-    return await requireMatchingClaudeProjectSnapshot(metadata, project);
   }
 
   runTurn(
@@ -2373,7 +1962,7 @@ export class ClaudeCodeRuntime {
     conversationId: string,
     modelId: string,
     options: RunTurnOptions,
-    project: ClaudeProjectSnapshot,
+    cwd: string,
     recordSettledTurn?: (turn?: SettledTurn) => Promise<void>,
   ): Promise<void> {
     this.assertTurnAdmitted();
@@ -2402,7 +1991,7 @@ export class ClaudeCodeRuntime {
         modelId,
         { ...options, signal: linked.signal },
         key,
-        project,
+        cwd,
         recordSettledTurn,
       ))
       .finally(() => {
@@ -2421,7 +2010,7 @@ export class ClaudeCodeRuntime {
     modelId: string,
     options: RunTurnOptions,
     key: string,
-    project: ClaudeProjectSnapshot,
+    cwd: string,
     recordSettledTurn?: (turn?: SettledTurn) => Promise<void>,
   ): Promise<void> {
     const logger = this.logger.child({ ghost: ghost.name, conversation: conversationId });
@@ -2487,21 +2076,7 @@ export class ClaudeCodeRuntime {
         ? (metadata.version === 2 || metadata.version === 3) && metadata.cwd
           ? resolve(metadata.cwd)
           : paths.home
-        : resolve(project.cwd || this.ownerHome);
-      if (metadata && resolve(runtimeCwd) !== resolve(project.cwd)) {
-        throw new GhostError(
-          "project_metadata_mismatch",
-          "Claude resume metadata does not match the conversation's trusted working directory.",
-          409,
-        );
-      }
-      if (project.root && !pathIsWithin(project.root, runtimeCwd)) {
-        throw new GhostError(
-          "cwd_outside_project",
-          "Claude resume metadata points outside the trusted project.",
-          409,
-        );
-      }
+        : resolve(cwd || this.ownerHome);
       turnCwd = runtimeCwd;
       const ownerTurnCount = metadata?.ownerTurnCount ?? 0;
       if (ownerTurnCount >= Number.MAX_SAFE_INTEGER) {
@@ -2514,21 +2089,17 @@ export class ClaudeCodeRuntime {
       const [persona, machineSkills, ghostDeclarative] = await Promise.all([
         this.sessionPersona(key, paths.home, ghost.name, conversationId),
         loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
-        loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
+        loadDeclarativeSnapshot(paths.home, { level: "user" }),
       ]);
       this.assertTurnAdmitted(options.signal);
-      const approvedProject = project.admittedSnapshot
-        ?? await requireMatchingClaudeProjectSnapshot(metadata, project);
+      const ghostMcp = ghostMcpServers(await readEffectiveMcp(paths.home), paths.home);
       this.assertTurnAdmitted(options.signal);
-      const sdkMcpServerName = internalMcpServerName(approvedProject.mcpServers);
+      const sdkMcpServerName = internalMcpServerName(ghostMcp.servers);
       adapter.setInternalMcpServerName(sdkMcpServerName);
-      const effectiveDeclarative = mergeDeclarativePromptSnapshots([
-        declarativePromptSnapshot(mergeProjectDeclarativeSnapshots([
-          ...(machineSkills ? [machineSkills] : []),
-          ghostDeclarative,
-        ])),
-        approvedProject.declarative,
-      ]);
+      const effectiveDeclarative = declarativePromptSnapshot(mergeDeclarativeSnapshots([
+        ...(machineSkills ? [machineSkills] : []),
+        ghostDeclarative,
+      ]));
       const declarativeAppend = renderClaudeDeclarativePrompt(effectiveDeclarative);
       const systemPrompt = declarativeAppend ? `${persona}\n\n${declarativeAppend}` : persona;
       for (const warning of ghostDeclarative.warnings) {
@@ -2539,47 +2110,22 @@ export class ClaudeCodeRuntime {
       for (const warning of machineSkills?.warnings ?? []) {
         logger.warn("Claude machine skill stayed disabled", { warning });
       }
-      for (const warning of approvedProject.resourceWarnings) {
-        logger.warn("Claude project resource stayed disabled", {
-          project: project.root,
-          warning,
-        });
+      for (const warning of ghostMcp.warnings) {
+        logger.warn("Claude ghost MCP row stayed disabled", { warning });
       }
-      for (const warning of approvedProject.mcpWarnings) {
-        logger.warn("Claude project MCP stayed disabled", {
-          project: project.root,
-          warning,
-        });
-      }
-      const configuredProjectMcp = Object.keys(approvedProject.mcpServers);
-      const projectMcpPath = approvedProject.root
-        ? join(approvedProject.root, ".omp", "mcp.json")
-        : runtimeCwd;
-      const mcpServers: SessionMcpView[] = (approvedProject.mcpResources
-        ?? configuredProjectMcp.map((name): ClaudeMcpResourceSnapshot => ({
-          name,
-          path: projectMcpPath,
-          status: "admitted",
-        }))).map((resource) => ({
-          name: resource.name,
-          path: resource.path,
-          source: "project",
-          precedence: 2,
-          enabled: resource.status === "admitted",
-          status: resource.status,
-          ...(resource.reason ? { reason: resource.reason } : {}),
-        }));
-      const mcpDiagnostics: SessionResourceDiagnostic[] = approvedProject.mcpWarnings
-        .filter((warning) => !mcpServers.some((server) =>
-          server.status === "skipped" && warning.startsWith(`${server.name}: `)))
-        .map((reason) => ({
-          source: "project",
-          path: projectMcpWarningPath(approvedProject.root, reason, projectMcpPath),
-          reason,
-        }));
+      const mcpServers: SessionMcpView[] = ghostMcp.resources.map((resource) => ({
+        name: resource.name,
+        path: resource.path,
+        source: "ghost",
+        precedence: 1,
+        enabled: resource.status === "admitted",
+        status: resource.status,
+        ...(resource.reason ? { reason: resource.reason } : {}),
+      }));
+      const mcpDiagnostics: SessionResourceDiagnostic[] = ghostMcp.diagnostics;
       const skillGroups: SessionSkillGroup[] = [
         ...(machineSkills
-          ? [projectSessionSkillGroup(
+          ? [sessionSkillGroup(
               "machine",
               0,
               machineSkills,
@@ -2589,28 +2135,7 @@ export class ClaudeCodeRuntime {
               })),
             )]
           : []),
-        projectSessionSkillGroup("ghost", 1, ghostDeclarative),
-        ...(approvedProject.root
-          ? [{
-              source: "project" as const,
-              precedence: 2,
-              skills: approvedProject.declarative.skills.map((skill) => {
-                const { frontmatter } = parseFrontmatter(skill.content);
-                return {
-                  name: skill.name,
-                  path: skill.path,
-                  ...(typeof frontmatter.description === "string"
-                    ? { description: frontmatter.description }
-                    : {}),
-                  hidden: frontmatter["disable-model-invocation"] === true,
-                };
-              }),
-              diagnostics: approvedProject.resourceWarnings.map((reason) => ({
-                source: "project" as const,
-                reason,
-              })),
-            }]
-          : []),
+        sessionSkillGroup("ghost", 1, ghostDeclarative),
       ];
       const resources = buildSessionResourceView({
         runtime: "claude-code",
@@ -2618,21 +2143,6 @@ export class ClaudeCodeRuntime {
         mcpServers,
         mcpDiagnostics,
       });
-      const publishProjectMcpStatus = async (failed: boolean): Promise<void> => {
-        if (!project.reportStatus || !project.root) return;
-        await project.reportStatus({
-          status: failed ? "degraded" : "ready",
-          error: failed
-            ? {
-                code: "project_mcp_degraded",
-                message: "One or more project MCP resources could not be loaded.",
-              }
-            : null,
-          mcpStatus: failed
-            ? "degraded"
-            : configuredProjectMcp.length > 0 ? "ready" : "off",
-        });
-      };
       let beforePromptContext: string | undefined;
       let beforePromptAcknowledge: (() => void | Promise<void>) | undefined;
       if (this.hooks.hasHandlers("before_prompt")) {
@@ -2681,7 +2191,7 @@ export class ClaudeCodeRuntime {
         modelId,
         systemPrompt,
         toolNames: baseBridge.names,
-        projectMcpServers: approvedProject.mcpServers,
+        mcpServers: ghostMcp.servers,
       });
       // Nothing the query was built from may have changed under a warm process;
       // the SDK fixes all of it at startup and offers no way to set it again.
@@ -2690,10 +2200,6 @@ export class ClaudeCodeRuntime {
         logger.debug?.("retiring Claude query whose startup options changed");
         this.retireWarm(key);
       }
-      await publishProjectMcpStatus(
-        approvedProject.mcpWarnings.length > 0
-          || this.warm.get(key)?.projectMcpFailed === true,
-      );
       this.assertTurnAdmitted(options.signal);
 
       while (!adapter.isTerminal()) {
@@ -2755,7 +2261,7 @@ export class ClaudeCodeRuntime {
               newSessionId: admittedSdkSessionId,
               abortController,
               internalMcpServerName: sdkMcpServerName,
-              projectMcpServers: approvedProject.mcpServers,
+              mcpServers: ghostMcp.servers,
               canUseTool: async (toolName, permissionInput, permissionOptions) =>
                 toolName === "AskUserQuestion"
                   ? answerClaudeQuestion(
@@ -2803,18 +2309,20 @@ export class ClaudeCodeRuntime {
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
             ask,
             resources,
-            projectMcpFailed: false,
           };
           this.warm.set(key, warm);
         }
         const live = warm;
         const onMessage = (message: SDKMessage): void => {
           if (message.type === "system" && message.subtype === "init") {
-            const statuses = new Map(
-              (message.mcp_servers ?? []).map((server) => [server.name, server.status]),
-            );
-            live.projectMcpFailed = configuredProjectMcp.some((name) =>
-              statuses.get(name) !== "connected");
+            for (const server of message.mcp_servers ?? []) {
+              if (server.status !== "connected" && Object.hasOwn(ghostMcp.servers, server.name)) {
+                logger.warn("Claude ghost MCP server did not connect", {
+                  server: server.name,
+                  status: server.status,
+                });
+              }
+            }
           }
           adapter.handle(message);
         };
@@ -2845,9 +2353,6 @@ export class ClaudeCodeRuntime {
           turnSignal?.removeEventListener("abort", interrupt);
           this.active.delete(key);
         }
-        await publishProjectMcpStatus(
-          approvedProject.mcpWarnings.length > 0 || live.projectMcpFailed,
-        );
         this.assertTurnAdmitted(options.signal);
 
         if (!Number.isSafeInteger(completed.num_turns) || completed.num_turns < 0) {
@@ -2871,7 +2376,6 @@ export class ClaudeCodeRuntime {
           messageCount,
           ownerTurnCount: ownerTurnId,
           cwd: runtimeCwd,
-          projectSnapshot: approvedProject,
         };
         this.assertTurnAdmitted(options.signal);
         await settleResumeMetadata(paths.sessionDir, metadata);
@@ -3087,7 +2591,7 @@ export class ClaudeCodeRuntime {
   /**
    * Drop a conversation's live query. Called whenever the process must not be
    * reused: idle expiry, an aborted or failed turn that leaves the message
-   * stream at an unknown point, a changed persona or project, or shutdown.
+   * stream at an unknown point, a changed persona, or shutdown.
    */
   private retireWarm(key: string, expected?: WarmClaudeQuery): void {
     const warm = this.warm.get(key);

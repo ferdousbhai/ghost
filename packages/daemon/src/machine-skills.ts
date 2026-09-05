@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadSkills } from "@earendil-works/pi-coding-agent";
-import type { ProjectDeclarativeSnapshot } from "./project-resources.js";
+import type { DeclarativeSnapshot } from "./declarative-resources.js";
 
 export const OMARCHY_COMPUTER_USE_POLICY = [
   "## Computer use",
@@ -57,7 +57,7 @@ export interface MachineSkillDiagnostic {
   shadowedBy?: string;
 }
 
-export interface MachineSkillSnapshot extends ProjectDeclarativeSnapshot {
+export interface MachineSkillSnapshot extends DeclarativeSnapshot {
   skillDiagnostics: MachineSkillDiagnostic[];
 }
 
@@ -135,18 +135,6 @@ export async function loadMachineSkills(
     rules: [],
     promptTemplates: [],
     slashCommands: [],
-    mcp: { claimedNames: [], disabled: [], servers: [], skipped: [] },
-    mcpWarnings: [],
-    resources: {
-      instructions: 0,
-      skills: skills.length,
-      rules: 0,
-      prompts: 0,
-      commands: 0,
-      agents: 0,
-      mcpServers: 0,
-      ignoredExecutable: 0,
-    },
     warnings,
     skillDiagnostics,
     truncated: false,

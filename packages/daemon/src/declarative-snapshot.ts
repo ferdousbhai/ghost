@@ -5,7 +5,7 @@ import {
   type Rule,
   type Skill,
 } from "./declarative-types.js";
-import type { ProjectDeclarativeSnapshot } from "./project-resources.js";
+import type { DeclarativeSnapshot } from "./declarative-resources.js";
 
 export interface EffectiveDeclarativeSnapshot {
   contextFiles: Array<{ path: string; content: string }>;
@@ -40,8 +40,8 @@ function requiredContent(value: string | undefined, category: string): string {
   return value;
 }
 
-export function mergeProjectDeclarativeSnapshots(
-  snapshots: readonly ProjectDeclarativeSnapshot[],
+export function mergeDeclarativeSnapshots(
+  snapshots: readonly DeclarativeSnapshot[],
 ): EffectiveDeclarativeSnapshot {
   return {
     contextFiles: snapshots.flatMap((snapshot) => snapshot.contextFiles),

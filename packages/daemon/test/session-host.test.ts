@@ -10,7 +10,6 @@ import { createHash } from "node:crypto";
 import {
   chmodSync,
   existsSync,
-  lstatSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -22,7 +21,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { lstat as lstatAsync } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import {
   createServer,
@@ -31,7 +29,6 @@ import {
 } from "node:http";
 import type { AddressInfo } from "node:net";
 import { basename, join, sep } from "node:path";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
 import {
   browserSessionFor,
   closeAllBrowserSessions,
@@ -61,16 +58,13 @@ import {
   parseUserBashCommand,
   sessionFileNameFor,
   sessionKeyOf,
-  type ConversationUpdatedEvent,
   type SessionHostOptions,
   type TrashedConversation,
 } from "../src/session-host.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPinState, writePins } from "../src/pins.js";
 import { readReadState, writeReads } from "../src/reads.js";
-import { ProjectBindingStore, projectBindingPath } from "../src/project-binding.js";
-import { PROJECT_SCAN_MAX_ENTRIES } from "../src/project-resources.js";
-import { piProjectSnapshotPath, piProjectSnapshotPaths } from "../src/project-snapshot.js";
+import { conversationCwdPath, writeConversationCwd } from "../src/conversation-cwd.js";
 import {
   readToolCwds,
   TOOL_CWDS_MAX_BYTES,
@@ -225,7 +219,7 @@ async function setup(
   return { dir, host, provider, temp };
 }
 
-async function modelSystemPrompt(
+async function _modelSystemPrompt(
   sessionId: string,
   prompt = "Show that this conversation is ready.",
 ): Promise<string> {
@@ -512,8 +506,7 @@ describe("SessionHost.open", () => {
 
     const handle = await host!.open("casper", "legacy-cwd");
     expect(handle.session.sessionManager.getCwd()).toBe(dir);
-    expect(await host!.getProject("casper", "legacy-cwd", "pi"))
-      .toMatchObject({ root: null, cwd: dir, reason: "legacy" });
+    expect(await host!.conversationCwd("casper", "legacy-cwd")).toBe(dir);
   });
 
   it("accepts only a line-one native Pi cwd header and rejects unsafe transcript shapes", async () => {
@@ -548,23 +541,23 @@ describe("SessionHost.open", () => {
       cwd: `${nulPrefix}\0escape`,
     }]);
     const beforeNulRead = directoryBytesSnapshot(paths.sessionDir);
-    await expect(host!.getProject("casper", "nul-cwd-legacy", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.conversationCwd("casper", "nul-cwd-legacy"))
+      .resolves.toBe(temp!.ownerHome);
     expect(directoryBytesSnapshot(paths.sessionDir)).toEqual(beforeNulRead);
     expect(existsSync(nulPrefix)).toBe(false);
 
     const sparse = writeTranscript("sparse-legacy", [header("sparse-legacy")]);
     truncateSync(sparse, 384 * 1024 * 1024);
-    await expect(host!.getProject("casper", "sparse-legacy", "pi"))
-      .resolves.toMatchObject({ cwd: dir, reason: "legacy" });
+    await expect(host!.conversationCwd("casper", "sparse-legacy"))
+      .resolves.toBe(dir);
 
     const titleFirst = writeTranscript("title-first-legacy", [
       { type: "title", title: "Legacy title", source: "auto" },
       header("title-first-legacy"),
     ]);
     const titleFirstBytes = readFileSync(titleFirst);
-    await expect(host!.getProject("casper", "title-first-legacy", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.conversationCwd("casper", "title-first-legacy"))
+      .resolves.toBe(temp!.ownerHome);
     await expect(host!.open("casper", "title-first-legacy"))
       .rejects.toThrow("not a valid pi session");
     expect(readFileSync(titleFirst)).toEqual(titleFirstBytes);
@@ -575,14 +568,14 @@ describe("SessionHost.open", () => {
       mode: 0o600,
     });
     truncateSync(longLine, 384 * 1024 * 1024);
-    await expect(host!.getProject("casper", "long-header", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.conversationCwd("casper", "long-header"))
+      .resolves.toBe(temp!.ownerHome);
 
     const fifo = join(paths.sessionDir, sessionFileNameFor("fifo-header"));
     execFileSync("mkfifo", [fifo]);
     chmodSync(fifo, 0o600);
-    await expect(host!.getProject("casper", "fifo-header", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.conversationCwd("casper", "fifo-header"))
+      .resolves.toBe(temp!.ownerHome);
 
     const outside = join(temp!.root, "outside-session.jsonl");
     writeFileSync(outside, `${JSON.stringify(header("linked-header"))}\n`, {
@@ -591,31 +584,9 @@ describe("SessionHost.open", () => {
     });
     const linked = join(paths.sessionDir, sessionFileNameFor("linked-header"));
     symlinkSync(outside, linked);
-    await expect(host!.getProject("casper", "linked-header", "pi"))
-      .resolves.toMatchObject({ cwd: temp!.ownerHome, reason: "default" });
+    await expect(host!.conversationCwd("casper", "linked-header"))
+      .resolves.toBe(temp!.ownerHome);
     expect(readFileSync(outside, "utf8")).toContain('"cwd"');
-  });
-
-  it("starts unbound native tools at owner home without admitting home as a project", async () => {
-    const { dir } = await setup();
-    mkdirSync(join(temp!.ownerHome, ".omp", "extensions"), { recursive: true });
-    writeFileSync(join(temp!.ownerHome, "AGENTS.md"), "HOSTILE-OWNER-PROJECT");
-    writeFileSync(
-      join(temp!.ownerHome, ".omp", "extensions", "hostile.ts"),
-      `export default (api: any) => api.registerTool({ name: "hostile_home_tool",
-        label: "hostile", description: "hostile", parameters: { type: "object" },
-        execute: async () => ({ content: [] }) });\n`,
-    );
-    writeFileSync(
-      join(temp!.ownerHome, ".omp", "config.yml"),
-      "retry:\n  modelFallback: false\n",
-    );
-
-    const handle = await host!.open("casper", "conv-owner-home");
-    expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
-    expect(handle.session.systemPrompt).not.toContain("HOSTILE-OWNER-PROJECT");
-    expect(handle.session.getToolDefinition("hostile_home_tool")).toBeUndefined();
-    expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
   });
 
   it("starts a new conversation in the settings.yml cwd when one is named", async () => {
@@ -626,7 +597,6 @@ describe("SessionHost.open", () => {
 
     const handle = await host!.open("casper", "conv-settings-cwd");
     expect(handle.session.sessionManager.getCwd()).toBe(workspace);
-    expect((await host!.getProject("casper", "conv-settings-cwd", "pi")).root).toBeNull();
   });
 
   it("ignores a settings.yml cwd outside the owner home", async () => {
@@ -635,813 +605,6 @@ describe("SessionHost.open", () => {
 
     const handle = await host!.open("casper", "conv-bad-cwd");
     expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
-  });
-
-  it("loads one trusted project snapshot while keeping executable project code disabled", async () => {
-    await setup(undefined, {
-      retention: { idleTtlMs: 0, maxSessions: 1 },
-    });
-    const project = join(temp!.root, "trusted-project");
-    const child = join(project, "packages", "app");
-    mkdirSync(join(project, ".omp", "skills", "trusted-skill"), { recursive: true });
-    mkdirSync(join(project, ".omp", "prompts"), { recursive: true });
-    mkdirSync(join(project, ".omp", "rules"), { recursive: true });
-    mkdirSync(join(project, ".omp", "extensions"), { recursive: true });
-    mkdirSync(join(project, ".claude", "commands"), { recursive: true });
-    mkdirSync(child, { recursive: true });
-    writeFileSync(join(project, "AGENTS.md"), "TRUSTED-PROJECT-INSTRUCTION");
-    writeFileSync(
-      join(project, ".omp", "skills", "trusted-skill", "SKILL.md"),
-      "---\nname: trusted-skill\ndescription: trusted\n---\n\nTrusted skill body.\n",
-    );
-    mkdirSync(join(project, ".omp", "skills", "invalid-skill"), { recursive: true });
-    writeFileSync(
-      join(project, ".omp", "skills", "invalid-skill", "SKILL.md"),
-      "---\nname: [unterminated\n---\n\nINVALID-SKILL-MUST-NOT-ENTER-PI\n",
-    );
-    writeFileSync(
-      join(project, ".omp", "extensions", "blocked.ts"),
-      `export default (api: any) => api.registerTool({ name: "blocked_project_tool",
-        label: "blocked", description: "blocked", parameters: { type: "object" },
-      execute: async () => ({ content: [] }) });\n`,
-    );
-    writeFileSync(
-      join(project, ".omp", "prompts", "project-brief.md"),
-      "---\ndescription: Summarize this project.\n---\n\nUse the trusted project brief.\n",
-    );
-    for (const [name, globs, interruptMode] of [
-      ["rule-never", '"**/*.ts"', "never"],
-      ["rule-prose", "['**/*.tsx', '**/*.jsx']", "prose-only"],
-      ["rule-tool", undefined, "tool-only"],
-      ["rule-always", undefined, "always"],
-    ] as const) {
-      writeFileSync(
-        join(project, ".omp", "rules", `${name}.md`),
-        `---\n${globs ? `globs: ${globs}\n` : ""}condition: ${name.toUpperCase()}\ninterruptMode: ${interruptMode}\n---\n\n${name} body\n`,
-      );
-    }
-    writeFileSync(
-      join(project, ".claude", "commands", "project-proof.md"),
-      "---\ndescription: Proof the project.\n---\n\nUse the trusted proof command.\n",
-    );
-    const preview = await host!.previewProject("casper", "conv-project", "pi", project);
-    expect(preview.resources.skills).toBe(1);
-    expect(preview.resources.rules).toBe(4);
-    expect(preview.warnings).toContainEqual(expect.stringContaining("skill metadata is invalid"));
-    await host!.bindProject("casper", "conv-project", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-LIVE-INSTRUCTION");
-
-    const handle = await host!.open("casper", "conv-project");
-    expect(handle.session.sessionManager.getCwd()).toBe(project);
-    expect(handle.skills.map((skill) => skill.name)).toContain("trusted-skill");
-    expect(handle.skills.map((skill) => skill.name)).not.toContain("invalid-skill");
-    expect(handle.session.getToolDefinition("blocked_project_tool")).toBeUndefined();
-    const expectProjectRules = (_session: typeof handle.session) => {
-      const rules = new Map(handle.rules.map((rule) => [rule.name, rule]));
-      expect(rules.get("rule-never")).toMatchObject({
-        globs: ["**/*.ts"],
-        interruptMode: "never",
-      });
-      expect(rules.get("rule-prose")).toMatchObject({
-        globs: ["**/*.tsx", "**/*.jsx"],
-        interruptMode: "prose-only",
-      });
-      expect(rules.get("rule-tool")?.interruptMode).toBe("tool-only");
-      expect(rules.get("rule-always")?.interruptMode).toBe("always");
-    };
-    expectProjectRules(handle.session);
-    const commands = await host!.availableCommands("casper", "conv-project");
-    expect(commands.map((command) => command.name)).toContain("project-brief");
-    expect(commands.map((command) => command.name)).toContain("project-proof");
-
-    writeFileSync(
-      join(project, ".omp", "skills", "trusted-skill", "SKILL.md"),
-      "---\nname: trusted-skill\ndescription: replaced\n---\n\nHOSTILE-LIVE-SKILL\n",
-    );
-    for (const name of ["rule-never", "rule-prose", "rule-tool", "rule-always"]) {
-      writeFileSync(join(project, ".omp", "rules", `${name}.md`), "MUTATED-LIVE-RULE");
-    }
-    await host!.runTurn("casper", {
-      sessionId: "conv-project",
-      prompt: "/skill:trusted-skill plate one",
-      emit: () => {},
-    });
-    const projectSystem = provider!.requests.at(-1)!.system;
-    expect(projectSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(projectSystem).not.toContain("HOSTILE-LIVE-INSTRUCTION");
-    expect(projectSystem).not.toContain("INVALID-SKILL-MUST-NOT-ENTER-PI");
-    expect(projectSystem).not.toContain("Trusted skill body");
-    expect(projectSystem).not.toContain("Use the trusted project brief");
-    expect(projectSystem).not.toContain("Use the trusted proof command");
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("Trusted skill body");
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).not.toContain("HOSTILE-LIVE-SKILL");
-
-    await host!.runTurn("casper", {
-      sessionId: "conv-project",
-      prompt: "/project-proof plate one",
-      emit: () => {},
-    });
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages))
-      .toContain("Use the trusted proof command");
-    expect(JSON.stringify(provider!.requests.at(-1)?.messages)).toContain("plate one");
-
-    const outside = join(temp!.root, "outside-project");
-    mkdirSync(outside);
-    symlinkSync(outside, join(project, "escape"));
-    const rejectedCd: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-project",
-      prompt: "!cd escape",
-      emit: (event) => rejectedCd.push(event),
-    });
-    expect(rejectedCd.at(-1)).toMatchObject({ type: "error" });
-    expect(await host!.getProject("casper", "conv-project", "pi"))
-      .toMatchObject({ cwd: project, generation: 1 });
-
-    const pwd: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-project",
-      prompt: "!pwd",
-      emit: (event) => pwd.push(event),
-    });
-    expect(JSON.stringify(pwd)).toContain(project);
-    expect(JSON.stringify(pwd)).not.toContain(outside);
-
-    await host!.runTurn("casper", {
-      sessionId: "conv-project",
-      prompt: "!cd packages/app",
-      emit: () => {},
-    });
-    expect(await host!.getProject("casper", "conv-project", "pi"))
-      .toMatchObject({ root: project, cwd: child, relativeCwd: "packages/app", generation: 2 });
-
-    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-AFTER-CACHE-EVICTION");
-    await host!.open("casper", "cache-evictor");
-    expect(((handle as { sessionDisposed?: boolean }).sessionDisposed === true)).toBe(true);
-    const reopened = await host!.open("casper", "conv-project");
-    expectProjectRules(reopened.session);
-    const reopenedSystem = await modelSystemPrompt("conv-project");
-    expect(reopenedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(reopenedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
-
-    await host!.disposeAll();
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      offline: true,
-    });
-    const afterRestart = await host.open("casper", "conv-project");
-    expectProjectRules(afterRestart.session);
-    const restartedSystem = await modelSystemPrompt("conv-project");
-    expect(restartedSystem).toContain("TRUSTED-PROJECT-INSTRUCTION");
-    expect(restartedSystem).not.toContain("HOSTILE-AFTER-CACHE-EVICTION");
-  });
-
-  it("keeps invalid UTF-8 project instructions, skills, and MCP out of Pi", async () => {
-    const { dir } = await setup();
-    const project = join(temp!.root, "pi-invalid-project-utf8");
-    const invalidSkill = join(project, ".omp", "skills", "invalid");
-    const validSkill = join(project, ".omp", "skills", "valid");
-    const namelessCollision = join(project, ".claude", "skills", "retained");
-    const retainedGhostSkill = join(dir, "skills", "retained");
-    mkdirSync(invalidSkill, { recursive: true });
-    mkdirSync(validSkill, { recursive: true });
-    mkdirSync(namelessCollision, { recursive: true });
-    mkdirSync(retainedGhostSkill, { recursive: true });
-    writeFileSync(
-      join(project, ".omp", "AGENTS.md"),
-      Buffer.concat([Buffer.from("INVALID-PI-INSTRUCTION-"), Buffer.from([0x80])]),
-    );
-    writeFileSync(join(project, "AGENTS.md"), "VALID-PI-FALLBACK-INSTRUCTION");
-    writeFileSync(
-      join(invalidSkill, "SKILL.md"),
-      Buffer.concat([
-        Buffer.from("---\nname: invalid\ndescription: invalid\n---\n\nINVALID-PI-SKILL-"),
-        Buffer.from([0x80]),
-      ]),
-    );
-    writeFileSync(
-      join(validSkill, "SKILL.md"),
-      "---\nname: valid\ndescription: valid\n---\n\nVALID-PI-SKILL",
-    );
-    writeFileSync(
-      join(namelessCollision, "SKILL.md"),
-      "---\ndescription: must not shadow the ghost skill\n---\n\nNAMELESS-PI-COLLISION",
-    );
-    writeFileSync(
-      join(retainedGhostSkill, "SKILL.md"),
-      "---\nname: retained\ndescription: ghost sibling\n---\n\nRETAINED-GHOST-SKILL",
-    );
-    writeFileSync(
-      join(project, ".omp", "mcp.json"),
-      Buffer.concat([
-        Buffer.from('{"mcpServers":{"invalid":{"type":"stdio","command":"INVALID-PI-MCP-'),
-        Buffer.from([0x80]),
-        Buffer.from('"}}}'),
-      ]),
-    );
-    const preview = await host!.previewProject("casper", "pi-invalid-utf8", "pi", project);
-    expect(preview.resources).toMatchObject({ instructions: 1, skills: 1, mcpServers: 0 });
-    expect(preview.warnings).toEqual(expect.arrayContaining([
-      expect.stringContaining(".omp/AGENTS.md was ignored because it is not valid UTF-8"),
-      expect.stringContaining(".omp/skills/invalid/SKILL.md was ignored because it is not valid UTF-8"),
-      expect.stringContaining(".omp/mcp.json was ignored because it is not valid UTF-8"),
-      expect.stringContaining("skill name or description is missing"),
-    ]));
-    await host!.bindProject("casper", "pi-invalid-utf8", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-
-    const opened = await host!.open("casper", "pi-invalid-utf8");
-    const prompt = await modelSystemPrompt("pi-invalid-utf8");
-    expect(prompt).toContain("VALID-PI-FALLBACK-INSTRUCTION");
-    expect(opened.skills.map((skill) => skill.name)).toEqual(
-      expect.arrayContaining(["retained", "valid"]),
-    );
-    expect(opened.skills.find((skill) => skill.name === "retained")?.snapshotContent)
-      .toContain("RETAINED-GHOST-SKILL");
-    expect(prompt).not.toContain("NAMELESS-PI-COLLISION");
-    expect(prompt).not.toContain("\uFFFD");
-    expect(await host!.getProject("casper", "pi-invalid-utf8", "pi"))
-      .toMatchObject({ status: "degraded", mcpStatus: "degraded" });
-  });
-
-  it("serializes concurrent project transitions for one runtime conversation", async () => {
-    await setup();
-    const firstRoot = join(temp!.root, "project-one");
-    const secondRoot = join(temp!.root, "project-two");
-    mkdirSync(firstRoot);
-    mkdirSync(secondRoot);
-    const firstPreview = await host!.previewProject("casper", "conv-race", "pi", firstRoot);
-    const secondPreview = await host!.previewProject("casper", "conv-race", "pi", secondRoot);
-    const first = host!.bindProject("casper", "conv-race", "pi", {
-      root: firstRoot,
-      trustToken: firstPreview.trustToken,
-      expectedGeneration: 0,
-    });
-    await expect(host!.bindProject("casper", "conv-race", "pi", {
-      root: secondRoot,
-      trustToken: secondPreview.trustToken,
-      expectedGeneration: 0,
-    })).rejects.toMatchObject({ code: "session_busy" });
-    await first;
-    expect(await host!.getProject("casper", "conv-race", "pi"))
-      .toMatchObject({ root: firstRoot, generation: 1 });
-  });
-
-  it("preserves a live Pi runtime when project validation, identity, or persistence fails", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    writeMcpFixture(dir);
-    const project = join(temp!.root, "failure-atomic-project");
-    mkdirSync(project);
-    const preview = await host!.previewProject("casper", "failure-atomic", "pi", project);
-    await host!.bindProject("casper", "failure-atomic", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    const opened = await host!.open("casper", "failure-atomic");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-    const expectRuntimeUnchanged = async () => {
-      const cached = (host as unknown as {
-        sessions: Map<string, { session: AgentSession }>;
-      }).sessions.get(sessionKeyOf("casper", "failure-atomic"));
-      expect(cached?.session).toBe(opened.session);
-      expect(cached?.session.getToolDefinition(toolName)).toBeDefined();
-      expect(JSON.parse(readFileSync(
-        projectBindingPath(ghostPaths(dir).sessionDir, "pi", "failure-atomic"),
-        "utf8",
-      ))).toMatchObject({ root: project, generation: 1 });
-    };
-
-    await expect(host!.bindProject("casper", "failure-atomic", "pi", {
-      root: null,
-      cwd: "relative",
-      expectedGeneration: 1,
-    })).rejects.toMatchObject({ code: "invalid_request", status: 400 });
-    await expectRuntimeUnchanged();
-
-    const movedProject = `${project}-original`;
-    renameSync(project, movedProject);
-    mkdirSync(project);
-    await expect(host!.reloadProject("casper", "failure-atomic", "pi", 1))
-      .rejects.toMatchObject({ code: "project_not_trusted", status: 403 });
-    await expectRuntimeUnchanged();
-    rmSync(project, { recursive: true, force: true });
-    renameSync(movedProject, project);
-
-    const bindings = (host as unknown as { projectBindings: ProjectBindingStore }).projectBindings;
-    vi.spyOn(bindings, "write").mockRejectedValueOnce(new Error("injected sidecar failure"));
-    await expect(host!.reloadProject("casper", "failure-atomic", "pi", 1))
-      .rejects.toThrow("injected sidecar failure");
-    await expectRuntimeUnchanged();
-  });
-
-  it("commits bind and reload before retrying failed Pi teardown without serving a stale cache", async () => {
-    const logger = recordingLogger();
-    const { dir } = await setup([{ kind: "text", text: "unused" }], { logger });
-    writeMcpFixture(dir);
-    const firstProject = join(temp!.root, "cleanup-first-project");
-    const secondProject = join(temp!.root, "cleanup-second-project");
-    mkdirSync(firstProject);
-    mkdirSync(secondProject);
-    writeFileSync(join(firstProject, "AGENTS.md"), "FIRST-PROJECT-SNAPSHOT");
-    writeFileSync(join(secondProject, "AGENTS.md"), "SECOND-PROJECT-SNAPSHOT");
-    const firstPreview = await host!.previewProject(
-      "casper",
-      "post-commit-cleanup",
-      "pi",
-      firstProject,
-    );
-    await host!.bindProject("casper", "post-commit-cleanup", "pi", {
-      root: firstProject,
-      trustToken: firstPreview.trustToken,
-      expectedGeneration: 0,
-    });
-
-    const internals = host as unknown as {
-      sessions: Map<string, { session: AgentSession }>;
-      cleanupRetries: Map<string, { session: AgentSession }>;
-    };
-    const sessionKey = sessionKeyOf("casper", "post-commit-cleanup");
-    const injectOneCleanupFailureSet = (handle: Awaited<ReturnType<SessionHost["open"]>>) => {
-      const mcp = (handle as typeof handle & {
-        mcp: { manager: { disconnectAll(): Promise<void> } };
-      }).mcp;
-      const originalDisconnect = mcp.manager.disconnectAll.bind(mcp.manager);
-      let disconnectFailure = true;
-      const disconnect = vi.spyOn(mcp.manager, "disconnectAll").mockImplementation(async () => {
-        if (disconnectFailure) {
-          disconnectFailure = false;
-          throw new Error("injected MCP teardown failure");
-        }
-        await originalDisconnect();
-      });
-      const originalAbort = handle.session.abort.bind(handle.session);
-      let abortFailure = true;
-      const abort = vi.spyOn(handle.session, "abort").mockImplementation(async () => {
-        if (abortFailure) {
-          abortFailure = false;
-          throw new Error("injected session abort failure");
-        }
-        await originalAbort();
-      });
-      const originalDispose = handle.session.dispose.bind(handle.session);
-      let disposeFailure = true;
-      const dispose = vi.spyOn(handle.session, "dispose").mockImplementation(async () => {
-        if (disposeFailure) {
-          disposeFailure = false;
-          throw new Error("injected session teardown failure");
-        }
-        await originalDispose();
-      });
-      return { abort, disconnect, dispose };
-    };
-    const expectCommittedCleanupRetry = async (
-      oldSession: AgentSession,
-      expectedGeneration: number,
-      expectedRoot: string,
-      spies: ReturnType<typeof injectOneCleanupFailureSet>,
-    ) => {
-      expect(internals.sessions.has(sessionKey)).toBe(false);
-      expect(internals.cleanupRetries.get(sessionKey)?.session).toBe(oldSession);
-      expect(host!.cachedSessionCount).toBe(0);
-      expect(await host!.getProject("casper", "post-commit-cleanup", "pi"))
-        .toMatchObject({ generation: expectedGeneration, root: expectedRoot });
-      expect(spies.disconnect).toHaveBeenCalledOnce();
-      expect(spies.abort).toHaveBeenCalledOnce();
-      expect(spies.dispose).toHaveBeenCalledOnce();
-
-      const reopened = await host!.open("casper", "post-commit-cleanup");
-      expect(reopened.session).not.toBe(oldSession);
-      expect(internals.cleanupRetries.has(sessionKey)).toBe(false);
-      expect(spies.disconnect).toHaveBeenCalledTimes(2);
-      expect(spies.abort).toHaveBeenCalledTimes(2);
-      expect(spies.dispose).toHaveBeenCalledTimes(2);
-      return reopened;
-    };
-
-    const first = await host!.open("casper", "post-commit-cleanup");
-    const firstFailures = injectOneCleanupFailureSet(first);
-    const secondPreview = await host!.previewProject(
-      "casper",
-      "post-commit-cleanup",
-      "pi",
-      secondProject,
-    );
-    await expect(host!.bindProject("casper", "post-commit-cleanup", "pi", {
-      root: secondProject,
-      trustToken: secondPreview.trustToken,
-      expectedGeneration: 1,
-    })).resolves.toMatchObject({ generation: 2, root: secondProject });
-    const second = await expectCommittedCleanupRetry(
-      first.session,
-      2,
-      secondProject,
-      firstFailures,
-    );
-    expect(await modelSystemPrompt("post-commit-cleanup"))
-      .toContain("SECOND-PROJECT-SNAPSHOT");
-
-    writeFileSync(join(secondProject, "AGENTS.md"), "RELOADED-PROJECT-SNAPSHOT");
-    const reloadFailures = injectOneCleanupFailureSet(second);
-    await expect(host!.reloadProject("casper", "post-commit-cleanup", "pi", 2))
-      .resolves.toMatchObject({ generation: 3, root: secondProject });
-    await expectCommittedCleanupRetry(
-      second.session,
-      3,
-      secondProject,
-      reloadFailures,
-    );
-    expect(await modelSystemPrompt("post-commit-cleanup"))
-      .toContain("RELOADED-PROJECT-SNAPSHOT");
-    expect(logger.records.filter((entry) =>
-      entry.message === "committed project session cleanup is pending retry"
-      && entry.fields?.code === "project_cleanup_pending")).toHaveLength(2);
-  });
-
-  it.each(["pi", "claude-code"] as const)(
-    "abandons and idempotently forgets an unpublished %s project draft",
-    async (runtime) => {
-      const { dir } = await setup([{ kind: "text", text: "unused" }]);
-      const id = `abandon-${runtime}`;
-      const project = join(temp!.root, `abandon-${runtime}-project`);
-      mkdirSync(project);
-      writeFileSync(join(project, "AGENTS.md"), "UNPUBLISHED-DRAFT-SNAPSHOT");
-      const preview = await host!.previewProject("casper", id, runtime, project);
-      await host!.bindProject("casper", id, runtime, {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      const sessionDir = ghostPaths(dir).sessionDir;
-      if (runtime === "pi") {
-        await writeToolCwds(sessionDir, id, new Map([["draft-tool", temp!.ownerHome]]));
-      }
-      const binding = projectBindingPath(sessionDir, runtime, id);
-      const snapshots = runtime === "pi" ? await piProjectSnapshotPaths(sessionDir, id) : [];
-      const cwd = toolCwdsPath(sessionDir, id);
-      expect(existsSync(binding)).toBe(true);
-      if (runtime === "pi") {
-        expect(snapshots).toHaveLength(1);
-        expect(existsSync(cwd)).toBe(true);
-      }
-
-      await expect(host!.abandonProjectDraft("casper", id, runtime)).resolves.toEqual({
-        ok: true,
-        id: `${runtime}:${id}`,
-        conversationId: id,
-        runtime,
-        abandoned: true,
-      });
-      expect(existsSync(binding)).toBe(false);
-      expect(snapshots.every((path) => !existsSync(path))).toBe(true);
-      expect(existsSync(cwd)).toBe(false);
-      expect(await host!.getProject("casper", id, runtime)).toMatchObject({
-        root: null,
-        generation: 0,
-      });
-      await expect(host!.abandonProjectDraft("casper", id, runtime)).resolves.toMatchObject({
-        abandoned: false,
-      });
-
-      const nextPreview = await host!.previewProject("casper", id, runtime, project);
-      expect(nextPreview.trustToken).toEqual(expect.any(String));
-      await expect(host!.abandonProjectDraft("casper", id, runtime)).resolves.toMatchObject({
-        abandoned: true,
-      });
-      await expect(host!.bindProject("casper", id, runtime, {
-        root: project,
-        trustToken: nextPreview.trustToken,
-        expectedGeneration: 0,
-      })).rejects.toMatchObject({ code: "trust_token_invalid", status: 403 });
-    },
-  );
-
-  it("retains an unpublished draft cleanup marker across failure and refuses published state", async () => {
-    let rejectCleanup = true;
-    const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      transactionProbe: (stage) => {
-        if (rejectCleanup && stage === "draft-abandon-unlink") {
-          throw new Error("injected draft cleanup failure");
-        }
-      },
-    });
-    const project = join(temp!.root, "draft-cleanup-project");
-    mkdirSync(project);
-    const bindDraft = async (id: string) => {
-      const preview = await host!.previewProject("casper", id, "pi", project);
-      await host!.bindProject("casper", id, "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-    };
-    await bindDraft("cleanup-pending");
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const pendingStem = sessionFileNameFor("cleanup-pending").slice(0, -".jsonl".length);
-    const marker = join(
-      sessionDir,
-      `.ghost-draft-abandon-${pendingStem}.pi.pending.json`,
-    );
-    await expect(host!.abandonProjectDraft("casper", "cleanup-pending", "pi"))
-      .rejects.toThrow("injected draft cleanup failure");
-    expect(existsSync(marker)).toBe(true);
-    await expect(host!.getProject("casper", "cleanup-pending", "pi"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    rejectCleanup = false;
-    await expect(host!.abandonProjectDraft("casper", "cleanup-pending", "pi"))
-      .resolves.toMatchObject({ abandoned: true });
-    expect(existsSync(marker)).toBe(false);
-
-    await bindDraft("published-draft");
-    await host!.runTurn("casper", {
-      sessionId: "published-draft",
-      prompt: "publish this conversation",
-      emit: () => {},
-    });
-    const binding = projectBindingPath(sessionDir, "pi", "published-draft");
-    const bindingBytes = readFileSync(binding, "utf8");
-    await expect(host!.abandonProjectDraft("casper", "published-draft", "pi"))
-      .rejects.toMatchObject({ code: "project_draft_published", status: 409 });
-    expect(readFileSync(binding, "utf8")).toBe(bindingBytes);
-  });
-
-  it.each(["draft-abandon-fsync", "draft-abandon-complete"] as const)(
-    "retries unpublished cleanup after %s fails",
-    async (blockedStage) => {
-      let rejectStage = true;
-      const { dir } = await setup([{ kind: "text", text: "unused" }], {
-        transactionProbe: (stage) => {
-          if (rejectStage && stage === blockedStage) {
-            throw new Error(`injected ${blockedStage} failure`);
-          }
-        },
-      });
-      const id = `draft-${blockedStage}`;
-      const project = join(temp!.root, id);
-      mkdirSync(project);
-      const preview = await host!.previewProject("casper", id, "pi", project);
-      await host!.bindProject("casper", id, "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      const sessionDir = ghostPaths(dir).sessionDir;
-      const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
-      const marker = join(sessionDir, `.ghost-draft-abandon-${stem}.pi.pending.json`);
-      const receipt = join(sessionDir, `.ghost-draft-abandon-${stem}.pi.complete.json`);
-      await expect(host!.abandonProjectDraft("casper", id, "pi"))
-        .rejects.toThrow(`injected ${blockedStage} failure`);
-      expect(existsSync(marker)).toBe(true);
-      expect(existsSync(receipt)).toBe(false);
-      await expect(host!.getProject("casper", id, "pi"))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-      rejectStage = false;
-      await expect(host!.abandonProjectDraft("casper", id, "pi"))
-        .resolves.toMatchObject({ abandoned: true });
-      expect(existsSync(marker)).toBe(false);
-      expect(existsSync(receipt)).toBe(true);
-      await expect(host!.abandonProjectDraft("casper", id, "pi"))
-        .resolves.toMatchObject({ abandoned: false });
-    },
-  );
-
-  it("rejects draft abandonment while fork or delete ownership exists", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const project = join(temp!.root, "draft-transaction-project");
-    mkdirSync(project);
-    const sessionDir = ghostPaths(dir).sessionDir;
-    for (const [id, kind] of [["fork-owned-draft", "fork"], ["delete-owned-draft", "delete"]] as const) {
-      const preview = await host!.previewProject("casper", id, "pi", project);
-      await host!.bindProject("casper", id, "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
-      const marker = kind === "fork"
-        ? join(sessionDir, `.ghost-fork-${stem}.pending.json`)
-        : join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
-      writeFileSync(marker, "{}", { mode: 0o600 });
-      await expect(host!.abandonProjectDraft("casper", id, "pi"))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(existsSync(projectBindingPath(sessionDir, "pi", id))).toBe(true);
-      unlinkSync(marker);
-    }
-    const invalidId = "invalid-abandon-marker";
-    const invalidPreview = await host!.previewProject("casper", invalidId, "pi", project);
-    await host!.bindProject("casper", invalidId, "pi", {
-      root: project,
-      trustToken: invalidPreview.trustToken,
-      expectedGeneration: 0,
-    });
-    const invalidStem = sessionFileNameFor(invalidId).slice(0, -".jsonl".length);
-    const invalidMarker = join(
-      sessionDir,
-      `.ghost-draft-abandon-${invalidStem}.pi.pending.json`,
-    );
-    writeFileSync(invalidMarker, "{}", { mode: 0o600 });
-    await expect(host!.abandonProjectDraft("casper", invalidId, "pi"))
-      .rejects.toMatchObject({ code: "project_draft_cleanup_pending", status: 500 });
-    expect(existsSync(projectBindingPath(sessionDir, "pi", invalidId))).toBe(true);
-    unlinkSync(invalidMarker);
-
-    const outsideMarker = join(temp!.root, "outside-draft-marker.json");
-    writeFileSync(outsideMarker, "{}\n", { mode: 0o600 });
-    symlinkSync(outsideMarker, invalidMarker);
-    await expect(host!.abandonProjectDraft("casper", invalidId, "pi"))
-      .rejects.toMatchObject({ code: "project_draft_cleanup_pending", status: 500 });
-    expect(existsSync(projectBindingPath(sessionDir, "pi", invalidId))).toBe(true);
-    unlinkSync(invalidMarker);
-
-    execFileSync("mkfifo", [invalidMarker]);
-    const timeout = Symbol("timeout");
-    const fifo = await Promise.race([
-      host!.abandonProjectDraft("casper", invalidId, "pi")
-        .then(() => "resolved", () => "rejected"),
-      new Promise<symbol>((resolve) => setTimeout(() => resolve(timeout), 500)),
-    ]);
-    expect(fifo).toBe("rejected");
-    expect(existsSync(projectBindingPath(sessionDir, "pi", invalidId))).toBe(true);
-    unlinkSync(invalidMarker);
-
-    writeFileSync(invalidMarker, "x".repeat(1_048_577), { mode: 0o600 });
-    await expect(host!.abandonProjectDraft("casper", invalidId, "pi"))
-      .rejects.toMatchObject({ code: "project_draft_cleanup_pending", status: 500 });
-    expect(existsSync(projectBindingPath(sessionDir, "pi", invalidId))).toBe(true);
-    unlinkSync(invalidMarker);
-    await expect(host!.abandonProjectDraft("casper", "never-created", "pi"))
-      .rejects.toMatchObject({ code: "not_found", status: 404 });
-  });
-
-  it("rejects opposite-runtime turns, opens, and closes after a project transition wins admission", async () => {
-    const { dir } = await setup([{ kind: "text", text: "must not run" }]);
-    await host!.disposeAll();
-    const bindingStore = new ProjectBindingStore({
-      ownerHome: temp!.ownerHome,
-      trustPath: join(temp!.root, "state", "opposite-transition-trust.json"),
-    });
-    const originalWrite = bindingStore.write.bind(bindingStore);
-    let writeGate: {
-      entered: ReturnType<typeof Promise.withResolvers<void>>;
-      release: ReturnType<typeof Promise.withResolvers<void>>;
-    } | null = null;
-    vi.spyOn(bindingStore, "write").mockImplementation(async (input) => {
-      const gate = writeGate;
-      if (gate) {
-        gate.entered.resolve();
-        await gate.release.promise;
-      }
-      return originalWrite(input);
-    });
-    let claudeQueries = 0;
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      projectBindings: bindingStore,
-      offline: true,
-      claudeCode: {
-        binaryPath: process.execPath,
-        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
-        createQuery: () => {
-          claudeQueries += 1;
-          throw new Error("Claude query must not start during a project transition");
-        },
-      },
-    });
-    const project = join(temp!.root, "opposite-transition-project");
-    mkdirSync(project);
-
-    for (const [transitionRuntime, selectedRuntime, id] of [
-      ["pi", "claude-code", "pi-transition"],
-      ["claude-code", "pi", "claude-transition"],
-    ] as const) {
-      if (selectedRuntime === "claude-code") {
-        setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
-      } else {
-        clearGhostModelRole(ghostPaths(dir).home, "chat_model");
-      }
-      const preview = await host.previewProject("casper", id, transitionRuntime, project);
-      const gate = {
-        entered: Promise.withResolvers<void>(),
-        release: Promise.withResolvers<void>(),
-      };
-      writeGate = gate;
-      const binding = host.bindProject("casper", id, transitionRuntime, {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      await gate.entered.promise;
-
-      await expect(host.runTurn("casper", { sessionId: id, prompt: "race", emit: () => {} }))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      await expect(host.open("casper", id))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      await expect(host.close("casper", id))
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(provider!.requests).toHaveLength(0);
-      expect(claudeQueries).toBe(0);
-
-      writeGate = null;
-      gate.release.resolve();
-      await expect(binding).resolves.toMatchObject({ root: project, generation: 1 });
-    }
-  });
-
-  it("blocks preview, bind, and reload during runtime-neutral turn admission", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    await host!.disposeAll();
-    const bindingStore = new ProjectBindingStore({
-      ownerHome: temp!.ownerHome,
-      trustPath: join(temp!.root, "state", "turn-admission-trust.json"),
-    });
-    const project = join(temp!.root, "turn-admission-project");
-    mkdirSync(project);
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      projectBindings: bindingStore,
-      offline: true,
-    });
-    const trusted = await host.previewProject("casper", "admitted", "pi", project);
-    await host.bindProject("casper", "admitted", "pi", {
-      root: project,
-      trustToken: trusted.trustToken,
-      expectedGeneration: 0,
-    });
-
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const admittedHost = host as unknown as {
-      runAdmittedTurn(ghostName: string, options: unknown): Promise<void>;
-    };
-    vi.spyOn(admittedHost, "runAdmittedTurn").mockImplementation(async () => {
-      entered.resolve();
-      await release.promise;
-    });
-    const previewSpy = vi.spyOn(bindingStore, "preview");
-    const writeSpy = vi.spyOn(bindingStore, "write");
-    const turn = host.runTurn("casper", {
-      sessionId: "admitted",
-      prompt: "route later",
-      emit: () => {},
-    });
-    await entered.promise;
-
-    await expect(host.previewProject("casper", "admitted", "pi", project))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host.bindProject("casper", "admitted", "pi", {
-      root: null,
-      expectedGeneration: 1,
-    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host.reloadProject("casper", "admitted", "pi", 1))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(previewSpy).not.toHaveBeenCalled();
-    expect(writeSpy).not.toHaveBeenCalled();
-
-    release.resolve();
-    await turn;
-  });
-
-  it("blocks either runtime's project transition while a Pi session tears down", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    const project = join(temp!.root, "teardown-project");
-    mkdirSync(project);
-    const trusted = await host!.previewProject("casper", "teardown", "pi", project);
-    await host!.bindProject("casper", "teardown", "pi", {
-      root: project,
-      trustToken: trusted.trustToken,
-      expectedGeneration: 0,
-    });
-    const opened = await host!.open("casper", "teardown");
-    const entered = Promise.withResolvers<void>();
-    const release = Promise.withResolvers<void>();
-    const originalDispose = opened.session.dispose.bind(opened.session);
-    vi.spyOn(opened.session, "dispose").mockImplementation(async () => {
-      entered.resolve();
-      await release.promise;
-      await originalDispose();
-    });
-    const closing = host!.close("casper", "teardown");
-    await entered.promise;
-
-    await expect(host!.previewProject("casper", "teardown", "pi", project))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host!.previewProject("casper", "teardown", "claude-code", project))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    release.resolve();
-    await closing;
   });
 
   it("closes the borrowed model runtime when a later startup stage fails", async () => {
@@ -1669,10 +832,7 @@ lines.on("line", (line) => {
     for (const name of names) {
       expect(handle.session.getToolDefinition(createMCPToolName(name, "reload_echo"))).toBeDefined();
       expect(host!.mcpConnectionStatus("casper", name)).toBe("connected");
-      expect(mcp?.sources.get(name)).toMatchObject({
-        level: "user",
-        path: join(dir, "mcp.json"),
-      });
+      expect(mcp?.sources.get(name)).toEqual({ path: join(dir, "mcp.json") });
       expect(mcp?.manager.getServerConfig(name)).toMatchObject({
         command: process.execPath,
         args: [serverPath],
@@ -2670,378 +1830,6 @@ lines.on("line", (line) => {
     connectSpy.mockRestore();
   });
 
-  it("serializes project, delete, whole-ghost, and MCP ownership in both admission orders", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    writeMcpFixture(dir);
-    await host!.disposeAll();
-    const bindingStore = new ProjectBindingStore({
-      ownerHome: temp!.ownerHome,
-      trustPath: join(temp!.root, "state", "project-trust.json"),
-    });
-    const originalWrite = bindingStore.write.bind(bindingStore);
-    const writeEntered = Promise.withResolvers<void>();
-    const releaseWrite = Promise.withResolvers<void>();
-    let delayNextWrite = true;
-    vi.spyOn(bindingStore, "write").mockImplementation(async (input) => {
-      if (delayNextWrite) {
-        delayNextWrite = false;
-        writeEntered.resolve();
-        await releaseWrite.promise;
-      }
-      return originalWrite(input);
-    });
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      projectBindings: bindingStore,
-      offline: true,
-      scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
-    });
-    const project = join(temp!.root, "ownership-project");
-    mkdirSync(project);
-    const preview = await host.previewProject("casper", "ownership", "pi", project);
-    const binding = host.bindProject("casper", "ownership", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    await writeEntered.promise;
-    await expect(host.withMcpReload("casper", async () => {}))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.deleteSession("casper", "ownership"))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.renameGhost("casper", "wisp"))
-      .rejects.toMatchObject({ code: "ghost_busy" });
-    releaseWrite.resolve();
-    await binding;
-
-    const mcpEntered = Promise.withResolvers<void>();
-    const releaseMcp = Promise.withResolvers<void>();
-    const mcpTransition = host.withMcpReload("casper", async () => {
-      mcpEntered.resolve();
-      await releaseMcp.promise;
-    });
-    await mcpEntered.promise;
-    await expect(host.bindProject("casper", "ownership", "pi", {
-      root: null,
-      expectedGeneration: 1,
-    })).rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.deleteSession("casper", "ownership"))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.renameGhost("casper", "wisp"))
-      .rejects.toMatchObject({ code: "ghost_busy" });
-    releaseMcp.resolve();
-    await mcpTransition;
-
-    const hosted = await host.open("casper", "ownership");
-    const reconnectManager = (hosted as unknown as { mcp: { manager: GhostMcpManager } }).mcp.manager;
-    const reconnectEntered = Promise.withResolvers<void>();
-    const releaseReconnect = Promise.withResolvers<void>();
-    const originalConnect = GhostMcpManager.prototype.connectServers;
-    const connectSpy = vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementationOnce(async function (
-      this: GhostMcpManager,
-      configs,
-    ) {
-      reconnectEntered.resolve();
-      await releaseReconnect.promise;
-      return originalConnect.call(this, configs);
-    });
-    const reconnecting = host.reconnectMcp("casper", "reload_fixture");
-    await reconnectEntered.promise;
-    await expect(host.deleteSession("casper", "ownership"))
-      .rejects.toMatchObject({ code: "session_busy" });
-    releaseReconnect.resolve();
-    await reconnecting;
-    expect((hosted as unknown as { mcp: { manager: unknown } }).mcp.manager)
-      .not.toBe(reconnectManager);
-    connectSpy.mockRestore();
-
-    const deleteBackground = Promise.withResolvers<void>();
-    (hosted as unknown as { title?: Promise<void> }).title = deleteBackground.promise;
-    const deleting = host.deleteSession("casper", "ownership");
-    expect((host as unknown as { deleting: Set<string> }).deleting.size).toBe(1);
-    await expect(host.bindProject("casper", "ownership", "pi", {
-      root: null,
-      expectedGeneration: 1,
-    })).rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.reconnectMcp("casper", "not-configured"))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.withMcpReload("casper", async () => {}))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.renameGhost("casper", "wisp"))
-      .rejects.toMatchObject({ code: "ghost_busy" });
-    deleteBackground.resolve();
-    await deleting;
-
-    const movingHosted = await host.open("casper", "move-block");
-    const moveBackground = Promise.withResolvers<void>();
-    (movingHosted as unknown as { title?: Promise<void> }).title = moveBackground.promise;
-    const renaming = host.renameGhost("casper", "wisp");
-    await waitFor(() =>
-      (host as unknown as { reservedGhosts: Set<string> }).reservedGhosts.has("casper") || null);
-    await expect(host.bindProject("casper", "move-block", "pi", {
-      root: null,
-      expectedGeneration: 0,
-    })).rejects.toMatchObject({ code: "ghost_busy" });
-    await expect(host.withMcpReload("casper", async () => {}))
-      .rejects.toMatchObject({ code: "session_busy" });
-    await expect(host.deleteSession("casper", "move-block"))
-      .rejects.toMatchObject({ code: "ghost_busy" });
-    moveBackground.resolve();
-    await expect(renaming).resolves.toMatchObject({ name: "wisp" });
-  });
-
-  it("refreshes project MCP only through an explicit project reload", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    const project = join(temp!.root, "mcp-bound-project");
-    mkdirSync(project);
-    mkdirSync(join(project, "runtime"));
-    writeMcpFixture(project, { cwd: "runtime", project: true });
-    mkdirSync(join(project, ".omp", "rules"), { recursive: true });
-    for (let index = 0; index < PROJECT_SCAN_MAX_ENTRIES + 10; index += 1) {
-      writeFileSync(join(project, ".omp", "rules", `wide-${index}.md`), `rule ${index}`);
-    }
-    const preview = await host!.previewProject("casper", "conv-project-mcp", "pi", project);
-    expect(preview.warnings).toContainEqual(expect.stringContaining("entry limit"));
-    await host!.bindProject("casper", "conv-project-mcp", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    const handle = await host!.open("casper", "conv-project-mcp");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(handle.session.getToolDefinition(toolName)).toBeDefined();
-    expect(readFileSync(join(project, "mcp-cwd.txt"), "utf8")).toBe(join(project, "runtime"));
-    expect(readFileSync(join(project, "mcp-cwd.txt"), "utf8")).not.toBe(temp!.ownerHome);
-    expect(await host!.getProject("casper", "conv-project-mcp", "pi"))
-      .toMatchObject({ generation: 1, status: "ready", mcpStatus: "ready" });
-
-    writeFileSync(join(project, ".omp", "mcp.json"), "{not-json", "utf8");
-    await host!.reloadMcp("casper");
-
-    expect(handle.session.getToolDefinition(toolName)).toBeDefined();
-    expect(await host!.getProject("casper", "conv-project-mcp", "pi"))
-      .toMatchObject({ generation: 1, status: "ready", mcpStatus: "ready" });
-
-    await host!.reloadProject("casper", "conv-project-mcp", "pi", 1);
-    const reopened = await host!.open("casper", "conv-project-mcp");
-    expect(reopened.session.getToolDefinition(toolName)).toBeUndefined();
-    expect(await host!.getProject("casper", "conv-project-mcp", "pi"))
-      .toMatchObject({
-        generation: 2,
-        status: "degraded",
-        mcpStatus: "degraded",
-        error: { code: "project_mcp_degraded" },
-      });
-  });
-
-  it("publishes project MCP health after manual reconnect success and failure", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    const project = join(temp!.root, "manual-project-mcp-health");
-    mkdirSync(project);
-    writeMcpFixture(project, { project: true });
-    const preview = await host!.previewProject("casper", "manual-project-health", "pi", project);
-    await host!.bindProject("casper", "manual-project-health", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-
-    const serverPath = join(project, "reload-mcp.mjs");
-    rmSync(serverPath);
-    const opened = await host!.open("casper", "manual-project-health");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(opened.session.getToolDefinition(toolName)).toBeUndefined();
-    expect(await host!.getProject("casper", "manual-project-health", "pi"))
-      .toMatchObject({ generation: 1, status: "degraded", mcpStatus: "degraded" });
-
-    const updates: ConversationUpdatedEvent[] = [];
-    const unsubscribe = host!.subscribeConversationEvents("casper", (event) => {
-      if (event.conversationId === "manual-project-health") updates.push(event);
-    });
-    writeMcpFixture(project, { project: true });
-    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("connected");
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-    expect(await host!.getProject("casper", "manual-project-health", "pi"))
-      .toMatchObject({ generation: 1, status: "ready", mcpStatus: "ready", error: null });
-    expect(updates).toEqual([
-      expect.objectContaining({
-        runtime: "pi",
-        conversationId: "manual-project-health",
-        reason: "project",
-      }),
-    ]);
-
-    rmSync(serverPath);
-    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("disconnected");
-    expect(opened.session.getToolDefinition(toolName)).toBeUndefined();
-    expect(await host!.getProject("casper", "manual-project-health", "pi"))
-      .toMatchObject({
-        generation: 1,
-        status: "degraded",
-        mcpStatus: "degraded",
-        error: { code: "project_mcp_degraded" },
-      });
-    expect(updates).toHaveLength(2);
-    expect(updates[1]).toMatchObject({
-      runtime: "pi",
-      conversationId: "manual-project-health",
-      reason: "project",
-    });
-    unsubscribe();
-  });
-
-  it("does not publish reconnect health over a newer project generation", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const project = join(temp!.root, "manual-project-mcp-stale");
-    mkdirSync(project);
-    writeMcpFixture(project, { project: true });
-    const conversationId = "manual-project-stale";
-    const preview = await host!.previewProject("casper", conversationId, "pi", project);
-    await host!.bindProject("casper", conversationId, "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    await host!.open("casper", conversationId);
-    const current = await host!.getProject("casper", conversationId, "pi");
-    const bindings = (host as unknown as {
-      projectBindings: ProjectBindingStore;
-    }).projectBindings;
-    const originalUpdate = bindings.updateRuntimeStatus.bind(bindings);
-    let advanced = false;
-    const updateSpy = vi.spyOn(bindings, "updateRuntimeStatus").mockImplementation(
-      async (...args) => {
-        if (!advanced) {
-          advanced = true;
-          await bindings.write({
-            sessionDir: ghostPaths(dir).sessionDir,
-            runtime: "pi",
-            conversationId,
-            current,
-            root: project,
-            cwd: project,
-            reason: "reloaded",
-            status: "degraded",
-            error: { code: "new_generation_health", message: "New generation owns health." },
-            mcpStatus: "degraded",
-            scope: "casper",
-          });
-        }
-        return originalUpdate(...args);
-      },
-    );
-    const updates: ConversationUpdatedEvent[] = [];
-    const unsubscribe = host!.subscribeConversationEvents("casper", (event) => {
-      if (event.conversationId === conversationId) updates.push(event);
-    });
-
-    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("connected");
-    expect(updateSpy).toHaveBeenCalledTimes(1);
-    expect(await host!.getProject("casper", conversationId, "pi")).toMatchObject({
-      generation: 2,
-      status: "degraded",
-      mcpStatus: "degraded",
-      error: { code: "new_generation_health" },
-    });
-    expect(updates).toEqual([]);
-    unsubscribe();
-  });
-
-  it("does not let a ghost-only reconnect rewrite bound-project health", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    writeMcpFixture(dir);
-    const project = join(temp!.root, "ghost-only-reconnect-project");
-    mkdirSync(project);
-    const conversationId = "ghost-only-reconnect";
-    const preview = await host!.previewProject("casper", conversationId, "pi", project);
-    await host!.bindProject("casper", conversationId, "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    await host!.open("casper", conversationId);
-    const current = await host!.getProject("casper", conversationId, "pi");
-    const bindings = (host as unknown as {
-      projectBindings: ProjectBindingStore;
-    }).projectBindings;
-    await expect(bindings.updateRuntimeStatus(
-      ghostPaths(dir).sessionDir,
-      "pi",
-      conversationId,
-      current,
-      {
-        status: "degraded",
-        error: { code: "preserve_project_health", message: "Project health sentinel." },
-        mcpStatus: "degraded",
-      },
-      "casper",
-    )).resolves.toBe(true);
-    const updates: ConversationUpdatedEvent[] = [];
-    const unsubscribe = host!.subscribeConversationEvents("casper", (event) => {
-      if (event.conversationId === conversationId) updates.push(event);
-    });
-
-    await expect(host!.reconnectMcp("casper", "reload_fixture")).resolves.toBe("connected");
-    expect(await host!.getProject("casper", conversationId, "pi")).toMatchObject({
-      generation: 1,
-      status: "degraded",
-      mcpStatus: "degraded",
-      error: { code: "preserve_project_health" },
-    });
-    expect(updates).toEqual([]);
-    unsubscribe();
-  });
-
-  it("launches and reloads Pi MCP from the one immutable project scan", async () => {
-    await setup([{ kind: "text", text: "unused" }]);
-    await host!.disposeAll();
-    const project = join(temp!.root, "single-scan-project-mcp");
-    mkdirSync(project);
-    writeMcpFixture(project, { project: true });
-    let mutateAfterScan = false;
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      offline: true,
-      sessionStartupProbe: (stage) => {
-        if (stage !== "model-runtime" || !mutateAfterScan) return;
-        mutateAfterScan = false;
-        writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
-          mcpServers: {
-            reload_fixture: { enabled: false, type: "stdio", command: "changed-after-scan" },
-          },
-        }));
-      },
-    });
-    const preview = await host.previewProject("casper", "single-scan", "pi", project);
-    await host.bindProject("casper", "single-scan", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-
-    mutateAfterScan = true;
-    const opened = await host.open("casper", "single-scan");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-    const projectMcp = (host as unknown as {
-      sessions: Map<string, { mcp?: { sources: Map<string, unknown> } }>;
-    }).sessions.get(sessionKeyOf("casper", "single-scan"))?.mcp;
-    expect(projectMcp?.sources.get("reload_fixture")).toMatchObject({
-      level: "project",
-      path: join(project, ".omp", "mcp.json"),
-    });
-
-    await host.reloadMcp("casper");
-    expect(opened.session.getToolDefinition(toolName)).toBeDefined();
-
-    await host.reloadProject("casper", "single-scan", "pi", 1);
-    const reopened = await host.open("casper", "single-scan");
-    expect(reopened.session).not.toBe(opened.session);
-    expect(reopened.session.getToolDefinition(toolName)).toBeUndefined();
-  });
-
   it("never falls back to the former hidden MCP path on open or reload", async () => {
     const { dir } = await setup([{ kind: "text", text: "unused" }]);
     writeMcpFixture(dir, { enabled: false });
@@ -3075,55 +1863,7 @@ lines.on("line", (line) => {
     const ghostMcp = (host as unknown as {
       sessions: Map<string, { mcp?: { sources: Map<string, unknown> } }>;
     }).sessions.get(sessionKeyOf("casper", "conv-mcp-shadow"))?.mcp;
-    expect(ghostMcp?.sources.get("reload_fixture")).toMatchObject({
-      level: "user",
-      path: join(dir, "mcp.json"),
-    });
-  });
-
-  it("lets a bound project claim a ghost MCP name even when disabled or malformed", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    writeMcpFixture(dir);
-    const project = join(temp!.root, "project-mcp-shadow");
-    mkdirSync(join(project, ".omp"), { recursive: true });
-    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
-      mcpServers: { reload_fixture: { enabled: false, type: "stdio", command: "disabled" } },
-    }));
-    const preview = await host!.previewProject("casper", "project-shadow", "pi", project);
-    const disabled = await host!.bindProject("casper", "project-shadow", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    expect(disabled).toMatchObject({
-      status: "ready",
-      mcpStatus: "off",
-      resources: { mcpServers: 0 },
-    });
-
-    const handle = await host!.open("casper", "project-shadow");
-    const toolName = "mcp__reload_fixture_reload_echo";
-    expect(handle.session.getToolDefinition(toolName)).toBeUndefined();
-
-    writeFileSync(join(project, ".omp", "mcp.json"), JSON.stringify({
-      mcpServers: { reload_fixture: { type: "stdio" } },
-    }));
-    await host!.reloadMcp("casper");
-    expect(handle.session.getToolDefinition(toolName)).toBeUndefined();
-    expect(await host!.getProject("casper", "project-shadow", "pi"))
-      .toMatchObject({ status: "ready", mcpStatus: "off", generation: 1 });
-
-    const malformed = await host!.reloadProject("casper", "project-shadow", "pi", 1);
-    expect(malformed).toMatchObject({
-      status: "degraded",
-      mcpStatus: "degraded",
-      resources: { mcpServers: 0 },
-      error: { code: "project_mcp_degraded" },
-    });
-    const reopened = await host!.open("casper", "project-shadow");
-    expect(reopened.session.getToolDefinition(toolName)).toBeUndefined();
-    expect(await host!.getProject("casper", "project-shadow", "pi"))
-      .toMatchObject({ status: "degraded", mcpStatus: "degraded", generation: 2 });
+    expect(ghostMcp?.sources.get("reload_fixture")).toEqual({ path: join(dir, "mcp.json") });
   });
 
   it("mounts the first server across open conversations and unmounts disabled or removed tools", async () => {
@@ -3950,97 +2690,8 @@ describe("SessionHost.runTurn", () => {
     expect(host!.cachedSessionCount).toBe(0);
     expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
     expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
-    expect(existsSync(projectBindingPath(sessionDir, "pi", id))).toBe(false);
+    expect(existsSync(conversationCwdPath(sessionDir, id))).toBe(false);
     expect(existsSync(claudeSessionMetadataPath(sessionDir, id))).toBe(false);
-  });
-
-  it("rejects opposite-runtime project bindings before normal or direct draft and duplicate admission", async () => {
-    let claudeQueries = 0;
-    const { dir } = await setup([{ kind: "text", text: "must not run" }], {
-      title: { enabled: false },
-      claudeCode: {
-        binaryPath: process.execPath,
-        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
-        createQuery: () => {
-          claudeQueries += 1;
-          throw new Error("Claude query must not start across a project runtime mismatch");
-        },
-      },
-    });
-    const home = ghostPaths(dir).home;
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const project = join(temp!.root, "runtime-mismatch-project");
-    mkdirSync(project);
-
-    for (const selectedRuntime of ["pi", "claude-code"] as const) {
-      const oppositeRuntime = selectedRuntime === "pi" ? "claude-code" : "pi";
-      for (const promptKind of ["normal", "direct"] as const) {
-        for (const identityKind of ["draft", "duplicate"] as const) {
-          const id = `${selectedRuntime}-${promptKind}-${identityKind}`;
-          if (selectedRuntime === "claude-code") {
-            setGhostModelRole(home, "chat_model", "claude-code", "default");
-          } else {
-            clearGhostModelRole(home, "chat_model");
-          }
-
-          if (identityKind === "duplicate" && selectedRuntime === "pi") {
-            await host!.open("casper", id);
-            await host!.close("casper", id);
-          } else if (identityKind === "duplicate") {
-            mkdirSync(sessionDir, { recursive: true });
-            const now = new Date().toISOString();
-            writeFileSync(claudeSessionMetadataPath(sessionDir, id), JSON.stringify({
-              version: 1,
-              runtime: "claude-code",
-              conversationId: id,
-              sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-              created: now,
-              modified: now,
-              messageCount: 2,
-            }), { encoding: "utf8", mode: 0o600 });
-          }
-
-          const preview = await host!.previewProject(
-            "casper",
-            id,
-            oppositeRuntime,
-            project,
-          );
-          await host!.bindProject("casper", id, oppositeRuntime, {
-            root: project,
-            trustToken: preview.trustToken,
-            expectedGeneration: 0,
-          });
-          const selectedBinding = projectBindingPath(sessionDir, selectedRuntime, id);
-          const oppositeBinding = projectBindingPath(sessionDir, oppositeRuntime, id);
-          const selectedArtifact = selectedRuntime === "pi"
-            ? join(sessionDir, sessionFileNameFor(id))
-            : claudeSessionMetadataPath(sessionDir, id);
-          const selectedBytes = existsSync(selectedArtifact)
-            ? readFileSync(selectedArtifact, "utf8")
-            : null;
-          const oppositeBytes = readFileSync(oppositeBinding, "utf8");
-          const providerRequests = provider!.requests.length;
-          const events: PiMessagesEvent[] = [];
-
-          await expect(host!.runTurn("casper", {
-            sessionId: id,
-            prompt: promptKind === "direct" ? "!pwd" : "ordinary owner message",
-            emit: (event) => events.push(event),
-          })).rejects.toMatchObject({ code: "project_runtime_mismatch", status: 409 });
-
-          expect(events).toEqual([]);
-          expect(provider!.requests).toHaveLength(providerRequests);
-          expect(claudeQueries).toBe(0);
-          expect(host!.cachedSessionCount).toBe(0);
-          expect(existsSync(selectedBinding)).toBe(false);
-          expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
-          expect(readFileSync(oppositeBinding, "utf8")).toBe(oppositeBytes);
-          if (selectedBytes === null) expect(existsSync(selectedArtifact)).toBe(false);
-          else expect(readFileSync(selectedArtifact, "utf8")).toBe(selectedBytes);
-        }
-      }
-    }
   });
 
   it("runs !command through Pi without asking the model", async () => {
@@ -4256,8 +2907,7 @@ describe("forkConversationTitle", () => {
 describe("conversation branching", () => {
   async function seedBranchable(
     title: string | null = "Weekend trip",
-    projectBindingsFactory?: (fixture: TempGhosts) => ProjectBindingStore,
-    options: Pick<SessionHostOptions, "conversationFileProbe" | "transactionProbe"> = {},
+    options: Pick<SessionHostOptions, "conversationFileProbe" | "transactionProbe" | "toolCwdWriter"> = {},
   ) {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
@@ -4274,7 +2924,6 @@ describe("conversation branching", () => {
         scheduleCommands.push([...args]);
         return { stdout: "", stderr: "", code: 0 };
       },
-      ...(projectBindingsFactory ? { projectBindings: projectBindingsFactory(temp) } : {}),
       ...options,
       title: title === null
         ? { enabled: false }
@@ -4334,7 +2983,7 @@ describe("conversation branching", () => {
     async (move) => {
       const readEntered = Promise.withResolvers<void>();
       const releaseRead = Promise.withResolvers<void>();
-      const { firstUser, scheduleCommands } = await seedBranchable("Weekend trip", undefined, {
+      const { firstUser, scheduleCommands } = await seedBranchable("Weekend trip", {
         conversationFileProbe: async (operation) => {
           if (operation !== "fork-read") return;
           readEntered.resolve();
@@ -4391,33 +3040,6 @@ describe("conversation branching", () => {
       ]);
     },
   );
-
-  it("transactionally forks the source's immutable project snapshot", async () => {
-    const { firstUser } = await seedBranchable();
-    const project = join(temp!.root, "fork-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "PINNED-FORK-INSTRUCTION");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    writeFileSync(join(project, "AGENTS.md"), "HOSTILE-LIVE-FORK-INSTRUCTION");
-
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const forkProject = await host!.getProject("casper", forked.sessionId, "pi");
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    expect(existsSync(piProjectSnapshotPath(
-      sessionDir,
-      forked.sessionId,
-      forkProject.generation,
-    ))).toBe(true);
-    await host!.open("casper", forked.sessionId);
-    const childSystem = await modelSystemPrompt(forked.sessionId);
-    expect(childSystem).toContain("PINNED-FORK-INSTRUCTION");
-    expect(childSystem).not.toContain("HOSTILE-LIVE-FORK-INSTRUCTION");
-  });
 
   it("names each copy with the next free counter and never stacks counters", async () => {
     const { firstUser } = await seedBranchable();
@@ -4485,21 +3107,22 @@ describe("conversation branching", () => {
   });
 
   it("keeps an in-flight fork unpublished and removes every staged artifact on failure", async () => {
-    let bindingStore!: ProjectBindingStore;
     const cloneEntered = Promise.withResolvers<void>();
     const releaseClone = Promise.withResolvers<void>();
-    const { firstUser } = await seedBranchable("Weekend trip", (fixture) => {
-      bindingStore = new ProjectBindingStore({
-        ownerHome: fixture.ownerHome,
-        trustPath: join(fixture.root, "state", "project-trust.json"),
-      });
-      const originalClone = bindingStore.clone.bind(bindingStore);
-      vi.spyOn(bindingStore, "clone").mockImplementation(async (...args) => {
+    let failNextStaging = false;
+    const { firstUser } = await seedBranchable("Weekend trip", {
+      // A fork stages its tool-cwd sidecar through the injectable writer; the
+      // fourth argument is only present for that staging write.
+      toolCwdWriter: async (...args) => {
+        if (args[3] === undefined) return writeToolCwds(...args);
+        if (failNextStaging) {
+          failNextStaging = false;
+          throw new Error("injected sidecar failure");
+        }
         cloneEntered.resolve();
         await releaseClone.promise;
-        return originalClone(...args);
-      });
-      return bindingStore;
+        return writeToolCwds(...args);
+      },
     });
 
     const fork = host!.forkConversation("casper", "conv-tree", firstUser.entryId);
@@ -4525,8 +3148,7 @@ describe("conversation branching", () => {
       .toContain(published.id);
     expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
 
-    vi.restoreAllMocks();
-    vi.spyOn(bindingStore, "clone").mockRejectedValueOnce(new Error("injected sidecar failure"));
+    failNextStaging = true;
     await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
       .rejects.toThrow("injected sidecar failure");
     expect((await host!.listSessions("casper")).map((row) => row.id).sort())
@@ -4537,69 +3159,45 @@ describe("conversation branching", () => {
 
   it("recovers only an already-rewound hidden fork after a publication crash", async () => {
     const { firstUser } = await seedBranchable();
-    const project = join(temp!.root, "recover-fork-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "PINNED-RECOVERED-FORK");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
     const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
-    const snapshot = piProjectSnapshotPath(sessionDir, forked.sessionId, 1);
+    const binding = conversationCwdPath(sessionDir, forked.sessionId);
     const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
     const temporaryTranscript = `${transcript}.crash.pending`;
     const temporaryBinding = `${binding}.crash.pending`;
-    const temporarySnapshot = `${snapshot}.crash.pending`;
     const temporaryToolCwds = `${toolCwds}.crash.pending`;
     renameSync(transcript, temporaryTranscript);
     renameSync(binding, temporaryBinding);
-    renameSync(snapshot, temporarySnapshot);
     renameSync(toolCwds, temporaryToolCwds);
     const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
     writeFileSync(join(sessionDir, `.ghost-fork-${stem}.pending.json`), JSON.stringify({
-      version: 2,
+      version: 3,
       kind: "fork",
       conversationId: forked.sessionId,
       tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempProjectSnapshot: temporarySnapshot,
-      projectSnapshotGeneration: 1,
+      tempConversationCwd: temporaryBinding,
       tempToolCwds: temporaryToolCwds,
     }), { mode: 0o600 });
 
     expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
     expect((await host!.readTranscript("casper", forked.sessionId)).messages).toEqual([]);
-    expect(existsSync(snapshot)).toBe(true);
     await host!.open("casper", forked.sessionId);
-    expect(await modelSystemPrompt(forked.sessionId)).toContain("PINNED-RECOVERED-FORK");
     expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
   });
 
   it("rejects victim, aliased, and duplicate fork paths before any cleanup", async () => {
     const recoveryStages: Array<{ stage: string; path: string }> = [];
-    await seedBranchable("Weekend trip", undefined, {
+    await seedBranchable("Weekend trip", {
       transactionProbe: (stage, path) => {
         recoveryStages.push({ stage, path });
       },
     });
-    const project = join(temp!.root, "fork-path-validation-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "VICTIM-SIDECAR-MUST-SURVIVE");
-    const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-    await host!.bindProject("casper", "conv-tree", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
 
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const victimTranscript = join(sessionDir, sessionFileNameFor("conv-tree"));
-    const victimBinding = projectBindingPath(sessionDir, "pi", "conv-tree");
+    await writeConversationCwd(sessionDir, "conv-tree", temp!.ownerHome);
+    const victimBinding = conversationCwdPath(sessionDir, "conv-tree");
     await writeToolCwds(
       sessionDir,
       "conv-tree",
@@ -4614,34 +3212,32 @@ describe("conversation branching", () => {
 
     const conversationId = "fork-path-attack";
     const transcript = join(sessionDir, sessionFileNameFor(conversationId));
-    const binding = projectBindingPath(sessionDir, "pi", conversationId);
+    const binding = conversationCwdPath(sessionDir, conversationId);
     const toolCwds = toolCwdsPath(sessionDir, conversationId);
     const valid = {
       tempTranscript: `${transcript}.safe.pending`,
-      tempProjectBinding: `${binding}.safe.pending`,
+      tempConversationCwd: `${binding}.safe.pending`,
       tempToolCwds: `${toolCwds}.safe.pending`,
     };
     const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
     const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
     const cases: Array<[string, Partial<typeof valid>]> = [
       ["victim transcript", { tempTranscript: victimTranscript }],
-      ["victim sidecar", { tempProjectBinding: victimBinding }],
+      ["victim sidecar", { tempConversationCwd: victimBinding }],
       ["aliased child", {
         tempTranscript: `${sessionDir}${sep}nested${sep}..${sep}${basename(valid.tempTranscript)}`,
       }],
-      ["duplicate artifact", { tempToolCwds: valid.tempProjectBinding }],
+      ["duplicate artifact", { tempToolCwds: valid.tempConversationCwd }],
     ];
 
     for (const [name, override] of cases) {
       recoveryStages.length = 0;
       writeFileSync(marker, `${JSON.stringify({
-        version: 2,
+        version: 3,
         kind: "fork",
         conversationId,
         ...valid,
         ...override,
-        tempProjectSnapshot: null,
-        projectSnapshotGeneration: null,
       })}\n`, { mode: 0o600 });
 
       expect((await host!.listSessions("casper")).map((row) => row.id))
@@ -4656,7 +3252,6 @@ describe("conversation branching", () => {
       rmSync(marker);
     }
 
-    expect((await host!.getProject("casper", "conv-tree", "pi")).root).toBe(project);
   });
 
   /**
@@ -4695,19 +3290,17 @@ describe("conversation branching", () => {
   ] as const)("retains the fork marker when %s fails", async (blockedStage) => {
     const activePublication = blockedStage === "active-transcript-cleanup";
     let rejectStage = true;
-    let bindingStore: ProjectBindingStore | undefined;
+    let sidecarFailed = false;
     const { firstUser } = await seedBranchable(
       "Weekend trip",
-      activePublication
-        ? (fixture) => {
-            bindingStore = new ProjectBindingStore({
-              ownerHome: fixture.ownerHome,
-              trustPath: join(fixture.root, "state", "active-fork-cleanup-trust.json"),
-            });
-            return bindingStore;
-          }
-        : undefined,
       {
+        toolCwdWriter: async (...args) => {
+          if (activePublication && args[3] !== undefined && !sidecarFailed) {
+            sidecarFailed = true;
+            throw new Error("injected active sidecar publication failure");
+          }
+          return writeToolCwds(...args);
+        },
         transactionProbe: (stage, path) => {
           if (!rejectStage) return;
           const blocked = activePublication
@@ -4718,12 +3311,6 @@ describe("conversation branching", () => {
         },
       },
     );
-    if (activePublication) {
-      vi.spyOn(bindingStore!, "clone").mockRejectedValueOnce(
-        new Error("injected active sidecar publication failure"),
-      );
-    }
-
     const forking = expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId));
     await (activePublication
       ? forking.rejects.toThrow("transaction remains pending recovery")
@@ -4735,15 +3322,14 @@ describe("conversation branching", () => {
 
   it.each([
     "transcript",
-    "project-binding",
-    "project-snapshot",
+    "conversation-cwd",
     "tool-cwds",
   ] as const)(
     "retains a failed rollback marker until the partial %s artifact is verified absent",
     async (blockedArtifact) => {
       let blockedPath: string | null = null;
       let rejectCleanup = true;
-      const { firstUser } = await seedBranchable("Weekend trip", undefined, {
+      const { firstUser } = await seedBranchable("Weekend trip", {
         transactionProbe: (stage, path) => {
           if (rejectCleanup && stage === "fork-cleanup-unlink" && path === blockedPath) {
             throw new Error(`injected ${blockedArtifact} cleanup failure`);
@@ -4753,24 +3339,17 @@ describe("conversation branching", () => {
       const project = join(temp!.root, `fork-cleanup-${blockedArtifact}`);
       mkdirSync(project);
       writeFileSync(join(project, "AGENTS.md"), "PINNED-CLEANUP-SNAPSHOT");
-      const preview = await host!.previewProject("casper", "conv-tree", "pi", project);
-      await host!.bindProject("casper", "conv-tree", "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
       const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
       const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
       const paths = {
         transcript: join(sessionDir, sessionFileNameFor(forked.sessionId)),
-        "project-binding": projectBindingPath(sessionDir, "pi", forked.sessionId),
-        "project-snapshot": piProjectSnapshotPath(sessionDir, forked.sessionId, 1),
+        "conversation-cwd": conversationCwdPath(sessionDir, forked.sessionId),
         "tool-cwds": toolCwdsPath(sessionDir, forked.sessionId),
       };
       blockedPath = paths[blockedArtifact];
-      const missingPath = blockedArtifact === "project-binding"
+      const missingPath = blockedArtifact === "conversation-cwd"
         ? paths["tool-cwds"]
-        : paths["project-binding"];
+        : paths["conversation-cwd"];
       unlinkSync(missingPath);
       const pending = Object.fromEntries(Object.entries(paths).map(([key, path]) =>
         [key, `${path}.rollback.pending`]
@@ -4778,13 +3357,11 @@ describe("conversation branching", () => {
       const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
       const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
       writeFileSync(marker, `${JSON.stringify({
-        version: 2,
+        version: 3,
         kind: "fork",
         conversationId: forked.sessionId,
         tempTranscript: pending.transcript,
-        tempProjectBinding: pending["project-binding"],
-        tempProjectSnapshot: pending["project-snapshot"],
-        projectSnapshotGeneration: 1,
+        tempConversationCwd: pending["conversation-cwd"],
         tempToolCwds: pending["tool-cwds"],
       })}\n`, { mode: 0o600 });
 
@@ -4804,38 +3381,6 @@ describe("conversation branching", () => {
       }
     },
   );
-
-  it("recovers a legacy v1 fork marker and its original three-artifact set", async () => {
-    const { firstUser } = await seedBranchable();
-    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
-    const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
-    const temporaryTranscript = `${transcript}.v1.pending`;
-    const temporaryBinding = `${binding}.v1.pending`;
-    const temporaryToolCwds = `${toolCwds}.v1.pending`;
-    renameSync(transcript, temporaryTranscript);
-    renameSync(binding, temporaryBinding);
-    renameSync(toolCwds, temporaryToolCwds);
-    const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
-    const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
-    writeFileSync(marker, JSON.stringify({
-      version: 1,
-      kind: "fork",
-      conversationId: forked.sessionId,
-      tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempToolCwds: temporaryToolCwds,
-    }), { mode: 0o600 });
-
-    expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
-    expect(existsSync(marker)).toBe(false);
-    expect(existsSync(transcript)).toBe(true);
-    expect(existsSync(binding)).toBe(true);
-    expect(existsSync(toolCwds)).toBe(true);
-    expect(readdirSync(sessionDir).some((name) => name.includes(".v1.pending"))).toBe(false);
-  });
 
   it.each([1, 2] as const)(
     "keeps a retained v%s fork marker hidden from listing and open",
@@ -4876,7 +3421,7 @@ describe("conversation branching", () => {
       .slice(0, -".jsonl".length);
     const unrelated = join(sessionDir, `.ghost-fork-${unrelatedStem}.pending.json`);
     writeFileSync(unrelated, JSON.stringify({
-      version: 2,
+      version: 3,
       kind: "fork",
       conversationId: "fork-marker-target",
       ignored: sentinel,
@@ -4897,7 +3442,7 @@ describe("conversation branching", () => {
       .not.toContain("pi:fork-marker-target");
     await expect(host!.open("casper", "fork-marker-target"))
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    await expect(host!.getProject("casper", "fork-marker-target", "pi"))
+    await expect(host!.conversationCwd("casper", "fork-marker-target"))
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
     expect(JSON.stringify(logger.records)).not.toContain(sentinel);
 
@@ -4917,7 +3462,7 @@ describe("conversation branching", () => {
     try {
       expect((await host!.listSessions("casper")).map((row) => row.id))
         .not.toContain("pi:fork-marker-target");
-      await expect(host!.getProject("casper", "fork-marker-target", "pi"))
+      await expect(host!.conversationCwd("casper", "fork-marker-target"))
         .rejects.toMatchObject({ code: "session_busy", status: 409 });
       expect(JSON.stringify(logger.records)).not.toContain(sentinel);
     } finally {
@@ -4939,7 +3484,7 @@ describe("conversation branching", () => {
     writeFileSync(marker, "x".repeat(1_048_577), { mode: 0o600 });
     expect((await host!.listSessions("casper")).map((row) => row.id))
       .not.toContain("pi:fork-marker-target");
-    await expect(host!.getProject("casper", "fork-marker-target", "pi"))
+    await expect(host!.conversationCwd("casper", "fork-marker-target"))
       .rejects.toMatchObject({ code: "session_busy", status: 409 });
     rmSync(marker);
 
@@ -4952,7 +3497,7 @@ describe("conversation branching", () => {
     const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
-    const binding = projectBindingPath(sessionDir, "pi", forked.sessionId);
+    const binding = conversationCwdPath(sessionDir, forked.sessionId);
     const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
     const temporaryBinding = `${binding}.io-failure.pending`;
     const temporaryToolCwds = `${toolCwds}.io-failure.pending`;
@@ -4964,13 +3509,11 @@ describe("conversation branching", () => {
     const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
     const marker = join(sessionDir, `.ghost-fork-${stem}.pending.json`);
     writeFileSync(marker, JSON.stringify({
-      version: 2,
+      version: 3,
       kind: "fork",
       conversationId: forked.sessionId,
       tempTranscript: temporaryTranscript,
-      tempProjectBinding: temporaryBinding,
-      tempProjectSnapshot: null,
-      projectSnapshotGeneration: null,
+      tempConversationCwd: temporaryBinding,
       tempToolCwds: temporaryToolCwds,
     }), { mode: 0o600 });
 
@@ -5228,14 +3771,6 @@ describe("session listing", () => {
       prompt: "persist me",
       emit: () => {},
     });
-    const project = join(temp!.root, "delete-recovery-project");
-    mkdirSync(project);
-    const preview = await host!.previewProject("casper", "delete-recovery", "pi", project);
-    await host!.bindProject("casper", "delete-recovery", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
     const sessionDir = ghostPaths(dir).sessionDir;
     const stem = sessionFileNameFor("delete-recovery").slice(0, -".jsonl".length);
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
@@ -5249,13 +3784,12 @@ describe("session listing", () => {
     expect(await host!.listSessions("casper")).toEqual([]);
     await expect(host!.open("casper", "delete-recovery"))
       .rejects.toMatchObject({ code: "session_deleting" });
-    await expect(host!.getProject("casper", "delete-recovery", "pi"))
+    await expect(host!.conversationCwd("casper", "delete-recovery"))
       .rejects.toMatchObject({ code: "session_deleting" });
     await expect(host!.deleteSession("casper", "delete-recovery"))
       .resolves.toMatchObject({
         artifacts: expect.arrayContaining([
           expect.objectContaining({ artifact: "omp-transcript" }),
-          expect.objectContaining({ artifact: "project-binding" }),
         ]),
       });
     expect(existsSync(tombstone)).toBe(false);
@@ -5274,25 +3808,12 @@ describe("session listing", () => {
     });
     const id = "delete-v2-recovery";
     await host!.runTurn("casper", { sessionId: id, prompt: "persist me", emit: () => {} });
-    const project = join(temp!.root, "delete-v2-project");
-    mkdirSync(project);
-    writeFileSync(join(project, "AGENTS.md"), "DELETE-V2-SNAPSHOT");
-    const preview = await host!.previewProject("casper", id, "pi", project);
-    await host!.bindProject("casper", id, "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
     const sessionDir = ghostPaths(dir).sessionDir;
     await writeToolCwds(sessionDir, id, new Map([["tool-call", temp!.ownerHome]]));
+    await writeConversationCwd(sessionDir, id, temp!.ownerHome);
     const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
-    const expectedKinds = [
-      "omp-transcript",
-      "tool-cwds",
-      "project-binding",
-      "project-snapshot",
-    ];
+    const expectedKinds = ["omp-transcript", "tool-cwds", "conversation-cwd"];
 
     for (let moved = 1; moved <= expectedKinds.length; moved += 1) {
       failAfterNextRecord = true;
@@ -5469,9 +3990,9 @@ describe("session listing", () => {
       pending: TrashedConversation["artifacts"][number];
     }]> = [
       ["character", { pending: pending("omp-transcript", character) }],
-      ["credential store", { pending: pending("project-binding", agentDb) }],
+      ["credential store", { pending: pending("conversation-cwd", agentDb) }],
       ["other transcript", { pending: pending("omp-transcript", victimTranscript) }],
-      ["wrong label", { pending: pending("project-binding", targetTranscript) }],
+      ["wrong label", { pending: pending("conversation-cwd", targetTranscript) }],
       ["aliased destination", {
         pending: pending(
           "omp-transcript",
@@ -5556,8 +4077,8 @@ describe("session listing", () => {
           kind: "freedesktop",
         },
         {
-          artifact: "project-binding",
-          source: projectBindingPath(paths.sessionDir, "pi", target),
+          artifact: "conversation-cwd",
+          source: conversationCwdPath(paths.sessionDir, target),
           trash: legacyExactTrash,
           kind: "freedesktop",
         },
@@ -5654,103 +4175,6 @@ describe("session listing", () => {
     rmSync(claudeMarker);
   });
 
-  it("claims synchronously and treats every non-absent draft/delete marker result as authoritative", async () => {
-    let draftMarker = "";
-    let deleteMarker = "";
-    let injected: { path: string; code: "EACCES" | "EIO" } | null = null;
-    let blocked: {
-      path: string;
-      entered: ReturnType<typeof Promise.withResolvers<void>>;
-      release: ReturnType<typeof Promise.withResolvers<void>>;
-    } | null = null;
-    const { dir } = await setup(undefined, {
-      transactionMarkerLstat: async (path) => {
-        if (blocked?.path === path) {
-          blocked.entered.resolve();
-          await blocked.release.promise;
-        }
-        if (injected?.path === path) {
-          throw Object.assign(new Error(`injected ${injected.code}`), { code: injected.code });
-        }
-        return lstatAsync(path);
-      },
-    });
-    const id = "marker-admission";
-    await host!.runTurn("casper", { sessionId: id, prompt: "persist", emit: () => {} });
-    await host!.listSessions("casper");
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
-    const transcript = join(sessionDir, sessionFileNameFor(id));
-    const original = readFileSync(transcript, "utf8");
-    draftMarker = join(sessionDir, `.ghost-draft-abandon-${stem}.pi.pending.json`);
-    deleteMarker = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
-    const missing = join(temp!.root, "missing-marker-target");
-
-    symlinkSync(missing, draftMarker);
-    await expect(host!.deleteSession("casper", id, "pi"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    expect(lstatSync(draftMarker).isSymbolicLink()).toBe(true);
-    expect(readFileSync(transcript, "utf8")).toBe(original);
-    unlinkSync(draftMarker);
-
-    symlinkSync(missing, deleteMarker);
-    await expect(host!.deleteSession("casper", id, "pi"))
-      .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-    expect(lstatSync(deleteMarker).isSymbolicLink()).toBe(true);
-    expect(readFileSync(transcript, "utf8")).toBe(original);
-    unlinkSync(deleteMarker);
-
-    for (const code of ["EACCES", "EIO"] as const) {
-      const draftBytes = `draft-${code}\n`;
-      writeFileSync(draftMarker, draftBytes, { mode: 0o600 });
-      injected = { path: draftMarker, code };
-      await expect(host!.deleteSession("casper", id, "pi"), `draft ${code}`)
-        .rejects.toMatchObject({ code: "session_busy", status: 409 });
-      expect(readFileSync(draftMarker, "utf8"), `draft ${code}`).toBe(draftBytes);
-      expect(readFileSync(transcript, "utf8"), `draft ${code}`).toBe(original);
-      injected = null;
-      unlinkSync(draftMarker);
-
-      const deleteBytes = `delete-${code}\n`;
-      writeFileSync(deleteMarker, deleteBytes, { mode: 0o600 });
-      injected = { path: deleteMarker, code };
-      await expect(host!.deleteSession("casper", id, "pi"), `delete ${code}`)
-        .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-      expect(readFileSync(deleteMarker, "utf8"), `delete ${code}`).toBe(deleteBytes);
-      expect(readFileSync(transcript, "utf8"), `delete ${code}`).toBe(original);
-      injected = null;
-      unlinkSync(deleteMarker);
-    }
-
-    const synchronousId = "synchronous-delete-claim";
-    await host!.runTurn("casper", {
-      sessionId: synchronousId,
-      prompt: "persist",
-      emit: () => {},
-    });
-    const synchronousStem = sessionFileNameFor(synchronousId).slice(0, -".jsonl".length);
-    blocked = {
-      path: join(
-        sessionDir,
-        `.ghost-draft-abandon-${synchronousStem}.pi.pending.json`,
-      ),
-      entered: Promise.withResolvers<void>(),
-      release: Promise.withResolvers<void>(),
-    };
-    const deleting = host!.deleteSession("casper", synchronousId, "pi");
-    await blocked.entered.promise;
-    const project = join(temp!.root, "claim-blocked-project");
-    mkdirSync(project);
-    await expect(host!.previewProject("casper", synchronousId, "pi", project))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-    blocked.release.resolve();
-    await expect(deleting).resolves.toMatchObject({
-      artifacts: expect.arrayContaining([
-        expect.objectContaining({ artifact: "omp-transcript" }),
-      ]),
-    });
-  });
-
   it("filters exact malformed delete markers for both runtimes without trusting marker bytes", async () => {
     const logger = recordingLogger();
     const { dir } = await setup(undefined, {
@@ -5799,7 +4223,7 @@ describe("session listing", () => {
     expect(piHidden.map((row) => row.id)).toEqual([`claude-code:${claudeId}`]);
     await expect(host!.open("casper", piId))
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
-    await expect(host!.getProject("casper", piId, "pi"))
+    await expect(host!.conversationCwd("casper", piId))
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
     expect(JSON.stringify({ piHidden, logs: logger.records })).not.toContain(sentinel);
     await expect(host!.deleteSession("casper", piId, "pi"))
@@ -5821,8 +4245,6 @@ describe("session listing", () => {
     writeFileSync(claudeMarker, `{ invalid ${sentinel}\n`, { mode: 0o600 });
     chmodSync(claudeMarker, 0o000);
     expect(await host!.listSessions("casper")).toEqual([]);
-    await expect(host!.getProject("casper", claudeId, "claude-code"))
-      .rejects.toMatchObject({ code: "session_deleting", status: 409 });
     expect(JSON.stringify(logger.records)).not.toContain(sentinel);
     await expect(host!.deleteSession("casper", claudeId, "claude-code"))
       .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
@@ -5868,15 +4290,15 @@ describe("session listing", () => {
 describe("passive session recovery during whole-home moves", () => {
   function seedRollbackFork(sessionDir: string, conversationId: string): void {
     mkdirSync(sessionDir, { recursive: true });
-    const binding = projectBindingPath(sessionDir, "pi", conversationId);
+    const binding = conversationCwdPath(sessionDir, conversationId);
     const toolCwds = toolCwdsPath(sessionDir, conversationId);
     const stem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
     writeFileSync(join(sessionDir, `.ghost-fork-${stem}.pending.json`), `${JSON.stringify({
-      version: 1,
+      version: 3,
       kind: "fork",
       conversationId,
       tempTranscript: join(sessionDir, `.${sessionFileNameFor(conversationId)}.race.pending`),
-      tempProjectBinding: `${binding}.race.pending`,
+      tempConversationCwd: `${binding}.race.pending`,
       tempToolCwds: `${toolCwds}.race.pending`,
     })}\n`, { mode: 0o600 });
   }
@@ -5959,47 +4381,6 @@ describe("passive session recovery during whole-home moves", () => {
 
     expect(existsSync(dir)).toBe(false);
     expect(existsSync(join(temp!.root, "wisp"))).toBe(true);
-  });
-
-  it("holds project and Claude recovery until a concurrent delete can safely move the home", async () => {
-    const recovery = pauseFirstForkCleanup();
-    const { dir } = await setup([{ kind: "text", text: "unused" }], {
-      transactionProbe: recovery.probe,
-    });
-    const conversationId = "project-race";
-    const sessionDir = ghostPaths(dir).sessionDir;
-    seedRollbackFork(sessionDir, conversationId);
-    const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
-    writeFileSync(`${sidecar}.settling`, `${JSON.stringify({
-      version: 1,
-      runtime: "claude-code",
-      conversationId,
-      sessionId: "sdk-project-race",
-      created: "2026-08-30T00:00:00.000Z",
-      modified: "2026-08-30T00:00:01.000Z",
-      messageCount: 2,
-      ownerTurnCount: 1,
-    })}\n`, { mode: 0o600 });
-    const coordinator = homeOperationsFor(temp!.registry);
-
-    const project = host!.getProject("casper", conversationId, "claude-code");
-    await recovery.entered.promise;
-    const reserved = await reserveBlockedMove(coordinator);
-    expect(reserved.ready()).toBe(false);
-    expect(coordinator.moveReservationCount).toBe(1);
-
-    recovery.resume.resolve();
-    await expect(project).resolves.toMatchObject({ root: null, canRebind: false });
-    expect(existsSync(sidecar)).toBe(true);
-    expect(existsSync(`${sidecar}.settling`)).toBe(false);
-    const releaseMove = await reserved.move;
-    try {
-      await host!.deleteGhost("casper");
-    } finally {
-      releaseMove();
-    }
-
-    expect(existsSync(dir)).toBe(false);
   });
 
   it("holds pin publication and its announcement until a concurrent rename moves the home", async () => {
@@ -6339,14 +4720,6 @@ describe("SessionHost.renameGhost", () => {
         closed.push(homeDir);
         if (failClose) throw new Error("relay close failed");
       },
-    });
-    const project = join(temp!.ownerHome, "rename-revocation-project");
-    mkdirSync(project);
-    const preview = await host!.previewProject("casper", "rename-revocation", "pi", project);
-    await host!.bindProject("casper", "rename-revocation", "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
     });
 
     await expect(host!.renameGhost("casper", "wisp"))

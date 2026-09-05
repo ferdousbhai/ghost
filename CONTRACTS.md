@@ -18,9 +18,8 @@ Durable state has three scopes:
 - **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in the
   owner's XDG Documents directory, which every ghost reads and writes with its
   runtime's native file and search tools.
-- **External:** trusted projects, browser downloads, screenshots, systemd user
-  timers, and provider credentials stay in the machine facility that owns
-  them.
+- **External:** browser downloads, screenshots, systemd user timers, and
+  provider credentials stay in the machine facility that owns them.
 
 The Documents directory is resolved like the screenshot directory:
 `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; never a
@@ -59,8 +58,7 @@ The directory is the atomic lifecycle unit. Rename and deletion hold a
 filesystem-identity lease and move the whole home on the same filesystem.
 Deletion goes to freedesktop Trash, with a recoverable `.trash/` fallback for
 `EXDEV`; Ghost never recursively removes a home. Machine credentials, owner
-documents, trusted projects, screenshots, downloads, and timers are not moved
-with it.
+documents, screenshots, downloads, and timers are not moved with it.
 The lifecycle implementation and crash recovery are in
 [`home-operations.ts`](packages/daemon/src/home-operations.ts),
 [`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
@@ -70,10 +68,9 @@ The lifecycle implementation and crash recovery are in
 `self:` mapping with a `checkout:` value that is an absolute path under the
 owner home; any other value reads as unset. It feeds the self-maintenance
 policy only. Naming it grants nothing the ghost's ordinary file tools and Bash
-do not already have; the checkout's own skills, rules, and MCP load only when
-the owner binds it as a conversation's project like any other. `settings.yml`
-may also name `cwd:`, the directory a new conversation starts in, under the
-same absolute-and-under-the-owner-home rule.
+do not already have; the checkout's own skills, rules, and MCP never enter a
+session. `settings.yml` may also name `cwd:`, the directory a new conversation
+starts in, under the same absolute-and-under-the-owner-home rule.
 
 ### Character and notes
 
@@ -88,24 +85,16 @@ owner's Documents directory (`<Documents>/notes/` by convention), written and
 read with the runtime's native file tools, shared by every ghost and readable
 by the owner. Nothing there is indexed or injected at session start.
 
-### Declarative resources and projects
+### Declarative resources
 
 Visible ghost-home instructions, skills, rules, Markdown commands/prompts, MCP,
 and trusted `hooks/pre` and `hooks/post` factories form an immutable session
 snapshot. Hidden compatibility roots inside a ghost home are not aliases.
 Machine skills under `~/.agents/skills/` and `~/.pi/agent/skills/` enter at
-lowest precedence, then ghost resources, then one explicitly trusted project.
-There is no skill-name allowlist.
-
-Project instructions, skills, rules, commands/prompts, and MCP are data-only.
-Project plugins, executable hooks/tools, LSP, and custom subagents stay disabled
-until they have a per-session isolation boundary. `agents/*.md` is preview-only
-for Pi; Claude Code retains its native subagents. Project trust is bound to the
-canonical filesystem identity, not a path string. The scanner and persisted
-snapshot shapes are in
-[`declarative-snapshot.ts`](packages/daemon/src/declarative-snapshot.ts),
-[`project-binding.ts`](packages/daemon/src/project-binding.ts), and
-[`project-snapshot.ts`](packages/daemon/src/project-snapshot.ts).
+lowest precedence, then ghost resources. There is no skill-name allowlist and
+no third, per-directory resource root: whatever tree a conversation works in
+is just its cwd, and nothing is discovered from it. The scanner is
+[`declarative-resources.ts`](packages/daemon/src/declarative-resources.ts).
 
 ### Sessions and sidecars
 
@@ -113,7 +102,7 @@ Conversation public ids are runtime-qualified (`pi:<raw>` or
 `claude-code:<raw>`). Raw ids remain the runtime resume identity. Pi transcripts
 are JSONL under `sessions/`; Claude transcripts remain in Claude Code's own
 storage and Ghost keeps only its resume metadata. Pins, read timestamps,
-project bindings/snapshots, tool-call cwd records, and crash markers are
+conversation cwd records, tool-call cwd records, and crash markers are
 bounded sidecars under `sessions/`.
 
 Each Claude conversation also gets a bounded presentation-journal sidecar
@@ -163,7 +152,6 @@ ghost home directory, which moves as one unit.
 | Conversations and sidecars under `sessions/` | survives; Pi JSONL is the durable history | moves with the home; Claude transcripts stay in Claude Code's own storage, only resume metadata moves | to Trash with the home | unchanged | unchanged | preserved |
 | `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| Project trust ledger (`$XDG_STATE_HOME/ghost/project-trust.json`) | survives | untouched; the ledger is owner-wide and identity-bound, never ghost-scoped | untouched | unchanged | unchanged | preserved |
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
@@ -195,8 +183,10 @@ documents are read only
 when relevant, with the runtime's own file and search tools, never injected
 automatically at session start.
 
-The operational cwd defaults to `settings.yml` `cwd:`, else the owner home,
-and may be rebound to one trusted project. Ghost home remains a separately named private resource root.
+The operational cwd defaults to `settings.yml` `cwd:`, else the owner home.
+A pi conversation's `!cd` moves it and records the new cwd in a sidecar; a
+Claude conversation keeps the cwd its resume metadata recorded. Ghost home
+remains a separately named private resource root.
 Prompt indexes are session-start snapshots; current data is read through the
 owning tool when needed.
 
@@ -205,8 +195,8 @@ owning tool when needed.
 Pi sessions use `createAgentSession`, an explicit transcript, Ghost's model
 runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
-automatic credential discovery, themes, prompt templates, executable project
-code, and native task tool do not enter the session. Ghost keeps Pi's native
+automatic credential discovery, themes, prompt templates, executable code
+found in the cwd, and native task tool do not enter the session. Ghost keeps Pi's native
 file, search, Bash, steering/follow-up, and branch behavior. Compaction is
 Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
 `session_before_compact` handler returns a compaction whose summary is a
@@ -259,10 +249,10 @@ APIs; Claude serves a thin settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
 warm query.
 
-Two deliberate capability gaps remain. Pi's MCP manager admits ghost-home MCP
-plus trusted-project MCP, including secret resolution and per-server cwd;
-Claude currently admits only credential-free trusted-project MCP that its SDK
-can represent and persist. Trusted ghost-home `hooks/pre` and `hooks/post`
+Two deliberate capability gaps remain. Pi's MCP manager admits every ghost-home
+MCP row, including secret resolution and per-server cwd; Claude admits only the
+credential-free rows its SDK can represent and reports the rest as skipped in
+the session's resources. Trusted ghost-home `hooks/pre` and `hooks/post`
 extension factories are Pi-native executable extensions and do not enter
 Claude. These exceptions must stay visible in the resource/API surfaces and
 must not be presented as shared capabilities.
@@ -270,7 +260,7 @@ must not be presented as shared capabilities.
 Claude Code can also serve the `advisor_model` role, independently of which
 runtime drives the ghost: both bind `roles.advisor_model` to
 `claude-code/default`. That query is not a principal session — no persona, no
-project snapshot, no Ghost tools, no warm query, no resume metadata — and it is
+Ghost tools, no warm query, no resume metadata — and it is
 admitted through the same SDK loader, executable probe, and reviewed child
 environment as the principal path.
 
@@ -346,7 +336,6 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries. |
-| `GET\|PUT\|DELETE /sessions/:id/project…` | Read, preview, bind/reload/unbind, or abandon an unpublished trusted-project draft. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
@@ -384,7 +373,7 @@ state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches is a named verb there (ghost roster, rename, character, greeting,
 conversations and their title/pin/read/fork/delete/reanswer, ask, jobs,
-resources, commands, project, model, MCP, hooks, remote, status, skill), so a
+resources, commands, model, MCP, hooks, remote, status, skill), so a
 ghost can drive and verify itself from Bash without raw HTTP. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
@@ -462,8 +451,8 @@ fail-closed state machine lives in
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a session. A conversation rejects conflicting owners;
   queued Pi steering/follow-ups are the explicit exception.
-- Home rename/delete, project transitions, MCP mutation, model refresh, fork,
-  and conversation deletion use explicit leases and publish only durable state.
+- Home rename/delete, MCP mutation, model refresh, fork, and conversation
+  deletion use explicit leases and publish only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.

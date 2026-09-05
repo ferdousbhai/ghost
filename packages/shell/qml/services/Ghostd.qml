@@ -22,7 +22,6 @@ import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
-import "../components/ProjectModel.js" as ProjectModel
 
 Singleton {
     id: root
@@ -203,7 +202,7 @@ Singleton {
     }
 
     // Hook status and configuration are daemon-global, independent of any
-    // ghost, conversation, or project.
+    // ghost or conversation.
 
     function makeHooksRequest(): var {
         return typeof root.hooksRequestFactory === "function"
@@ -369,137 +368,8 @@ Singleton {
             JSON.stringify(document), function () { return xhr === root.hookConfigMutation; });
     }
 
-    function makeProjectRequest(kind: string): var {
-        let factory = null;
-        if (kind === "get") factory = root.projectRequestFactory;
-        else if (kind === "preview") factory = root.projectPreviewRequestFactory;
-        else if (kind === "abandon") factory = root.projectAbandonRequestFactory;
-        else factory = root.projectMutationRequestFactory;
-        return typeof factory === "function" ? factory() : new XMLHttpRequest();
-    }
-
-    function projectRoute(ghost: string, sessionId: string): string {
-        return "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/project";
-    }
-
-    function projectIdentityCurrent(ghost: string, sessionId: string): bool {
-        return ghost !== "" && sessionId !== "" && ghost === root.activeGhost
-            && sessionId === root.currentSessionId;
-    }
-
-    /** Retire ownership before abort so synchronous DONE cannot publish stale state. */
-    function retireProjectRequests(): void {
-        const requests = [root.projectRequest, root.projectPreviewRequest,
-            root.projectMutationRequest, root.projectAbandonRequest];
-        root.projectRequest = null;
-        root.projectPreviewRequest = null;
-        root.projectMutationRequest = null;
-        root.projectAbandonRequest = null;
-        root.pendingProjectReplacement = null;
-        for (const request of requests) {
-            if (request && request.readyState !== 4) request.abort();
-        }
-        root.projectLoading = false;
-        root.projectPreviewLoading = false;
-        root.projectMutating = false;
-    }
-
-    /**
-     * Return the active in-memory identity only when every shell signal says it
-     * is a bound draft which has never been published. Published rows are
-     * never offered to the draft endpoint; the daemon repeats this admission
-     * check as the authority.
-     */
-    function activeBoundProjectDraft(): var {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (!root.projectIdentityCurrent(ghost, sessionId)
-                || root.projectGhost !== ghost || root.projectSessionId !== sessionId
-                || root.projectState.id !== sessionId || root.projectState.root === null)
-            return null;
-        const identity = root.parseConversationActionId(sessionId);
-        if (!identity) return null;
-        if (root.sessions.some(function (session) {
-            return session && session.id === sessionId;
-        })) return null;
-        const state = root.turnStates[root.conversationKey(ghost, sessionId)];
-        if (!state || state.published === true || state.streaming === true || state.request
-                || state.hydratedRowCount > 0) return null;
-        return {
-            ghost: ghost,
-            id: sessionId,
-            conversationId: identity.conversationId,
-            runtime: identity.runtime
-        };
-    }
-
-    function validProjectAbandonResponse(body: var, draft: var): bool {
-        return body && body.ok === true && typeof body.abandoned === "boolean"
-            && body.id === draft.id && body.conversationId === draft.conversationId
-            && body.runtime === draft.runtime;
-    }
-
-    function forgetAbandonedProjectDraft(draft: var): void {
-        const key = root.conversationKey(draft.ghost, draft.id);
-        const kept = Object.assign({}, root.turnStates);
-        root.cancelTranscriptLoad(kept[key]);
-        delete kept[key];
-        root.turnStates = kept;
-        root.updateLiveConversationKeys();
-        if (root.sessionIds[draft.ghost] === draft.id) root.sessionIds[draft.ghost] = "";
-    }
-
-    /**
-     * Keep the old draft selected until ghostd has durably abandoned its
-     * binding. A failed request leaves every local identity and project field
-     * intact; repeating the owner action retries the idempotent endpoint.
-     */
-    function requestProjectReplacement(action: var): void {
-        if (!action || typeof action.kind !== "string") return;
-        const draft = root.activeBoundProjectDraft();
-        if (!draft) {
-            root.performProjectReplacement(action);
-            return;
-        }
-        if (root.projectMutating) {
-            root.projectError = "Wait for the current project change before leaving this draft.";
-            return;
-        }
-        const xhr = root.makeProjectRequest("abandon");
-        root.projectAbandonRequest = xhr;
-        root.pendingProjectReplacement = action;
-        root.projectMutating = true;
-        root.projectError = "";
-        root.projectNotice = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.projectAbandonRequest) return;
-            root.projectAbandonRequest = null;
-            root.projectMutating = false;
-            const pending = root.pendingProjectReplacement;
-            root.pendingProjectReplacement = null;
-            const stillCurrent = root.projectIdentityCurrent(draft.ghost, draft.id);
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!root.validProjectAbandonResponse(body, draft))
-                        throw new Error("invalid abandon result");
-                    root.forgetAbandonedProjectDraft(draft);
-                    if (stillCurrent) root.performProjectReplacement(pending);
-                } catch (error) {
-                    if (stillCurrent)
-                        root.projectError = "ghostd sent malformed project draft abandonment";
-                }
-                return;
-            }
-            if (stillCurrent)
-                root.projectError = root.describeError(xhr, "abandon project draft");
-        };
-        root.dispatch(xhr, "DELETE", root.projectRoute(draft.ghost, draft.id) + "/draft",
-            ({}), null, function () { return root.projectAbandonRequest === xhr; });
-    }
-
-    function performProjectReplacement(action: var): void {
+    /** One tray or roster intent, applied to the selected destination. */
+    function performNavigation(action: var): void {
         if (!action) return;
         if (action.kind === "newConversation") root.finishNewConversation();
         else if (action.kind === "selectGhost") root.finishSelectGhost(action.name);
@@ -513,231 +383,6 @@ Singleton {
             root.finishNewConversation();
         }
     }
-
-    function projectRenameSnapshot(): var {
-        return {
-            state: root.projectState,
-            preview: root.projectPreview,
-            error: root.projectError,
-            notice: root.projectNotice,
-            ghost: root.projectGhost,
-            sessionId: root.projectSessionId
-        };
-    }
-
-    function restoreProjectRenameSnapshot(snapshot: var): void {
-        if (!snapshot) return;
-        root.projectState = snapshot.state;
-        root.projectPreview = snapshot.preview;
-        root.projectError = snapshot.error;
-        root.projectNotice = snapshot.notice;
-        root.projectGhost = snapshot.ghost;
-        root.projectSessionId = snapshot.sessionId;
-        root.projectLoading = false;
-        root.projectPreviewLoading = false;
-        root.projectMutating = false;
-    }
-
-    function clearProject(): void {
-        root.retireProjectRequests();
-        root.projectState = ProjectModel.empty();
-        root.projectPreview = null;
-        root.projectError = "";
-        root.projectNotice = "";
-        root.projectGhost = "";
-        root.projectSessionId = "";
-    }
-
-    function applyProjectState(body: var, sessionId: string): bool {
-        const parsed = ProjectModel.state(body, sessionId);
-        if (!parsed.ok) {
-            root.projectError = "ghostd sent malformed project state: " + parsed.error;
-            return false;
-        }
-        root.projectState = parsed.state;
-        root.projectError = "";
-        return true;
-    }
-
-    function fetchProject(force: bool, ensure: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearProject();
-            return;
-        }
-        let sessionId = root.currentSessionId;
-        if (sessionId === "" && ensure) sessionId = root.ensureSession(ghost);
-        if (sessionId === "") {
-            root.clearProject();
-            return;
-        }
-        if (!force && root.projectGhost === ghost
-                && root.projectSessionId === sessionId
-                && (root.projectLoading || root.projectState.id === sessionId)) return;
-        if (root.projectRequest && root.projectRequest.readyState !== 4) {
-            if (!force) return;
-            const previous = root.projectRequest;
-            root.projectRequest = null;
-            previous.abort();
-        }
-        if (root.projectGhost !== ghost || root.projectSessionId !== sessionId) {
-            root.projectState = ProjectModel.empty();
-            root.projectPreview = null;
-            root.projectNotice = "";
-        }
-        const xhr = root.makeProjectRequest("get");
-        root.projectRequest = xhr;
-        root.projectGhost = ghost;
-        root.projectSessionId = sessionId;
-        root.projectLoading = true;
-        root.projectError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.projectRequest) return;
-            root.projectRequest = null;
-            root.projectLoading = false;
-            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
-            if (xhr.status === 200) {
-                try {
-                    if (root.applyProjectState(JSON.parse(xhr.responseText), sessionId))
-                        root.reachable = true;
-                } catch (error) {
-                    root.projectError = "ghostd sent malformed project state";
-                }
-            } else {
-                root.projectError = root.describeError(xhr, "GET project");
-            }
-        };
-        root.dispatch(xhr, "GET", root.projectRoute(ghost, sessionId), ({}), null,
-            function () { return xhr === root.projectRequest; });
-    }
-
-    function previewProject(path: string): void {
-        const candidate = path.trim();
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId || (ghost !== "" ? root.ensureSession(ghost) : "");
-        if (candidate === "" || !root.projectIdentityCurrent(ghost, sessionId)) return;
-        if (root.projectState.id !== sessionId) {
-            root.projectError = "Project state is still loading.";
-            root.fetchProject(true, true);
-            return;
-        }
-        if (root.projectPreviewRequest && root.projectPreviewRequest.readyState !== 4) {
-            const previous = root.projectPreviewRequest;
-            root.projectPreviewRequest = null;
-            previous.abort();
-        }
-        const xhr = root.makeProjectRequest("preview");
-        root.projectPreviewRequest = xhr;
-        root.projectPreview = null;
-        root.projectPreviewLoading = true;
-        root.projectError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.projectPreviewRequest) return;
-            root.projectPreviewRequest = null;
-            root.projectPreviewLoading = false;
-            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
-            if (xhr.status === 200) {
-                try {
-                    const parsed = ProjectModel.preview(JSON.parse(xhr.responseText));
-                    if (!parsed.ok) throw new Error(parsed.error);
-                    root.projectPreview = parsed.preview;
-                    root.projectError = "";
-                    root.projectPreviewFinished(true);
-                } catch (error) {
-                    root.projectError = "ghostd sent malformed project preview";
-                    root.projectPreviewFinished(false);
-                }
-            } else {
-                root.projectError = root.describeError(xhr, "preview project");
-                root.projectPreviewFinished(false);
-            }
-        };
-        root.dispatch(xhr, "POST", root.projectRoute(ghost, sessionId) + "/preview",
-            ({ "Content-Type": "application/json" }), JSON.stringify({ path: candidate }),
-            function () { return xhr === root.projectPreviewRequest; });
-    }
-
-    function mutateProject(action: string, method: string, suffix: string, body: var): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (!root.projectIdentityCurrent(ghost, sessionId)
-                || root.projectState.id !== sessionId || root.projectMutating) return;
-        const xhr = root.makeProjectRequest("mutation");
-        root.projectMutationRequest = xhr;
-        root.projectMutating = true;
-        root.projectError = "";
-        root.projectNotice = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.projectMutationRequest) return;
-            root.projectMutationRequest = null;
-            root.projectMutating = false;
-            if (!root.projectIdentityCurrent(ghost, sessionId)) return;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyProjectState(JSON.parse(xhr.responseText), sessionId))
-                        throw new Error("malformed state");
-                    if (action === "bind") root.projectPreview = null;
-                    root.projectNotice = action === "bind" ? "Project selected."
-                        : (action === "reload" ? "Project resources reloaded."
-                            : "This conversation now uses Home.");
-                    root.clearSessionResources();
-                    root.projectMutationFinished(action, true);
-                } catch (error) {
-                    if (root.projectError === "")
-                        root.projectError = "ghostd sent malformed project state";
-                    root.projectMutationFinished(action, false);
-                }
-                return;
-            }
-            const code = root.errorCode(xhr);
-            root.projectError = root.describeError(xhr, action + " project");
-            root.projectMutationFinished(action, false);
-            if (code === "stale_generation"
-                    || code === "project_rebind_requires_new_conversation") {
-                Qt.callLater(function () {
-                    if (root.projectIdentityCurrent(ghost, sessionId))
-                        root.fetchProject(true, false);
-                });
-            }
-        };
-        root.dispatch(xhr, method, root.projectRoute(ghost, sessionId) + suffix,
-            ({ "Content-Type": "application/json" }), JSON.stringify(body),
-            function () { return xhr === root.projectMutationRequest; });
-    }
-
-    function bindProject(): void {
-        const selected = root.projectPreview;
-        if (!selected || root.projectState.canRebind !== true) return;
-        root.mutateProject("bind", "PUT", "", {
-            root: selected.root,
-            cwd: selected.root,
-            trustToken: selected.trustToken,
-            expectedGeneration: root.projectState.generation
-        });
-    }
-
-    function reloadProject(): void {
-        if (root.projectState.root === null || root.projectState.canRebind !== true) return;
-        root.mutateProject("reload", "POST", "/reload", {
-            expectedGeneration: root.projectState.generation
-        });
-    }
-
-    function unbindProject(): void {
-        if (root.projectState.root === null || root.projectState.canRebind !== true) return;
-        const ownerHome = Quickshell.env("HOME") || "";
-        if (!ownerHome.startsWith("/")) {
-            root.projectError = "Owner Home is unavailable; the project was not changed.";
-            return;
-        }
-        const body = {
-            root: null,
-            cwd: ownerHome,
-            expectedGeneration: root.projectState.generation
-        };
-        root.mutateProject("unbind", "PUT", "", body);
-    }
-
 
     // The persona file, edited through the daemon rather than by a direct
     // disk write: the daemon owns the size cap and refuses an oversize body,
@@ -788,19 +433,6 @@ Singleton {
 
     property bool establishedConnection: false
 
-    // Project discovery is explicit and conversation-scoped. The ghost home
-    // remains the persona/memory/session store; this state changes only what
-    // the active runtime discovers from an owner-trusted working tree.
-    property var projectState: ProjectModel.empty()
-    property var projectPreview: null
-    property bool projectLoading: false
-    property bool projectPreviewLoading: false
-    property bool projectMutating: false
-    property string projectError: ""
-    property string projectNotice: ""
-    property string projectGhost: ""
-    property string projectSessionId: ""
-
     // Effective commands are conversation-scoped: an extension can register
     // them while a session is built, so a ghost-level cache would quietly show
     // the wrong palette after switching conversations.
@@ -819,7 +451,7 @@ Singleton {
     property string sessionResourcesSessionId: ""
 
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
-    // here. Explicitly bound external-project MCP remains session-owned. GET
+    // here. GET
     // is sanitized; secret-bearing values are write-only through mutations.
     property var mcpServers: []
     property var mcpSkipped: []
@@ -902,8 +534,6 @@ Singleton {
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
     signal hooksConnectionReset(int epoch)
-    signal projectPreviewFinished(bool ok)
-    signal projectMutationFinished(string action, bool ok)
     signal remoteSetFinished(bool enabled, bool ok)
 
     property var providers: []
@@ -942,7 +572,6 @@ Singleton {
     property var renameGhostRequest: null
     property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
-    property var renameGhostProjectSnapshot: null
     property var renameSessionRequest: null
     /** Login requests have distinct owners so a poll cannot evict an input or
         provider fetch from the GC root, and every one can be retired on close. */
@@ -976,15 +605,6 @@ Singleton {
     property var hooksRequestFactory: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
-    property var projectRequestFactory: null
-    property var projectPreviewRequestFactory: null
-    property var projectMutationRequestFactory: null
-    property var projectAbandonRequestFactory: null
-    property var projectRequest: null
-    property var projectPreviewRequest: null
-    property var projectMutationRequest: null
-    property var projectAbandonRequest: null
-    property var pendingProjectReplacement: null
     property var commandsRequest: null
     property var sessionResourcesRequest: null
     /** Test seam; production constructs the native resource-snapshot XHR. */
@@ -1128,13 +748,6 @@ Singleton {
         root.retireRemoteRequests();
         root.retireHooksRequest();
         root.clearWork();
-        for (const request of [root.projectRequest, root.projectPreviewRequest,
-                root.projectMutationRequest]) {
-            if (request && request.readyState !== 4) request.abort();
-        }
-        root.projectRequest = null;
-        root.projectPreviewRequest = null;
-        root.projectMutationRequest = null;
     }
     onActiveGhostChanged: {
         root.modelGeneration += 1;
@@ -1145,8 +758,6 @@ Singleton {
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
             root.cancelLogin();
-        if (root.projectGhost !== "" && root.projectGhost !== root.activeGhost)
-            root.clearProject();
         root.connectConversationEvents(root.activeGhost);
     }
     onCurrentSessionIdChanged: {
@@ -1263,7 +874,6 @@ Singleton {
                         root.fetchSessions(root.activeGhost);
                         root.fetchGreeting();
                         root.refreshCurrentTranscript();
-                        root.fetchProject(false, false);
                     }
                 } catch (error) {
                     root.fail("ghostd sent a malformed ghost list: " + error);
@@ -1303,7 +913,7 @@ Singleton {
                 if (created && !root.ghosts.some(function (ghost) {
                     return ghost && ghost.name === createdName;
                 })) root.ghosts = root.ghosts.concat([created]);
-                root.requestProjectReplacement(({
+                root.performNavigation(({
                     kind: "createdGhost", name: createdName
                 }));
             } else {
@@ -1327,7 +937,6 @@ Singleton {
         root.clearGreeting();
         root.clearCommands();
         root.clearSessionResources();
-        root.clearProject();
         root.clearMcp();
         root.refresh();
     }
@@ -1390,12 +999,6 @@ Singleton {
             root.ghostRenameError = "Wait for the provider login to start before renaming this ghost.";
             return false;
         }
-        // The daemon holds a project transition lease through its atomic write;
-        // a whole-home rename is guaranteed to answer ghost_busy in this state.
-        if (root.projectMutating && root.projectGhost === from) {
-            root.ghostRenameError = "Wait for the project change to finish before renaming this ghost.";
-            return false;
-        }
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -1406,11 +1009,6 @@ Singleton {
         root.renamingGhost = from;
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
-        const projectBelongsToRename = root.projectGhost === from
-            || (root.projectGhost === "" && root.activeGhost === from);
-        root.renameGhostProjectSnapshot = projectBelongsToRename
-            ? root.projectRenameSnapshot() : null;
-        if (projectBelongsToRename) root.retireProjectRequests();
         root.pauseLoginRoute(from);
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
@@ -1423,7 +1021,6 @@ Singleton {
             root.renamingGhost = "";
             if (xhr.status === 200) {
                 root.renameGhostSnapshot = null;
-                root.renameGhostProjectSnapshot = null;
                 root.ghostRenameError = "";
                 // The daemon has the last word on the name it actually wrote.
                 let settled = next;
@@ -1435,32 +1032,20 @@ Singleton {
                 }
                 if (settled !== next) root.applyGhostRename(next, settled);
                 root.moveLoginRoute(from, settled);
-                // Every retired request used the old route. Even if the
-                // semantic snapshot was current, the settled daemon name is
-                // authoritative and must own a fresh GET.
-                if (root.activeGhost === settled && root.currentSessionId !== "")
-                    root.fetchProject(true, false);
                 root.refresh();
             } else {
-                const projectBefore = root.renameGhostProjectSnapshot;
                 if (root.renameGhostSnapshot) {
                     root.moveTurnStates(next, from);
                     root.installGhostRenameState(GhostRename.rollback({
                         before: root.renameGhostSnapshot
                     }));
                 }
-                root.restoreProjectRenameSnapshot(projectBefore);
                 root.renameGhostSnapshot = null;
-                root.renameGhostProjectSnapshot = null;
                 const detail = root.errorDetail(xhr);
                 root.ghostRenameError = detail !== ""
                     ? detail
                     : root.describeError(xhr, "PUT ghost name");
                 root.resumeLoginRoute(from);
-                Qt.callLater(function () {
-                    if (root.activeGhost === from && root.currentSessionId !== "")
-                        root.fetchProject(true, false);
-                });
             }
         };
         root.dispatch(xhr, "PUT",
@@ -1479,7 +1064,6 @@ Singleton {
             greetingGhost: root.greetingGhost,
             loginGhost: root.loginGhost,
             commandsGhost: root.commandsGhost,
-            projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             activeGhost: root.activeGhost,
             characterGhost: root.characterGhost
@@ -1494,7 +1078,6 @@ Singleton {
         root.greetingGhost = state.greetingGhost;
         root.loginGhost = state.loginGhost;
         root.commandsGhost = state.commandsGhost;
-        root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
         root.activeGhost = state.activeGhost;
         root.characterGhost = state.characterGhost;
@@ -1545,13 +1128,12 @@ Singleton {
         root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
-        root.clearProject();
         root.clearMcp();
     }
 
     function selectGhost(name: string): void {
         if (name === root.activeGhost) return;
-        root.requestProjectReplacement(({ kind: "selectGhost", name: name }));
+        root.performNavigation(({ kind: "selectGhost", name: name }));
     }
 
     function finishSelectGhost(name: string): void {
@@ -1576,18 +1158,16 @@ Singleton {
         root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
-        root.clearProject();
         root.clearMcp();
         root.fetchCurrentModel();
         root.fetchSessions(name);
         root.fetchGreeting();
-        root.fetchProject(false, false);
     }
 
-    /** One atomic tray intent; selection must not outrun draft abandonment. */
+    /** One atomic tray intent for the selected ghost. */
     function openConversationForGhost(name: string, id: string): void {
         if (name === "" || id === "") return;
-        root.requestProjectReplacement(({
+        root.performNavigation(({
             kind: "openConversationForGhost", name: name, id: id
         }));
     }
@@ -1595,7 +1175,7 @@ Singleton {
     /** One atomic tray intent; New must apply to the selected destination. */
     function newConversationForGhost(name: string): void {
         if (name === "") return;
-        root.requestProjectReplacement(({
+        root.performNavigation(({
             kind: "newConversationForGhost", name: name
         }));
     }
@@ -1667,13 +1247,8 @@ Singleton {
                 || (runtime !== "pi" && runtime !== "claude-code")) return null;
         const state = root.activeTurnState(false);
         if (!state || state.runtime === runtime || state.streaming) return state;
-        // A trusted binding belongs to this exact runtime-qualified draft. It
-        // is never silently transferred to another runtime.
-        if (root.projectState.id === state.sessionId && root.projectState.root !== null)
-            return state;
         root.captureActiveTurn(state);
         root.cancelTranscriptLoad(state);
-        root.clearProject();
         const id = root.conversationActionId(runtime, state.conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
@@ -1681,7 +1256,6 @@ Singleton {
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearSessionResources();
-        root.fetchProject(false, false);
         return target;
     }
 
@@ -2127,7 +1701,7 @@ Singleton {
     }
 
     function validSessionResourceRow(row: var, mcp: bool): bool {
-        const sources = mcp ? ["ghost", "project"] : ["machine", "ghost", "project"];
+        const sources = mcp ? ["ghost"] : ["machine", "ghost"];
         const statuses = mcp
             ? ["admitted", "shadowed", "skipped", "disabled"]
             : ["admitted", "shadowed", "skipped"];
@@ -2146,7 +1720,7 @@ Singleton {
 
     function validSessionResourceDiagnostic(row: var): bool {
         return row && typeof row === "object" && !Array.isArray(row)
-            && ["machine", "ghost", "project"].indexOf(row.source) >= 0
+            && ["machine", "ghost"].indexOf(row.source) >= 0
             && typeof row.reason === "string"
             && (row.path === undefined || typeof row.path === "string")
             && (row.shadowedBy === undefined || typeof row.shadowedBy === "string");
@@ -2666,8 +2240,6 @@ Singleton {
                             event.runtime, event.conversationId)
                         && ghost === root.activeGhost) {
                     root.fetchSessions(ghost);
-                    if (event.reason === "project" && event.id === root.currentSessionId)
-                        root.fetchProject(true, false);
                 }
             } catch (error) {
                 console.warn("ghost: unparseable conversation event:", line);
@@ -2757,7 +2329,7 @@ Singleton {
      */
     function newConversation(): void {
         if (root.activeGhost === "") return;
-        root.requestProjectReplacement(({ kind: "newConversation" }));
+        root.performNavigation(({ kind: "newConversation" }));
     }
 
     function finishNewConversation(): void {
@@ -2778,11 +2350,9 @@ Singleton {
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearSessionResources();
-        root.clearProject();
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
         root.fetchGreeting();
-        root.fetchProject(false, false);
     }
 
     function ensureOptimisticSessionRow(ghost: string, id: string): void {
@@ -2840,8 +2410,7 @@ Singleton {
                         root.clearTurnProjection();
                         root.clearCommands();
                         root.clearSessionResources();
-                        root.clearProject();
-                        root.clearGreeting();
+                                        root.clearGreeting();
                         root.fetchGreeting();
                     }
                     root.sessionsError = "";
@@ -2977,7 +2546,6 @@ Singleton {
             root.captureActiveTurn(previous);
             if (previous.sessionId !== id) root.cancelTranscriptLoad(previous);
         }
-        root.clearProject();
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
@@ -2988,7 +2556,6 @@ Singleton {
         // A conversation with its own history needs no opening line; a greeting
         // would be answering a question nobody just asked.
         root.clearGreeting();
-        root.fetchProject(false, false);
     }
 
     /**
@@ -3006,7 +2573,7 @@ Singleton {
             if (!root.streaming) root.finishOpenConversation(id);
             return;
         }
-        root.requestProjectReplacement(({ kind: "openConversation", id: id }));
+        root.performNavigation(({ kind: "openConversation", id: id }));
     }
 
     function finishOpenConversation(id: string): void {
@@ -3446,17 +3013,6 @@ Singleton {
         let sessionId = root.ensureSession(ghost);
         let state = root.ensureTurnState(ghost, sessionId);
         const desiredRuntime = root.runtimeForNewConversation();
-        if (state && state.runtime !== desiredRuntime
-                && root.projectState.id === state.sessionId
-                && root.projectState.root !== null) {
-            const message = "This draft’s trusted project is bound to "
-                + (state.runtime === "claude-code" ? "Claude Code" : "Pi")
-                + ". Use Home or start a new conversation before changing runtimes.";
-            root.projectError = message;
-            state.lastError = message;
-            root.projectTurnFields(state);
-            return;
-        }
         if (state && state.runtime !== desiredRuntime) {
             state = root.adoptConversationRuntime(ghost, desiredRuntime);
             sessionId = state ? state.sessionId : "";

@@ -81,8 +81,8 @@ opens the entry itself with `O_NOFOLLOW`, verifies that it is a regular file,
 and imports that pinned descriptor before binding the factory to the session.
 All dot-prefixed entries are ignored before extension or file-type checks, so
 they neither execute nor produce hook diagnostics. Visible symbolic-link entries
-and directories are rejected. Owner-home cwd, bound projects, and hidden
-compatibility directories never contribute executable hooks.
+and directories are rejected. The conversation cwd and hidden compatibility
+directories never contribute executable hooks.
 
 Treat a ghost home containing those visible hook files as executable code. Do
 not place an unreviewed archive or somebody else's hook extension there; remove

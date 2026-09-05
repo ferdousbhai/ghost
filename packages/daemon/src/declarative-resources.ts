@@ -15,45 +15,19 @@ import {
   openRegularFileNoFollow,
 } from "@ghost/extensions";
 import { GhostError } from "./ghosts.js";
-import {
-  parseEffectiveProjectMcpInputs,
-  type EffectiveProjectMcpInput,
-  type EffectiveProjectMcpRead,
-  type ProjectMcpConfigSource,
-} from "./mcp-catalog.js";
-import type { ProjectResourceSummary } from "./project-binding.js";
 
-export const PROJECT_SCAN_MAX_ENTRIES = 512;
-export const PROJECT_SCAN_MAX_BYTES = 1_048_576;
-export const PROJECT_SCAN_MAX_FILE_BYTES = 262_144;
-export const PROJECT_SCAN_MAX_DEPTH = 8;
-export const PROJECT_SCAN_TIMEOUT_MS = 1_000;
+export const SCAN_MAX_ENTRIES = 512;
+export const SCAN_MAX_BYTES = 1_048_576;
+export const SCAN_MAX_FILE_BYTES = 262_144;
+export const SCAN_MAX_DEPTH = 8;
+export const SCAN_TIMEOUT_MS = 1_000;
 
-const EMPTY_RESOURCES: ProjectResourceSummary = {
-  instructions: 0,
-  skills: 0,
-  rules: 0,
-  prompts: 0,
-  commands: 0,
-  agents: 0,
-  mcpServers: 0,
-  ignoredExecutable: 0,
-};
-
-export interface ProjectFilesystemIdentity {
-  dev: string;
-  ino: string;
-}
-
-export interface ProjectDeclarativeSnapshot {
+export interface DeclarativeSnapshot {
   contextFiles: Array<{ path: string; content: string }>;
   skills: Skill[];
   rules: Rule[];
   promptTemplates: PromptTemplate[];
   slashCommands: FileSlashCommand[];
-  mcp: EffectiveProjectMcpRead;
-  mcpWarnings: string[];
-  resources: ProjectResourceSummary;
   warnings: string[];
   truncated: boolean;
 }
@@ -75,32 +49,9 @@ interface MarkdownFile {
   content: string;
 }
 
-const PROJECT_INSTRUCTION_FILES = [
-  ".omp/AGENTS.md",
-  ".claude/CLAUDE.md",
-  ".agents/AGENTS.md",
-  "AGENTS.md",
-  "CLAUDE.md",
-] as const;
 const GHOST_INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
-const PROJECT_SKILL_DIRS = ["skills", ".agents/skills", ".claude/skills", ".pi/skills", ".omp/skills"] as const;
-const PROJECT_RULE_DIRS = ["rules", ".claude/rules", ".omp/rules"] as const;
-const PROJECT_PROMPT_DIRS = ["prompts", ".claude/prompts", ".omp/prompts"] as const;
-const PROJECT_COMMAND_DIRS = ["commands", ".claude/commands", ".omp/commands"] as const;
-const PROJECT_AGENT_DIRS = ["agents", ".claude/agents", ".omp/agents"] as const;
-const PROJECT_EXECUTABLE_DIRS = [
-  ".omp/extensions",
-  ".pi/extensions",
-  ".omp/hooks",
-  ".omp/tools",
-  ".claude/hooks",
-] as const;
-const PROJECT_MCP_FILES = [
-  { kind: "canonical", relativePath: ".omp/mcp.json" },
-  { kind: "legacy", relativePath: ".omp/.mcp.json" },
-] as const;
 
-function sourceFor(path: string, level: "user" | "project" | "native"): SourceMeta {
+function sourceFor(path: string, level: "user" | "native"): SourceMeta {
   return {
     provider: level === "native" ? "ghost-recommended" : "ghost-pinned",
     providerName: level === "native" ? "Ghost recommended" : "Ghost",
@@ -110,11 +61,11 @@ function sourceFor(path: string, level: "user" | "project" | "native"): SourceMe
 }
 
 function checkBudget(budget: ScanBudget): boolean {
-  if (budget.entries >= PROJECT_SCAN_MAX_ENTRIES) {
+  if (budget.entries >= SCAN_MAX_ENTRIES) {
     budget.denied += 1;
     budget.truncated = true;
-    if (!budget.warnings.includes("Project preview stopped at its entry limit.")) {
-      budget.warnings.push("Project preview stopped at its entry limit.");
+    if (!budget.warnings.includes("Resource scan stopped at its entry limit.")) {
+      budget.warnings.push("Resource scan stopped at its entry limit.");
     }
     return false;
   }
@@ -123,11 +74,11 @@ function checkBudget(budget: ScanBudget): boolean {
 }
 
 function checkTimeBudget(budget: ScanBudget): boolean {
-  if (budget.now() - budget.started >= PROJECT_SCAN_TIMEOUT_MS) {
+  if (budget.now() - budget.started >= SCAN_TIMEOUT_MS) {
     budget.denied += 1;
     budget.truncated = true;
-    if (!budget.warnings.includes("Project preview stopped at its time limit.")) {
-      budget.warnings.push("Project preview stopped at its time limit.");
+    if (!budget.warnings.includes("Resource scan stopped at its time limit.")) {
+      budget.warnings.push("Resource scan stopped at its time limit.");
     }
     return false;
   }
@@ -162,41 +113,26 @@ async function readUtf8AtMost(
 
 async function openPinnedRoot(
   root: string,
-  expected?: ProjectFilesystemIdentity,
   traceOpen?: (path: string) => void,
 ): Promise<FileHandle> {
   traceOpen?.(root);
-  const { directory } = await openPinnedRootDescriptor(root);
-  try {
-    const info = await directory.stat({ bigint: true });
-    if (expected && (String(info.dev) !== expected.dev || String(info.ino) !== expected.ino)) {
-      throw new GhostError(
-        "project_identity_changed",
-        "The project changed filesystem identity while it was being loaded.",
-        409,
-      );
-    }
-    return directory;
-  } catch (error) {
-    await directory.close().catch(() => {});
-    throw error;
-  }
+  return (await openPinnedRootDescriptor(root)).directory;
 }
 
 async function openPinnedRootDescriptor(
   path: string,
 ): Promise<{ root: string; directory: FileHandle }> {
   if (!isAbsolute(path)) {
-    throw new GhostError("invalid_project_path", "Project paths must be absolute.", 400);
+    throw new GhostError("invalid_resource_root", "Resource roots must be absolute.", 400);
   }
   const root = resolve(path);
   let current: FileHandle | undefined;
   try {
-    current = await openDirectoryNoFollow("/", "Project path root");
+    current = await openDirectoryNoFollow("/", "Resource root");
     for (const part of root.split("/").filter(Boolean)) {
       const next = await openDirectoryNoFollow(
         descriptorPath(current, part),
-        "Project path component",
+        "Resource root component",
       );
       await current.close();
       current = next;
@@ -205,33 +141,21 @@ async function openPinnedRootDescriptor(
   } catch (error) {
     await current?.close().catch(() => {});
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      throw new GhostError("not_found", "That project directory does not exist.", 404);
+      throw new GhostError("not_found", "That resource root does not exist.", 404);
     }
     if (error instanceof GhostError) throw error;
     throw new GhostError(
-      "invalid_project_path",
-      "Project paths cannot contain symbolic links or non-directory components.",
+      "invalid_resource_root",
+      "Resource roots cannot contain symbolic links or non-directory components.",
       400,
     );
-  }
-}
-
-export async function pinnedProjectIdentity(
-  path: string,
-): Promise<{ root: string; dev: string; ino: string }> {
-  const { root, directory } = await openPinnedRootDescriptor(path);
-  try {
-    const info = await directory.stat({ bigint: true });
-    return { root, dev: String(info.dev), ino: String(info.ino) };
-  } finally {
-    await directory.close().catch(() => {});
   }
 }
 
 function segments(path: string): string[] {
   const parts = path.split("/");
   if (parts.some((part) => part === "" || part === "." || part === ".." || part.includes("\0"))) {
-    throw new GhostError("invalid_project_path", "A project resource path is invalid.", 400);
+    throw new GhostError("invalid_resource_root", "A resource path is invalid.", 400);
   }
   return parts;
 }
@@ -249,7 +173,7 @@ async function openRelativeDirectory(
         budget.traceOpen?.(path);
         next = await openDirectoryNoFollow(
           descriptorPath(current ?? root, part),
-          "Project resource directory",
+          "Resource directory",
         );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -294,7 +218,7 @@ async function readRelativeFile(
   try {
     try {
       budget.traceOpen?.(relativePath);
-      const opened = await openRegularFileNoFollow(descriptorPath(parent, name), "Project resource");
+      const opened = await openRegularFileNoFollow(descriptorPath(parent, name), "Resource file");
       file = opened;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -302,15 +226,15 @@ async function readRelativeFile(
       return null;
     }
     const remaining = Math.min(
-      PROJECT_SCAN_MAX_FILE_BYTES,
-      PROJECT_SCAN_MAX_BYTES - budget.bytes,
+      SCAN_MAX_FILE_BYTES,
+      SCAN_MAX_BYTES - budget.bytes,
     );
     const bounded = await readUtf8AtMost(file, Math.max(0, remaining));
     if (bounded.overflow) {
       budget.truncated = true;
       budget.warnings.push(
-        remaining < PROJECT_SCAN_MAX_FILE_BYTES
-          ? `${relativePath} was ignored because the project byte limit was reached.`
+        remaining < SCAN_MAX_FILE_BYTES
+          ? `${relativePath} was ignored because the scan byte limit was reached.`
           : `${relativePath} was ignored because it exceeds the 256 KiB per-file limit.`,
       );
       return null;
@@ -348,7 +272,7 @@ async function boundedDirectoryEntries(
       if (!entry) break;
       if (!checkTimeBudget(budget)) break;
       if (entry.name.startsWith(".")) continue;
-      if (budget.entries >= PROJECT_SCAN_MAX_ENTRIES) {
+      if (budget.entries >= SCAN_MAX_ENTRIES) {
         checkBudget(budget);
         break;
       }
@@ -379,18 +303,18 @@ async function scanMarkdownDirectory(
   const files: MarkdownFile[] = [];
   const visit = async (directory: FileHandle, prefix: string, depth: number): Promise<void> => {
     if (!checkBudget(budget)) return;
-    if (depth > PROJECT_SCAN_MAX_DEPTH) {
+    if (depth > SCAN_MAX_DEPTH) {
       budget.truncated = true;
-      budget.warnings.push(`${prefix} was truncated at the project depth limit.`);
+      budget.warnings.push(`${prefix} was truncated at the scan depth limit.`);
       return;
     }
     const entries = await boundedDirectoryEntries(directory, budget);
     for (const entry of entries) {
       const relativePath = posix.join(prefix, entry.name);
       const entryDepth = segments(relativePath).length;
-      if (entryDepth > PROJECT_SCAN_MAX_DEPTH) {
+      if (entryDepth > SCAN_MAX_DEPTH) {
         budget.truncated = true;
-        budget.warnings.push(`${relativePath} was truncated at the project depth limit.`);
+        budget.warnings.push(`${relativePath} was truncated at the scan depth limit.`);
         continue;
       }
       if (entry.isSymbolicLink()) {
@@ -400,7 +324,7 @@ async function scanMarkdownDirectory(
       if (entry.isDirectory()) {
         let child: FileHandle | undefined;
         try {
-          const opened = await openDirectoryNoFollow(descriptorPath(directory, entry.name), "Project resource directory");
+          const opened = await openDirectoryNoFollow(descriptorPath(directory, entry.name), "Resource directory");
           child = opened;
           await visit(opened, relativePath, depth + 1);
         } catch {
@@ -430,43 +354,17 @@ function description(body: string, frontmatter: Record<string, unknown>): string
   return first.length > 60 ? `${first.slice(0, 60)}...` : first;
 }
 
-async function countDirectoryEntries(root: FileHandle, relativeDir: string, budget: ScanBudget): Promise<number> {
-  let directory: FileHandle | null;
-  try {
-    directory = await openRelativeDirectory(root, relativeDir, budget);
-  } catch {
-    budget.warnings.push(`${relativeDir} was ignored because it is not a confined directory.`);
-    return 0;
-  }
-  if (!directory) return 0;
-  try {
-    let count = 0;
-    for (const entry of await boundedDirectoryEntries(directory, budget)) {
-      if (entry.isSymbolicLink()) {
-        budget.warnings.push(`${relativeDir}/${entry.name} was ignored because symbolic links are not followed.`);
-        continue;
-      }
-      count += 1;
-    }
-    return count;
-  } finally {
-    await directory.close();
-  }
-}
-
-export async function loadProjectDeclarativeSnapshot(
+export async function loadDeclarativeSnapshot(
   rootPath: string,
   options: {
-    level: "user" | "project" | "native";
-    expectedIdentity?: ProjectFilesystemIdentity;
-    includeContents?: boolean;
+    level: "user" | "native";
     /** Read only these exact skill files and admit no other resource category. */
     skillFiles?: readonly { name: string; relativePath: string }[];
     traceOpen?: (path: string) => void;
     /** Deterministic cooperative-clock seam used by boundary tests. */
     now?: () => number;
   },
-): Promise<ProjectDeclarativeSnapshot> {
+): Promise<DeclarativeSnapshot> {
   const now = options.now ?? Date.now;
   const budget: ScanBudget = {
     started: now(),
@@ -478,63 +376,20 @@ export async function loadProjectDeclarativeSnapshot(
     warnings: [],
     ...(options.traceOpen ? { traceOpen: options.traceOpen } : {}),
   };
-  const root = await openPinnedRoot(rootPath, options.expectedIdentity, options.traceOpen);
+  const root = await openPinnedRoot(rootPath, options.traceOpen);
   try {
-    const projectLevel = options.level === "project";
     const skillsOnly = options.skillFiles !== undefined;
-    const instructionFiles = skillsOnly ? [] : projectLevel ? PROJECT_INSTRUCTION_FILES : GHOST_INSTRUCTION_FILES;
-    const skillDirectories = projectLevel ? PROJECT_SKILL_DIRS : ["skills"];
-    const ruleDirectories = skillsOnly ? [] : projectLevel ? PROJECT_RULE_DIRS : ["rules"];
-    const promptDirectories = skillsOnly ? [] : projectLevel ? PROJECT_PROMPT_DIRS : ["prompts"];
-    const commandDirectories = skillsOnly ? [] : projectLevel ? PROJECT_COMMAND_DIRS : ["commands"];
-    const agentDirectories = skillsOnly ? [] : projectLevel ? PROJECT_AGENT_DIRS : ["agents"];
-    const executableDirectories = skillsOnly ? [] : projectLevel ? PROJECT_EXECUTABLE_DIRS : [];
-    // Fixed MCP files are the only bounded resources that can change runtime
-    // connectivity. Admit or explicitly reject them before broad directory
-    // walks can consume the shared entry, byte, or cooperative-time budget.
-    const mcpInputs: EffectiveProjectMcpInput[] = [];
-    const mcpWarningStart = budget.warnings.length;
-    if (projectLevel && !skillsOnly) {
-      for (const descriptor of PROJECT_MCP_FILES) {
-        const source: ProjectMcpConfigSource = {
-          kind: descriptor.kind,
-          relativePath: descriptor.relativePath,
-          absolutePath: join(rootPath, ...descriptor.relativePath.split("/")),
-        };
-        const warningCount = budget.warnings.length;
-        const deniedCount = budget.denied;
-        const file = await readRelativeFile(
-          root,
-          rootPath,
-          descriptor.relativePath,
-          budget,
-        );
-        if (file) {
-          mcpInputs.push({ source, content: file.content });
-        } else if (budget.denied > deniedCount || budget.warnings.length > warningCount) {
-          mcpInputs.push({
-            source,
-            error: "MCP config was rejected by the bounded project scan.",
-          });
-        }
-      }
-    }
-    const mcp = parseEffectiveProjectMcpInputs(mcpInputs);
-    for (const skipped of mcp.skipped) {
-      const warning = `${skipped.path}: ${skipped.reason}`;
-      if (!budget.warnings.includes(warning)) budget.warnings.push(warning);
-    }
-    const mcpWarnings = budget.warnings.slice(mcpWarningStart);
+    const instructionFiles = skillsOnly ? [] : GHOST_INSTRUCTION_FILES;
+    const skillDirectories = ["skills"];
+    const ruleDirectories = skillsOnly ? [] : ["rules"];
+    const promptDirectories = skillsOnly ? [] : ["prompts"];
+    const commandDirectories = skillsOnly ? [] : ["commands"];
 
     const contextFiles: Array<{ path: string; content: string }> = [];
-    let instructionCount = 0;
     for (const path of instructionFiles) {
       const file = await readRelativeFile(root, rootPath, path, budget);
       if (file) {
-        instructionCount += 1;
-        if (options.includeContents !== false) {
-          contextFiles.push({ path: file.absolutePath, content: file.content });
-        }
+        contextFiles.push({ path: file.absolutePath, content: file.content });
         break;
       }
     }
@@ -565,11 +420,6 @@ export async function loadProjectDeclarativeSnapshot(
     const ruleFiles = await scanDirectories(ruleDirectories);
     const promptFiles = await scanDirectories(promptDirectories);
     const commandFiles = await scanDirectories(commandDirectories);
-    const agentFiles = await scanDirectories(agentDirectories);
-    let ignoredExecutable = 0;
-    for (const directory of executableDirectories) {
-      ignoredExecutable += await countDirectoryEntries(root, directory, budget);
-    }
     const skillEntries = new Map<string, Skill>();
     for (const file of skillFiles) {
       let parsed: ReturnType<typeof parseFrontmatter>;
@@ -666,41 +516,12 @@ export async function loadProjectDeclarativeSnapshot(
     }
     const slashCommands = [...commandEntries.values()];
 
-    const resources: ProjectResourceSummary = {
-      ...EMPTY_RESOURCES,
-      instructions: instructionCount,
-      skills: skills.length,
-      rules: rules.length,
-      prompts: promptTemplates.length,
-      commands: slashCommands.length,
-      agents: agentFiles.length,
-      mcpServers: mcp.servers.length,
-      ignoredExecutable,
-    };
-    if (options.includeContents === false) {
-      return {
-        contextFiles: [],
-        skills: [],
-        rules: [],
-        promptTemplates: [],
-        slashCommands: [],
-        mcp,
-        mcpWarnings,
-        resources,
-        warnings: budget.warnings,
-        truncated: budget.truncated,
-      };
-    }
-
     return {
       contextFiles,
       skills,
       rules,
       promptTemplates,
       slashCommands,
-      mcp,
-      mcpWarnings,
-      resources,
       warnings: budget.warnings,
       truncated: budget.truncated,
     };

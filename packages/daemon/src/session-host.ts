@@ -34,7 +34,6 @@ import {
   ClaudeCodeRuntime,
   claudeSessionMetadataPath,
   claudeSessionResumeMarkerPaths,
-  type ClaudeProjectSnapshot,
   type ClaudeCodeRuntimeOptions,
 } from "./claude-code.js";
 import {
@@ -174,37 +173,22 @@ import {
 import {
   expandMcpServerConfig,
   normalizeMcpStdioCwd,
-  readEffectiveProjectMcp,
-  type EffectiveProjectMcpRead,
+  readEffectiveMcp,
 } from "./mcp-catalog.js";
 import {
   buildSessionResourceView,
-  projectSessionSkillGroup,
+  sessionSkillGroup,
   replaceSessionMcpView,
   type SessionMcpGroup,
   type SessionResourceView,
   type SessionSkillGroup,
 } from "./session-resources.js";
+import { loadDeclarativeSnapshot } from "./declarative-resources.js";
 import {
-  projectBindingPath,
-  ProjectBindingStore,
-  type BindingRevocationLease,
-  type ProjectBindingState,
-  type ProjectPreview,
-} from "./project-binding.js";
-import {
-  loadProjectDeclarativeSnapshot,
-  type ProjectDeclarativeSnapshot,
-} from "./project-resources.js";
-import {
-  mergeProjectDeclarativeSnapshots,
+  mergeDeclarativeSnapshots,
   renderPiDeclarativePrompt,
 } from "./declarative-snapshot.js";
-import {
-  piProjectSnapshotPath,
-  piProjectSnapshotPaths,
-  readPiProjectSnapshot,
-} from "./project-snapshot.js";
+import { conversationCwdPath, readConversationCwd, writeConversationCwd } from "./conversation-cwd.js";
 import { readToolCwds, toolCwdsPath, writeToolCwds } from "./tool-cwds.js";
 
 /** pi's built-in coding tools a ghost session starts with. */
@@ -563,7 +547,6 @@ export interface SessionHostOptions {
   scheduleCommandRunner?: CommandRunner;
   /** Test seam; production discovers the standard owner-machine skill paths. */
   machineSkillPaths?: readonly string[];
-  projectBindings?: ProjectBindingStore;
   /** Test seam for retiring the process-wide browser entry before a home move. */
   browserSessionClose?: (homeDir: string) => Promise<void>;
   sessionStartupProbe?: (
@@ -675,7 +658,8 @@ type SelectedTurnRuntime =
   | {
       readonly runtime: "claude-code";
       readonly modelId: string;
-      readonly project: ClaudeProjectSnapshot;
+      /** The working directory a new Claude conversation starts in. */
+      readonly cwd: string;
     };
 
 export interface RunAskReanswerOptions {
@@ -709,8 +693,8 @@ export interface QueuedMessages {
 }
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
-  artifact: "omp-transcript" | "claude-sidecar" | "project-binding"
-    | "project-snapshot" | "tool-cwds" | "presentation-history";
+  artifact: "omp-transcript" | "claude-sidecar" | "conversation-cwd"
+    | "tool-cwds" | "presentation-history";
   source: string;
 }
 
@@ -724,7 +708,6 @@ export type QueueMode = "steer" | "followUp";
 
 interface McpSource {
   path: string;
-  level: "user" | "project";
 }
 
 interface HostedMCP {
@@ -741,8 +724,8 @@ interface HostedMCP {
 interface HostedSession extends GhostSessionHandle {
   logger: Logger;
   resources: SessionResourceView;
-  project: ProjectBindingState;
-  projectSnapshot: ProjectDeclarativeSnapshot | null;
+  /** The session's working directory; `!cd` moves it and reopens the session. */
+  cwd: string;
   toolCwds: Map<string, string>;
   toolCwdWrite?: Promise<void>;
   /** Monotonic in-memory revision, retained across failed publications. */
@@ -864,44 +847,19 @@ function deleteTransactionPath(
   );
 }
 
-function draftAbandonTransactionPath(
-  sessionDir: string,
-  runtime: ConversationRuntime,
-  conversationId: string,
-): string {
-  return join(
-    sessionDir,
-    `.ghost-draft-abandon-${conversationTransactionStem(conversationId)}.${runtime}.pending.json`,
-  );
-}
-
-function draftAbandonReceiptPath(
-  sessionDir: string,
-  runtime: ConversationRuntime,
-  conversationId: string,
-): string {
-  return join(
-    sessionDir,
-    `.ghost-draft-abandon-${conversationTransactionStem(conversationId)}.${runtime}.complete.json`,
-  );
-}
-
 interface ForkTransactionRecord {
-  version: 1 | 2;
+  version: 3;
   kind: "fork";
   conversationId: string;
   tempTranscript: string;
-  tempProjectBinding: string;
-  tempProjectSnapshot: string | null;
-  projectSnapshotGeneration: number | null;
+  tempConversationCwd: string;
   tempToolCwds: string;
 }
 
 const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"]>([
   "omp-transcript",
   "claude-sidecar",
-  "project-binding",
-  "project-snapshot",
+  "conversation-cwd",
   "tool-cwds",
   "presentation-history",
 ]);
@@ -916,14 +874,6 @@ interface DeleteTransactionRecord {
   artifacts: TrashedConversationFileArtifact[];
   trashRoot: string | null;
   pending: DeleteMoveIntent | null;
-}
-
-interface DraftAbandonTransactionRecord {
-  version: 1;
-  kind: "project-draft-abandon";
-  runtime: ConversationRuntime;
-  conversationId: string;
-  artifacts: string[];
 }
 
 const TRANSACTION_MARKER_MAX_BYTES = 1_048_576;
@@ -1062,21 +1012,14 @@ function exactDeleteStaticSource(
           || artifact.source === markers.started
           || artifact.source === markers.settling);
     }
-    case "project-binding":
-      return artifact.source === projectBindingPath(sessionDir, runtime, conversationId);
+    case "conversation-cwd":
+      return runtime === "pi"
+        && artifact.source === conversationCwdPath(sessionDir, conversationId);
     case "tool-cwds":
       return runtime === "pi"
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
     case "presentation-history":
       return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
-    case "project-snapshot": {
-      if (runtime !== "pi" || artifact.source !== join(sessionDir, basename(artifact.source))) {
-        return false;
-      }
-      const prefix = `${conversationTransactionStem(conversationId)}.pi.project-snapshot.`;
-      const name = basename(artifact.source);
-      return name.startsWith(prefix) && /^\d+\.json$/u.test(name.slice(prefix.length));
-    }
   }
 }
 
@@ -1094,11 +1037,12 @@ function persistentCdTarget(command: string, cwd: string, ownerHome: string): st
   return isAbsolute(rest) ? resolve(rest) : resolve(cwd, rest);
 }
 
-const LEGACY_PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
+const PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
 
-async function legacyPiSessionCwd(path: string): Promise<string | undefined> {
+/** The cwd pi recorded when it created the transcript, for conversations that never moved. */
+async function piSessionHeaderCwd(path: string): Promise<string | undefined> {
   try {
-    const first = await readDaemonControlLine(path, LEGACY_PI_SESSION_HEADER_MAX_BYTES);
+    const first = await readDaemonControlLine(path, PI_SESSION_HEADER_MAX_BYTES);
     const header = JSON.parse(first) as { type?: unknown; cwd?: unknown };
     return header.type === "session"
       && typeof header.cwd === "string"
@@ -1168,7 +1112,6 @@ export interface ConversationUpdatedEvent {
   conversationId: string;
   runtime: ConversationRuntime;
   updatedAt: string;
-  reason?: "project";
 }
 
 export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
@@ -1408,157 +1351,51 @@ export function forkConversationTitle(
   return `${base} (${counter})`;
 }
 
-interface ProjectMcpConnectionResult {
-  projectConfigured: number;
-  projectFailed: number;
-}
-
-function rejectedProjectMcpCount(effective: EffectiveProjectMcpRead): number {
-  return effective.skipped.length
-    + effective.servers.filter((server) => server.errors.length > 0).length;
-}
-
-function summarizeProjectMcpConnection(
-  sources: ReadonlyMap<string, McpSource>,
-  errors: ReadonlyMap<string, unknown>,
-  rejected = 0,
-): ProjectMcpConnectionResult {
-  const projectServers = new Set(
-    [...sources].filter(([, source]) => source.level === "project").map(([name]) => name),
-  );
-  return {
-    projectConfigured: projectServers.size,
-    projectFailed: rejected + [...errors.keys()].filter((name) => projectServers.has(name)).length,
-  };
-}
-
-function projectMcpRuntimeStatus(result: ProjectMcpConnectionResult): {
-  status: "ready" | "degraded";
-  error: { code: string; message: string } | null;
-  mcpStatus: "off" | "ready" | "degraded";
-} {
-  const degraded = result.projectFailed > 0;
-  return {
-    status: degraded ? "degraded" : "ready",
-    error: degraded
-      ? {
-          code: "project_mcp_degraded",
-          message: "One or more project MCP resources could not be loaded.",
-        }
-      : null,
-    mcpStatus: degraded
-      ? "degraded"
-      : result.projectConfigured > 0 ? "ready" : "off",
-  };
-}
-
-async function connectGhostProjectMCP(
+/** Connect the ghost's own `mcp.json` servers; disabled and malformed rows are reported, not started. */
+async function connectGhostMcp(
   manager: GhostMcpManager,
-  input: {
-    ghostRoot: string;
-    project?: { root: string; mcp: EffectiveProjectMcpRead };
-  },
+  ghostRoot: string,
   logger: Logger,
 ): Promise<{
-  result: ProjectMcpConnectionResult;
   configs: Map<string, MCPServerConfig>;
   sources: Map<string, McpSource>;
   admission: SessionMcpGroup[];
 }> {
   const configs = new Map<string, MCPServerConfig>();
   const sources = new Map<string, McpSource>();
-  let projectRejected = 0;
-  const roots = [
-    {
-      root: input.ghostRoot,
-      project: false,
-      effective: await readEffectiveProjectMcp(input.ghostRoot),
-    },
-    ...(input.project
-      ? [{ root: input.project.root, project: true, effective: input.project.mcp }]
-      : []),
-  ];
-  const admission: SessionMcpGroup[] = roots.map(({ root, project, effective }) => ({
-    source: project ? "project" : "ghost",
-    precedence: project ? 2 : 1,
-    root,
-    effective,
-  }));
-  for (const sourceRoot of roots) {
-    const { root, project: isActiveProject, effective } = sourceRoot;
-    // A later project row claims precedence before admission. Disabled and
-    // invalid rows therefore shadow a same-name visible Ghost server without
-    // entering the runtime configuration themselves.
-    for (const name of effective.claimedNames) {
-      configs.delete(name);
-      sources.delete(name);
-    }
-    for (const skipped of effective.skipped) {
-      if (isActiveProject) projectRejected += 1;
-      logger.error("MCP config failed to load", {
-        path: skipped.path,
+  const effective = await readEffectiveMcp(ghostRoot);
+  const admission: SessionMcpGroup[] = [{ source: "ghost", precedence: 1, root: ghostRoot, effective }];
+  for (const skipped of effective.skipped) {
+    logger.error("MCP config failed to load", { path: skipped.path, code: "mcp_connection_failed" });
+  }
+  for (const server of effective.servers) {
+    if (server.errors.length > 0) {
+      logger.error("MCP server failed to load", {
+        path: server.source.relativePath,
+        ...(validateServerName(server.name) ? {} : { server: server.name }),
         code: "mcp_connection_failed",
       });
+      continue;
     }
-    for (const server of effective.servers) {
-      if (server.errors.length > 0) {
-        if (isActiveProject) projectRejected += 1;
-        logger.error("MCP server failed to load", {
-          path: server.source.relativePath,
-          ...(validateServerName(server.name) ? {} : { server: server.name }),
-          code: "mcp_connection_failed",
-        });
-        continue;
-      }
-      const config = server.config as MCPServerConfig;
-      if (config.enabled === false) continue;
-      configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(config), root));
-      sources.set(server.name, {
-        path: server.source.absolutePath,
-        level: isActiveProject ? "project" : "user",
-      });
-    }
+    const config = server.config as MCPServerConfig;
+    if (config.enabled === false) continue;
+    configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(config), ghostRoot));
+    sources.set(server.name, { path: server.source.absolutePath });
   }
-
-  if (configs.size === 0) {
-    return {
-      result: summarizeProjectMcpConnection(sources, new Map(), projectRejected),
-      configs,
-      sources,
-      admission,
-    };
-  }
+  if (configs.size === 0) return { configs, sources, admission };
   try {
     const connected = await manager.connectServers(Object.fromEntries(configs));
     for (const [name, error] of connected.errors) {
-      logger.error("ghost project MCP server failed to load", {
+      logger.error("ghost MCP server failed to load", {
         path: sources.get(name)?.path ?? `mcp:${name}`,
         server: name,
         code: error,
       });
     }
-    return {
-      result: summarizeProjectMcpConnection(sources, connected.errors, projectRejected),
-      configs,
-      sources,
-      admission,
-    };
   } catch {
-    logger.error("project MCP failed to load", {
-      path: input.project ? join(input.project.root, ".omp") : input.ghostRoot,
-      code: "mcp_connection_failed",
-    });
-    const configured = summarizeProjectMcpConnection(sources, new Map(), projectRejected);
-    return {
-      result: {
-        projectConfigured: configured.projectConfigured,
-        projectFailed: configured.projectFailed + configured.projectConfigured,
-      },
-      configs,
-      sources,
-      admission,
-    };
+    logger.error("ghost MCP failed to load", { path: ghostRoot, code: "mcp_connection_failed" });
   }
+  return { configs, sources, admission };
 }
 
 export class SessionHost {
@@ -1569,7 +1406,6 @@ export class SessionHost {
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly machineSkills: string[];
-  private readonly projectBindings: ProjectBindingStore;
   private readonly browserSessionClose: (homeDir: string) => Promise<void>;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
   private readonly toolCwdWriter: typeof writeToolCwds;
@@ -1618,7 +1454,6 @@ export class SessionHost {
   /** Fork markers owned by this process are not crash-recovered mid-publication. */
   private readonly activeForks = new Set<string>();
   private readonly forkRecoveries = new Map<string, Promise<void>>();
-  private readonly projectTransitions = new Set<string>();
   private readonly mcpReloadGhosts = new Set<string>();
   /** Whole-home delete and rename reserve a ghost name across every await. */
   private readonly reservedGhosts = new Set<string>();
@@ -1657,8 +1492,6 @@ export class SessionHost {
     this.machineSkills = options.machineSkillPaths
       ? [...options.machineSkillPaths]
       : machineSkillPaths(this.ownerHome);
-    this.projectBindings = options.projectBindings
-      ?? new ProjectBindingStore({ ownerHome: this.ownerHome });
     this.browserSessionClose = options.browserSessionClose ?? closeBrowserSession;
     this.sessionStartupProbe = options.sessionStartupProbe ?? (() => {});
     this.toolCwdWriter = options.toolCwdWriter ?? writeToolCwds;
@@ -1880,7 +1713,6 @@ export class SessionHost {
     ghostName: string,
     runtime: ConversationRuntime,
     conversationId: string,
-    reason?: "project",
   ): Promise<void> {
     const listeners = this.conversationListeners.get(ghostName);
     if (!listeners || listeners.size === 0) return;
@@ -1889,7 +1721,6 @@ export class SessionHost {
       type: "conversation-updated",
       ...identity,
       updatedAt: new Date().toISOString(),
-      ...(reason ? { reason } : {}),
     };
     for (const { listener } of [...listeners]) {
       try {
@@ -1936,7 +1767,6 @@ export class SessionHost {
       throw new GhostError("session_busy", "Wait for this ghost's MCP reload to finish.", 409);
     }
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
-    this.assertNoProjectTransition(ghostName, conversationId);
     const releaseAdmission = this.reserveLifecycleAdmission(ghostName, conversationId);
     try {
     const key = this.keyOf(ghostName, conversationId);
@@ -2001,7 +1831,7 @@ export class SessionHost {
     const pending = this.opening.get(key);
     if (pending) return pending;
 
-    const promise = this.createSession(ghostName, conversationId, key, homeLeaseHeld)
+    const promise = this.createSession(ghostName, conversationId, key)
       .then(async (hosted) => {
         if (this.disposed) {
           this.cleanupRetries.set(key, hosted);
@@ -2095,158 +1925,31 @@ export class SessionHost {
     return ghost;
   }
 
-  private async projectState(
-    ghostName: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-  ): Promise<ProjectBindingState> {
-    return this.homeOperations.withLease(ghostName, () =>
-      this.projectStateLeased(ghostName, runtime, conversationId)
-    );
+  /** The cwd a brand-new conversation starts in: `settings.yml cwd:` or the owner home. */
+  private defaultCwd(ghost: Ghost): string {
+    return resolveSettingsCwd(loadGhostSettings(ghost.dir), this.ownerHome) ?? this.ownerHome;
   }
 
-  private async projectStateLeased(
-    ghostName: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-  ): Promise<ProjectBindingState> {
+  /**
+   * Where a pi conversation runs: the `!cd` sidecar, else the cwd pi recorded
+   * when it created the transcript, else the ghost's default. Refuses a
+   * conversation whose fork or deletion is still being published.
+   */
+  async conversationCwd(ghostName: string, conversationId: string): Promise<string> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     await this.recoverForkTransactions(paths.sessionDir, ghostName);
-    if (runtime === "pi" && await this.transactionMarkerEntryExists(
-      forkTransactionPath(paths.sessionDir, conversationId),
-    )) {
+    if (await this.transactionMarkerEntryExists(forkTransactionPath(paths.sessionDir, conversationId))) {
       throw new GhostError("session_busy", "This conversation is still being published.", 409);
     }
     if (await this.transactionMarkerEntryExists(
-      draftAbandonTransactionPath(paths.sessionDir, runtime, conversationId),
-    )) {
-      throw new GhostError(
-        "session_busy",
-        "This unpublished draft is still being abandoned.",
-        409,
-      );
-    }
-    if (await this.transactionMarkerEntryExists(
-      deleteTransactionPath(paths.sessionDir, runtime, conversationId),
+      deleteTransactionPath(paths.sessionDir, "pi", conversationId),
     )) {
       throw new GhostError("session_deleting", "This conversation has an unfinished deletion.", 409);
     }
-    const identity = conversationIdentity(runtime, conversationId);
-    let legacyCwd: string | undefined;
-    let canRebind = true;
-    if (runtime !== "pi") {
-      const defaults = await this.claudeCode.projectDefaults(ghost, conversationId);
-      legacyCwd = defaults.cwd;
-      canRebind = defaults.canRebind;
-    }
-    const defaultCwd = resolveSettingsCwd(loadGhostSettings(ghost.dir), this.ownerHome);
-    return this.projectBindings.read(paths.sessionDir, identity.id, runtime, conversationId, {
-      ...(defaultCwd ? { defaultCwd } : {}),
-      ...(runtime === "pi"
-        ? {
-            legacyCwd: () => legacyPiSessionCwd(
-              join(paths.sessionDir, sessionFileNameFor(conversationId)),
-            ),
-          }
-        : legacyCwd ? { legacyCwd } : {}),
-      canRebind,
-    });
-  }
-
-  async getProject(
-    ghostName: string,
-    conversationId: string,
-    runtime: ConversationRuntime,
-  ): Promise<ProjectBindingState> {
-    requireRawConversationId(conversationId);
-    return this.homeOperations.withLease(ghostName, () =>
-      this.projectStateLeased(ghostName, runtime, conversationId)
-    );
-  }
-
-  async previewProject(
-    ghostName: string,
-    conversationId: string,
-    runtime: ConversationRuntime,
-    path: string,
-  ): Promise<ProjectPreview> {
-    requireRawConversationId(conversationId);
-    const release = this.reserveProjectTransition(ghostName, runtime, conversationId);
-    try {
-      // Apply the same tombstone/recovery checks as bind/reload before minting
-      // a receipt, including for a qualified id not yet present in session lists.
-      await this.projectState(ghostName, runtime, conversationId);
-      await this.clearDraftAbandonReceipt(
-        ghostPaths(this.registry.get(ghostName).dir).sessionDir,
-        runtime,
-        conversationId,
-      );
-      return await this.projectBindings.preview(runtime, conversationId, path, ghostName);
-    } finally {
-      release();
-    }
-  }
-
-  private assertProjectTransitionIdle(
-    ghostName: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-  ): void {
-    const transitionKey = deletionKeyOf(ghostName, runtime, conversationId);
-    if (this.ghostMoveReserved(ghostName)) {
-      throw new GhostError("ghost_busy", "Wait for this ghost's filesystem move to finish.", 409);
-    }
-    if (this.mcpReloadGhosts.has(ghostName)) {
-      throw new GhostError("session_busy", "Wait for this ghost's MCP change to finish.", 409);
-    }
-    if (this.deleting.has(transitionKey)) {
-      throw new GhostError("session_busy", "Wait for this conversation's deletion to finish.", 409);
-    }
-    if (this.projectTransitions.has(transitionKey)) {
-      throw new GhostError("session_busy", "Another project change is already in progress.", 409);
-    }
-    // Admission is runtime-neutral until routing has been resolved. Likewise a
-    // cached Pi session may be tearing down immediately before Claude starts.
-    // Neither window may race a project receipt or mutation for either runtime.
-    const key = this.keyOf(ghostName, conversationId);
-    if (this.turnAdmissions.has(key)) {
-      throw new GhostError("session_busy", "Wait for this conversation's admitted turn to finish.", 409);
-    }
-    if ((this.lifecycleAdmissions.get(key) ?? 0) > 0) {
-      throw new GhostError("session_busy", "Wait for this conversation to finish opening or closing.", 409);
-    }
-    if (this.opening.has(key) || this.closing.has(key)) {
-      throw new GhostError("session_busy", "Wait for this conversation to finish opening or closing.", 409);
-    }
-    if (runtime === "claude-code") {
-      if (this.claudeCode.isBusy(ghostName, conversationId)) {
-        throw new GhostError("session_busy", "Wait for this conversation to finish before changing its project.", 409);
-      }
-      return;
-    }
-    const hosted = this.sessions.get(key);
-    if (hosted && (this.sessionOwned(hosted)
-      || (hosted.mcpTransitions ?? 0) > 0
-      || hosted.pendingMcpReload === true
-      || hosted.mcp?.reload !== undefined)) {
-      throw new GhostError("session_busy", "Wait for this conversation to finish before changing its project.", 409);
-    }
-  }
-
-  private assertNoProjectTransition(ghostName: string, conversationId: string): void {
-    if (["pi", "claude-code"].some((runtime) =>
-      this.projectTransitions.has(deletionKeyOf(
-        ghostName,
-        runtime as ConversationRuntime,
-        conversationId,
-      )))) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation's project change to finish.",
-        409,
-      );
-    }
+    return await readConversationCwd(paths.sessionDir, conversationId)
+      ?? await piSessionHeaderCwd(join(paths.sessionDir, sessionFileNameFor(conversationId)))
+      ?? this.defaultCwd(ghost);
   }
 
   private reserveLifecycleAdmission(ghostName: string, conversationId: string): () => void {
@@ -2259,295 +1962,15 @@ export class SessionHost {
     };
   }
 
-  private reserveProjectTransition(
-    ghostName: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-  ): () => void {
-    this.assertProjectTransitionIdle(ghostName, runtime, conversationId);
-    const key = deletionKeyOf(ghostName, runtime, conversationId);
-    this.projectTransitions.add(key);
-    return () => this.projectTransitions.delete(key);
-  }
-
-  async bindProject(
-    ghostName: string,
-    conversationId: string,
-    runtime: ConversationRuntime,
-    input: {
-      root: string | null;
-      cwd?: string;
-      trustToken?: string;
-      expectedGeneration: number;
-    },
-  ): Promise<ProjectBindingState> {
-    requireRawConversationId(conversationId);
-    const release = this.reserveProjectTransition(ghostName, runtime, conversationId);
-    try {
-      const current = await this.projectState(ghostName, runtime, conversationId);
-      await this.clearDraftAbandonReceipt(
-        ghostPaths(this.registry.get(ghostName).dir).sessionDir,
-        runtime,
-        conversationId,
-      );
-      if (current.generation !== input.expectedGeneration) {
-        throw new GhostError("stale_generation", "The project binding changed; refresh it and try again.", 409);
-      }
-      if (!current.canRebind) {
-        throw new GhostError(
-          "project_rebind_requires_new_conversation",
-          "Claude Code fixes its project before the first owner turn; start a new conversation to change it.",
-          409,
-        );
-      }
-      const ghost = this.registry.get(ghostName);
-      const sessionDir = ghostPaths(ghost.dir).sessionDir;
-      await this.projectBindings.write({
-        sessionDir,
-        runtime,
-        conversationId,
-        current,
-        root: input.root,
-        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-        ...(input.trustToken === undefined ? {} : { trustToken: input.trustToken }),
-        reason: input.root === null ? "unbound" : "bound",
-        scope: ghostName,
-      });
-      if (runtime === "pi") {
-        await this.cleanupCommittedProjectPiSession(ghostName, conversationId);
-      }
-      const next = await this.projectState(ghostName, runtime, conversationId);
-      await this.announceConversationUpdated(ghostName, runtime, conversationId, "project");
-      return next;
-    } finally {
-      release();
-    }
-  }
-
-  async reloadProject(
-    ghostName: string,
-    conversationId: string,
-    runtime: ConversationRuntime,
-    expectedGeneration: number,
-  ): Promise<ProjectBindingState> {
-    requireRawConversationId(conversationId);
-    const release = this.reserveProjectTransition(ghostName, runtime, conversationId);
-    try {
-    const current = await this.projectState(ghostName, runtime, conversationId);
-    if (current.generation !== expectedGeneration) {
-      throw new GhostError("stale_generation", "The project binding changed; refresh it and try again.", 409);
-    }
-    if (!current.canRebind) {
-      throw new GhostError(
-        "project_rebind_requires_new_conversation",
-        "Claude Code fixes its project before the first owner turn; start a new conversation to refresh it.",
-        409,
-      );
-    }
-    if (!current.root) {
-      throw new GhostError("invalid_request", "An unbound conversation has no project to reload.", 400);
-    }
-    const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
-    await this.projectBindings.write({
-      sessionDir,
-      runtime,
-      conversationId,
-      current,
-      root: current.root,
-      cwd: current.cwd,
-      reason: "reloaded",
-      scope: ghostName,
-    });
-    if (runtime === "pi") {
-      await this.cleanupCommittedProjectPiSession(ghostName, conversationId);
-    }
-    const next = await this.projectState(ghostName, runtime, conversationId);
-    await this.announceConversationUpdated(ghostName, runtime, conversationId, "project");
-    return next;
-    } finally {
-      release();
-    }
-  }
-
-  async abandonProjectDraft(
-    ghostName: string,
-    conversationId: string,
-    runtime: ConversationRuntime,
-  ): Promise<{
-    ok: true;
-    id: string;
-    conversationId: string;
-    runtime: ConversationRuntime;
-    abandoned: boolean;
-  }> {
-    requireRawConversationId(conversationId);
-    const _parent = conversationIdentity(runtime, conversationId);
-    let releaseProjectTransition: (() => void) | undefined;
-    let revocation: BindingRevocationLease | undefined;
-    let revocationCommitted = false;
-    let revocationRetired = false;
-    try {
-      releaseProjectTransition = this.reserveProjectTransition(
-        ghostName,
-        runtime,
-        conversationId,
-      );
-      const ghost = this.registry.get(ghostName);
-      const sessionDir = ghostPaths(ghost.dir).sessionDir;
-      mkdirSync(sessionDir, { recursive: true });
-      await this.recoverForkTransactions(sessionDir, ghostName);
-      const key = this.keyOf(ghostName, conversationId);
-      const transcript = join(sessionDir, sessionFileNameFor(conversationId));
-      const claudeSidecar = claudeSessionMetadataPath(sessionDir, conversationId);
-      if ((runtime === "pi" && this.sessions.has(key))
-        || await this.transactionMarkerEntryExists(runtime === "pi" ? transcript : claudeSidecar)) {
-        throw new GhostError(
-          "project_draft_published",
-          "A published conversation cannot be abandoned as a pre-turn draft.",
-          409,
-        );
-      }
-      if (runtime === "pi" && await this.transactionMarkerEntryExists(
-        forkTransactionPath(sessionDir, conversationId),
-      )) {
-        throw new GhostError("session_busy", "This conversation is still being published.", 409);
-      }
-      if (await this.transactionMarkerEntryExists(
-        deleteTransactionPath(sessionDir, runtime, conversationId),
-      )) {
-        throw new GhostError("session_busy", "This conversation is still being deleted.", 409);
-      }
-
-      const marker = draftAbandonTransactionPath(sessionDir, runtime, conversationId);
-      const receipt = draftAbandonReceiptPath(sessionDir, runtime, conversationId);
-      const markerExists = await this.transactionMarkerEntryExists(marker);
-      if (!markerExists && await this.transactionMarkerEntryExists(receipt)) {
-        revocation = await this.projectBindings.beginRevocation(
-          sessionDir,
-          ghostName,
-          runtime,
-          conversationId,
-        );
-        revocation.commit();
-        revocationCommitted = true;
-        revocation.retire();
-        revocationRetired = true;
-        return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: false };
-      }
-
-      let record: DraftAbandonTransactionRecord;
-      if (markerExists) {
-        record = await this.readDraftAbandonTransaction(
-          sessionDir,
-          runtime,
-          conversationId,
-          marker,
-        );
-      } else {
-        const candidates = [
-          projectBindingPath(sessionDir, runtime, conversationId),
-          ...(runtime === "pi" ? await piProjectSnapshotPaths(sessionDir, conversationId) : []),
-          ...(runtime === "pi" ? [toolCwdsPath(sessionDir, conversationId)] : []),
-        ];
-        const artifacts: string[] = [];
-        for (const path of candidates) {
-          if (await this.transactionEntryExists(path)) artifacts.push(path);
-        }
-        const hasPreview = this.projectBindings.hasPreview(
-          ghostName,
-          runtime,
-          conversationId,
-        );
-        if (artifacts.length === 0 && !hasPreview) {
-          throw new GhostError(
-            "not_found",
-            "This unpublished project draft does not exist.",
-            404,
-          );
-        }
-        record = {
-          version: 1,
-          kind: "project-draft-abandon",
-          runtime,
-          conversationId,
-          artifacts,
-        };
-      }
-      revocation = await this.projectBindings.beginRevocation(
-        sessionDir,
-        ghostName,
-        runtime,
-        conversationId,
-      );
-      if (!markerExists) {
-        try {
-          await this.transactionWriter(marker, record);
-        } catch (error) {
-          const { state: markerState } = await transactionMarkerState(
-            marker,
-            this.transactionMarkerLstat,
-          );
-          if (markerState === "absent") revocation.rollback();
-          else {
-            revocation.commit();
-            revocationCommitted = true;
-          }
-          throw error;
-        }
-      }
-      revocation.commit();
-      revocationCommitted = true;
-      await this.finishDraftAbandon(sessionDir, marker, receipt, record);
-      revocation.retire();
-      revocationRetired = true;
-      await this.announceConversationUpdated(ghostName, runtime, conversationId, "project");
-      return { ok: true, ...conversationIdentity(runtime, conversationId), abandoned: true };
-    } finally {
-      if (revocation && !revocationRetired) {
-        const ghost = this.registry.list().find((entry) => entry.name === ghostName);
-        if (ghost) {
-          const sessionDir = ghostPaths(ghost.dir).sessionDir;
-          const [markerState, receiptState] = await Promise.all([
-            transactionMarkerState(
-              draftAbandonTransactionPath(sessionDir, runtime, conversationId),
-              this.transactionMarkerLstat,
-            ).then(({ state }) => state),
-            transactionMarkerState(
-              draftAbandonReceiptPath(sessionDir, runtime, conversationId),
-              this.transactionMarkerLstat,
-            ).then(({ state }) => state),
-          ]);
-          if (markerState === "absent" && receiptState === "absent" && !revocationCommitted) {
-            revocation.rollback();
-          } else if (markerState === "absent" && receiptState === "present") {
-            revocation.commit();
-            revocation.retire();
-            revocationRetired = true;
-          } else if (markerState !== "absent" || receiptState !== "absent") {
-            revocation.commit();
-          }
-        }
-      }
-      releaseProjectTransition?.();
-    }
-  }
-
   private async createSession(
     ghostName: string,
     sessionKey: string,
     key: string,
-    homeLeaseHeld = false,
   ): Promise<HostedSession> {
     const ghost = this.registry.get(ghostName);
     const logger = this.logger.child({ ghost: ghostName, conversation: sessionKey });
     const paths = ghostPaths(ghost.dir);
-    let project = await (homeLeaseHeld
-      ? this.projectStateLeased(ghostName, "pi", sessionKey)
-      : this.projectState(ghostName, "pi", sessionKey));
-    const projectIdentity = project.root
-      ? await this.projectBindings.assertTrusted(project.root)
-      : null;
-    const runtimeCwd = project.cwd;
+    const runtimeCwd = await this.conversationCwd(ghostName, sessionKey);
     mkdirSync(paths.agentDir, { recursive: true });
     mkdirSync(paths.sessionDir, { recursive: true });
 
@@ -2555,25 +1978,15 @@ export class SessionHost {
     const [sessionCharacter, machineSkills, ghostSnapshot] = await Promise.all([
       openGhostHome(paths.home).readCharacter(),
       loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
-      loadProjectDeclarativeSnapshot(paths.home, { level: "user" }),
+      loadDeclarativeSnapshot(paths.home, { level: "user" }),
     ]);
-    const projectSnapshot = project.root && projectIdentity
-      ? await readPiProjectSnapshot({
-          sessionDir: paths.sessionDir,
-          conversationId: sessionKey,
-          generation: project.generation,
-          root: project.root,
-          identity: projectIdentity,
-        })
-      : null;
     const rootSnapshots = [
       ...(machineSkills ? [machineSkills] : []),
       ghostSnapshot,
-      ...(projectSnapshot ? [projectSnapshot] : []),
     ];
     const skillGroups: SessionSkillGroup[] = [
       ...(machineSkills
-        ? [projectSessionSkillGroup(
+        ? [sessionSkillGroup(
             "machine",
             0,
             machineSkills,
@@ -2583,12 +1996,9 @@ export class SessionHost {
             })),
           )]
         : []),
-      projectSessionSkillGroup("ghost", 1, ghostSnapshot),
-      ...(projectSnapshot
-        ? [projectSessionSkillGroup("project", 2, projectSnapshot)]
-        : []),
+      sessionSkillGroup("ghost", 1, ghostSnapshot),
     ];
-    const effectiveDeclarative = mergeProjectDeclarativeSnapshots(rootSnapshots);
+    const effectiveDeclarative = mergeDeclarativeSnapshots(rootSnapshots);
     const fileCommands: GhostFileCommand[] = [
       ...effectiveDeclarative.slashCommands,
       ...effectiveDeclarative.promptTemplates,
@@ -2648,16 +2058,7 @@ export class SessionHost {
     try {
     await this.sessionStartupProbe("model-runtime", modelRuntime);
     const manager = new GhostMcpManager({ cwd: runtimeCwd, logger });
-    const mcpResult = await connectGhostProjectMCP(
-      manager,
-      {
-        ghostRoot: paths.home,
-        ...(project.root && projectSnapshot
-          ? { project: { root: project.root, mcp: projectSnapshot.mcp } }
-          : {}),
-      },
-      logger,
-    );
+    const mcpResult = await connectGhostMcp(manager, paths.home, logger);
     const resources = buildSessionResourceView({
       runtime: "pi",
       skillGroups,
@@ -2665,19 +2066,6 @@ export class SessionHost {
     });
     mcp = { manager, configs: mcpResult.configs, sources: mcpResult.sources };
     await this.sessionStartupProbe("mcp", modelRuntime);
-    if (project.root) {
-      await this.projectBindings.updateRuntimeStatus(
-        paths.sessionDir,
-        "pi",
-        sessionKey,
-        project,
-        projectMcpRuntimeStatus(mcpResult.result),
-        ghostName,
-      );
-      project = await (homeLeaseHeld
-        ? this.projectStateLeased(ghostName, "pi", sessionKey)
-        : this.projectState(ghostName, "pi", sessionKey));
-    }
 
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(sessionKey));
     const sessionFileExists = existsSync(sessionFile);
@@ -2691,8 +2079,7 @@ export class SessionHost {
       mkdirSync(paths.sessionDir, { recursive: true });
       writeFileSync(sessionFile, "", { flag: "wx", mode: 0o600 });
     }
-    // The binding sidecar is the crash-safe authority for the cwd; the header
-    // may carry an older one from before a rebind.
+    // The cwd sidecar outranks the header, which only records where pi started.
     sessionManager = SessionManager.open(sessionFile, paths.sessionDir, runtimeCwd);
     await this.sessionStartupProbe("session-manager", modelRuntime);
     if (!sessionFileExists) bindConversationId(sessionManager, sessionKey);
@@ -2734,7 +2121,7 @@ export class SessionHost {
       extensionFactories,
       // Executable discovery is empty. Trusted visible Ghost hooks were
       // already descriptor-pinned and imported as inline factories above;
-      // project hooks/extensions and Ghost custom-code tools stay disabled.
+      // cwd-discovered extensions and Ghost custom-code tools stay disabled.
       noExtensions: true,
       noSkills: false,
       additionalSkillPaths: this.machineSkills,
@@ -2813,8 +2200,7 @@ export class SessionHost {
       sessionFile: session.sessionFile,
       model,
       modelRuntime,
-      project,
-      projectSnapshot,
+      cwd: runtimeCwd,
       toolCwds,
       toolCwdVersion: 0,
       toolCwdPersistedVersion: 0,
@@ -3158,7 +2544,7 @@ export class SessionHost {
   }
 
   /**
-   * Re-read the ghost and bound-project MCP files for every open pi conversation.
+   * Re-read the ghost MCP file for every open pi conversation.
    * Turns coalesce changes into one deferred reload at their settle boundary;
    * idle sessions reconnect immediately.
    */
@@ -3171,11 +2557,10 @@ export class SessionHost {
     if (this.ghostMoveReserved(ghostName)
       || this.mcpReloadGhosts.has(ghostName)
       || this.ghostHasTurnAdmission(ghostName)
-      || [...this.projectTransitions].some((key) => deletionKeyGhost(key) === ghostName)
       || [...this.deleting].some((key) => deletionKeyGhost(key) === ghostName)) {
       throw new GhostError(
         "session_busy",
-        "Wait for active turns or project changes to finish before reloading MCP.",
+        "Wait for active turns to finish before reloading MCP.",
         409,
       );
     }
@@ -3220,11 +2605,10 @@ export class SessionHost {
     this.registry.get(ghostName);
     if (this.mcpReloadGhosts.has(ghostName)
       || this.ghostHasTurnAdmission(ghostName)
-      || [...this.projectTransitions].some((key) => deletionKeyGhost(key) === ghostName)
       || [...this.deleting].some((key) => deletionKeyGhost(key) === ghostName)) {
       throw new GhostError(
         "session_busy",
-        "Wait for active turns or project changes to finish before reconnecting MCP.",
+        "Wait for active turns to finish before reconnecting MCP.",
         409,
       );
     }
@@ -3254,34 +2638,9 @@ export class SessionHost {
       // malformed or unavailable new server therefore cannot create a window
       // where the old catalog has already been torn down.
       const candidate = this.createHostedMcpCandidate(hosted);
-      if (hosted.project.root) {
-        await this.projectBindings.assertTrusted(hosted.project.root);
-        if (!hosted.projectSnapshot) {
-          throw new GhostError(
-            "project_snapshot_missing",
-            "This session has no immutable project snapshot; reopen the conversation.",
-            409,
-          );
-        }
-      }
-      const connected = await connectGhostProjectMCP(
-        candidate,
-        {
-          ghostRoot: hosted.ghost.dir,
-          ...(hosted.project.root && hosted.projectSnapshot
-            ? {
-                project: {
-                  root: hosted.project.root,
-                  mcp: hosted.projectSnapshot.mcp,
-                },
-              }
-            : {}),
-        },
-        hosted.logger,
-      );
+      const connected = await connectGhostMcp(candidate, hosted.ghost.dir, hosted.logger);
       await this.replaceHostedMcpManager(hosted, candidate, connected.configs, connected.sources);
       hosted.resources = replaceSessionMcpView(hosted.resources, connected.admission);
-      await this.updateHostedProjectMcpStatus(hosted, connected.result);
     });
     const tracked = reload.finally(() => {
       if (mcp.reload === tracked) mcp.reload = undefined;
@@ -3612,35 +2971,11 @@ export class SessionHost {
       await hosted.session.reload();
     });
     mcp.refresh = run.catch(() => {
-      hosted.logger.warn("ghost project MCP tool refresh failed", {
+      hosted.logger.warn("ghost MCP tool refresh failed", {
         code: "mcp_tool_load_failed",
       });
     });
     return run;
-  }
-
-  private async updateHostedProjectMcpStatus(
-    hosted: HostedSession,
-    result: ProjectMcpConnectionResult,
-  ): Promise<void> {
-    if (!hosted.project.root) return;
-    const conversationId = sessionKeyParts(hosted.sessionKey)[1];
-    const changed = await this.projectBindings.updateRuntimeStatus(
-      ghostPaths(hosted.ghost.dir).sessionDir,
-      "pi",
-      conversationId,
-      hosted.project,
-      projectMcpRuntimeStatus(result),
-      hosted.ghost.name,
-    );
-    if (!changed) return;
-    hosted.project = await this.projectState(hosted.ghost.name, "pi", conversationId);
-    await this.announceConversationUpdated(
-      hosted.ghost.name,
-      "pi",
-      conversationId,
-      "project",
-    );
   }
 
   private async replaceHostedMcpManager(
@@ -3671,7 +3006,7 @@ export class SessionHost {
         throw error;
       }
       await previous.disconnectAll().catch(() => {
-        hosted.logger.warn("previous project MCP manager did not close cleanly", {
+        hosted.logger.warn("previous MCP manager did not close cleanly", {
           code: "mcp_connection_failed",
         });
       });
@@ -3681,7 +3016,6 @@ export class SessionHost {
   private reconnectHostedMcp(hosted: HostedSession, serverName: string): Promise<void> {
     const mcp = hosted.mcp;
     if (!mcp?.configs.has(serverName)) return Promise.resolve();
-    const reconnectsProject = mcp.sources.get(serverName)?.level === "project";
     hosted.mcpTransitions = (hosted.mcpTransitions ?? 0) + 1;
     const reconnect = (mcp.reload ?? Promise.resolve()).then(async () => {
       const candidate = this.createHostedMcpCandidate(hosted);
@@ -3689,17 +3023,9 @@ export class SessionHost {
       const sources = new Map(mcp.sources);
       let published = false;
       try {
-        const result = await candidate.connectServers(Object.fromEntries(configs));
-        const summary = summarizeProjectMcpConnection(
-          sources,
-          result.errors,
-          hosted.projectSnapshot
-            ? rejectedProjectMcpCount(hosted.projectSnapshot.mcp)
-            : 0,
-        );
+        await candidate.connectServers(Object.fromEntries(configs));
         await this.replaceHostedMcpManager(hosted, candidate, configs, sources);
         published = true;
-        if (reconnectsProject) await this.updateHostedProjectMcpStatus(hosted, summary);
       } catch (error) {
         if (!published) await candidate.disconnectAll().catch(() => {});
         throw error;
@@ -3896,7 +3222,6 @@ export class SessionHost {
     );
     const id = `bash-${randomUUID()}`;
     const executionCwd = resolve(hosted.session.sessionManager.getCwd());
-    let prevalidatedCd: string | null = null;
     let streamedTail = "";
     let lastUpdate = 0;
     let toolFinished = false;
@@ -3915,17 +3240,6 @@ export class SessionHost {
         cwd: executionCwd,
         intent: "Run a local command",
       });
-      if (hosted.project.root && isPersistentShellCdCommand(command.command)) {
-        const target = persistentCdTarget(command.command, executionCwd, this.ownerHome);
-        if (!target) {
-          throw new GhostError(
-            "cwd_outside_project",
-            "This cd form cannot be authorized inside a bound project; choose an explicit path.",
-            409,
-          );
-        }
-        prevalidatedCd = await this.projectBindings.resolveOperationalCwd(hosted.project, target);
-      }
       options.signal?.addEventListener("abort", onAbort, { once: true });
       const result = await hosted.session.executeBash(
         command.command,
@@ -3949,21 +3263,12 @@ export class SessionHost {
         && !result.cancelled
         && result.exitCode === 0
       ) {
-        const target = prevalidatedCd
-          ?? persistentCdTarget(command.command, executionCwd, this.ownerHome);
+        const target = persistentCdTarget(command.command, executionCwd, this.ownerHome);
         const nextCwd = target ? resolve(target) : null;
         if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
-          const sessionDir = ghostPaths(hosted.ghost.dir).sessionDir;
-          await this.projectBindings.writeOperationalCwd(
-            sessionDir,
-            "pi",
-            conversationId,
-            hosted.project,
-            nextCwd,
-            ghostName,
-          );
-          hosted.project = await this.projectState(ghostName, "pi", conversationId);
-          await this.announceConversationUpdated(ghostName, "pi", conversationId, "project");
+          await writeConversationCwd(ghostPaths(hosted.ghost.dir).sessionDir, conversationId, nextCwd);
+          hosted.cwd = nextCwd;
+          await this.announceConversationUpdated(ghostName, "pi", conversationId);
         }
       }
 
@@ -4045,7 +3350,6 @@ export class SessionHost {
         session: hosted.session,
         jobs: hosted.jobs,
         cwd: hosted.session.sessionManager.getCwd(),
-        projectRoot: hosted.project.root,
         ghostHome: hosted.ghost.dir,
       });
       options.emit({ type: "command_output", command: dispatch.command, output });
@@ -4092,96 +3396,6 @@ export class SessionHost {
   }
 
   /**
-   * A raw resume id may exist in both runtimes, but a trusted project binding
-   * must never cross that qualification boundary implicitly. Reading these
-   * sidecars creates nothing and validates any binding before admission.
-   */
-  private async assertProjectRuntimeMatches(
-    ghostName: string,
-    conversationId: string,
-    selectedRuntime: ConversationRuntime,
-  ): Promise<void> {
-    const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
-    const selectedIdentity = conversationIdentity(selectedRuntime, conversationId);
-    const selected = await this.projectBindings.read(
-      sessionDir,
-      selectedIdentity.id,
-      selectedRuntime,
-      conversationId,
-    );
-    if (selected.root !== null) return;
-
-    const oppositeRuntime: ConversationRuntime = selectedRuntime === "pi"
-      ? "claude-code"
-      : "pi";
-    const oppositeIdentity = conversationIdentity(oppositeRuntime, conversationId);
-    const opposite = await this.projectBindings.read(
-      sessionDir,
-      oppositeIdentity.id,
-      oppositeRuntime,
-      conversationId,
-    );
-    if (opposite.root === null) return;
-    throw new GhostError(
-      "project_runtime_mismatch",
-      `This conversation is project-bound for ${oppositeRuntime}; unbind it or start a new conversation before using ${selectedRuntime}.`,
-      409,
-    );
-  }
-
-  private async admitClaudeProject(
-    ghostName: string,
-    conversationId: string,
-  ): Promise<ClaudeProjectSnapshot> {
-    const ghost = this.registry.get(ghostName);
-    const paths = ghostPaths(ghost.dir);
-    const project = await this.projectState(ghostName, "claude-code", conversationId);
-    const projectIdentity = project.root
-      ? await this.projectBindings.assertTrusted(project.root)
-      : undefined;
-    const reference = {
-      root: project.root,
-      cwd: project.cwd,
-      ...(projectIdentity ? { identity: projectIdentity } : {}),
-    };
-    const admittedSnapshot = await this.claudeCode.admitProjectSnapshot(
-      ghost,
-      conversationId,
-      reference,
-    );
-    return {
-      ...reference,
-      ...(admittedSnapshot ? { admittedSnapshot } : {}),
-      ...(project.root
-        ? {
-            reportStatus: async (status: {
-              status: "ready" | "degraded";
-              error: { code: string; message: string } | null;
-              mcpStatus: "off" | "ready" | "degraded";
-            }) => {
-              const changed = await this.projectBindings.updateRuntimeStatus(
-                paths.sessionDir,
-                "claude-code",
-                conversationId,
-                project,
-                status,
-                ghostName,
-              );
-              if (changed) {
-                await this.announceConversationUpdated(
-                  ghostName,
-                  "claude-code",
-                  conversationId,
-                  "project",
-                );
-              }
-            },
-          }
-        : {}),
-    };
-  }
-
-  /**
    * Reserve and fully validate a turn before an HTTP caller publishes SSE
    * headers. The returned admission freezes runtime selection across the turn.
    */
@@ -4202,7 +3416,6 @@ export class SessionHost {
     if (this.mcpReloadGhosts.has(ghostName)) {
       throw new GhostError("session_busy", "Wait for this ghost's MCP reload to finish.", 409);
     }
-    this.assertNoProjectTransition(ghostName, conversationId);
     if (this.turnAdmissions.has(admissionKey)) {
       throw new GhostError(
         "session_busy",
@@ -4220,7 +3433,6 @@ export class SessionHost {
     };
     try {
       const configured = this.selectedTurnRuntime(ghostName);
-      await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
       if (bashCommand && configured.runtime === "claude-code") {
         throw new GhostError(
@@ -4232,12 +3444,14 @@ export class SessionHost {
       if (bashCommand && !bashCommand.command) {
         throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
       }
-      const selected: SelectedTurnRuntime = configured.runtime === "claude-code"
-        ? {
-            ...configured,
-            project: await this.admitClaudeProject(ghostName, conversationId),
-          }
-        : configured;
+      let selected: SelectedTurnRuntime;
+      if (configured.runtime === "claude-code") {
+        const ghost = this.registry.get(ghostName);
+        await this.claudeCode.assertResumable(ghost, conversationId);
+        selected = { ...configured, cwd: this.defaultCwd(ghost) };
+      } else {
+        selected = configured;
+      }
       return {
         run: async (streamOptions: AdmittedTurnOptions) => {
           if (started || released) {
@@ -4302,14 +3516,11 @@ export class SessionHost {
     const key = this.keyOf(ghostName, conversationId);
     const bashCommand = parseUserBashCommand(options.prompt);
     if (bashCommand) {
-      if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
-        throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
-      }
       await this.runUserBash(ghostName, bashCommand, options);
       // pi binds a session's cwd when it opens; a `!cd` takes effect by
       // reopening the conversation at its new operational cwd.
       const moved = this.sessions.get(key);
-      if (moved && resolve(moved.project.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
+      if (moved && resolve(moved.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
         await this.closePi(ghostName, conversationId);
       }
       await this.announceConversationUpdated(
@@ -4320,9 +3531,6 @@ export class SessionHost {
       return;
     }
     if (selected.runtime === "claude-code") {
-      if (this.projectTransitions.has(deletionKeyOf(ghostName, "claude-code", conversationId))) {
-        throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
-      }
       // A model switch must not leave a stale pi AgentSession owning this
       // conversation. Claude owns a separate warm query whose startup identity
       // is checked inside runTurn before it accepts the next prompt.
@@ -4347,16 +3555,13 @@ export class SessionHost {
         conversationId,
         selected.modelId,
         options,
-        selected.project,
+        selected.cwd,
         this.claudeSettledTurnRecorder(ghostName, conversationId),
       );
-      await this.announceConversationUpdated(ghostName, "claude-code", conversationId, "project");
+      await this.announceConversationUpdated(ghostName, "claude-code", conversationId);
       return;
     }
 
-    if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
-      throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
-    }
     if (this.claudeCode.isBusy(ghostName, conversationId)) {
       throw new GhostError(
         "session_busy",
@@ -4897,14 +4102,14 @@ export class SessionHost {
     if (opening) await opening.catch(() => {});
 
     const hosted = this.sessions.get(key);
-    const project = hosted?.project ?? await this.projectStateLeased(ghostName, "pi", id);
+    const cwd = hosted?.cwd ?? await this.conversationCwd(ghostName, id);
     // A manager opened for this write alone is simply dropped afterwards; the
     // live session keeps its own, and the next turn re-opens an idle
     // conversation.
     const manager = hosted?.session.sessionManager ?? SessionManager.open(
       sessionFile,
       paths.sessionDir,
-      project.cwd,
+      cwd,
     );
     const stored = this.applySessionName(hosted?.session, manager, title);
     (hosted?.logger ?? this.logger.child({ ghost: ghostName, conversation: id })).info("renamed ghost conversation", {
@@ -5080,112 +4285,6 @@ export class SessionHost {
     }
   }
 
-  private async clearDraftAbandonReceipt(
-    sessionDir: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-  ): Promise<void> {
-    try {
-      await unlink(draftAbandonReceiptPath(sessionDir, runtime, conversationId));
-      await fsyncDirectory(sessionDir);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
-
-  private async readDraftAbandonTransaction(
-    sessionDir: string,
-    runtime: ConversationRuntime,
-    conversationId: string,
-    marker: string,
-  ): Promise<DraftAbandonTransactionRecord> {
-    let value: unknown;
-    try {
-      value = JSON.parse(await readDaemonControlFile(marker, TRANSACTION_MARKER_MAX_BYTES));
-    } catch {
-      throw new GhostError(
-        "project_draft_cleanup_pending",
-        "This unpublished draft has an unreadable cleanup transaction.",
-        500,
-      );
-    }
-    const row = value && typeof value === "object" && !Array.isArray(value)
-      ? value as Record<string, unknown>
-      : null;
-    const artifacts = row?.artifacts;
-    const binding = projectBindingPath(sessionDir, runtime, conversationId);
-    const toolCwds = toolCwdsPath(sessionDir, conversationId);
-    const snapshotPrefix = `${conversationTransactionStem(conversationId)}.pi.project-snapshot.`;
-    const allowed = (path: string): boolean => path === binding
-      || (runtime === "pi" && path === toolCwds)
-      || (runtime === "pi" && pathIsWithin(sessionDir, path)
-        && basename(path).startsWith(snapshotPrefix)
-        && /^\d+\.json$/u.test(basename(path).slice(snapshotPrefix.length)));
-    if (row?.version !== 1 || row.kind !== "project-draft-abandon"
-      || row.runtime !== runtime || row.conversationId !== conversationId
-      || !Array.isArray(artifacts)
-      || !artifacts.every((path): path is string =>
-        typeof path === "string" && isAbsolute(path) && allowed(path))
-      || new Set(artifacts).size !== artifacts.length) {
-      throw new GhostError(
-        "project_draft_cleanup_pending",
-        "This unpublished draft has an invalid cleanup transaction.",
-        500,
-      );
-    }
-    return {
-      version: 1,
-      kind: "project-draft-abandon",
-      runtime,
-      conversationId,
-      artifacts,
-    };
-  }
-
-  private async finishDraftAbandon(
-    sessionDir: string,
-    marker: string,
-    receipt: string,
-    record: DraftAbandonTransactionRecord,
-  ): Promise<void> {
-    for (const path of record.artifacts) {
-      await this.transactionProbe("draft-abandon-unlink", path);
-      try {
-        await unlink(path);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-    }
-    for (const path of record.artifacts) {
-      if (await this.transactionEntryExists(path)) {
-        throw new Error(`Draft cleanup left an unpublished sidecar at ${path}.`);
-      }
-    }
-    await this.transactionProbe("draft-abandon-fsync", sessionDir);
-    await fsyncDirectory(sessionDir);
-    await this.transactionProbe("draft-abandon-complete", receipt);
-    await this.transactionWriter(receipt, {
-      version: 1,
-      kind: "project-draft-abandoned",
-      runtime: record.runtime,
-      conversationId: record.conversationId,
-    });
-    await unlink(marker);
-    try {
-      await fsyncDirectory(sessionDir);
-    } catch (error) {
-      try {
-        await this.transactionWriter(marker, record);
-      } catch (restoreError) {
-        throw new AggregateError(
-          [error, restoreError],
-          "Draft cleanup marker removal was not durable and could not be restored.",
-        );
-      }
-      throw error;
-    }
-  }
-
   private async ensureDeleteTrashRoot(
     ghostDir: string,
     marker: string,
@@ -5346,79 +4445,39 @@ export class SessionHost {
           kind?: unknown;
           conversationId?: unknown;
           tempTranscript?: unknown;
-          tempProjectBinding?: unknown;
-          tempProjectSnapshot?: unknown;
-          projectSnapshotGeneration?: unknown;
+          tempConversationCwd?: unknown;
           tempToolCwds?: unknown;
         };
-        const legacy = value.version === 1;
-        const current = value.version === 2;
-        if ((!legacy && !current) || value.kind !== "fork"
+        if (value.version !== 3 || value.kind !== "fork"
           || typeof value.conversationId !== "string" || !isValidConversationId(value.conversationId)
           || typeof value.tempTranscript !== "string" || !isAbsolute(value.tempTranscript)
           || !pathIsWithin(sessionDir, value.tempTranscript)
-          || typeof value.tempProjectBinding !== "string" || !isAbsolute(value.tempProjectBinding)
-          || !pathIsWithin(sessionDir, value.tempProjectBinding)
+          || typeof value.tempConversationCwd !== "string" || !isAbsolute(value.tempConversationCwd)
+          || !pathIsWithin(sessionDir, value.tempConversationCwd)
           || typeof value.tempToolCwds !== "string" || !isAbsolute(value.tempToolCwds)
           || !pathIsWithin(sessionDir, value.tempToolCwds)
-          || (current && value.tempProjectSnapshot !== null
-            && (typeof value.tempProjectSnapshot !== "string"
-              || !isAbsolute(value.tempProjectSnapshot)
-              || !pathIsWithin(sessionDir, value.tempProjectSnapshot)))
-          || (current && value.projectSnapshotGeneration !== null
-            && (typeof value.projectSnapshotGeneration !== "number"
-              || !Number.isSafeInteger(value.projectSnapshotGeneration)
-              || value.projectSnapshotGeneration < 0))
-          || (current && ((value.tempProjectSnapshot === null)
-            !== (value.projectSnapshotGeneration === null)))
           || marker !== forkTransactionPath(sessionDir, value.conversationId)) {
           throw new Error("invalid fork transaction marker");
         }
         const record: ForkTransactionRecord = {
-          version: current ? 2 : 1,
+          version: 3,
           kind: "fork",
           conversationId: value.conversationId,
           tempTranscript: value.tempTranscript,
-          tempProjectBinding: value.tempProjectBinding,
-          tempProjectSnapshot: current && typeof value.tempProjectSnapshot === "string"
-            ? value.tempProjectSnapshot
-            : null,
-          projectSnapshotGeneration: current
-            && typeof value.projectSnapshotGeneration === "number"
-            ? value.projectSnapshotGeneration
-            : null,
+          tempConversationCwd: value.tempConversationCwd,
           tempToolCwds: value.tempToolCwds,
         };
         const transcript = join(sessionDir, sessionFileNameFor(record.conversationId));
-        const binding = projectBindingPath(sessionDir, "pi", record.conversationId);
+        const conversationCwd = conversationCwdPath(sessionDir, record.conversationId);
         const toolCwds = toolCwdsPath(sessionDir, record.conversationId);
-        const projectSnapshot = current && typeof value.projectSnapshotGeneration === "number"
-          ? piProjectSnapshotPath(sessionDir, record.conversationId, value.projectSnapshotGeneration)
-          : null;
         const pairs = [
-          ...(record.tempProjectSnapshot && projectSnapshot
-            ? [[record.tempProjectSnapshot, projectSnapshot] as const]
-            : []),
-          [record.tempProjectBinding, binding],
+          [record.tempConversationCwd, conversationCwd],
           [record.tempToolCwds, toolCwds],
           [record.tempTranscript, transcript],
         ] as const;
         if (!exactForkTemporaryPath(sessionDir, record.tempTranscript, transcript, true)
-          || !exactForkTemporaryPath(
-            sessionDir,
-            record.tempProjectBinding,
-            binding,
-            false,
-          )
+          || !exactForkTemporaryPath(sessionDir, record.tempConversationCwd, conversationCwd, false)
           || !exactForkTemporaryPath(sessionDir, record.tempToolCwds, toolCwds, false)
-          || (record.tempProjectSnapshot !== null
-            && projectSnapshot !== null
-            && !exactForkTemporaryPath(
-              sessionDir,
-              record.tempProjectSnapshot,
-              projectSnapshot,
-              false,
-            ))
           || pairs.some(([temporary, final]) => temporary === final)
           || new Set(pairs.flat()).size
             !== pairs.length * 2) {
@@ -5450,12 +4509,10 @@ export class SessionHost {
         }
         await this.rollbackForkTransaction(sessionDir, marker, record, [
           record.tempTranscript,
-          record.tempProjectBinding,
-          ...(record.tempProjectSnapshot ? [record.tempProjectSnapshot] : []),
+          record.tempConversationCwd,
           record.tempToolCwds,
           transcript,
-          binding,
-          ...(projectSnapshot ? [projectSnapshot] : []),
+          conversationCwd,
           toolCwds,
         ]);
       } catch {
@@ -5589,9 +4646,9 @@ export class SessionHost {
     // right after the first turn carries the freshly generated title.
     const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (hosted?.title) await hosted.title.catch(() => {});
-    const project = hosted?.project ?? await this.projectStateLeased(ghostName, "pi", id);
+    const cwd = hosted?.cwd ?? await this.conversationCwd(ghostName, id);
 
-    const manager = SessionManager.open(path, paths.sessionDir, project.cwd);
+    const manager = SessionManager.open(path, paths.sessionDir, cwd);
     const toolCwds = await readToolCwds(paths.sessionDir, id);
     return this.transcriptFromManager(id, manager, options, toolCwds);
   }
@@ -5733,7 +4790,7 @@ export class SessionHost {
       paths.sessionDir,
       `.${sessionFileNameFor(forkId)}.${randomUUID()}.pending`,
     );
-    const temporaryProjectBinding = `${projectBindingPath(paths.sessionDir, "pi", forkId)}.${randomUUID()}.pending`;
+    const temporaryConversationCwd = `${conversationCwdPath(paths.sessionDir, forkId)}.${randomUUID()}.pending`;
     const temporaryToolCwds = `${toolCwdsPath(paths.sessionDir, forkId)}.${randomUUID()}.pending`;
     let stagedFork: {
       title: string | null;
@@ -5747,30 +4804,20 @@ export class SessionHost {
       true,
       true,
     );
-    const forkProjectSnapshot = source.project.root
-      ? piProjectSnapshotPath(paths.sessionDir, forkId, source.project.generation)
-      : null;
-    const temporaryProjectSnapshot = forkProjectSnapshot
-      ? `${forkProjectSnapshot}.${randomUUID()}.pending`
-      : null;
     const forkRecord: ForkTransactionRecord = {
-      version: 2,
+      version: 3,
       kind: "fork",
       conversationId: forkId,
       tempTranscript: temporaryForkFile,
-      tempProjectBinding: temporaryProjectBinding,
-      tempProjectSnapshot: temporaryProjectSnapshot,
-      projectSnapshotGeneration: source.project.root ? source.project.generation : null,
+      tempConversationCwd: temporaryConversationCwd,
       tempToolCwds: temporaryToolCwds,
     };
     const forkArtifacts = [
       temporaryForkFile,
-      temporaryProjectBinding,
-      ...(temporaryProjectSnapshot ? [temporaryProjectSnapshot] : []),
+      temporaryConversationCwd,
       temporaryToolCwds,
       forkFile,
-      projectBindingPath(paths.sessionDir, "pi", forkId),
-      ...(forkProjectSnapshot ? [forkProjectSnapshot] : []),
+      conversationCwdPath(paths.sessionDir, forkId),
       toolCwdsPath(paths.sessionDir, forkId),
     ];
     this.activeForks.add(forkMarker);
@@ -5835,16 +4882,8 @@ export class SessionHost {
         transcript: this.transcriptFromManager(forkId, forked, {}, source.toolCwds),
       };
       const sidecars = await Promise.allSettled([
-        this.projectBindings.clone(
-          paths.sessionDir,
-          "pi",
-          forkId,
-          source.project,
-          ghostName,
-          temporaryProjectBinding,
-          temporaryProjectSnapshot ?? undefined,
-        ),
-        writeToolCwds(paths.sessionDir, forkId, source.toolCwds, temporaryToolCwds),
+        writeConversationCwd(paths.sessionDir, forkId, source.cwd, temporaryConversationCwd),
+        this.toolCwdWriter(paths.sessionDir, forkId, source.toolCwds, temporaryToolCwds),
       ]);
       const sidecarFailures = sidecars.filter(
         (result): result is PromiseRejectedResult => result.status === "rejected",
@@ -5863,16 +4902,7 @@ export class SessionHost {
       } finally {
         await transcript.close();
       }
-      if (temporaryProjectSnapshot && forkProjectSnapshot) {
-        await rename(temporaryProjectSnapshot, forkProjectSnapshot);
-      }
-      await this.projectBindings.publishCloneDestination(
-        paths.sessionDir,
-        "pi",
-        forkId,
-        ghostName,
-        temporaryProjectBinding,
-      );
+      await rename(temporaryConversationCwd, conversationCwdPath(paths.sessionDir, forkId));
       await rename(temporaryToolCwds, toolCwdsPath(paths.sessionDir, forkId));
       // The transcript is the publication barrier: list/open cannot see the
       // fork until both required sidecars already have their final names.
@@ -5881,18 +4911,8 @@ export class SessionHost {
         paths.sessionDir,
         forkMarker,
         forkRecord,
-        [
-          temporaryForkFile,
-          temporaryProjectBinding,
-          ...(temporaryProjectSnapshot ? [temporaryProjectSnapshot] : []),
-          temporaryToolCwds,
-        ],
-        [
-          forkFile,
-          projectBindingPath(paths.sessionDir, "pi", forkId),
-          ...(forkProjectSnapshot ? [forkProjectSnapshot] : []),
-          toolCwdsPath(paths.sessionDir, forkId),
-        ],
+        [temporaryForkFile, temporaryConversationCwd, temporaryToolCwds],
+        [forkFile, conversationCwdPath(paths.sessionDir, forkId), toolCwdsPath(paths.sessionDir, forkId)],
       );
     } catch (error) {
       let cleanupError: unknown;
@@ -5951,10 +4971,8 @@ export class SessionHost {
         }
         await unlink(sessionFile);
         await Promise.all([
-          unlink(projectBindingPath(paths.sessionDir, "pi", forkId)).catch(() => {}),
+          unlink(conversationCwdPath(paths.sessionDir, forkId)).catch(() => {}),
           unlink(toolCwdsPath(paths.sessionDir, forkId)).catch(() => {}),
-          ...(await piProjectSnapshotPaths(paths.sessionDir, forkId))
-            .map((path) => unlink(path).catch(() => {})),
         ]);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -6225,7 +5243,6 @@ export class SessionHost {
   /** Drop one hosted session (aborting an in-flight turn). */
   async close(ghostName: string, sessionId?: string | null): Promise<void> {
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
-    this.assertNoProjectTransition(ghostName, conversationId);
     const releaseAdmission = this.reserveLifecycleAdmission(ghostName, conversationId);
     try {
       await this.closeClaude(ghostName, conversationId);
@@ -6267,17 +5284,6 @@ export class SessionHost {
         409,
       );
     }
-    if (this.projectTransitions.has(deleteKey)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation's project change to finish before deleting it.",
-        409,
-      );
-    }
-
-    let revocation: BindingRevocationLease | undefined;
-    let revocationCommitted = false;
-    let revocationRetired = false;
     let runtimeRetired = false;
     const retireRuntime = async (): Promise<void> => {
       if (runtimeRetired) return;
@@ -6287,31 +5293,11 @@ export class SessionHost {
     };
     this.deleting.add(deleteKey);
     try {
-      revocation = await this.projectBindings.beginRevocation(
-        paths.sessionDir,
-        ghostName,
-        runtime,
-        id,
-      );
-      const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
-      const { state: draftState } = await transactionMarkerState(
-        draftMarker,
-        this.transactionMarkerLstat,
-      );
-      if (draftState !== "absent") {
-        throw new GhostError(
-          "session_busy",
-          "Wait for this unpublished draft to finish being abandoned.",
-          409,
-        );
-      }
       const { state: deleteState } = await transactionMarkerState(
         tombstone,
         this.transactionMarkerLstat,
       );
       if (deleteState === "indeterminate") {
-        revocation.commit();
-        revocationCommitted = true;
         await retireRuntime();
         throw new GhostError(
           "delete_recovery_pending",
@@ -6320,10 +5306,6 @@ export class SessionHost {
         );
       }
       const resumingDeletion = deleteState === "present";
-      if (resumingDeletion) {
-        revocation.commit();
-        revocationCommitted = true;
-      }
       if (!resumingDeletion) {
         mkdirSync(paths.sessionDir, { recursive: true });
         try {
@@ -6333,16 +5315,9 @@ export class SessionHost {
             tombstone,
             this.transactionMarkerLstat,
           );
-          if (published === "absent") revocation.rollback();
-          else {
-            revocation.commit();
-            revocationCommitted = true;
-            await retireRuntime();
-          }
+          if (published !== "absent") await retireRuntime();
           throw error;
         }
-        revocation.commit();
-        revocationCommitted = true;
       }
       const deleteRecord = await this.readDeleteTransaction(
         tombstone,
@@ -6363,12 +5338,9 @@ export class SessionHost {
       const claudeResumeMarkers = Object.values(
         claudeSessionResumeMarkerPaths(paths.sessionDir, id),
       );
-      const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
+      const conversationCwd = conversationCwdPath(paths.sessionDir, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
       const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
-      const projectSnapshots = runtime === "pi"
-        ? await piProjectSnapshotPaths(paths.sessionDir, id)
-        : [];
       if (runtime === "pi" && await this.transactionEntryExists(piPath)) {
         await requireSessionFileConversationId(piPath, id);
       }
@@ -6380,11 +5352,7 @@ export class SessionHost {
         ? [
             { artifact: "omp-transcript", path: piPath },
             { artifact: "tool-cwds", path: cwdPath },
-            { artifact: "project-binding", path: bindingPath },
-            ...projectSnapshots.map((path) => ({
-              artifact: "project-snapshot" as const,
-              path,
-            })),
+            { artifact: "conversation-cwd", path: conversationCwd },
             { artifact: "presentation-history", path: presentationPath },
           ]
         : [
@@ -6393,7 +5361,6 @@ export class SessionHost {
               artifact: "claude-sidecar" as const,
               path,
             })),
-            { artifact: "project-binding", path: bindingPath },
             { artifact: "presentation-history", path: presentationPath },
           ];
       const artifacts = [...deleteRecord.artifacts];
@@ -6425,8 +5392,6 @@ export class SessionHost {
       }
       if (artifacts.length === 0 && !resumingDeletion) {
         await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
-        revocation.retire();
-        revocationRetired = true;
         throw new GhostError(
           "not_found",
           `This ghost has no conversation ${JSON.stringify(identity.id)}.`,
@@ -6450,15 +5415,8 @@ export class SessionHost {
       await this.readWriter(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([key]) => remainingIds.has(key)),
       ));
-      try {
-        await unlink(draftAbandonReceiptPath(paths.sessionDir, runtime, id));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
       deleteRecord.artifacts = [...artifacts];
       await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
-      revocation.retire();
-      revocationRetired = true;
       this.logger.child({ ghost: ghostName, conversation: id }).info("trashed ghost conversation", {
         session: identity.id,
         artifacts: [
@@ -6469,19 +5427,10 @@ export class SessionHost {
       return { artifacts };
     } finally {
       this.deleting.delete(deleteKey);
-      let retiringRuntime: Promise<void> | undefined;
-      if (revocation && !revocationRetired) {
-        const { state: markerState } = await transactionMarkerState(
-          tombstone,
-          this.transactionMarkerLstat,
-        );
-        if (markerState === "absent" && !revocationCommitted) revocation.rollback();
-        else if (markerState !== "absent") {
-          revocation.commit();
-          retiringRuntime = retireRuntime();
-        }
-      }
-      await retiringRuntime;
+      // A marker left behind means the deletion resumes later; keep no live
+      // runtime on a conversation whose files are mid-move.
+      const { state: markerState } = await transactionMarkerState(tombstone, this.transactionMarkerLstat);
+      if (markerState !== "absent") await retireRuntime();
     }
   }
 
@@ -6513,14 +5462,11 @@ export class SessionHost {
 
   private async settleFailedGhostMove(
     ghost: Ghost,
-    revocation: BindingRevocationLease,
   ): Promise<"pending" | "moved" | "indeterminate"> {
     const pathState = await this.ghostMovePathState(ghost.dir);
     if (pathState === "present") return "pending";
-    revocation.commit();
     if (pathState === "indeterminate") return "indeterminate";
     this.forgetGhost(ghost.name);
-    revocation.retire();
     return "moved";
   }
 
@@ -6535,18 +5481,15 @@ export class SessionHost {
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
     const ghost = this.registry.get(ghostName);
     this.reserveGhosts([ghost.name], "deleting it");
-    let revocation: BindingRevocationLease | undefined;
     let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
-      revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "deleted");
       let trashed: { trash: string };
       try {
         trashed = this.registry.trash(ghost.name);
         moveState = "moved";
-        revocation.commit();
       } catch (error) {
-        moveState = await this.settleFailedGhostMove(ghost, revocation);
+        moveState = await this.settleFailedGhostMove(ghost);
         if (moveState === "indeterminate") {
           throw new GhostError(
             "ghost_move_recovery_pending",
@@ -6557,11 +5500,9 @@ export class SessionHost {
         throw error;
       }
       this.forgetGhost(ghost.name);
-      revocation.retire();
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
-      if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
     }
   }
@@ -6593,18 +5534,15 @@ export class SessionHost {
       );
     }
     this.reserveGhosts([ghost.name, nextName], "renaming it");
-    let revocation: BindingRevocationLease | undefined;
     let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
-      revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "renamed");
       let renamed: Ghost;
       try {
         renamed = this.registry.rename(ghost.name, nextName);
         moveState = "moved";
-        revocation.commit();
       } catch (error) {
-        moveState = await this.settleFailedGhostMove(ghost, revocation);
+        moveState = await this.settleFailedGhostMove(ghost);
         if (moveState === "indeterminate") {
           throw new GhostError(
             "ghost_move_recovery_pending",
@@ -6615,11 +5553,9 @@ export class SessionHost {
         throw error;
       }
       this.forgetGhost(ghost.name);
-      revocation.retire();
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
-      if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
     }
@@ -6735,9 +5671,6 @@ export class SessionHost {
     for (const key of this.deleting) {
       if (deletionKeyGhost(key) === ghostName) return true;
     }
-    for (const key of this.projectTransitions) {
-      if (deletionKeyGhost(key) === ghostName) return true;
-    }
     if (this.mcpReloadGhosts.has(ghostName)) return true;
     return this.claudeCode.isGhostBusy(ghostName);
   }
@@ -6747,25 +5680,6 @@ export class SessionHost {
       if (sessionKeyParts(key)[0] === ghostName) return true;
     }
     return false;
-  }
-
-  private async cleanupCommittedProjectPiSession(
-    ghostName: string,
-    sessionId: string,
-  ): Promise<void> {
-    const key = this.keyOf(ghostName, sessionId);
-    if (!this.sessions.has(key) && !this.cleanupRetries.has(key)) return;
-    try {
-      await this.closeHostedSession(key);
-    } catch {
-      try {
-        this.logger.child({ ghost: ghostName, conversation: sessionId }).warn("committed project session cleanup is pending retry", {
-          code: "project_cleanup_pending",
-        });
-      } catch {
-        // A committed binding stays successful even if an injected logger fails.
-      }
-    }
   }
 
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {

@@ -99,8 +99,6 @@ describe("ghost CLI against a real daemon server", () => {
     expect(JSON.parse(read.stdout)).toMatchObject({ ok: true });
     expect(JSON.parse((await cli(["resources", "-g", "casper", "-s", "conv", "--json"])).stdout))
       .toHaveProperty("skills");
-    expect(JSON.parse((await cli(["project", "-g", "casper", "-s", "conv", "--json"])).stdout))
-      .toHaveProperty("generation");
     expect(await cli(["remote"])).toMatchObject({ code: 5 });
     expect(await cli(["delete", "-g", "casper", "-s", "conv"])).toMatchObject({ code: 2 });
   });

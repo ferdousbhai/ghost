@@ -13,7 +13,6 @@ import {
   commandsCommand,
   deleteSessionCommand,
   greetingCommand,
-  projectCommand,
   readCommand,
   reanswerCommand,
   remoteCommand,
@@ -274,14 +273,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost commands -s cli-abc",
     positionals: [0, 0],
     run: commandsCommand,
-  },
-  {
-    verb: "project",
-    usage: "project [show|bind <dir>|reload|unbind] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Show or change the conversation's trusted project.",
-    example: "ghost project bind ~/github.com/me/app -s cli-abc",
-    positionals: [0, 2],
-    run: projectCommand,
   },
   {
     verb: "remote",

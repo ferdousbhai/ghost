@@ -16,12 +16,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
-import {
-  mockProjectResources,
-  mockProjectWarnings,
-  resolveMockProjectRoot,
-} from "./mock-project-fixture.mjs";
+import { join } from "node:path";
 
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
@@ -144,12 +139,11 @@ function routeConversation(parts) {
 }
 
 function publishConversationUpdated(name, runtime, conversationId,
-    updatedAt = new Date().toISOString(), reason = undefined) {
+    updatedAt = new Date().toISOString()) {
   const event = `data: ${JSON.stringify({
     type: "conversation-updated",
     ...conversationIdentity(runtime, conversationId),
     updatedAt,
-    ...(reason ? { reason } : {}),
   })}\n\n`;
   for (const response of conversationEventClients.get(name) ?? []) {
     if (!response.writableEnded) response.write(event);
@@ -157,7 +151,7 @@ function publishConversationUpdated(name, runtime, conversationId,
 }
 
 // Effective command discovery is session-scoped in the real daemon. These
-// exercise built-ins, aliases, input hints, subcommands, skills, and a project
+// exercise built-ins, aliases, input hints, subcommands, skills, and a file
 // command so both the full browser and slash completion have meaningful data.
 const MOCK_COMMANDS = [
   {
@@ -199,10 +193,10 @@ const MOCK_COMMANDS = [
   {
     name: "release-notes",
     aliases: ["release"],
-    description: "Draft release notes from the current project history.",
+    description: "Draft release notes from the recent git history.",
     input: { usage: "<version>" },
     subcommands: [],
-    source: "project",
+    source: "ghost",
   },
 ];
 
@@ -211,17 +205,17 @@ const MOCK_SESSION_RESOURCES = {
   skills: [
     {
       name: "research",
-      path: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
-      source: "ghost",
-      precedence: 1,
+      path: "/tmp/ghost-shell-preview/.agents/skills/research/SKILL.md",
+      source: "machine",
+      precedence: 0,
       status: "shadowed",
-      shadowedBy: "/tmp/ghost-shell-preview/project/.omp/skills/research/SKILL.md",
+      shadowedBy: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
     },
     {
       name: "research",
-      path: "/tmp/ghost-shell-preview/project/.omp/skills/research/SKILL.md",
-      source: "project",
-      precedence: 2,
+      path: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
+      source: "ghost",
+      precedence: 1,
       status: "admitted",
     },
   ],
@@ -714,98 +708,6 @@ function cancelJob(name, conversationId, jobId) {
 }
 
 
-const projectStore = new Map();
-const projectTrust = new Map();
-const abandonedProjectDrafts = new Set();
-let projectTrustSeq = 0;
-const EMPTY_PROJECT_RESOURCES = Object.freeze({
-  instructions: 0,
-  skills: 0,
-  rules: 0,
-  prompts: 0,
-  commands: 0,
-  agents: 0,
-  mcpServers: 0,
-  ignoredExecutable: 0,
-});
-
-function ghostProjects(name) {
-  if (!projectStore.has(name)) projectStore.set(name, new Map());
-  return projectStore.get(name);
-}
-
-function projectCanRebind(name, conversation) {
-  if (conversation.runtime !== "claude-code") return true;
-  const session = ghostSessions(name).get(conversation.id);
-  return !session || (session.messageCount ?? session.messages?.length ?? 0) === 0;
-}
-
-function defaultProjectState(name, conversation) {
-  return {
-    ...conversation,
-    root: null,
-    cwd: SESSION_CWD,
-    relativeCwd: null,
-    name: null,
-    generation: 0,
-    status: "unbound",
-    error: null,
-    mcpStatus: "off",
-    resources: { ...EMPTY_PROJECT_RESOURCES },
-    canRebind: projectCanRebind(name, conversation),
-    lastRefreshAt: null,
-    reason: "default",
-  };
-}
-
-function projectState(name, conversation) {
-  const stored = ghostProjects(name).get(conversation.id)
-    || defaultProjectState(name, conversation);
-  return {
-    ...stored,
-    resources: { ...stored.resources },
-    error: stored.error ? { ...stored.error } : null,
-    canRebind: projectCanRebind(name, conversation),
-  };
-}
-
-function withinProject(root, cwd) {
-  const nested = relative(root, cwd);
-  return nested === "" || (nested !== ".." && !nested.startsWith(`..${sep}`)
-    && !isAbsolute(nested));
-}
-
-function storeProject(name, conversation, next) {
-  abandonedProjectDrafts.delete(JSON.stringify([name, conversation.id]));
-  ghostProjects(name).set(conversation.id, next);
-  publishConversationUpdated(name, conversation.runtime, conversation.conversationId,
-    new Date().toISOString(), "project");
-  return projectState(name, conversation);
-}
-
-function previewProject(name, conversation, path) {
-  const canonical = resolveMockProjectRoot(path);
-  if (!canonical) return null;
-  abandonedProjectDrafts.delete(JSON.stringify([name, conversation.id]));
-  const resources = mockProjectResources();
-  const token = `mock-trust-${++projectTrustSeq}-${Date.now().toString(36)}`;
-  const expires = Date.now() + 5 * 60_000;
-  projectTrust.set(token, {
-    name,
-    id: conversation.id,
-    root: canonical,
-    expires,
-  });
-  return {
-    root: canonical,
-    name: basename(canonical) || "/",
-    trustToken: token,
-    expiresAt: new Date(expires).toISOString(),
-    resources,
-    warnings: mockProjectWarnings(resources),
-  };
-}
-
 function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
   if (!sessionId) return;
   const store = ghostSessions(name);
@@ -832,8 +734,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
-  publishConversationUpdated(name, runtime, sessionId, s.updatedAt,
-    runtime === "claude-code" ? "project" : undefined);
+  publishConversationUpdated(name, runtime, sessionId, s.updatedAt);
 }
 
 // The empty-chat opening line. Both branches of the contract are demoable:
@@ -1664,14 +1565,7 @@ const mockServer = createServer(async (req, res) => {
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
-    projectStore.delete(name);
     dropWork(name);
-    for (const receipt of abandonedProjectDrafts) {
-      if (JSON.parse(receipt)[0] === name) abandonedProjectDrafts.delete(receipt);
-    }
-    for (const [token, preview] of projectTrust) {
-      if (preview.name === name) projectTrust.delete(token);
-    }
     deletedContext.delete(name);
     writtenCharacter.delete(name);
     mcpStore.delete(name);
@@ -1698,21 +1592,11 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, projectStore, deletedContext,
-        writtenCharacter, mcpStore, roles]) {
+    for (const store of [sessionStore, deletedContext, writtenCharacter, mcpStore, roles]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
       }
-    }
-    for (const receipt of [...abandonedProjectDrafts]) {
-      const [receiptGhost, id] = JSON.parse(receipt);
-      if (receiptGhost !== name) continue;
-      abandonedProjectDrafts.delete(receipt);
-      abandonedProjectDrafts.add(JSON.stringify([next, id]));
-    }
-    for (const preview of projectTrust.values()) {
-      if (preview.name === name) preview.name = next;
     }
     moveWorkGhost(name, next);
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
@@ -1787,162 +1671,6 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 200, mcpSnapshot(name));
     }
   }
-  if (parts[3] === "sessions" && parts.length >= 6 && parts[5] === "project") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    const current = () => projectState(name, conversation);
-    if (parts.length === 6 && req.method === "GET") return json(res, 200, current());
-    if (parts.length === 7 && parts[6] === "draft" && req.method === "DELETE") {
-      const receipt = JSON.stringify([name, conversation.id]);
-      if (ghostSessions(name).has(conversation.id)) return json(res, 409, {
-        error: {
-          code: "project_draft_published",
-          message: "Published conversations cannot be abandoned as drafts.",
-        },
-      });
-      if (answering.has(turnKey(name, conversation.conversationId))) {
-        return json(res, 409, {
-          error: { code: "session_busy", message: "Wait for this answer to finish." },
-        });
-      }
-      const projects = ghostProjects(name);
-      if (!projects.has(conversation.id)) {
-        if (!abandonedProjectDrafts.has(receipt)) return json(res, 404, {
-          error: { code: "not_found", message: "No unpublished project draft exists." },
-        });
-        return json(res, 200, { ok: true, ...conversation, abandoned: false });
-      }
-      projects.delete(conversation.id);
-      for (const [token, preview] of projectTrust) {
-        if (preview.name === name && preview.id === conversation.id) projectTrust.delete(token);
-      }
-      abandonedProjectDrafts.add(receipt);
-      return json(res, 200, { ok: true, ...conversation, abandoned: true });
-    }
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { code: "session_busy", message: "Wait for this answer to finish." },
-      });
-    }
-    if (parts.length === 7 && parts[6] === "preview" && req.method === "POST") {
-      const body = await readBody(req).catch(() => ({}));
-      const path = typeof body?.path === "string" ? body.path.trim() : "";
-      const preview = path === "" ? null : previewProject(name, conversation, path);
-      return preview
-        ? json(res, 200, preview)
-        : json(res, 400, {
-          error: { code: "invalid_project_path", message: "Choose an available directory." },
-        });
-    }
-    if (parts.length === 6 && req.method === "PUT") {
-      const body = await readBody(req).catch(() => ({}));
-      const before = current();
-      if (!Number.isInteger(body?.expectedGeneration)
-          || body.expectedGeneration !== before.generation) {
-        return json(res, 409, {
-          error: { code: "stale_generation", message: "The project changed in another client." },
-        });
-      }
-      if (!before.canRebind) {
-        return json(res, 409, {
-          error: {
-            code: "project_rebind_requires_new_conversation",
-            message: "Claude Code fixes its project after the first message.",
-          },
-        });
-      }
-      if (body.root === null) {
-        const cwd = typeof body.cwd === "string" && body.cwd.startsWith("/")
-          ? resolve(body.cwd) : before.cwd;
-        return json(res, 200, storeProject(name, conversation, {
-          ...before,
-          root: null,
-          cwd,
-          relativeCwd: null,
-          name: null,
-          generation: before.generation + 1,
-          status: "unbound",
-          error: null,
-          mcpStatus: "off",
-          resources: { ...EMPTY_PROJECT_RESOURCES },
-          lastRefreshAt: new Date().toISOString(),
-          reason: "unbound",
-        }));
-      }
-      if (typeof body.root !== "string" || typeof body.cwd !== "string"
-          || typeof body.trustToken !== "string") {
-        return json(res, 400, {
-          error: { code: "invalid_request", message: "A preview token and project cwd are required." },
-        });
-      }
-      const trusted = projectTrust.get(body.trustToken);
-      if (!trusted || trusted.name !== name || trusted.id !== conversation.id
-          || trusted.root !== body.root) {
-        return json(res, 403, {
-          error: { code: "trust_token_invalid", message: "Resolve and trust this folder again." },
-        });
-      }
-      if (trusted.expires <= Date.now()) {
-        projectTrust.delete(body.trustToken);
-        return json(res, 403, {
-          error: { code: "trust_token_expired", message: "The project preview expired." },
-        });
-      }
-      if (!withinProject(trusted.root, resolve(body.cwd))) {
-        return json(res, 400, {
-          error: { code: "cwd_outside_project", message: "The working directory must be inside the project." },
-        });
-      }
-      projectTrust.delete(body.trustToken);
-      const resources = mockProjectResources();
-      return json(res, 200, storeProject(name, conversation, {
-        ...before,
-        root: trusted.root,
-        cwd: resolve(body.cwd),
-        relativeCwd: relative(trusted.root, resolve(body.cwd)) || ".",
-        name: basename(trusted.root),
-        generation: before.generation + 1,
-        status: "ready",
-        error: null,
-        mcpStatus: resources.mcpServers > 0 ? "ready" : "off",
-        resources,
-        lastRefreshAt: new Date().toISOString(),
-        reason: "bound",
-      }));
-    }
-    if (parts.length === 7 && parts[6] === "reload" && req.method === "POST") {
-      const body = await readBody(req).catch(() => ({}));
-      const before = current();
-      if (!Number.isInteger(body?.expectedGeneration)
-          || body.expectedGeneration !== before.generation) {
-        return json(res, 409, {
-          error: { code: "stale_generation", message: "The project changed in another client." },
-        });
-      }
-      if (before.root === null) return json(res, 400, {
-        error: { code: "invalid_request", message: "Home has no project resources to reload." },
-      });
-      if (!before.canRebind) return json(res, 409, {
-        error: {
-          code: "project_rebind_requires_new_conversation",
-          message: "Claude Code fixes its project after the first message.",
-        },
-      });
-      const resources = mockProjectResources();
-      return json(res, 200, storeProject(name, conversation, {
-        ...before,
-        generation: before.generation + 1,
-        status: "ready",
-        error: null,
-        mcpStatus: resources.mcpServers > 0 ? "ready" : "off",
-        resources,
-        lastRefreshAt: new Date().toISOString(),
-        reason: "reloaded",
-      }));
-    }
-  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
       && req.method === "GET") {
     const conversation = routeConversation(parts);
@@ -1990,7 +1718,6 @@ const mockServer = createServer(async (req, res) => {
     }
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
-      ghostProjects(name).delete(conversation.id);
       dropWork(name, conversation.id);
       publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     }

@@ -167,7 +167,6 @@ export interface GhostBuiltinContext {
   session: AgentSession;
   jobs: GhostJobManager;
   cwd: string;
-  projectRoot: string | null;
   ghostHome: string;
 }
 
@@ -211,7 +210,6 @@ export async function executeGhostBuiltin(
       return [
         `cwd: ${context.cwd}`,
         `ghost home: ${context.ghostHome}`,
-        ...(context.projectRoot ? [`project: ${context.projectRoot}`] : []),
       ].join("\n");
     case "/compact": {
       const result = await session.compact(dispatch.args || undefined);

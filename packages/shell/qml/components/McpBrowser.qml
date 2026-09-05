@@ -183,7 +183,7 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: "Project-owned tools for " + (Ghostd.activeGhost || "this ghost")
+                    text: "Tools for " + (Ghostd.activeGhost || "this ghost")
                         + ". Secret values are write-only."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily

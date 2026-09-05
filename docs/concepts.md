@@ -41,7 +41,7 @@ in the layout appears when it is used
 The home is the atomic lifecycle unit. Rename moves the directory (so every
 conversation id stays valid); delete moves it to the freedesktop Trash. Ghost
 never recursively removes a home, and neither operation touches credentials,
-owner documents, trusted projects, screenshots, downloads, or timers.
+owner documents, screenshots, downloads, or timers.
 
 ## Three state scopes
 
@@ -54,7 +54,7 @@ enforced in the system prompt as well as in code
 |---|---|---|
 | Ghost-private | character, conversations, settings, runtime sidecars | one ghost home |
 | Owner-shared | notes, knowledge, decisions, plans, tasks | the owner's XDG Documents directory, read and written as ordinary files |
-| External | trusted projects, downloads, screenshots, systemd user timers, credentials | the machine facility that already owns them |
+| External | downloads, screenshots, systemd user timers, credentials | the machine facility that already owns them |
 
 Private memory is for the ghost's own continuity. Owner facts, preferences,
 shared decisions, project knowledge, and durable tasks go to the owner's
@@ -126,9 +126,9 @@ runtime still owns its own mechanics, so the same ghost feels like itself on
 either while working the way that harness works.
 
 Two capability gaps are deliberate and stay visible in the API rather than
-being papered over: Pi admits ghost-home *and* trusted-project MCP with secret
-resolution, while Claude admits only credential-free project MCP its SDK can
-represent; and ghost-home `hooks/pre` / `hooks/post` extension factories are
+being papered over: Pi admits every ghost-home MCP row with secret resolution,
+while Claude admits only the credential-free rows its SDK can represent and
+reports the rest as skipped; and ghost-home `hooks/pre` / `hooks/post` extension factories are
 Pi-native executable extensions that do not enter Claude.
 
 ## Models and roles
@@ -158,13 +158,10 @@ A ghost is extended with readable files, not code: instructions, skills, rules,
 Markdown commands and prompts, MCP servers, and — for pi — trusted `hooks/pre`
 and `hooks/post` factories in the ghost home. Machine skills under
 `~/.agents/skills/` and `~/.pi/agent/skills/` enter at lowest precedence, then
-ghost-home resources, then one explicitly trusted project. There is no
-skill-name allowlist, and the admitted set is an immutable per-session snapshot
-the owner can inspect through the session resources API.
-
-Project trust is explicit and bound to the canonical filesystem identity, not a
-path string. Project instructions, skills, rules, commands, and MCP are
-data-only.
+ghost-home resources. There is no skill-name allowlist, and the admitted set is
+an immutable per-session snapshot the owner can inspect through the session
+resources API. The directory a conversation works in is only its cwd: nothing
+is discovered from it, and `!cd` moves a pi conversation there durably.
 
 Hook protocol and the built-in review pipeline are in [hooks.md](hooks.md).
 
@@ -178,11 +175,10 @@ If you expect one of these, it is missing on purpose:
   and no plan or todo CLI verbs.
 - **No second browser backend** and no separate ghost browser profile — the one
   paired Chromium, or no browser at all.
-- **No executable project extensions.** Project plugins, executable hooks and
-  tools, LSP, and custom subagents stay disabled until they have a per-session
-  isolation boundary
-  ([#31](https://github.com/ferdousbhai/ghost/issues/31)). `agents/*.md` is
-  preview-only for pi; Claude keeps its own native subagents.
+- **No trusted projects.** A conversation has a cwd, not a bound project tree
+  whose instructions, skills, and MCP are scanned in. Plugins, executable hooks
+  and tools beyond the ghost's own, LSP, and custom subagents stay disabled for
+  pi; Claude keeps its own native subagents.
 - **No ambient credentials.** Provider and cloud environment variables are
   scrubbed before the pi runtime is built; Ghost does not discover a credential
   the owner did not give it

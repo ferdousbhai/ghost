@@ -1,7 +1,7 @@
 # Self-maintenance
 
 A ghost can edit, build, and restart the code it runs on. Ghost adds no
-machinery for this. The clone is a trusted project like any other, git is the
+machinery for this. The clone is an ordinary directory, git is the
 code history, journald is the lifecycle history, and systemd is the guardian
 that survives the daemon it restarts.
 
@@ -92,9 +92,9 @@ change applies to new conversations, not to one already running.
 
 Naming the checkout grants nothing the ghost's file tools and Bash do not
 already have: it edits the clone directly. Set `cwd:` in the same
-`settings.yml` to start new conversations inside it. Binding the clone as the
-conversation's trusted project through the HUD project chip is still what
-admits its skills, rules, and MCP, the same as for any other project.
+`settings.yml` to start new conversations inside it, or `!cd` into it from a
+conversation. Nothing is discovered from the clone; its skills, rules, and MCP
+never enter a session.
 
 ## The loop
 

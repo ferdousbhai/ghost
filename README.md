@@ -11,13 +11,12 @@ steering/follow-ups, and branchable conversations; Ghost adds an `ask` tool
 matching Claude Code's native `AskUserQuestion`, supervised native
 Pi/Codex/Claude Code workers, model roles and fallback
 chains, bounded declarative skills, rules,
-Markdown commands/prompts, and MCP from the visible ghost home plus one
-explicitly trusted project. Remote sharing uses the built-in tailnet viewer
-over Tailscale Serve. Project plugins, agent definitions, custom code tools, and
-LSP remain disabled in principal sessions pending a per-session isolation
-boundary; trusted visible `hooks/pre` and `hooks/post` files in the ghost home
-remain the explicit in-process extension surface. The optional Claude Code
-principal retains its own project discovery and subagents. Ghost replaces
+Markdown commands/prompts, and MCP from the visible ghost home. Remote sharing
+uses the built-in tailnet viewer over Tailscale Serve. Plugins, agent
+definitions, custom code tools, and LSP remain disabled in principal sessions;
+trusted visible `hooks/pre` and `hooks/post` files in the ghost home remain the
+explicit in-process extension surface. The optional Claude Code principal
+retains its own subagents. Ghost replaces
 pi's coding-oriented system prompt with its character. Both runtimes treat the owner's XDG Documents directory as the
 persistent owner-visible state every ghost shares, reading and writing it with
 their native file tools.

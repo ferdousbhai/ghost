@@ -253,14 +253,13 @@ TestCase {
         compare(requests.length, 1);
     }
 
-    function test_ghostSessionAndProjectChangesDoNotOwnCatalog(): void {
+    function test_ghostAndSessionChangesDoNotOwnCatalog(): void {
         Ghostd.fetchHooks(false);
         requests[0].complete(200, status("Machine global"));
         const epoch = Ghostd.hooksEpoch;
 
         Ghostd.activeGhost = "moaning-myrtle";
         Ghostd.currentSessionId = "claude-code:thread-2";
-        Ghostd.projectGhost = "moaning-myrtle";
 
         compare(Ghostd.hooksEpoch, epoch);
         compare(Ghostd.activeHooks[0].name, "Machine global");

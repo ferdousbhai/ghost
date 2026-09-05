@@ -14,14 +14,13 @@ An owner installs Ghost, creates a named persona, binds a local or open-source
 model as its driver, adds a subscription or API key for the frontier teacher and
 specialists, and talks through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
 Code is an optional native runtime. Both feel like the same ghost because they
-receive the same character, notes policy, machine skills,
-owner-context policy, and trusted-project snapshot. The runtime still owns its native way of
-working.
+receive the same character, notes policy, machine skills, and owner-context
+policy. The runtime still owns its native way of working.
 
 The official repository stays a narrow, opinionated core. Owners extend a ghost
 with readable instructions, skills, rules, Markdown commands/prompts, models,
-and MCP. Executable project extensions wait for a real per-session isolation
-boundary. Generic capabilities should graduate into core or upstream rather
+and MCP. Executable extensions beyond the ghost's own hooks wait for a real
+per-session isolation boundary. Generic capabilities should graduate into core or upstream rather
 than becoming parallel Ghost frameworks.
 
 ## Decisions that are not obvious from code
@@ -49,8 +48,8 @@ than becoming parallel Ghost frameworks.
   what the adapter has to absorb.
 - **Three persistence scopes.** Character and subjective continuity are
   ghost-private. Owner-visible knowledge, preferences, decisions, notes, plans,
-  and tasks live in the owner's Documents directory. Projects and machine
-  artifacts remain owned by their native facility.
+  and tasks live in the owner's Documents directory. Machine artifacts remain
+  owned by their native facility.
 - **The owner's documents are the shared store.** Ghost names that directory in
   the prompt and reads it with the runtime's native file and search tools.
   Ghost has no notes database, task store, plan mode, or document index.
@@ -66,8 +65,8 @@ than becoming parallel Ghost frameworks.
   other command. Ghost keeps no task records, scopes, or worker API.
 - **Self-maintenance through the machine's own facilities.** A ghost may edit,
   build, and restart its own source. The clone it is allowed to touch is named
-  by `self.checkout` in its `settings.yml` and is bound like any other trusted
-  project; git is the code history and the rollback, journald
+  by `self.checkout` in its `settings.yml` and edited with its ordinary file
+  tools; git is the code history and the rollback, journald
   (`journalctl --user -t ghostd`) is the lifecycle history, systemd is the
   guardian (`systemd-run --user` hands off `systemctl --user restart ghostd`,
   so the restarter outlives the daemon it restarts), and Omarchy's snapper
@@ -84,8 +83,8 @@ than becoming parallel Ghost frameworks.
   Omarchy desktop. The remote viewer is deliberately narrower and opt-in over
   Tailscale Serve.
 - **Owner-local trust.** There is one owner role. Remote guests are read-only;
-  project trust is explicit and filesystem-identity bound; ambient provider
-  credentials and executable project code are not discovered.
+  ambient provider credentials and executable code found in a working
+  directory are not discovered.
 - **No artificial throttles.** Ghost surfaces provider/runtime limits and uses
   their retry/fallback chains. It does not impose turn, concurrency, hosted
   session, or spend caps.

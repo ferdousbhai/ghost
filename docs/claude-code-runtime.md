@@ -65,9 +65,9 @@ Before each admitted owner turn Ghost:
 1. validates the exact SDK root, metadata, entry, and required exports;
 2. resolves and fingerprints the executable, checks its minimum version, then
    runs isolated `claude auth status --json` and requires `loggedIn:true`;
-3. builds or reuses the conversation persona and trusted-project snapshot;
+3. builds or reuses the conversation persona;
 4. exposes Ghost tools as one in-process SDK MCP server and translates only the
-   admitted, credential-free project MCP rows;
+   credential-free ghost-home MCP rows;
 5. routes native `AskUserQuestion` permission callbacks through Ghost's
    conversation-scoped ask broker and existing HUD dialog;
 6. starts or reuses one warm SDK query and maps its messages onto Ghost's
@@ -85,7 +85,7 @@ adapter is
 When a ghost runs `claude -p` from its own Bash, that child is a plain Claude
 Code process: it retains Claude Code's native project settings, skills, agents,
 MCP, tools, persistence, and subagents, and Ghost injects no principal persona
-or project snapshot there. Ghost owns nothing about it beyond the Bash job that
+there. Ghost owns nothing about it beyond the Bash job that
 systemd scope. Both paths use the same pinned SDK loader and authenticated
 installed executable.
 
@@ -135,7 +135,7 @@ chat-redirect behavior do not depend on which principal runtime is active.
 | Browser, screen, desktop | Ghost runtime-neutral tools | The same Ghost tools through the SDK MCP bridge |
 | Files, search, shell | Pi-native tools; Ghost wraps Bash in `GhostJob` | Claude-native tools and background tasks |
 | Skills, rules, prompts | Admitted declarative snapshot | The same admitted bytes appended to Claude's native prompt |
-| MCP | Ghost-home and trusted-project rows through Ghost's MCP manager | Credential-free trusted-project rows only |
+| MCP | Every ghost-home row through Ghost's MCP manager | Credential-free ghost-home rows only; the rest report as skipped |
 | Ghost-home executable hook extensions | Pi-native extension factories | Not admitted |
 | Transcript, branches, commands, job API | Daemon-visible Pi session state | Native opaque Claude session state; the transcript API serves a thin settled-turn presentation journal, the rest stays unsupported |
 
@@ -149,10 +149,9 @@ session; the presentation journal is a daemon-owned display record, not an
 emulation of Claude's transcript.
 
 Filesystem setting sources, SDK plugin/skill discovery, and ambient MCP are
-empty. Ghost supplies only the explicit machine/ghost/project declarative
-snapshot, credential-free project MCP, and its in-process tools. Executable
-project hooks/plugins/tools, LSP, and project agent definitions remain disabled
-pending the isolation boundary in #31.
+empty. Ghost supplies only the explicit machine/ghost declarative snapshot,
+credential-free ghost-home MCP, and its in-process tools. Nothing is discovered
+from the working directory.
 
 Claude reads and writes the owner's XDG Documents directory with its own
 native file and search tools; the owner-context policy names the directory and
@@ -161,8 +160,7 @@ nothing more.
 ### As the advisor
 
 Claude Code also serves the review teacher, bound as `roles.advisor_model`.
-That query is not a principal session: no persona, no project snapshot, no
-Ghost tools, no warm query, no resume metadata, and nothing written to Claude
+That query is not a principal session: no persona, no Ghost tools, no warm query, no resume metadata, and nothing written to Claude
 Code's own session storage. It goes through the same SDK loader, executable
 probe, and reviewed child environment as the principal path, and it is
 independent of which runtime drives the ghost — a Pi-driven ghost gets Claude
@@ -199,8 +197,7 @@ The normative allowlist and negative credential corpus are in
 
 One query remains warm per conversation so Claude's native session context,
 subagents, and tool state survive turns. It expires after the configured idle
-TTL, explicit close, project transition, ghost move, runtime change, or daemon
-shutdown. A failed turn is retired unless its result was fully settled.
+TTL, explicit close, ghost move, runtime change, or daemon shutdown. A failed turn is retired unless its result was fully settled.
 
 Ghost stores an opaque Claude session id and resume fence under the ghost
 home. The actual Claude transcript remains in Claude Code's own storage; Pi
@@ -211,8 +208,9 @@ intermediate messages. A conversation that predates the journal reads as empty
 with `historyTruncated: true`, which the HUD renders as an
 earlier-history-unavailable notice; a failed journal write never fails the
 turn and surfaces the same way.
-Project binding is fixed after Claude's first published message; changing it
-requires a new conversation. Background jobs exposed by Claude's native harness
+The working directory is fixed by Claude's resume metadata after its first
+published message; a new conversation starts in the ghost's configured cwd.
+Background jobs exposed by Claude's native harness
 remain native; Ghost's own process-local job API applies to Pi sessions.
 
 `authMethod`, `apiProvider`, `subscriptionType`, SDK token usage, and

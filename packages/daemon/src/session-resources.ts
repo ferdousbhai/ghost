@@ -1,9 +1,9 @@
 import type { ConversationRuntime } from "./conversation-identity.js";
-import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
-import type { ProjectDeclarativeSnapshot } from "./project-resources.js";
+import type { EffectiveMcpRead } from "./mcp-catalog.js";
+import type { DeclarativeSnapshot } from "./declarative-resources.js";
 import { isAbsolute, join, resolve } from "node:path";
 
-export type SessionResourceSource = "machine" | "ghost" | "project";
+export type SessionResourceSource = "machine" | "ghost";
 export type SessionResourceStatus = "admitted" | "shadowed" | "skipped" | "disabled";
 
 export interface SessionResourceDiagnostic {
@@ -27,12 +27,11 @@ export interface SessionSkillGroup {
   diagnostics?: readonly SessionResourceDiagnostic[];
 }
 
-export function projectSessionSkillGroup(
+export function sessionSkillGroup(
   source: SessionResourceSource,
   precedence: number,
-  snapshot: ProjectDeclarativeSnapshot,
+  snapshot: DeclarativeSnapshot,
   diagnostics: readonly SessionResourceDiagnostic[] = snapshot.warnings
-    .filter((warning) => !snapshot.mcpWarnings.includes(warning))
     .map((reason) => ({ source, reason })),
 ): SessionSkillGroup {
   return {
@@ -60,7 +59,7 @@ export interface SessionMcpGroup {
   source: Exclude<SessionResourceSource, "machine">;
   precedence: number;
   root: string;
-  effective: EffectiveProjectMcpRead;
+  effective: EffectiveMcpRead;
 }
 
 export interface SessionMcpView {
@@ -137,7 +136,7 @@ function skippedName(path: string): string | undefined {
 }
 
 function mcpSourcePath(group: SessionMcpGroup, path?: string): string {
-  if (!path) return join(group.root, group.source === "project" ? ".omp/mcp.json" : "mcp.json");
+  if (!path) return join(group.root, "mcp.json");
   const hash = path.indexOf("#");
   const pathname = hash < 0 ? path : path.slice(0, hash);
   const fragment = hash < 0 ? "" : path.slice(hash);

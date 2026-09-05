@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
 // The effective slash-command catalog for the active conversation. Discovery
-// stays daemon-side because extensions, plugins, skills, and project commands
+// stays daemon-side because extensions, plugins, skills, and file commands
 // all participate in precedence there. Choosing one only stages it in chat;
 // Enter remains the explicit act that runs it.
 import QtQuick
@@ -257,7 +257,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "Reading this conversation's commands, prompts, skills, and project commands."
+                    text: "Reading this conversation's commands, prompts, and skills."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
