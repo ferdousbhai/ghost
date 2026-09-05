@@ -46,8 +46,8 @@ The post-install hook prints the relay path and the enable command. Details, dep
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
-it with its runtime's native file tools, including its own notes under
-`notes/`. Ghost does not index the directory or read any of it until a request
+it with its runtime's native file tools, its own notes included. Ghost does
+not index the directory or read any of it until a request
 calls for it.
 
 ## 3. Start the services

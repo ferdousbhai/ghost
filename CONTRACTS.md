@@ -81,7 +81,7 @@ the owner a draft and waits for confirmation before replacing it.
 
 There is no ghost-private memory store. A ghost's notes — owner facts,
 decisions, tasks, and its own reflections — are Markdown files under the
-owner's Documents directory (`<Documents>/notes/` by convention), written and
+owner's Documents directory itself, written and
 read with the runtime's native file tools, shared by every ghost and readable
 by the owner. Nothing there is indexed or injected at session start.
 
