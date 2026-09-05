@@ -189,10 +189,10 @@ Handlers are cancelled when the client aborts the turn.
 
 Ghost sets `stop_hook_active: true` on continuation passes. As with the native
 stop-hook conventions of Codex and Claude Code, the hook owns its continuation
-policy: Ghost keeps honoring a
-blocking result until the hook accepts the stop. Hook authors must use
-`stop_hook_active` or their own bounded counter to avoid an unbounded loop and
-should normally stop after one revision. A continuation reason is in model
+policy, and Ghost honors a blocking result up to `MAX_SESSION_STOP_CONTINUATIONS`
+times per owner turn (`hooks.ts`), then accepts the pass and logs it. Hook
+authors should still use `stop_hook_active` and normally stop after one
+revision. A continuation reason is in model
 context; an informational notification alone is not.
 
 Trusted command hooks that need a fast classifier can invoke

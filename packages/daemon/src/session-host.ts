@@ -46,7 +46,7 @@ import {
   type CompactionConfig,
 } from "./compaction.js";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
+import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS, ghostSessionStopContinuation } from "./hooks.js";
 import {
   closeBrowserSession,
   piToolCapabilities,
@@ -2879,6 +2879,7 @@ export class SessionHost {
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
     const ghost = this.registry.get(ghostName);
     let stopHookActive = false;
+    let continuations = 0;
     let latestAssistantEntry = assistantEntry;
     while (!pass.signal.aborted) {
       const assistant = latestAssistantEntry.message;
@@ -2903,6 +2904,14 @@ export class SessionHost {
       });
       const additionalContext = ghostSessionStopContinuation(result);
       if (!additionalContext) return;
+      if (continuations >= MAX_SESSION_STOP_CONTINUATIONS) {
+        hosted.logger.warn("session_stop kept asking for a continuation; accepting the pass", {
+          continuations,
+          code: "stop_hook_bounded",
+        });
+        return;
+      }
+      continuations += 1;
       stopHookActive = true;
       await hosted.session.sendCustomMessage({
         customType: "session-stop-continuation",

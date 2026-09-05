@@ -290,7 +290,8 @@ that harness owns its project discovery, tools, auth, and session semantics.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in
-[`docs/hooks.md`](docs/hooks.md). A ghost keeps its notes in the
+[`docs/hooks.md`](docs/hooks.md); a stop hook's hidden continuations are
+bounded per owner turn by `MAX_SESSION_STOP_CONTINUATIONS`. A ghost keeps its notes in the
 owner's documents with its file tools during ordinary turns. Ghost runs no
 background memory pass of its own.
 

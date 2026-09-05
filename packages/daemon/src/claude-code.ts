@@ -89,7 +89,7 @@ import {
   terminateOwnedProcessGroup,
   type OwnedCommandResult,
 } from "./owned-process.js";
-import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
+import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS, ghostSessionStopContinuation } from "./hooks.js";
 import {
   resolveGhostExtensions,
   type GhostExtensionOptions,
@@ -2200,6 +2200,7 @@ export class ClaudeCodeRuntime {
 
       let prompt = options.prompt;
       let stopHookActive = false;
+      let continuations = 0;
       const identity = warmQueryIdentity({
         runtimeIdentity,
         cwd: runtimeCwd,
@@ -2470,11 +2471,18 @@ export class ClaudeCodeRuntime {
           : undefined;
         this.assertTurnAdmitted(options.signal);
         const additionalContext = ghostSessionStopContinuation(hookResult);
-        if (!additionalContext) {
+        if (!additionalContext || continuations >= MAX_SESSION_STOP_CONTINUATIONS) {
+          if (additionalContext) {
+            logger.warn("session_stop kept asking for a continuation; accepting the pass", {
+              continuations,
+              code: "stop_hook_bounded",
+            });
+          }
           postQueryWorkPending = false;
           pendingTerminalResult = completed;
           break;
         }
+        continuations += 1;
         adapter.recordUsage(completed);
         stopHookActive = true;
         prompt = additionalContext;
