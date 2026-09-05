@@ -3,7 +3,7 @@
 pkgname=ghost
 pkgver=@@VERSION@@
 pkgrel=1
-pkgdesc="Owner-local AI persona with memory, tools, and an Omarchy-native desktop shell"
+pkgdesc="Owner-local AI persona with a character, tools, and an Omarchy-native desktop shell"
 arch=('x86_64')
 url="https://github.com/@@RELEASE_REPOSITORY@@"
 license=('Apache-2.0')

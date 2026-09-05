@@ -5,7 +5,7 @@ pkgname=ghost-dev
 # authoritative and is expected to lag HEAD.
 pkgver=0.0.1.r100.g0c04ce7
 pkgrel=1
-pkgdesc="Owner-local AI persona with memory, tools, and an Omarchy-native desktop shell"
+pkgdesc="Owner-local AI persona with a character, tools, and an Omarchy-native desktop shell"
 arch=('x86_64')
 url="https://github.com/ferdousbhai/ghost"
 license=('Apache-2.0')
