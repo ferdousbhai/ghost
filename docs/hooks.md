@@ -407,7 +407,6 @@ The manifest carries the counts per file, the skip reasons with counts, the
 `--since` watermark used, and the newest `recordedAt` seen — pass that as
 `--since` next round. An empty result still writes every file and exits 0.
 
-data. It cannot access owner documents, character, deletion, network/MCP,
 ## Status
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.

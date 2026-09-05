@@ -300,8 +300,7 @@ not a principal session — no persona, no project snapshot, no Ghost tools, no
 warm query, no resume metadata — and it is admitted through the same SDK loader,
 executable probe, and reviewed child environment as the principal path.
 
-### Ask, jobs, hooks, and maintenance
-### Ask, jobs, delegation, and hooks
+### Ask, jobs, and hooks
 
 `ask` is owner input, never tool approval. Pi's model-facing `ask` input and
 output match Claude Code's native `AskUserQuestion` contract: one to four
@@ -328,10 +327,8 @@ and the review journal records how many times each reviewed turn did so.
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A ghost keeps its own private memory current
-with its memory tools during ordinary turns; shared knowledge uses Obsidian the
-same way. Ghost runs no background memory pass of its own.
-or consolidate only private memory; shared knowledge and task maintenance
-happens in the owner's documents during ordinary runtime work.
+with its memory tools during ordinary turns; shared knowledge goes to the
+owner's documents the same way. Ghost runs no background memory pass of its own.
 
 One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
 `settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
@@ -562,11 +559,8 @@ fail-closed state machine lives in
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a session. A conversation rejects conflicting owners;
   queued Pi steering/follow-ups are the explicit exception.
-- Home rename/delete, project transitions, MCP mutation, model refresh,
-  maintenance, fork, and conversation deletion use explicit leases and publish
-  only durable state.
-  voice, collaboration, fork, and conversation deletion use explicit leases and
-  publish only durable state.
+- Home rename/delete, project transitions, MCP mutation, model refresh, fork,
+  and conversation deletion use explicit leases and publish only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.
