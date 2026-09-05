@@ -37,7 +37,7 @@ export function defaultModel<T extends { provider: string; id: string; priority?
   return sortCatalogModels([...models])[0];
 }
 
-export type AutomaticModelRole = "tiny" | "advisor";
+export type AutomaticModelRole = "advisor";
 
 interface ModelPreference {
   provider?: string;
@@ -45,18 +45,9 @@ interface ModelPreference {
 }
 
 /**
- * Ghost's own defaults for the roles that do not simply inherit the chat
- * model: the smallest model for `tiny`, a strong reasoner for `advisor`.
+ * Ghost's own default for the advisor role: a strong reasoner.
  */
 const ROLE_PREFERENCES: Record<AutomaticModelRole, readonly ModelPreference[]> = {
-  tiny: [
-    { id: /haiku/i },
-    { id: /nano/i },
-    { id: /flash-lite/i },
-    { id: /mini/i },
-    { id: /flash/i },
-    { id: /lite/i },
-  ],
   advisor: [
     { provider: "openai-codex", id: /^gpt-5/i },
     { provider: "openai", id: /^gpt-5/i },

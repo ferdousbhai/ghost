@@ -137,16 +137,13 @@ may already be done. To look and choose explicitly:
 
 ```sh
 ghost model                        # what is bound now
-ghost model --list --q free        # models this ghost can use, filtered
-ghost model openrouter/<model-id>  # bind one
+ghost model openrouter/<model-id>  # bind the chat model
 ```
 
 A model is always written as `provider/id`, split at the *first* slash — an id
-that itself contains slashes is fine. `--q` only works with `--list`.
-
-In the HUD, the same pill opens the switcher: the models your logins make
-available, a search box over the whole catalog, and a **Routing** toggle for the
-other model roles and their fallback chains.
+that itself contains slashes is fine. Ghost keeps no catalog: pi validates the
+model when the next turn runs. The HUD pill shows the binding and opens the
+provider login.
 
 To run the conversation on Claude Code instead, set
 `ghost model claude-code/default` — that path additionally needs an installed,

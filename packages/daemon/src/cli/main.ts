@@ -159,9 +159,9 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "model",
-    usage: "model [provider/id] [--list] [--q <text>] [-g <name>] [--json] [-q]",
-    summary: "Show, set, or search chat models.",
-    example: "ghost model --list --q claude",
+    usage: "model [provider/id] [-g <name>] [--json] [-q]",
+    summary: "Show or set the chat model.",
+    example: "ghost model openrouter/openai/gpt-5.5",
     positionals: [0, 1],
     run: modelCommand,
   },

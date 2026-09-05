@@ -18,12 +18,6 @@ import type {
   Model,
 } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
-import {
-  detectLocalModelProviders,
-  withLocalProviders,
-  type DetectedLocalProvider,
-  type LocalRunner,
-} from "./local-models.js";
 import { syncModelsView } from "./model-config-view.js";
 import { readGhostModels } from "./models.js";
 
@@ -36,11 +30,10 @@ export interface GhostPiRuntimeInput {
   /** The ghost home holding `models.json`. */
   home: string;
   allowModelNetwork: boolean;
-  /** Offline skips local-endpoint detection along with the catalog refresh. */
+  /** Offline skips the catalog refresh. */
   offline?: boolean;
   /** pi's credential file; defaults to `auth.json` under `agentDir`. */
   authPath?: string;
-  localRunners?: readonly LocalRunner[];
 }
 
 export interface GhostProviderSummary {
@@ -55,26 +48,16 @@ export interface GhostProviderSummary {
 export class GhostPiRuntime {
   /** pi's own runtime, for the session that streams through it. */
   readonly runtime: ModelRuntime;
-  /** Local endpoints this runtime's own detection pass found, in preference order. */
-  readonly localProviders: readonly DetectedLocalProvider[];
-
-  private constructor(runtime: ModelRuntime, localProviders: readonly DetectedLocalProvider[]) {
+  private constructor(runtime: ModelRuntime) {
     this.runtime = runtime;
-    this.localProviders = localProviders;
   }
 
   static async create(input: GhostPiRuntimeInput): Promise<GhostPiRuntime> {
     mkdirSync(input.agentDir, { recursive: true });
     const models = readGhostModels(input.home) ?? { providers: {} };
-    // The detection pass rides this runtime's catalog refresh: a local
-    // endpoint reaches pi as an ordinary provider, and nothing is persisted.
-    const localProviders = await detectLocalModelProviders({
-      offline: input.offline ?? false,
-      ...(input.localRunners ? { runners: input.localRunners } : {}),
-    });
     const runtime = await ModelRuntime.create({
       authPath: input.authPath ?? join(input.agentDir, "auth.json"),
-      modelsPath: syncModelsView(withLocalProviders(models, localProviders), input.agentDir, PI_MODELS_VIEW),
+      modelsPath: syncModelsView(models, input.agentDir, PI_MODELS_VIEW),
       modelsStorePath: join(input.agentDir, "models-store.json"),
       refreshOnCreate: false,
     });
@@ -82,7 +65,7 @@ export class GhostPiRuntime {
       allowNetwork: input.allowModelNetwork,
       ...(input.allowModelNetwork ? { signal: AbortSignal.timeout(NETWORK_REFRESH_TIMEOUT_MS) } : {}),
     });
-    return new GhostPiRuntime(runtime, localProviders);
+    return new GhostPiRuntime(runtime);
   }
 
   getModels(providerId?: string): readonly Model<Api>[] {

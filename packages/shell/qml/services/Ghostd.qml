@@ -920,19 +920,10 @@ Singleton {
 
     property var currentModel: null
     property string modelSource: "none"
-    property var availableModels: []
     property int availableModelTotal: 0
-    property var catalogModels: []
-    property int catalogTotal: 0
-    property string catalogQuery: ""
-    property int catalogOffset: 0
-    readonly property int catalogLimit: 50
-    property bool catalogLoading: false
     /** Non-empty when a model fetch or switch failed. */
     property string modelError: ""
     property string modelWarning: ""
-    property var modelRouting: []
-    property bool modelRoutingLoading: false
 
     signal modelSwitchNeedsLogin(string provider)
     signal modelSwitchCompleted(string provider, string id)
@@ -967,10 +958,7 @@ Singleton {
     property var modelRequest: null
     property int modelGeneration: 0
     property var availRequest: null
-    property var availableModelsRequestFactory: null
-    property var catalogRequest: null
     property var setModelRequest: null
-    property var modelRoutingRequest: null
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -1992,10 +1980,7 @@ Singleton {
     function clearModelState(): void {
         root.currentModel = null;
         root.modelSource = "none";
-        root.availableModels = [];
         root.availableModelTotal = 0;
-        root.modelRouting = [];
-        root.modelRoutingLoading = false;
         root.modelWarning = "";
     }
 
@@ -4481,254 +4466,18 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
     }
 
-    function fetchAvailableModels(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const xhr = root.availableModelsRequestFactory
-            ? root.availableModelsRequestFactory() : new XMLHttpRequest();
-        root.availRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.availRequest
-                    || ghost !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    // The daemon clamps `limit` silently, so the echoed value —
-                    // not the requested one — is what the page must agree with.
-                    if (!Array.isArray(body.models) || typeof body.total !== "number"
-                            || !Number.isFinite(body.total) || Math.floor(body.total) !== body.total
-                            || body.total < body.models.length || !(body.limit > 0)
-                            || body.offset !== 0
-                            || body.models.length !== Math.min(body.total, body.limit))
-                        throw new Error("invalid available model page");
-                    root.availableModels = body.models;
-                    root.availableModelTotal = body.total;
-                    root.modelError = "";
-                } catch (error) {
-                    root.modelError = "ghostd sent a malformed model list";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "GET models (available)");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/models?scope=available&limit=500&offset=0", ({}), null,
-            function () { return xhr === root.availRequest && ghost === root.activeGhost; });
-    }
-
     /**
      * Search the FULL pi catalogue. `query` is a case-insensitive substring on
      * id/name; `offset` pages by catalogLimit. Result → catalogModels/catalogTotal.
      * A stale reply (a newer search already fired) is dropped.
      */
-    function fetchCatalog(query: string, offset: int): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        root.catalogQuery = query;
-        root.catalogOffset = offset;
-        root.catalogLoading = true;
-        const xhr = new XMLHttpRequest();
-        root.catalogRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4) return;
-            if (xhr !== root.catalogRequest) return;   // superseded by a newer search
-            root.catalogLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.catalogModels = Array.isArray(body.models) ? body.models : [];
-                    root.catalogTotal = Number(body.total) || 0;
-                    root.modelError = "";
-                } catch (error) {
-                    root.modelError = "ghostd sent a malformed catalogue";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "GET models (catalog)");
-            }
-        };
-        const q = query === "" ? "" : "&q=" + encodeURIComponent(query);
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/models?scope=catalog&limit=" + root.catalogLimit + "&offset=" + offset + q,
-            ({}), null);
-    }
-
     /**
      * Set roles.chat_model. The daemon writes the role even when the provider is
      * not credentialed and answers { usable: false, … } — we then emit
      * modelSwitchNeedsLogin so the shell can surface a login rather than fail the
      * switch silently. The indicator and available list are refreshed either way.
      */
-    function setModel(provider: string, id: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || provider === "" || id === "") return;
-        root.modelWarning = "";
-        const xhr = new XMLHttpRequest();
-        root.setModelRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.setModelRequest
-                    || ghost !== root.activeGhost) return;
-            root.setModelRequest = null;
-            if (xhr.status === 200) {
-                let body = {};
-                try {
-                    body = JSON.parse(xhr.responseText);
-                } catch (error) {
-                    body = {};
-                }
-                root.modelWarning = body.usable === false && typeof body.warning === "string"
-                    ? body.warning
-                    : "";
-                root.modelError = "";
-                root.adoptSelectedModelRuntime(ghost, provider);
-                root.fetchCurrentModel();
-                root.fetchAvailableModels();
-                // Claude Code owns its external desktop login. Opening Ghost's
-                // per-ghost provider form here would offer no usable action.
-                if (body.usable === true) {
-                    root.modelSwitchCompleted(provider, id);
-                } else if (body.usable === false && provider !== "claude-code") {
-                    root.modelSwitchNeedsLogin(provider);
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "PUT model");
-            }
-        };
-        root.dispatch(xhr, "PUT",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/model",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ provider: provider, id: id }));
-    }
-
-    function applyModelRouting(body: var): void {
-        root.modelRouting = Array.isArray(body.roles) ? body.roles : [];
-    }
-
-    function fetchModelRouting(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        root.modelRoutingLoading = true;
-        const xhr = new XMLHttpRequest();
-        root.modelRoutingRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
-            root.modelRoutingLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyModelRouting(JSON.parse(xhr.responseText));
-                    root.modelError = "";
-                } catch (error) {
-                    root.modelError = "ghostd sent malformed model routing";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "GET model routing");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/model-routing", ({}), null);
-    }
-
-    function setModelRoute(role: string, target: string, provider: string, id: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || role === "" || provider === "" || id === "") return;
-        root.modelRoutingLoading = true;
-        const xhr = new XMLHttpRequest();
-        root.modelRoutingRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
-            root.modelRoutingLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyModelRouting(JSON.parse(xhr.responseText));
-                    root.modelError = "";
-                    root.fetchCurrentModel();
-                    root.fetchAvailableModels();
-                    root.modelRouteCompleted(role, target);
-                } catch (error) {
-                    root.modelError = "ghostd sent malformed model routing";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "PUT model routing");
-            }
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/model-routing", ({ "Content-Type": "application/json" }),
-            JSON.stringify({ role: role, target: target, provider: provider, id: id }));
-    }
-
-    function clearModelFallbacks(role: string): void {
-        root.replaceModelFallbacks(role, []);
-    }
-
-    function clearModelPrimary(role: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || role === "") return;
-        root.modelRoutingLoading = true;
-        const xhr = new XMLHttpRequest();
-        root.modelRoutingRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
-            root.modelRoutingLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyModelRouting(JSON.parse(xhr.responseText));
-                    root.modelError = "";
-                    root.fetchCurrentModel();
-                    root.fetchAvailableModels();
-                    root.modelRouteCompleted(role, "clear_primary");
-                } catch (error) {
-                    root.modelError = "ghostd sent malformed model routing";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "clear model primary");
-            }
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/model-routing", ({ "Content-Type": "application/json" }),
-            JSON.stringify({ role: role, target: "clear_primary" }));
-    }
-
     /** Atomically replace a Ghost role's complete ordered retry chain. */
-    function replaceModelFallbacks(role: string, fallbacks: var): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || role === "" || !Array.isArray(fallbacks)) return;
-
-        const replacement = [];
-        for (let i = 0; i < fallbacks.length; i++) {
-            const fallback = fallbacks[i];
-            if (!fallback || typeof fallback.provider !== "string"
-                    || fallback.provider === "" || typeof fallback.id !== "string"
-                    || fallback.id === "") return;
-            replacement.push({ provider: fallback.provider, id: fallback.id });
-        }
-
-        root.modelRoutingLoading = true;
-        const xhr = new XMLHttpRequest();
-        root.modelRoutingRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.modelRoutingRequest) return;
-            root.modelRoutingLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyModelRouting(JSON.parse(xhr.responseText));
-                    root.modelError = "";
-                    root.modelRouteCompleted(role, "replace_fallbacks");
-                } catch (error) {
-                    root.modelError = "ghostd sent malformed model routing";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "replace model fallbacks");
-            }
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/model-routing", ({ "Content-Type": "application/json" }),
-            JSON.stringify({
-                role: role,
-                target: "replace_fallbacks",
-                fallbacks: replacement
-            }));
-    }
-
-
     /** The daemon's own presentable message for a failure, or "". */
     function errorDetail(xhr: var): string {
         try {

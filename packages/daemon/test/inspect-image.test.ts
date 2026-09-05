@@ -29,7 +29,7 @@ describe("inspect_image", () => {
     const vision = model("eyes", ["text", "image"]);
     const tool = createInspectImageTool({
       cwd: dir,
-      visionModel: () => ({ provider: "fake", modelId: "eyes" }),
+      imageModel: () => ({ provider: "fake", modelId: "eyes" }),
       runtime: {
         getModel: (_provider, id) => (id === "eyes" ? vision : undefined),
         complete: async (_model, context) => {
@@ -44,7 +44,7 @@ describe("inspect_image", () => {
     expect(seen).toHaveLength(0);
 
     const described = await tool.execute("c2", { path: join(dir, "shot.png"), question: "Which colour?" }, undefined, undefined, { model: model("blind", ["text"]) } as never);
-    expect(described.details).toMatchObject({ path: join(dir, "shot.png"), mimeType: "image/png", visionModel: "fake/eyes" });
+    expect(described.details).toMatchObject({ path: join(dir, "shot.png"), mimeType: "image/png", imageModel: "fake/eyes" });
     expect(described.content[0]).toMatchObject({
       type: "text",
       text: expect.stringMatching(/^<untrusted source="image shot\.png described by fake\/eyes" id="[0-9a-f]+">\nA white pixel\./),
@@ -55,22 +55,22 @@ describe("inspect_image", () => {
     });
   });
 
-  it("refuses non-images, missing files, and a blind model without a vision model", async () => {
+  it("refuses non-images, missing files, and a blind model without an image-capable advisor", async () => {
     dir = mkdtempSync(join(tmpdir(), "ghost-inspect-"));
     writeFileSync(join(dir, "notes.txt"), "text");
     writeFileSync(join(dir, "shot.png"), PNG);
     const tool = createInspectImageTool({
       cwd: dir,
-      visionModel: () => null,
+      imageModel: () => null,
       runtime: { getModel: () => undefined, complete: async () => { throw new Error("unreachable"); } },
     });
     const blind = { model: model("blind", ["text"]) } as never;
     await expect(tool.execute("c", { path: "notes.txt" }, undefined, undefined, blind)).rejects.toThrow(/not an image/);
-    await expect(tool.execute("c", { path: "shot.png" }, undefined, undefined, blind)).rejects.toThrow(/roles\.vision_model/);
+    await expect(tool.execute("c", { path: "shot.png" }, undefined, undefined, blind)).rejects.toThrow(/roles\.advisor_model/);
 
     const sighted = createInspectImageTool({
       cwd: dir,
-      visionModel: () => ({ provider: "fake", modelId: "eyes" }),
+      imageModel: () => ({ provider: "fake", modelId: "eyes" }),
       runtime: { getModel: () => model("eyes", ["text", "image"]), complete: async () => { throw new Error("unreachable"); } },
     });
     await expect(sighted.execute("c", { path: "missing.png" }, undefined, undefined, blind)).rejects.toThrow(/ENOENT/);

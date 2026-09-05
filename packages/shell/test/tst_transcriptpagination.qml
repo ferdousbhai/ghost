@@ -7,7 +7,6 @@ TestCase {
     name: "TranscriptPagination"
 
     property var requests: []
-    property var availableRequests: []
     property var deleteRequests: []
     property var branchRequests: []
     property string deleteSettlementError: ""
@@ -106,15 +105,11 @@ TestCase {
         Ghostd.availableModels = [];
         Ghostd.availableModelTotal = 0;
         requests = [];
-        availableRequests = [];
         deleteRequests = [];
         branchRequests = [];
         deleteSettlementError = "";
         Ghostd.transcriptRequestFactory = function () {
             return fakeRequest(requests);
-        };
-        Ghostd.availableModelsRequestFactory = function () {
-            return fakeRequest(availableRequests);
         };
         Ghostd.deleteSessionRequestFactory = function () {
             return fakeRequest(deleteRequests);
@@ -127,7 +122,6 @@ TestCase {
     function cleanup(): void {
         Ghostd.cancelAllTranscriptLoads();
         Ghostd.transcriptRequestFactory = null;
-        Ghostd.availableModelsRequestFactory = null;
         Ghostd.deleteSessionRequestFactory = null;
         Ghostd.branchRequestFactory = null;
         Ghostd.turnStates = ({});
@@ -516,47 +510,5 @@ TestCase {
 
     // Lives here for the request-factory harness in init(); it is about page
     // accounting, not transcripts.
-    function test_availableModelCountUsesPageTotal(): void {
-        Ghostd.activeGhost = "casper";
-        Ghostd.fetchAvailableModels();
-        compare(availableRequests.length, 1);
-        // The daemon clamps `limit` to its own maximum silently, so the test
-        // pins the scope and offset the shell chose — never the limit value.
-        verify(availableRequests[0].url.indexOf("scope=available") >= 0);
-        verify(availableRequests[0].url.indexOf("offset=0") >= 0);
-        const models = [];
-        for (let index = 0; index < 500; index++)
-            models.push({ provider: "local", id: "model-" + index });
-        availableRequests[0].complete(200, {
-            scope: "available",
-            models: models,
-            total: 501,
-            limit: 500,
-            offset: 0
-        });
 
-        compare(Ghostd.availableModels.length, 500);
-        compare(Ghostd.availableModelTotal, 501);
-        compare(Ghostd.modelError, "");
-    }
-
-    function test_daemonClampedModelLimitIsAuthoritative(): void {
-        Ghostd.activeGhost = "casper";
-        Ghostd.fetchAvailableModels();
-        compare(availableRequests.length, 1);
-        const models = [];
-        for (let index = 0; index < 200; index++)
-            models.push({ provider: "local", id: "model-" + index });
-        availableRequests[0].complete(200, {
-            scope: "available",
-            models: models,
-            total: 501,
-            limit: 200,
-            offset: 0
-        });
-
-        compare(Ghostd.availableModels.length, 200);
-        compare(Ghostd.availableModelTotal, 501);
-        compare(Ghostd.modelError, "");
-    }
 }

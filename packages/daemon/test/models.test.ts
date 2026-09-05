@@ -71,17 +71,17 @@ describe("models.json round-trip", () => {
       providers: {},
       futureSetting: { enabled: true },
     })}\n`, "utf8");
-    setGhostModelRole(agentDir, "vision_model", "openai-codex", "gpt-5.6");
-    appendGhostModelFallback(agentDir, "vision_model", "anthropic", "claude-sonnet-4-6");
+    setGhostModelRole(agentDir, "advisor_model", "openai-codex", "gpt-5.6");
+    appendGhostModelFallback(agentDir, "advisor_model", "anthropic", "claude-sonnet-4-6");
     expect(readGhostModels(agentDir)).toMatchObject({
       futureSetting: { enabled: true },
-      roles: { vision_model: { provider: "openai-codex", modelId: "gpt-5.6" } },
+      roles: { advisor_model: { provider: "openai-codex", modelId: "gpt-5.6" } },
       fallbacks: {
-        vision_model: [{ provider: "anthropic", modelId: "claude-sonnet-4-6" }],
+        advisor_model: [{ provider: "anthropic", modelId: "claude-sonnet-4-6" }],
       },
     });
-    clearGhostModelFallbacks(agentDir, "vision_model");
-    expect(readGhostModels(agentDir)?.fallbacks?.vision_model).toBeUndefined();
+    clearGhostModelFallbacks(agentDir, "advisor_model");
+    expect(readGhostModels(agentDir)?.fallbacks?.advisor_model).toBeUndefined();
   });
 
   it("recovers an interrupted portable CAS before an ordinary role mutation", () => {

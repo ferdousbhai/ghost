@@ -139,36 +139,18 @@ fallback chains. Provider logins live in pi's own file-backed store,
 never leaves the ghost home. Credential values never enter logs or API
 responses.
 
-Roles let one ghost use different models for different jobs: `chat_model`,
-`smol_model`, `slow_model`, `vision_model`, `plan_model`, `designer_model`,
-`commit_model`, `tiny_model`, `task_model`, `advisor_model`. (`models.json`
-also still accepts `general_purpose_model` and `research_model`, kept only so
-an older home keeps its routing.) A role lives under `roles`, and its ordered
-fallback chain under `fallbacks`, where the runtime supports one. Only
-`chat_model` is load-bearing for a turn; the rest exist so adding a role later
-needs no file migration.
-
-- `chat_model` is the conversation. Unset, it resolves to the first model
-  declared in `models.json`, and with nothing declared there at all, pi decides
-  — its own settings, then its first available model. A successful provider
-  login binds that default into the role when nothing has claimed it yet, so a
-  fresh ghost is usable straight after login.
-- `smol_model` serves titles, greetings, and trusted command-hook completions.
-  Unset, it picks the cheapest usable model and treats an authenticated
-  subscription as zero marginal cost. An explicitly bound but unusable
-  `smol_model` fails loudly instead of quietly switching models.
-- `vision_model` has no ghost-side default: reading an image is quality work,
-  so the owner binds it rather than inheriting the cheapest model with eyes.
-  Unbound, `slow`/`designer`/`task` inherit the chat model and `tiny`/`advisor`
-  follow Ghost's preference lists.
-- `claude-code/default` is valid only as the primary chat runtime. It is not a
-  pi provider model and never a role fallback.
+Roles are `chat_model` (the conversation), `smol_model` (titles, greetings,
+command-hook completions; unset, the cheapest usable model), and
+`advisor_model` (the frontier teacher and image reader; unset, a strong
+reasoner from Ghost's preference list), each with an optional fallback chain.
+`chat_model` unset leaves the choice to pi. `claude-code/default` is valid only
+as the chat runtime or the advisor. There is no model catalog API and no
+local-runner detection: `ghost model <provider>/<id>` writes the binding, and
+a local endpoint is an ordinary provider in `models.json`.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use the runtime's own retry and fallback chains; Ghost adds no turn,
-concurrency, hosted-session, or spend cap. Selection details live in
-[`models.ts`](../packages/daemon/src/models.ts) and
-[`model-catalog.ts`](../packages/daemon/src/model-catalog.ts).
+concurrency, hosted-session, or spend cap.
 
 ## Extending a ghost
 

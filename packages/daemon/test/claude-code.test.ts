@@ -56,7 +56,6 @@ import {
 } from "../src/presentation-history.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
-import { ModelCatalog } from "../src/model-catalog.js";
 import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import {
@@ -68,7 +67,6 @@ import {
   mergeProjectDeclarativeSnapshots,
 } from "../src/declarative-snapshot.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
-import { makeFakeCatalogRuntime } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 let temp: TempGhosts | null = null;
@@ -1320,17 +1318,10 @@ fi
         expect(options.env?.ANTHROPIC_API_KEY).toBeUndefined();
       }
       const publicProbeMetadata = await probe.read();
-      const modelApiPayload = await new ModelCatalog({
-        registry: temp!.registry,
-        offline: true,
-        createRuntime: async () => makeFakeCatalogRuntime({ models: [], credentialed: [] }),
-        claudeCodeProbe: probe,
-      }).listModels("casper", { provider: "claude-code" });
       for (const observable of [
         JSON.stringify(events),
         JSON.stringify(logger.records),
         JSON.stringify(publicProbeMetadata),
-        JSON.stringify(modelApiPayload),
         readFileSync(claudeSessionMetadataPath(
           paths.sessionDir,
           "owner-wrapper-boundary",
@@ -3479,45 +3470,6 @@ fi
     expect(authReads).toBe(3);
   });
 
-  it("does not reuse the catalogue auth cache for turn admission", async () => {
-    let resolutions = 0;
-    let authReads = 0;
-    const probe = new ClaudeCodeProbe({
-      binaryPath: "configured-claude",
-      readVersion: readSupportedClaudeVersion,
-      resolveExecutable: async () => {
-        resolutions += 1;
-        return process.execPath;
-      },
-      readAuthStatus: async () => {
-        authReads += 1;
-        return { loggedIn: true, authMethod: "claude.ai" };
-      },
-    });
-    setupClaudeHost({ probe });
-    const catalog = new ModelCatalog({
-      registry: temp!.registry,
-      offline: true,
-      claudeCodeProbe: probe,
-      createRuntime: async () => makeFakeCatalogRuntime({ models: [] }),
-    });
-
-    const listing = await catalog.listModels("casper", {
-      scope: "catalog",
-      provider: "claude-code",
-    });
-    expect(listing.models).toEqual([expect.objectContaining({
-      provider: "claude-code",
-      usable: true,
-    })]);
-    await host!.runTurn("casper", {
-      sessionId: "conversation-shared-probe",
-      prompt: "hello",
-      emit: () => {},
-    });
-
-    expect({ resolutions, authReads }).toEqual({ resolutions: 2, authReads: 2 });
-  });
 
   it("deletes a Claude Code resume sidecar and its presentation journal", async () => {
     const { paths } = setupClaudeHost();

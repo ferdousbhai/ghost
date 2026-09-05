@@ -162,7 +162,6 @@ import { CONTEXT_WINDOW_POLICY, ghostContextWindowsExtension } from "./context-w
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
-import { chatModelChoice } from "./local-models.js";
 import { resolveChatModel } from "./model-routing.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
@@ -2713,7 +2712,7 @@ export class SessionHost {
     }
     const liveMcp = mcp;
     extensionFactories.push(mcpToolsExtension(liveMcp));
-    const chatRef = chatModelChoice(readGhostModels(paths.home), modelRuntime.localProviders).ref;
+    const chatRef = resolveChatModelRef(readGhostModels(paths.home));
     const chatModel = resolveChatModel(chatRef, modelRuntime.getAvailableSnapshot());
     const compaction = nativeCompactionSettings(this.compactionConfig, chatModel?.contextWindow);
     extensionFactories.push(ghostContextWindowsExtension(compaction));
@@ -2776,7 +2775,7 @@ export class SessionHost {
         createInspectImageTool({
           runtime: modelRuntime,
           cwd: runtimeCwd,
-          visionModel: () => readGhostModels(paths.home)?.roles?.vision_model,
+          imageModel: () => readGhostModels(paths.home)?.roles?.advisor_model,
         }) as ToolDefinition,
       ],
     });
@@ -3849,7 +3848,7 @@ export class SessionHost {
   ): Promise<{ provider: string; id: string } | null> {
     let ref: ReturnType<typeof resolveChatModelRef> = null;
     try {
-      ref = chatModelChoice(readGhostModels(configDir), modelRuntime.localProviders).ref;
+      ref = resolveChatModelRef(readGhostModels(configDir));
     } catch (error) {
       this.logger.error("models.json is unusable", {
         ghost: ghostName,

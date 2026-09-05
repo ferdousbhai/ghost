@@ -28,7 +28,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
-import { fakePiModel } from "./helpers/fake-catalog-runtime.js";
+import { fakePiModel } from "./helpers/fake-pi-model.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
 let temp: TempGhosts | null = null;

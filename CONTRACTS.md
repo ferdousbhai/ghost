@@ -337,9 +337,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
-| `GET /api/ghosts/:name/models` | Paginated available/catalog model rows, detected local endpoints included in both scopes; `q` is at most 256 characters. |
-| `GET\|PUT /api/ghosts/:name/model-routing` | Read or replace role primaries/fallbacks. |
+| `GET\|PUT /api/ghosts/:name/model` | Read or set `roles.chat_model` as `provider/id`; no catalog, pi validates at turn time. |
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
 | `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
@@ -402,39 +400,18 @@ credential-bearing values are excluded. The implementation allowlists and tests
 in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) and
 [`claude-code.ts`](packages/daemon/src/claude-code.ts) are normative.
 
-Roles are `chat_model`, `smol_model`, `slow_model`, `vision_model`,
-`plan_model`, `designer_model`, `commit_model`, `tiny_model`, `task_model`, and
-`advisor_model`. Each may have an ordered fallback chain where the runtime
-supports it. `claude-code/default` is valid as the primary chat runtime and, as
-the one exception, as the primary `advisor_model`; it is not a Pi provider model
-and is never a role fallback. As the advisor it answers one non-interactive Claude Agent SDK query per
-completion with no tools, MCP, skills, plugins, filesystem settings, project
-discovery, or session persistence, capped at one turn; when Claude Code is
-missing or unauthenticated the explicit binding fails loudly, exactly like an
-unusable explicit smol binding.
-
-`chat_model` uses an explicit usable selection or Pi's catalog default.
-`smol_model` serves titles, greetings, and trusted command-hook completions. If
-unset, it chooses the cheapest usable model, treating an authenticated
-subscription as zero marginal cost. An explicit unusable smol binding fails
-loudly rather than silently switching models. Conversation titles are one
-persisted Pi `session_info` name after the first turn; owner titles win.
-
-Local OpenAI-compatible endpoints are detected, not configured. Every Pi
-runtime construction probes `127.0.0.1` on the well-known runner ports —
-`local-ollama` 11434, `local-lm-studio` 1234, `local-llama-cpp` 8080,
-`local-vllm` 8000 — in parallel with a short timeout, and publishes each
-answering endpoint as a zero-cost provider of every model id it lists. A
-refused connection, a timeout, a non-JSON body, or an empty list is silence,
-not an error. Detected providers are runtime facts: they appear in both
-`scope=available` and `scope=catalog` rows and a switcher pick persists like
-any other, but detection itself never writes `models.json`. With no
-`chat_model` binding and no configured provider, the first model of the first
-detected endpoint drives the ghost, in the runner order above, and the
-current-model response marks it `source: "default"` with `origin: "local"`.
-Any explicit binding or configured provider wins, a ghost whose principal
-runtime is Claude Code keeps its own model and is unaffected, and `offline`
-skips the probe in every daemon-owned runtime.
+Roles are `chat_model`, `smol_model`, and `advisor_model`, each with an
+optional ordered fallback chain. `claude-code/default` is valid as the primary
+chat runtime and as the primary `advisor_model`; it is not a Pi provider model
+and is never a role fallback. `chat_model` unset leaves the choice to Pi's
+catalog default; Ghost keeps no model list, no catalog API, and no local-runner
+detection — a local endpoint is an ordinary provider entry in `models.json`.
+`smol_model` serves titles, greetings, and command-hook completions; unset, it
+chooses the cheapest usable model, treating an authenticated subscription as
+zero marginal cost. `advisor_model` is the frontier teacher and reads images
+for a chat model that cannot; unset, Ghost's preference list picks a strong
+reasoner. An explicit unusable binding fails loudly rather than silently
+switching models.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use configured runtime retry/fallback behavior; Ghost adds no turn,

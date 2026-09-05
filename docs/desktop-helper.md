@@ -17,7 +17,7 @@ extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
 
 Vision is NOT in the helper. Once the helper fallback is needed, semantic
 (AT-SPI) access is preferred where it exists (GTK); Ghost's `inspect_image` —
-which resolves the `vision_model` role Ghost binds from `models.json` — is the
+which resolves the `advisor_model` role Ghost binds from `models.json` — is the
 universal fallback for
 canvas/Qt-without-a11y/web/games. The strongest path uses both: try semantic,
 fall back to a screenshot + vision.
@@ -125,7 +125,7 @@ execFile arg arrays; no shell interpolation of model input.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
 to a vision-capable model — a text-only model reaches it through Ghost's
-`inspect_image`, which uses the bound `vision_model` — and surfaces
+`inspect_image`, which uses the bound `advisor_model` — and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
 disturbed the desktop. `mode: "watch"` loops the same `capture` op N times over
 an interval and returns the frames as an **image sequence** (multiple image

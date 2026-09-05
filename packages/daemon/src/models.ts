@@ -60,12 +60,6 @@ export interface GhostModelRoleBinding {
  * because `roles` is optional and each role within it is optional.
  *
  * - `chat_model` — answers the turn.
- * - `vision_model` — reads images when `chat_model` cannot; must be a model
- *   whose `input` includes `"image"`. Image inspection in a pi session is a
- *   planned port (issue #3); Claude Code reads images natively. Unbound, there
- *   is no ghost-side cheapest-model default — that was removed deliberately:
- *   reading an image is quality work, not throwaway work, so the owner
- *   configures the role instead of inheriting the cheapest thing with eyes.
  * - `smol_model` — the cheap, fast lane for a ghost's throwaway completions:
  *   the name of a new conversation (`title.ts`), the opening line of an empty
  *   chat (`greeting.ts`), and trusted command-hook classification
@@ -74,61 +68,20 @@ export interface GhostModelRoleBinding {
  *   subscription (OAuth / included plan → zero marginal cost) is preferred over
  *   a cheaper metered model. Every use is a single, fire-and-forget completion;
  *   a failure never affects the conversation.
- * - `slow_model`, `plan_model`, `designer_model`, `commit_model`,
- *   `tiny_model`, `task_model`, `advisor_model` — the remaining working
- *   roles. Unbound, `slow`/`designer`/`task` inherit the chat default and
- *   `tiny`/`advisor` follow Ghost's preference lists (`model-routing.ts`).
- * - `general_purpose_model`, `research_model` — older Ghost custom roles,
- *   retained so an existing home keeps its routing.
+ * - `advisor_model` — the frontier teacher: `hook-smol-complete --role advisor`
+ *   and image inspection for a chat model that cannot see. Unbound, Ghost's
+ *   preference list picks a strong reasoner (`model-routing.ts`).
  */
 export type GhostModelRole =
   | "chat_model"
   | "smol_model"
-  | "slow_model"
-  | "vision_model"
-  | "plan_model"
-  | "designer_model"
-  | "commit_model"
-  | "tiny_model"
-  | "task_model"
-  | "advisor_model"
-  | "general_purpose_model"
-  | "research_model";
+  | "advisor_model";
 
 export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
   "chat_model",
   "smol_model",
-  "slow_model",
-  "vision_model",
-  "plan_model",
-  "designer_model",
-  "commit_model",
-  "tiny_model",
-  "task_model",
   "advisor_model",
-  "general_purpose_model",
-  "research_model",
 ];
-
-/**
- * The short role names the HTTP API reports beside Ghost's role keys (the
- * `ompRole` field is a compatibility name); `general` and `research` remain
- * custom roles solely for compatibility with earlier Ghost homes.
- */
-export const GHOST_TO_OMP_MODEL_ROLE: Readonly<Record<GhostModelRole, string>> = {
-  chat_model: "default",
-  smol_model: "smol",
-  slow_model: "slow",
-  vision_model: "vision",
-  plan_model: "plan",
-  designer_model: "designer",
-  commit_model: "commit",
-  tiny_model: "tiny",
-  task_model: "task",
-  advisor_model: "advisor",
-  general_purpose_model: "general",
-  research_model: "research",
-};
 
 /**
  * `smol_model` was called `title_model` before the role grew a second consumer.

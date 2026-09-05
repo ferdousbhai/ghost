@@ -16,7 +16,7 @@ import type {
   McpCatalogSnapshot,
   McpConnectionTest,
 } from "./mcp-catalog.js";
-import type { ListModelsQuery, ModelCatalog, ModelScope } from "./model-catalog.js";
+import type { ModelSelection } from "./model-selection.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -33,7 +33,6 @@ import type {
   GhostHookStatus,
   GhostHookRunner,
 } from "./hooks.js";
-import { GHOST_MODEL_ROLES, type GhostModelRole } from "./models.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,
@@ -59,12 +58,8 @@ export interface ServerOptions {
    * no login surface.
    */
   login?: LoginManager;
-  /**
-   * The per-ghost model indicator + switcher. Omit to leave the `/model` and
-   * `/models` routes out entirely (they 404) — a server that only runs turns
-   * needs no switcher surface.
-   */
-  catalog?: ModelCatalog;
+  /** Chat-model selection. Omit to leave the `/model` route out (it 404s). */
+  models?: ModelSelection;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
   mcp?: McpCatalog;
@@ -1023,61 +1018,11 @@ export function createDaemonServer(options: ServerOptions): Server {
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
-    if (!options.catalog) {
-      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
+    if (!options.models) {
+      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
       return;
     }
-    jsonResponse(response, 200, await options.catalog.getCurrent(ghostName));
-  };
-
-  const handleListModels = async (
-    ghostName: string,
-    url: URL,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.catalog) {
-      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
-      return;
-    }
-    const scopeParam = url.searchParams.get("scope");
-    if (scopeParam !== null && scopeParam !== "available" && scopeParam !== "catalog") {
-      errorResponse(response, 400, "invalid_request", "\"scope\" must be \"available\" or \"catalog\".");
-      return;
-    }
-    const query: ListModelsQuery = {};
-    if (scopeParam) query.scope = scopeParam as ModelScope;
-    const provider = url.searchParams.get("provider");
-    if (provider) query.provider = provider;
-    const q = url.searchParams.get("q");
-    if (q !== null && q.length > MAX_MODEL_QUERY_LENGTH) {
-      errorResponse(
-        response,
-        400,
-        "invalid_request",
-        `"q" must be at most ${MAX_MODEL_QUERY_LENGTH} characters.`,
-      );
-      return;
-    }
-    if (q) query.q = q;
-    const limit = url.searchParams.get("limit");
-    if (limit !== null) {
-      const parsed = Number(limit);
-      if (!Number.isFinite(parsed)) {
-        errorResponse(response, 400, "invalid_request", "\"limit\" must be a number.");
-        return;
-      }
-      query.limit = parsed;
-    }
-    const offset = url.searchParams.get("offset");
-    if (offset !== null) {
-      const parsed = Number(offset);
-      if (!Number.isFinite(parsed)) {
-        errorResponse(response, 400, "invalid_request", "\"offset\" must be a number.");
-        return;
-      }
-      query.offset = parsed;
-    }
-    jsonResponse(response, 200, await options.catalog.listModels(ghostName, query));
+    jsonResponse(response, 200, await options.models.getCurrent(ghostName));
   };
 
   const handleSetModel = async (
@@ -1085,8 +1030,8 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    if (!options.catalog) {
-      errorResponse(response, 404, "not_found", "The model switcher is not enabled on this daemon.");
+    if (!options.models) {
+      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
@@ -1099,119 +1044,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"id\" must be a non-empty string.");
       return;
     }
-    jsonResponse(response, 200, await options.catalog.setChatModel(ghostName, provider, id));
-  };
-
-  const handleModelRouting = async (
-    ghostName: string,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.catalog) {
-      errorResponse(response, 404, "not_found", "Model routing is not enabled on this daemon.");
-      return;
-    }
-    if (method === "GET") {
-      jsonResponse(response, 200, await options.catalog.getModelRouting(ghostName));
-      return;
-    }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { role, target, provider, id, fallbacks } = body as {
-      role?: unknown;
-      target?: unknown;
-      provider?: unknown;
-      id?: unknown;
-      fallbacks?: unknown;
-    };
-    if (typeof role !== "string" || !GHOST_MODEL_ROLES.includes(role as GhostModelRole)) {
-      errorResponse(response, 400, "invalid_request", "\"role\" is not a supported Ghost model role.");
-      return;
-    }
-    if (target === "clear_fallbacks") {
-      jsonResponse(
-        response,
-        200,
-        await options.catalog.clearModelFallbacks(ghostName, role as GhostModelRole),
-      );
-      return;
-    }
-    if (target === "clear_primary") {
-      jsonResponse(
-        response,
-        200,
-        await options.catalog.clearModelPrimary(ghostName, role as GhostModelRole),
-      );
-      return;
-    }
-    if (target === "replace_fallbacks") {
-      if (!Array.isArray(fallbacks)) {
-        errorResponse(response, 400, "invalid_request", '"fallbacks" must be an array.');
-        return;
-      }
-      const selections: Array<{ provider: string; id: string }> = [];
-      for (const fallback of fallbacks) {
-        if (fallback === null || typeof fallback !== "object" || Array.isArray(fallback)) {
-          errorResponse(
-            response,
-            400,
-            "invalid_request",
-            'Every "fallbacks" entry must be an object with non-empty "provider" and "id" strings.',
-          );
-          return;
-        }
-        const selection = fallback as { provider?: unknown; id?: unknown };
-        if (typeof selection.provider !== "string" || selection.provider === ""
-          || typeof selection.id !== "string" || selection.id === "") {
-          errorResponse(
-            response,
-            400,
-            "invalid_request",
-            'Every "fallbacks" entry must be an object with non-empty "provider" and "id" strings.',
-          );
-          return;
-        }
-        selections.push({ provider: selection.provider, id: selection.id });
-      }
-      jsonResponse(
-        response,
-        200,
-        await options.catalog.replaceModelFallbacks(
-          ghostName,
-          role as GhostModelRole,
-          selections,
-        ),
-      );
-      return;
-    }
-    if (target !== "primary" && target !== "fallback") {
-      errorResponse(
-        response,
-        400,
-        "invalid_request",
-        '"target" must be primary, fallback, clear_primary, replace_fallbacks, or clear_fallbacks.',
-      );
-      return;
-    }
-    if (typeof provider !== "string" || provider === "" || typeof id !== "string" || id === "") {
-      errorResponse(response, 400, "invalid_request", "\"provider\" and \"id\" must be non-empty strings.");
-      return;
-    }
-    jsonResponse(
-      response,
-      200,
-      await options.catalog.setModelRoute(
-        ghostName,
-        role as GhostModelRole,
-        target,
-        provider,
-        id,
-      ),
-    );
+    jsonResponse(response, 200, await options.models.setChatModel(ghostName, provider, id));
   };
 
   const streamSessionEvents = async (
@@ -1975,16 +1808,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           if (method === "PUT") return await handleSetModel(ghostName, request, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
-        }
-        if (segments.length === 4 && segments[3] === "models") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleListModels(ghostName, url, response);
-        }
-        if (segments.length === 4 && segments[3] === "model-routing") {
-          return await handleModelRouting(ghostName, method, request, response);
         }
         if (segments.length === 4 && segments[3] === "providers") {
           if (method !== "GET") {

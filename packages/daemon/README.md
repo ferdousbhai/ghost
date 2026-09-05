@@ -17,8 +17,8 @@ development guide.
 - [`claude-code.ts`](src/claude-code.ts) — native Claude Code adapter
 - [`pi-extension-bridge.ts`](src/pi-extension-bridge.ts) — runtime-neutral
   extension adapter
-- [`models.ts`](src/models.ts), [`model-catalog.ts`](src/model-catalog.ts) —
-  roles, selection, and model catalog
+- [`models.ts`](src/models.ts), [`model-selection.ts`](src/model-selection.ts) —
+  roles and chat-model selection
 - [`mcp-manager.ts`](src/mcp-manager.ts) — explicit Ghost/project MCP
 - [`hooks.ts`](src/hooks.ts) — awaited harness hooks
 - [`jobs.ts`](src/jobs.ts) — foreground/background Bash lifecycle

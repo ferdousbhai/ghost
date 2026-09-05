@@ -33,7 +33,7 @@ than becoming parallel Ghost frameworks.
   well-known loopback port is detected automatically and drives the ghost when
   nothing else is bound. Frontier models bind only to the teacher and
   specialist roles,
-  `advisor_model`, `task_model`, and `slow_model`, and are reached through
+  `advisor_model`, and are reached through
   `ghostd hook-smol-complete --role advisor` from an owner `session_stop` hook
   and through the specialist CLIs the ghost runs from Bash. Those owner hooks
   are the training signal for the continual-learning flywheel in #64; the

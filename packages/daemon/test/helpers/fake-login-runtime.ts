@@ -9,7 +9,7 @@ import type {
   Credential,
   LoginRuntime,
 } from "../../src/auth.js";
-import { fakePiModel } from "./fake-catalog-runtime.js";
+import { fakePiModel } from "./fake-pi-model.js";
 
 export type LoginImpl = (
   providerId: string,

@@ -34,7 +34,6 @@ import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
 import qs.services
 import qs.components
-import "components/ModelPresentation.js" as ModelPresentation
 
 FloatingWindow {
     id: hud
@@ -43,7 +42,6 @@ FloatingWindow {
     property bool shown: false
     property bool sidebarOpen: true
     property bool loginOpen: false
-    property bool switcherOpen: false
     property bool loginFromSwitcher: false
 
     // Leaving login abandons any client-only model intent and restores the
@@ -52,7 +50,6 @@ FloatingWindow {
     onLoginOpenChanged: {
         if (!hud.loginOpen) {
             Ghostd.cancelLogin();
-            if (modelSwitcher.hasPendingModel) modelSwitcher.clearPendingModel();
         }
     }
     property string currentSection: "chat"
@@ -139,7 +136,6 @@ FloatingWindow {
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
-        hud.switcherOpen = false;
         projectChip.hide();
         hud.currentSection = section;
         if (section === "chat") {
@@ -168,7 +164,6 @@ FloatingWindow {
         // `focuswindow class:ghost` spelling is parsed as invalid Lua.
         Hyprland.dispatch('hl.dsp.focus({ window = "class:ghost" })');
         hud.loginOpen = false;
-        hud.switcherOpen = false;
         hud.currentSection = "chat";
         Ghostd.refresh();
         composer.take();
@@ -184,35 +179,8 @@ FloatingWindow {
         projectChip.hide();
         hud.currentSection = "chat";
         hud.loginFromSwitcher = false;
-        hud.switcherOpen = false;
         hud.loginOpen = true;
         modelLogin.open("");
-    }
-
-    function openSwitcher(): void {
-        projectChip.hide();
-        hud.currentSection = "chat";
-        hud.loginOpen = false;
-        hud.switcherOpen = true;
-        modelSwitcher.open();
-    }
-
-    function openLoginFromSwitcher(): void {
-        projectChip.hide();
-        hud.currentSection = "chat";
-        hud.loginFromSwitcher = true;
-        hud.switcherOpen = false;
-        hud.loginOpen = true;
-        modelLogin.open("");
-    }
-
-    function openLoginForSelectedModel(provider: string): void {
-        projectChip.hide();
-        hud.currentSection = "chat";
-        hud.loginFromSwitcher = false;
-        hud.switcherOpen = false;
-        hud.loginOpen = true;
-        modelLogin.open(provider);
     }
 
     /**
@@ -435,7 +403,7 @@ FloatingWindow {
                         availableHeight: Math.max(260, hud.height - Theme.pad * 2 - 44)
                     }
 
-                    // Current-model indicator → opens the switcher. Shows the
+                    // Current-model indicator → opens the login pane. Shows the
                     // model name (or id), Claude subscription when applicable,
                     // a vision badge, a "default" hint when the pick is only a
                     // fallback, and a CTA when nothing is set.
@@ -450,11 +418,9 @@ FloatingWindow {
                         implicitWidth: indicatorRow.implicitWidth + Theme.pad * 1.5
                         implicitHeight: 28
                         radius: Theme.radius / 2
-                        color: hud.switcherOpen ? Theme.selection
-                            : (indicatorArea.containsMouse ? Theme.hover : "transparent")
-                        border.width: hud.switcherOpen || modelIndicator.noneSet ? 1 : 0
-                        border.color: hud.switcherOpen ? Theme.accent
-                            : (modelIndicator.noneSet ? Theme.warn : Theme.border)
+                        color: indicatorArea.containsMouse ? Theme.hover : "transparent"
+                        border.width: modelIndicator.noneSet ? 1 : 0
+                        border.color: modelIndicator.noneSet ? Theme.warn : Theme.border
 
                         Row {
                             id: indicatorRow
@@ -463,44 +429,21 @@ FloatingWindow {
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                text: hud.switcherOpen ? "Back to chat"
-                                    : (Ghostd.currentModel
-                                        ? (Ghostd.currentModel.name || Ghostd.currentModel.id)
-                                        : "Choose a model")
-                                color: hud.switcherOpen ? Theme.accent
-                                    : (modelIndicator.noneSet ? Theme.warn : Theme.foreground)
+                                text: Ghostd.currentModel
+                                    ? (Ghostd.currentModel.provider + "/" + Ghostd.currentModel.id)
+                                    : "No model: ghost model <provider>/<id>"
+                                color: modelIndicator.noneSet ? Theme.warn : Theme.foreground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
                                 elide: Text.ElideRight
                             }
 
-                            Text {
-                                readonly property string subscription: ModelPresentation
-                                    .subscriptionLabel(Ghostd.currentModel)
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: !hud.switcherOpen && subscription !== ""
-                                text: "· " + subscription
-                                color: Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                            }
 
-                            // Vision badge.
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                visible: !hud.switcherOpen && Ghostd.currentModel
-                                    && Ghostd.currentModel.hasVision === true
-                                text: "· Vision"
-                                color: Theme.foregroundDim
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSizeSmall
-                            }
 
                             // Fallback hint: this model was not explicitly chosen.
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                visible: !hud.switcherOpen && Ghostd.currentModel
-                                    && Ghostd.modelSource === "default"
+                                visible: Ghostd.currentModel && Ghostd.modelSource === "default"
                                 text: "· Default"
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
@@ -513,14 +456,7 @@ FloatingWindow {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (hud.switcherOpen) {
-                                    hud.switcherOpen = false;
-                                    composer.take();
-                                } else {
-                                    hud.openSwitcher();
-                                }
-                            }
+                            onClicked: hud.openLogin()
                         }
                     }
 
@@ -537,7 +473,7 @@ FloatingWindow {
 
             RowLayout {
                 visible: hud.currentSection === "chat"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: Theme.sectionGap
@@ -1092,7 +1028,7 @@ FloatingWindow {
             CharacterPane {
                 id: characterPane
                 visible: hud.currentSection === "character"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onClosed: hud.showSection("chat")
@@ -1103,7 +1039,7 @@ FloatingWindow {
             CommandsBrowser {
                 id: commandsBrowser
                 visible: hud.currentSection === "commands"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onCommandPicked: invocation => {
@@ -1118,7 +1054,7 @@ FloatingWindow {
             HooksBrowser {
                 id: hooksBrowser
                 visible: hud.currentSection === "hooks"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
@@ -1126,7 +1062,7 @@ FloatingWindow {
             SessionResources {
                 id: sessionResources
                 visible: hud.currentSection === "resources"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
@@ -1134,7 +1070,7 @@ FloatingWindow {
             McpBrowser {
                 id: mcpBrowser
                 visible: hud.currentSection === "mcp"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
             }
@@ -1142,24 +1078,12 @@ FloatingWindow {
             RemoteAccess {
                 id: remoteAccess
                 visible: hud.currentSection === "remote"
-                    && !hud.loginOpen && !hud.switcherOpen
+                    && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 onCloseRequested: hud.showSection("chat")
             }
 
-            // Model switcher: swaps in over the transcript body.
-            ModelSwitcher {
-                id: modelSwitcher
-                visible: hud.switcherOpen && !hud.loginOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCloseRequested: {
-                    hud.switcherOpen = false;
-                    composer.take();
-                }
-                onConnectProviderRequested: hud.openLoginFromSwitcher()
-            }
 
             // "Connect a model": swaps in over the transcript body.
             ModelLogin {
@@ -1281,8 +1205,6 @@ FloatingWindow {
         Connections {
             target: Ghostd
             function onModelSwitchCompleted(provider: string, id: string): void {
-                modelSwitcher.clearPendingModel();
-                hud.switcherOpen = false;
                 composer.take();
             }
             function onModelSwitchNeedsLogin(provider: string): void {

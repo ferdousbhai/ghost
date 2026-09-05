@@ -186,7 +186,7 @@ const MOCK_COMMANDS = [
     subcommands: [],
     source: "built-in",
     availability: "partial",
-    unavailableReason: "Model routing is available in Ghost's model switcher; other settings remain file-backed.",
+    unavailableReason: "Models are bound with `ghost model`; other settings remain file-backed.",
   },
   {
     name: "skill:research",
@@ -1497,28 +1497,7 @@ const CATALOG = [
 // connected so the available list is non-empty; the rest route through login.
 const credentialed = new Set(["anthropic", "claude-code"]);
 const roles = new Map();
-const routing = new Map();
-const ROUTE_ROLES = [
-  ["chat_model", "default", "Chat"],
-  ["smol_model", "smol", "Fast"],
-  ["slow_model", "slow", "Thinking"],
-  ["vision_model", "vision", "Vision"],
-  ["plan_model", "plan", "Architect"],
-  ["designer_model", "designer", "Designer"],
-  ["commit_model", "commit", "Commit"],
-  ["tiny_model", "tiny", "Tiny"],
-  ["task_model", "task", "Subtask"],
-  ["advisor_model", "advisor", "Advisor"],
-  ["general_purpose_model", "general", "General purpose"],
-  ["research_model", "research", "Research"],
-];
-const AUTO_ROUTE_ROLES = new Set([
-  "chat_model", "smol_model", "slow_model", "designer_model",
-  "tiny_model", "task_model", "advisor_model",
-]);
-const COMPAT_ROUTE_ROLES = new Set(["general_purpose_model", "research_model"]);
-
-const modelRow = (m) => ({
+const _modelRow = (m) => ({
   provider: m.provider,
   id: m.id,
   name: m.name,
@@ -1541,85 +1520,14 @@ const currentModelRow = (m) => ({
 
 function resolveCurrent(name) {
   const role = roles.get(name);
-  if (role) {
-    const m = CATALOG.find((x) => x.provider === role.provider && x.id === role.id);
-    if (m) {
-      return {
-        current: currentModelRow(m),
-        source: "role",
-      };
-    }
-  }
-  const first = CATALOG.find((x) => credentialed.has(x.provider));
-  if (first) {
-    return {
-      current: currentModelRow(first),
-      source: "default",
-    };
-  }
-  return { current: null, source: "none" };
-}
-
-function listModels(name, params) {
-  const scope = params.get("scope") === "catalog" ? "catalog" : "available";
-  const provider = params.get("provider") || "";
-  const q = (params.get("q") || "").toLowerCase();
-  const limitValue = params.get("limit");
-  const offsetValue = params.get("offset");
-  const limit = limitValue === null ? 100
-    : Math.max(1, Math.min(500, Math.floor(Number(limitValue))));
-  const requestedOffset = offsetValue === null ? 0 : Number(offsetValue);
-  const cur = resolveCurrent(name).current;
-
-  let rows = CATALOG.filter((m) => (scope === "available" ? credentialed.has(m.provider) : true));
-  if (provider) rows = rows.filter((m) => m.provider === provider);
-  if (q) rows = rows.filter((m) => (`${m.id} ${m.name}`).toLowerCase().includes(q));
-  const total = rows.length;
-  const offset = Math.min(total,
-    requestedOffset < 0 ? 0 : Math.floor(requestedOffset));
-  const page = rows.slice(offset, offset + limit).map((m) => {
-    const row = modelRow(m);
-    row.current = Boolean(cur && cur.provider === m.provider && cur.id === m.id);
-    if (scope === "catalog") {
-      row.usable = credentialed.has(m.provider);
-      if (row.usable && !row.connectedVia) row.connectedVia = "api_key";
-    } else {
-      if (!row.connectedVia) row.connectedVia = "api_key";
-    }
-    return row;
-  });
-  return { scope, models: page, total, limit, offset, provider: provider || undefined, q: params.get("q") || undefined };
-}
-
-function routeState(name) {
-  if (!routing.has(name)) routing.set(name, {});
-  const state = routing.get(name);
-  const automatic = resolveCurrent(name).current;
+  if (!role) return { current: null, source: "none" };
+  const m = CATALOG.find((x) => x.provider === role.provider && x.id === role.id);
   return {
-    roles: ROUTE_ROLES.filter(([role]) => !COMPAT_ROUTE_ROLES.has(role) || state[role])
-      .map(([role, ompRole, label]) => {
-      const configured = state[role] || {};
-      const primary = role === "chat_model"
-        ? (configured.primary || roles.get(name)) : configured.primary;
-      const view = (binding) => {
-        if (!binding) return null;
-        const model = CATALOG.find((m) => m.provider === binding.provider && m.id === binding.id);
-        return Object.assign(model ? modelRow(model) : { provider: binding.provider, id: binding.id, hasVision: false }, {
-          resolved: Boolean(model),
-          usable: Boolean(model && credentialed.has(model.provider)),
-        });
-      };
-      return {
-        role,
-        ompRole,
-        label,
-        primary: view(primary),
-        effective: view(primary || (AUTO_ROUTE_ROLES.has(role) ? automatic : null)),
-        source: primary ? "explicit" : (AUTO_ROUTE_ROLES.has(role) && automatic
-          ? "auto" : "unavailable"),
-        fallbacks: (configured.fallbacks || []).map(view),
-      };
-    }),
+    current: {
+      ...(m ? currentModelRow(m) : { provider: role.provider, id: role.id, name: role.id }),
+      runtime: role.provider === "claude-code" ? "claude-code" : "pi",
+    },
+    source: "explicit",
   };
 }
 
@@ -1768,7 +1676,6 @@ const mockServer = createServer(async (req, res) => {
     writtenCharacter.delete(name);
     mcpStore.delete(name);
     roles.delete(name);
-    routing.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
@@ -1792,7 +1699,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     for (const store of [sessionStore, projectStore, deletedContext,
-        writtenCharacter, mcpStore, roles, routing]) {
+        writtenCharacter, mcpStore, roles]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
@@ -2279,73 +2186,15 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "model" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, resolveCurrent(name));
   }
-  if (parts[3] === "models" && parts.length === 4 && req.method === "GET") {
-    for (const field of ["limit", "offset"]) {
-      const value = url.searchParams.get(field);
-      if (value !== null && !Number.isFinite(Number(value))) {
-        return json(res, 400, {
-          error: { message: `"${field}" must be a number.`, code: "invalid_request" },
-        });
-      }
-    }
-    return json(res, 200, listModels(name, url.searchParams));
-  }
   if (parts[3] === "model" && parts.length === 4 && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
+    const body = await readJson(req);
     const provider = typeof body?.provider === "string" ? body.provider : "";
     const id = typeof body?.id === "string" ? body.id : "";
-    if (!CATALOG.some((m) => m.provider === provider && m.id === id)) {
-      return json(res, 400, { error: { message: `unknown model ${provider}/${id}`, code: "unknown_model" } });
+    if (!provider || !id) {
+      return json(res, 400, { error: { message: "A model is written as provider/id.", code: "invalid_request" } });
     }
     roles.set(name, { provider, id });
-    const usable = credentialed.has(provider);
-    const { current, source } = resolveCurrent(name);
-    return json(res, 200, usable
-      ? { ok: true, usable: true, current, source }
-      : { ok: true, usable: false, warning: `${provider} is not connected; sign in to use this model`, current, source });
-  }
-  if (parts[3] === "model-routing" && parts.length === 4 && req.method === "GET") {
-    return json(res, 200, routeState(name));
-  }
-  if (parts[3] === "model-routing" && parts.length === 4 && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
-    const definition = ROUTE_ROLES.find(([role]) => role === body?.role);
-    if (!definition) return json(res, 400, { error: { message: "unknown role", code: "invalid_request" } });
-    if (!routing.has(name)) routing.set(name, {});
-    const state = routing.get(name);
-    const route = state[body.role] || { primary: null, fallbacks: [] };
-    if (body.target === "clear_fallbacks") {
-      route.fallbacks = [];
-    } else if (body.target === "clear_primary") {
-      route.primary = null;
-      if (body.role === "chat_model") roles.delete(name);
-    } else if (body.target === "replace_fallbacks") {
-      if (!Array.isArray(body.fallbacks))
-        return json(res, 400, { error: { message: "fallbacks must be an array", code: "invalid_request" } });
-      const replacement = [];
-      for (const candidate of body.fallbacks) {
-        const model = CATALOG.find((m) => m.provider === candidate?.provider && m.id === candidate?.id);
-        if (!model)
-          return json(res, 400, { error: { message: "unknown model", code: "unknown_model" } });
-        replacement.push({ provider: model.provider, id: model.id });
-      }
-      route.fallbacks = replacement;
-    } else {
-      const model = CATALOG.find((m) => m.provider === body.provider && m.id === body.id);
-      if (!model) return json(res, 400, { error: { message: "unknown model", code: "unknown_model" } });
-      const binding = { provider: model.provider, id: model.id };
-      if (body.target === "primary") {
-        route.primary = binding;
-        if (body.role === "chat_model") roles.set(name, binding);
-      } else if (body.target === "fallback") {
-        if (!route.fallbacks.some((item) => item.provider === binding.provider && item.id === binding.id))
-          route.fallbacks.push(binding);
-      } else {
-        return json(res, 400, { error: { message: "unknown target", code: "invalid_request" } });
-      }
-    }
-    state[body.role] = route;
-    return json(res, 200, routeState(name));
+    return json(res, 200, resolveCurrent(name));
   }
 
   if (parts[3] === "providers" && req.method === "GET") {

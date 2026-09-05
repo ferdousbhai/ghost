@@ -1,15 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
-import { ModelCatalog } from "../src/model-catalog.js";
-import { readGhostModels } from "../src/models.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { deferred } from "./helpers/fake-login-runtime.js";
-import { makeFakeCatalogRuntime, sampleCatalog } from "./helpers/fake-catalog-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
@@ -149,77 +145,6 @@ describe("path-bound mutations during whole-home moves", () => {
     expect(coordinator.moveReservationCount).toBe(0);
   });
 
-  it("drains deferred model runtime construction before rename and moves the completed change", async () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    seedGhost(temp.root, { name: "casper" });
-    host = makeSessionHost(temp);
-    const coordinator = new HomeOperationCoordinator(temp.registry);
-    const constructionStarted = deferred<void>();
-    const finishConstruction = deferred<void>();
-    let runtimeCalls = 0;
-    const catalog = new ModelCatalog({
-      registry: temp.registry,
-      homeOperations: coordinator,
-      offline: true,
-      createRuntime: async () => {
-        runtimeCalls += 1;
-        if (runtimeCalls === 1) {
-          constructionStarted.resolve();
-          await finishConstruction.promise;
-        }
-        return makeFakeCatalogRuntime({
-          models: sampleCatalog(),
-          credentialed: ["openai-codex"],
-        });
-      },
-      claudeCodeStatus: async () => null,
-    });
-    listening = await startDaemonServer({
-      registry: temp.registry,
-      host,
-      catalog,
-      homeOperations: coordinator,
-      port: 0,
-      relay: null,
-      apiToken: null,
-    });
-    const base = `http://127.0.0.1:${listening.port}`;
-    const selection = jsonRequest(`${base}/api/ghosts/casper/model`, "PUT", {
-      provider: "openai-codex",
-      id: "gpt-5-codex",
-    });
-    await constructionStarted.promise;
-
-    const rename = jsonRequest(`${base}/api/ghosts/casper/name`, "PUT", { name: "wisp" });
-    await waitForMove(coordinator);
-    const blocked = await jsonRequest(`${base}/api/ghosts/casper/model`, "PUT", {
-      provider: "openai-codex",
-      id: "gpt-5-mini",
-    });
-    expect(blocked.status).toBe(409);
-    expect(await blocked.json()).toMatchObject({ error: { code: "ghost_busy" } });
-    expect(runtimeCalls).toBe(1);
-
-    finishConstruction.resolve();
-    const [selected, renamed] = await Promise.all([selection, rename]);
-    expect(selected.status).toBe(200);
-    expect(renamed.status).toBe(200);
-    expect(existsSync(join(temp.root, "casper"))).toBe(false);
-    const movedModels = readGhostModels(ghostPaths(join(temp.root, "wisp")).home);
-    expect(movedModels?.roles?.chat_model).toEqual({
-      provider: "openai-codex",
-      modelId: "gpt-5-codex",
-    });
-    expect(coordinator.moveReservationCount).toBe(0);
-
-    const after = await jsonRequest(`${base}/api/ghosts/wisp/model`, "PUT", {
-      provider: "openai-codex",
-      id: "gpt-5-mini",
-    });
-    expect(after.status).toBe(200);
-  });
-
   it("drains a deferred MCP writer before delete without recreating the old home", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
@@ -294,43 +219,5 @@ describe("path-bound mutations during whole-home moves", () => {
     });
     expect(replacement.status).toBe(201);
     expect(writerCalls).toBe(2);
-  });
-
-  it("releases the operation gate when SessionHost refuses the reserved move", async () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    seedGhost(temp.root, { name: "casper" });
-    seedGhost(temp.root, { name: "wisp" });
-    host = makeSessionHost(temp);
-    const coordinator = new HomeOperationCoordinator(temp.registry);
-    const catalog = new ModelCatalog({
-      registry: temp.registry,
-      homeOperations: coordinator,
-      offline: true,
-      createRuntime: async () => makeFakeCatalogRuntime({
-        models: sampleCatalog(),
-        credentialed: ["openai-codex"],
-      }),
-      claudeCodeStatus: async () => null,
-    });
-    listening = await startDaemonServer({
-      registry: temp.registry,
-      host,
-      catalog,
-      homeOperations: coordinator,
-      port: 0,
-      relay: null,
-      apiToken: null,
-    });
-    const base = `http://127.0.0.1:${listening.port}`;
-
-    const refused = await jsonRequest(`${base}/api/ghosts/casper/name`, "PUT", { name: "wisp" });
-    expect(refused.status).toBe(409);
-    expect(coordinator.moveReservationCount).toBe(0);
-    const mutation = await jsonRequest(`${base}/api/ghosts/casper/model`, "PUT", {
-      provider: "openai-codex",
-      id: "gpt-5-codex",
-    });
-    expect(mutation.status).toBe(200);
   });
 });
