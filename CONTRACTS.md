@@ -74,8 +74,11 @@ The lifecycle implementation and crash recovery are in
 `settings.yml` may name the ghost's own git clone of this repository, as a
 `self:` mapping with a `checkout:` value that is an absolute path under the
 owner home; any other value reads as unset. It feeds the self-maintenance
-policy only. It is never auto-bound: the owner trusts and binds that checkout
-through the same explicit project boundary as any other project.
+policy only. Naming it grants nothing the ghost's ordinary file tools and Bash
+do not already have; the checkout's own skills, rules, and MCP load only when
+the owner binds it as a conversation's project like any other. `settings.yml`
+may also name `cwd:`, the directory a new conversation starts in, under the
+same absolute-and-under-the-owner-home rule.
 
 ### Character and memory
 
@@ -227,8 +230,8 @@ skill into each runtime's standard skill index. Owner documents are read only
 when relevant, with the runtime's own file and search tools, never injected
 automatically at session start.
 
-The operational cwd defaults to the owner home and may be rebound to one
-trusted project. Ghost home remains a separately named private resource root.
+The operational cwd defaults to `settings.yml` `cwd:`, else the owner home,
+and may be rebound to one trusted project. Ghost home remains a separately named private resource root.
 Prompt indexes are session-start snapshots; current data is read through the
 owning tool when needed.
 

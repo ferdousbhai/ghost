@@ -90,14 +90,15 @@ The path must be absolute and under the owner's home. Anything else is ignored
 rather than treated as an error. The value is read when a session opens, so a
 change applies to new conversations, not to one already running.
 
-Naming the checkout does not grant access to it. Project trust stays explicit:
-bind the clone as the conversation's trusted project through the HUD project
-chip, the same way you would bind any other project. A ghost cannot bind one for
-itself.
+Naming the checkout grants nothing the ghost's file tools and Bash do not
+already have: it edits the clone directly. Set `cwd:` in the same
+`settings.yml` to start new conversations inside it. Binding the clone as the
+conversation's trusted project through the HUD project chip is still what
+admits its skills, rules, and MCP, the same as for any other project.
 
 ## The loop
 
-What the ghost does, once the checkout is bound:
+What the ghost does:
 
 1. Read the clone's `CLAUDE.md` and `CONTRACTS.md` first. They are its self map.
 2. Branch, edit, run the touched package tests and `typecheck`.

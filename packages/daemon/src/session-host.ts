@@ -139,7 +139,7 @@ export {
 };
 import { pathIsWithin } from "./path-within.js";
 import type { RunningSource } from "./running-source.js";
-import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
+import { renderSelfMaintenancePolicy, resolveSelfCheckout, resolveSettingsCwd } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { loadGhostHookExtensions } from "./hook-extensions.js";
@@ -2153,7 +2153,9 @@ export class SessionHost {
       legacyCwd = defaults.cwd;
       canRebind = defaults.canRebind;
     }
+    const defaultCwd = resolveSettingsCwd(loadGhostSettings(ghost.dir), this.ownerHome);
     return this.projectBindings.read(paths.sessionDir, identity.id, runtime, conversationId, {
+      ...(defaultCwd ? { defaultCwd } : {}),
       ...(runtime === "pi"
         ? {
             legacyCwd: () => legacyPiSessionCwd(

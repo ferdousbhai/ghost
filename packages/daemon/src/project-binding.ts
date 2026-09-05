@@ -851,6 +851,8 @@ export class ProjectBindingStore {
     conversationId: string,
     options: {
       legacyCwd?: string | (() => Promise<string | undefined>);
+      /** Where an unbound conversation with no recorded cwd starts; the owner home when omitted. */
+      defaultCwd?: string;
       canRebind?: boolean;
     } = {},
   ): Promise<ProjectBindingState> {
@@ -905,7 +907,7 @@ export class ProjectBindingStore {
       : typeof options.legacyCwd === "function"
         ? await options.legacyCwd()
         : options.legacyCwd;
-    const cwd = stored?.cwd ?? resolve(legacyCwd ?? this.ownerHome);
+    const cwd = stored?.cwd ?? resolve(legacyCwd ?? options.defaultCwd ?? this.ownerHome);
     const root = stored?.root ?? null;
     return {
       id,

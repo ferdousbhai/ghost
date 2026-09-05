@@ -618,6 +618,25 @@ describe("SessionHost.open", () => {
     expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
   });
 
+  it("starts a new conversation in the settings.yml cwd when one is named", async () => {
+    const { dir } = await setup();
+    const workspace = join(temp!.ownerHome, "workspace");
+    mkdirSync(workspace, { recursive: true });
+    writeFileSync(ghostPaths(dir).settingsFile, `cwd: ${workspace}\n`);
+
+    const handle = await host!.open("casper", "conv-settings-cwd");
+    expect(handle.session.sessionManager.getCwd()).toBe(workspace);
+    expect((await host!.getProject("casper", "conv-settings-cwd", "pi")).root).toBeNull();
+  });
+
+  it("ignores a settings.yml cwd outside the owner home", async () => {
+    const { dir } = await setup();
+    writeFileSync(ghostPaths(dir).settingsFile, "cwd: /srv/elsewhere\n");
+
+    const handle = await host!.open("casper", "conv-bad-cwd");
+    expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
+  });
+
   it("loads one trusted project snapshot while keeping executable project code disabled", async () => {
     await setup(undefined, {
       retention: { idleTtlMs: 0, maxSessions: 1 },

@@ -21,11 +21,23 @@ export function resolveSelfCheckout(
   settings: GhostSettings,
   ownerHome: string,
 ): string | null {
-  const configured = settings.getString("self.checkout")?.trim();
-  if (!configured || !isAbsolute(configured)) return null;
-  const checkout = resolve(configured);
-  if (checkout === resolve(ownerHome) || !pathIsWithin(ownerHome, checkout)) return null;
-  return checkout;
+  return ownerHomeDirectory(settings.getString("self.checkout"), ownerHome);
+}
+
+/**
+ * `cwd` names where a new conversation starts, the owner home when unset. The
+ * same rule as `self.checkout`: absolute, under the owner home, else unset.
+ */
+export function resolveSettingsCwd(settings: GhostSettings, ownerHome: string): string | null {
+  return ownerHomeDirectory(settings.getString("cwd"), ownerHome);
+}
+
+function ownerHomeDirectory(configured: string | undefined, ownerHome: string): string | null {
+  const trimmed = configured?.trim();
+  if (!trimmed || !isAbsolute(trimmed)) return null;
+  const path = resolve(trimmed);
+  if (path === resolve(ownerHome) || !pathIsWithin(ownerHome, path)) return null;
+  return path;
 }
 
 /** Same directory on disk, following symlinks, without failing on a missing one. */
@@ -66,7 +78,7 @@ function checkoutLines(input: SelfMaintenanceInput): string[] {
   const isRunningRoot = running?.root != null && sameDirectory(checkout, running.root);
   return [
     `Your own checkout is ${JSON.stringify(checkout)}.`,
-    "The owner has to bind it as this conversation's trusted project through the HUD project chip before you can edit it — you cannot bind it yourself, so ask.",
+    "Edit it directly with your file tools and Bash; no binding or approval comes first.",
     "Read its `CLAUDE.md` and `CONTRACTS.md` first. They are your self map.",
     isRunningRoot
       ? "This checkout is what runs you: edits go live after build + restart."
