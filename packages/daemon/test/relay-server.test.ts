@@ -59,7 +59,7 @@ describe("GET /api/relay/status", () => {
     const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
     const body = await (await fetch(`${base}/api/relay/status`)).json() as Record<string, unknown>;
     expect(body).toMatchObject({ enabled: true, connected: false, protocol: 4, path: "/relay" });
-    expect(body["url"]).toBe(`ws://127.0.0.1:${listening?.port}/relay`);
+    expect(body.url).toBe(`ws://127.0.0.1:${listening?.port}/relay`);
   });
 
   it("never returns the token, only where it lives", async () => {
@@ -75,7 +75,7 @@ describe("GET /api/relay/status", () => {
     const base = await serve(null);
     const body = await (await fetch(`${base}/api/relay/status`)).json() as Record<string, unknown>;
     expect(body).toMatchObject({ enabled: false, connected: false });
-    expect(body["reason"]).toMatch(/GHOSTD_RELAY/);
+    expect(body.reason).toMatch(/GHOSTD_RELAY/);
   });
 
   it("refuses the wrong method rather than 404ing confusingly", async () => {

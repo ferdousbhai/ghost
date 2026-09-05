@@ -135,7 +135,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "memory", "commands", "hooks", "resources", "mcp", "remote", "character"]
+        if (["chat", "commands", "hooks", "resources", "mcp", "remote", "character"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -152,8 +152,6 @@ FloatingWindow {
             Ghostd.fetchSessionResources(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
-        } else if (section === "memory") {
-            Ghostd.fetchMemory(false);
         } else if (section === "character") {
             Ghostd.fetchCharacter(false);
         }
@@ -1085,16 +1083,8 @@ FloatingWindow {
                 }
             }
 
-            // Memory and character replace chat rather than nesting its
-            // roster/conversation sidebar inside their own surface.
-            MemoryList {
-                id: memoryList
-                visible: hud.currentSection === "memory"
-                    && !hud.loginOpen && !hud.switcherOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-
+            // Character replaces chat rather than nesting its roster/conversation
+            // sidebar inside its own surface.
             // The persona edits through the daemon's validating writer rather
             // than the workbench's direct file editor (which remains for
             // ordinary files): the daemon owns the size cap, so a bad edit is

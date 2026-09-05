@@ -10,7 +10,6 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { GhostHomeDigestReaders } from "../src/extensions.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { homeOperationsFor } from "../src/home-operations.js";
 import type { Logger } from "../src/log.js";
@@ -250,7 +249,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
   });
 
   for (const code of ["EACCES", "EIO"] as const) {
-    it(`keeps the route at 200 and preserves memory when character reads fail with ${code}`, async () => {
+    it(`keeps the route at 200 when character reads fail with ${code}`, async () => {
       const logger = recordingLogger("warn");
       const failure = () => {
         throw Object.assign(new Error("SENSITIVE-/owner/ghosts/casper/character.md"), { code });
@@ -267,14 +266,6 @@ describe("POST /api/ghosts/:name/greeting", () => {
           readRawCharacter: failure,
           inputReaders: {
             character: async () => failure(),
-            memory: async () => ({
-              files: [{
-                slug: "survives",
-                content: "kept",
-                updated: "2026-08-27",
-              }],
-              skipped: [],
-            }),
           },
         },
       });
@@ -286,44 +277,9 @@ describe("POST /api/ghosts/:name/greeting", () => {
         onboarding: false,
       });
       expect(seen?.character).toBeNull();
-      expect(seen?.memoryLines).toEqual(["survives"]);
       expect(JSON.stringify(logger.records)).toContain('"input":"character"');
       expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
       expect(JSON.stringify(logger.records)).not.toContain("character.md");
-    });
-  }
-
-  for (const testCase of [
-    { label: "memory EACCES", code: "EACCES" },
-    { label: "memory EIO", code: "EIO" },
-  ]) {
-    it(`preserves every successful greeting input when ${testCase.label} is unavailable`, async () => {
-      const logger = recordingLogger("warn");
-      const failed = async (): Promise<never> => {
-        throw Object.assign(new Error("SENSITIVE-INPUT-PATH"), { code: testCase.code });
-      };
-      let seen: Parameters<GreetingGenerator>[0]["context"] | undefined;
-      const readers: GhostHomeDigestReaders = {
-        character: async () => ({ title: "Casper", body: "CHARACTER_SURVIVES" }),
-        memory: failed,
-      };
-      const base = await serve({
-        written: true,
-        logger,
-        generate: async ({ context }) => {
-          seen = context;
-          return "Hello despite a missing input.";
-        },
-        greeting: { inputReaders: readers },
-      });
-
-      const { status, body } = await postGreeting(base);
-      expect(status).toBe(200);
-      expect(body.greeting).toBe("Hello despite a missing input.");
-      expect(seen?.character).toBe("CHARACTER_SURVIVES");
-      expect(seen?.memoryLines).toEqual([]);
-      expect(JSON.stringify(logger.records)).toContain('"input":"memory"');
-      expect(JSON.stringify(logger.records)).not.toContain("SENSITIVE-");
     });
   }
 
@@ -337,7 +293,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
         readRawCharacter: () => {
           throw Object.assign(new Error("SENSITIVE-RAW-CHARACTER"), { code: "EACCES" });
         },
-        inputReaders: { character: failed, memory: failed },
+        inputReaders: { character: failed },
       },
     });
 

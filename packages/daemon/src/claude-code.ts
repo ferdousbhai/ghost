@@ -55,7 +55,6 @@ import { validateServerName } from "./mcp-config.js";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
-  deriveMemoryIndex,
   openGhostHome,
   openRegularFileNoFollow,
   resolveDocumentsDirectory,
@@ -1431,15 +1430,11 @@ async function buildPersona(
   self: { ownerHome: string; running: RunningSource | null; sessionId: string },
 ): Promise<string> {
   const home = openGhostHome(homeDir);
-  const [character, memory] = await Promise.all([
-    home.readCharacter(),
-    home.listMemory(),
-  ]);
+  const character = await home.readCharacter();
   return buildGhostSystemPrompt({
     ghostName,
     character,
-    memoryRoot: home.memoryDir,
-    memory: deriveMemoryIndex(memory.files),
+    homeDir: home.dir,
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,

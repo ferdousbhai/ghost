@@ -4,29 +4,16 @@
  * boundary for quotas and file contents.
  */
 import {
-  lstat,
   mkdir,
   open,
-  readdir,
   rename,
   unlink,
   type FileHandle,
 } from "node:fs/promises";
 import { constants, type BigIntStats } from "node:fs";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
-import { GhostError, MemoryFileFormatError } from "./errors.js";
-import {
-  assertWritableMemory,
-  coerceMemorySlug,
-  MAX_MEMORY_FILE_BYTES,
-  MAX_MEMORY_FILES,
-  memoryFileName,
-  memorySlugForText,
-  parseMemoryFile,
-  redactMemorySecrets,
-  serializeMemoryFile,
-} from "./memory-file.js";
+import { GhostError } from "./errors.js";
 import {
   descriptorPath,
   openConfinedDirectory,
@@ -35,165 +22,16 @@ import {
   openRegularFileNoFollow,
   withDescriptorLock,
 } from "./linux-fs.js";
-import type {
-  CharacterFile,
-  MemoryRecord,
-} from "./types.js";
+import type { CharacterFile } from "./types.js";
 
-export const MEMORY_DIRNAME = "memory";
-export const MEMORY_TRASH_DIRNAME = ".trash";
 export const CHARACTER_FILENAME = "character.md";
 export const MAX_CHARACTER_BODY_LENGTH = 20_000;
-
-const MEMORY_INTENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
 export interface SkippedFile {
   readonly path: string;
   readonly reason: string;
 }
 
-export interface MemoryListing {
-  readonly files: readonly MemoryRecord[];
-  readonly skipped: readonly SkippedFile[];
-}
-
-export interface MemoryWriteInput {
-  readonly name?: string;
-  readonly content: string;
-}
-
-export interface MemoryWriteResult {
-  readonly slug: string;
-  readonly path: string;
-  readonly created: boolean;
-}
-
-export interface MemoryWriteIntent {
-  readonly id: string;
-  readonly path: `memory/${string}.md`;
-  readonly before: string | null;
-  /** Exact serialized Markdown that will be atomically published. */
-  readonly after: string;
-  readonly beforeSha256: string | null;
-  readonly afterSha256: string;
-}
-
-export interface MemoryWriteReceipt extends MemoryWriteIntent {
-  readonly operation: "created" | "updated";
-}
-
-export interface MemoryWriteWithReceiptResult {
-  readonly written: MemoryWriteResult;
-  readonly receipt: MemoryWriteReceipt;
-}
-
-export interface MemoryDeleteResult {
-  readonly slug: string;
-  readonly path: `memory/${string}.md`;
-  readonly trash: `.trash/${string}.md`;
-}
-
-export interface MemoryDeleteIntent {
-  readonly id: string;
-  readonly path: `memory/${string}.md`;
-  readonly before: string;
-  readonly beforeSha256: string;
-  readonly trash: `.trash/${string}.md`;
-}
-
-export interface MemoryDeleteReceipt extends MemoryDeleteIntent {
-  readonly operation: "deleted";
-}
-
-export interface MemoryDeleteWithReceiptResult {
-  readonly deleted: MemoryDeleteResult;
-  readonly receipt: MemoryDeleteReceipt;
-}
-
-export type MemoryReadStage = "opened" | "read";
-
-export interface GhostHomeOptions {
-  /** Deterministic descriptor-race injection for filesystem-boundary tests. */
-  readonly memoryReadProbe?: (
-    stage: MemoryReadStage,
-    path: string,
-  ) => void | Promise<void>;
-}
-
-function sha256(text: string): string {
-  return createHash("sha256").update(text).digest("hex");
-}
-
-function memoryIntentName(intent: MemoryWriteIntent): { name: string; slug: string } {
-  const prefix = `${MEMORY_DIRNAME}/`;
-  if (!intent.path.startsWith(prefix)) {
-    throw new GhostError("invalid_format", "A memory replay intent has an invalid path.");
-  }
-  const name = intent.path.slice(prefix.length);
-  const slug = coerceMemorySlug(name);
-  if (intent.before !== null) assertAdmittedMemorySource(intent.before, intent.path);
-  assertAdmittedMemorySource(intent.after, intent.path);
-  if (intent.path !== `${prefix}${memoryFileName(slug)}`
-    || !MEMORY_INTENT_UUID.test(intent.id)
-    || intent.afterSha256 !== sha256(intent.after)
-    || intent.beforeSha256 !== (intent.before === null ? null : sha256(intent.before))
-    || serializeMemoryFile(parseMemoryFile(intent.after).content) !== intent.after) {
-    throw new GhostError("invalid_format", "A memory replay intent failed exact validation.");
-  }
-  return { name, slug };
-}
-
-function parseMemoryTrashFileName(name: string): string {
-  if (!name.endsWith(".md")) {
-    throw new GhostError("invalid_format", "A memory trash entry must use the .md extension.");
-  }
-  const slug = name.slice(0, -".md".length);
-  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug) || slug.length > 240) {
-    throw new GhostError("invalid_format", "A memory trash entry has an invalid name.");
-  }
-  return slug;
-}
-
-function validMemoryTrashSlug(slug: string, trashSlug: string): boolean {
-  if (trashSlug === slug) return true;
-  if (!trashSlug.startsWith(`${slug}-`)) return false;
-  const suffixText = trashSlug.slice(slug.length + 1);
-  const suffix = Number(suffixText);
-  return Number.isSafeInteger(suffix) && suffix >= 2 && String(suffix) === suffixText;
-}
-
-function assertValidMemoryDeleteIntent(intent: MemoryDeleteIntent): void {
-  const prefix = `${MEMORY_DIRNAME}/`;
-  const trashPrefix = `${MEMORY_TRASH_DIRNAME}/`;
-  if (!intent.path.startsWith(prefix) || !intent.trash.startsWith(trashPrefix)) {
-    throw new GhostError("invalid_format", "A memory delete intent has an invalid path.");
-  }
-  const slug = coerceMemorySlug(intent.path.slice(prefix.length));
-  const trashSlug = parseMemoryTrashFileName(intent.trash.slice(trashPrefix.length));
-  assertAdmittedMemorySource(intent.before, intent.path);
-  if (intent.path !== `${prefix}${memoryFileName(slug)}`
-    || !validMemoryTrashSlug(slug, trashSlug)
-    || !MEMORY_INTENT_UUID.test(intent.id)
-    || intent.beforeSha256 !== sha256(intent.before)) {
-    throw new GhostError("invalid_format", "A memory delete intent failed exact validation.");
-  }
-}
-
-async function collisionFreeMemoryTrashName(
-  trashDirectory: FileHandle,
-  slug: string,
-): Promise<string> {
-  const entries = new Set(await readdir(descriptorPath(trashDirectory)));
-  // One more candidate than existing entries always leaves a free name.
-  for (let suffix = 1; suffix <= entries.size + 1; suffix += 1) {
-    const name = memoryFileName(suffix === 1 ? slug : `${slug}-${suffix}`);
-    if (!entries.has(name)) return name;
-  }
-  throw new GhostError(
-    "limit_exceeded",
-    `Memory trash already holds too many entries for ${memoryFileName(slug)}.`,
-  );
-}
 
 const fileMutationQueues = new Map<string, Promise<unknown>>();
 
@@ -208,11 +46,11 @@ async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>):
   }
 }
 
-function message(error: unknown): string {
+function _message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function resolveWithin(base: string, relativePath: string, label: string): string {
+function _resolveWithin(base: string, relativePath: string, label: string): string {
   const full = resolve(base, relativePath);
   if (full !== base && !full.startsWith(base + sep)) {
     throw new GhostError(
@@ -238,7 +76,7 @@ interface ReadTextFile {
   readonly modified: Date;
 }
 
-function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+function _sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.isFile() && right.isFile()
     && left.dev === right.dev
     && left.ino === right.ino
@@ -247,104 +85,6 @@ function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
     && left.ctimeNs === right.ctimeNs
     && left.mode === right.mode
     && left.nlink === right.nlink;
-}
-
-function invalidMemoryBytes(path: string, reason: string): MemoryFileFormatError {
-  return new MemoryFileFormatError(
-    `Memory file ${JSON.stringify(path)} ${reason}.`,
-    { path, limit: MAX_MEMORY_FILE_BYTES },
-  );
-}
-
-function normalizeMemoryReadError(error: unknown, path: string): never {
-  if (error instanceof GhostError) throw error;
-  throw invalidMemoryBytes(path, `could not be read safely: ${message(error)}`);
-}
-
-function memoryChanged(path: string): GhostError {
-  return new GhostError(
-    "conflict",
-    `Memory file ${JSON.stringify(path)} changed while it was being read.`,
-    { path },
-  );
-}
-
-function assertAdmittedMemorySource(text: string, path: string): void {
-  if (Buffer.byteLength(text) > MAX_MEMORY_FILE_BYTES) {
-    throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
-  }
-  parseMemoryFile(text);
-}
-
-/**
- * Read one complete memory through its pinned directory entry. The initial
- * descriptor size is admitted before allocating or decoding any file data.
- */
-async function readPinnedMemoryTextFile(
-  directory: FileHandle,
-  name: string,
-  path: string,
-  probe?: GhostHomeOptions["memoryReadProbe"],
-): Promise<ReadTextFile | null> {
-  let file: FileHandle;
-  try {
-    file = await openRegularFileNoFollow(
-      descriptorPath(directory, name),
-      "Memory file",
-    );
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    return normalizeMemoryReadError(error, path);
-  }
-  try {
-    const before = await file.stat({ bigint: true });
-    if (!before.isFile()) throw invalidMemoryBytes(path, "is not a regular file");
-    if (before.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
-      throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
-    }
-    await probe?.("opened", path);
-
-    const bytes = Buffer.alloc(Number(before.size) + 1);
-    let length = 0;
-    while (length < bytes.length) {
-      const result = await file.read(bytes, length, bytes.length - length, length);
-      if (result.bytesRead === 0) break;
-      length += result.bytesRead;
-    }
-    await probe?.("read", path);
-
-    const after = await file.stat({ bigint: true });
-    if (length > MAX_MEMORY_FILE_BYTES || after.size > BigInt(MAX_MEMORY_FILE_BYTES)) {
-      throw invalidMemoryBytes(path, `exceeds its ${MAX_MEMORY_FILE_BYTES}-byte limit`);
-    }
-    if (BigInt(length) !== before.size || !sameFileIdentity(before, after)) {
-      throw memoryChanged(path);
-    }
-
-    let live: BigIntStats;
-    try {
-      live = await lstat(descriptorPath(directory, name), { bigint: true });
-    } catch {
-      throw memoryChanged(path);
-    }
-    if (!sameFileIdentity(after, live)) {
-      throw memoryChanged(path);
-    }
-
-    try {
-      // Preserve an admitted UTF-8 BOM as U+FEFF so receipt comparisons and
-      // hashes round-trip the exact owner-authored bytes.
-      const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true })
-        .decode(bytes.subarray(0, length));
-      return { text, modified: after.mtime };
-    } catch {
-      throw invalidMemoryBytes(path, "is not valid UTF-8");
-    }
-  } catch (error) {
-    return normalizeMemoryReadError(error, path);
-  } finally {
-    await file.close().catch(() => undefined);
-  }
 }
 
 async function readConfinedTextFile(
@@ -436,7 +176,7 @@ async function atomicWriteFile(
   }
 }
 
-async function openOrCreateChildDirectory(
+async function _openOrCreateChildDirectory(
   parent: FileHandle,
   name: string,
   label: string,
@@ -453,24 +193,14 @@ async function openOrCreateChildDirectory(
 export class GhostHome {
   readonly dir: string;
   readonly name: string;
-  readonly #memoryReadProbe?: GhostHomeOptions["memoryReadProbe"];
 
-  constructor(dir: string, options: GhostHomeOptions = {}) {
+  constructor(dir: string) {
     this.dir = resolve(dir);
     this.name = basename(this.dir);
-    this.#memoryReadProbe = options.memoryReadProbe;
   }
 
   get characterPath(): string {
     return join(this.dir, CHARACTER_FILENAME);
-  }
-
-  get memoryDir(): string {
-    return join(this.dir, MEMORY_DIRNAME);
-  }
-
-  get memoryTrashDir(): string {
-    return join(this.dir, MEMORY_TRASH_DIRNAME);
   }
 
   relative(absolutePath: string): string {
@@ -485,18 +215,7 @@ export class GhostHome {
       const directory = await openConfinedDirectory(this.dir, this.dir, {
         label: "Ghost home",
       });
-      try {
-        await withDescriptorLock(directory, async () => {
-          const memory = await openOrCreateChildDirectory(
-            directory,
-            MEMORY_DIRNAME,
-            "Memory path",
-          );
-          await memory.close();
-        });
-      } finally {
-        await directory.close();
-      }
+      await directory.close();
     });
   }
 
@@ -538,363 +257,8 @@ export class GhostHome {
       await atomicWriteFile(this.dir, this.characterPath, input.body);
     });
   }
-
-  async listMemory(): Promise<MemoryListing> {
-    const dir = this.memoryDir;
-    const files: MemoryRecord[] = [];
-    const skipped: SkippedFile[] = [];
-    let directory: FileHandle;
-    try {
-      directory = await openConfinedDirectory(this.dir, dir, { label: "Memory path" });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { files, skipped };
-      throw error;
-    }
-    try {
-      await this.listMemoryFromDirectory(directory, files, skipped);
-    } finally {
-      await directory.close();
-    }
-    files.sort((left, right) => left.slug.localeCompare(right.slug));
-    return { files, skipped };
-  }
-
-  private async listMemoryFromDirectory(
-    directory: FileHandle,
-    files: MemoryRecord[],
-    skipped: SkippedFile[],
-  ): Promise<void> {
-    for (const entry of await readdir(descriptorPath(directory), {
-      withFileTypes: true,
-    })) {
-      if (entry.name.startsWith(".") || !entry.name.endsWith(".md")) continue;
-      const relativePath = `${MEMORY_DIRNAME}/${entry.name}`;
-      try {
-        const source = await readPinnedMemoryTextFile(
-          directory,
-          entry.name,
-          relativePath,
-          this.#memoryReadProbe,
-        );
-        if (source === null) continue;
-        const parsed = parseMemoryFile(source.text);
-        files.push({
-          slug: coerceMemorySlug(entry.name),
-          content: parsed.content,
-          updated: source.modified.toISOString(),
-        });
-      } catch (error) {
-        skipped.push({ path: relativePath, reason: message(error) });
-      }
-    }
-  }
-
-  async readMemory(name: string): Promise<MemoryRecord> {
-    const slug = coerceMemorySlug(name);
-    const fileName = memoryFileName(slug);
-    const path = `${MEMORY_DIRNAME}/${fileName}`;
-    const source = await this.readMemoryEntry(fileName, path);
-    if (source === null) {
-      throw new GhostError(
-        "not_found",
-        `No memory file named ${fileName}.`,
-        { name: fileName },
-      );
-    }
-    const parsed = parseMemoryFile(source.text);
-    return {
-      slug,
-      content: parsed.content,
-      updated: source.modified.toISOString(),
-    };
-  }
-
-  /**
-   * Exact serialized bytes for a memory receipt/recovery comparison.
-   * Presentation fields are derived and therefore cannot be used to
-   * reconstruct owner-authored whitespace byte-for-byte.
-   */
-  async readMemorySource(name: string): Promise<string> {
-    const slug = coerceMemorySlug(name);
-    const fileName = memoryFileName(slug);
-    const source = await this.readMemoryEntry(
-      fileName,
-      `${MEMORY_DIRNAME}/${fileName}`,
-    );
-    if (source === null) {
-      throw new GhostError(
-        "not_found",
-        `No memory file named ${fileName}.`,
-        { name: fileName },
-      );
-    }
-    assertAdmittedMemorySource(source.text, `${MEMORY_DIRNAME}/${fileName}`);
-    return source.text;
-  }
-
-  private async readMemoryEntry(name: string, path: string): Promise<ReadTextFile | null> {
-    let directory: FileHandle;
-    try {
-      directory = await openConfinedDirectory(this.dir, this.memoryDir, {
-        label: "Memory path",
-      });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-      return normalizeMemoryReadError(error, path);
-    }
-    try {
-      return await readPinnedMemoryTextFile(
-        directory,
-        name,
-        path,
-        this.#memoryReadProbe,
-      );
-    } finally {
-      await directory.close();
-    }
-  }
-
-  /** Create or replace exactly one atomic memory file. */
-  async writeMemory(
-    input: MemoryWriteInput,
-  ): Promise<MemoryWriteResult> {
-    return (await this.writeMemoryWithReceipt(input, async () => {})).written;
-  }
-
-  /**
-   * Publish one memory write with an exact, pre-publication receipt boundary.
-   * The callback runs under the memory mutation queue and descriptor lock, so
-   * durable callers can journal the precise before/after bytes before rename.
-   */
-  async writeMemoryWithReceipt(
-    input: MemoryWriteInput,
-    beforePublish: (intent: MemoryWriteIntent) => Promise<void>,
-  ): Promise<MemoryWriteWithReceiptResult> {
-    const content = redactMemorySecrets(input.content);
-    assertWritableMemory(content);
-    const slug = input.name
-      ? coerceMemorySlug(input.name)
-      : memorySlugForText(content);
-    const dir = this.memoryDir;
-    const full = resolveWithin(dir, memoryFileName(slug), "Memory file");
-    const text = serializeMemoryFile(content);
-
-    // The quota spans the directory, so new names must share one queue. A
-    // per-file queue lets parallel creates all observe the same free slot.
-    return withFileMutationQueue(dir, async () => {
-      const directory = await openConfinedDirectory(this.dir, dir, {
-        create: true,
-        label: "Memory path",
-      });
-      try {
-        return await withDescriptorLock(directory, async () => {
-          const name = memoryFileName(slug);
-          const before = (await readPinnedMemoryTextFile(
-            directory,
-            name,
-            `${MEMORY_DIRNAME}/${name}`,
-            this.#memoryReadProbe,
-          ))?.text ?? null;
-          if (before !== null) {
-            assertAdmittedMemorySource(before, `${MEMORY_DIRNAME}/${name}`);
-          }
-          const created = before === null;
-          if (created) {
-            const files: MemoryRecord[] = [];
-            const skipped: SkippedFile[] = [];
-            await this.listMemoryFromDirectory(directory, files, skipped);
-            if (files.length >= MAX_MEMORY_FILES) {
-              throw new GhostError(
-                "limit_exceeded",
-                `Memory already holds ${MAX_MEMORY_FILES} files. `
-                + "Rewrite an existing memory instead of adding another.",
-                { limit: MAX_MEMORY_FILES },
-              );
-            }
-          }
-          const intent: MemoryWriteIntent = {
-            id: randomUUID(),
-            path: `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`,
-            before,
-            after: text,
-            beforeSha256: before === null ? null : sha256(before),
-            afterSha256: sha256(text),
-          };
-          await beforePublish(intent);
-          await atomicWriteFile(this.dir, full, text, directory);
-          const written = { slug, path: this.relative(full), created };
-          return {
-            written,
-            receipt: {
-              ...intent,
-              operation: created ? "created" : "updated",
-            },
-          };
-        });
-      } finally {
-        await directory.close();
-      }
-    });
-  }
-
-  /**
-   * Replay one already-journaled exact memory publication without consulting a
-   * model. The durable intent owns the exact before/after boundary: replay is
-   * allowed only while the descriptor-pinned current bytes still equal before.
-   */
-  async replayMemoryWriteIntent(intent: MemoryWriteIntent): Promise<MemoryWriteReceipt> {
-    const { name } = memoryIntentName(intent);
-    const dir = this.memoryDir;
-    const full = resolveWithin(dir, name, "Memory file");
-    return withFileMutationQueue(dir, async () => {
-      const directory = await openConfinedDirectory(this.dir, dir, {
-        create: true,
-        label: "Memory path",
-      });
-      try {
-        return await withDescriptorLock(directory, async () => {
-          const current = (await readPinnedMemoryTextFile(
-            directory,
-            name,
-            `${MEMORY_DIRNAME}/${name}`,
-            this.#memoryReadProbe,
-          ))?.text ?? null;
-          if (current !== null) {
-            assertAdmittedMemorySource(current, `${MEMORY_DIRNAME}/${name}`);
-          }
-          const currentSha256 = current === null ? null : sha256(current);
-          if (current !== intent.before || currentSha256 !== intent.beforeSha256) {
-            throw new GhostError(
-              "conflict",
-              "The journaled memory write no longer matches the current file bytes.",
-              { path: intent.path },
-            );
-          }
-          await atomicWriteFile(this.dir, full, intent.after, directory);
-          return {
-            ...intent,
-            operation: intent.before === null ? "created" : "updated",
-          };
-        });
-      } finally {
-        await directory.close();
-      }
-    });
-  }
-
-  async deleteMemory(name: string): Promise<MemoryDeleteResult> {
-    return (await this.deleteMemoryWithReceipt(name, async () => {})).deleted;
-  }
-
-  /**
-   * Move one admitted memory with an exact pre-rename journal boundary. The
-   * callback and rename share the write path's directory queue and lock.
-   */
-  async deleteMemoryWithReceipt(
-    inputName: string,
-    beforeDelete: (intent: MemoryDeleteIntent) => Promise<void>,
-  ): Promise<MemoryDeleteWithReceiptResult> {
-    const slug = coerceMemorySlug(inputName);
-    const name = memoryFileName(slug);
-    const dir = this.memoryDir;
-    return withFileMutationQueue(dir, async () => {
-      const directory = await openConfinedDirectory(this.dir, dir, {
-        label: "Memory path",
-      });
-      try {
-        const trashDirectory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
-          create: true,
-          label: "Memory trash path",
-        });
-        try {
-          return await withDescriptorLock(directory, async () => {
-            const path = `${MEMORY_DIRNAME}/${name}` as `memory/${string}.md`;
-            const before = (await readPinnedMemoryTextFile(
-              directory,
-              name,
-              path,
-              this.#memoryReadProbe,
-            ))?.text;
-            if (before === undefined) {
-              throw new GhostError(
-                "not_found",
-                `No memory file named ${name}.`,
-                { name },
-              );
-            }
-            assertAdmittedMemorySource(before, path);
-            const trashName = await collisionFreeMemoryTrashName(trashDirectory, slug);
-            const trash = `${MEMORY_TRASH_DIRNAME}/${trashName}` as `.trash/${string}.md`;
-            const intent: MemoryDeleteIntent = {
-              id: randomUUID(),
-              path,
-              before,
-              beforeSha256: sha256(before),
-              trash,
-            };
-            await beforeDelete(intent);
-            await rename(
-              descriptorPath(directory, name),
-              descriptorPath(trashDirectory, trashName),
-            );
-            await directory.sync();
-            await trashDirectory.sync();
-            return {
-              deleted: { slug, path, trash },
-              receipt: { ...intent, operation: "deleted" },
-            };
-          });
-        } finally {
-          await trashDirectory.close();
-        }
-      } finally {
-        await directory.close();
-      }
-    });
-  }
-
-  async readTrashedMemorySource(trashPath: string): Promise<string> {
-    const prefix = `${MEMORY_TRASH_DIRNAME}/`;
-    if (!trashPath.startsWith(prefix)) {
-      throw new GhostError("invalid_path", "Expected a path under memory trash.");
-    }
-    const name = trashPath.slice(prefix.length);
-    parseMemoryTrashFileName(name);
-    let directory: FileHandle;
-    try {
-      directory = await openConfinedDirectory(this.dir, this.memoryTrashDir, {
-        label: "Memory trash path",
-      });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new GhostError("not_found", `No trashed memory file named ${name}.`, { name });
-      }
-      throw error;
-    }
-    try {
-      const source = await readPinnedMemoryTextFile(
-        directory,
-        name,
-        trashPath,
-        this.#memoryReadProbe,
-      );
-      if (source === null) {
-        throw new GhostError("not_found", `No trashed memory file named ${name}.`, { name });
-      }
-      assertAdmittedMemorySource(source.text, trashPath);
-      return source.text;
-    } finally {
-      await directory.close();
-    }
-  }
-
-  validateMemoryDeleteIntent(intent: MemoryDeleteIntent): void {
-    assertValidMemoryDeleteIntent(intent);
-  }
-
-
 }
 
-export function openGhostHome(dir: string, options: GhostHomeOptions = {}): GhostHome {
-  return new GhostHome(dir, options);
+export function openGhostHome(dir: string): GhostHome {
+  return new GhostHome(dir);
 }

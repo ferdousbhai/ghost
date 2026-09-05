@@ -153,10 +153,9 @@ actually remember over a general statement you could have made about anything.
 
 ## What you know
 
-Your memory files are your private internal continuity. Shared notes, facts,
-decisions, and tasks belong in the owner's documents, where every ghost and the
-owner can read them. Write memory only for something that matters to who you are
-and does not belong in the owner's shared knowledge.
+Everything worth keeping — the owner's facts, decisions, and tasks, and your own
+reflections — is a note in the owner's documents, where every ghost and the
+owner can read it. This file is only who you are.
 `;
 
 /**
@@ -301,8 +300,7 @@ export class GhostRegistry {
   }
 
   /**
-   * Create `<root>/<name>/` with a seeded `character.md` and empty memory
-   * directory. Refuses to overwrite an existing ghost.
+   * Create `<root>/<name>/` with a seeded `character.md`. Refuses to overwrite an existing ghost.
    */
   create(name: string): Ghost {
     assertValidGhostName(name);
@@ -311,7 +309,6 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    mkdirSync(join(dir, "memory"), { recursive: true });
     writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
       encoding: "utf8",
       // Fail rather than clobber a character.md that appeared between the

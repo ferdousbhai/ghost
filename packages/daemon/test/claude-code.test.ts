@@ -1540,12 +1540,7 @@ fi
 
     writeFileSync(
       join(paths.home, "character.md"),
-      "# Casper\n\nYou are Casper, now a bookbinder.\n",
-      "utf8",
-    );
-    writeFileSync(
-      join(paths.home, "memory", "idle-session-memory.md"),
-      "The owner expects idle sessions to refresh.\n",
+      "# Casper\n\nYou are Casper, now a bookbinder. idle-session-rebuild\n",
       "utf8",
     );
 
@@ -1561,7 +1556,7 @@ fi
     );
     const resumedPrompt = JSON.stringify(seenOptions[1]?.systemPrompt);
     expect(resumedPrompt).toContain("bookbinder");
-    expect(resumedPrompt).toContain("idle-session-memory");
+    expect(resumedPrompt).toContain("idle-session-rebuild");
   });
 
   it("claims a warm query before async setup can cross its idle deadline", async () => {
@@ -1738,12 +1733,12 @@ fi
     await runTurn("conversation-1");
     expect(append(0)).not.toContain("written-between-turns");
     writeFileSync(
-      join(paths.home, "memory", "written-between-turns.md"),
-      "A fact the ghost learned mid-conversation.\n",
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper. written-between-turns\n",
       "utf8",
     );
 
-    // The memory index is session-start state. It is on disk, where the native
+    // The character is session-start state. It is on disk, where the native
     // file tools read it; it does not rewrite a prompt prefix already read.
     await runTurn("conversation-1");
     // The turn rode the warm query, so it was answered under the very prompt
@@ -1764,14 +1759,13 @@ fi
       },
     });
     writeFileSync(
-      join(paths.home, "memory", "casper-private.md"),
-      "Casper keeps this private.\n",
+      join(paths.home, "character.md"),
+      "# Casper\n\nYou are Casper, a letterpress printer. Casper keeps this private.\n",
       "utf8",
     );
     const minaDir = seedGhost(temp!.root, {
       name: "mina",
-      character: "# Mina\n\nYou are Mina, a beekeeper.\n",
-      memory: { "mina-private.md": "Mina keeps this private.\n" },
+      character: "# Mina\n\nYou are Mina, a beekeeper. Mina keeps this private.\n",
     });
     const minaPaths = ghostPaths(minaDir);
     mkdirSync(minaPaths.agentDir, { recursive: true });
@@ -1805,10 +1799,10 @@ fi
       expect(prompt).toContain(sharedSkill);
       expect(prompt.split(sharedSkill)).toHaveLength(2);
     }
-    expect(casperPrompt).toContain("casper-private");
-    expect(casperPrompt).not.toContain("mina-private");
-    expect(minaPrompt).toContain("mina-private");
-    expect(minaPrompt).not.toContain("casper-private");
+    expect(casperPrompt).toContain("Casper keeps this private");
+    expect(casperPrompt).not.toContain("Mina keeps this private");
+    expect(minaPrompt).toContain("Mina keeps this private");
+    expect(minaPrompt).not.toContain("Casper keeps this private");
   });
 
   it("routes an explicit claude-code role through the isolated SDK harness and resumes it", async () => {

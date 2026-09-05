@@ -11,11 +11,6 @@ import {
   requireConversationIdentity,
   type ConversationIdentity,
 } from "./conversation-identity.js";
-import {
-  listGhostMemory,
-  trashGhostMemoryFile,
-  writeGhostMemory,
-} from "./memory-files.js";
 import type {
   McpCatalog,
   McpCatalogSnapshot,
@@ -58,14 +53,6 @@ export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
   homeOperations?: HomeOperationCoordinator;
-  /** Test seam for pausing the plain owner memory listing. */
-  memoryReader?: typeof listGhostMemory;
-  /** Test seam for pausing the validated owner memory writer. */
-  memoryWriter?: typeof writeGhostMemory;
-  /** Test seam for pausing the memory-to-Trash move. */
-  memoryTrasher?: (
-    ...args: Parameters<typeof trashGhostMemoryFile>
-  ) => ReturnType<typeof trashGhostMemoryFile> | Promise<ReturnType<typeof trashGhostMemoryFile>>;
   /**
    * Provider login orchestration. Omit to leave the `/providers` and `/login`
    * routes out entirely (they 404) — a server that only ever runs turns needs
@@ -325,9 +312,6 @@ export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
-  const memoryReader = options.memoryReader ?? listGhostMemory;
-  const memoryWriter = options.memoryWriter ?? writeGhostMemory;
-  const memoryTrasher = options.memoryTrasher ?? trashGhostMemoryFile;
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -532,48 +516,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     connection.signal.addEventListener("abort", cleanup, { once: true });
   };
 
-  /**
-   * The owner's memory list: the plain files, read from disk on every request.
-   */
-  const handleListMemory = async (
-    ghostName: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const listing = await homeOperations.withLease(ghostName, () => {
-      const ghost = options.registry.get(ghostName);
-      return memoryReader(ghost.dir);
-    });
-    jsonResponse(response, 200, listing);
-  };
-
-  const handleWriteMemory = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { content, name } = body as { content?: unknown; name?: unknown };
-    if (typeof content !== "string") {
-      errorResponse(response, 400, "invalid_request", '"content" must be a string.');
-      return;
-    }
-    if (name !== undefined && typeof name !== "string") {
-      errorResponse(response, 400, "invalid_request", '"name" must be a string when present.');
-      return;
-    }
-    const written = await homeOperations.withLease(ghostName, async () => {
-      const ghost = options.registry.get(ghostName);
-      return memoryWriter(ghost.dir, { content, name });
-    });
-    jsonResponse(response, 200, { ok: true, ...written });
-  };
-
-  /**
-   * The persona file, editable from the HUD without touching the disk
-   * directly. The read tolerates an oversize hand-edited file (it must load
-   * to be shortened); the write refuses one, so a bad edit fails here instead
-   * of at the next cold session start.
-   */
   const handleReadCharacter = async (
     ghostName: string,
     response: ServerResponse,
@@ -612,33 +554,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       }
     });
     jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
-  };
-
-  const handleTrashMemory = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { path, confirm } = body as { path?: unknown; confirm?: unknown };
-    if (typeof path !== "string" || path === "") {
-      errorResponse(response, 400, "invalid_request", '"path" must be a non-empty string.');
-      return;
-    }
-    if (confirm !== path) {
-      errorResponse(
-        response,
-        400,
-        "confirmation_required",
-        '"confirm" must exactly repeat the memory file path.',
-      );
-      return;
-    }
-    const trashed = await homeOperations.withLease(ghostName, () => {
-      const ghost = options.registry.get(ghostName);
-      return memoryTrasher(ghost.dir, path);
-    });
-    jsonResponse(response, 200, { ok: true, ...trashed });
   };
 
   const handleGreeting = async (
@@ -1794,13 +1709,6 @@ export function createDaemonServer(options: ServerOptions): Server {
         const ghostName = decodePathSegment(segments[2] ?? "");
         if (segments.length === 3 && method === "DELETE") {
           return await handleDeleteGhost(ghostName, url, response);
-        }
-        if (segments.length === 4 && segments[3] === "memory") {
-          if (method === "GET") return await handleListMemory(ghostName, response);
-          if (method === "PUT") return await handleWriteMemory(ghostName, request, response);
-          if (method === "DELETE") return await handleTrashMemory(ghostName, request, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-          return;
         }
         if (segments.length === 4 && segments[3] === "character") {
           if (method === "GET") return await handleReadCharacter(ghostName, response);

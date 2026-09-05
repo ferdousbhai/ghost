@@ -4636,7 +4636,6 @@ export class SessionHost {
     return {
       ghostName: ghost.name,
       character: digest.character,
-      memoryLines: digest.memoryLines,
       localTime: localTimeString(),
       daysSinceLastConversation,
       onboarding,

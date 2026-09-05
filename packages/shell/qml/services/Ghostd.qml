@@ -738,17 +738,6 @@ Singleton {
         root.mutateProject("unbind", "PUT", "", body);
     }
 
-    // Plain files stay canonical: memory/*.md is one fact per file, and this
-    // is only the latest listing of them read through the daemon.
-    property var memory: []
-    property var memorySkipped: []
-    property bool memoryLoading: false
-    property string memoryError: ""
-    /** The memory path a write or trash is in flight for; "" when idle. A
-        new fact has no path yet and is busy under "memory/". */
-    property string memoryBusyPath: ""
-    property string memoryActionError: ""
-    property string memoryGhost: ""
 
     // The persona file, edited through the daemon rather than by a direct
     // disk write: the daemon owns the size cap and refuses an oversize body,
@@ -765,7 +754,6 @@ Singleton {
     property string characterGhost: ""
     /** The last listing body verbatim: an unchanged directory must not rebuild
         the list's rows. */
-    property string memoryRaw: ""
 
     /** The daemon's RemoteStatus, `{}` until read. */
     property var remoteStatus: ({})
@@ -911,7 +899,6 @@ Singleton {
     signal queueMessageRejected(string text)
     signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
-    signal memoryWriteFinished(string path, bool ok)
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
     signal hooksConnectionReset(int epoch)
@@ -989,8 +976,6 @@ Singleton {
     property string eventsGhost: ""
     property int eventsConsumed: 0
     property string eventsFrameBuffer: ""
-    property var memoryRequest: null
-    property var memoryMutationRequest: null
     property var characterRequest: null
     property var characterWriteRequest: null
     /** Test seam; production constructs native character XHRs. */
@@ -1509,7 +1494,6 @@ Singleton {
             projectGhost: root.projectGhost,
             mcpGhost: root.mcpGhost,
             activeGhost: root.activeGhost,
-            memoryGhost: root.memoryGhost,
             characterGhost: root.characterGhost
         };
     }
@@ -1525,7 +1509,6 @@ Singleton {
         root.projectGhost = state.projectGhost;
         root.mcpGhost = state.mcpGhost;
         root.activeGhost = state.activeGhost;
-        root.memoryGhost = state.memoryGhost;
         root.characterGhost = state.characterGhost;
     }
 
@@ -1571,7 +1554,6 @@ Singleton {
         root.clearTurnProjection();
         root.clearModelState();
         root.clearGreeting();
-        root.clearMemory();
         root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
@@ -1603,7 +1585,6 @@ Singleton {
         root.clearModelState();
         // The greeting is this ghost's own voice, so it never carries over.
         root.clearGreeting();
-        root.clearMemory();
         root.clearCharacter();
         root.clearCommands();
         root.clearSessionResources();
@@ -2025,118 +2006,6 @@ Singleton {
         root.greetingGhost = "";
     }
 
-
-    function clearMemory(): void {
-        if (root.memoryRequest && root.memoryRequest.readyState !== 4)
-            root.memoryRequest.abort();
-        if (root.memoryMutationRequest && root.memoryMutationRequest.readyState !== 4)
-            root.memoryMutationRequest.abort();
-        root.memoryRequest = null;
-        root.memoryMutationRequest = null;
-        root.memory = [];
-        root.memorySkipped = [];
-        root.memoryLoading = false;
-        root.memoryError = "";
-        root.memoryBusyPath = "";
-        root.memoryActionError = "";
-        root.memoryGhost = "";
-        root.memoryRaw = "";
-    }
-
-    /**
-     * Re-read the active ghost's memory files. `force` bypasses the per-ghost
-     * cache; the memory list forces it whenever the directory changes on disk.
-     */
-    function fetchMemory(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearMemory();
-            return;
-        }
-        if (!force && root.memoryGhost === ghost) return;
-        if (root.memoryRequest && root.memoryRequest.readyState !== 4) {
-            if (!force) return;
-            root.memoryRequest.abort();
-        }
-
-        const xhr = new XMLHttpRequest();
-        root.memoryRequest = xhr;
-        root.memoryLoading = true;
-        root.memoryError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.memoryRequest) return;
-            root.memoryLoading = false;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    if (root.memoryGhost !== ghost || xhr.responseText !== root.memoryRaw) {
-                        const body = JSON.parse(xhr.responseText);
-                        root.memory = Array.isArray(body.memory) ? body.memory : [];
-                        root.memorySkipped = Array.isArray(body.skipped) ? body.skipped : [];
-                        root.memoryRaw = xhr.responseText;
-                    }
-                    root.memoryGhost = ghost;
-                    root.memoryError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.memoryError = "ghostd sent a malformed memory list";
-                }
-            } else {
-                root.memoryError = root.describeError(xhr, "GET memory");
-            }
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory", ({}), null);
-    }
-
-    /**
-     * One mutation at a time, each followed by a re-read: the file on disk is
-     * the truth and the list never guesses what the daemon wrote.
-     */
-    function mutateMemory(method: string, busyPath: string, body: var,
-                          settle: var): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || root.memoryBusyPath !== "") return;
-        const xhr = new XMLHttpRequest();
-        root.memoryMutationRequest = xhr;
-        root.memoryBusyPath = busyPath;
-        root.memoryActionError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.memoryMutationRequest) return;
-            root.memoryBusyPath = "";
-            if (ghost !== root.activeGhost) return;
-            let result = null;
-            if (xhr.status === 200) {
-                try {
-                    result = JSON.parse(xhr.responseText);
-                    if (!result || result.ok !== true) throw new Error("not ok");
-                } catch (error) {
-                    result = null;
-                    root.memoryActionError = "ghostd sent a malformed memory result";
-                }
-            } else {
-                root.memoryActionError = root.describeError(xhr, method + " memory");
-            }
-            if (settle) settle(result);
-            if (result !== null) root.fetchMemory(true);
-        };
-        root.dispatch(xhr, method,
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/memory",
-            ({ "Content-Type": "application/json" }), JSON.stringify(body));
-    }
-
-    /** Create (empty `name`) or replace one memory file with `content`. */
-    function writeMemory(name: string, content: string): void {
-        const path = "memory/" + (name === "" ? "" : name + ".md");
-        root.mutateMemory("PUT", path, ({ name: name === "" ? undefined : name, content: content }),
-            function (result) { root.memoryWriteFinished(path, result !== null); });
-    }
-
-    /** Move one memory file to recoverable Trash. */
-    function deleteMemory(path: string): void {
-        if (path === "") return;
-        root.mutateMemory("DELETE", path, ({ path: path, confirm: path }), null);
-    }
 
 
     function newCharacterRequest(): var {

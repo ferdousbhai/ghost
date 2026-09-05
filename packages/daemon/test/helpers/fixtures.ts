@@ -64,17 +64,16 @@ export interface SeedGhostOptions {
   name?: string;
   character?: string;
   docs?: Record<string, string>;
-  memory?: Record<string, string>;
   provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional retained docs, memory, and a models.json. */
+/** A ghost home with a persona, optional retained docs, and a models.json. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
   const paths = ghostPaths(dir);
+  mkdirSync(dir, { recursive: true });
   if (options.docs) mkdirSync(join(dir, "docs"), { recursive: true });
-  mkdirSync(join(dir, "memory"), { recursive: true });
   writeFileSync(
     paths.characterFile,
     options.character
@@ -85,9 +84,6 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
     const full = join(dir, "docs", path);
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content, "utf8");
-  }
-  for (const [path, content] of Object.entries(options.memory ?? {})) {
-    writeFileSync(join(dir, "memory", path), content, "utf8");
   }
   if (options.provider) {
     mkdirSync(paths.agentDir, { recursive: true });
@@ -117,7 +113,6 @@ export interface TestDaemon {
 
 export interface StartTestDaemonOptions {
   ghost?: string;
-  memory?: Record<string, string>;
   openSession?: string;
   providerScript?: MockStep[];
 }
@@ -133,7 +128,6 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   });
   seedGhost(temp.root, {
     name: ghost,
-    memory: options.memory,
     provider: { baseUrl: provider.url, modelId: provider.modelId },
   });
   const homeOperations = new HomeOperationCoordinator(temp.registry);

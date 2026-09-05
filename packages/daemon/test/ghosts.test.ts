@@ -75,7 +75,7 @@ describe("GhostRegistry.list", () => {
 });
 
 describe("GhostRegistry.create", () => {
-  it("seeds character.md and the memory directory without retired hosted state", () => {
+  it("seeds character.md without retired hosted state", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     const ghost = temp.registry.create("casper");
@@ -84,7 +84,6 @@ describe("GhostRegistry.create", () => {
     const character = readFileSync(ghostPaths(ghost.dir).characterFile, "utf8");
     expect(character).toMatch(/^# casper\n/);
     expect(character).not.toContain("title:");
-    expect(existsSync(join(ghost.dir, "memory"))).toBe(true);
     expect(existsSync(join(ghost.dir, "conversations"))).toBe(false);
     expect(existsSync(join(ghost.dir, "docs"))).toBe(false);
     expect(temp.registry.list().map((entry) => entry.name)).toEqual(["casper"]);
@@ -211,14 +210,14 @@ describe("GhostRegistry.trash", () => {
     temp = makeTempGhosts();
     const dir = seedGhost(temp.root, { name: "casper" });
     seedGhost(temp.root, { name: "mina" });
-    writeFileSync(join(dir, "memory", "keepsake.md"), "remember this\n", "utf8");
+    writeFileSync(join(dir, "keepsake.md"), "remember this\n", "utf8");
 
     const { trash } = temp.registry.trash("casper", new Date(2026, 7, 24, 15, 30, 0));
 
     expect(existsSync(dir)).toBe(false);
     expect(trash).toBe(join(temp.trashDir, "files", "casper"));
     // A move, never an rm: everything the ghost owned is still on disk.
-    expect(readFileSync(join(trash, "memory", "keepsake.md"), "utf8")).toBe("remember this\n");
+    expect(readFileSync(join(trash, "keepsake.md"), "utf8")).toBe("remember this\n");
     expect(isGhostHome(trash)).toBe(true);
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["mina"]);
   });

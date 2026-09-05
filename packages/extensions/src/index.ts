@@ -1,27 +1,9 @@
 export { isGhostError } from "./errors.js";
 
 export {
-  coerceMemorySlug,
-  compareMemoryNewestFirst,
-  deriveMemoryIndex,
-  MEMORY_INDEX_MAX_ENTRIES,
-  memoryFileName,
-  REDACTED_MEMORY_SECRET,
-  redactMemorySecrets,
-} from "./memory-file.js";
-
-export {
   MAX_CHARACTER_BODY_LENGTH,
   GhostHome,
-  MEMORY_DIRNAME,
   openGhostHome,
-  type MemoryListing,
-  type MemoryDeleteIntent,
-  type MemoryDeleteReceipt,
-  type MemoryWriteIntent,
-  type MemoryWriteInput,
-  type MemoryWriteReceipt,
-  type MemoryWriteResult,
 } from "./home.js";
 
 export {
@@ -30,10 +12,7 @@ export {
   openRegularFileNoFollow,
 } from "./linux-fs.js";
 
-export type {
-  CharacterFile,
-  MemoryRecord,
-} from "./types.js";
+export type { CharacterFile } from "./types.js";
 
 export {
   buildGhostSystemPrompt,

@@ -18,7 +18,6 @@ import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
-import { listGhostMemory, trashGhostMemoryFile, writeGhostMemory } from "../src/memory-files.js";
 import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { projectBindingPath } from "../src/project-binding.js";
@@ -63,9 +62,6 @@ async function serve(
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
-    memoryReader?: ServerOptions["memoryReader"];
-    memoryWriter?: ServerOptions["memoryWriter"];
-    memoryTrasher?: ServerOptions["memoryTrasher"];
     conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
@@ -110,15 +106,6 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
-    ...(serverOptions.memoryReader === undefined
-      ? {}
-      : { memoryReader: serverOptions.memoryReader }),
-    ...(serverOptions.memoryWriter === undefined
-      ? {}
-      : { memoryWriter: serverOptions.memoryWriter }),
-    ...(serverOptions.memoryTrasher === undefined
-      ? {}
-      : { memoryTrasher: serverOptions.memoryTrasher }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -664,234 +651,6 @@ describe("conversation project binding", () => {
     expect(await reload.json()).toMatchObject({
       error: { code: "project_rebind_requires_new_conversation" },
     });
-  });
-});
-
-describe("/api/ghosts/:name/memory", () => {
-  it("lists the plain memory files and rejects other methods", async () => {
-    const base = await serve();
-    const ghostDir = join(temp!.root, "casper");
-    writeFileSync(
-      join(ghostDir, "memory", "preferred-tone.md"),
-      "The owner prefers direct answers. Lead with the decision.\n",
-      "utf8",
-    );
-
-    const response = await fetch(`${base}/api/ghosts/casper/memory`);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      memory: Array<{ path: string; slug: string; content: string; updated: string }>;
-      skipped: unknown[];
-    };
-    expect(body.memory).toEqual([{
-      path: "memory/preferred-tone.md",
-      slug: "preferred-tone",
-      content: "The owner prefers direct answers. Lead with the decision.",
-      updated: expect.any(String),
-    }]);
-    expect(body.skipped).toEqual([]);
-
-    expect((await fetch(`${base}/api/ghosts/casper/memory`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })).status).toBe(405);
-    expect((await fetch(`${base}/api/ghosts/missing/memory`)).status).toBe(404);
-  });
-
-  it("writes one fact through the validating writer", async () => {
-    const base = await serve();
-    const ghostDir = join(temp!.root, "casper");
-    const put = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    const created = await put({ content: "Prefers concise replies." });
-    expect(created.status).toBe(200);
-    expect(await created.json()).toEqual({
-      ok: true,
-      slug: "prefers-concise-replies",
-      path: "memory/prefers-concise-replies.md",
-      created: true,
-    });
-    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
-      .toBe("Prefers concise replies.\n");
-
-    const replaced = await put({ name: "prefers-concise-replies", content: "Prefers one item." });
-    expect((await replaced.json() as { created: boolean }).created).toBe(false);
-    expect(readFileSync(join(ghostDir, "memory", "prefers-concise-replies.md"), "utf8"))
-      .toBe("Prefers one item.\n");
-
-    expect((await put({ content: "   " })).status).toBe(400);
-    expect((await put({ content: 42 })).status).toBe(400);
-    expect((await put({ name: "Not A Slug", content: "x" })).status).toBe(400);
-  });
-
-  it("holds the home lease through memory publication before a concurrent delete", async () => {
-    const writerEntered = Promise.withResolvers<void>();
-    const releaseWriter = Promise.withResolvers<void>();
-    const base = await serve(undefined, {
-      memoryWriter: async (...args) => {
-        writerEntered.resolve();
-        await releaseWriter.promise;
-        return writeGhostMemory(...args);
-      },
-    });
-    const ghostDir = join(temp!.root, "casper");
-    const writing = fetch(`${base}/api/ghosts/casper/memory`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ content: "The memory write owns its home path." }),
-    });
-    await writerEntered.promise;
-
-    let deleteSettled = false;
-    const deleting = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" })
-      .then((response) => {
-        deleteSettled = true;
-        return response;
-      });
-    await waitForHomeMove();
-    expect(deleteSettled).toBe(false);
-
-    releaseWriter.resolve();
-    const [written, deleted] = await Promise.all([writing, deleting]);
-    expect(written.status).toBe(200);
-    expect(deleted.status).toBe(200);
-    const { trash } = await deleted.json() as { trash: string };
-    expect(existsSync(ghostDir)).toBe(false);
-    expect(readFileSync(join(trash, "memory", "the-memory-write-owns-its-home.md"), "utf8"))
-      .toBe("The memory write owns its home path.\n");
-  });
-
-  it("holds the home lease through a memory trash before a concurrent delete", async () => {
-    const trasherEntered = Promise.withResolvers<void>();
-    const releaseTrasher = Promise.withResolvers<void>();
-    const base = await serve(undefined, {
-      memoryTrasher: async (...args) => {
-        trasherEntered.resolve();
-        await releaseTrasher.promise;
-        return trashGhostMemoryFile(...args);
-      },
-    });
-    const ghostDir = join(temp!.root, "casper");
-    writeFileSync(join(ghostDir, "memory", "doomed.md"), "doomed\n", "utf8");
-    const trashing = fetch(`${base}/api/ghosts/casper/memory`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ path: "memory/doomed.md", confirm: "memory/doomed.md" }),
-    });
-    await trasherEntered.promise;
-
-    let deleteSettled = false;
-    const deleting = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" })
-      .then((response) => {
-        deleteSettled = true;
-        return response;
-      });
-    await waitForHomeMove();
-    expect(deleteSettled).toBe(false);
-
-    releaseTrasher.resolve();
-    const [trashed, deleted] = await Promise.all([trashing, deleting]);
-    expect(trashed.status).toBe(200);
-    expect(deleted.status).toBe(200);
-    expect(existsSync(ghostDir)).toBe(false);
-  });
-
-  it.each(["rename", "delete"] as const)(
-    "finishes an admitted memory read from the original home before %s and old-name reuse",
-    async (move) => {
-      const readerEntered = Promise.withResolvers<void>();
-      const releaseReader = Promise.withResolvers<void>();
-      let resolvedDir = "";
-      const base = await serve(undefined, {
-        memoryReader: async (dir) => {
-          resolvedDir = dir;
-          readerEntered.resolve();
-          await releaseReader.promise;
-          return listGhostMemory(dir);
-        },
-      });
-      const originalHome = join(temp!.root, "casper");
-      const memoryPath = join(originalHome, "memory", "original-home.md");
-      writeFileSync(memoryPath, "This fact belongs to the original home.\n", "utf8");
-      const originalInode = statSync(originalHome, { bigint: true }).ino;
-
-      const reading = fetch(`${base}/api/ghosts/casper/memory`);
-      await readerEntered.promise;
-      expect(resolvedDir).toBe(originalHome);
-      const moving = move === "rename"
-        ? fetch(`${base}/api/ghosts/casper/name`, {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: "wisp" }),
-          })
-        : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-      await waitForHomeMove();
-
-      releaseReader.resolve();
-      const readResponse = await reading;
-      expect(readResponse.status).toBe(200);
-      expect(await readResponse.json()).toMatchObject({
-        memory: [{
-          path: "memory/original-home.md",
-          content: "This fact belongs to the original home.",
-        }],
-      });
-      const movedResponse = await moving;
-      expect(movedResponse.status).toBe(200);
-      const movedBody = await movedResponse.json() as { trash?: string };
-      const movedHome = move === "rename" ? join(temp!.root, "wisp") : movedBody.trash!;
-      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
-
-      const recreated = await fetch(`${base}/api/ghosts`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "casper" }),
-      });
-      expect(recreated.status).toBe(201);
-      expect(statSync(originalHome, { bigint: true }).ino).not.toBe(originalInode);
-      expect(await (await fetch(`${base}/api/ghosts/casper/memory`)).json())
-        .toEqual({ memory: [], skipped: [] });
-      expect(readFileSync(join(movedHome, "memory", "original-home.md"), "utf8"))
-        .toBe("This fact belongs to the original home.\n");
-    },
-  );
-
-  it("moves confirmed memory files to Trash and refuses everything else", async () => {
-    const base = await serve();
-    const ghostDir = join(temp!.root, "casper");
-    const doc = join(ghostDir, "docs", "delete-me.md");
-    const memory = join(ghostDir, "memory", "delete-me-too.md");
-    mkdirSync(join(ghostDir, "docs"), { recursive: true });
-    writeFileSync(doc, "doc\n", "utf8");
-    writeFileSync(memory, "temporary memory\n", "utf8");
-    const remove = (body: unknown) => fetch(`${base}/api/ghosts/casper/memory`, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    });
-
-    expect((await remove({
-      path: "memory/delete-me-too.md",
-      confirm: "memory/something-else.md",
-    })).status).toBe(400);
-    expect(existsSync(memory)).toBe(true);
-
-    expect((await remove({ path: "docs/delete-me.md", confirm: "docs/delete-me.md" })).status)
-      .toBe(400);
-    expect(existsSync(doc)).toBe(true);
-
-    expect((await remove({
-      path: "memory/delete-me-too.md",
-      confirm: "memory/delete-me-too.md",
-    })).status).toBe(200);
-    expect(existsSync(memory)).toBe(false);
-    expect((await remove({ path: "character.md", confirm: "character.md" })).status).toBe(400);
-    expect(existsSync(join(ghostDir, "character.md"))).toBe(true);
   });
 });
 

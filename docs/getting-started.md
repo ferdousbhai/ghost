@@ -92,7 +92,7 @@ HUD: in the left sidebar (`Ctrl+B` toggles it), click the `+` in the **Ghosts**
 header, type a name, press Enter.
 
 Either route posts to the same daemon route and writes exactly two things:
-`~/ghosts/sage/character.md` (a seed) and an empty `~/ghosts/sage/memory/`.
+`~/ghosts/sage/character.md` (a seed).
 Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, and may not
 start with a dot. The directory name *is* the ghost's name.
 
@@ -173,7 +173,7 @@ Type, and:
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 
 The 64-pixel rail on the right switches sections: **Chat**, **Character**,
-**Memory**, **Commands**, **Delegation**, **Hooks**, **Resources**, **MCP**, and
+**Commands**, **Hooks**, **Resources**, **MCP**, and
 **Phone access**. Left-clicking the tray icon toggles the HUD; its menu carries
 a ghost switcher when you have more than one, five recent conversations, **New
 conversation**, **Choose a model**, and **Quit ghost shell**.
@@ -185,7 +185,6 @@ ghost say "What should I focus on today?"
 ghost say --new "Start fresh"
 ghost sessions
 ghost show -s cli-abc
-ghost memory
 ```
 
 `ghost say` streams the turn; tool activity goes to stderr so stdout stays the
@@ -207,7 +206,7 @@ skill, so another agent on this machine can drive the same client.
 
 | Path | What |
 |---|---|
-| `~/ghosts/<name>/` | the ghost home: `character.md`, `memory/`, `sessions/`, `models.json`, and whatever else that ghost uses |
+| `~/ghosts/<name>/` | the ghost home: `character.md`, `sessions/`, `models.json`, and whatever else that ghost uses |
 | `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, ask timeout, remote) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
@@ -223,7 +222,7 @@ and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
 host).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
-leaves personas, memory, conversations, credentials, tokens, your documents,
+leaves personas, conversations, credentials, tokens, your documents,
 and any skill you installed untouched.
 
 ## 9. Optional, once you are talking

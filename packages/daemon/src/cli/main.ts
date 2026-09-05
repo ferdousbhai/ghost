@@ -14,7 +14,6 @@ import { ghostsCommand } from "./ghosts.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
-import { memoryCommand } from "./memory.js";
 import { modelCommand } from "./model.js";
 import { sayCommand } from "./say.js";
 import { sessionActionCommand, sessionsCommand, showCommand } from "./sessions.js";
@@ -199,14 +198,6 @@ export const COMMANDS: readonly Command[] = [
     flags: LOGIN_ARGS,
     positionals: [0, 1],
     run: logoutCommand,
-  },
-  {
-    verb: "memory",
-    usage: "memory [show <name>] [-g <name>] [--json] [-q]",
-    summary: "List or read ghost memory files.",
-    example: "ghost memory show owner-name",
-    positionals: [0, 2],
-    run: memoryCommand,
   },
   {
     verb: "watch",

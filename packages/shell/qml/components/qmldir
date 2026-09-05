@@ -18,7 +18,6 @@ HooksBrowser 1.0 HooksBrowser.qml
 InlineRename 1.0 InlineRename.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
 McpBrowser 1.0 McpBrowser.qml
-MemoryList 1.0 MemoryList.qml
 ModelLogin 1.0 ModelLogin.qml
 ModelSwitcher 1.0 ModelSwitcher.qml
 PencilGlyph 1.0 PencilGlyph.qml

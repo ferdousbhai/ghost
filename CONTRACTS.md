@@ -13,7 +13,7 @@ Tailscale Serve viewer.
 
 Durable state has three scopes:
 
-- **Ghost-private:** character, memory, conversations, settings, and runtime
+- **Ghost-private:** character, conversations, settings, and runtime
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in the
   owner's XDG Documents directory, which every ghost reads and writes with its
@@ -43,7 +43,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ```text
 ~/ghosts/<name>/
   character.md
-  memory/*.md
   skills/<name>/SKILL.md
   agents/<name>.md
   commands/<name>.md
@@ -76,32 +75,18 @@ the owner binds it as a conversation's project like any other. `settings.yml`
 may also name `cwd:`, the directory a new conversation starts in, under the
 same absolute-and-under-the-owner-home rule.
 
-### Character and memory
+### Character and notes
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
 with a heading naming the persona. Its complete body (maximum 20,000
 JavaScript UTF-16 code units) is the persona. A seeded or blank character marks onboarding; the ghost
 shows the owner a draft and waits for confirmation before replacing it.
 
-`memory/*.md` is this ghost's private internal continuity: subjective
-reflections, ghost-specific interpretations, and commitments about its own
-behavior. It is not the owner's knowledge store. Owner facts and preferences,
-shared decisions, project knowledge, notes, plans, and tasks go to the owner's
-documents.
-The owner can inspect memory for transparency; other ghosts do not consume it.
-
-Each memory is one Markdown file named by a lowercase kebab-case slug. Content
-is limited to 2,000 UTF-16 code units and 6,001 bytes. The session-start index
-lists at most 4,000 characters of complete slugs, newest modification first.
-Unsafe, linked, invalid-UTF-8, or oversized entries are skipped; direct reads
-fail rather than truncate. API writes redact common credential forms before
-disk. Exact parsing, descriptor confinement, redaction, and limits are defined
-in [`memory-file.ts`](packages/extensions/src/memory-file.ts),
-[`home.ts`](packages/extensions/src/home.ts), and their tests.
-
-Native runtime file tools can write character and memory directly. They do not
-receive the API writer's validation/redaction guarantees; the system prompt
-states the hard limits and the next cold session rejects or omits invalid data.
+There is no ghost-private memory store. A ghost's notes — owner facts,
+decisions, tasks, and its own reflections — are Markdown files under the
+owner's Documents directory (`<Documents>/notes/` by convention), written and
+read with the runtime's native file tools, shared by every ghost and readable
+by the owner. Nothing there is indexed or injected at session start.
 
 ### Declarative resources and projects
 
@@ -174,7 +159,7 @@ ghost home directory, which moves as one unit.
 
 | State | Daemon restart | Ghost rename | Ghost delete | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
 | --- | --- | --- | --- | --- | --- | --- |
-| `character.md`, `memory/*.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
+| `character.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
 | Conversations and sidecars under `sessions/` | survives; Pi JSONL is the durable history | moves with the home; Claude transcripts stay in Claude Code's own storage, only resume metadata moves | to Trash with the home | unchanged | unchanged | preserved |
 | `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
@@ -202,7 +187,7 @@ backup: Trash and snapper are undo, not retention.
 
 ## Runtime contract
 
-Both runtimes receive the same Ghost character, private memory index, first
+Both runtimes receive the same Ghost character, first
 meeting policy, Omarchy computer-use policy, scheduled-work policy,
 self-maintenance policy, and owner-context policy. The owner-context policy names the
 Documents directory in one sentence and nothing else about it. Owner
@@ -254,8 +239,8 @@ understanding, subagents, background tasks, todos, web tools, and planning.
 Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
 `ask` without denying or replacing any native tool. Claude's complete native
 tool preset remains available; Ghost's browser/screen/desktop tools are
-additive. Ghost disables Claude auto-memory; shared persistence is the owner's
-documents and private continuity is Ghost memory.
+additive. Ghost disables Claude auto-memory; persistence is the owner's
+documents.
 
 The Claude Code path is native-first. A capability already supplied by the
 native `claude_code` preset keeps Claude's tool name, schema, result, and
@@ -314,9 +299,9 @@ that harness owns its project discovery, tools, auth, and session semantics.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in
-[`docs/hooks.md`](docs/hooks.md). A ghost keeps its own private memory current
-with its memory tools during ordinary turns; shared knowledge goes to the
-owner's documents the same way. Ghost runs no background memory pass of its own.
+[`docs/hooks.md`](docs/hooks.md). A ghost keeps its notes in the
+owner's documents with its file tools during ordinary turns. Ghost runs no
+background memory pass of its own.
 
 Ghost registers no built-in hook of its own; every `session_stop` and
 `before_prompt` behavior is a `hooks.json` command the owner chooses, and the
@@ -351,7 +336,6 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
-| `GET\|PUT\|DELETE /api/ghosts/:name/memory` | List, write, or trash private memory. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
 | `GET /api/ghosts/:name/models` | Paginated available/catalog model rows, detected local endpoints included in both scopes; `q` is at most 256 characters. |
@@ -400,7 +384,7 @@ persisted as an assistant answer.
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
-ask, job, model, memory, MCP, hooks, status, and skill operations. Signing in is a provider
+ask, job, model, MCP, hooks, status, and skill operations. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the
@@ -467,7 +451,7 @@ hosted-session, concurrency, or spend cap.
   CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
   talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
-  state (memory, character, control files) directly; the one deliberate
+  state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
   owner's explicit direction.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the

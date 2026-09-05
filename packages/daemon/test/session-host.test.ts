@@ -5010,7 +5010,7 @@ describe("multi-ghost", () => {
           kind: "tool",
           name: "write",
           args: {
-            path: join(temp.root, "casper", "memory", "asked-who-i-am.md"),
+            path: join(temp.root, "casper", "asked-who-i-am.md"),
             content: "Someone asked who casper is.",
           },
         },
@@ -5023,7 +5023,7 @@ describe("multi-ghost", () => {
           kind: "tool",
           name: "write",
           args: {
-            path: join(temp.root, "mina", "memory", "asked-who-i-am.md"),
+            path: join(temp.root, "mina", "asked-who-i-am.md"),
             content: "Someone asked who mina is.",
           },
         },
@@ -5033,14 +5033,12 @@ describe("multi-ghost", () => {
     try {
       const casper = seedGhost(temp.root, {
         name: "casper",
-        character: "# casper\n\nYou set type.\n",
-        memory: { "casper-private.md": "Casper keeps this private.\n" },
+        character: "# casper\n\nYou set type. Casper keeps this private.\n",
         provider: { baseUrl: provider.url, modelId: provider.modelId },
       });
       const mina = seedGhost(temp.root, {
         name: "mina",
-        character: "# mina\n\nYou keep bees.\n",
-        memory: { "mina-private.md": "Mina keeps this private.\n" },
+        character: "# mina\n\nYou keep bees. Mina keeps this private.\n",
         provider: { baseUrl: minaProvider.url, modelId: minaProvider.modelId },
       });
       for (const [dir, shellPath] of [[casper, "/bin/bash"], [mina, "/bin/sh"]] as const) {
@@ -5074,7 +5072,7 @@ describe("multi-ghost", () => {
         const paths = ghostPaths(dir);
         expect(existsSync(paths.sessionDir)).toBe(true);
         expect(readdirSync(paths.sessionDir).filter((name) => name.endsWith(".jsonl"))).toHaveLength(1);
-        expect(readFileSync(join(dir, "memory", "asked-who-i-am.md"), "utf8")).toContain(expected);
+        expect(readFileSync(join(dir, "asked-who-i-am.md"), "utf8")).toContain(expected);
       }
       // Personas did not cross: each initial provider request carried one ghost's prompt.
       const systems = [...provider.requests, ...minaProvider.requests]
@@ -5091,9 +5089,9 @@ describe("multi-ghost", () => {
         );
         expect(system.split(join(obsidianSkill, "SKILL.md"))).toHaveLength(2);
       }
-      expect(provider.requests[0]?.system).toContain("casper-private");
-      expect(provider.requests[0]?.system).not.toContain("mina-private");
-      expect(minaProvider.requests[0]?.system).toContain("mina-private");
+      expect(provider.requests[0]?.system).toContain("Casper keeps this private");
+      expect(provider.requests[0]?.system).not.toContain("Mina keeps this private");
+      expect(minaProvider.requests[0]?.system).toContain("Mina keeps this private");
       expect(minaProvider.requests[0]?.system).not.toContain("casper-private");
 
       // Bash execution runs in each session's own working directory; nothing
@@ -6363,12 +6361,12 @@ describe("SessionHost.renameGhost", () => {
     expect(closed).toEqual([dir, dir]);
   });
 
-  it("moves the home and keeps every conversation, pin, and memory with it", async () => {
+  it("moves the home and keeps every conversation, pin, and file with it", async () => {
     const { dir } = await setup();
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "one", emit: () => {} });
     await host!.renameConversation("casper", "conv-1", "First light");
     await host!.setPinned("casper", "conv-1", true);
-    writeFileSync(join(dir, "memory", "press.md"), "The Vandercook is a proof press.\n", "utf8");
+    writeFileSync(join(dir, "press.md"), "The Vandercook is a proof press.\n", "utf8");
 
     const renamed = await host!.renameGhost("casper", "wisp");
 
@@ -6384,7 +6382,7 @@ describe("SessionHost.renameGhost", () => {
       title: "First light",
       pinned: true,
     }]);
-    expect(readFileSync(join(renamed.dir, "memory", "press.md"), "utf8"))
+    expect(readFileSync(join(renamed.dir, "press.md"), "utf8"))
       .toContain("Vandercook");
     // The old name is gone from the API, and the renamed ghost still answers.
     await expect(host!.listSessions("casper"))

@@ -257,28 +257,6 @@ export async function smokeCommand(
       }
       report("second turn", true, second);
 
-      // Memory is written with the runtime's own file tools now, so the thing
-      // worth proving is that what lands is still a memory the home can read.
-      // `skipped` is the daemon's own report of files it could not parse.
-      step = "memory";
-      await runScratchCli([
-        "say",
-        "-q",
-        "-g",
-        "probe",
-        "-s",
-        sessionId,
-        "Save a memory recording that the owner's favourite typeface is Garamond.",
-      ], options);
-      const memorySlugs = smokeMemorySlugs(
-        (await runScratchCli(["memory", "-g", "probe", "--json"], options)).stdout,
-      );
-      report(
-        "memory",
-        true,
-        `${memorySlugs.length} readable (${memorySlugs.join(", ")})`,
-      );
-
       step = "accounting";
       const listed = readSession(
         (await runScratchCli(["sessions", "-g", "probe", "--json"], options)).stdout,

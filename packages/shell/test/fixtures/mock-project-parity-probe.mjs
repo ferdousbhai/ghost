@@ -221,33 +221,6 @@ try {
   assert.equal(rejected.status, 400);
   assert.equal((await rejected.json()).error.code, "invalid_project_path");
 
-  const memoryResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`);
-  assert.equal(memoryResponse.status, 200);
-  const memory = await memoryResponse.json();
-  assert.ok(Array.isArray(memory.memory) && memory.memory.length > 0);
-  assert.deepEqual(Object.keys(memory.memory[0]).sort(), ["content", "path", "slug", "updated"]);
-  assert.deepEqual(memory.skipped, []);
-  const writtenResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content: "Probe fact worth keeping." }),
-  });
-  assert.equal(writtenResponse.status, 200);
-  const written = await writtenResponse.json();
-  assert.equal(written.slug, "probe-fact-worth-keeping");
-  assert.equal(written.created, true);
-  const trashedResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path: written.path, confirm: written.path }),
-  });
-  assert.equal(trashedResponse.status, 200);
-  assert.equal((await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/memory`, {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ content: "   " }),
-  })).status, 400);
-
   const mcpResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/mcp`);
   assert.equal(mcpResponse.status, 200);
   const mcp = await mcpResponse.json();

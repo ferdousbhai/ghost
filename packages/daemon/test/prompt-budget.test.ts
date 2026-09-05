@@ -28,7 +28,7 @@ import type { RunningSource } from "../src/running-source.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
-const MEMORY_ROOT = "/home/owner/ghosts/casper/memory";
+const HOME_DIR = "/home/owner/ghosts/casper";
 const UNIT_DIR = "/home/owner/.config/systemd/user";
 const CHECKOUT = "/home/owner/src/ghost";
 const DOCUMENTS = "/home/owner/Documents";
@@ -42,16 +42,13 @@ const RUNNING: RunningSource = {
 /**
  * `characterPolicySection` and `memorySection` are internal to the prompt
  * builder, so they are measured where they are shipped: in a prompt built with
- * an unwritten character and an empty memory index, split back into its
- * `## `-headed sections. The memory section keeps its fenced index, which is
- * per-ghost, so only the policy above the fence is budgeted.
+ * an unwritten character, split back into its `## `-headed sections.
  */
 function promptSection(heading: string): string {
   const prompt = buildGhostSystemPrompt({
     ghostName: GHOST_NAME,
     character: null,
-    memoryRoot: MEMORY_ROOT,
-    memory: { lines: [], chars: 0, omitted: 0, total: 0 },
+    homeDir: HOME_DIR,
   });
   const section = prompt.trimEnd()
     .split(/\n\n(?=## )/u)
@@ -63,7 +60,6 @@ function promptSection(heading: string): string {
 function renderStablePolicy(): Record<string, string> {
   return {
     "Character file": promptSection("## Character file"),
-    Memory: promptSection("## Memory"),
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
     "Context windows": CONTEXT_WINDOW_POLICY,
@@ -82,19 +78,18 @@ function renderStablePolicy(): Record<string, string> {
 
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
-  "Character file": 940,
-  Memory: 1537,
+  "Character file": 928,
   "Computer use": 415,
-  "Finished work": 404,
-  "Context windows": 665,
+  "Finished work": 250,
+  "Context windows": 693,
   Hooks: 462,
-  "Owner context": 578,
+  "Owner context": 822,
   "Scheduled work": 1399,
   "Self-maintenance": 2116,
-  "First meeting": 470,
+  "First meeting": 431,
 };
 
-const TOTAL_CEILING = 8986;
+const TOTAL_CEILING = 7516;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

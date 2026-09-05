@@ -1,6 +1,6 @@
 # Ghost
 
-Your ghost, on your machine. An AI persona with private memory, the owner's own
+Your ghost, on your machine. An AI persona with a character, the owner's own
 documents, and tools — running locally as an
 [Omarchy](https://omarchy.org)-native desktop app,
 built on the [pi](https://github.com/earendil-works/pi) coding agent
@@ -18,8 +18,7 @@ LSP remain disabled in principal sessions pending a per-session isolation
 boundary; trusted visible `hooks/pre` and `hooks/post` files in the ghost home
 remain the explicit in-process extension surface. The optional Claude Code
 principal retains its own project discovery and subagents. Ghost replaces
-pi's coding-oriented system prompt with its character and bounded private
-memory index. Both runtimes treat the owner's XDG Documents directory as the
+pi's coding-oriented system prompt with its character. Both runtimes treat the owner's XDG Documents directory as the
 persistent owner-visible state every ghost shares, reading and writing it with
 their native file tools.
 Nothing in it is indexed or injected at session start. Claude keeps its complete,
@@ -32,9 +31,8 @@ restart to systemd, as in
 tool activity beside the recovered summoning orb from the earlier summon-ghost
 interface, naming the call the ghost is inside of while it runs.
 
-A ghost keeps its own private memory current with its memory tools during
-ordinary turns; shared knowledge goes to the owner's documents instead. Every
-memory write redacts common credential forms before disk. Provider logins live
+A ghost keeps its notes as Markdown in the owner's documents, shared by every
+ghost and the owner, and writes them with its file tools. Provider logins live
 in pi's own credential file under the ghost home.
 
 The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use

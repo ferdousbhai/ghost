@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { utimes, writeFile } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createPersonaExtension } from "../src/extensions/persona.js";
 import { openGhostHome } from "../src/home.js";
@@ -37,32 +37,6 @@ describe("persona extension", () => {
     expect(prompt).not.toContain("---\ntitle:");
   });
 
-  it("assembles character and the derived private memory index", async () => {
-    await utimes(
-      join(fixture.dir, "memory", "apprentice-question.md"),
-      new Date("2026-08-26T08:00:00.000Z"),
-      new Date("2026-08-26T08:00:00.000Z"),
-    );
-    await utimes(
-      join(fixture.dir, "memory", "working-habit.md"),
-      new Date("2026-08-27T08:00:00.000Z"),
-      new Date("2026-08-27T08:00:00.000Z"),
-    );
-    const harness = await loadExtension(createPersonaExtension(), fixture.dir);
-    const prompt = (await harness.beforeAgentStart()) ?? "";
-
-    expect(prompt).toContain("the ghost of a working typographer");
-    expect(prompt).toContain(JSON.stringify(join(fixture.dir, "character.md")));
-    expect(prompt).toContain("## Memory");
-    expect(prompt).toContain(JSON.stringify(join(fixture.dir, "memory")));
-    expect(prompt).toContain("Never use private memory for owner facts or preferences");
-    expect(prompt).toContain("Put those in the owner's documents");
-    expect(prompt).toContain("apprentice-question");
-    expect(prompt).not.toContain("I explained how to start");
-    expect(prompt.indexOf("working-habit")).toBeLessThan(prompt.indexOf("apprentice-question"));
-    expect(prompt).not.toContain("## Documents");
-  });
-
   it("does not carry text from the inherited harness prompt", async () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const prompt = (await harness.beforeAgentStart("UNIQUE-UPSTREAM-HARNESS-INSTRUCTION")) ?? "";
@@ -73,20 +47,16 @@ describe("persona extension", () => {
     const harness = await loadExtension(createPersonaExtension(), fixture.dir);
     const first = await harness.beforeAgentStart();
     expect(first).not.toContain("freshly-written");
-    await openGhostHome(fixture.dir).writeMemory({
-      content: "freshly-written memory between turns",
-    });
+    await openGhostHome(fixture.dir).writeCharacter({ body: "# Casper\n\nfreshly-written between turns\n" });
     expect(await harness.beforeAgentStart()).toBe(first);
   });
 
-  it("picks up a memory written between sessions", async () => {
+  it("picks up a character written between sessions", async () => {
     const before = await loadExtension(createPersonaExtension(), fixture.dir);
     expect(await before.beforeAgentStart()).not.toContain("freshly-written");
-    await openGhostHome(fixture.dir).writeMemory({
-      content: "freshly-written memory between turns",
-    });
+    await openGhostHome(fixture.dir).writeCharacter({ body: "# Casper\n\nfreshly-written between sessions\n" });
     const after = await loadExtension(createPersonaExtension(), fixture.dir);
-    expect(await after.beforeAgentStart()).toContain("freshly-written-memory-between-turns");
+    expect(await after.beforeAgentStart()).toContain("freshly-written between sessions");
   });
 
   it("says so plainly when there is no character file", async () => {

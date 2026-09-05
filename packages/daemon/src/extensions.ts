@@ -2,7 +2,6 @@ import {
   closeAllBrowserSessions as closeAllExtensionBrowserSessions,
   closeBrowserSession as closeExtensionBrowserSession,
   createGhostExtension,
-  deriveMemoryIndex,
   ghostToolNames,
   openGhostHome,
   relayBackend,
@@ -11,7 +10,6 @@ import {
   type GhostExtensionFactory,
   type GhostToolCapabilitiesSource,
   type GhostToolCapabilitiesResolver,
-  type MemoryListing,
   type RelayTransport,
 } from "@ghost/extensions";
 
@@ -110,15 +108,13 @@ export function resolveGhostExtensions(
  */
 export interface GhostHomeDigest {
   character: string | null;
-  memoryLines: readonly string[];
 }
 
-export type GhostHomeDigestInput = "character" | "memory";
+export type GhostHomeDigestInput = "character";
 
 /** Injectable input readers for deterministic failure and isolation tests. */
 export interface GhostHomeDigestReaders {
   readonly character?: () => Promise<CharacterFile | null>;
-  readonly memory?: () => Promise<MemoryListing>;
 }
 
 export interface GhostHomeDigestReadOptions {
@@ -131,22 +127,11 @@ export async function readGhostHomeDigest(
   options: GhostHomeDigestReadOptions = {},
 ): Promise<GhostHomeDigest> {
   const home = openGhostHome(homeDir);
-  const settled = await Promise.allSettled([
+  const [characterResult] = await Promise.allSettled([
     Promise.resolve().then(() =>
       options.readers?.character ? options.readers.character() : home.readCharacter()),
-    Promise.resolve().then(() =>
-      options.readers?.memory ? options.readers.memory() : home.listMemory()),
   ]);
-  const [characterResult, memoryResult] = settled;
   if (characterResult.status === "rejected") options.onUnavailable?.("character");
-  if (memoryResult.status === "rejected") options.onUnavailable?.("memory");
-
   const character = characterResult.status === "fulfilled" ? characterResult.value : null;
-  const memory = memoryResult.status === "fulfilled"
-    ? memoryResult.value
-    : { files: [], skipped: [] };
-  return {
-    character: character?.body ?? null,
-    memoryLines: deriveMemoryIndex(memory.files).lines,
-  };
+  return { character: character?.body ?? null };
 }

@@ -8,7 +8,6 @@
  * model is present to decide when to ask.
  */
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -156,23 +155,6 @@ function publishConversationUpdated(name, runtime, conversationId,
     if (!response.writableEnded) response.write(event);
   }
 }
-
-// Metadata stays in memory. The default root gets matching temporary files so
-// FilePane exercises real atomic reads/writes without touching ~/ghosts.
-const MOCK_MEMORY = [
-  {
-    path: "memory/preferred-tone.md",
-    slug: "preferred-tone",
-    content: "The owner prefers direct, evidence-first answers. Use terse, concrete language. Lead with the decision and evidence.",
-    updated: "2026-08-24",
-  },
-  {
-    path: "memory/current-project.md",
-    slug: "current-project",
-    content: "Ghost is the owner's local sovereign assistant. Keep context in plain files and keep cloud credentials out of exports.",
-    updated: "2026-08-25",
-  },
-];
 
 // Effective command discovery is session-scoped in the real daemon. These
 // exercise built-ins, aliases, input hints, subcommands, skills, and a project
@@ -390,8 +372,6 @@ function validMcpConfig(config) {
 }
 
 const deletedContext = new Map();
-/** Per-ghost owner-written facts, layered over the seeded MOCK_MEMORY. */
-const writtenMemory = new Map();
 /** The daemon's character cap (MAX_CHARACTER_BODY_LENGTH); shells must read
     it from responses, never pin it. */
 const CHARACTER_LIMIT = 20000;
@@ -404,51 +384,17 @@ function characterBodyFor(name) {
   return `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
 }
 
-function contextDeletedFor(name) {
+function _contextDeletedFor(name) {
   if (!deletedContext.has(name)) deletedContext.set(name, new Set());
   return deletedContext.get(name);
 }
 
-function writtenMemoryFor(name) {
-  if (!writtenMemory.has(name)) writtenMemory.set(name, new Map());
-  return writtenMemory.get(name);
-}
-
-function memoryListing(name) {
-  const deleted = contextDeletedFor(name);
-  const written = writtenMemoryFor(name);
-  const seeded = MOCK_MEMORY.filter((item) => !deleted.has(item.path) && !written.has(item.path));
-  return {
-    memory: [...seeded, ...written.values()].sort((a, b) =>
-      b.updated.localeCompare(a.updated) || a.slug.localeCompare(b.slug)),
-    skipped: [],
-  };
-}
-
-// Mirrors memorySlugForText in @ghost/extensions (minus NFKD), which the
-// shell package cannot import.
-function memorySlug(text) {
-  const slug = text.toLowerCase().replace(/[^a-z0-9\s-]/gu, "").trim()
-    .split(/[\s-]+/u).filter(Boolean).slice(0, 6).join("-").slice(0, 64);
-  return slug || "memory";
-}
-
 function seedMockHome(name) {
   const dir = join(GHOSTS_ROOT, name);
-  mkdirSync(join(dir, "memory"), { recursive: true });
+  mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "character.md"),
     `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
-    "utf8",
-  );
-  writeFileSync(
-    join(dir, "memory", "preferred-tone.md"),
-    `${MOCK_MEMORY[0].content}\n`,
-    "utf8",
-  );
-  writeFileSync(
-    join(dir, "memory", "current-project.md"),
-    `${MOCK_MEMORY[1].content}\n`,
     "utf8",
   );
 }
@@ -1112,9 +1058,9 @@ const LIVE_QUESTION = {
   options: [
     { label: "Answer here and stop", description: "One paragraph back, nothing written to disk." },
     {
-      label: "Answer and keep it as a memory",
-      description: "One concise memory file.",
-      preview: "memory/what-the-owner-asked-for.md",
+      label: "Answer and keep it as a note",
+      description: "One concise note in Documents.",
+      preview: "Documents/notes/what-the-owner-asked-for.md",
     },
     { label: "Answer and save a note", description: "A shared note in Documents, yours to edit after." },
     { label: "Neither — forget I asked", description: "No answer, no files." },
@@ -1140,28 +1086,28 @@ function* script(name, prompt, sessionId) {
   }
   yield { type: "text_end", contentIndex: preamble, content: narration };
   const memory = contentIndex++;
-  yield { type: "toolcall_start", contentIndex: memory, id: "call_1", toolName: "read_memory" };
+  yield { type: "toolcall_start", contentIndex: memory, id: "call_1", toolName: "read_note" };
   yield { type: "toolcall_delta", contentIndex: memory, delta: '{"query":"' };
   yield { type: "toolcall_delta", contentIndex: memory, delta: `${prompt.slice(0, 24)}"}` };
   yield {
     type: "toolcall_end",
     contentIndex: memory,
-    toolCall: { type: "toolCall", id: "call_1", name: "read_memory", arguments: { query: prompt.slice(0, 24) } },
+    toolCall: { type: "toolCall", id: "call_1", name: "read_note", arguments: { query: prompt.slice(0, 24) } },
   };
   yield {
     type: "tool_execution_start",
     id: "call_1",
-    toolName: "read_memory",
+    toolName: "read_note",
     arguments: { query: prompt.slice(0, 24) },
     cwd: SESSION_CWD,
-    intent: "Read the relevant memory",
+    intent: "Read the relevant note",
   };
   yield {
     type: "tool_execution_end",
     id: "call_1",
-    toolName: "read_memory",
+    toolName: "read_note",
     isError: false,
-    summary: "Memory checked",
+    summary: "Note checked",
   };
   for (let step = 1; step < TOOL_STEPS; step++) {
     const index = contentIndex++;
@@ -1447,7 +1393,7 @@ const PROVIDERS = [
 const logins = new Map();
 
 function startLogin(providerId, authType) {
-  const loginId = "login-" + Math.random().toString(36).slice(2, 10);
+  const loginId = `login-${Math.random().toString(36).slice(2, 10)}`;
   const session = { loginId, providerId, authType, view: { loginId, providerId, authType } };
   logins.set(loginId, session);
   if (authType === "api_key") {
@@ -1627,7 +1573,7 @@ function listModels(name, params) {
 
   let rows = CATALOG.filter((m) => (scope === "available" ? credentialed.has(m.provider) : true));
   if (provider) rows = rows.filter((m) => m.provider === provider);
-  if (q) rows = rows.filter((m) => (m.id + " " + m.name).toLowerCase().includes(q));
+  if (q) rows = rows.filter((m) => (`${m.id} ${m.name}`).toLowerCase().includes(q));
   const total = rows.length;
   const offset = Math.min(total,
     requestedOffset < 0 ? 0 : Math.floor(requestedOffset));
@@ -1794,64 +1740,6 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, { ok: true, limit: CHARACTER_LIMIT });
   }
 
-  if (parts.length === 4 && parts[3] === "memory" && req.method === "GET") {
-    return json(res, 200, memoryListing(name));
-  }
-  if (parts.length === 4 && parts[3] === "memory" && req.method === "PUT") {
-    const body = await readBody(req).catch(() => ({}));
-    const content = typeof body?.content === "string" ? body.content.trim() : "";
-    if (content === "") {
-      return json(res, 400, {
-        error: { message: "A memory must contain one concise private thought.", code: "invalid_request" },
-      });
-    }
-    if (content.length > 2000) {
-      return json(res, 400, {
-        error: { message: "Memory files must be 2000 characters or fewer.", code: "invalid_request" },
-      });
-    }
-    const slug = typeof body?.name === "string" && body.name !== "" ? body.name : memorySlug(content);
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(slug)) {
-      return json(res, 400, {
-        error: { message: "Memory file names must be short kebab-case slugs.", code: "invalid_request" },
-      });
-    }
-    const path = `memory/${slug}.md`;
-    const existed = memoryListing(name).memory.some((item) => item.path === path);
-    contextDeletedFor(name).delete(path);
-    writtenMemoryFor(name).set(path, { path, slug, content, updated: new Date().toISOString() });
-    if (OWNS_GHOSTS_ROOT) {
-      mkdirSync(join(ghost.dir, "memory"), { recursive: true });
-      writeFileSync(join(ghost.dir, path), `${content}\n`, "utf8");
-    }
-    return json(res, 200, { ok: true, slug, path, created: !existed });
-  }
-  if (parts.length === 4 && parts[3] === "memory" && req.method === "DELETE") {
-    const body = await readBody(req).catch(() => ({}));
-    const path = typeof body?.path === "string" ? body.path : "";
-    if (path === "" || body?.confirm !== path) {
-      return json(res, 400, {
-        error: {
-          message: "Memory deletion requires an exact path confirmation",
-          code: "confirmation_required",
-        },
-      });
-    }
-    if (!memoryListing(name).memory.some((item) => item.path === path)) {
-      return json(res, 404, {
-        error: { message: "No such memory file", code: "not_found" },
-      });
-    }
-    const trash = join(GHOSTS_ROOT, ".mock-trash", name, path.replace(/\//gu, "--"));
-    if (OWNS_GHOSTS_ROOT && existsSync(join(ghost.dir, path))) {
-      mkdirSync(join(GHOSTS_ROOT, ".mock-trash", name), { recursive: true });
-      renameSync(join(ghost.dir, path), trash);
-    }
-    contextDeletedFor(name).add(path);
-    writtenMemoryFor(name).delete(path);
-    return json(res, 200, { ok: true, path, trash });
-  }
-  // Banishing a ghost. The real daemon moves the home to the XDG trash so it is
   // recoverable from the desktop; the mock just drops it from memory, and
   // answers the same `trash` path so the surfaces see the contract's shape.
   if (parts.length === 3 && req.method === "DELETE") {
@@ -1877,7 +1765,6 @@ const mockServer = createServer(async (req, res) => {
       if (preview.name === name) projectTrust.delete(token);
     }
     deletedContext.delete(name);
-    writtenMemory.delete(name);
     writtenCharacter.delete(name);
     mcpStore.delete(name);
     roles.delete(name);
@@ -1904,7 +1791,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, projectStore, deletedContext, writtenMemory,
+    for (const store of [sessionStore, projectStore, deletedContext,
         writtenCharacter, mcpStore, roles, routing]) {
       if (store.has(name)) {
         store.set(next, store.get(name));

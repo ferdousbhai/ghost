@@ -14,7 +14,7 @@ An owner installs Ghost, creates a named persona, binds a local or open-source
 model as its driver, adds a subscription or API key for the frontier teacher and
 specialists, and talks through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
 Code is an optional native runtime. Both feel like the same ghost because they
-receive the same character, private memory policy, machine skills,
+receive the same character, notes policy, machine skills,
 owner-context policy, and trusted-project snapshot. The runtime still owns its native way of
 working.
 
@@ -43,7 +43,7 @@ than becoming parallel Ghost frameworks.
   hook output leaving the machine; the adapter stays downloadable so it can
   be served locally later, behind one provider-agnostic adapter-host seam.
 - **Lean core, adaptive ghost.** The core ships sensible defaults and stops
-  there. A ghost fits its owner through character, memory, hooks, and its own
+  there. A ghost fits its owner through character, notes, hooks, and its own
   checkout (#65), not through the core growing a feature per preference. The
   system prompt is a budget rather than a place to put things, because it is
   what the adapter has to absorb.

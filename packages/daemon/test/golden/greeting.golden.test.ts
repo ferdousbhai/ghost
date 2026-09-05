@@ -18,7 +18,7 @@
  * with `localTimeString()`, which is the machine's zone and the current minute;
  * the generator below swaps in a pinned string before building the prompt, so
  * the prompt text in the fixture is the real one with a stable clock rather than
- * a redacted one. Everything else — the memory budget and the "days since your
+ * a redacted one. Everything else — the "days since your
  * last conversation" line — is what the route actually
  * assembled. See ./harness.ts for the shared normalisation rules.
  */
@@ -56,9 +56,6 @@ const CHARACTER = `# casper
 You are casper, a letterpress printer. You answer in short sentences.
 `;
 
-function memoryFile(content: string): string {
-  return `${content}\n`;
-}
 
 /**
  * Two models, both credentialed, so `resolveSmolModel` has a real ranking to
@@ -207,7 +204,6 @@ describe("golden: greeting flow", () => {
     const reference: GreetingContextInput = {
       ghostName: "casper",
       character: "You are casper, a letterpress printer.",
-      memoryLines: ["- owner-prefers-short.md"],
       localTime: LOCAL_TIME,
       daysSinceLastConversation: 12,
       onboarding: false,
@@ -227,11 +223,6 @@ describe("golden: greeting flow", () => {
         seedGhost(temp.root, {
           name: "casper",
           character: CHARACTER,
-          memory: {
-            "owner-prefers-short.md": memoryFile(
-              "The owner wants short answers. Keep replies to a line or two.",
-            ),
-          },
         });
       } else {
         // The registry's own seed is the definition of "never been met".

@@ -41,7 +41,7 @@ const BUILTINS: readonly BuiltinSpec[] = [
   { name: "compact", description: "Summarize older history to free context", availability: "available", hint: "[instructions]" },
   { name: "browser", description: "Browser mode", availability: "unsupported", reason: "Ghost's browser tools own this surface." },
   { name: "computer", description: "Computer use mode", availability: "unsupported", reason: "Ghost's desktop tools own this surface." },
-  { name: "memory", description: "Memory backends", availability: "unsupported", reason: "Ghost memory is plain files in this ghost home." },
+  { name: "memory", description: "Memory backends", availability: "unsupported", reason: "Notes are plain files in the owner's documents" },
   { name: "mcp", description: "MCP servers", availability: "unsupported", reason: "Use Ghost MCP management." },
   { name: "move", description: "Move the conversation to another project", availability: "unsupported", reason: "A Ghost conversation stays rooted in its ghost home." },
   { name: "add-dir", description: "Add a directory to the conversation", availability: "unsupported", reason: "Ghost does not extend a conversation outside its fixed ghost-home scope." },

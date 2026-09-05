@@ -104,14 +104,14 @@ export function parseClientFrame(raw: string): ParsedClientFrame {
   }
   if (!isRecord(parsed)) return { ok: false, reason: "not a JSON object" };
 
-  switch (parsed["t"]) {
+  switch (parsed.t) {
     case "hello": {
-      const protocol = parsed["protocol"];
+      const protocol = parsed.protocol;
       if (typeof protocol !== "number" || !Number.isInteger(protocol)) {
         return { ok: false, reason: "hello has no integer protocol" };
       }
-      const agent = parsed["agent"];
-      const browser = parsed["browser"];
+      const agent = parsed.agent;
+      const browser = parsed.browser;
       return {
         ok: true,
         frame: {
@@ -123,19 +123,19 @@ export function parseClientFrame(raw: string): ParsedClientFrame {
       };
     }
     case "res": {
-      const id = parsed["id"];
+      const id = parsed.id;
       if (typeof id !== "number" || !Number.isInteger(id)) {
         return { ok: false, reason: "res has no integer id" };
       }
-      if (parsed["ok"] === true) {
-        return { ok: true, frame: { t: "res", id, ok: true, result: parsed["result"] } };
+      if (parsed.ok === true) {
+        return { ok: true, frame: { t: "res", id, ok: true, result: parsed.result } };
       }
-      const error = parsed["error"];
-      if (!isRecord(error) || typeof error["message"] !== "string") {
+      const error = parsed.error;
+      if (!isRecord(error) || typeof error.message !== "string") {
         return { ok: false, reason: "res is a failure with no error.message" };
       }
-      const failure = error["failure"];
-      const details = error["details"];
+      const failure = error.failure;
+      const details = error.details;
       return {
         ok: true,
         frame: {
@@ -144,25 +144,25 @@ export function parseClientFrame(raw: string): ParsedClientFrame {
           ok: false,
           error: {
             failure: typeof failure === "string" ? failure : "navigation_failed",
-            message: error["message"],
+            message: error.message,
             ...(isRecord(details) ? { details } : {}),
           },
         },
       };
     }
     case "event": {
-      const event = parsed["event"];
+      const event = parsed.event;
       if (typeof event !== "string" || event === "") {
         return { ok: false, reason: "event has no name" };
       }
-      const data = parsed["data"];
+      const data = parsed.data;
       return {
         ok: true,
         frame: { t: "event", event, ...(isRecord(data) ? { data } : {}) },
       };
     }
     default:
-      return { ok: false, reason: `unknown frame type ${JSON.stringify(parsed["t"])}` };
+      return { ok: false, reason: `unknown frame type ${JSON.stringify(parsed.t)}` };
   }
 }
 

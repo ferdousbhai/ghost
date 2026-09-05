@@ -21,7 +21,7 @@ never widens a ghost's local tool authority.
 
 A **ghost** is one persona. Its **ghost home** is one directory —
 `~/ghosts/<name>/` by default — and the directory name *is* the ghost's name.
-Creating a ghost writes `character.md` and an empty `memory/`; everything else
+Creating a ghost writes `character.md`; everything else
 in the layout appears when it is used
 ([`ghosts.ts`](../packages/daemon/src/ghosts.ts),
 [`home.ts`](../packages/extensions/src/home.ts)).
@@ -32,11 +32,9 @@ in the layout appears when it is used
   in the gaps and to show a character draft before writing one. Writing the
   file removes that section on the next conversation — onboarding ends by
   itself rather than by a flag ([`greeting.ts`](../packages/daemon/src/greeting.ts)).
-- `memory/*.md` is *this ghost's private internal continuity*: subjective
-  reflections and commitments about its own behavior, one thought per
-  kebab-case file. It is not the owner's knowledge store, and no other ghost
-  reads it. Limits, redaction, and the session-start index are in
-  [`memory-file.ts`](../packages/extensions/src/memory-file.ts).
+- Notes are not in the home: a ghost's facts, decisions, and reflections are
+  Markdown files under the owner's Documents directory, shared with every
+  ghost and the owner.
 - Sessions, sidecars, and runtime scratch state live
   under the same home.
 
@@ -54,7 +52,7 @@ enforced in the system prompt as well as in code
 
 | Scope | Holds | Owned by |
 |---|---|---|
-| Ghost-private | character, memory, conversations, settings, runtime sidecars | one ghost home |
+| Ghost-private | character, conversations, settings, runtime sidecars | one ghost home |
 | Owner-shared | notes, knowledge, decisions, plans, tasks | the owner's XDG Documents directory, read and written as ordinary files |
 | External | trusted projects, downloads, screenshots, systemd user timers, credentials | the machine facility that already owns them |
 
@@ -85,7 +83,7 @@ may depend on it.
 
 The daemon is the only session owner: one process owns a session, and every
 other surface is a client. The CLI never edits a ghost home directly, and the
-HUD never writes daemon-validated state (memory, character, control files)
+HUD never writes daemon-validated state (character, control files)
 behind the daemon's back — the workbench file editor is the one deliberate
 exception, and it writes ordinary files at the owner's explicit direction.
 
@@ -121,8 +119,7 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   only what the preset lacks. Setup is in
   [claude-code-runtime.md](claude-code-runtime.md).
 
-Both runtimes receive the same Ghost-owned context: character, private memory
-index, first-meeting policy, computer-use policy, scheduled-work policy, and
+Both runtimes receive the same Ghost-owned context: character, first-meeting policy, computer-use policy, scheduled-work policy, and
 owner-context policy. Owner questions, image understanding, and
 browser/screen/desktop control work on both. The
 runtime still owns its own mechanics, so the same ghost feels like itself on

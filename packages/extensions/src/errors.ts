@@ -36,18 +36,6 @@ export class GhostError extends Error {
   }
 }
 
-/**
- * A memory file the model wrote does not match the format. Kept as its own class
- * (as in the hosted repo) because the message is deliberately instructional: it
- * is handed back verbatim so the model can fix its own write.
- */
-export class MemoryFileFormatError extends GhostError {
-  constructor(message: string, details: Readonly<Record<string, unknown>> = {}) {
-    super("invalid_format", message, details);
-    this.name = "MemoryFileFormatError";
-  }
-}
-
 export function isGhostError(value: unknown): value is GhostError {
   return value instanceof GhostError;
 }

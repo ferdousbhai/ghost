@@ -19,7 +19,6 @@ let env: NodeJS.ProcessEnv;
 beforeEach(async () => {
   const fixture = await startTestDaemon({
     ghost: "casper",
-    memory: { "favorite-tea.md": "The owner likes oolong tea.\n" },
     openSession: "conv-1",
   });
   ({ temp, provider, host, listening, tokenFile, env } = fixture);
@@ -85,22 +84,6 @@ describe("ghost CLI against a real daemon server", () => {
     });
   });
 
-  it("lists and reads memory through the current memory API", async () => {
-    const listed = await cli(["memory", "-g", "casper", "--json"]);
-    expect(listed.code).toBe(0);
-    expect(JSON.parse(listed.stdout)).toMatchObject({
-      memory: [{
-        path: "memory/favorite-tea.md",
-        slug: "favorite-tea",
-        content: "The owner likes oolong tea.",
-      }],
-      skipped: [],
-    });
-    expect(await cli(["memory", "show", "favorite-tea", "-g", "casper"])).toMatchObject({
-      code: 0,
-      stdout: "The owner likes oolong tea.\n",
-    });
-  });
 
   it("keeps destructive removal behind --yes", async () => {
     const result = await cli(["rm", "casper"]);
