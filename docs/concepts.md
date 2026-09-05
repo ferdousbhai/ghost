@@ -172,12 +172,12 @@ none. The protocol is in [hooks.md](hooks.md).
   with one LoRA adapter per ghost. Frontier models bind to the teacher role,
   `advisor_model`, reached through `ghostd hook-smol-complete --role advisor`
   from an owner `session_stop` hook and through the specialist CLIs the ghost
-  runs from Bash. Those owner hooks are the training signal for the
-  continual-learning flywheel in #64; the core keeps no review pipeline or
-  training journal of its own.
+  runs from Bash. Those owner hooks are the training signal for any
+  continual-learning loop an owner builds outside the core (#64); Ghost keeps
+  no review pipeline or training journal of its own.
 - **Lean core, adaptive ghost.** The core ships sensible defaults and stops
   there. A ghost fits its owner through character, notes, hooks, and its own
-  checkout (#65), not through the core growing a feature per preference. The
+  checkout, not through the core growing a feature per preference. The
   system prompt is a budget rather than a place to put things, because it is
   what the adapter has to absorb.
 - **Files over an application database.** Personas and inspectable policy stay
