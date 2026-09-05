@@ -555,8 +555,6 @@ Singleton {
     property string modelError: ""
     property string modelWarning: ""
 
-    signal modelSwitchNeedsLogin(string provider)
-    signal modelSwitchCompleted(string provider, string id)
     signal modelRouteCompleted(string role, string target)
 
     // The XHR must be held by a property. A request whose only reference is the
@@ -4022,18 +4020,6 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
     }
 
-    /**
-     * Search the FULL pi catalogue. `query` is a case-insensitive substring on
-     * id/name; `offset` pages by catalogLimit. Result → catalogModels/catalogTotal.
-     * A stale reply (a newer search already fired) is dropped.
-     */
-    /**
-     * Set roles.chat_model. The daemon writes the role even when the provider is
-     * not credentialed and answers { usable: false, … } — we then emit
-     * modelSwitchNeedsLogin so the shell can surface a login rather than fail the
-     * switch silently. The indicator and available list are refreshed either way.
-     */
-    /** Atomically replace a Ghost role's complete ordered retry chain. */
     /** The daemon's own presentable message for a failure, or "". */
     function errorDetail(xhr: var): string {
         try {

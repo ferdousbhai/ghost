@@ -42,7 +42,6 @@ FloatingWindow {
     property bool shown: false
     property bool sidebarOpen: true
     property bool loginOpen: false
-    property bool loginFromSwitcher: false
 
     // Leaving login abandons any client-only model intent and restores the
     // daemon's effective selection. This catches Close, Done, navigation, and
@@ -175,7 +174,6 @@ FloatingWindow {
 
     function openLogin(): void {
         hud.currentSection = "chat";
-        hud.loginFromSwitcher = false;
         hud.loginOpen = true;
         modelLogin.open("");
     }
@@ -1076,13 +1074,7 @@ FloatingWindow {
                 visible: hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                onCloseRequested: {
-                    hud.loginOpen = false;
-                    if (hud.loginFromSwitcher) {
-                        hud.loginFromSwitcher = false;
-                        hud.openSwitcher();
-                    }
-                }
+                onCloseRequested: hud.loginOpen = false
             }
         }
 
@@ -1185,16 +1177,8 @@ FloatingWindow {
             }
         }
 
-        // A switch to an uncredentialed provider's model wrote the role but
-        // needs a login before it resolves; route into the login flow.
         Connections {
             target: Ghostd
-            function onModelSwitchCompleted(provider: string, id: string): void {
-                composer.take();
-            }
-            function onModelSwitchNeedsLogin(provider: string): void {
-                hud.openLoginForSelectedModel(provider);
-            }
             function onQueueMessageRejected(text: string): void {
                 composer.text = text;
                 composer.take();

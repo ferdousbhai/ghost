@@ -90,7 +90,7 @@ ShellRoot {
 
         function switcher(): void {
             hud.open();
-            hud.openSwitcher();
+            hud.openLogin();
         }
 
         function section(name: string): void {
