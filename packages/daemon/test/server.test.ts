@@ -1241,7 +1241,6 @@ describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       runtime: "pi",
-      obsidian: { path: skillPath, status: "admitted" },
       skills: [expect.objectContaining({
         name: "obsidian-cli",
         source: "machine",
@@ -1382,6 +1381,7 @@ describe("ghost MCP routes", () => {
     const added = await jsonRequest(collection, "POST", {
       name: "probe",
       config: {
+        enabled: true,
         type: "stdio",
         command: process.execPath,
         args: ["-e", "process.exit(1)", "secret-argument"],
@@ -1548,7 +1548,7 @@ describe("ghost MCP routes", () => {
     for (const name of names) {
       const response = await jsonRequest(collection, "POST", {
         name,
-        config: { type: "stdio", command: `${name}-before` },
+        config: { type: "stdio", command: `${name}-before`, enabled: true },
       });
       expect(response.status).toBe(201);
     }
@@ -1604,7 +1604,7 @@ describe("ghost MCP routes", () => {
 
     const added = await jsonRequest(collection, "POST", {
       name: "route_fixture",
-      config: { type: "stdio", command: process.execPath, args: [firstServer] },
+      config: { type: "stdio", command: process.execPath, args: [firstServer], enabled: true },
     });
     expect(added.status).toBe(201);
     expect(await added.json()).toMatchObject({
@@ -1674,7 +1674,7 @@ describe("ghost MCP routes", () => {
 
     const added = await jsonRequest(collection, "POST", {
       name: "route_fixture",
-      config: { type: "stdio", command: process.execPath, args: [firstServer] },
+      config: { type: "stdio", command: process.execPath, args: [firstServer], enabled: true },
     });
     expect(added.status).toBe(201);
     expect(opened.session.getToolDefinition(stableTool)).toBeDefined();

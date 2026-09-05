@@ -435,6 +435,7 @@ describe("McpCatalog mutations", () => {
     await catalog.add("casper", "smithery:cloudflare.api-v1", {
       type: "http",
       url: "https://example.com/mcp",
+      enabled: true,
     });
     await catalog.update("casper", "legacy", { type: "stdio", command: "after" });
     await catalog.setEnabled("casper", "legacy", false);
@@ -456,6 +457,7 @@ describe("McpCatalog mutations", () => {
       await catalog.add("casper", name, {
         type: "stdio",
         command: `${name}-before`,
+        enabled: true,
       });
     }
 

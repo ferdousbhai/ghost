@@ -62,7 +62,9 @@ An optional top-level `builtin` object is reserved for hooks Ghost registers
 in code. Ghost registers none today, so the section admits no keys; an empty
 object is accepted so an older `hooks.json` still parses.
 
-This file configures Ghost's machine-level awaited command hooks. They run for
+`ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
+ghost asked for a hook can write one. This file configures Ghost's machine-level
+awaited command hooks. They run for
 both principal pi and principal Claude Code conversations, above either model
 harness, and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration

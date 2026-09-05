@@ -359,7 +359,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
 | `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
-| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, enablement, reconnect, and isolated test. |
+| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, enablement, reconnect, and isolated test. A server added through this API starts disabled unless its row says `enabled: true`. |
 | `POST /api/ghosts/:name/greeting` | `{ greeting: string|null, onboarding }`; generation failure is a null greeting, not a 5xx. |
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
@@ -400,7 +400,7 @@ persisted as an assistant answer.
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
-ask, job, model, memory, status, and skill operations. Signing in is a provider
+ask, job, model, memory, MCP, hooks, status, and skill operations. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the

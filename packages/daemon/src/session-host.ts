@@ -88,6 +88,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
@@ -2602,6 +2603,7 @@ export class SessionHost {
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
       CONTEXT_WINDOW_POLICY,
+      OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       renderSelfMaintenancePolicy({

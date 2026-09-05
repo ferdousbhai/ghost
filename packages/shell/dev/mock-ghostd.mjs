@@ -1956,7 +1956,8 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `MCP server ${serverName} already exists`, code: "mcp_server_exists" },
       });
     }
-    ghostMcp(name).set(serverName, structuredClone(body.config));
+    // Like ghostd: a newly added server starts disabled unless the row says otherwise.
+    ghostMcp(name).set(serverName, { enabled: false, ...structuredClone(body.config) });
     return json(res, 201, mcpSnapshot(name));
   }
   if (parts[3] === "mcp" && parts.length >= 5) {

@@ -11,6 +11,8 @@ import {
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { ghostsCommand } from "./ghosts.js";
+import { hooksCommand } from "./hooks.js";
+import { mcpCommand } from "./mcp.js";
 import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
 import { memoryCommand } from "./memory.js";
 import { modelCommand } from "./model.js";
@@ -163,6 +165,22 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost model --list --q claude",
     positionals: [0, 1],
     run: modelCommand,
+  },
+  {
+    verb: "mcp",
+    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>|test <name>|reconnect <name>] [-g <name>] [--json] [-q]",
+    summary: "Inspect or change this ghost's MCP servers; new servers start disabled.",
+    example: "ghost mcp enable github",
+    positionals: [0, 3],
+    run: mcpCommand,
+  },
+  {
+    verb: "hooks",
+    usage: "hooks [status|show|set <hooks.json>] [--json] [-q]",
+    summary: "Show or replace the owner's hooks.json.",
+    example: "ghost hooks show",
+    positionals: [0, 2],
+    run: hooksCommand,
   },
   {
     verb: "login",

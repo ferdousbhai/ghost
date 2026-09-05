@@ -109,6 +109,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
@@ -1442,6 +1443,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       renderSelfMaintenancePolicy({

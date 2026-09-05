@@ -19,6 +19,17 @@ export const OWNER_DELIVERABLE_POLICY = [
     + "knowledge, notes, and task state every ghost shares.",
 ].join("\n");
 
+/** Owner hooks are files the ghost may write when asked; Ghost ships none. */
+export const OWNER_HOOKS_POLICY = [
+  "## Hooks",
+  "The owner's hooks live in `~/.config/ghost/hooks.json`: `before_prompt` and `session_stop` "
+    + "commands (`ghost hooks show`, `ghost hooks set <file>`). None ship by default; when the "
+    + "owner asks for one, write it there and say what it runs.",
+  "An MCP server added with `ghost mcp add` starts disabled because its tools cost context. "
+    + "Enable one with `ghost mcp enable <name>` when needed, or run a toolset in a `pi` "
+    + "subagent from Bash instead of loading it here.",
+].join("\n");
+
 /** The owner's own directory: persistent context every ghost on this machine shares. */
 export function renderOwnerContextPolicy(documentsDir: string): string {
   return [

@@ -540,7 +540,11 @@ export class McpCatalog {
       throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
     }
     const [canonical] = this.sources(ghostName);
-    await this.writeServer("add", canonical.absolutePath, name, config);
+    // A new server costs context the moment it connects, so it starts off
+    // unless the row says otherwise; `enable` is the deliberate step.
+    const row = config as Record<string, unknown>;
+    const stored = "enabled" in row ? config : { ...row, enabled: false };
+    await this.writeServer("add", canonical.absolutePath, name, stored);
     return this.listLeased(ghostName);
   }
 

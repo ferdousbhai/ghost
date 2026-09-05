@@ -19,6 +19,7 @@ import { CONTEXT_WINDOW_POLICY } from "../src/context-windows.js";
 import {
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
+  OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "../src/machine-skills.js";
 import { renderScheduledWorkPolicy } from "../src/schedules.js";
@@ -66,6 +67,7 @@ function renderStablePolicy(): Record<string, string> {
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
     "Context windows": CONTEXT_WINDOW_POLICY,
+    Hooks: OWNER_HOOKS_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
@@ -85,13 +87,14 @@ const CEILINGS: Record<string, number> = {
   "Computer use": 415,
   "Finished work": 404,
   "Context windows": 665,
+  Hooks: 462,
   "Owner context": 578,
   "Scheduled work": 1399,
   "Self-maintenance": 2116,
   "First meeting": 470,
 };
 
-const TOTAL_CEILING = 8524;
+const TOTAL_CEILING = 8986;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(
