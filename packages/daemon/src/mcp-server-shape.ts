@@ -1,13 +1,13 @@
 /**
  * The single definition of "a valid Ghost-owned MCP server row".
  *
- * Both the visible MCP catalogue and the keyring migration have to agree on
- * this, and for opposite reasons: the catalogue rejects an invalid row so a
- * malformed value never reaches the MCP manager or an HTTP sanitizer, while migration must
- * recognise exactly the same rows in order to leave everything else untouched.
+ * Both the visible MCP catalogue and the HTTP sanitizer have to agree on
+ * this: the catalogue rejects an invalid row so a malformed value never
+ * reaches the MCP manager, while the sanitizer must recognise exactly the
+ * same rows in order to redact the right fields.
  * Two independent copies of the rule would eventually disagree, and the
- * disagreement would show up as migration refusing a server the catalogue is
- * perfectly willing to describe.
+ * disagreement would show up as the sanitizer leaking a field the catalogue
+ * was perfectly willing to accept.
  *
  * Messages name fields but never interpolate their values.
  */

@@ -88,8 +88,7 @@ describe("models.json round-trip", () => {
     const agentDir = makeAgentDir();
     const path = ghostModelsPath(agentDir);
     writeFileSync(path, `${JSON.stringify({
-      providers: { retained: { apiKey: "keyring:retained/personal" } },
-      accounts: ["retained/personal"],
+      providers: { retained: { apiKey: "retained-key" } },
       futureSetting: { retained: true },
     })}\n`, { mode: 0o600 });
     renameSync(path, `${path}.ghost-migration-cas`);
@@ -97,8 +96,7 @@ describe("models.json round-trip", () => {
     setGhostModelRole(agentDir, "chat_model", "retained", "model-after-recovery");
 
     expect(readGhostModels(agentDir)).toMatchObject({
-      providers: { retained: { apiKey: "keyring:retained/personal" } },
-      accounts: ["retained/personal"],
+      providers: { retained: { apiKey: "retained-key" } },
       futureSetting: { retained: true },
       roles: { chat_model: { provider: "retained", modelId: "model-after-recovery" } },
     });
@@ -429,11 +427,11 @@ describe("Pi runtime compatibility", () => {
     runtime.close();
   });
 
-  it("imports legacy auth.json into the keyring and leaves no plaintext store behind", async () => {
+  it("reads pi's auth.json as the ghost's credential store", async () => {
     const agentDir = makeAgentDir();
     const authPath = ghostAuthPath(agentDir);
     writeFileSync(authPath, JSON.stringify({
-      openrouter: { type: "api_key", key: "legacy-secret" },
+      openrouter: { type: "api_key", key: "stored-secret" },
     }), { encoding: "utf8", mode: 0o600 });
 
     const runtime = await createGhostPiRuntime({
@@ -442,30 +440,13 @@ describe("Pi runtime compatibility", () => {
       allowModelNetwork: false,
     });
     await expect(runtime.runtime.getAuth("openrouter")).resolves.toMatchObject({
-      auth: { apiKey: "legacy-secret" },
+      auth: { apiKey: "stored-secret" },
     });
-    // The keyring is the only credential store now. The verified import
-    // removes its plaintext source, and Ghost injects its own
-    // AuthCredentialStore instead of calling AuthStorage.create(agent.db), so
-    // nothing recreates a SQLite credential database in the ghost home.
-    expect(existsSync(authPath)).toBe(false);
+    // pi's file is the only credential store: nothing copies it anywhere else.
+    expect(existsSync(authPath)).toBe(true);
     expect(existsSync(join(agentDir, "agent.db"))).toBe(false);
-    expect(readGhostModels(agentDir)?.accounts).toEqual(["openrouter/personal"]);
+    expect(readGhostModels(agentDir)).toBeNull();
     runtime.close();
-
-    // Idempotent: reopening with the source already gone resolves the same
-    // machine account rather than importing a second copy of it.
-    const reopened = await createGhostPiRuntime({
-      authPath,
-      modelsPath: ghostModelsPath(agentDir),
-      allowModelNetwork: false,
-    });
-    await expect(reopened.runtime.getAuth("openrouter")).resolves.toMatchObject({
-      auth: { apiKey: "legacy-secret" },
-    });
-    expect(readGhostModels(agentDir)?.accounts).toEqual(["openrouter/personal"]);
-    expect(existsSync(join(agentDir, "agent.db"))).toBe(false);
-    reopened.close();
   });
 
   it("is provider-agnostic: any OpenAI-compatible endpoint is one preset call", () => {

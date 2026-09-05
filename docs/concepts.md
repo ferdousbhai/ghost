@@ -144,12 +144,11 @@ Pi-native executable extensions that do not enter Claude.
 
 ## Models and roles
 
-`models.json` in the ghost home holds provider policy, role bindings, fallback
-chains, and Secret Service *references*. Credential values live in the Linux
-Secret Service under Ghost's own schema and never enter that file, logs, API
-responses, or a backup — see [keyring.md](keyring.md). Its `accounts` list is
-policy, not discovery: a ghost cannot resolve a keyring item that list omits,
-even when another ghost uses it.
+`models.json` in the ghost home holds provider policy, role bindings, and
+fallback chains. Provider logins live in pi's own file-backed store,
+`.pi/auth.json` (mode 0600), so each ghost signs in on its own and a login
+never leaves the ghost home. Credential values never enter logs or API
+responses.
 
 Roles let one ghost use different models for different jobs: `chat_model`,
 `smol_model`, `slow_model`, `vision_model`, `plan_model`, `designer_model`,
@@ -231,5 +230,5 @@ If you expect one of these, it is missing on purpose:
 - [`CONTRACTS.md`](../CONTRACTS.md) — the normative wire, storage, and package
   boundaries.
 - [hooks.md](hooks.md), [claude-code-runtime.md](claude-code-runtime.md),
-  [desktop-helper.md](desktop-helper.md), [keyring.md](keyring.md),
+  [desktop-helper.md](desktop-helper.md),
   [injection-defense.md](injection-defense.md) — one document per protocol.

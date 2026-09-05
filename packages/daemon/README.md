@@ -29,7 +29,6 @@ Detailed external protocols have one home:
 
 - [Claude Code runtime](../../docs/claude-code-runtime.md)
 - [hooks](../../docs/hooks.md)
-- [keyring credentials](../../docs/keyring.md)
 
 ## Persistent state
 

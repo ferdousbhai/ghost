@@ -357,7 +357,7 @@ write          registry=yes  wire=yes  invokable=yes
 [ghost home after the conversation]
 ------------------------------------------------------------------------------
 --- .pi/ (contents not compared) ---
-models-store.json, models.pi.json
+auth.json, models-store.json, models.pi.json
 --- sessions/ (contents not compared) ---
 conv-golden.jsonl, conv-golden.pi.tool-cwds.json
 --- character.md ---
@@ -391,7 +391,7 @@ The owner wants short answers. They asked for the story, not the spec sheet. Kee
           }
         }
       ],
-      "apiKey": "keyring:ghost-local/personal"
+      "apiKey": "not-needed"
     }
   },
   "roles": {
@@ -399,8 +399,5 @@ The owner wants short answers. They asked for the story, not the spec sheet. Kee
       "provider": "ghost-local",
       "modelId": "mock-ghost-1"
     }
-  },
-  "accounts": [
-    "ghost-local/personal"
-  ]
+  }
 }

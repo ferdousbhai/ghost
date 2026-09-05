@@ -186,7 +186,6 @@ import {
   type SessionResourceView,
   type SessionSkillGroup,
 } from "./session-resources.js";
-import { resolveMcpServerSecrets, type SecretResolver } from "./secret-resolution.js";
 import {
   projectBindingPath,
   ProjectBindingStore,
@@ -1470,7 +1469,6 @@ async function connectGhostProjectMCP(
   manager: GhostMcpManager,
   input: {
     ghostRoot: string;
-    secretResolver: SecretResolver;
     project?: { root: string; mcp: EffectiveProjectMcpRead };
   },
   logger: Logger,
@@ -1527,8 +1525,7 @@ async function connectGhostProjectMCP(
       }
       const config = server.config as MCPServerConfig;
       if (config.enabled === false) continue;
-      const resolved = resolveMcpServerSecrets(config, input.secretResolver);
-      configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(resolved), root));
+      configs.set(server.name, normalizeMcpStdioCwd(expandMcpServerConfig(config), root));
       sources.set(server.name, {
         path: server.source.absolutePath,
         level: isActiveProject ? "project" : "user",
@@ -2665,7 +2662,6 @@ export class SessionHost {
       manager,
       {
         ghostRoot: paths.home,
-        secretResolver: modelRuntime.secretResolver,
         ...(project.root && projectSnapshot
           ? { project: { root: project.root, mcp: projectSnapshot.mcp } }
           : {}),
@@ -3291,7 +3287,6 @@ export class SessionHost {
         candidate,
         {
           ghostRoot: hosted.ghost.dir,
-          secretResolver: hosted.modelRuntime.secretResolver,
           ...(hosted.project.root && hosted.projectSnapshot
             ? {
                 project: {
@@ -4686,7 +4681,7 @@ export class SessionHost {
    * A runtime to `complete()` on, outside any session.
    *
    * A live conversation already has one bound to this ghost's credentials, so
-   * reuse it rather than opening a second keyring/metadata handle for one throwaway
+   * reuse it rather than building a second one for one throwaway
    * call; with nothing open, build one exactly as `createSession` does and close
    * it again. (Reusing a live one can race a concurrent `closePi`, which closes
    * that runtime — the completion then fails and the greeting is null, which is

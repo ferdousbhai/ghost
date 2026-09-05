@@ -117,7 +117,7 @@ describe("short-lived auth runtime home leases", () => {
     ["provider listing", (manager: LoginManager) => manager.listProviders("casper"), "rename"],
     [
       "logout",
-      (manager: LoginManager) => manager.logout("casper", "openrouter", "personal"),
+      (manager: LoginManager) => manager.logout("casper", "openrouter"),
       "delete",
     ],
   ] as const)("holds the lease through %s runtime construction and use", async (
@@ -309,7 +309,7 @@ describe("successful login refresh", () => {
     )).resolves.toMatchObject({ status: "succeeded" });
   });
 
-  it("binds the default model in a renamed home when discovery was already pending", async () => {
+  it("fails a login the home rename interrupts and binds nothing", async () => {
     const discoveryStarted = deferred<void>();
     const finishDiscovery = deferred<readonly ReturnType<typeof fakePiModel>[]>();
     const { manager, root } = setup(async () => oauthCredential(), {
@@ -332,14 +332,11 @@ describe("successful login refresh", () => {
     manager.renameGhost(renamed);
     finishDiscovery.resolve([fakePiModel({ provider: "openrouter", id: "rename-default" })]);
 
-    const done = await waitFor(
-      () => manager.view("wisp", started.loginId),
-      (view) => view.status === "succeeded",
-    );
-    expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "rename-default" });
+    // pi's credential file is bound to the old path, so the rename ends the
+    // login instead of stranding what it would have written.
+    expect(() => manager.view("wisp", started.loginId)).toThrow(/No login/u);
     expect(existsSync(join(root, "casper"))).toBe(false);
-    expect(readGhostModels(ghostPaths(join(root, "wisp")).home)?.roles?.chat_model)
-      .toEqual({ provider: "openrouter", modelId: "rename-default" });
+    expect(readGhostModels(ghostPaths(join(root, "wisp")).home)?.roles?.chat_model).toBeUndefined();
   });
 
   it("aborts a finishing hook at the login TTL and never resurrects success", async () => {

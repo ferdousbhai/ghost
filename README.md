@@ -33,12 +33,9 @@ tool activity beside the recovered summoning orb from the earlier summon-ghost
 interface, naming the call the ghost is inside of while it runs.
 
 A ghost keeps its own private memory current with its memory tools during
-ordinary turns; shared knowledge goes through Obsidian instead. Every memory
-write redacts common credential forms before disk.
-only under index pressure; shared knowledge goes to the owner's documents
-instead. Every
-Provider and MCP secrets live in Linux Secret Service, while portable config
-holds only keyring references; see [docs/keyring.md](docs/keyring.md).
+ordinary turns; shared knowledge goes to the owner's documents instead. Every
+memory write redacts common credential forms before disk. Provider logins live
+in pi's own credential file under the ghost home.
 
 The `ghost` terminal client talks only to ghostd's authenticated HTTP API. Use
 it for a quick terminal conversation or to inspect the same sessions the HUD

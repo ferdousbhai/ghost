@@ -16,7 +16,6 @@ import {
 } from "./models.js";
 import { resolveChatModel } from "./model-routing.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
-import { parseSecretAccountName, serviceForCredentialProvider } from "./secret-reference.js";
 
 export type AuthType = "oauth" | "api_key";
 export type { Credential } from "@earendil-works/pi-ai";
@@ -66,14 +65,8 @@ export interface LoginRuntime {
   isUsingOAuth(providerId: string): boolean;
   getModels(providerId?: string): readonly Model<Api>[];
   getAvailable(providerId?: string): Promise<readonly Model<Api>[]>;
-  login(providerId: string, type: AuthType, interaction: AuthInteraction, account?: string): Promise<Credential>;
-  getProviderAccounts?(providerId: string): Array<{
-    account: string;
-    configured: boolean;
-    connectedVia?: AuthType;
-  }>;
-  logout?(providerId: string, account: string): Promise<void>;
-  authorizeAccount?(providerId: string, account: string, home: string): void;
+  login(providerId: string, type: AuthType, interaction: AuthInteraction): Promise<Credential>;
+  logout?(providerId: string): Promise<void>;
   close?(): void;
 }
 
@@ -99,7 +92,6 @@ export interface LoginPromptView {
 export interface LoginView {
   loginId: string;
   providerId: string;
-  account: string;
   authType: AuthType;
   status: LoginStatus;
   message?: string;
@@ -122,7 +114,6 @@ export interface ProviderInfo {
   configured: boolean;
   billingNote?: string;
   connectedVia?: AuthType;
-  accounts: Array<{ account: string; configured: boolean; connectedVia?: AuthType }>;
 }
 
 interface PendingPrompt {
@@ -309,18 +300,6 @@ async function discoverAvailableModels(
   });
 }
 
-function assertAccountName(providerId: string, account: string): void {
-  try {
-    parseSecretAccountName(`${serviceForCredentialProvider(providerId)}/${account}`);
-  } catch {
-    throw new GhostError(
-      "invalid_request",
-      '"account" must use lowercase letters, numbers, dots, underscores, or hyphens.',
-      400,
-    );
-  }
-}
-
 export class LoginManager {
   private readonly registry: GhostRegistry;
   private readonly homeOperations: HomeOperationCoordinator;
@@ -375,7 +354,7 @@ export class LoginManager {
     return this.withRuntime(ghostName, (runtime) => this.providersFrom(runtime));
   }
 
-  async logout(ghostName: string, providerId: string, account: string): Promise<void> {
+  async logout(ghostName: string, providerId: string): Promise<void> {
     return this.withRuntime(ghostName, async (runtime) => {
       if (!runtime.logout) {
         throw new GhostError("not_supported", "This credential runtime does not support logout.", 409);
@@ -384,8 +363,7 @@ export class LoginManager {
       if (!offered) {
         throw new GhostError("unknown_provider", `No provider ${JSON.stringify(providerId)} to log out of.`, 400);
       }
-      assertAccountName(providerId, account);
-      await runtime.logout(providerId, account);
+      await runtime.logout(providerId);
       await this.onLoginSucceeded(ghostName, new AbortController().signal);
     });
   }
@@ -413,7 +391,6 @@ export class LoginManager {
           : provider.auth.oauth?.isSubscription ?? false,
         authTypes,
         configured: status.configured,
-        accounts: runtime.getProviderAccounts?.(provider.id) ?? [],
       };
       if (provider.id === "anthropic") {
         info.loginLabel = "Sign in (extra usage)";
@@ -435,7 +412,6 @@ export class LoginManager {
     ghostName: string,
     providerId: string,
     authType: AuthType,
-    account = "personal",
   ): Promise<LoginView> {
     if (this.disposed) {
       throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
@@ -448,7 +424,6 @@ export class LoginManager {
     if (!AUTH_TYPES.includes(authType)) {
       throw new GhostError("invalid_request", '"authType" must be "oauth" or "api_key".', 400);
     }
-    assertAccountName(providerId, account);
     const ghostHome = ghostHomeIdentity(ghost.dir);
     if ([...this.moving].some((movingHome) => sameGhostHome(movingHome, ghostHome))) {
       throw new GhostError(
@@ -490,7 +465,7 @@ export class LoginManager {
       const ownedSession: LoginSession = {
         ghostName: starting.ghostName,
         ghostHome: starting.ghostHome,
-        view: { loginId, providerId, account, authType, status: "starting" },
+        view: { loginId, providerId, authType, status: "starting" },
         controller,
         runtime,
         runtimeClosed: false,
@@ -518,14 +493,13 @@ export class LoginManager {
       );
 
       void runtime
-        .login(providerId, authType, interaction, account)
+        .login(providerId, authType, interaction)
         .then((credential) => this.onSuccess(ownedSession, credential))
         .catch((error: unknown) => this.onFailure(ownedSession, error));
 
       this.logger.info("ghost login started", {
         ghost: ownedSession.ghostName,
         provider: providerId,
-        account,
         authType,
       });
       return this.publicView(ownedSession);
@@ -681,11 +655,6 @@ export class LoginManager {
     session.view.prompt = undefined;
     session.view.status = "working";
     session.view.message = "Finishing sign-in.";
-    session.runtime.authorizeAccount?.(
-      session.view.providerId,
-      session.view.account,
-      ghost.dir,
-    );
     // Best-effort: give a freshly-signed-in ghost a chat model so the owner
     // lands ready to talk. Never fatal to the login itself.
     try {
@@ -868,9 +837,11 @@ export class LoginManager {
   }
 
   /**
-   * Follow a successful home rename in diagnostics and deletion bookkeeping.
-   * Filesystem identity is still authoritative: a newly-created ghost reusing
-   * the old spelling must never inherit the earlier home's login.
+   * Follow a successful home rename. A login still in flight is bound to pi's
+   * credential file under the old path, so it fails rather than stranding its
+   * credential; the owner signs in again under the new name. Filesystem
+   * identity stays authoritative: a newly-created ghost reusing the old
+   * spelling must never inherit the earlier home's login.
    */
   renameGhost(renamed: Ghost): void {
     let renamedHome: GhostHomeIdentity;
@@ -885,8 +856,10 @@ export class LoginManager {
     for (const starting of this.starting) {
       if (sameGhostHome(starting.ghostHome, renamedHome)) starting.ghostName = renamed.name;
     }
-    for (const session of this.sessions.values()) {
-      if (sameGhostHome(session.ghostHome, renamedHome)) session.ghostName = renamed.name;
+    for (const session of [...this.sessions.values()]) {
+      if (!sameGhostHome(session.ghostHome, renamedHome)) continue;
+      session.ghostName = renamed.name;
+      this.cancelSession(session, "The ghost was renamed during login; sign in again.");
     }
   }
 
@@ -896,17 +869,22 @@ export class LoginManager {
       if (starting.ghostName === ghostName) starting.deleted = true;
     }
     for (const session of [...this.sessions.values()]) {
-      if (session.ghostName !== ghostName) continue;
-      session.view.status = "failed";
-      session.view.error = "The ghost was deleted during login.";
-      session.view.prompt = undefined;
-      session.pending?.reject(new Error(CANCELLED_MESSAGE));
-      session.pending = null;
-      if (!session.controller.signal.aborted) session.controller.abort();
-      if (session.timer) clearTimeout(session.timer);
-      this.sessions.delete(session.view.loginId);
-      this.closeRuntime(session);
+      if (session.ghostName === ghostName) {
+        this.cancelSession(session, "The ghost was deleted during login.");
+      }
     }
+  }
+
+  private cancelSession(session: LoginSession, error: string): void {
+    session.view.status = "failed";
+    session.view.error = error;
+    session.view.prompt = undefined;
+    session.pending?.reject(new Error(CANCELLED_MESSAGE));
+    session.pending = null;
+    if (!session.controller.signal.aborted) session.controller.abort();
+    if (session.timer) clearTimeout(session.timer);
+    this.sessions.delete(session.view.loginId);
+    this.closeRuntime(session);
   }
 
   /** Abort every in-flight login and drop all state. Idempotent. */

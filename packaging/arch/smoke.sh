@@ -55,7 +55,6 @@ require_file /usr/lib/ghost/runtime/ghostd.js
 require_file /usr/lib/ghost/runtime/ghost.js
 require_file /usr/lib/ghost/runtime/photon_rs_bg.wasm
 # Installed documentation links into docs/; those targets must ship with it.
-require_file /usr/share/doc/ghost/docs/keyring.md
 require_file /usr/share/doc/ghost/docs/hooks.md
 require_file /usr/share/doc/ghost/docs/claude-code-runtime.md
 require_executable /usr/bin/ghostd

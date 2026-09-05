@@ -17,11 +17,6 @@ import {
   type PrivateReadRefusal,
 } from "./private-file.js";
 import {
-  parseSecretAccountName,
-  parseSecretReference,
-  SECRET_REFERENCE_PREFIX,
-} from "./secret-reference.js";
-import {
   acquireWriterLock,
   releaseWriterLock,
   WriterLockBusyError,
@@ -144,7 +139,6 @@ const LEGACY_SMOL_MODEL_ROLE = "title_model";
 
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
-  accounts?: string[];
   roles?: Partial<Record<GhostModelRole, GhostModelRoleBinding>>;
   fallbacks?: Partial<Record<GhostModelRole, GhostModelRoleBinding[]>>;
   [key: string]: unknown;
@@ -254,8 +248,8 @@ export function withSerializedModelsWrite<T>(path: string, mutation: () => T): T
  *
  * The temporary lives beside the destination so `renameSync` cannot cross a
  * filesystem boundary. Its random, exclusive name prevents concurrent daemon
- * processes from sharing a staging file; mode 0600 protects an embedded
- * keyring reference during staging as well as after rename.
+ * processes from sharing a staging file; mode 0600 protects an embedded API
+ * key during staging as well as after rename.
  */
 function persistGhostModels(path: string, file: GhostModelsFile): void {
   const text = renderPrivateJson(path, file);
@@ -304,29 +298,11 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
-function assertParses(path: string, value: string, parse: (input: string) => unknown): void {
+function _assertParses(path: string, value: string, parse: (input: string) => unknown): void {
   try {
     parse(value);
   } catch (error) {
     throw new Error(`${path}: ${(error as Error).message}`);
-  }
-}
-
-function assertSecretValue(path: string, value: string): void {
-  if (!value.startsWith(SECRET_REFERENCE_PREFIX)) return;
-  assertParses(path, value, parseSecretReference);
-}
-
-function assertAccountPolicy(path: string, accounts: unknown): void {
-  if (accounts === undefined) return;
-  if (!Array.isArray(accounts) || !accounts.every((entry) => typeof entry === "string")) {
-    throw new Error(`${path}: "accounts" must be an array of service/account strings.`);
-  }
-  const seen = new Set<string>();
-  for (const account of accounts as string[]) {
-    assertParses(path, account, parseSecretAccountName);
-    if (seen.has(account)) throw new Error(`${path}: "accounts" must not contain duplicates.`);
-    seen.add(account);
   }
 }
 
@@ -339,7 +315,6 @@ function assertProviderShape(path: string, providers: Record<string, unknown>): 
     if (config.apiKey !== undefined && typeof config.apiKey !== "string") {
       throw new Error(`${path}: provider ${JSON.stringify(provider)} "apiKey" must be a string.`);
     }
-    if (typeof config.apiKey === "string") assertSecretValue(path, config.apiKey);
     if (config.headers === undefined) continue;
     if (config.headers === null || typeof config.headers !== "object" || Array.isArray(config.headers)) {
       throw new Error(`${path}: provider ${JSON.stringify(provider)} "headers" must be an object.`);
@@ -348,7 +323,6 @@ function assertProviderShape(path: string, providers: Record<string, unknown>): 
       if (typeof header !== "string") {
         throw new Error(`${path}: provider ${JSON.stringify(provider)} header values must be strings.`);
       }
-      assertSecretValue(path, header);
     }
   }
 }
@@ -370,7 +344,6 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
   }
   const file = parsed as Record<string, unknown> & {
     providers?: unknown;
-    accounts?: unknown;
     roles?: unknown;
     fallbacks?: unknown;
   };
@@ -386,13 +359,11 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
     && (file.fallbacks === null || typeof file.fallbacks !== "object" || Array.isArray(file.fallbacks))) {
     throw new Error(`${path}: "fallbacks" must be an object.`);
   }
-  assertAccountPolicy(path, file.accounts);
   const providers = (file.providers as Record<string, unknown>) ?? {};
   assertProviderShape(path, providers);
   return {
     ...file,
     providers: providers as Record<string, GhostProviderConfig>,
-    accounts: file.accounts as string[] | undefined,
     roles: migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
     fallbacks: migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
   };
@@ -417,18 +388,6 @@ export function readGhostModelsSnapshot(configDir: string): GhostModelsSnapshot 
 
 export function readGhostModels(configDir: string): GhostModelsFile | null {
   return readGhostModelsSnapshot(configDir)?.file ?? null;
-}
-
-export function addGhostAccounts(configDir: string, additions: readonly string[]): GhostModelsFile {
-  for (const account of additions) parseSecretAccountName(account);
-  mkdirSync(configDir, { recursive: true });
-  const path = ghostModelsPath(configDir);
-  return withSerializedModelsWrite(path, () => {
-    const file = readGhostModels(configDir) ?? { providers: {} };
-    file.accounts = [...new Set([...(file.accounts ?? []), ...additions])];
-    persistGhostModels(path, file);
-    return file;
-  });
 }
 
 export function writeGhostModels(configDir: string, file: GhostModelsFile): void {
@@ -709,8 +668,8 @@ export function openAiCompatiblePreset(
 }
 
 /**
- * Bind a model served by a provider pi already knows, authenticated from the
- * Ghost keyring store. No `providers` entry is emitted: pi supplies the
+ * Bind a model served by a provider pi already knows, authenticated from pi's
+ * own credential store. No `providers` entry is emitted: pi supplies the
  * endpoint and catalogue.
  */
 export function builtinProviderPreset(

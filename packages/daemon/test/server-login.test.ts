@@ -13,9 +13,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction, LoginManagerOptions } from "../src/auth.js";
 import { LoginManager } from "../src/auth.js";
 import { ghostPaths } from "../src/ghosts.js";
-import { GhostPiCredentialStore } from "../src/pi-credential-store.js";
 import { readGhostModels } from "../src/models.js";
-import { authorizeGhostAccounts, openGhostSecretContext } from "../src/secret-migration.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -27,7 +25,6 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
-import { testSecretService } from "./setup.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
@@ -199,58 +196,42 @@ describe("POST /api/ghosts/:name/login", () => {
       .toEqual({ provider: "openrouter", modelId: "openai/gpt-5.5" });
   });
 
-  it("routes login, listing, and logout through one explicit account", async () => {
+  it("routes login, listing, and logout through pi's store", async () => {
     const logins: string[] = [];
-    const authorized: string[] = [];
     const loggedOut: string[] = [];
     const base = await serveWithRuntime(async () => ({
       ...makeFakeRuntime({
-        login: async (_providerId, _authType, _interaction, account = "personal") => {
-          logins.push(account);
+        login: async (providerId) => {
+          logins.push(providerId);
           return apiKeyCredential();
         },
       }),
-      getProviderAccounts: providerId => providerId === "openrouter"
-        ? [{ account: "work", configured: true, connectedVia: "api_key" }]
-        : [],
-      authorizeAccount: (providerId, account) => authorized.push(`${providerId}/${account}`),
-      logout: async (providerId, account) => {
-        loggedOut.push(`${providerId}/${account}`);
+      logout: async (providerId: string) => {
+        loggedOut.push(providerId);
       },
     }));
 
     const providers = await fetch(`${base}/api/ghosts/casper/providers`);
     expect(await providers.json()).toMatchObject({
-      providers: expect.arrayContaining([
-        expect.objectContaining({
-          id: "openrouter",
-          accounts: [{ account: "work", configured: true, connectedVia: "api_key" }],
-        }),
-      ]),
+      providers: expect.arrayContaining([expect.objectContaining({ id: "openrouter" })]),
     });
 
-    const response = await fetch(`${base}/api/ghosts/casper/login`, {
+    const start = await fetch(`${base}/api/ghosts/casper/login`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ providerId: "openrouter", authType: "api_key", account: "work" }),
+      body: JSON.stringify({ providerId: "openrouter", authType: "api_key" }),
     });
-    expect(response.status).toBe(201);
-    const { loginId } = (await response.json()) as { loginId: string };
+    const { loginId } = (await start.json()) as { loginId: string };
     const done = await waitForStatus(base, loginId, "succeeded");
-    expect(done.account).toBe("work");
-    expect(logins).toEqual(["work"]);
-    expect(authorized).toEqual(["openrouter/work"]);
+    expect(done.providerId).toBe("openrouter");
+    expect(logins).toEqual(["openrouter"]);
 
-    const logout = await fetch(`${base}/api/ghosts/casper/providers/openrouter/accounts/work`, {
-      method: "DELETE",
-    });
+    const logout = await fetch(`${base}/api/ghosts/casper/providers/openrouter`, { method: "DELETE" });
     expect(logout.status).toBe(200);
-    expect(await logout.json()).toEqual({ ok: true, providerId: "openrouter", account: "work" });
-    expect(loggedOut).toEqual(["openrouter/work"]);
+    expect(await logout.json()).toEqual({ ok: true, providerId: "openrouter" });
+    expect(loggedOut).toEqual(["openrouter"]);
   });
-});
 
-describe("the full url + paste state machine", () => {
   it("walks start → awaiting_input → succeeded and never leaks the pasted code", async () => {
     const received: string[] = [];
     const impl: LoginImpl = async (_id, _type, interaction: AuthInteraction) => {
@@ -289,35 +270,21 @@ describe("the full url + paste state machine", () => {
     expect(finalRaw).not.toContain("PASTE-XYZ-SECRET");
   });
 
-  it("keeps the login and credential store attached to a renamed ghost home", async () => {
-    const base = await serveWithRuntime(async ({ authPath, modelsPath }) => {
-      const context = openGhostSecretContext({
-        home: dirname(modelsPath),
-        authPath,
-        client: testSecretService,
-      });
-      const credentialStore = new GhostPiCredentialStore(context);
-      return {
-        ...makeFakeRuntime({
-          models: { openrouter: ["m-1"] },
-          login: async (providerId, _authType, interaction) => {
-            const key = await interaction.prompt({ type: "secret", message: "Paste the API key" });
-            const credential = { type: "api_key" as const, key };
-            credentialStore.allowAccounts([`${providerId}/personal`]);
-            credentialStore.setWriteAccount(providerId, "personal");
-            await credentialStore.modify(providerId, async () => credential);
-            credentialStore.clearWriteAccount();
-            return credential;
-          },
-        }),
-        getProviderAccounts: (providerId: string) => credentialStore.listProviderAccounts(providerId),
-        authorizeAccount: (providerId: string, account: string, home: string) => {
-          authorizeGhostAccounts(home, context, [`${providerId}/${account}`]);
-          credentialStore.allowAccounts([`${providerId}/${account}`]);
+  it("fails a login that a home rename interrupts and signs the renamed ghost in fresh", async () => {
+    const base = await serveWithRuntime(async ({ authPath }) => ({
+      ...makeFakeRuntime({
+        models: { openrouter: ["m-1"] },
+        login: async (providerId, _authType, interaction) => {
+          const key = await interaction.prompt({ type: "secret", message: "Paste the API key" });
+          const credential = { type: "api_key" as const, key };
+          // Stand in for pi's file-backed store: the credential lands beside
+          // the runtime's own state, which moves with the home.
+          mkdirSync(dirname(authPath), { recursive: true });
+          writeFileSync(authPath, JSON.stringify({ [providerId]: credential }), { mode: 0o600 });
+          return credential;
         },
-        close: () => context.close(),
-      };
-    });
+      }),
+    }));
 
     const start = await fetch(`${base}/api/ghosts/casper/login`, {
       method: "POST",
@@ -333,34 +300,31 @@ describe("the full url + paste state machine", () => {
       body: JSON.stringify({ name: "bob" }),
     });
     expect(renamed.status).toBe(200);
-    expect((await poll(base, loginId, "bob")).status).toBe("awaiting_input");
+    // The interrupted login is gone from both spellings, and nothing was
+    // written under the old path.
+    expect((await fetch(`${base}/api/ghosts/bob/login/${loginId}`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/login/${loginId}`)).status).toBe(404);
+    expect(existsSync(join(temp!.root, "casper"))).toBe(false);
 
-    const input = await fetch(`${base}/api/ghosts/bob/login/${loginId}/input`, {
+    const again = await fetch(`${base}/api/ghosts/bob/login`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ providerId: "openrouter", authType: "api_key" }),
+    });
+    const fresh = (await again.json()) as { loginId: string };
+    await waitForStatus(base, fresh.loginId, "awaiting_input", "bob");
+    const input = await fetch(`${base}/api/ghosts/bob/login/${fresh.loginId}/input`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ value: "sk-after-rename" }),
     });
     expect(input.status).toBe(200);
-    const done = await waitForStatus(base, loginId, "succeeded", "bob");
+    const done = await waitForStatus(base, fresh.loginId, "succeeded", "bob");
     expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "m-1" });
 
     const bob = ghostPaths(join(temp!.root, "bob"));
-    const context = openGhostSecretContext({
-      home: bob.home,
-      authPath: join(bob.agentDir, "auth.json"),
-      client: testSecretService,
-    });
-    try {
-      context.allowAccounts(["openrouter/personal"]);
-      await expect(new GhostPiCredentialStore(context).read("openrouter"))
-        .resolves.toEqual({ type: "api_key", key: "sk-after-rename" });
-    } finally {
-      context.close();
-    }
-    const models = readFileSync(join(bob.home, "models.json"), "utf8");
-    expect(models).not.toContain("sk-after-rename");
-    expect(readGhostModels(bob.home)?.accounts).toContain("openrouter/personal");
+    expect(readFileSync(join(bob.agentDir, "auth.json"), "utf8")).toContain("sk-after-rename");
+    expect(readFileSync(join(bob.home, "models.json"), "utf8")).not.toContain("sk-after-rename");
     expect(readGhostModels(bob.home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "m-1" });
   });
@@ -423,7 +387,8 @@ describe("whole-home moves during login runtime construction", () => {
     expect(started.status).toBe(201);
     expect(renamed.status).toBe(200);
     const { loginId } = (await started.json()) as { loginId: string };
-    await waitForStatus(base, loginId, "awaiting_input", "bob");
+    // The rename that drained construction also ended the login it drained for.
+    expect((await fetch(`${base}/api/ghosts/bob/login/${loginId}`)).status).toBe(404);
 
     expect(existsSync(join(temp!.root, "casper"))).toBe(false);
     expect(existsSync(join(temp!.root, "bob", ".pi", runtime.marker))).toBe(true);

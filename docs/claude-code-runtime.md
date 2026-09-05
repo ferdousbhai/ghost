@@ -9,7 +9,7 @@ This is distinct from selecting an Anthropic model through Pi:
 
 | Selection | Harness | Authentication |
 |---|---|---|
-| `anthropic/<model>` | Pi | Ghost-selected Secret Service account |
+| `anthropic/<model>` | Pi | pi's own login under the ghost's `.pi/auth.json` |
 | `claude-code/default` | Claude Agent SDK + installed `claude` | Any native method for which `claude auth status --json` reports `loggedIn:true` |
 
 ## Setup
@@ -53,8 +53,8 @@ The stored role is:
 }
 ```
 
-There is no `providers.claude-code` entry and no Claude credential in Ghost's
-keyring schema. `GHOST_CLAUDE_BINARY` may select an explicit owner wrapper when
+There is no `providers.claude-code` entry and no Claude credential in the
+ghost's `.pi/auth.json`. `GHOST_CLAUDE_BINARY` may select an explicit owner wrapper when
 `claude` is not on the daemon PATH or a native route needs environment setup.
 Ghost treats that wrapper as an owner trust boundary and never unwraps it.
 

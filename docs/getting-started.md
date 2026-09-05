@@ -19,9 +19,6 @@ of — this page.
   there is no generic Arch/Hyprland support promise.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
-- **A running, unlocked Secret Service** (`gnome-keyring` is the usual one).
-  Provider and MCP credentials go there; the daemon does not prompt, unlock, or
-  fall back to a file. See [keyring.md](keyring.md).
 - **A model provider you can sign into** — an OpenRouter account is enough, and
   its free models cost nothing — or an installed, authenticated Claude Code
   ([claude-code-runtime.md](claude-code-runtime.md)).
@@ -127,11 +124,9 @@ printf %s "$KEY" | ghost login openrouter --key-stdin -g sage
 
 `ghost login` goes through the running daemon, which owns the whole flow.
 `--oauth` chooses the browser flow where the provider offers both; the default
-is the paste-a-key flow. `--account <name>` picks the machine keyring account
-(default `personal`), `--key-stdin` reads one key from stdin so a script never
-puts it in argv, and `ghost logout <provider>` removes the account again.
-The credential goes straight into the Secret Service under Ghost's own schema;
-`models.json` keeps only a `keyring:` reference.
+is the paste-a-key flow. `--key-stdin` reads one key from stdin so a script
+never puts it in argv, and `ghost logout <provider>` signs out again. The
+credential goes into pi's own store, `~/ghosts/<name>/.pi/auth.json`.
 
 With the daemon stopped, `ghostd login` does the same thing offline:
 
@@ -229,7 +224,7 @@ skill, so another agent on this machine can drive the same client.
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/relay-token` | the browser-relay pairing token |
-| Secret Service | every provider and MCP credential value |
+| `~/ghosts/<name>/.pi/auth.json` | that ghost's provider logins, written by pi |
 | XDG Pictures | `ghost-<ghost>-{screen,browser}-<timestamp>.png` screenshots |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
@@ -259,7 +254,6 @@ and any skill you installed untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| A keyring error on login or when a session opens | the Secret Service must be running with its default collection unlocked — see [keyring.md](keyring.md) |
 | `obsidian` CLI operations fail | the CLI is optional and needs Obsidian *running*; a ghost can always edit vault notes as plain files instead |
 | The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |

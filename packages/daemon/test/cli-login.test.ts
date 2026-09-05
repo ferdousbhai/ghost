@@ -9,7 +9,6 @@ const OPENROUTER: ProviderInfo = {
   subscription: false,
   authTypes: ["api_key"],
   configured: false,
-  accounts: [],
 };
 
 const ANTHROPIC: ProviderInfo = {
@@ -18,14 +17,13 @@ const ANTHROPIC: ProviderInfo = {
   subscription: false,
   authTypes: ["oauth"],
   configured: true,
-  accounts: [{ account: "personal", configured: true, connectedVia: "oauth" }],
+  connectedVia: "oauth",
 };
 
 function view(overrides: Partial<LoginView>): LoginView {
   return {
     loginId: "login-1",
     providerId: "openrouter",
-    account: "personal",
     authType: "api_key",
     status: "starting",
     ...overrides,
@@ -56,7 +54,7 @@ function loginDaemon(providers: ProviderInfo[], views: LoginView[]): FakeDaemon 
     if (init?.body !== undefined) daemon.bodies.push(JSON.parse(String(init.body)));
     if (pathname === "/api/ghosts/casper/providers") return json({ providers });
     if (pathname.includes("/providers/") && method === "DELETE") {
-      return json({ ok: true, providerId: "openrouter", account: "personal" });
+      return json({ ok: true, providerId: "openrouter" });
     }
     if (pathname.startsWith("/api/ghosts/casper/login")) {
       const next = remaining.shift();
@@ -99,7 +97,6 @@ describe("ghost login", () => {
     expect(daemon.bodies[0]).toEqual({
       providerId: "openrouter",
       authType: "api_key",
-      account: "personal",
     });
     expect(daemon.bodies[1]).toEqual({ value: "sk-piped-secret" });
     expect(daemon.calls).toEqual([
@@ -108,7 +105,7 @@ describe("ghost login", () => {
       "GET /api/ghosts/casper/login/login-1",
       "POST /api/ghosts/casper/login/login-1/input",
     ]);
-    expect(result.stdout).toContain("Signed in to OpenRouter (openrouter/personal).");
+    expect(result.stdout).toContain("Signed in to OpenRouter (openrouter).");
     expect(result.stdout).toContain("Chat model set to openrouter/auto.");
     expect(result.stdout).not.toContain("sk-piped-secret");
   });
@@ -152,12 +149,12 @@ describe("ghost login", () => {
       view({ status: "succeeded" }),
     ]);
     const result = await runCli(
-      ["login", "openrouter", "--account", "work", "-g", "casper"],
+      ["login", "openrouter", "-g", "casper"],
       options(daemon, { prompt: async () => "2" }),
     );
 
     expect(result.code).toBe(0);
-    expect(daemon.bodies[0]).toMatchObject({ account: "work" });
+    expect(daemon.bodies[0]).toMatchObject({ providerId: "openrouter" });
     expect(daemon.bodies[1]).toEqual({ value: "org-b" });
     expect(result.stdout).toContain("  2. Beta — the other one");
   });
@@ -226,28 +223,27 @@ describe("ghost login", () => {
 });
 
 describe("ghost logout", () => {
-  it("removes one account and says what stops working", async () => {
+  it("signs out of one provider", async () => {
     const daemon = loginDaemon([OPENROUTER], []);
     const result = await runCli(
-      ["logout", "openrouter", "--account", "work", "-g", "casper"],
+      ["logout", "openrouter", "-g", "casper"],
       options(daemon),
     );
 
     expect(result.code).toBe(0);
-    expect(daemon.calls).toEqual(["DELETE /api/ghosts/casper/providers/openrouter/accounts/work"]);
-    expect(result.stdout).toContain("Removed the openrouter/work keyring item.");
-    expect(result.stdout).toContain("fails closed until it signs in again");
+    expect(daemon.calls).toEqual(["DELETE /api/ghosts/casper/providers/openrouter"]);
+    expect(result.stdout).toContain("Signed out of openrouter.");
   });
 });
 
 describe("ghost login --list", () => {
-  it("tabulates ids, auth types, and signed-in accounts", async () => {
+  it("tabulates ids, auth types, and sign-in state", async () => {
     const daemon = loginDaemon([OPENROUTER, ANTHROPIC], []);
     const result = await runCli(["login", "--list", "-g", "casper"], options(daemon));
 
     expect(result.code).toBe(0);
     expect(result.stdout).toContain("PROVIDER");
     expect(result.stdout).toContain("openrouter  OpenRouter  api_key  —");
-    expect(result.stdout).toContain("anthropic   Anthropic   oauth    personal");
+    expect(result.stdout).toContain("anthropic   Anthropic   oauth    oauth");
   });
 });

@@ -39,16 +39,12 @@ Convention: each step names the command, then **Pass**, **Fail**, and
 ```sh
 systemctl --user is-active graphical-session.target
 bun --version                                      # >= 1.3.14 runtime, >= 1.4.0 to build
-secret-tool --version && busctl --user list | grep -c org.freedesktop.secrets
 bash packaging/arch/ci-dependencies.sh --constraints
 ```
 
-**Pass:** systemd ≥ 254, graphical session active, a Secret Service provider on
 the user bus with its default collection unlocked, and every constraint printed
 by `ci-dependencies.sh` satisfied on the host.
 **Fail:** any missing constraint — install it before continuing; a locked or
-absent keyring makes every provider gate fail for the wrong reason
-(`docs/keyring.md`).
 **Record:** `$EV/00-host.txt`.
 
 ### 0.2 Optional harnesses
@@ -133,7 +129,6 @@ bsdtar -tf "$PKG" | grep -E 'ghosts/|\.config/ghost|\.local/state' || echo "owns
 `usr/lib/ghost/runtime/{ghostd.js,ghost.js,photon_rs_bg.wasm}`,
 `usr/share/ghost/{quickshell,chromium-extension}`,
 `usr/lib/ghost/package-smoke/service-browser-smoke.sh`, and
-`usr/share/doc/ghost/docs/{keyring,hooks,claude-code-runtime}.md` are present;
 the grep prints `owns no user state`.
 **Record:** `$EV/01-payload.txt`.
 
@@ -328,7 +323,6 @@ sudo pacman -U "$PKG" 2>&1 | tee "$EV/03-install.log"
 
 **Pass:** install succeeds and the `post_install` hook prints the Chromium
 extension path, the enable command, the optional integrations, and the
-keyring/ghost-home note — and gates enabling Ghost on nothing owner-level.
 **Record:** the log.
 
 ### 3.2 Enable the user services
@@ -376,8 +370,6 @@ the offline path and refuses to run while `ghostd.service` holds the ghosts-root
 reservation, so use it only with the unit stopped.
 
 **Pass:** login completes without Ghost prompting for a credential it stores
-itself outside Secret Service; `ghost model` echoes the selection.
-**Record:** `$EV/03-model.txt` and `secret-tool search --all service <provider>`
 output showing the item under Ghost's own schema.
 
 ### 3.6 First turns, shared state, private memory
@@ -474,7 +466,6 @@ ghost say --new "Summarize this repository's CONTRACTS.md in three lines."
 from §4.2.
 
 **Pass:** both paths run; Ghost never prompts for or stores a Claude credential
-— confirm with `secret-tool search --all service claude` (no Ghost-schema item)
 and by grepping `~/.config/ghost` for any Claude secret.
 
 ### 5.4 Removal fails closed, with no stale reuse
@@ -652,7 +643,6 @@ diff "$EV/07-state-before.txt" "$EV/07-state-after-remove.txt"
 ```
 
 **Pass:** package-owned `/usr` paths and the Quickshell symlink are gone;
-`~/ghosts`, `~/.config/ghost`, `~/.local/state/ghost`, Secret Service items, any
 owner-installed skill, and every document are untouched; `pre_remove`/`post_remove` print
 the disable instruction and the preservation note.
 
@@ -670,7 +660,6 @@ relay pairing come back with no re-login.
 ### 7.4 Clean account
 
 On a second local account (or a clean machine): log in graphically, unlock its
-keyring, complete Phase 2 for that account, install the package, enable the two
 units, and run one turn.
 
 **Pass:** the new account gets its own empty `~/ghosts`, its own tokens, and its

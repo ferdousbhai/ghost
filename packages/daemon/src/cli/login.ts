@@ -13,8 +13,6 @@ import type { CliContext, CliRuntime } from "./types.js";
  * cadence.
  */
 const POLL_INTERVAL_MS = 1_000;
-/** The daemon's own default when a start body omits `account`. */
-const DEFAULT_ACCOUNT = "personal";
 /**
  * Flags only the sign-in verbs accept. `main.ts` merges them into the argv spec
  * for `login` and `logout` alone, so they stay unknown options on every other
@@ -22,7 +20,7 @@ const DEFAULT_ACCOUNT = "personal";
  */
 export const LOGIN_ARGS: ArgsSpec = {
   boolean: ["oauth", "api-key", "key-stdin"],
-  value: ["account"],
+  value: [],
 };
 
 function providersPath(ghost: string): string {
@@ -169,7 +167,7 @@ function sleep(ms: number): Promise<void> {
   });
 }
 
-/** The `ghost login --list` table: what there is to sign in to, and as whom. */
+/** The `ghost login --list` table: what there is to sign in to, and how. */
 function renderProviders(ctx: CliContext, providers: readonly ProviderInfo[]): number {
   emit(ctx, { providers }, () => providers.length === 0
     ? "No login-capable providers.\n"
@@ -177,10 +175,9 @@ function renderProviders(ctx: CliContext, providers: readonly ProviderInfo[]): n
         provider.id,
         provider.name,
         provider.authTypes.join(","),
-        provider.accounts.filter((account) => account.configured)
-          .map((account) => account.account).join(",") || "—",
+        provider.configured ? (provider.connectedVia ?? "configured") : "—",
         provider.subscription ? "subscription" : "",
-      ]), ["PROVIDER", "NAME", "AUTH", "ACCOUNTS", "PLAN"])}\n`);
+      ]), ["PROVIDER", "NAME", "AUTH", "SIGNED IN", "PLAN"])}\n`);
   return EXIT_CODE.success;
 }
 
@@ -188,7 +185,6 @@ export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   const requested = parsed.positionals[0];
   const listing = flagBoolean(parsed, "list");
   if (listing && requested) throw new ArgsError("ghost login --list takes no provider");
-  const account = flagString(parsed, "account") ?? DEFAULT_ACCOUNT;
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const providers = await listProviders(ctx, name);
   if (listing) return renderProviders(ctx, providers);
@@ -211,13 +207,13 @@ export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   }
 
   const base = `/api/ghosts/${encodeURIComponent(name)}/login`;
-  let view = (await ctx.client.request<LoginView>("POST", base, { providerId: provider.id, authType, account })).body;
+  let view = (await ctx.client.request<LoginView>("POST", base, { providerId: provider.id, authType })).body;
   const path = `${base}/${encodeURIComponent(view.loginId)}`;
   const silent = flagBoolean(parsed, "json") || flagBoolean(parsed, "quiet");
   const write = (text: string): void => {
     if (!silent) ctx.runtime.stdout.write(text);
   };
-  write(`Signing ${name} in to ${provider.name} (${authType}, account ${account}).\n`);
+  write(`Signing ${name} in to ${provider.name} (${authType}).\n`);
 
   const seen = new Set<string>();
   while (view.status !== "succeeded" && view.status !== "failed") {
@@ -238,7 +234,7 @@ export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   renderState(view, seen, write);
 
   emit(ctx, view, (final) => final.status === "failed" ? "" : [
-    `Signed in to ${provider.name} (${final.providerId}/${final.account}).`,
+    `Signed in to ${provider.name} (${final.providerId}).`,
     final.modelBound
       ? `Chat model set to ${final.modelBound.provider}/${final.modelBound.modelId}.`
       : "Pick a model with `ghost model <provider>/<id>`.",
@@ -254,14 +250,12 @@ export async function loginCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
 export async function logoutCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const provider = parsed.positionals[0];
   if (!provider) throw new ArgsError("ghost logout needs a provider; see `ghost login --list`.");
-  const account = flagString(parsed, "account") ?? DEFAULT_ACCOUNT;
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const body = (await ctx.client.request(
     "DELETE",
-    `${providersPath(name)}/${encodeURIComponent(provider)}/accounts/${encodeURIComponent(account)}`,
+    `${providersPath(name)}/${encodeURIComponent(provider)}`,
   )).body;
   emit(ctx, body, () =>
-    `Removed the ${provider}/${account} keyring item.\n`
-    + "Every ghost that references that account fails closed until it signs in again.\n");
+    `Signed out of ${provider}.\n`);
   return EXIT_CODE.success;
 }

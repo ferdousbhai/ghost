@@ -19,7 +19,7 @@ Durable state has three scopes:
   owner's XDG Documents directory, which every ghost reads and writes with its
   runtime's native file and search tools.
 - **External:** trusted projects, browser downloads, screenshots, systemd user
-  timers, and Secret Service credentials stay in the machine facility that owns
+  timers, and provider credentials stay in the machine facility that owns
   them.
 
 The Documents directory is resolved like the screenshot directory:
@@ -173,9 +173,11 @@ allowlists, and recovery state machines live beside their focused tests in
   `ghost-timer-v1-<name-length>-<ghost>-<slug>`. Ghost prompts author persistent
   units; rename/delete retire units owned by that prefix. See
   [`schedules.ts`](packages/daemon/src/schedules.ts).
-- Provider and MCP credential values live in Linux Secret Service. `models.json`
-  and `mcp.json` hold service/account references only. See
-  [`docs/keyring.md`](docs/keyring.md).
+- Provider credentials live in pi's own file-backed store, `<ghost>/.pi/auth.json`
+  (mode 0600), written and refreshed by pi's login flows. A custom provider's
+  `apiKey` and an MCP server's headers or env are literal values in the ghost's
+  private `models.json` and `mcp.json`. Ghost keeps no keyring, no account
+  allow-list, and no secret references.
 - Finished artifacts go to the destination the owner requested, defaulting to
   the owner's Documents directory when none was named. Ghost keeps no index of
   it.
@@ -192,7 +194,6 @@ ghost home directory, which moves as one unit.
 | `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Project trust ledger (`$XDG_STATE_HOME/ghost/project-trust.json`) | survives | untouched; the ledger is owner-wide and identity-bound, never ghost-scoped | untouched | unchanged | unchanged | preserved |
-| Keyring credentials | survive | never touched | never touched | unchanged | unchanged; the store is `~/.local/share/keyrings` | preserved |
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
@@ -211,7 +212,7 @@ ls /etc/snapper/configs
 
 Where `/home` is a separate subvolume that snapper does not cover, a rollback of
 `/` restores the packaged install and system configuration and leaves every
-ghost home, the trust ledger, the keyring store, the persistent timer units, and
+ghost home, the trust ledger, the persistent timer units, and
 the ghost's own checkout exactly as they were. Nothing in this table is a
 backup: Trash and snapper are undo, not retention.
 
@@ -402,9 +403,9 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/ghosts/:name/model` | Read or set the chat model. |
 | `GET /api/ghosts/:name/models` | Paginated available/catalog model rows, detected local endpoints included in both scopes; `q` is at most 256 characters. |
 | `GET\|PUT /api/ghosts/:name/model-routing` | Read or replace role primaries/fallbacks. |
-| `GET /api/ghosts/:name/providers` | Login-capable Pi providers and accounts. |
-| `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. |
-| `DELETE /api/ghosts/:name/providers/:provider/accounts/:account` | Remove one Ghost-owned Secret Service account item. |
+| `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
+| `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
+| `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, enablement, reconnect, and isolated test. |
 | `POST /api/ghosts/:name/greeting` | `{ greeting: string|null, onboarding }`; generation failure is a null greeting, not a 5xx. |
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
@@ -467,9 +468,9 @@ the file names, and the manifest are in [`docs/hooks.md`](docs/hooks.md).
 
 ## Models and credentials
 
-`models.json` owns provider policy, exact Secret Service account references,
-roles, and retry chains. Credential values never enter that file, logs, API
-responses, or ghost-home backups. Inherited provider/auth environment variables
+`models.json` owns provider policy, roles, and retry chains; pi's
+`.pi/auth.json` owns login credentials. Credential values never enter logs or
+API responses. Inherited provider/auth environment variables
 are scrubbed before Pi runtime construction. Claude Code receives a separate
 reviewed operational/selector environment captured before the global scrub; its
 credential-bearing values are excluded. The implementation allowlists and tests
@@ -575,8 +576,7 @@ fail-closed state machine lives in
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
   CLI, or machine skill is required before enabling the services.
-- Package removal preserves ghost homes, XDG config/state, Secret Service
-  items, owner documents, and any owner-installed machine skill.
+- Package removal preserves ghost homes, XDG config/state, owner documents, and any owner-installed machine skill.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute

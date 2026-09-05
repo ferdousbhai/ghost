@@ -200,8 +200,8 @@ export class GhostMcpManager {
     if (server.pending) return server.pending.done;
     if (this.closed) throw new Error("manager closed");
     if (server.config.auth) {
-      // Ghost keeps MCP credentials as keyring references in headers and env;
-      // a separate OAuth/API-key login flow for MCP servers is not offered.
+      // Ghost keeps MCP credentials as literal headers and env in the private
+      // mcp.json; a separate OAuth/API-key login flow for MCP servers is not offered.
       throw new Error("MCP server auth configuration is not supported");
     }
     const client = new Client({ name: "ghost", version: "0.1.0" }, { capabilities: {} });

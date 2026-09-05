@@ -28,13 +28,6 @@ import {
   readPrivateFileText,
   type PrivateReadProbe,
 } from "./private-file.js";
-import {
-  authorizeGhostAccounts,
-  materializeMcpSecretReferences,
-  openGhostSecretContext,
-} from "./secret-migration.js";
-import { resolveMcpServerSecrets } from "./secret-resolution.js";
-import { SecretServiceError } from "./secret-service.js";
 
 export type McpConfigSource = "canonical" | "legacy";
 export type McpTransport = "stdio" | "http" | "sse";
@@ -513,33 +506,16 @@ export class McpCatalog {
     return { servers, skipped };
   }
 
-  /**
-   * Move a row's literal secrets into the machine keyring, authorize the
-   * accounts they landed in, then write the reference-only row.
-   *
-   * `add` and `update` share this because they must not drift on its ordering:
-   * policy is widened only after a verified keyring write, and the secret
-   * context is closed on every path out.
-   */
-  private async writeMigratedServer(
+  private async writeServer(
     mutation: "add" | "update",
-    ghostName: string,
     absolutePath: string,
     name: string,
     config: unknown,
   ): Promise<void> {
-    const home = this.registry.get(ghostName).dir;
-    const context = openGhostSecretContext({ home });
     try {
-      const migrated = materializeMcpSecretReferences(name, config as MCPServerConfig, context);
-      authorizeGhostAccounts(home, context, migrated.addedAccounts);
-      try {
-        await this.writer[mutation](absolutePath, name, migrated.config);
-      } catch (error) {
-        translateWriterError(error, name);
-      }
-    } finally {
-      context.close();
+      await this.writer[mutation](absolutePath, name, config as MCPServerConfig);
+    } catch (error) {
+      translateWriterError(error, name);
     }
   }
 
@@ -564,7 +540,7 @@ export class McpCatalog {
       throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
     }
     const [canonical] = this.sources(ghostName);
-    await this.writeMigratedServer("add", ghostName, canonical.absolutePath, name, config);
+    await this.writeServer("add", canonical.absolutePath, name, config);
     return this.listLeased(ghostName);
   }
 
@@ -591,7 +567,7 @@ export class McpCatalog {
     if (!server) {
       throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
     }
-    await this.writeMigratedServer("update", ghostName, server.source.absolutePath, name, config);
+    await this.writeServer("update", server.source.absolutePath, name, config);
     return this.listLeased(ghostName);
   }
 
@@ -669,8 +645,7 @@ export class McpCatalog {
   /** The caller already owns this ghost home's identity lease. */
   async testLeased(ghostName: string, name: string): Promise<McpConnectionTest> {
     const home = this.registry.get(ghostName).dir;
-    const context = openGhostSecretContext({ home });
-    try {
+    {
       const server = (await this.effective(ghostName)).configured
         .find((candidate) => candidate.name === name);
       if (!server) {
@@ -682,8 +657,7 @@ export class McpCatalog {
         logger: this.logger.child({ ghost: ghostName }),
       });
       try {
-        const resolved = resolveMcpServerSecrets(server.config as MCPServerConfig, context);
-        const expanded = expandMcpServerConfig(resolved);
+        const expanded = expandMcpServerConfig(server.config as MCPServerConfig);
         const result = await manager.connectServers({ [name]: normalizeMcpStdioCwd(expanded, home) });
         const connected = result.connectedServers.includes(name);
         return {
@@ -693,8 +667,7 @@ export class McpCatalog {
           toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
           message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
         };
-      } catch (error) {
-        if (error instanceof SecretServiceError) throw error;
+      } catch {
         return {
           name,
           ok: false,
@@ -705,8 +678,6 @@ export class McpCatalog {
       } finally {
         await manager.disconnectAll().catch(() => {});
       }
-    } finally {
-      context.close();
     }
   }
 }

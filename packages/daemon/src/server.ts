@@ -1042,10 +1042,9 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { providerId, authType, account = "personal" } = body as {
+    const { providerId, authType } = body as {
       providerId?: unknown;
       authType?: unknown;
-      account?: unknown;
     };
     if (typeof providerId !== "string") {
       errorResponse(response, 400, "invalid_request", "\"providerId\" must be a string.");
@@ -1055,11 +1054,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"authType\" must be \"oauth\" or \"api_key\".");
       return;
     }
-    if (typeof account !== "string") {
-      errorResponse(response, 400, "invalid_request", '"account" must be a string.');
-      return;
-    }
-    const view = await options.login.start(ghostName, providerId, authType as AuthType, account);
+    const view = await options.login.start(ghostName, providerId, authType as AuthType);
     // The status line stays 200; a failed login is a state the client polls,
     // not an HTTP error.
     jsonResponse(response, 201, view);
@@ -1068,15 +1063,14 @@ export function createDaemonServer(options: ServerOptions): Server {
   const handleLogout = async (
     ghostName: string,
     providerId: string,
-    account: string,
     response: ServerResponse,
   ): Promise<void> => {
     if (!options.login) {
       errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
       return;
     }
-    await options.login.logout(ghostName, providerId, account);
-    jsonResponse(response, 200, { ok: true, providerId, account });
+    await options.login.logout(ghostName, providerId);
+    jsonResponse(response, 200, { ok: true, providerId });
   };
 
   const handleLoginStatus = (
@@ -2091,7 +2085,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleListProviders(ghostName, response);
         }
-        if (segments.length === 7 && segments[3] === "providers" && segments[5] === "accounts") {
+        if (segments.length === 5 && segments[3] === "providers") {
           if (method !== "DELETE") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
             return;
@@ -2099,7 +2093,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleLogout(
             ghostName,
             decodePathSegment(segments[4] ?? ""),
-            decodePathSegment(segments[6] ?? ""),
             response,
           );
         }

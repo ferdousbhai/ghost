@@ -16,9 +16,9 @@
  * (`main.ts`) and `SessionHost` runs it again in its constructor, which is
  * idempotent — the second call finds nothing left to remove.
  *
- * Credentials therefore come only from Ghost's machine-scoped Secret Service
- * schema. A ghost's `models.json` and `mcp.json` hold references plus an
- * account allow-list, never values.
+ * Credentials therefore come only from pi's own store under the ghost's
+ * `.pi/auth.json`, or from the literal values the ghost's private
+ * `models.json` and `mcp.json` name.
  *
  * ## What is removed
  *

@@ -167,8 +167,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "login",
-    usage: "login <provider>|--list [--account <name>] [--oauth|--api-key] [--key-stdin] [-g <name>] [--json] [-q]",
-    summary: "Sign a provider account in, or list the providers.",
+    usage: "login <provider>|--list [--oauth|--api-key] [--key-stdin] [-g <name>] [--json] [-q]",
+    summary: "Sign in to a provider, or list the providers.",
     example: "ghost login openrouter",
     flags: LOGIN_ARGS,
     positionals: [0, 1],
@@ -176,8 +176,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "logout",
-    usage: "logout <provider> [--account <name>] [-g <name>] [--json] [-q]",
-    summary: "Remove a provider account from the keyring.",
+    usage: "logout <provider> [-g <name>] [--json] [-q]",
+    summary: "Sign out of a provider.",
     example: "ghost logout openrouter",
     flags: LOGIN_ARGS,
     positionals: [0, 1],

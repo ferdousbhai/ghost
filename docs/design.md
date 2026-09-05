@@ -56,7 +56,7 @@ than becoming parallel Ghost frameworks.
   notes database, task store, plan mode, document index, or vault adapter.
 - **Files over an application database.** Personas and inspectable policy stay
   greppable and backup-friendly. Derived runtime state is isolated under
-  `.pi/`; credential values live only in Linux Secret Service.
+  `.pi/`, including pi's own 0600 credential file.
 - **Runtime-native behavior wins.** Ghost projects policy through Pi and Claude
   Code's supported settings/hooks. It adds machinery only for product boundaries
   the runtimes do not own: persona lifecycle, daemon sessions, the HUD, browser

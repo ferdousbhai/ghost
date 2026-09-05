@@ -112,12 +112,6 @@ path, follow the exact versioned installation and Option C environment boundary
 in
 [`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md#runtime-and-security-boundary).
 
-Before opening a session, install `libsecret` (for `secret-tool`) and run a
-user-session Secret Service provider such as `gnome-keyring`; its default
-collection must be available to `ghostd`. See
-[keyring credentials](../../docs/keyring.md) for failure behavior and the
-blank-password/autologin caveat.
-
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost` package uses the
 [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
