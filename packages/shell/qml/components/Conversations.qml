@@ -7,8 +7,8 @@ pragma ComponentBehavior: Bound
 // sidebar footer below mints a new session id like "+ new ghost" mints a ghost.
 //
 // The list is shaped like Apple Notes' sidebar: its section heading and search
-// field sit on top, then the rows. Pinned state lives on the daemon row
-// (`pinned`), which also owns the ordering; pinned conversations arrive first
+// field sit on top, then the rows. Starred (pinned) state lives on the daemon
+// row (`pinned`), which also owns the ordering; starred conversations arrive first
 // in the listing and that order speaks for itself.
 import QtQuick
 import QtQuick.Layouts
@@ -166,21 +166,63 @@ Item {
                 ColorAnimation { duration: Theme.durFast }
             }
 
-            // One line per conversation, and the whole line is the title: no
-            // age, no badge, nothing standing between a name and the edge of
-            // the sidebar. The pin and close only take their width while the
-            // pointer is on the row, and take it back smoothly, so a title
-            // gives up its tail to them and gets it back on the way out.
+            // One line per conversation: a star, then the title, then the
+            // edge of the sidebar. The star is the watchlist pattern — always
+            // there, hollow until you star it, filled amber once you have —
+            // so starring is one click and the list says what is starred
+            // without a hover. The close only takes its width while the
+            // pointer is on the row, and takes it back smoothly.
             Item {
                 z: 1
                 anchors.fill: parent
-                anchors.leftMargin: Theme.gap
+                anchors.leftMargin: Theme.gap / 2
                 anchors.rightMargin: Theme.gap
+
+                Rectangle {
+                    id: starAction
+                    anchors.left: parent.left
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Theme.controlHeight - Theme.gap
+                    height: Theme.controlHeight - Theme.gap
+                    visible: !entry.editing
+                    z: 2
+                    radius: Theme.radius / 2
+                    color: starArea.containsMouse ? Theme.film(0.10) : "transparent"
+
+                    Accessible.role: Accessible.Button
+                    Accessible.name: entry.pinned ? "Unstar conversation" : "Star conversation"
+
+                    Behavior on color {
+                        enabled: !Theme.reducedMotion
+                        ColorAnimation { duration: Theme.durFast }
+                    }
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: entry.pinned ? "★" : "☆"
+                        color: entry.pinned
+                            ? (starArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber)
+                            : (starArea.containsMouse ? Theme.foreground
+                                : (entryArea.containsMouse ? Theme.foregroundDim : Theme.foregroundFaint))
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize
+                    }
+
+                    MouseArea {
+                        id: starArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        // Starring is reversible in one click, so it asks nothing.
+                        onClicked: Ghostd.pinConversation(entry.sessionData.id, !entry.pinned)
+                    }
+                }
 
                 Text {
                     id: titleText
                     visible: !entry.editing
-                    anchors.left: parent.left
+                    anchors.left: starAction.right
+                    anchors.leftMargin: Theme.gap / 2
                     anchors.right: actions.left
                     anchors.rightMargin: Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
@@ -192,13 +234,14 @@ Item {
                     elide: Text.ElideRight
                 }
 
-                // The name becomes a field where it is read. It takes the pin
+                // The name becomes a field where it is read. It takes the star
                 // and the × with it: a row being renamed is not a row you are
-                // about to pin or delete.
+                // about to star or delete.
                 InlineRename {
                     id: titleEdit
                     visible: entry.editing
                     anchors.left: parent.left
+                    anchors.leftMargin: Theme.gap / 2
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     placeholder: "Name this conversation"
@@ -215,15 +258,14 @@ Item {
                     id: actions
 
                     readonly property bool showActions: !entry.editing
-                        && (entryArea.containsMouse
-                        || pinArea.containsMouse || deleteArea.containsMouse
+                        && (entryArea.containsMouse || deleteArea.containsMouse
                         || entry.deleting)
 
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
-                    // At rest this is one status slot. Hover expands the same
-                    // right edge into pin/delete actions and hides the marker.
-                    width: actions.showActions ? 16 * 2 + Theme.gap / 2 : 16
+                    // At rest this is one status slot. Hover turns the same
+                    // right edge into the delete action and hides the marker.
+                    width: 16
                     height: Theme.controlHeight
                     clip: true
 
@@ -247,45 +289,6 @@ Item {
                             loops: Animation.Infinite
                             NumberAnimation { to: 0.28; duration: 650; easing.type: Easing.InOutSine }
                             NumberAnimation { to: 1; duration: 650; easing.type: Easing.InOutSine }
-                        }
-                    }
-
-                    Rectangle {
-                        id: pinAction
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 16
-                        height: Theme.controlHeight
-                        // Pinned state reads from where the row sits — pinned
-                        // rows lead the daemon's ordering — so this is a hover
-                        // action and never a permanent badge.
-                        visible: actions.showActions && !entry.deleting
-                        z: 2
-                        radius: Theme.radius / 2
-                        color: pinArea.containsMouse ? Theme.film(0.10) : "transparent"
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: "⚲"
-                            color: entry.pinned
-                                ? (pinArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber)
-                                : (pinArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                        }
-
-                        MouseArea {
-                            id: pinArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            // Pinning is reversible in one click, so it asks nothing.
-                            onClicked: Ghostd.pinConversation(entry.sessionData.id, !entry.pinned)
                         }
                     }
 
