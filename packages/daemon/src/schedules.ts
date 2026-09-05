@@ -19,7 +19,7 @@
  * the same rule screenshot retention follows.
  */
 import { readdir, unlink } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { accessSync, constants, type Dirent } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { isValidGhostName } from "./ghosts.js";
 import {
@@ -173,12 +173,33 @@ export function resolveScheduleRuntimeUnitDirectory(
   throw new TypeError("XDG_RUNTIME_DIR must be absolute when the uid is unavailable");
 }
 
+/**
+ * The `ghost` executable a timer unit must name. systemd needs an absolute
+ * path and the packaged install puts it at /usr/bin/ghost, but a checkout
+ * install runs a launcher elsewhere on PATH, so the running daemon's PATH is
+ * consulted first.
+ */
+export function ghostCliPath(env: NodeJS.ProcessEnv = process.env): string {
+  for (const directory of (env.PATH ?? "").split(":").filter(Boolean)) {
+    const candidate = join(directory, "ghost");
+    try {
+      accessSync(candidate, constants.X_OK);
+      return candidate;
+    } catch {
+      // Not here; try the next PATH entry.
+    }
+  }
+  return "/usr/bin/ghost";
+}
+
 /** The exact runtime policy rendered from schedule ownership, not a second copy. */
 export function renderScheduledWorkPolicy(
   ghostName: string,
   unitDir: string,
+  cliPath = "/usr/bin/ghost",
 ): string {
   if (!isAbsolute(unitDir)) throw new TypeError("schedule unit directory must be absolute");
+  if (!isAbsolute(cliPath)) throw new TypeError("ghost CLI path must be absolute");
   const unit = `${scheduleUnitPrefix(ghostName)}<slug>`;
   return [
     "## Scheduled work",
@@ -191,7 +212,7 @@ export function renderScheduledWorkPolicy(
     "Type=oneshot",
     "# Or the turn is SIGTERMed after ~90s, mid-answer.",
     "TimeoutStartSec=infinity",
-    `ExecStart=/usr/bin/ghost say --new --ghost ${ghostName} "<the prompt>"`,
+    `ExecStart=${cliPath} say --new --ghost ${ghostName} "<the prompt>"`,
     "```",
     "```ini",
     `# ${unit}.timer`,

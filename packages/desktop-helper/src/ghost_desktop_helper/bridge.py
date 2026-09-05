@@ -29,6 +29,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from . import a11y_bus
 from ._vendor.omaharness import atspi as atspi_module
 from ._vendor.omaharness import hypr, process, session
 from ._vendor.omaharness import toplevels as toplevel_protocol
@@ -376,6 +377,13 @@ class GhostDesktop:
 
     def _ax_backend(self) -> atspi_module.AtspiBackend:
         if self._atspi is None:
+            # libatspi aborts the process on a dead bus rather than raising,
+            # so the bus is checked before the binding ever touches it.
+            reason = a11y_bus.problem()
+            if reason is not None:
+                raise CapabilityError(
+                    f"AT-SPI is unavailable: {reason}. " + " ".join(a11y_bus.REMEDIATION)
+                )
             self._atspi = atspi_module.AtspiBackend()
         return self._atspi
 

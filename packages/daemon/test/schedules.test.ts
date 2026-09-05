@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ghostCliPath,
   isValidScheduleSlug,
   listGhostScheduleUnits,
   renderScheduledWorkPolicy,
@@ -540,5 +541,22 @@ describe("sweeping a deleted ghost's schedules", () => {
     });
 
     expect(disabled).toEqual([["--user", "disable", timer]]);
+  });
+});
+
+describe("ghostCliPath", () => {
+  it("names the ghost executable on PATH and falls back to the packaged path", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, chmodSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const root = mkdtempSync(join(tmpdir(), "ghost-cli-path-"));
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "ghost"), "#!/bin/sh\n");
+    chmodSync(join(bin, "ghost"), 0o755);
+    expect(ghostCliPath({ PATH: `${join(root, "empty")}:${bin}` })).toBe(join(bin, "ghost"));
+    expect(ghostCliPath({ PATH: join(root, "empty") })).toBe("/usr/bin/ghost");
+    expect(renderScheduledWorkPolicy("casper", "/tmp/units", join(bin, "ghost")))
+      .toContain(`ExecStart=${join(bin, "ghost")} say --new --ghost casper`);
   });
 });

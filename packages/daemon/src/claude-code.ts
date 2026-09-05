@@ -111,6 +111,7 @@ import {
   renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
+  ghostCliPath,
   renderScheduledWorkPolicy,
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
@@ -1155,7 +1156,7 @@ async function buildPersona(
       OWNER_DELIVERABLE_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
-      renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
+      renderScheduledWorkPolicy(ghostName, scheduleUnitDir, ghostCliPath()),
       renderSelfMaintenancePolicy({
         ghostName,
         checkout: resolveSelfCheckout(loadGhostSettings(homeDir), self.ownerHome),

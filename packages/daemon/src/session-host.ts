@@ -77,6 +77,7 @@ import {
 } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
+  ghostCliPath,
   renderScheduledWorkPolicy,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
@@ -2014,7 +2015,7 @@ export class SessionHost {
       CONTEXT_WINDOW_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),
-      renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
+      renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir, ghostCliPath()),
       renderSelfMaintenancePolicy({
         ghostName,
         checkout: resolveSelfCheckout(settings, this.ownerHome),

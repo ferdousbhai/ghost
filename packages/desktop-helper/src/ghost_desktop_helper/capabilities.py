@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import a11y_bus
 from ._vendor.omaharness import atspi as atspi_module
 from ._vendor.omaharness import capture as capture_module
 from ._vendor.omaharness import hypr, inputs, process
@@ -31,7 +32,7 @@ def detect_backends() -> dict[str, Any]:
     """Report which capture / input / accessibility backends are usable."""
     grim = capture_module.detect_grim()
     ydotool_status = inputs.socket_status()
-    atspi = atspi_module.binding_diagnosis()
+    atspi = a11y_bus.diagnosis(atspi_module.binding_diagnosis())
 
     backends: dict[str, Any] = {
         "hyprctl": _tool("hyprctl"),
