@@ -939,7 +939,7 @@ const json = (res, status, body) => {
 // its status projection derived from it. The loader's shape check is the
 // small subset a pane edit can plausibly trip, worded the way ghostd words it.
 const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
-const HOOK_EVENTS = ["before_prompt", "session_stop", "conversation_idle"];
+const HOOK_EVENTS = ["before_prompt", "session_stop"];
 let hooksDocument = {
   hooks: {
     before_prompt: [{ hooks: [{
@@ -971,14 +971,6 @@ const BUILTIN_HOOKS = [
     description: "Runs deterministic lint, then optional WATCHDOG model review, through one delivery policy.",
     settingsKey: "review",
   },
-  {
-    event: "conversation_idle",
-    source: "builtin",
-    name: "Idle upkeep",
-    description: "Runs after the current conversation remains inactive.",
-    idleSeconds: 60,
-    settingsKey: "memory_upkeep",
-  },
 ];
 
 function hooksDocumentProblem(document) {
@@ -991,15 +983,10 @@ function hooksDocumentProblem(document) {
     if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
     for (const [key, raw] of Object.entries(builtin)) {
       if (!/^[a-z][a-z0-9_]*$/u.test(key)) return `${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`;
-      if (key !== "memory_upkeep" && key !== "review") return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
+      if (key !== "review") return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
       if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return `${path}: builtin.${key} must be an object.`;
       for (const field of Object.keys(raw)) {
-        if (field !== "idleSeconds") return `${path}: builtin.${key}.${field} is not a setting.`;
-        if (key !== "memory_upkeep") return `${path}: builtin.${key}.${field} is not a setting.`;
-      }
-      if (raw.idleSeconds !== undefined
-          && !(Number.isSafeInteger(raw.idleSeconds) && raw.idleSeconds >= 1 && raw.idleSeconds <= 86_400)) {
-        return `${path}: builtin.${key}.idleSeconds must be an integer in [1, 86400].`;
+        return `${path}: builtin.${key}.${field} is not a setting.`;
       }
     }
   }
@@ -1026,10 +1013,6 @@ function hooksDocumentProblem(document) {
         if (handler.timeout !== undefined && !(typeof handler.timeout === "number" && handler.timeout > 0 && handler.timeout <= 600)) {
           return `${path}: ${label}.timeout must be a number in (0, 600].`;
         }
-        if (event === "conversation_idle" && handler.idleSeconds !== undefined
-            && !(Number.isSafeInteger(handler.idleSeconds) && handler.idleSeconds >= 1 && handler.idleSeconds <= 86_400)) {
-          return `${path}: ${label}.idleSeconds must be an integer in [1, 86400].`;
-        }
       }
     }
   }
@@ -1042,18 +1025,14 @@ function hooksStatus() {
     rows.push(...BUILTIN_HOOKS.filter((row) => row.event === event));
     for (const group of hooksDocument.hooks?.[event] ?? []) {
       for (const handler of group.hooks) {
-        const trigger = event === "before_prompt" ? "Before-prompt"
-          : event === "session_stop" ? "Session-stop" : "Conversation-idle";
+        const trigger = event === "before_prompt" ? "Before-prompt" : "Session-stop";
         rows.push({
           event,
           source: "config",
           name: handler.name ?? `${trigger} command hook`,
           description: handler.description ?? (event === "before_prompt"
             ? "Adds context before the owner prompt is sent."
-            : event === "session_stop"
-              ? "Reviews the current assistant pass and may continue it."
-              : "Runs in the background after the configured idle interval."),
-          ...(event === "conversation_idle" ? { idleSeconds: handler.idleSeconds ?? 60 } : {}),
+            : "Reviews the current assistant pass and may continue it."),
         });
       }
     }
@@ -2276,21 +2255,6 @@ const mockServer = createServer(async (req, res) => {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
     return json(res, 200, { ...MOCK_SESSION_RESOURCES, runtime: conversation.runtime });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "recap" && req.method === "POST") {
-    await readBody(req).catch(() => ({}));
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    if (conversation.runtime !== "pi") {
-      return json(res, 409, {
-        error: { code: "not_supported", message: "Claude Code has no transient recap completion" },
-      });
-    }
-    const s = ghostSessions(name).get(conversation.id);
-    if (!s) return json(res, 404, { error: { code: "not_found", message: "no such session" } });
-    return json(res, 200, {
-      recap: "You were shaping the launch notes into a clear plan. Next: choose the first section to finish.",
-    });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {

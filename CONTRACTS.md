@@ -58,7 +58,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
   mcp.json
   sessions/
   .pi/
-  .memory-maintenance.json
 ```
 
 The directory is the atomic lifecycle unit. Rename and deletion hold a
@@ -130,8 +129,8 @@ Conversation public ids are runtime-qualified (`pi:<raw>` or
 `claude-code:<raw>`). Raw ids remain the runtime resume identity. Pi transcripts
 are JSONL under `sessions/`; Claude transcripts remain in Claude Code's own
 storage and Ghost keeps only its resume metadata. Pins, read timestamps,
-project bindings/snapshots, tool-call cwd records, idle-maintenance journals,
-and crash markers are bounded sidecars under `sessions/`.
+project bindings/snapshots, tool-call cwd records, and crash markers are
+bounded sidecars under `sessions/`.
 
 Each Claude conversation also gets a bounded presentation-journal sidecar
 (`*.claude-code.presentation.json`): one owner prompt plus final assistant text
@@ -301,6 +300,7 @@ warm query, no resume metadata — and it is admitted through the same SDK loade
 executable probe, and reviewed child environment as the principal path.
 
 ### Ask, jobs, hooks, and maintenance
+### Ask, jobs, delegation, and hooks
 
 `ask` is owner input, never tool approval. Pi's model-facing `ask` input and
 output match Claude Code's native `AskUserQuestion` contract: one to four
@@ -324,9 +324,11 @@ runs the owner's installed `pi`, `codex`, or `claude -p` from its own Bash;
 that harness owns its project discovery, tools, auth, and session semantics,
 and the review journal records how many times each reviewed turn did so.
 
-Awaited harness hooks are `before_prompt`, `session_stop`, and
-`conversation_idle`. Their JSON protocol, failure behavior, and settings are
-defined in [`docs/hooks.md`](docs/hooks.md). Built-in idle maintenance may write
+Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
+protocol, failure behavior, and settings are defined in
+[`docs/hooks.md`](docs/hooks.md). A ghost keeps its own private memory current
+with its memory tools during ordinary turns; shared knowledge uses Obsidian the
+same way. Ghost runs no background memory pass of its own.
 or consolidate only private memory; shared knowledge and task maintenance
 happens in the owner's documents during ordinary runtime work.
 
@@ -363,8 +365,8 @@ while cooldown and continuation-pass blockers become next-turn feedback. A
 strict continuation starts the `review.immuneTurns` cooldown. The feedback,
 cooldown, dedupe, and ledger state are bounded and non-durable, so restart drops
 rather than replays them. Transcript, model, parse, discovery, and quarantine
-failures fail open; a model failure never discards lint notes. Built-in hook
-settings keys are only `memory_upkeep` and `review`.
+failures fail open; a model failure never discards lint notes. `review` is the
+only built-in hook settings key.
 
 ## Daemon HTTP API
 
@@ -412,7 +414,6 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips, and the optional `obsidian-cli` skill's readiness. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
-| `POST /sessions/:id/recap` | Non-persisted bounded Pi recap; failure returns `recap:null`. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
 | `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
@@ -563,6 +564,8 @@ fail-closed state machine lives in
 - Home rename/delete, project transitions, MCP mutation, model refresh,
   maintenance, fork, and conversation deletion use explicit leases and publish
   only durable state.
+  voice, collaboration, fork, and conversation deletion use explicit leases and
+  publish only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.

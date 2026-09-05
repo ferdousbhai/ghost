@@ -44,13 +44,6 @@ import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
-import {
-  ConversationMaintenance,
-  maintenanceStatePath,
-  type MaintenanceIdentity,
-  type MaintenanceOwnerActivity,
-  type SettledMaintenanceTurn,
-} from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
   clearGhostModelRole,
@@ -88,7 +81,6 @@ import {
   homeOperationsFor,
   type HomeOperationCoordinator,
 } from "../src/home-operations.js";
-import type { GhostPiRuntime } from "../src/pi-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import {
   createMockProviderBarrier,
@@ -210,7 +202,6 @@ async function setup(
     | "transactionMarkerLstat"
     | "ghostHomeLstat"
     | "logger"
-    | "maintenance"
     | "jobs"
     | "scheduleCommandRunner"
   > = {},
@@ -243,43 +234,6 @@ async function modelSystemPrompt(
   const request = provider?.requests[before];
   if (!request) throw new Error("Expected the turn to reach the mock provider.");
   return request.system;
-}
-
-class ReanswerPreparationHooks extends GhostHookRunner {
-  failPreparation = false;
-
-  override hasHandlers(event: Parameters<GhostHookRunner["hasHandlers"]>[0]): boolean {
-    return event === "before_prompt" || super.hasHandlers(event);
-  }
-
-  override async emitBeforePrompt(
-    event: Parameters<GhostHookRunner["emitBeforePrompt"]>[0],
-  ): ReturnType<GhostHookRunner["emitBeforePrompt"]> {
-    if (this.failPreparation) throw new Error("injected re-answer preparation failure");
-    return super.emitBeforePrompt(event);
-  }
-}
-
-async function establishHistoricalAsk(sessionId: string): Promise<string> {
-  const initial = host!.runTurn("casper", {
-    sessionId,
-    prompt: "Help choose a finish.",
-    emit: () => {},
-  });
-  const ask = await waitFor(() => host!.pendingAsk("casper", sessionId));
-  host!.answerAsk("casper", sessionId, ask.id, {
-    kind: "submit",
-    results: [{ id: "question-1", selectedOptions: ["Matte"] }],
-  });
-  await initial;
-  const transcript = await host!.readTranscript("casper", sessionId);
-  const call = transcript.messages
-    .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-    .find((part) => (part as { name?: unknown }).name === "ask") as {
-      ghostAsk?: { resultEntryId?: string };
-    };
-  if (!call.ghostAsk?.resultEntryId) throw new Error("fixture ask result was not persisted");
-  return call.ghostAsk.resultEntryId;
 }
 
 async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
@@ -429,71 +383,10 @@ async function failedRelayOpen(
   };
 }
 
-function recordMaintenanceTurns(
-  finishTurn?: (turn: SettledMaintenanceTurn | undefined) => Promise<void>,
-  recordActivity?: (
-    identity: MaintenanceIdentity,
-    activity: MaintenanceOwnerActivity,
-  ) => Promise<void>,
-): {
-  maintenance: NonNullable<SessionHostOptions["maintenance"]>;
-  admitted: MaintenanceIdentity[];
-  finished: Array<SettledMaintenanceTurn | undefined>;
-  activities: Array<{ identity: MaintenanceIdentity; activity: MaintenanceOwnerActivity }>;
-  released: { count: number };
-} {
-  const admitted: MaintenanceIdentity[] = [];
-  const finished: Array<SettledMaintenanceTurn | undefined> = [];
-  const activities: Array<{
-    identity: MaintenanceIdentity;
-    activity: MaintenanceOwnerActivity;
-  }> = [];
-  const released = { count: 0 };
-  const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-  return {
-    admitted,
-    finished,
-    activities,
-    released,
-    maintenance: {
-      admitOwnerAction: (identity) => {
-        admitted.push(identity);
-        return {
-          ready: Promise.resolve(),
-          finish: async (turn) => {
-            finished.push(turn);
-            await finishTurn?.(turn);
-          },
-          release: () => {
-            released.count += 1;
-          },
-        };
-      },
-      recordOwnerActivity: async (identity, activity) => {
-        activities.push({ identity, activity });
-        await recordActivity?.(identity, activity);
-      },
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    },
-  };
-}
-
 function authRuntimeForTest(handle: Awaited<ReturnType<SessionHost["open"]>>): {
   close(): void;
 } {
   return (handle as typeof handle & { modelRuntime: { close(): void } }).modelRuntime;
-}
-
-function completionRuntimeForTest(
-  handle: Awaited<ReturnType<SessionHost["open"]>>,
-): GhostPiRuntime {
-  return (handle as typeof handle & { modelRuntime: GhostPiRuntime }).modelRuntime;
 }
 
 describe("sessionKeyOf", () => {
@@ -597,140 +490,6 @@ describe("Ghost slash commands", () => {
     }
 
     expect(provider!.requests).toHaveLength(0);
-  });
-});
-
-describe("SessionHost recap", () => {
-  it("completes over the effective Pi context, normalizes text, and leaves no transcript trace", async () => {
-    await setup([{ kind: "text", text: "We are shaping the launch notes." }], {
-      title: { enabled: false },
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap",
-      prompt: "Help me finish the launch notes.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap");
-    const before = readFileSync(handle.sessionFile!, "utf8");
-    let recapContext: Parameters<GhostPiRuntime["complete"]>[1] | undefined;
-    const complete = vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockImplementation(async (_model, context) => {
-        recapContext = context;
-        return {
-          role: "assistant",
-          content: [{ type: "text", text: "  Return to the launch plan.\n- Next: finish the opening.  " }],
-          stopReason: "stop",
-        } as never;
-      });
-
-    await expect(host!.recap("casper", "conv-recap")).resolves.toBe(
-      "Return to the launch plan. Next: finish the opening.",
-    );
-
-    expect(complete).toHaveBeenCalledOnce();
-    expect(complete.mock.calls[0]?.[0].id).toBe(provider!.modelId);
-    expect(recapContext?.systemPrompt).toBe(handle.session.systemPrompt);
-    expect(JSON.stringify(recapContext?.messages)).toContain("Help me finish the launch notes.");
-    expect(JSON.stringify(recapContext?.messages)).toContain("<recap>");
-    expect(readFileSync(handle.sessionFile!, "utf8")).toBe(before);
-    expect(before).not.toContain("<recap>");
-  });
-
-  it("logs generation failure as pure upside and refuses unknown or Claude conversations", async () => {
-    const logger = recordingLogger("warn");
-    await setup([{ kind: "text", text: "Conversation established." }], {
-      title: { enabled: false },
-      logger,
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap-failure",
-      prompt: "Start here.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap-failure");
-    vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockRejectedValueOnce(new Error("provider unavailable"));
-
-    await expect(host!.recap("casper", "conv-recap-failure")).resolves.toBeNull();
-    expect(logger.records).toContainEqual(expect.objectContaining({
-      message: "conversation recap generation failed",
-      fields: expect.objectContaining({ session: "conv-recap-failure" }),
-    }));
-    await expect(host!.recap("casper", "missing"))
-      .rejects.toMatchObject({ code: "not_found", status: 404 });
-    await expect(host!.recap("casper", "conv-recap-failure", "claude-code"))
-      .rejects.toMatchObject({ code: "not_supported", status: 409 });
-  });
-
-  it("returns session_busy while an owner turn is running", async () => {
-    const barrier = createMockProviderBarrier();
-    await setup([{ kind: "text", text: "Held owner turn.", barrier }], {
-      title: { enabled: false },
-    });
-    const turn = host!.runTurn("casper", {
-      sessionId: "conv-recap-busy",
-      prompt: "Keep this turn running.",
-      emit: () => {},
-    });
-    await barrier.waitForArrivals();
-
-    await expect(host!.recap("casper", "conv-recap-busy"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    barrier.release();
-    await turn;
-  });
-
-  it("rejects a second recap, then aborts and drains the first before the owner turn", async () => {
-    await setup([
-      { kind: "text", text: "First turn complete." },
-      { kind: "text", text: "The owner turn won." },
-    ], {
-      title: { enabled: false },
-    }, {
-      sequential: true,
-    });
-    await host!.runTurn("casper", {
-      sessionId: "conv-recap-preempt",
-      prompt: "First turn.",
-      emit: () => {},
-    });
-    const handle = await host!.open("casper", "conv-recap-preempt");
-    const completionStarted = Promise.withResolvers<AbortSignal>();
-    vi.spyOn(completionRuntimeForTest(handle), "complete")
-      .mockImplementation(async (_model, _context, options) => {
-        const signal = options?.signal;
-        if (!signal) throw new Error("recap completion did not receive an abort signal");
-        completionStarted.resolve(signal);
-        if (!signal.aborted) {
-          await new Promise<void>((resolve) => {
-            signal.addEventListener("abort", () => resolve(), { once: true });
-          });
-        }
-        return {
-          role: "assistant",
-          content: [{ type: "text", text: "Stale recap." }],
-          stopReason: "aborted",
-        } as never;
-      });
-
-    const recap = host!.recap("casper", "conv-recap-preempt");
-    const recapSignal = await completionStarted.promise;
-    await expect(host!.recap("casper", "conv-recap-preempt"))
-      .rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    const events: PiMessagesEvent[] = [];
-    const ownerTurn = host!.runTurn("casper", {
-      sessionId: "conv-recap-preempt",
-      prompt: "I am back.",
-      emit: (event) => events.push(event),
-    });
-
-    await expect(recap).resolves.toBeNull();
-    await ownerTurn;
-    expect(recapSignal.aborted).toBe(true);
-    expect(events.at(-1)?.type).toBe("done");
-    expect(provider!.requests).toHaveLength(2);
   });
 });
 
@@ -2410,43 +2169,6 @@ describe("SessionHost retention", () => {
 });
 
 describe("SessionHost shutdown", () => {
-  it("reserves maintenance synchronously and disposes it only after its real drain", async () => {
-    const drained = deferred();
-    let beginCalls = 0;
-    let disposeCalls = 0;
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async () => {},
-        release: () => {},
-      }),
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: () => {
-        beginCalls += 1;
-        return drained.promise;
-      },
-      disposeAll: async () => {
-        disposeCalls += 1;
-      },
-    };
-    await setup([{ kind: "text", text: "unused" }], { maintenance });
-
-    host!.beginShutdown();
-    expect(beginCalls).toBe(1);
-    const disposing = host!.disposeAll();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(disposeCalls).toBe(0);
-    drained.resolve();
-    await disposing;
-    expect(disposeCalls).toBe(1);
-  });
-
   it("stops admission synchronously and aborts an active provider turn", async () => {
     const barrier = createMockProviderBarrier();
     await setup([{ kind: "text", text: "held", barrier }]);
@@ -3712,7 +3434,6 @@ describe("SessionHost.runTurn", () => {
     const writerEntered = deferred();
     const releaseWriter = deferred();
     let blockWriter = false;
-    const recorded = recordMaintenanceTurns();
     const hooks = new GhostHookRunner();
     const beforeOwners: string[] = [];
     const stoppedOwners: string[] = [];
@@ -3752,7 +3473,6 @@ describe("SessionHost.runTurn", () => {
       ],
       {
         hooks,
-        maintenance: recorded.maintenance,
         title: { enabled: false },
         toolCwdWriter: async (...args) => {
           if (blockWriter) {
@@ -3837,254 +3557,6 @@ describe("SessionHost.runTurn", () => {
     expect(beforeOwners).toHaveLength(2);
     expect(beforeOwners[0]).toBe("Help choose the finish.");
     expect(beforeOwners[1]).toContain("Gloss");
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toMatchObject({
-      ownerPrompt: beforeOwners[1],
-      assistantText: expect.stringContaining("The final choice is gloss stock."),
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      outcome: "completed",
-    });
-    expect(recorded.activities).toEqual([]);
-    expect(recorded.released.count).toBe(2);
-  });
-
-  it.each(["preparation", "custom-message", "resume"] as const)(
-    "records committed re-answer activity when %s fails before an assistant result",
-    async (stage) => {
-      const hooks = new ReanswerPreparationHooks();
-      const logger = recordingLogger("warn");
-      const activityReleaseCounts: number[] = [];
-      let recorded!: ReturnType<typeof recordMaintenanceTurns>;
-      recorded = recordMaintenanceTurns(
-        undefined,
-        async () => {
-          activityReleaseCounts.push(recorded.released.count);
-          if (stage === "resume") {
-            throw new Error("sensitive owner activity write failure");
-          }
-        },
-      );
-      await setup([
-        {
-          kind: "tool",
-          name: "ask",
-          args: {
-            questions: [{
-              header: "Finish",
-              question: "Which finish?",
-              options: [
-                { label: "Matte", description: "Quiet and low-glare" },
-                { label: "Gloss", description: "Brighter and reflective" },
-              ],
-              multiSelect: false,
-            }],
-          },
-        },
-        { kind: "text", text: "Initial matte answer." },
-        { kind: "text", text: "This model response must not run." },
-      ], {
-        hooks,
-        maintenance: recorded.maintenance,
-        title: { enabled: false },
-        logger,
-      }, { sequential: true });
-      const sessionId = `reanswer-${stage}-failure`;
-      const resultEntryId = await establishHistoricalAsk(sessionId);
-      const opened = await host!.open("casper", sessionId);
-      const createdAt = opened.session.sessionManager.getHeader()?.timestamp;
-      expect(createdAt).toBeTruthy();
-
-      if (stage === "preparation") {
-        hooks.failPreparation = true;
-      } else if (stage === "custom-message") {
-        const manager = opened.session.sessionManager;
-        const appendCustomMessageEntry = manager.appendCustomMessageEntry.bind(manager);
-        vi.spyOn(manager, "appendCustomMessageEntry").mockImplementation(
-          (customType, ...rest) => {
-            if (customType === "ghost-ask-reanswer-owner") {
-              throw new Error("injected re-answer custom-message failure");
-            }
-            return appendCustomMessageEntry(customType, ...rest);
-          },
-        );
-      } else {
-        vi.spyOn(opened.session.agent, "continue").mockImplementation(async () => {
-          throw new Error("injected re-answer resume failure");
-        });
-      }
-
-      const events: PiMessagesEvent[] = [];
-      const reanswer = host!.runAskReanswer("casper", {
-        sessionId,
-        entryId: resultEntryId,
-        emit: (event) => events.push(event),
-      });
-      const revisedAsk = await waitFor(() => host!.pendingAsk("casper", sessionId));
-      host!.answerAsk("casper", sessionId, revisedAsk.id, {
-        kind: "submit",
-        results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
-      });
-      await reanswer;
-
-      expect(events.some((event) => event.type === "branch_changed")).toBe(true);
-      expect(events.filter((event) => event.type === "done" || event.type === "error"))
-        .toEqual([expect.objectContaining({ type: "error" })]);
-      expect(provider!.requests).toHaveLength(2);
-      expect(recorded.activities).toEqual([{
-        identity: { ghostName: "casper", runtime: "pi", conversationId: sessionId },
-        activity: {
-          source: { runtime: "pi", createdAt },
-          cwd: temp!.ownerHome,
-        },
-      }]);
-      expect(recorded.finished).toHaveLength(2);
-      expect(recorded.finished[1]).toBeUndefined();
-      expect(activityReleaseCounts).toEqual([1]);
-      expect(recorded.released.count).toBe(2);
-
-      const after = await host!.readTranscript("casper", sessionId);
-      const revisedCall = after.messages
-        .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-        .find((part) => (part as { name?: unknown }).name === "ask") as {
-          ghostAsk?: { resultEntryId?: string };
-        };
-      expect(revisedCall.ghostAsk?.resultEntryId).toBeTruthy();
-      expect(revisedCall.ghostAsk?.resultEntryId).not.toBe(resultEntryId);
-      if (stage === "resume") {
-        expect(events.at(-1)).toMatchObject({
-          type: "error",
-          errorMessage: "injected re-answer resume failure",
-        });
-        expect(logger.records).toContainEqual({
-          level: "warn",
-          message: "conversation maintenance owner activity was not recorded",
-          fields: { ghost: "casper", conversation: sessionId, runtime: "pi" },
-        });
-        expect(JSON.stringify(logger.records)).not.toContain("sensitive owner activity write failure");
-      }
-    },
-  );
-
-  it("records no owner activity when re-answering fails before branch commit", async () => {
-    const recorded = recordMaintenanceTurns();
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Finish",
-            question: "Which finish?",
-            options: [
-              { label: "Matte", description: "Quiet and low-glare" },
-              { label: "Gloss", description: "Brighter and reflective" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Initial matte answer." },
-    ], {
-      maintenance: recorded.maintenance,
-      title: { enabled: false },
-    }, { sequential: true });
-    const sessionId = "reanswer-precommit-failure";
-    await establishHistoricalAsk(sessionId);
-    const events: PiMessagesEvent[] = [];
-
-    await host!.runAskReanswer("casper", {
-      sessionId,
-      entryId: "missing-result-entry",
-      emit: (event) => events.push(event),
-    });
-
-    expect(events.some((event) => event.type === "branch_changed")).toBe(false);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "error" })]);
-    expect(recorded.activities).toEqual([]);
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toBeUndefined();
-    expect(recorded.released.count).toBe(2);
-  });
-
-  it("keeps a re-answer branch durable but emits an error when maintenance persistence rejects", async () => {
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn?.ownerPrompt.includes("Gloss")) {
-        throw new Error("sensitive re-answer persistence failure");
-      }
-    });
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Finish",
-            question: "Which finish?",
-            options: [
-              { label: "Matte", description: "Quiet and low-glare" },
-              { label: "Gloss", description: "Brighter and reflective" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Initial matte answer." },
-      { kind: "text", text: "Persisted gloss re-answer." },
-    ], {
-      maintenance: recorded.maintenance,
-      title: { enabled: false },
-    }, { sequential: true });
-    const initial = host!.runTurn("casper", {
-      sessionId: "strict-reanswer-maintenance",
-      prompt: "Help choose a finish.",
-      emit: () => {},
-    });
-    const firstAsk = await waitFor(() =>
-      host!.pendingAsk("casper", "strict-reanswer-maintenance")
-    );
-    host!.answerAsk("casper", "strict-reanswer-maintenance", firstAsk.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Matte"] }],
-    });
-    await initial;
-    const before = await host!.readTranscript("casper", "strict-reanswer-maintenance");
-    const askCall = before.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string };
-      };
-    expect(askCall.ghostAsk?.resultEntryId).toBeTruthy();
-    const events: PiMessagesEvent[] = [];
-    const reanswer = host!.runAskReanswer("casper", {
-      sessionId: "strict-reanswer-maintenance",
-      entryId: askCall.ghostAsk!.resultEntryId!,
-      emit: (event) => events.push(event),
-    });
-    const revisedAsk = await waitFor(() =>
-      host!.pendingAsk("casper", "strict-reanswer-maintenance")
-    );
-    host!.answerAsk("casper", "strict-reanswer-maintenance", revisedAsk.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
-    });
-    await reanswer;
-
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({
-        type: "error",
-        errorMessage: "Could not durably settle this owner turn.",
-      })]);
-    expect(JSON.stringify(events)).not.toContain("sensitive re-answer persistence failure");
-    expect(recorded.finished).toHaveLength(2);
-    expect(recorded.finished[1]).toMatchObject({
-      ownerPrompt: expect.stringContaining("Gloss"),
-      assistantText: expect.stringContaining("Persisted gloss re-answer."),
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-    });
-    expect(recorded.released.count).toBe(2);
-    expect(JSON.stringify(await host!.readTranscript("casper", "strict-reanswer-maintenance")))
-      .toContain("Persisted gloss re-answer.");
   });
 
   describe("how a historical ask settled", () => {
@@ -4193,29 +3665,6 @@ describe("SessionHost.runTurn", () => {
         stoppedOwners.push(event.owner_prompt);
       });
     });
-    const admitted: MaintenanceIdentity[] = [];
-    const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: (identity) => {
-        admitted.push(identity);
-        return {
-          ready: Promise.resolve(),
-          finish: async (turn) => {
-            finished.push(turn);
-          },
-          release: () => {},
-        };
-      },
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
     await setup([
       {
         kind: "tool",
@@ -4234,7 +3683,7 @@ describe("SessionHost.runTurn", () => {
       },
       { kind: "text", text: "I adjusted the direction." },
       { kind: "text", text: "And handled the follow-up." },
-    ], { hooks, maintenance });
+    ], { hooks });
     const turn = host!.runTurn("casper", {
       sessionId: "conv-queue",
       prompt: "Start.",
@@ -4264,95 +3713,10 @@ describe("SessionHost.runTurn", () => {
       "Use the quieter direction.",
       "Then explain the tradeoff.",
     ]);
-    expect(admitted).toEqual(Array(3).fill({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "conv-queue",
-    }));
-    expect(finished.map((entry) => entry?.ownerPrompt)).toEqual([
-      undefined,
-      "Use the quieter direction.",
-      "Then explain the tradeoff.",
-    ]);
     expect(stoppedOwners).toEqual([
       "Use the quieter direction.",
       "Then explain the tradeoff.",
     ]);
-    const revisions = finished.flatMap((entry) => entry ? [entry.sourceRevision.value] : []);
-    expect(revisions).toHaveLength(new Set(revisions).size);
-    expect(finished.slice(1).every((entry) => entry?.assistantText.length)).toBe(true);
-  });
-
-  it("fails the shared terminal when a queued native pass cannot persist maintenance", async () => {
-    let rejected = false;
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (turn?.ownerPrompt === "Use the queued correction." && !rejected) {
-        rejected = true;
-        throw new Error("sensitive queued sidecar failure");
-      }
-    });
-    await setup([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Ready",
-            question: "Ready?",
-            options: [
-              { label: "Yes", description: "Continue" },
-              { label: "No", description: "Wait" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Queued durable answer." },
-      { kind: "text", text: "Retry answer." },
-    ], { maintenance: recorded.maintenance });
-    const events: PiMessagesEvent[] = [];
-    const turn = host!.runTurn("casper", {
-      sessionId: "strict-queued-maintenance",
-      prompt: "Start and ask first.",
-      emit: (event) => events.push(event),
-    });
-    const pending = await waitFor(() => host!.pendingAsk("casper", "strict-queued-maintenance"));
-    await host!.queueMessage(
-      "casper",
-      "strict-queued-maintenance",
-      "steer",
-      "Use the queued correction.",
-    );
-    host!.answerAsk("casper", "strict-queued-maintenance", pending.id, {
-      kind: "submit",
-      results: [{ id: "question-1", selectedOptions: ["Yes"] }],
-    });
-    await turn;
-
-    expect(recorded.finished).toEqual([
-      undefined,
-      expect.objectContaining({
-        ownerPrompt: "Use the queued correction.",
-        assistantText: expect.stringContaining("Queued durable answer."),
-        sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(2);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({
-        type: "error",
-        errorMessage: "Could not durably settle this owner turn.",
-      })]);
-    expect(JSON.stringify(events)).not.toContain("sensitive queued sidecar failure");
-
-    const retryEvents: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "strict-queued-maintenance",
-      prompt: "Try a fresh owner pass.",
-      emit: (event) => retryEvents.push(event),
-    });
-    expect(retryEvents.at(-1)?.type).toBe("done");
-    expect(recorded.released.count).toBe(3);
   });
 
   it("awaits session_stop and sends only the current assistant pass", async () => {
@@ -4429,125 +3793,6 @@ describe("SessionHost.runTurn", () => {
     expect(events.at(-1)?.type).toBe("done");
   });
 
-  it("records the durable Pi leaf as failed when a continuation cannot start", async () => {
-    class ContinuingHooks extends GhostHookRunner {
-      calls = 0;
-
-      override hasHandlers(event: Parameters<GhostHookRunner["hasHandlers"]>[0]): boolean {
-        return event === "session_stop" || super.hasHandlers(event);
-      }
-
-      override async emitSessionStop(): Promise<{ continue: true; additionalContext: string }> {
-        this.calls += 1;
-        return { continue: true, additionalContext: "Revise this answer." };
-      }
-    }
-    const hooks = new ContinuingHooks();
-    let acknowledgements = 0;
-    await hooks.register((api) => {
-      api.on("before_prompt", () => ({
-        additionalContext: "A retained maintenance notice.",
-        acknowledge: () => {
-          acknowledgements += 1;
-          throw new Error("sensitive acknowledgement failure");
-        },
-      }));
-    });
-    const logger = recordingLogger("warn");
-    const recorded = recordMaintenanceTurns();
-    await setup([{ kind: "text", text: "Initial durable answer." }], {
-      hooks,
-      maintenance: recorded.maintenance,
-      logger,
-    });
-    const opened = await host!.open("casper", "continuation-start-failure");
-    const sendCustomMessage = opened.session.sendCustomMessage.bind(opened.session);
-    vi.spyOn(opened.session, "sendCustomMessage").mockImplementation(async (message, options) => {
-      if (typeof message !== "string" && message.customType === "session-stop-continuation") {
-        throw new Error("injected continuation start failure");
-      }
-      return sendCustomMessage(message, options);
-    });
-    const events: PiMessagesEvent[] = [];
-
-    await host!.runTurn("casper", {
-      sessionId: "continuation-start-failure",
-      prompt: "Give me an answer.",
-      emit: (event) => events.push(event),
-    });
-
-    expect(hooks.calls).toBe(1);
-    expect(acknowledgements).toBe(1);
-    expect(recorded.finished).toEqual([
-      expect.objectContaining({
-        ownerPrompt: "Give me an answer.",
-        assistantText: expect.stringContaining("Initial durable answer."),
-        outcome: "failed",
-        sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(1);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "error" })]);
-    expect(logger.records).toContainEqual({
-      level: "warn",
-      message: "before_prompt hook acknowledgement failed",
-      fields: { ghost: "casper", conversation: "continuation-start-failure", runtime: "pi" },
-    });
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive acknowledgement failure");
-  });
-
-  it("records the latest replacement leaf as failed when later stop settlement fails", async () => {
-    class FailingReplacementHooks extends GhostHookRunner {
-      calls = 0;
-
-      override hasHandlers(event: Parameters<GhostHookRunner["hasHandlers"]>[0]): boolean {
-        return event === "session_stop" || super.hasHandlers(event);
-      }
-
-      override async emitSessionStop(): Promise<
-        { continue: true; additionalContext: string } | undefined
-      > {
-        this.calls += 1;
-        if (this.calls === 1) {
-          return { continue: true, additionalContext: "Persist a replacement." };
-        }
-        throw new Error("injected post-replacement stop failure");
-      }
-    }
-    const hooks = new FailingReplacementHooks();
-    const recorded = recordMaintenanceTurns();
-    await setup([
-      { kind: "text", text: "Initial durable answer." },
-      { kind: "text", text: "Replacement durable answer." },
-    ], { hooks, maintenance: recorded.maintenance }, { sequential: true });
-    const events: PiMessagesEvent[] = [];
-
-    await host!.runTurn("casper", {
-      sessionId: "post-replacement-stop-failure",
-      prompt: "Give me an answer.",
-      emit: (event) => events.push(event),
-    });
-
-    const opened = await host!.open("casper", "post-replacement-stop-failure");
-    const latestAssistant = opened.session.sessionManager.getBranch().findLast((entry) =>
-      entry.type === "message" && entry.message.role === "assistant"
-    );
-    expect(hooks.calls).toBe(2);
-    expect(latestAssistant?.type).toBe("message");
-    expect(recorded.finished).toEqual([
-      expect.objectContaining({
-        ownerPrompt: "Give me an answer.",
-        assistantText: expect.stringContaining("Replacement durable answer."),
-        outcome: "failed",
-        sourceRevision: { kind: "pi-leaf", value: latestAssistant?.id },
-      }),
-    ]);
-    expect(recorded.released.count).toBe(1);
-    expect(events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "error" })]);
-  });
-
   it("injects before_prompt context into the user turn without an extra model pass", async () => {
     const hooks = new GhostHookRunner();
     let hookCwd = "";
@@ -4615,141 +3860,6 @@ describe("SessionHost.runTurn", () => {
       fields: { ghost: "casper", conversation: "conv-ack-failure", runtime: "pi" },
     });
     expect(JSON.stringify(logger.records)).not.toContain("sensitive notice id");
-  });
-
-  it("drains maintenance before an owner turn and records a durable Pi revision before done", async () => {
-    const ready = deferred();
-    const finishEntered = deferred();
-    const allowFinish = deferred();
-    let released = 0;
-    let settled: MaintenanceIdentity | undefined;
-    let turn: SettledMaintenanceTurn | undefined;
-    const drainedReservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: (identity) => {
-        settled = identity;
-        return {
-          ready: ready.promise,
-          finish: async (value) => {
-            turn = value;
-            finishEntered.resolve();
-            await allowFinish.promise;
-          },
-          release: () => {
-            released += 1;
-          },
-        };
-      },
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: drainedReservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: drainedReservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "Durable answer." }], { maintenance });
-    const events: PiMessagesEvent[] = [];
-    const running = host!.runTurn("casper", {
-      sessionId: "maintenance-pi",
-      prompt: "Remember this.",
-      emit: (event) => events.push(event),
-    });
-
-    await waitFor(() => settled ?? null);
-    expect(provider!.requests).toHaveLength(0);
-    expect(settled).toEqual({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "maintenance-pi",
-    });
-    ready.resolve();
-    await finishEntered.promise;
-    expect(events.at(-1)?.type).not.toBe("done");
-    expect(released).toBe(0);
-    expect(turn).toMatchObject({
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      cwd: temp!.ownerHome,
-      ownerPrompt: "Remember this.",
-      assistantText: expect.stringContaining("Durable answer."),
-      outcome: "completed",
-      source: { runtime: "pi", createdAt: expect.any(String) },
-    });
-    allowFinish.resolve();
-    await running;
-    expect(events.at(-1)?.type).toBe("done");
-    expect(released).toBe(1);
-  });
-
-  it("turns a rejected durable Pi maintenance record into one generic terminal error", async () => {
-    const finishEntered = deferred();
-    const allowFailure = deferred();
-    const order: string[] = [];
-    let rejectNext = true;
-    const recorded = recordMaintenanceTurns(async (turn) => {
-      if (!turn || !rejectNext) return;
-      rejectNext = false;
-      order.push("finish");
-      finishEntered.resolve();
-      await allowFailure.promise;
-      throw new Error("sensitive sidecar persistence failure");
-    });
-    const hooks = new GhostHookRunner();
-    await hooks.register((api) => {
-      api.on("before_prompt", () => ({
-        additionalContext: "Attach this notice before acknowledging it.",
-        acknowledge: () => {
-          order.push("acknowledge");
-        },
-      }));
-    });
-    await setup([{ kind: "text", text: "Durable model answer." }], {
-      hooks,
-      maintenance: recorded.maintenance,
-    });
-    const failedEvents: PiMessagesEvent[] = [];
-    const failed = host!.runTurn("casper", {
-      sessionId: "strict-pi-maintenance",
-      prompt: "Remember this owner turn.",
-      emit: (event) => failedEvents.push(event),
-    });
-
-    await finishEntered.promise;
-    expect(order).toEqual(["acknowledge", "finish"]);
-    expect(failedEvents.some((event) => event.type === "done" || event.type === "error"))
-      .toBe(false);
-    expect(recorded.released.count).toBe(0);
-    allowFailure.resolve();
-    await failed;
-
-    const terminals = failedEvents.filter((event) =>
-      event.type === "done" || event.type === "error"
-    );
-    expect(terminals).toEqual([{
-      type: "error",
-      reason: "error",
-      usage: expect.any(Object),
-      errorMessage: "Could not durably settle this owner turn.",
-    }]);
-    expect(JSON.stringify(failedEvents)).not.toContain("sensitive sidecar persistence failure");
-    expect(recorded.finished).toEqual([expect.objectContaining({
-      sourceRevision: { kind: "pi-leaf", value: expect.any(String) },
-      assistantText: expect.stringContaining("Durable model answer."),
-    })]);
-    expect(recorded.released.count).toBe(1);
-    expect(JSON.stringify(await host!.readTranscript("casper", "strict-pi-maintenance")))
-      .toContain("Durable model answer.");
-
-    const retriedEvents: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "strict-pi-maintenance",
-      prompt: "Retry after the persistence fault.",
-      emit: (event) => retriedEvents.push(event),
-    });
-    expect(retriedEvents.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "done" })]);
-    expect(recorded.released.count).toBe(2);
   });
 
   it("reconstructs Pi owner turn ids from the persisted branch after cache close", async () => {
@@ -4968,145 +4078,6 @@ describe("SessionHost.runTurn", () => {
     expect(provider!.requests.at(-1)?.system).toContain("letterpress printer");
   });
 
-  it("records a direct Bash activity with its durable post-cd cwd before terminal publication", async () => {
-    const activityEntered = deferred();
-    const allowActivity = deferred();
-    let recordedIdentity: MaintenanceIdentity | undefined;
-    let recordedActivity: Parameters<
-      NonNullable<SessionHostOptions["maintenance"]>["recordOwnerActivity"]
-    >[1] | undefined;
-    let released = 0;
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async () => {},
-        release: () => {
-          released += 1;
-        },
-      }),
-      recordOwnerActivity: async (identity, activity) => {
-        recordedIdentity = identity;
-        recordedActivity = activity;
-        activityEntered.resolve();
-        await allowActivity.promise;
-      },
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "the model must not run" }], { maintenance });
-    const ownerDocs = join(temp!.ownerHome, "activity-docs");
-    mkdirSync(ownerDocs);
-    const events: PiMessagesEvent[] = [];
-
-    const turn = host!.runTurn("casper", {
-      sessionId: "activity-cd",
-      prompt: "!cd activity-docs",
-      emit: (event) => events.push(event),
-    });
-    await activityEntered.promise;
-    expect(events.some((event) => event.type === "done" || event.type === "error")).toBe(false);
-    expect(released).toBe(0);
-    expect(recordedIdentity).toEqual({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: "activity-cd",
-    });
-    expect(recordedActivity).toEqual({
-      source: { runtime: "pi", createdAt: expect.any(String) },
-      cwd: ownerDocs,
-    });
-    allowActivity.resolve();
-    await turn;
-    expect(events.at(-1)?.type).toBe("done");
-    expect(released).toBe(1);
-    expect((await host!.open("casper", "activity-cd")).session.sessionManager.getCwd())
-      .toBe(ownerDocs);
-    expect(provider!.requests).toHaveLength(0);
-  });
-
-  it("fails open after no-model activity bookkeeping errors without inventing a turn", async () => {
-    const logger = recordingLogger("warn");
-    const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const recordedCwds: string[] = [];
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async (turn) => {
-          finished.push(turn);
-          throw new Error("sensitive cleanup persistence bytes");
-        },
-        release: () => {},
-      }),
-      recordOwnerActivity: async (_identity, activity) => {
-        recordedCwds.push(activity.cwd);
-        throw new Error("sensitive maintenance bytes");
-      },
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "the model must not run" }], {
-      maintenance,
-      logger,
-    });
-    const ownerDocs = join(temp!.ownerHome, "failed-activity-docs");
-    mkdirSync(ownerDocs);
-
-    for (const [sessionId, prompt] of [
-      ["failed-activity-cd", "!cd failed-activity-docs"],
-      ["failed-activity-builtin", "/tools"],
-    ] as const) {
-      const events: PiMessagesEvent[] = [];
-      await host!.runTurn("casper", {
-        sessionId,
-        prompt,
-        emit: (event) => events.push(event),
-      });
-      expect(events.at(-1)?.type).toBe("done");
-    }
-
-    expect(recordedCwds).toEqual([ownerDocs, temp!.ownerHome]);
-    expect((await host!.open("casper", "failed-activity-cd")).session.sessionManager.getCwd())
-      .toBe(ownerDocs);
-    expect(finished).toEqual([undefined, undefined]);
-    expect(logger.records).toEqual([
-      {
-        level: "warn",
-        message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-cd", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance owner activity was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
-      },
-      {
-        level: "warn",
-        message: "conversation maintenance cleanup was not recorded",
-        fields: { ghost: "casper", conversation: "failed-activity-builtin", runtime: "pi" },
-      },
-    ]);
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive maintenance bytes");
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive cleanup persistence bytes");
-    expect(provider!.requests).toHaveLength(0);
-  });
-
   it("persists a memory file the ghost writes", async () => {
     temp = makeTempGhosts();
     const memoryDir = join(temp.root, "casper", "memory");
@@ -5310,10 +4281,6 @@ describe("conversation branching", () => {
   it("copies the conversation, rewinds the copy, and leaves the source untouched", async () => {
     const { firstUser } = await seedBranchable();
     const before = await host!.readTranscript("casper", "conv-tree");
-    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    const sourceMaintenance = maintenanceStatePath(sessionDir, "pi", "conv-tree");
-    writeFileSync(sourceMaintenance, "source maintenance must not be cloned\n", { mode: 0o600 });
-
     const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
     expect(forked.sessionId).not.toBe("conv-tree");
     expect(forked.draft).toBe("Original question");
@@ -5321,8 +4288,6 @@ describe("conversation branching", () => {
     expect(forked.transcript.messages).toEqual([]);
     expect(forked.transcript.id).toBe(forked.id);
     expect(forked.transcript.conversationId).toBe(forked.conversationId);
-    expect(readFileSync(sourceMaintenance, "utf8")).toBe("source maintenance must not be cloned\n");
-    expect(existsSync(maintenanceStatePath(sessionDir, "pi", forked.sessionId))).toBe(false);
 
     // The source keeps every entry, its leaf, and its title.
     const after = await host!.readTranscript("casper", "conv-tree");
@@ -6163,21 +5128,13 @@ describe("session listing", () => {
     const { dir } = await setup();
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "one", emit: () => {} });
     const path = join(ghostPaths(dir).sessionDir, sessionFileNameFor("conv-delete"));
-    const maintenancePath = maintenanceStatePath(
-      ghostPaths(dir).sessionDir,
-      "pi",
-      "conv-delete",
-    );
-    writeFileSync(maintenancePath, "maintenance state\n", { mode: 0o600 });
     expect(existsSync(path)).toBe(true);
 
     const trashed = await host!.deleteSession("casper", "conv-delete");
     expect(existsSync(path)).toBe(false);
     expect(trashed.artifacts).toMatchObject([
       { artifact: "omp-transcript", source: path, kind: "fallback" },
-      { artifact: "maintenance-state", source: maintenancePath, kind: "fallback" },
     ]);
-    expect(existsSync(maintenancePath)).toBe(false);
     expect(existsSync(trashed.artifacts[0]!.trash)).toBe(true);
     expect(await host!.listSessions("casper")).toEqual([]);
     await expect(host!.readTranscript("casper", "conv-delete")).rejects.toMatchObject({
@@ -6248,141 +5205,6 @@ describe("session listing", () => {
     expect(existsSync(transcript)).toBe(false);
   });
 
-  it("drains conversation maintenance before publishing a deletion tombstone", async () => {
-    const deleteDrain = deferred();
-    let reservedIdentity: MaintenanceIdentity | undefined;
-    let completedIdentity: MaintenanceIdentity | undefined;
-    let released: string | undefined;
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async () => {},
-        release: () => {},
-      }),
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: (identity) => {
-        reservedIdentity = identity;
-        return {
-          drained: deleteDrain.promise,
-          release: (outcome) => {
-            released = outcome;
-          },
-        };
-      },
-      completeConversationDelete: (identity) => {
-        expect(released).toBeUndefined();
-        completedIdentity = identity;
-      },
-      reserveGhostMove: () => ({ drained: Promise.resolve(), release: () => {} }),
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    const { dir } = await setup(undefined, { maintenance });
-    const id = "delete-maintenance-drain";
-    await host!.runTurn("casper", { sessionId: id, prompt: "one", emit: () => {} });
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
-    const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
-
-    const deleting = host!.deleteSession("casper", id, "pi");
-    await vi.waitFor(() => expect(reservedIdentity).toEqual({
-      ghostName: "casper",
-      runtime: "pi",
-      conversationId: id,
-    }));
-    expect(existsSync(tombstone)).toBe(false);
-    expect(released).toBeUndefined();
-    deleteDrain.resolve();
-    await deleting;
-    expect(existsSync(tombstone)).toBe(false);
-    expect(completedIdentity).toEqual(reservedIdentity);
-    expect(released).toBe("completed");
-  });
-
-  it("suppresses due maintenance and external idle hooks across tombstoned delete recovery", async () => {
-    const hooks = new GhostHookRunner();
-    const scheduled: Array<() => void> = [];
-    let updateRuns = 0;
-    let externalRuns = 0;
-    let failFirstIntent = true;
-    const retryEntered = deferred();
-    const allowRetry = deferred();
-    let blockRetryMove = true;
-    const { dir } = await setup([{ kind: "text", text: "Remember this durably." }], {
-      hooks,
-      transactionProbe: async (stage) => {
-        if (stage === "delete-intent-recorded" && failFirstIntent) {
-          failFirstIntent = false;
-          throw new Error("injected tombstone-stage failure");
-        }
-        if (stage === "delete-artifact-fsync" && blockRetryMove) {
-          blockRetryMove = false;
-          retryEntered.resolve();
-          await allowRetry.promise;
-        }
-      },
-    });
-    const externalMutation = join(dir, "memory", "external-idle-must-not-run.md");
-    const maintenance = new ConversationMaintenance({
-      registry: temp!.registry,
-      homeOperations: homeOperationsFor(temp!.registry),
-      hooks,
-      withRuntime: async () => {
-        throw new Error("the injected updater does not borrow a model runtime");
-      },
-      idleSeconds: 1,
-      schedule: (run) => {
-        scheduled.push(run);
-        return setTimeout(() => {}, 60_000);
-      },
-      update: async ({ writeMemory }) => {
-        updateRuns += 1;
-        await writeMemory({
-          name: "maintenance-must-not-run",
-          content: "This write must remain suppressed during deletion recovery.",
-        });
-      },
-    });
-    await hooks.register(maintenance.hookFactory);
-    await hooks.register((api) => {
-      api.on("conversation_idle", () => {
-        externalRuns += 1;
-        writeFileSync(externalMutation, "external idle mutation\n");
-      }, { idleSeconds: 1 });
-    });
-    host!.setConversationMaintenance(maintenance);
-    const id = "delete-maintenance-suppressed";
-    await host!.runTurn("casper", {
-      sessionId: id,
-      prompt: "Remember this.",
-      emit: () => {},
-    });
-    expect(scheduled).toHaveLength(1);
-
-    await expect(host!.deleteSession("casper", id, "pi"))
-      .rejects.toThrow("injected tombstone-stage failure");
-    scheduled[0]?.();
-    expect(updateRuns).toBe(0);
-    expect(externalRuns).toBe(0);
-    expect(existsSync(externalMutation)).toBe(false);
-    expect(existsSync(maintenanceStatePath(ghostPaths(dir).sessionDir, "pi", id))).toBe(true);
-
-    const retry = host!.deleteSession("casper", id, "pi");
-    await retryEntered.promise;
-    scheduled[0]?.();
-    expect(updateRuns).toBe(0);
-    expect(externalRuns).toBe(0);
-    expect(existsSync(externalMutation)).toBe(false);
-    allowRetry.resolve();
-    await retry;
-    scheduled[0]?.();
-    expect(updateRuns).toBe(0);
-    expect(externalRuns).toBe(0);
-    expect(existsSync(externalMutation)).toBe(false);
-  });
-
   it("hides a tombstoned crash residue and resumes deletion before the raw id can reopen", async () => {
     const { dir } = await setup();
     await host!.runTurn("casper", {
@@ -6447,18 +5269,12 @@ describe("session listing", () => {
     });
     const sessionDir = ghostPaths(dir).sessionDir;
     await writeToolCwds(sessionDir, id, new Map([["tool-call", temp!.ownerHome]]));
-    writeFileSync(
-      maintenanceStatePath(sessionDir, "pi", id),
-      "durable maintenance sidecar\n",
-      { mode: 0o600 },
-    );
     const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
     const expectedKinds = [
       "omp-transcript",
       "tool-cwds",
       "project-binding",
-      "maintenance-state",
       "project-snapshot",
     ];
 
@@ -7527,51 +6343,6 @@ describe("SessionHost.renameGhost", () => {
     await expect(host!.renameGhost("casper", "wisp"))
       .resolves.toMatchObject({ name: "wisp" });
     expect(closed).toEqual([dir, dir]);
-  });
-
-  it("drains maintenance and transfers its identity after the home rename but before release", async () => {
-    const moveDrained = deferred();
-    let reservedGhost = "";
-    let completedRename: [string, string] | undefined;
-    let reservationReleased = false;
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async () => {},
-        release: () => {},
-      }),
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: () => ({ drained: Promise.resolve(), release: () => {} }),
-      completeConversationDelete: () => {},
-      reserveGhostMove: (ghostName) => {
-        reservedGhost = ghostName;
-        return {
-          drained: moveDrained.promise,
-          release: () => {
-            reservationReleased = true;
-          },
-        };
-      },
-      completeGhostRename: async (previousName, nextName) => {
-        expect(existsSync(join(temp!.root, previousName))).toBe(false);
-        expect(existsSync(join(temp!.root, nextName))).toBe(true);
-        expect(reservationReleased).toBe(false);
-        completedRename = [previousName, nextName];
-      },
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    await setup([{ kind: "text", text: "unused" }], { maintenance });
-
-    const renaming = host!.renameGhost("casper", "wisp");
-    expect(reservedGhost).toBe("casper");
-    expect(existsSync(join(temp!.root, "casper"))).toBe(true);
-    expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
-    moveDrained.resolve();
-    await expect(renaming).resolves.toMatchObject({ name: "wisp" });
-    expect(completedRename).toEqual(["casper", "wisp"]);
-    expect(reservationReleased).toBe(true);
   });
 
   it("moves the home and keeps every conversation, pin, and memory with it", async () => {

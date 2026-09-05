@@ -1,10 +1,9 @@
 .pragma library
 
-const EVENT_ORDER = ["before_prompt", "session_stop", "conversation_idle"];
+const EVENT_ORDER = ["before_prompt", "session_stop"];
 const ROOT_KEYS = ["active", "events", "hooks", "total"];
 const EVENT_KEYS = ["count", "event"];
 const HOOK_KEYS = ["description", "event", "name", "source"];
-const IDLE_HOOK_KEYS = ["description", "event", "idleSeconds", "name", "source"];
 const SOURCES = ["builtin", "config"];
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/;
 
@@ -77,13 +76,7 @@ function normalize(body) {
         const tuned = hasOwn(hook, "settingsKey");
         if (tuned && (hook.source !== "builtin" || typeof hook.settingsKey !== "string"
                 || !SETTINGS_KEY.test(hook.settingsKey))) return null;
-        const expected = (hook.event === "conversation_idle" ? IDLE_HOOK_KEYS : HOOK_KEYS)
-            .concat(tuned ? ["settingsKey"] : []);
-        if (!exactKeys(hook, expected)) return null;
-        if (hook.event === "conversation_idle") {
-            if (!Number.isSafeInteger(hook.idleSeconds)
-                    || hook.idleSeconds < 1 || hook.idleSeconds > 86400) return null;
-        }
+        if (!exactKeys(hook, HOOK_KEYS.concat(tuned ? ["settingsKey"] : []))) return null;
         observed[hook.event] = (observed[hook.event] || 0) + 1;
         const normalized = {
             event: hook.event,
@@ -91,7 +84,6 @@ function normalize(body) {
             name: hook.name,
             description: hook.description
         };
-        if (hook.event === "conversation_idle") normalized.idleSeconds = hook.idleSeconds;
         if (tuned) normalized.settingsKey = hook.settingsKey;
         hooks.push(normalized);
     }
@@ -113,26 +105,11 @@ function normalize(body) {
 function label(event) {
     if (event === "before_prompt") return "Before prompt";
     if (event === "session_stop") return "Session stop";
-    if (event === "conversation_idle") return "Conversation idle";
     return "";
 }
 
-function duration(seconds) {
-    if (seconds >= 3600 && seconds % 3600 === 0) {
-        const hours = seconds / 3600;
-        return hours + (hours === 1 ? " hour" : " hours");
-    }
-    if (seconds >= 60 && seconds % 60 === 0) {
-        const minutes = seconds / 60;
-        return minutes + (minutes === 1 ? " minute" : " minutes");
-    }
-    return seconds + (seconds === 1 ? " second" : " seconds");
-}
-
-function trigger(event, idleSeconds) {
+function trigger(event) {
     if (event === "before_prompt") return "Before each owner prompt";
     if (event === "session_stop") return "After each assistant pass";
-    if (event === "conversation_idle") return "After " + duration(idleSeconds)
-        + " of conversation inactivity";
     return "";
 }

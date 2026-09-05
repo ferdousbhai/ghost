@@ -12,7 +12,6 @@ import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
-import { ConversationMaintenance, MEMORY_UPKEEP_SETTINGS_KEY } from "./conversation-maintenance.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -485,39 +484,6 @@ async function serveDaemon(
       claude: { ...claudeCode, logger },
     }),
   }));
-  const maintenance = new ConversationMaintenance({
-    registry,
-    homeOperations,
-    hooks,
-    logger,
-    idleSeconds: hooks.builtinSettings(MEMORY_UPKEEP_SETTINGS_KEY).idleSeconds,
-    withRuntime: (ghostName, use) => host.withMaintenanceRuntime(ghostName, use),
-  });
-  host.setConversationMaintenance(maintenance);
-  try {
-    await hooks.register(maintenance.hookFactory);
-    for (const ghost of registry.list()) {
-      const restored = await maintenance.restoreGhost(ghost.name);
-      if (restored.restored > 0) {
-        logger.info("restored conversation maintenance state", {
-          ghost: ghost.name,
-          conversations: restored.restored,
-        });
-      }
-      if (restored.invalid > 0) {
-        logger.warn("some conversation maintenance state stayed disabled", {
-          ghost: ghost.name,
-          conversations: restored.invalid,
-        });
-      }
-    }
-  } catch (error) {
-    logger.error("could not restore conversation maintenance", {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    await host.disposeAll();
-    return 1;
-  }
   const login = new LoginManager({
     registry,
     homeOperations,

@@ -116,8 +116,8 @@ import {
   renderScheduledWorkPolicy,
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
-import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
+import type { SettledTurn } from "./presentation-history.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { pathIsWithin } from "./path-within.js";
 import { loadGhostSettings } from "./ghost-settings.js";
@@ -158,7 +158,6 @@ const CLAUDE_SESSION_PREFIX = "claude-";
 const CLAUDE_SESSION_SUFFIX = ".json";
 const CLAUDE_SESSION_FILE_PATTERN = /^claude-[0-9a-f]{64}\.json$/u;
 const MAX_CLAUDE_CODE_SESSION_ID_SCALARS = 512;
-const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 export const CLAUDE_SESSION_METADATA_MAX_BYTES = 16 * 1_048_576;
 const AUTH_STATUS_TIMEOUT_MS = 10_000;
 const AUTH_STATUS_METADATA_MAX_SCALARS = 128;
@@ -2379,7 +2378,7 @@ export class ClaudeCodeRuntime {
     modelId: string,
     options: RunTurnOptions,
     project: ClaudeProjectSnapshot,
-    finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
+    recordSettledTurn?: (turn?: SettledTurn) => Promise<void>,
   ): Promise<void> {
     this.assertTurnAdmitted();
     requireRawConversationId(conversationId);
@@ -2408,7 +2407,7 @@ export class ClaudeCodeRuntime {
         { ...options, signal: linked.signal },
         key,
         project,
-        finishMaintenance,
+        recordSettledTurn,
       ))
       .finally(() => {
         linked.dispose();
@@ -2427,7 +2426,7 @@ export class ClaudeCodeRuntime {
     options: RunTurnOptions,
     key: string,
     project: ClaudeProjectSnapshot,
-    finishMaintenance?: (turn?: SettledMaintenanceTurn) => Promise<void>,
+    recordSettledTurn?: (turn?: SettledTurn) => Promise<void>,
   ): Promise<void> {
     const logger = this.logger.child({ ghost: ghost.name, conversation: conversationId });
     // The turn's trusted working directory, resolved below before any tool can
@@ -2438,7 +2437,7 @@ export class ClaudeCodeRuntime {
       includeThinking: options.includeThinking,
       getCwd: () => turnCwd,
     });
-    let settledTurn: SettledMaintenanceTurn | undefined;
+    let settledTurn: SettledTurn | undefined;
     let pendingTerminalResult: SDKResultMessage | undefined;
     let pendingFailure: { cause: unknown; aborted: boolean } | undefined;
     let terminalEmissionFailure: { cause: unknown } | undefined;
@@ -2923,7 +2922,6 @@ export class ClaudeCodeRuntime {
           },
           sourceRevision: { kind: "claude-owner-turn", value: ownerTurnId },
           sourceOrdinal: ownerTurnId,
-          cwd: runtimeCwd,
           ownerPrompt: options.prompt,
           assistantText: resultText,
           outcome: completed.subtype === "success" ? "completed" : "failed",
@@ -2991,18 +2989,14 @@ export class ClaudeCodeRuntime {
         aborted: options.signal?.aborted === true || this.disposed,
       };
     } finally {
+      // Journalling display history never fails the turn: the turn is already
+      // durable in Claude's own storage.
       try {
-        await finishMaintenance?.(settledTurn);
-      } catch {
-        this.retireWarm(key);
-        logger.warn("conversation maintenance turn record failed", {
-          runtime: "claude-code",
+        await recordSettledTurn?.(settledTurn);
+      } catch (error) {
+        logger.warn("settled turn record failed", {
+          error: error instanceof Error ? error.message : String(error),
         });
-        pendingTerminalResult = undefined;
-        pendingFailure = {
-          cause: new Error(MODEL_TURN_PERSISTENCE_ERROR),
-          aborted: false,
-        };
       }
       try {
         if (pendingTerminalResult && !adapter.isTerminal()) {

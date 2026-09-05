@@ -6,14 +6,13 @@ uses pi or the owner-local Claude Code runtime. A `pi`, `codex`, or `claude -p`
 child the ghost runs from Bash keeps its own native hook behavior; Ghost does
 not translate, duplicate, or await those hooks as principal events.
 
-Ghost supports three events. `before_prompt` runs after the user submits a prompt
+Ghost supports two events. `before_prompt` runs after the user submits a prompt
 but before the model request. It can add advisory context to that request without
 blocking or creating another model turn. `session_stop` runs after an assistant
 pass and before Ghost emits the turn's terminal `done` frame. It can accept the
 pass or return model-visible context for a hidden continuation. The stop boundary
 is awaited by Ghost rather than inferred from notification-only
-`agent_end` events. `conversation_idle` runs in the background after a configured
-whole-second interval without owner activity. It cannot block or continue a turn.
+`agent_end` events.
 
 ## Configuration
 
@@ -44,18 +43,6 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
           }
         ]
       }
-    ],
-    "conversation_idle": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/absolute/path/to/idle-observer",
-            "idleSeconds": 60,
-            "timeout": 10
-          }
-        ]
-      }
     ]
   }
 }
@@ -69,29 +56,16 @@ hooks Ghost registers in code for the same event.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds) must be greater than 0 and at most 600.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
-handler that requests a continuation wins. `idleSeconds` is a safe integer from
-1 through 86400 and defaults to 60; fractional, zero, and out-of-range values
-are rejected when configuration is loaded. Idle registrations keep independent
-deadlines: Ghost wakes at the earliest one and dispatches only the registrations
-then due. After restart it derives each remaining or overdue delay from the
-conversation's durable last-activity time. An optional `registrationId` on a
-`conversation_idle` command must match `[A-Za-z0-9][A-Za-z0-9._:-]*`, be at
-most 128 characters, and remain
-stable when its delivery identity must survive configuration reordering;
-otherwise Ghost derives a stable identity from the admitted command fields.
+handler that requests a continuation wins.
 
-An optional top-level `builtin` object tunes hooks that Ghost registers in
-code. Each key names one built-in hook — the `settingsKey` on its status row.
-`memory_upkeep` accepts `{ "idleSeconds": <integer 1..86400> }` and defaults to
-60. `review` names the built-in stop review but takes no `hooks.json` fields;
-its per-ghost settings live in the ghost's own `settings.yml` (see below).
-These are the only built-in keys. The section is validated with the rest of the
-file and applies at the next daemon start, not live: a built-in idle
-registration's identity includes its interval and persisted retry state refers
-to that identity.
+An optional top-level `builtin` object names the hooks Ghost registers in code.
+Each key is the `settingsKey` on that hook's status row. `review` is the only
+built-in key, and it takes no `hooks.json` fields: its per-ghost settings live
+in the ghost's own `settings.yml` (see below). The section is validated with the
+rest of the file.
 
 ```json
-{ "hooks": {}, "builtin": { "memory_upkeep": { "idleSeconds": 900 } } }
+{ "hooks": {}, "builtin": { "review": {} } }
 ```
 
 This file configures Ghost's machine-level awaited command hooks. They run for
@@ -433,85 +407,14 @@ The manifest carries the counts per file, the skip reasons with counts, the
 `--since` watermark used, and the newest `recordedAt` seen — pass that as
 `--since` next round. An empty result still writes every file and exits 0.
 
-## `conversation_idle` protocol
-
-The event carries the same explicit path and runtime fields plus durable
-conversation-maintenance identity:
-
-```json
-{
-  "type": "conversation_idle",
-  "session_id": "conversation-a",
-  "session_file": "...",
-  "ghost_name": "casper",
-  "ghost_home": "/home/me/ghosts/casper",
-  "cwd": "/home/me/project",
-  "runtime": "pi",
-  "conversation_id": "conversation-a",
-  "conversation_runtime": "pi",
-  "conversation_incarnation": "68c7477b-c759-4a4e-a747-c908159080c2",
-  "sequence": 9,
-  "source_revision": "pi-leaf:leaf-id",
-  "idle_for_ms": 60000,
-  "last_turn_outcome": "completed"
-}
-```
-
-`conversation_runtime` is the durable runtime (`pi` or `claude-code`), while
-`runtime` names the awaited-hook harness (`pi` or `claude-code`). The `cwd` is
-the actual operational directory after the settled turn; `ghost_home` remains
-the separate storage root. `last_turn_outcome` is `completed` or `failed`.
-For Pi, `session_id` is the raw Ghost conversation id and `session_file` is its
-exact native Pi transcript. For Claude Code, `session_id` is the persisted SDK
-resume id while `conversation_id` remains the raw Ghost id, and `session_file`
-is that raw id's exact Claude v3 metadata sidecar. Equal raw ids across runtimes
-therefore never share a session id/path pair, including after restart.
-Command output is ignored and exit 2 cannot block. Errors and timeouts are
-logged and fail open.
-
-Ghost's built-in idle-memory hook uses `smol_model` and only memory list/read/
-search plus one receipt-journaled write. Transcript text is fenced as untrusted
 data. It cannot access owner documents, character, deletion, network/MCP,
-shell, or general session tools. A new owner action, conversation delete,
-whole-home move, or shutdown aborts and drains background work before
-proceeding. Its exact mode-0600 v1 state is stored per runtime-qualified
-conversation beside the transcript and is never cloned during fork. Recovery
-replays only the exact journaled bytes when the current memory still matches
-the stored `before` digest; it never asks a model to reconstruct an interrupted
-write. A transient, aborted, or model failure which leaves pending turns arms
-one fixed 60-second retry, including after restart, rather than a zero-delay
-loop.
-
-That retry invokes only the built-in memory registration by its exact
-registration identity. A command or observer registered at the same 60-second
-deadline runs once when ordinarily due and is not repeated with the memory
-retry.
-
-For each owner-activity generation, Ghost durably claims a command or observer
-before invoking it. This is at-most-once across restart: it prevents duplicate
-side effects, while a daemon crash after the claim and before execution may
-skip that hook. Built-in memory upkeep is different because its exact receipt
-journal makes replay safe: Ghost persists its identity and retry deadline
-before invocation and retries it at least once until the pending turn settles.
-A new owner action resets both delivery progress and retry state.
-
-A successfully admitted owner action which reaches no model (for example a
-native command) records only its operational cwd and last-activity time. It
-creates no synthetic transcript turn or pending memory input, but restarts idle
-deadlines so hooks observe inactivity from the real owner action. Admission and
-its pre-action drain are strict; after the native action succeeds, this record
-is fail-open bookkeeping. A write failure is logged and leaves prior pending
-maintenance untouched without hiding the successful result or undoing a
-durable cwd change.
-
 ## Status
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
 Event rows contain `{ event, count }`; hook rows
-contain `{ event, source, name, description }` plus `idleSeconds` only for an
-idle hook and `settingsKey` only for a built-in row, where `source` is
-`builtin` for an in-process registration and `config` for a `hooks.json`
-command. Commands, source paths, arguments, prompts,
+contain `{ event, source, name, description }` plus `settingsKey` only for a
+built-in row, where `source` is `builtin` for an in-process registration and
+`config` for a `hooks.json` command. Commands, source paths, arguments, prompts,
 injected context, errors, receipts, and scheduler state never cross that route.
 
 ## Editing
@@ -521,11 +424,8 @@ admitted `hooks.json` as one object and its absolute path. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
-`session_stop` changes apply at the next boundary. A changed idle registration
-arms from the next owner activity; a deadline already armed against a retired
-registration settles as a no-op rather than an error. Built-in hooks such as
-memory upkeep are registered in code; the document's `builtin` section tunes
-them and applies at the next start.
+`session_stop` changes apply at the next boundary. Built-in hooks are registered
+in code and are not editable through this route.
 
 ## In-process API
 
@@ -541,14 +441,6 @@ await hooks.register((api) => {
   api.on("session_stop", async (event) => {
     if (event.stop_hook_active) return;
     return { decision: "block", reason: "Run one final verification pass." };
-  });
-  api.on("conversation_idle", async (event) => {
-    console.log(`idle sequence ${event.sequence}`);
-  }, {
-    idleSeconds: 60,
-    registrationId: "my.idle-observer.v1",
-    name: "Idle observer",
-    description: "Records idle events.",
   });
 });
 ```

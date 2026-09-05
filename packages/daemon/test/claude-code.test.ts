@@ -49,10 +49,6 @@ import {
 } from "../src/claude-code.js";
 import { claudeSdkTranscriptPath } from "../src/claude-sdk-files.js";
 import { captureClaudeCodeEnvironment } from "../src/env-scrub.js";
-import type {
-  MaintenanceIdentity,
-  SettledMaintenanceTurn,
-} from "../src/conversation-maintenance.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
   PresentationHistoryStore,
@@ -295,7 +291,6 @@ function setupClaudeHost(options: {
   ) => Query;
   hooks?: GhostHookRunner;
   logger?: Logger;
-  maintenance?: SessionHostOptions["maintenance"];
   machineSkill?: { name: string; description: string; body: string };
   warmIdleTtlMs?: number;
   exitWaitTimeoutMs?: number;
@@ -339,7 +334,6 @@ function setupClaudeHost(options: {
     offline: true,
     ...(options.logger ? { logger: options.logger } : {}),
     ...(options.hooks ? { hooks: options.hooks } : {}),
-    ...(options.maintenance ? { maintenance: options.maintenance } : {}),
     ...(options.browserSessionClose
       ? { browserSessionClose: options.browserSessionClose }
       : {}),
@@ -3408,37 +3402,10 @@ fi
     ["modified", "2026-01-01T00:00:00.000+00:00"],
     ["modified", "2026-02-30T00:00:00.000Z"],
   ] as const)(
-    "rejects a noncanonical or invalid v3 %s timestamp before maintenance or Claude work",
+    "rejects a noncanonical or invalid v3 %s timestamp before any Claude work",
     async (field, timestamp) => {
       let authReads = 0;
-      let maintenanceAdmissions = 0;
-      let maintenanceFinishes = 0;
-      let maintenanceReleases = 0;
-      const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-      const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-        admitOwnerAction: () => {
-          maintenanceAdmissions += 1;
-          return {
-            ready: Promise.resolve(),
-            finish: async () => {
-              maintenanceFinishes += 1;
-            },
-            release: () => {
-              maintenanceReleases += 1;
-            },
-          };
-        },
-        recordOwnerActivity: async () => {},
-        reserveConversationDelete: reservation,
-        completeConversationDelete: () => {},
-        reserveGhostMove: reservation,
-        completeGhostRename: async () => {},
-        completeGhostDelete: () => {},
-        beginShutdown: async () => {},
-        disposeAll: async () => {},
-      };
       const { paths, lifecycle } = setupClaudeHost({
-        maintenance,
         readAuthStatus: async () => {
           authReads += 1;
           return { loggedIn: true, authMethod: "claude.ai" };
@@ -3461,11 +3428,6 @@ fi
 
       expect(authReads).toBe(0);
       expect(lifecycle.queries).toBe(0);
-      expect({ maintenanceAdmissions, maintenanceFinishes, maintenanceReleases }).toEqual({
-        maintenanceAdmissions: 0,
-        maintenanceFinishes: 0,
-        maintenanceReleases: 0,
-      });
       expect(events).toEqual([]);
       expect(readFileSync(sidecar, "utf8")).toBe(original);
     },
@@ -3657,7 +3619,6 @@ fi
         },
         sourceRevision: { kind: "claude-owner-turn", value: 1 },
         sourceOrdinal: 1,
-        cwd: temp!.ownerHome,
         ownerPrompt: "orphaned",
         assistantText: "orphaned answer",
         outcome: "completed",
@@ -4009,86 +3970,37 @@ fi
     });
   });
 
-  it("records Claude v3 resume identity before releasing runtime ownership", async () => {
-    const finishEntered = Promise.withResolvers<void>();
-    const allowFinish = Promise.withResolvers<void>();
-    let identity: MaintenanceIdentity | undefined;
-    let settled: SettledMaintenanceTurn | undefined;
-    let releases = 0;
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: (value) => {
-        identity = value;
-        return {
-          ready: Promise.resolve(),
-          finish: async (turn) => {
-            settled = turn;
-            finishEntered.resolve();
-            await allowFinish.promise;
-          },
-          release: () => {
-            releases += 1;
-          },
-        };
-      },
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    const { paths } = setupClaudeHost({ maintenance });
+  it("journals a settled Claude turn so its transcript is readable", async () => {
+    const { paths } = setupClaudeHost();
     const events: PiMessagesEvent[] = [];
-    const running = host!.runTurn("casper", {
-      sessionId: "conversation-maintenance-source",
+    await host!.runTurn("casper", {
+      sessionId: "conversation-journal-source",
       prompt: "Keep the source exact.",
       emit: (event) => events.push(event),
     });
 
-    await finishEntered.promise;
-    expect(identity).toEqual({
-      ghostName: "casper",
-      runtime: "claude-code",
-      conversationId: "conversation-maintenance-source",
-    });
     const metadata = JSON.parse(readFileSync(claudeSessionMetadataPath(
       paths.sessionDir,
-      "conversation-maintenance-source",
+      "conversation-journal-source",
     ), "utf8")) as { created: string; sessionId: string };
-    expect(settled).toMatchObject({
-      source: {
-        runtime: "claude-code",
-        createdAt: metadata.created,
-        resumeId: metadata.sessionId,
-      },
-      sourceRevision: { kind: "claude-owner-turn", value: 1 },
-      sourceOrdinal: 1,
-      cwd: temp!.ownerHome,
-      ownerPrompt: "Keep the source exact.",
-      assistantText: "Hello from the plan.",
-      outcome: "completed",
-    });
-    // The presentation journal is written before maintenance settles, so a
-    // settled Claude turn is already readable from the transcript API.
     expect(JSON.parse(readFileSync(presentationHistoryPath(
       paths.sessionDir,
       "claude-code",
-      "conversation-maintenance-source",
+      "conversation-journal-source",
     ), "utf8"))).toMatchObject({
       historyPrefixOmitted: false,
       lastSourceOrdinal: 1,
+      lastSourceRevision: { kind: "claude-owner-turn", value: 1 },
       turns: [{ ownerText: "Keep the source exact.", assistantText: "Hello from the plan." }],
     });
+    expect(metadata.sessionId).toBeTruthy();
     await expect(host!.readTranscript(
       "casper",
-      "conversation-maintenance-source",
+      "conversation-journal-source",
       {},
       "claude-code",
     )).resolves.toMatchObject({
-      id: "claude-code:conversation-maintenance-source",
+      id: "claude-code:conversation-journal-source",
       runtime: "claude-code",
       historyTruncated: false,
       total: 2,
@@ -4105,109 +4017,7 @@ fi
         },
       ],
     });
-    expect(releases).toBe(0);
-    expect(events.at(-1)?.type).not.toBe("done");
-    await expect(host!.runTurn("casper", {
-      sessionId: "conversation-maintenance-source",
-      prompt: "Must wait.",
-      emit: () => {},
-    })).rejects.toMatchObject({ code: "session_busy", status: 409 });
-
-    allowFinish.resolve();
-    await running;
-    expect(releases).toBe(1);
     expect(events.at(-1)?.type).toBe("done");
-  });
-
-  it("emits one generic error when a durable Claude maintenance record rejects", async () => {
-    const finished: Array<SettledMaintenanceTurn | undefined> = [];
-    const logger = recordingLogger("warn");
-    let releases = 0;
-    let rejectNext = true;
-    const reservation = () => ({ drained: Promise.resolve(), release: () => {} });
-    const maintenance: NonNullable<SessionHostOptions["maintenance"]> = {
-      admitOwnerAction: () => ({
-        ready: Promise.resolve(),
-        finish: async (turn) => {
-          finished.push(turn);
-          if (turn && rejectNext) {
-            rejectNext = false;
-            throw new Error("sensitive Claude sidecar failure");
-          }
-        },
-        release: () => {
-          releases += 1;
-        },
-      }),
-      recordOwnerActivity: async () => {},
-      reserveConversationDelete: reservation,
-      completeConversationDelete: () => {},
-      reserveGhostMove: reservation,
-      completeGhostRename: async () => {},
-      completeGhostDelete: () => {},
-      beginShutdown: async () => {},
-      disposeAll: async () => {},
-    };
-    const { paths, lifecycle, seenOptions } = setupClaudeHost({ maintenance, logger });
-    const failedEvents: PiMessagesEvent[] = [];
-
-    await host!.runTurn("casper", {
-      sessionId: "strict-claude-maintenance",
-      prompt: "Persist this Claude owner turn.",
-      emit: (event) => failedEvents.push(event),
-    });
-
-    expect(failedEvents.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({
-        type: "error",
-        errorMessage: "Could not durably settle this owner turn.",
-      })]);
-    expect(JSON.stringify(failedEvents)).not.toContain("sensitive Claude sidecar failure");
-    expect(finished).toEqual([expect.objectContaining({
-      source: {
-        runtime: "claude-code",
-        createdAt: expect.any(String),
-        resumeId: expect.any(String),
-      },
-      sourceRevision: { kind: "claude-owner-turn", value: 1 },
-      assistantText: "Hello from the plan.",
-    })]);
-    expect(releases).toBe(1);
-    expect(logger.records).toContainEqual({
-      level: "warn",
-      message: "conversation maintenance turn record failed",
-      fields: {
-        ghost: "casper",
-        conversation: "strict-claude-maintenance",
-        runtime: "claude-code",
-      },
-    });
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive Claude sidecar failure");
-    expect(JSON.parse(readFileSync(
-      claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
-      "utf8",
-    ))).toMatchObject({ ownerTurnCount: 1, messageCount: 2 });
-    expect(lifecycle.closed).toBe(1);
-
-    const retryEvents: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "strict-claude-maintenance",
-      prompt: "Retry after persistence failure.",
-      emit: (event) => retryEvents.push(event),
-    });
-    expect(retryEvents.at(-1)?.type).toBe("done");
-    expect(lifecycle.queries).toBe(2);
-    expect(seenOptions[1]?.resume).toBe(
-      (JSON.parse(readFileSync(
-        claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
-        "utf8",
-      )) as { sessionId: string }).sessionId,
-    );
-    expect(releases).toBe(2);
-    expect(JSON.parse(readFileSync(
-      claudeSessionMetadataPath(paths.sessionDir, "strict-claude-maintenance"),
-      "utf8",
-    ))).toMatchObject({ ownerTurnCount: 2, messageCount: 4 });
   });
 
   it("injects before_prompt guidance into one Claude query", async () => {

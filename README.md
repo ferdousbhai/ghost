@@ -32,10 +32,11 @@ restart to systemd, as in
 tool activity beside the recovered summoning orb from the earlier summon-ghost
 interface, naming the call the ghost is inside of while it runs.
 
-Idle maintenance may write one ghost-private reflection and consolidates memory
+A ghost keeps its own private memory current with its memory tools during
+ordinary turns; shared knowledge goes through Obsidian instead. Every memory
+write redacts common credential forms before disk.
 only under index pressure; shared knowledge goes to the owner's documents
 instead. Every
-memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).
 

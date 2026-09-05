@@ -50,16 +50,15 @@ TestCase {
             total: 2,
             events: [
                 { event: "before_prompt", count: 1 },
-                { event: "conversation_idle", count: 1 }
+                { event: "session_stop", count: 1 }
             ],
             hooks: [
                 { event: "before_prompt", source: "config", name, description: "Adds bounded context." },
                 {
-                    event: "conversation_idle",
+                    event: "session_stop",
                     source: "builtin",
-                    name: "Memory upkeep",
-                    description: "Runs after inactivity.",
-                    idleSeconds: 60
+                    name: "Review",
+                    description: "Reviews the assistant pass."
                 }
             ]
         };

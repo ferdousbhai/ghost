@@ -23,16 +23,15 @@ Window {
 
     Component.onCompleted: {
         Ghostd.activeHooks = [{
-            event: "conversation_idle",
+            event: "session_stop",
             source: "builtin",
             name: "![remote](" + root.fixtureUrl + "/markdown-name.png) "
                 + "<img src=\"file:///etc/passwd\">",
             description: "<img src=\"" + root.fixtureUrl + "/raw-description.png\"> "
                 + "![data](data:image/svg+xml,<svg onload='fetch(1)'/>) "
-                + "[local](file:///etc/shadow)",
-            idleSeconds: 60
+                + "[local](file:///etc/shadow)"
         }];
-        Ghostd.hookEvents = [{ event: "conversation_idle", count: 1 }];
+        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
         Ghostd.activeHookCount = 1;
         Ghostd.hooksLoaded = true;
         Ghostd.hooksLoading = false;

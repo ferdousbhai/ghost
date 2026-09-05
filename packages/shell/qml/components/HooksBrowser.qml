@@ -48,8 +48,7 @@ Rectangle {
     }
 
     function canEdit(card: var): bool {
-        return !!card && (card.source === "config"
-            || (card.settingsKey !== "" && card.event === "conversation_idle"));
+        return !!card && card.source === "config";
     }
 
     /** Open one card's form over a frozen list, starting from `fields` as typed. */
@@ -92,9 +91,7 @@ Rectangle {
                 document = HookConfig.withNewHandler(current, attempt.event, attempt.fields);
         } else {
             const card = HookConfig.find(root.frozenCards, attempt.key);
-            if (card && card.source === "builtin") {
-                document = HookConfig.withBuiltinIdle(current, card.settingsKey, attempt.fields);
-            } else if (card) {
+            if (card) {
                 document = HookConfig.withHandler(current, card.event, card.groupIndex,
                     card.handlerIndex, attempt.fields);
             }
@@ -386,7 +383,7 @@ Rectangle {
             Accessible.role: hookCard.tunable ? Accessible.ListItem : Accessible.StaticText
             Accessible.name: hookCard.draft ? "New command hook" : hookCard.modelData.name
             Accessible.description: hookCard.modelData.description + ". "
-                + HookStatus.trigger(hookCard.event, hookCard.modelData.idleSeconds || 0)
+                + HookStatus.trigger(hookCard.event)
 
             Behavior on color {
                 enabled: !Theme.reducedMotion
@@ -506,11 +503,7 @@ Rectangle {
                 Text {
                     objectName: "hookTrigger"
                     width: parent.width
-                    text: HookStatus.trigger(hookCard.event, hookCard.modelData.idleSeconds || 0)
-                        + (hookCard.modelData.pendingIdleSeconds > 0
-                            ? " · " + HookStatus.duration(hookCard.modelData.pendingIdleSeconds)
-                                + " once ghostd restarts"
-                            : "")
+                    text: HookStatus.trigger(hookCard.event)
                     textFormat: Text.PlainText
                     color: Theme.ghostAmber
                     font.family: Theme.fontFamily
@@ -581,60 +574,30 @@ Rectangle {
                     }
 
                     Field {
-                        visible: hookCard.config
                         label: "Command"
                         name: "command"
                         placeholder: "/absolute/path/to/hook --flag"
                         mono: true
-                        takeFocus: hookCard.config
+                        takeFocus: true
                     }
 
                     Field {
-                        visible: hookCard.config
                         label: "Name"
                         name: "name"
                         placeholder: "Shown here; the daemon names it if blank"
                     }
 
                     Field {
-                        visible: hookCard.config
                         label: "Description"
                         name: "description"
                         placeholder: "One line on what it does"
                     }
 
-                    Row {
-                        width: parent.width
-                        spacing: Theme.gap
-
-                        Field {
-                            width: (parent.width - Theme.gap) / 2
-                            visible: hookCard.config
-                            label: "Timeout (seconds, default 30)"
-                            name: "timeout"
-                            placeholder: "30"
-                        }
-
-                        Field {
-                            width: (parent.width - Theme.gap) / 2
-                            visible: hookCard.event === "conversation_idle"
-                            label: "Idle interval (seconds, default 60)"
-                            name: "idleSeconds"
-                            placeholder: "60"
-                            takeFocus: !hookCard.config
-                        }
-                    }
-
-                    Text {
-                        objectName: "hookRestartNote"
-                        width: parent.width
-                        visible: !hookCard.config
-                        text: "Built into ghostd; the interval is saved to hooks.json and applies when ghostd next starts."
-                        textFormat: Text.PlainText
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        wrapMode: Text.WordWrap
+                    Field {
+                        width: (parent.width - Theme.gap) / 2
+                        label: "Timeout (seconds, default 30)"
+                        name: "timeout"
+                        placeholder: "30"
                     }
 
                     Row {
@@ -644,7 +607,7 @@ Rectangle {
                             objectName: "hookSaveButton"
                             label: "Save"
                             primary: true
-                            enabled: !hookCard.config || root.fields.command.trim() !== ""
+                            enabled: root.fields.command.trim() !== ""
                             onClicked: root.commitEdit()
                         }
 

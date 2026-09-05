@@ -15,7 +15,6 @@ import {
   resolveDocumentsDirectory,
 } from "@ghost/extensions";
 import {
-  convertToLlm,
   createAgentSession,
   createLocalBashOperations,
   createSyntheticSourceInfo,
@@ -93,20 +92,10 @@ import {
   renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
-  maintenanceStatePath,
-  type ConversationMaintenance,
-  type MaintenanceConversationDeleteOutcome,
-  type MaintenanceConversationDeleteReservation,
-  type MaintenanceDrainReservation,
-  type MaintenanceIdentity,
-  type MaintenanceOwnerActivity,
-  type MaintenanceOwnerAdmission,
-  type SettledMaintenanceTurn,
-} from "./conversation-maintenance.js";
-import {
   PresentationHistoryStore,
   presentationHistoryPath,
   type PresentationHistoryV1,
+  type SettledTurn,
 } from "./presentation-history.js";
 import { reviewJournalPath } from "./review-journal.js";
 import {
@@ -175,8 +164,6 @@ import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { chatModelChoice } from "./local-models.js";
 import { resolveChatModel } from "./model-routing.js";
-import { buildRecapPrompt, normalizeRecap } from "./recap.js";
-import { assistantText } from "./smol.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
   buildGhostAvailableSlashCommands,
@@ -221,18 +208,6 @@ import {
   readPiProjectSnapshot,
 } from "./project-snapshot.js";
 import { readToolCwds, toolCwdsPath, writeToolCwds } from "./tool-cwds.js";
-
-type SessionConversationMaintenance = Pick<ConversationMaintenance,
-  | "admitOwnerAction"
-  | "recordOwnerActivity"
-  | "reserveConversationDelete"
-  | "completeConversationDelete"
-  | "reserveGhostMove"
-  | "completeGhostRename"
-  | "completeGhostDelete"
-  | "beginShutdown"
-  | "disposeAll"
->;
 
 /** pi's built-in coding tools a ghost session starts with. */
 export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
@@ -408,7 +383,6 @@ interface PendingPiOwnerPass {
   readonly signal: AbortSignal;
   ownerEntryId?: string;
   acknowledge?: () => void | Promise<void>;
-  finish(turn?: SettledMaintenanceTurn): Promise<void>;
 }
 
 interface PersistedPiPassBoundary {
@@ -678,7 +652,6 @@ export interface SessionHostOptions {
     | "askTimeoutMs"
   >;
   hooks?: GhostHookRunner;
-  maintenance?: SessionConversationMaintenance;
   presentationHistory?: PresentationHistoryStore;
   homeOperations?: HomeOperationCoordinator;
   retention?: SessionRetentionConfig;
@@ -748,8 +721,7 @@ export interface QueuedMessages {
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
   artifact: "omp-transcript" | "claude-sidecar" | "project-binding"
-    | "project-snapshot" | "tool-cwds" | "maintenance-state" | "presentation-history"
-    | "review-journal";
+    | "project-snapshot" | "tool-cwds" | "presentation-history" | "review-journal";
   source: string;
 }
 
@@ -775,11 +747,6 @@ interface HostedMCP {
   refresh?: Promise<void>;
   /** Serialized config reconnects; concurrent mutations must not interleave. */
   reload?: Promise<void>;
-}
-
-interface HostedRecap {
-  controller: AbortController;
-  task: Promise<string | null>;
 }
 
 interface HostedSession extends GhostSessionHandle {
@@ -831,8 +798,6 @@ interface HostedSession extends GhostSessionHandle {
    */
   title?: Promise<void>;
   titleAbort?: AbortController;
-  /** One abortable, non-persisted completion over the current Pi context. */
-  recap?: HostedRecap;
   /** The short atomic manager/tool publication phase of an MCP transition. */
   mcpPublication?: Promise<void>;
   releaseMcpPublication?: () => void;
@@ -949,7 +914,6 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"
   "project-binding",
   "project-snapshot",
   "tool-cwds",
-  "maintenance-state",
   "presentation-history",
   "review-journal",
 ]);
@@ -1115,8 +1079,6 @@ function exactDeleteStaticSource(
     case "tool-cwds":
       return runtime === "pi"
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
-    case "maintenance-state":
-      return artifact.source === maintenanceStatePath(sessionDir, runtime, conversationId);
     case "presentation-history":
       return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
     case "review-journal":
@@ -1652,7 +1614,6 @@ export class SessionHost {
   private readonly createGreetingRuntime: typeof createGhostPiRuntime;
   private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
-  private maintenance: SessionConversationMaintenance | undefined;
   private readonly presentationHistory: PresentationHistoryStore;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly sessions = new Map<string, HostedSession>();
@@ -1747,7 +1708,6 @@ export class SessionHost {
     this.greetingInputReaders = options.greeting?.inputReaders;
     this.createGreetingRuntime = options.greeting?.createRuntime ?? createGhostPiRuntime;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
-    this.maintenance = options.maintenance;
     this.presentationHistory = options.presentationHistory ?? new PresentationHistoryStore();
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.unregisterHomeMoveParticipant = this.homeOperations.registerMoveParticipant({
@@ -1822,37 +1782,6 @@ export class SessionHost {
       this.logger.warn("scrubbed inherited provider credentials and routing overrides", {
         removed,
       });
-    }
-  }
-
-  setConversationMaintenance(maintenance: SessionConversationMaintenance): void {
-    if (this.maintenance && this.maintenance !== maintenance) {
-      throw new Error("Conversation maintenance is already attached.");
-    }
-    this.maintenance = maintenance;
-  }
-
-  async withMaintenanceRuntime<T>(
-    ghostName: string,
-    use: (runtime: GhostPiRuntime) => Promise<T>,
-  ): Promise<T> {
-    if (this.disposed) {
-      throw new GhostError("shutting_down", "The daemon is shutting down.", 503);
-    }
-    const paths = ghostPaths(this.registry.get(ghostName).dir);
-    // Maintenance owns a short-lived runtime. Borrowing one from the Pi cache
-    // would let an unrelated eviction or project/runtime switch close it while
-    // the idle generation is still using the model catalogue.
-    const runtime = await createGhostPiRuntime({
-      authPath: ghostAuthPath(paths.agentDir),
-      modelsPath: ghostModelsPath(paths.home),
-      allowModelNetwork: !this.offline,
-      offline: this.offline,
-    });
-    try {
-      return await use(runtime);
-    } finally {
-      runtime.close();
     }
   }
 
@@ -3009,7 +2938,6 @@ export class SessionHost {
         hosted.runSignal = hosted.session.agent.signal;
         // Job turns bypass HTTP admission; they still win over a
         // presentation-only recap.
-        hosted.recap?.controller.abort();
       }
       if (event.type === "tool_execution_start") {
         this.recordToolCwd(hosted, event.toolCallId, hosted.session.sessionManager.getCwd());
@@ -3134,7 +3062,6 @@ export class SessionHost {
       else await hosted.session.steer(text);
     } catch (error) {
       hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter((candidate) => candidate !== pass);
-      await pass.finish();
       throw error;
     }
     return this.queuedMessages(ghostName, sessionId, runtime);
@@ -3389,46 +3316,12 @@ export class SessionHost {
     return tracked;
   }
 
-  private sessionOwned(hosted: HostedSession, includeRecap = true): boolean {
+  private sessionOwned(hosted: HostedSession): boolean {
     return hosted.busy
-      || (includeRecap && hosted.recap !== undefined)
       || hosted.pendingOwnerPasses.length > 0
       || hosted.ownerPassSettlement !== undefined
       || hosted.session.isStreaming
       || hosted.session.isBashRunning;
-  }
-
-  private settledTurnFinisher(
-    identity: MaintenanceIdentity,
-    admission: MaintenanceOwnerAdmission | undefined,
-    release: () => void = () => admission?.release(),
-  ): (turn?: SettledMaintenanceTurn) => Promise<void> {
-    let finished = false;
-    return async (turn) => {
-      if (finished) return;
-      finished = true;
-      try {
-        if (turn && identity.runtime === "claude-code") {
-          await this.journalSettledClaudeTurn(identity, turn);
-        }
-        await admission?.finish(turn);
-      } catch {
-        if (turn) {
-          throw new GhostError(
-            "session_settlement_failed",
-            MODEL_TURN_PERSISTENCE_ERROR,
-            500,
-          );
-        }
-        this.logger
-          .child({ ghost: identity.ghostName, conversation: identity.conversationId })
-          .warn("conversation maintenance cleanup was not recorded", {
-            runtime: identity.runtime,
-          });
-      } finally {
-        release();
-      }
-    };
   }
 
   /**
@@ -3438,26 +3331,31 @@ export class SessionHost {
    * on the next successful write, so the journal self-heals into an honest gap
    * instead of failing the turn.
    */
-  private async journalSettledClaudeTurn(
-    identity: MaintenanceIdentity,
-    turn: SettledMaintenanceTurn,
-  ): Promise<void> {
-    try {
-      const sessionDir = ghostPaths(this.registry.get(identity.ghostName).dir).sessionDir;
-      await this.homeOperations.withLease(identity.ghostName, () =>
-        this.presentationHistory.recordSettledTurn(
-          sessionDir,
-          { runtime: identity.runtime, conversationId: identity.conversationId },
-          turn,
-        ));
-    } catch (error) {
-      this.logger
-        .child({ ghost: identity.ghostName, conversation: identity.conversationId })
-        .warn("conversation presentation history was not recorded", {
-          runtime: identity.runtime,
-          error: error instanceof Error ? error.message : String(error),
-        });
-    }
+  private claudeSettledTurnRecorder(
+    ghostName: string,
+    conversationId: string,
+  ): (turn?: SettledTurn) => Promise<void> {
+    let recorded = false;
+    return async (turn) => {
+      if (recorded || !turn) return;
+      recorded = true;
+      try {
+        const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
+        await this.homeOperations.withLease(ghostName, () =>
+          this.presentationHistory.recordSettledTurn(
+            sessionDir,
+            { runtime: "claude-code", conversationId },
+            turn,
+          ));
+      } catch (error) {
+        this.logger
+          .child({ ghost: ghostName, conversation: conversationId })
+          .warn("conversation presentation history was not recorded", {
+            runtime: "claude-code",
+            error: error instanceof Error ? error.message : String(error),
+          });
+      }
+    };
   }
 
   private async preparePiOwnerPass(
@@ -3467,25 +3365,11 @@ export class SessionHost {
       ownerPrompt: string;
       signal?: AbortSignal;
       delivery?: "steer" | "followUp";
-      finish?: (turn?: SettledMaintenanceTurn) => Promise<void>;
-      callerOwnsFinishOnFailure?: boolean;
     },
   ): Promise<PendingPiOwnerPass> {
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
     if (this.ghostMoveReserved(ghostName)) {
       throw new GhostError("ghost_busy", "Wait for this ghost's move to finish.", 409);
-    }
-    const identity: MaintenanceIdentity = { ghostName, runtime: "pi", conversationId };
-    let finish = input.finish;
-    if (!finish) {
-      const admission = this.maintenance?.admitOwnerAction(identity);
-      finish = this.settledTurnFinisher(identity, admission);
-      try {
-        await admission?.ready;
-      } catch (error) {
-        await finish();
-        throw error;
-      }
     }
     const passSignal = input.signal ?? new AbortController().signal;
     const priorEntryIds = new Set(hosted.session.sessionManager.getBranch().map((entry) => entry.id));
@@ -3497,45 +3381,39 @@ export class SessionHost {
       turnId: hosted.nextOwnerTurnId,
       priorEntryIds,
       signal: passSignal,
-      finish,
     };
-    try {
-      if (this.hooks.hasHandlers("before_prompt")) {
-        const ghost = this.registry.get(ghostName);
-        const result = await this.hooks.emitBeforePrompt({
-          type: "before_prompt",
-          prompt: input.ownerPrompt,
-          turn_id: pass.turnId,
-          session_id: hosted.session.sessionId,
-          ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
-          signal: passSignal,
-          ghost_name: ghostName,
-          ghost_home: ghost.dir,
-          cwd: hosted.session.sessionManager.getCwd(),
-          runtime: "pi",
-          conversation_runtime: "pi",
-          conversation_id: conversationId,
+    if (this.hooks.hasHandlers("before_prompt")) {
+      const ghost = this.registry.get(ghostName);
+      const result = await this.hooks.emitBeforePrompt({
+        type: "before_prompt",
+        prompt: input.ownerPrompt,
+        turn_id: pass.turnId,
+        session_id: hosted.session.sessionId,
+        ...(hosted.session.sessionFile ? { session_file: hosted.session.sessionFile } : {}),
+        signal: passSignal,
+        ghost_name: ghostName,
+        ghost_home: ghost.dir,
+        cwd: hosted.session.sessionManager.getCwd(),
+        runtime: "pi",
+        conversation_runtime: "pi",
+        conversation_id: conversationId,
+      });
+      if (result?.additionalContext && !passSignal.aborted) {
+        await hosted.session.sendCustomMessage({
+          customType: "before-prompt-hook-context",
+          content: result.additionalContext,
+          display: false,
+        }, {
+          triggerTurn: false,
+          ...(input.delivery ? { deliverAs: input.delivery } : {}),
         });
-        if (result?.additionalContext && !passSignal.aborted) {
-          await hosted.session.sendCustomMessage({
-            customType: "before-prompt-hook-context",
-            content: result.additionalContext,
-            display: false,
-          }, {
-            triggerTurn: false,
-            ...(input.delivery ? { deliverAs: input.delivery } : {}),
-          });
-          // pi writes nothing to disk before the first assistant message, so
-          // the hook is acknowledged once the pass has settled durably.
-          if (result.acknowledge) pass.acknowledge = result.acknowledge;
-        }
+        // pi writes nothing to disk before the first assistant message, so
+        // the hook is acknowledged once the pass has settled durably.
+        if (result.acknowledge) pass.acknowledge = result.acknowledge;
       }
-      hosted.pendingOwnerPasses.push(pass);
-      return pass;
-    } catch (error) {
-      if (!input.callerOwnsFinishOnFailure) await finish();
-      throw error;
     }
+    hosted.pendingOwnerPasses.push(pass);
+    return pass;
   }
 
   private persistedPiPassBoundary(
@@ -3576,15 +3454,15 @@ export class SessionHost {
     hosted: HostedSession,
     pass: PendingPiOwnerPass,
     assistantEntry: Extract<SessionEntry, { type: "message" }>,
-  ): Promise<Extract<SessionEntry, { type: "message" }>> {
-    if (!this.hooks.hasHandlers("session_stop") || pass.signal.aborted) return assistantEntry;
+  ): Promise<void> {
+    if (!this.hooks.hasHandlers("session_stop") || pass.signal.aborted) return;
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
     const ghost = this.registry.get(ghostName);
     let stopHookActive = false;
     let latestAssistantEntry = assistantEntry;
     while (!pass.signal.aborted) {
       const assistant = latestAssistantEntry.message;
-      if (assistant.role !== "assistant") return latestAssistantEntry;
+      if (assistant.role !== "assistant") return;
       const sessionFile = hosted.session.sessionFile;
       const result = await this.hooks.emitSessionStop({
         type: "session_stop",
@@ -3604,7 +3482,7 @@ export class SessionHost {
         conversation_id: conversationId,
       });
       const additionalContext = ghostSessionStopContinuation(result);
-      if (!additionalContext) return latestAssistantEntry;
+      if (!additionalContext) return;
       stopHookActive = true;
       await hosted.session.sendCustomMessage({
         customType: "session-stop-continuation",
@@ -3616,34 +3494,6 @@ export class SessionHost {
       );
       if (nextAssistant?.type === "message") latestAssistantEntry = nextAssistant;
     }
-    return latestAssistantEntry;
-  }
-
-  private async finishPiPersistedPass(
-    hosted: HostedSession,
-    pass: PendingPiOwnerPass,
-    assistantEntry: Extract<SessionEntry, { type: "message" }>,
-    outcome?: SettledMaintenanceTurn["outcome"],
-  ): Promise<void> {
-    const assistant = assistantEntry.message;
-    if (assistant.role !== "assistant") {
-      await pass.finish();
-      return;
-    }
-    const createdAt = hosted.session.sessionManager.getHeader()?.timestamp;
-    if (!createdAt) {
-      await pass.finish();
-      return;
-    }
-    await pass.finish({
-      source: { runtime: "pi", createdAt },
-      sourceRevision: { kind: "pi-leaf", value: assistantEntry.id },
-      sourceOrdinal: pass.turnId,
-      cwd: hosted.session.sessionManager.getCwd(),
-      ownerPrompt: pass.ownerPrompt,
-      assistantText: entryText(assistant.content),
-      outcome: outcome ?? (assistant.stopReason === "error" ? "failed" : "completed"),
-    });
   }
 
   private settlePiOwnerPasses(hosted: HostedSession): Promise<void> {
@@ -3666,32 +3516,16 @@ export class SessionHost {
               });
             }
           }
-          if (boundary === "superseded") {
-            await pass.finish();
-            continue;
-          }
-          let assistantEntry = boundary.assistantEntry;
+          if (boundary === "superseded") continue;
+          const assistantEntry = boundary.assistantEntry;
           const assistant = assistantEntry.message;
           // An abort that lands while a tool runs surfaces on the follow-up
           // model call as a provider error; the run's own signal is the fact.
           const aborted = assistant.role === "assistant"
             && (assistant.stopReason === "aborted"
               || (assistant.stopReason === "error" && hosted.runSignal?.aborted === true));
-          if (assistant.role !== "assistant" || aborted || pass.signal.aborted) {
-            await pass.finish();
-            continue;
-          }
-          try {
-            assistantEntry = await this.emitPiSessionStop(hosted, pass, assistantEntry);
-          } catch (error) {
-            const latestBoundary = this.persistedPiPassBoundary(hosted, pass, new Set());
-            const latestAssistant = latestBoundary && latestBoundary !== "superseded"
-              ? latestBoundary.assistantEntry
-              : assistantEntry;
-            await this.finishPiPersistedPass(hosted, pass, latestAssistant, "failed");
-            throw error;
-          }
-          await this.finishPiPersistedPass(hosted, pass, assistantEntry);
+          if (assistant.role !== "assistant" || aborted || pass.signal.aborted) continue;
+          await this.emitPiSessionStop(hosted, pass, assistantEntry);
         }
       } finally {
         hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter(
@@ -3699,8 +3533,7 @@ export class SessionHost {
         );
       }
       if (!hosted.session.isStreaming && hosted.session.pendingMessageCount === 0) {
-        const abandoned = hosted.pendingOwnerPasses.splice(0);
-        for (const pass of abandoned) await pass.finish();
+        hosted.pendingOwnerPasses.splice(0);
       }
     })().finally(() => {
       if (hosted.ownerPassSettlement === settling) hosted.ownerPassSettlement = undefined;
@@ -3711,14 +3544,10 @@ export class SessionHost {
 
   private async abandonPiOwnerPasses(hosted: HostedSession): Promise<void> {
     await hosted.ownerPassSettlement?.catch(() => {});
-    const abandoned = hosted.pendingOwnerPasses.splice(0);
-    for (const pass of abandoned) await pass.finish();
+    hosted.pendingOwnerPasses.splice(0);
   }
 
-  private deferPiSettlement(
-    hosted: HostedSession,
-    finish?: (turn?: SettledMaintenanceTurn) => Promise<void>,
-  ): PiSettlementBarrier {
+  private deferPiSettlement(hosted: HostedSession): PiSettlementBarrier {
     const completed = Promise.withResolvers<PiSettlementResult>();
     let armed = true;
     const unsubscribe = hosted.session.subscribe((event) => {
@@ -3728,7 +3557,7 @@ export class SessionHost {
       void (async () => {
         let result: PiSettlementResult;
         try {
-          result = await this.settlePiNow(hosted, finish);
+          result = await this.settlePiNow(hosted);
         } catch (error) {
           result = { settlementError: error };
         }
@@ -3746,10 +3575,7 @@ export class SessionHost {
     };
   }
 
-  private async settlePiNow(
-    hosted: HostedSession,
-    finish?: (turn?: SettledMaintenanceTurn) => Promise<void>,
-  ): Promise<PiSettlementResult> {
+  private async settlePiNow(hosted: HostedSession): Promise<PiSettlementResult> {
     let toolCwdError: unknown;
     let settlementError: unknown;
     try {
@@ -3766,45 +3592,10 @@ export class SessionHost {
       });
       await this.abandonPiOwnerPasses(hosted);
     }
-    await finish?.();
     return {
       ...(toolCwdError === undefined ? {} : { toolCwdError }),
       ...(settlementError === undefined ? {} : { settlementError }),
     };
-  }
-
-  private piOwnerActivity(hosted: HostedSession): MaintenanceOwnerActivity | null {
-    const createdAt = hosted.session.sessionManager.getHeader()?.timestamp;
-    if (!createdAt) return null;
-    return {
-      source: { runtime: "pi", createdAt },
-      cwd: hosted.project.cwd,
-    };
-  }
-
-  private async recordPiOwnerActivity(
-    ghostName: string,
-    conversationId: string,
-    hosted: HostedSession,
-    activity: MaintenanceOwnerActivity | null = this.piOwnerActivity(hosted),
-  ): Promise<void> {
-    if (!this.maintenance) return;
-    if (!activity) {
-      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        runtime: "pi",
-      });
-      return;
-    }
-    try {
-      await this.maintenance.recordOwnerActivity(
-        { ghostName, runtime: "pi", conversationId },
-        activity,
-      );
-    } catch {
-      hosted.logger.warn("conversation maintenance owner activity was not recorded", {
-        runtime: "pi",
-      });
-    }
   }
 
   private async publishMcpCandidate<T>(
@@ -4025,16 +3816,6 @@ export class SessionHost {
     }
   }
 
-  /** Cancel presentation-only recap work and drain deferred session changes. */
-  private async cancelRecap(key: string): Promise<void> {
-    const hosted = this.sessions.get(key);
-    const recap = hosted?.recap;
-    if (!hosted || !recap) return;
-    recap.controller.abort();
-    await recap.task.catch(() => {});
-    await this.settleDeferredSession(hosted);
-  }
-
   /**
    * Drain model/MCP changes after an owner that bypassed SessionHost settles.
    * One promise per hosted session prevents two agent_end boundaries from
@@ -4121,7 +3902,6 @@ export class SessionHost {
     ghostName: string,
     command: UserBashCommand,
     options: RunTurnOptions,
-    settleBeforeRelease?: (hosted: HostedSession) => Promise<void>,
   ): Promise<void> {
     const conversationId = options.sessionId ?? DEFAULT_SESSION_KEY;
     if (this.claudeCode.isBusy(ghostName, conversationId)) {
@@ -4259,7 +4039,6 @@ export class SessionHost {
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
       try {
-        await settleBeforeRelease?.(hosted);
         if (pendingTerminal) options.emit(pendingTerminal);
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
@@ -4458,23 +4237,12 @@ export class SessionHost {
     this.turnAdmissions.add(admissionKey);
     let released = false;
     let started = false;
-    let maintenanceAdmission: MaintenanceOwnerAdmission | undefined;
-    let maintenanceReleased = false;
-    const releaseMaintenance = () => {
-      if (maintenanceReleased) return;
-      maintenanceReleased = true;
-      maintenanceAdmission?.release();
-    };
     const release = () => {
       if (released) return;
       released = true;
-      releaseMaintenance();
       this.turnAdmissions.delete(admissionKey);
     };
     try {
-      // Reserve first so another owner cannot slip in while recap cancellation
-      // drains; owner work then wins this presentation-only boundary.
-      await this.cancelRecap(admissionKey);
       const configured = this.selectedTurnRuntime(ghostName);
       await this.assertProjectRuntimeMatches(ghostName, conversationId, configured.runtime);
       const bashCommand = parseUserBashCommand(options.prompt);
@@ -4494,31 +4262,19 @@ export class SessionHost {
             project: await this.admitClaudeProject(ghostName, conversationId),
           }
         : configured;
-      maintenanceAdmission = this.maintenance?.admitOwnerAction({
-        ghostName,
-        runtime: selected.runtime,
-        conversationId,
-      });
-      await maintenanceAdmission?.ready;
       return {
         run: async (streamOptions: AdmittedTurnOptions) => {
           if (started || released) {
             throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
           }
           started = true;
-          const finishMaintenance = this.settledTurnFinisher(
-            { ghostName, runtime: selected.runtime, conversationId },
-            maintenanceAdmission,
-            releaseMaintenance,
-          );
           try {
             await this.runAdmittedTurn(ghostName, {
               sessionId: conversationId,
               prompt: options.prompt,
               ...streamOptions,
-            }, selected, finishMaintenance);
+            }, selected);
           } finally {
-            await finishMaintenance();
             release();
           }
         },
@@ -4555,21 +4311,14 @@ export class SessionHost {
     ghostName: string,
     options: RunTurnOptions,
     selected: SelectedTurnRuntime,
-    finishMaintenance: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
-    await this.runAdmittedTurnWithPrincipalCapability(
-      ghostName,
-      options,
-      selected,
-      finishMaintenance,
-    );
+      await this.runAdmittedTurnWithPrincipalCapability(ghostName, options, selected);
   }
 
   private async runAdmittedTurnWithPrincipalCapability(
     ghostName: string,
     options: RunTurnOptions,
     selected: SelectedTurnRuntime,
-    finishMaintenance: (turn?: SettledMaintenanceTurn) => Promise<void>,
   ): Promise<void> {
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const ghost = this.registry.get(ghostName);
@@ -4580,10 +4329,7 @@ export class SessionHost {
       if (this.projectTransitions.has(deletionKeyOf(ghostName, "pi", conversationId))) {
         throw new GhostError("session_busy", "Wait for this conversation's project change to finish.", 409);
       }
-      await this.runUserBash(ghostName, bashCommand, options, async (hosted) => {
-        await this.recordPiOwnerActivity(ghostName, conversationId, hosted);
-        await finishMaintenance();
-      });
+      await this.runUserBash(ghostName, bashCommand, options);
       // pi binds a session's cwd when it opens; a `!cd` takes effect by
       // reopening the conversation at its new operational cwd.
       const moved = this.sessions.get(key);
@@ -4626,7 +4372,7 @@ export class SessionHost {
         selected.modelId,
         options,
         selected.project,
-        finishMaintenance,
+        this.claudeSettledTurnRecorder(ghostName, conversationId),
       );
       await this.announceConversationUpdated(ghostName, "claude-code", conversationId, "project");
       return;
@@ -4666,11 +4412,8 @@ export class SessionHost {
           ...options,
           emit: emitAfterActivityDurability,
         });
-        await this.recordPiOwnerActivity(ghostName, conversationId, hosted);
-        await finishMaintenance();
         if (pendingTerminal) options.emit(pendingTerminal);
       } finally {
-        await finishMaintenance();
         await this.releaseSessionClaim(hosted, ghostName);
       }
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
@@ -4717,9 +4460,8 @@ export class SessionHost {
         kind: "direct",
         ownerPrompt: options.prompt,
         ...(options.signal ? { signal: options.signal } : {}),
-        finish: finishMaintenance,
       });
-      settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
+      settlementBarrier = this.deferPiSettlement(hosted);
       await promptPiSession(hosted.session, options.prompt, hosted.skills);
     } catch (error) {
       hosted.logger.error("turn failed", {
@@ -4730,9 +4472,9 @@ export class SessionHost {
       options.signal?.removeEventListener("abort", onAbort);
       const settlement = settlementBarrier
         ? settlementBarrier.cancel()
-          ? await this.settlePiNow(hosted, finishMaintenance)
+          ? await this.settlePiNow(hosted)
           : await settlementBarrier.settled
-        : await this.settlePiNow(hosted, finishMaintenance);
+        : await this.settlePiNow(hosted);
       if (settlement.toolCwdError !== undefined) {
         pendingTerminal = {
           type: "error",
@@ -4757,7 +4499,6 @@ export class SessionHost {
         adapter.finishDone();
       }
       unsubscribe();
-      await finishMaintenance();
       if (pendingTerminal) options.emit(pendingTerminal);
       // A model switch that arrived mid-turn was deferred rather than applied to
       // the running prompt; apply it now the turn has settled, before the next
@@ -4770,101 +4511,6 @@ export class SessionHost {
       }
       await this.announceConversationUpdated(ghostName, "pi", conversationId);
     }
-  }
-
-  /** Generate one transient recap without adding either message to the transcript. */
-  async recap(
-    ghostName: string,
-    conversationId: string | null | undefined,
-    runtime: ConversationRuntime = "pi",
-    signal?: AbortSignal,
-  ): Promise<string | null> {
-    assertPiConversation(runtime, "Conversation recap");
-    const ghost = this.assertPiRuntime(ghostName, "Conversation recap");
-    const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
-    const key = this.keyOf(ghostName, id);
-    const paths = ghostPaths(ghost.dir);
-    const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
-
-    // `open` creates a transcript. A recap is only a view over existing
-    // history, so an unknown id stays unknown instead of creating an empty row.
-    if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
-      throw new GhostError(
-        "not_found",
-        `This ghost has no conversation ${JSON.stringify(id)}.`,
-        404,
-      );
-    }
-    if (this.turnAdmissions.has(key)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation to finish before generating a recap.",
-        409,
-      );
-    }
-    if (signal?.aborted) return null;
-
-    const hosted = await this.idleHostedSession(
-      ghostName,
-      id,
-      "Wait for this conversation to finish before generating a recap.",
-    );
-    this.assertPiRuntime(ghostName, "Conversation recap");
-    if (this.turnAdmissions.has(key)) {
-      throw new GhostError(
-        "session_busy",
-        "Wait for this conversation to finish before generating a recap.",
-        409,
-      );
-    }
-
-    const branchMessages = hosted.session.sessionManager.buildSessionContext().messages;
-    if (branchMessages.length === 0 || signal?.aborted) return null;
-
-    const controller = new AbortController();
-    const onAbort = () => controller.abort(signal?.reason);
-    signal?.addEventListener("abort", onAbort, { once: true });
-    if (signal?.aborted) controller.abort(signal.reason);
-
-    let tracked!: Promise<string | null>;
-    const generation = Promise.resolve().then(async () => {
-      const model = hosted.session.model;
-      if (!model) throw new Error("This conversation has no chat model bound for a recap.");
-      const response = await hosted.modelRuntime.complete(model, {
-        systemPrompt: hosted.session.systemPrompt,
-        messages: [
-          ...convertToLlm(branchMessages),
-          {
-            role: "user",
-            content: buildRecapPrompt(hosted.session.sessionName),
-            timestamp: Date.now(),
-          },
-        ],
-      }, { signal: controller.signal });
-      if (response.stopReason === "error" || response.stopReason === "aborted") {
-        throw new Error(response.errorMessage || `Recap generation ${response.stopReason}.`);
-      }
-      const recap = normalizeRecap(assistantText(response));
-      if (!recap) throw new Error("The chat model returned no usable recap text.");
-      return recap;
-    });
-    tracked = generation.catch((error: unknown) => {
-      if (!controller.signal.aborted) {
-        hosted.logger.warn("conversation recap generation failed", {
-          session: id,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      return null;
-    }).finally(() => {
-      signal?.removeEventListener("abort", onAbort);
-      if (hosted.recap?.task === tracked) hosted.recap = undefined;
-      this.touchSession(hosted);
-    });
-    hosted.recap = { controller, task: tracked };
-    const recap = await tracked;
-    await this.settleDeferredSession(hosted);
-    return recap;
   }
 
   /**
@@ -6432,23 +6078,6 @@ export class SessionHost {
       throw new GhostError("session_busy", "This conversation already has an owner action.", 409);
     }
     this.turnAdmissions.add(admissionKey);
-    const maintenanceIdentity: MaintenanceIdentity = {
-      ghostName,
-      runtime: "pi",
-      conversationId,
-    };
-    const maintenanceAdmission = this.maintenance?.admitOwnerAction(maintenanceIdentity);
-    const finishMaintenance = this.settledTurnFinisher(
-      maintenanceIdentity,
-      maintenanceAdmission,
-    );
-    try {
-      await maintenanceAdmission?.ready;
-    } catch (error) {
-      await finishMaintenance();
-      this.turnAdmissions.delete(admissionKey);
-      throw error;
-    }
     let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
     const emitAfterToolCwdDurability = (event: PiMessagesEvent) => {
       if (event.type === "done" || event.type === "error") pendingTerminal = event;
@@ -6470,7 +6099,6 @@ export class SessionHost {
         true,
       );
     } catch (error) {
-      await finishMaintenance();
       this.turnAdmissions.delete(admissionKey);
       throw error;
     }
@@ -6481,8 +6109,6 @@ export class SessionHost {
     };
     const syntheticId = `ask-reanswer-${options.entryId}`;
     let settlementBarrier: PiSettlementBarrier | undefined;
-    let reanswerPass: PendingPiOwnerPass | undefined;
-    let committedActivity: MaintenanceOwnerActivity | null | undefined;
     let turnFailure: { error: unknown; aborted: boolean } | undefined;
     try {
       unsubscribe = hosted.session.subscribe((event: AgentSessionEvent) => adapter.handle(asRuntimeSessionEvent(event)));
@@ -6546,7 +6172,6 @@ export class SessionHost {
         timestamp: Date.now(),
       });
       hosted.session.agent.state.messages = manager.buildSessionContext().messages;
-      committedActivity = this.piOwnerActivity(hosted);
       options.emit({
         type: "branch_changed",
         transcript: this.transcriptFromManager(
@@ -6561,12 +6186,10 @@ export class SessionHost {
       if (!ownerPrompt) {
         throw new GhostError("ask_reanswer_failed", "The revised answer was empty.", 409);
       }
-      reanswerPass = await this.preparePiOwnerPass(hosted, {
+      await this.preparePiOwnerPass(hosted, {
         kind: "reanswer",
         ownerPrompt,
         ...(options.signal ? { signal: options.signal } : {}),
-        finish: finishMaintenance,
-        callerOwnsFinishOnFailure: true,
       });
       manager.appendCustomMessageEntry(
         ASK_REANSWER_OWNER_MESSAGE_TYPE,
@@ -6574,7 +6197,7 @@ export class SessionHost {
         false,
         { attribution: "user", askResultEntryId: options.entryId },
       );
-      settlementBarrier = this.deferPiSettlement(hosted, finishMaintenance);
+      settlementBarrier = this.deferPiSettlement(hosted);
       await hosted.session.agent.continue();
       await hosted.session.waitForIdle();
     } catch (error) {
@@ -6585,23 +6208,11 @@ export class SessionHost {
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
       try {
-        const persistedBoundary = reanswerPass
-          ? this.persistedPiPassBoundary(hosted, reanswerPass, new Set())
-          : null;
-        if (committedActivity !== undefined
-          && (!persistedBoundary || persistedBoundary === "superseded")) {
-          await this.recordPiOwnerActivity(
-            ghostName,
-            conversationId,
-            hosted,
-            committedActivity,
-          );
-        }
         const settlement = settlementBarrier
           ? settlementBarrier.cancel()
-            ? await this.settlePiNow(hosted, finishMaintenance)
+            ? await this.settlePiNow(hosted)
             : await settlementBarrier.settled
-          : await this.settlePiNow(hosted, finishMaintenance);
+          : await this.settlePiNow(hosted);
         if (settlement.toolCwdError !== undefined) {
           pendingTerminal = {
             type: "error",
@@ -6626,7 +6237,6 @@ export class SessionHost {
           adapter.finishDone();
         }
         unsubscribe?.();
-        await finishMaintenance();
         if (pendingTerminal) options.emit(pendingTerminal);
         await this.releaseSessionClaim(hosted, ghostName);
         await this.announceConversationUpdated(ghostName, "pi", conversationId);
@@ -6669,7 +6279,7 @@ export class SessionHost {
     const runtimeBusy = runtime === "pi"
       ? this.opening.has(piKey)
         || (hosted !== undefined
-          && (this.sessionOwned(hosted, false) || (hosted.mcpTransitions ?? 0) > 0))
+          && (this.sessionOwned(hosted) || (hosted.mcpTransitions ?? 0) > 0))
       : this.claudeCode.isBusy(ghostName, id);
     const busy = this.mcpReloadGhosts.has(ghostName)
       || (this.lifecycleAdmissions.get(piKey) ?? 0) > 0
@@ -6690,8 +6300,6 @@ export class SessionHost {
       );
     }
 
-    let maintenanceReservation: MaintenanceConversationDeleteReservation | undefined;
-    let maintenanceDeleteOutcome: MaintenanceConversationDeleteOutcome = "rolled-back";
     let revocation: BindingRevocationLease | undefined;
     let revocationCommitted = false;
     let revocationRetired = false;
@@ -6710,13 +6318,6 @@ export class SessionHost {
         runtime,
         id,
       );
-      maintenanceReservation = this.maintenance?.reserveConversationDelete({
-        ghostName,
-        runtime,
-        conversationId: id,
-      });
-      if (runtime === "pi") await this.cancelRecap(piKey);
-      await maintenanceReservation?.drained;
       const draftMarker = draftAbandonTransactionPath(paths.sessionDir, runtime, id);
       const { state: draftState } = await transactionMarkerState(
         draftMarker,
@@ -6736,7 +6337,6 @@ export class SessionHost {
       if (deleteState === "indeterminate") {
         revocation.commit();
         revocationCommitted = true;
-        maintenanceDeleteOutcome = "recovery-pending";
         await retireRuntime();
         throw new GhostError(
           "delete_recovery_pending",
@@ -6748,13 +6348,11 @@ export class SessionHost {
       if (resumingDeletion) {
         revocation.commit();
         revocationCommitted = true;
-        maintenanceDeleteOutcome = "recovery-pending";
       }
       if (!resumingDeletion) {
         mkdirSync(paths.sessionDir, { recursive: true });
         try {
           await this.transactionWriter(tombstone, emptyDeleteTransaction(runtime, id));
-          maintenanceDeleteOutcome = "recovery-pending";
         } catch (error) {
           const { state: published } = await transactionMarkerState(
             tombstone,
@@ -6764,7 +6362,6 @@ export class SessionHost {
           else {
             revocation.commit();
             revocationCommitted = true;
-            maintenanceDeleteOutcome = "recovery-pending";
             await retireRuntime();
           }
           throw error;
@@ -6793,7 +6390,6 @@ export class SessionHost {
       );
       const bindingPath = projectBindingPath(paths.sessionDir, runtime, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
-      const maintenancePath = maintenanceStatePath(paths.sessionDir, runtime, id);
       const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
       const reviewJournal = reviewJournalPath(paths.sessionDir, runtime, id);
       const projectSnapshots = runtime === "pi"
@@ -6811,7 +6407,6 @@ export class SessionHost {
             { artifact: "omp-transcript", path: piPath },
             { artifact: "tool-cwds", path: cwdPath },
             { artifact: "project-binding", path: bindingPath },
-            { artifact: "maintenance-state", path: maintenancePath },
             ...projectSnapshots.map((path) => ({
               artifact: "project-snapshot" as const,
               path,
@@ -6826,7 +6421,6 @@ export class SessionHost {
               path,
             })),
             { artifact: "project-binding", path: bindingPath },
-            { artifact: "maintenance-state", path: maintenancePath },
             { artifact: "presentation-history", path: presentationPath },
             { artifact: "review-journal", path: reviewJournal },
           ];
@@ -6861,7 +6455,6 @@ export class SessionHost {
         await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
         revocation.retire();
         revocationRetired = true;
-        maintenanceDeleteOutcome = "rolled-back";
         throw new GhostError(
           "not_found",
           `This ghost has no conversation ${JSON.stringify(identity.id)}.`,
@@ -6894,12 +6487,6 @@ export class SessionHost {
       await this.retireDeleteMarker(paths.sessionDir, tombstone, deleteRecord);
       revocation.retire();
       revocationRetired = true;
-      this.maintenance?.completeConversationDelete({
-        ghostName,
-        runtime,
-        conversationId: id,
-      });
-      maintenanceDeleteOutcome = "completed";
       this.logger.child({ ghost: ghostName, conversation: id }).info("trashed ghost conversation", {
         session: identity.id,
         artifacts: [
@@ -6919,11 +6506,9 @@ export class SessionHost {
         if (markerState === "absent" && !revocationCommitted) revocation.rollback();
         else if (markerState !== "absent") {
           revocation.commit();
-          maintenanceDeleteOutcome = "recovery-pending";
           retiringRuntime = retireRuntime();
         }
       }
-      maintenanceReservation?.release(maintenanceDeleteOutcome);
       await retiringRuntime;
     }
   }
@@ -6978,12 +6563,9 @@ export class SessionHost {
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
     const ghost = this.registry.get(ghostName);
     this.reserveGhosts([ghost.name], "deleting it");
-    let maintenanceReservation: MaintenanceDrainReservation | undefined;
     let revocation: BindingRevocationLease | undefined;
     let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
-      maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      await maintenanceReservation?.drained;
       revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "deleted");
       let trashed: { trash: string };
@@ -7004,13 +6586,11 @@ export class SessionHost {
       }
       this.forgetGhost(ghost.name);
       revocation.retire();
-      this.maintenance?.completeGhostDelete(ghost.name);
       this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
       return trashed;
     } finally {
       if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
-      maintenanceReservation?.release();
     }
   }
 
@@ -7041,12 +6621,9 @@ export class SessionHost {
       );
     }
     this.reserveGhosts([ghost.name, nextName], "renaming it");
-    let maintenanceReservation: MaintenanceDrainReservation | undefined;
     let revocation: BindingRevocationLease | undefined;
     let moveState: "pending" | "moved" | "indeterminate" = "pending";
     try {
-      maintenanceReservation = this.maintenance?.reserveGhostMove(ghost.name);
-      await maintenanceReservation?.drained;
       revocation = await this.projectBindings.beginScopeRevocation(ghost.name);
       await this.quiesceGhost(ghost, "renamed");
       let renamed: Ghost;
@@ -7067,14 +6644,12 @@ export class SessionHost {
       }
       this.forgetGhost(ghost.name);
       revocation.retire();
-      await this.maintenance?.completeGhostRename(ghost.name, nextName);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
       if (revocation && moveState === "pending") revocation.rollback();
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
-      maintenanceReservation?.release();
     }
   }
 
@@ -7136,9 +6711,8 @@ export class SessionHost {
     const hosted = [...this.sessions].filter(([key]) => sessionKeyParts(key)[0] === ghostName);
     // Title generation can still append to an otherwise-idle transcript. Let
     // it settle before the home moves out from under it.
-    for (const [, entry] of hosted) entry.recap?.controller.abort();
     const background: Promise<unknown>[] = hosted
-      .flatMap(([, entry]) => [entry.title, entry.recap?.task])
+      .map(([, entry]) => entry.title)
       .filter((task) => task !== undefined);
     if (background.length > 0) await Promise.allSettled(background);
 
@@ -7393,8 +6967,6 @@ export class SessionHost {
   private async disposePiSession(hosted: HostedSession): Promise<void> {
     const failures: unknown[] = [];
     await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
-    await this.collectCleanupFailure(failures, () => hosted.recap?.controller.abort());
-    await this.collectCleanupFailure(failures, () => hosted.recap?.task);
     await this.collectCleanupFailure(failures, () => this.flushHostedToolCwds(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
@@ -7418,20 +6990,14 @@ export class SessionHost {
   beginShutdown(): void {
     if (this.shutdownTasks) return;
     this.disposed = true;
-    // Invocation is synchronous even though draining is awaited below: timers
-    // are retired and running maintenance is aborted before any other shutdown
-    // owner gets a chance to capture another home path.
-    const maintenanceDrain = this.maintenance?.beginShutdown();
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
     this.shutdownTasks = [
-      ...(maintenanceDrain ? [maintenanceDrain] : []),
       Promise.resolve().then(() => this.claudeCode.disposeAll()),
     ];
     for (const hosted of this.sessions.values()) {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
       this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));
       this.launchCleanupStep(hosted, "abort title", () => this.abortHostedTitle(hosted));
-      this.launchCleanupStep(hosted, "abort recap", () => hosted.recap?.controller.abort());
       this.launchCleanupStep(hosted, "abort session", () => this.abortHostedSession(hosted));
     }
   }
@@ -7464,11 +7030,6 @@ export class SessionHost {
           this.reportCleanupFailure(undefined, "daemon shutdown controller", result.reason);
         }
       }
-      try {
-        await this.maintenance?.disposeAll();
-      } catch (error) {
-        this.reportCleanupFailure(undefined, "conversation maintenance", error);
-      }
       this.unregisterHomeMoveParticipant?.();
       this.sessions.clear();
     })().finally(() => {
@@ -7497,7 +7058,6 @@ export class SessionHost {
       this.launchCleanupStep(entry, "force abort bash", () => this.abortHostedBash(entry));
       this.launchCleanupStep(entry, "force close ask", () => this.closeHostedAsk(entry));
       this.launchCleanupStep(entry, "force abort title", () => this.abortHostedTitle(entry));
-      this.launchCleanupStep(entry, "force abort recap", () => entry.recap?.controller.abort());
       this.launchCleanupStep(entry, "force detach ownership", () => this.detachHostedOwnership(entry));
       this.launchCleanupStep(entry, "force abort session", () => this.abortHostedSession(entry));
       if (entry.mcp) {

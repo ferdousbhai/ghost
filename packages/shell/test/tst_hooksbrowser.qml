@@ -86,13 +86,12 @@ TestCase {
         Ghostd.hookConfigLoaded = true;
         Ghostd.hookConfigError = "";
         Ghostd.activeHooks = [{
-            event: "conversation_idle",
+            event: "session_stop",
             source: "builtin",
             name: hostileName,
-            description: hostileDescription,
-            idleSeconds: 60
+            description: hostileDescription
         }];
-        Ghostd.hookEvents = [{ event: "conversation_idle", count: 1 }];
+        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
         Ghostd.activeHookCount = 1;
         Ghostd.hooksLoaded = true;
         Ghostd.hooksLoading = false;
@@ -139,12 +138,10 @@ TestCase {
 
     function editableBrowser(): var {
         Ghostd.activeHooks = [
-            { event: "session_stop", source: "config", name: "Review", description: "Reviews the pass." },
-            { event: "conversation_idle", source: "builtin", name: "Memory upkeep",
-              description: "Upkeep.", idleSeconds: 60, settingsKey: "memory_upkeep" }
+            { event: "session_stop", source: "config", name: "Review", description: "Reviews the pass." }
         ];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }, { event: "conversation_idle", count: 1 }];
-        Ghostd.activeHookCount = 2;
+        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
+        Ghostd.activeHookCount = 1;
         Ghostd.hookConfig = configDocument();
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
         const browser = createTemporaryObject(browserComponent, tc);
@@ -166,7 +163,6 @@ TestCase {
         compare(browser.editingKey, "config:session_stop:0:0");
         compare(findChild(browser, "hookField-command").text, "/bin/review");
         compare(findChild(browser, "hookField-timeout").text, "5");
-        verify(!findChild(browser, "hookField-idleSeconds").visible);
 
         findChild(browser, "hookField-command").text = "/bin/review --strict";
         findChild(browser, "hookField-name").text = "";
@@ -200,14 +196,12 @@ TestCase {
         // Save is inert until there is a command.
         mouseClick(findChild(browser, "hookSaveButton"));
         verify(browser.drafting);
-        browser.draftEvent = "conversation_idle";
-        tryVerify(function () { return findChild(browser, "hookField-idleSeconds").visible; });
-        findChild(browser, "hookField-command").text = "/bin/idle";
-        findChild(browser, "hookField-idleSeconds").text = "300";
+        browser.draftEvent = "before_prompt";
+        findChild(browser, "hookField-command").text = "/bin/context";
         mouseClick(findChild(browser, "hookSaveButton"));
         compare(tc.requests.length, 1);
-        compare(JSON.parse(tc.requests[0].body).hooks.conversation_idle,
-            [{ hooks: [{ type: "command", command: "/bin/idle", idleSeconds: 300 }] }]);
+        compare(JSON.parse(tc.requests[0].body).hooks.before_prompt,
+            [{ hooks: [{ type: "command", command: "/bin/context" }] }]);
         tc.requests[0].complete(200, {
             path: "/owner/.config/ghost/hooks.json",
             document: JSON.parse(tc.requests[0].body)
@@ -216,13 +210,12 @@ TestCase {
         compare(tc.requests.length, 2);
         compare(tc.requests[1].method, "GET");
         verify(tc.requests[1].url.endsWith("/api/hooks"));
-        compare(Ghostd.hookConfig.hooks.conversation_idle[0].hooks[0].command, "/bin/idle");
+        compare(Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].command, "/bin/context");
 
+        // The first card's delete prunes its event, leaving the rest of the file.
         mouseClick(findChild(browser, "hookDeleteButton"));
         compare(tc.requests.length, 3);
-        compare(JSON.parse(tc.requests[2].body), {
-            hooks: { conversation_idle: [{ hooks: [{ type: "command", command: "/bin/idle", idleSeconds: 300 }] }] }
-        });
+        compare(JSON.parse(tc.requests[2].body), configDocument());
     }
 
     function hookCards(browser: var): var {
@@ -235,28 +228,7 @@ TestCase {
         return cards;
     }
 
-    function test_builtinHookWithoutTuningIsReadOnly(): void {
-        Ghostd.activeHooks = [
-            { event: "session_stop", source: "config", name: "Review", description: "Reviews the pass." },
-            { event: "conversation_idle", source: "builtin", name: "Memory upkeep",
-              description: "Upkeep.", idleSeconds: 60 }
-        ];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }, { event: "conversation_idle", count: 1 }];
-        Ghostd.activeHookCount = 2;
-        Ghostd.hookConfig = configDocument();
-        Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
-        const browser = createTemporaryObject(browserComponent, tc);
-        tryVerify(function () { return findChild(browser, "hookCommand") !== null; });
-        const cards = hookCards(browser);
-        compare(cards.length, 2);
-        compare(findChild(cards[1], "hookSource").text, "built in");
-        verify(!findChild(cards[1], "hookDeleteButton").visible);
-        mouseClick(cards[1]);
-        verify(!browser.editing);
-        compare(tc.requests.length, 0);
-    }
-
-    function test_reviewSettingsKeyDoesNotMakeTheBuiltinEditable(): void {
+    function test_builtinHookIsReadOnly(): void {
         Ghostd.activeHooks = [
             { event: "session_stop", source: "builtin", name: "Review",
               description: "Reviews the pass.", settingsKey: "review" }
@@ -267,32 +239,13 @@ TestCase {
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
         const browser = createTemporaryObject(browserComponent, tc);
         tryVerify(function () { return hookCards(browser).length === 1; });
-        mouseClick(hookCards(browser)[0]);
+        const card = hookCards(browser)[0];
+        compare(findChild(card, "hookSource").text, "built in");
+        verify(!findChild(card, "hookDeleteButton").visible);
+        compare(findChild(card, "hookTrigger").text, "After each assistant pass");
+        mouseClick(card);
         verify(!browser.editing);
         compare(tc.requests.length, 0);
-    }
-
-    function test_builtinIntervalIsSavedToTheFileAndPendingUntilRestart(): void {
-        const browser = editableBrowser();
-        const cards = hookCards(browser);
-        compare(cards.length, 2);
-        compare(findChild(cards[1], "hookTrigger").text, "After 1 minute of conversation inactivity");
-        mouseClick(cards[1]);
-        tryVerify(function () { return findChild(browser, "hookField-idleSeconds") !== null; });
-        verify(!findChild(browser, "hookField-command").visible);
-        verify(findChild(browser, "hookRestartNote").visible);
-        findChild(browser, "hookField-idleSeconds").text = "900";
-        mouseClick(findChild(browser, "hookSaveButton"));
-        verify(!browser.editing);
-        compare(tc.requests.length, 1);
-        const sent = JSON.parse(tc.requests[0].body);
-        compare(sent.builtin, { memory_upkeep: { idleSeconds: 900 } });
-        compare(sent.hooks, configDocument().hooks);
-        tc.requests[0].complete(200, { path: "/owner/.config/ghost/hooks.json", document: sent });
-        tryVerify(function () {
-            const trigger = findChild(hookCards(browser)[1], "hookTrigger");
-            return trigger !== null && trigger.text.indexOf("15 minutes once ghostd restarts") > 0;
-        });
     }
 
     function test_navigationContainsKeyboardActivatableHooksDestination(): void {

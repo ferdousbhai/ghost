@@ -73,7 +73,7 @@ Before each admitted owner turn Ghost:
 6. starts or reuses one warm SDK query and maps its messages onto Ghost's
    pi-messages protocol;
 7. persists opaque resume metadata and actual cwd, runs awaited hooks and
-   maintenance, then publishes the terminal event.
+   journals the settled turn, then publishes the terminal event.
 
 The exact probes, timeouts, identity rechecks, process-group teardown, warm
 query lifecycle, and resume transaction are executable in

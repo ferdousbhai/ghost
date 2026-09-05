@@ -167,12 +167,11 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, source, name, description, idleSeconds, settingsKey }) => ({
+    hooks: status.hooks.map(({ event, source, name, description, settingsKey }) => ({
       event,
       source,
       name,
       description,
-      ...(event === "conversation_idle" && idleSeconds !== undefined ? { idleSeconds } : {}),
       ...(source === "builtin" && settingsKey !== undefined ? { settingsKey } : {}),
     })),
   };
@@ -773,30 +772,6 @@ export function createDaemonServer(options: ServerOptions): Server {
         conversation.runtime,
       ),
     );
-  };
-
-  const handleRecap = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    await readJsonObjectBody(request, maxBodyBytes);
-
-    const connection = abortOnClose(request, response);
-    try {
-      const recap = await options.host.recap(
-        ghostName,
-        conversation.conversationId,
-        conversation.runtime,
-        connection.signal,
-      );
-      if (!response.writableEnded && !connection.signal.aborted) {
-        jsonResponse(response, 200, { recap });
-      }
-    } finally {
-      connection.release();
-    }
   };
 
   const decorateMcpSnapshot = (
@@ -1979,18 +1954,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleSessionResources(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "recap") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleRecap(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            request,
             response,
           );
         }

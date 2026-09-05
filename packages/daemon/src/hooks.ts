@@ -1,5 +1,4 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -9,7 +8,6 @@ import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 
 const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
-const GHOST_CONVERSATION_IDLE_DELAY_MS = 60_000;
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
 interface GhostHookEventBase {
@@ -50,15 +48,6 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   transcript_path?: string;
 }
 
-export interface GhostConversationIdleEvent extends GhostHookEventBase {
-  type: "conversation_idle";
-  conversation_incarnation: string;
-  sequence: number;
-  source_revision: string;
-  idle_for_ms: number;
-  last_turn_outcome: "completed" | "failed";
-}
-
 export interface GhostSessionStopResult {
   continue?: boolean;
   additionalContext?: string;
@@ -66,7 +55,7 @@ export interface GhostSessionStopResult {
   reason?: string;
 }
 
-export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent | GhostConversationIdleEvent;
+export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent;
 export type GhostHookResult = GhostBeforePromptResult | GhostSessionStopResult;
 
 export interface GhostHookEventStatus {
@@ -82,14 +71,8 @@ export interface GhostHookStatusItem {
   source: GhostHookSource;
   name: string;
   description: string;
-  idleSeconds?: number;
   /** The `builtin.<key>` entry of `hooks.json` that tunes this built-in hook. */
   settingsKey?: string;
-}
-
-/** What `hooks.json` may tune on one built-in hook; read at startup only. */
-export interface GhostBuiltinHookSettings {
-  idleSeconds?: number;
 }
 
 /** The admitted `hooks.json` document and where it lives. */
@@ -122,17 +105,6 @@ export type GhostSessionStopHandler = (
   context: GhostHookContext,
 ) => Promise<GhostSessionStopResult | undefined | void> | GhostSessionStopResult | undefined | void;
 
-export type GhostConversationIdleHandler = (
-  event: GhostConversationIdleEvent,
-  context: GhostHookContext,
-) => Promise<void> | void;
-
-/** Opaque identity for dispatching one exact in-process idle registration. */
-export interface GhostConversationIdleRegistration {
-  readonly id: string;
-  readonly idleMs: number;
-}
-
 type GhostHookHandler = (
   event: GhostHookEvent,
   context: GhostHookContext,
@@ -141,9 +113,7 @@ type GhostHookHandler = (
 export interface GhostHookRegistrationOptions {
   name?: string;
   description?: string;
-  idleSeconds?: number;
   timeoutSeconds?: number;
-  registrationId?: string;
   /** Names the `builtin.<key>` entry of `hooks.json` that tunes this hook. */
   settingsKey?: string;
 }
@@ -151,11 +121,6 @@ export interface GhostHookRegistrationOptions {
 export interface GhostHookAPI {
   on(event: "before_prompt", handler: GhostBeforePromptHandler, options?: GhostHookRegistrationOptions): void;
   on(event: "session_stop", handler: GhostSessionStopHandler, options?: GhostHookRegistrationOptions): void;
-  on(
-    event: "conversation_idle",
-    handler: GhostConversationIdleHandler,
-    options?: GhostHookRegistrationOptions,
-  ): GhostConversationIdleRegistration;
 }
 
 export type GhostHookFactory = (hooks: GhostHookAPI) => void | Promise<void>;
@@ -166,16 +131,13 @@ interface CommandHook {
   command: string;
   name: string;
   description: string;
-  idleMs?: number;
   timeoutMs: number;
   source: string;
-  idleRegistration?: GhostConversationIdleRegistration;
 }
 
 interface GhostHookRunnerOptions {
   logger?: Logger;
   handlerTimeoutMs?: number;
-  conversationIdleDelayMs?: number;
   /** Test seam for a rejected command execution boundary. */
   commandRunner?: (hook: CommandHook, event: GhostHookEvent) => Promise<CommandResult>;
 }
@@ -184,29 +146,22 @@ interface RegisteredHook {
   handler: GhostHookHandler;
   name: string;
   description: string;
-  idleMs?: number;
   timeoutMs: number;
-  idleRegistration?: GhostConversationIdleRegistration;
   settingsKey?: string;
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
-const BUILTIN_SETTINGS_KEYS = new Set(["memory_upkeep", "review"]);
+const BUILTIN_SETTINGS_KEYS = new Set(["review"]);
 
 /**
- * The `builtin` section of a `hooks.json` document: per-key tuning for hooks
- * registered in code. It is read at startup and applies at the next start,
- * because a built-in idle registration's identity includes its interval and
- * persisted retry state refers to that identity.
+ * The `builtin` section of a `hooks.json` document names the hooks Ghost
+ * registers in code. No built-in takes a `hooks.json` field today, so the
+ * section only admits a known key with an empty object.
  */
-function parseBuiltinHookSettings(
-  parsed: Record<string, unknown>,
-  path: string,
-): Record<string, GhostBuiltinHookSettings> {
+function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: string): void {
   const builtin = parsed.builtin;
-  if (builtin === undefined) return {};
+  if (builtin === undefined) return;
   if (!isObject(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
-  const settings: Record<string, GhostBuiltinHookSettings> = {};
   for (const [key, raw] of Object.entries(builtin)) {
     if (!SETTINGS_KEY.test(key)) {
       throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
@@ -215,22 +170,12 @@ function parseBuiltinHookSettings(
       throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
     }
     if (!isObject(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
-    for (const field of Object.keys(raw)) {
-      if (field !== "idleSeconds") throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
-      if (key !== "memory_upkeep") {
-        throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
-      }
+    const [field] = Object.keys(raw);
+    if (field !== undefined) {
+      throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
     }
-    settings[key] = raw.idleSeconds === undefined
-      ? {}
-      : { idleSeconds: idleSeconds(raw.idleSeconds, `${path}: builtin.${key}.idleSeconds`) };
   }
-  return settings;
 }
-
-type IdleTarget =
-  | { registration: GhostConversationIdleRegistration; handler: RegisteredHook }
-  | { registration: GhostConversationIdleRegistration; command: CommandHook };
 
 export function ghostSessionStopContinuation(
   result: GhostSessionStopResult | undefined,
@@ -252,18 +197,14 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function defaultHookName(event: GhostHookEvent["type"], kind: "command" | "extension"): string {
-  const trigger = event === "before_prompt"
-    ? "Before-prompt"
-    : event === "session_stop" ? "Session-stop" : "Conversation-idle";
+  const trigger = event === "before_prompt" ? "Before-prompt" : "Session-stop";
   return `${trigger} ${kind} hook`;
 }
 
 function defaultHookDescription(event: GhostHookEvent["type"]): string {
   return event === "before_prompt"
     ? "Adds context before the owner prompt is sent."
-    : event === "session_stop"
-      ? "Reviews the current assistant pass and may continue it."
-      : "Runs in the background after the configured idle interval.";
+    : "Reviews the current assistant pass and may continue it.";
 }
 
 function displayText(value: unknown, fallback: string, label: string, maximum: number): string {
@@ -272,37 +213,6 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
     throw new Error(`${label} must be a non-empty string of at most ${maximum} characters.`);
   }
   return value.trim();
-}
-
-function idleSeconds(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > 86_400) {
-    throw new Error(`${label} must be an integer in [1, 86400].`);
-  }
-  return value as number;
-}
-
-function idleDelayMs(value: unknown, fallbackMs: number, label: string): number {
-  return value === undefined ? fallbackMs : idleSeconds(value, label) * 1_000;
-}
-
-function explicitIdleRegistrationId(value: unknown, label: string): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.length < 1 || value.length > 128
-    || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)) {
-    throw new Error(`${label} must match [A-Za-z0-9][A-Za-z0-9._:-]* and be at most 128 characters.`);
-  }
-  return value;
-}
-
-function derivedIdleRegistrationId(
-  kind: "command" | "extension",
-  fields: readonly unknown[],
-  duplicates: Map<string, number>,
-): string {
-  const fingerprint = createHash("sha256").update(JSON.stringify([kind, ...fields])).digest("hex");
-  const ordinal = duplicates.get(fingerprint) ?? 0;
-  duplicates.set(fingerprint, ordinal + 1);
-  return `${kind}:${fingerprint}:${ordinal}`;
 }
 
 function timeoutMs(value: unknown, fallbackMs: number, label: string): number {
@@ -325,25 +235,21 @@ function readCommandHooksDocument(path: string): Record<string, unknown> {
   return parsed;
 }
 
-interface ParsedHooksDocument {
-  commands: CommandHook[];
-  builtin: Record<string, GhostBuiltinHookSettings>;
-}
-
 /**
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-function parseHooksDocument(parsed: unknown, path: string): ParsedHooksDocument {
+function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
   if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  return { commands: parseCommandHooks(parsed, path), builtin: parseBuiltinHookSettings(parsed, path) };
+  validateBuiltinHookSettings(parsed, path);
+  return parseCommandHooks(parsed, path);
 }
 
 function parseCommandHooks(parsed: Record<string, unknown>, path: string): CommandHook[] {
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isObject(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
-  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop", "conversation_idle"]);
+  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop"]);
   for (const eventName of Object.keys(hooks)) {
     if (!supported.has(eventName as GhostHookEvent["type"])) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
@@ -351,7 +257,6 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
   }
 
   const result: CommandHook[] = [];
-  const idleDuplicates = new Map<string, number>();
   for (const eventName of supported) {
     const groups = hooks[eventName];
     if (groups === undefined) continue;
@@ -366,9 +271,6 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
           || !raw.command.trim() || raw.command.includes("\0")) {
           throw new Error(`${path}: ${label} must be a command hook with a non-empty NUL-free command.`);
         }
-        if (eventName !== "conversation_idle" && raw.registrationId !== undefined) {
-          throw new Error(`${path}: ${label}.registrationId is supported only for conversation_idle hooks.`);
-        }
         const timeoutSeconds = raw.timeout === undefined ? GHOST_HOOK_HANDLER_TIMEOUT_MS / 1_000 : raw.timeout;
         if (typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) {
           throw new Error(`${path}: ${label}.timeout must be a number in (0, 600].`);
@@ -380,27 +282,13 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
           `${path}: ${label}.description`,
           240,
         );
-        const admittedIdleMs = eventName === "conversation_idle"
-          ? idleDelayMs(raw.idleSeconds, GHOST_CONVERSATION_IDLE_DELAY_MS, `${path}: ${label}.idleSeconds`)
-          : undefined;
-        const admittedTimeoutMs = Math.floor(timeoutSeconds * 1_000);
-        const idleRegistration = admittedIdleMs === undefined ? undefined : Object.freeze({
-          id: explicitIdleRegistrationId(raw.registrationId, `${path}: ${label}.registrationId`)
-            ?? derivedIdleRegistrationId(
-              "command",
-              [raw.command, name, description, admittedIdleMs, admittedTimeoutMs],
-              idleDuplicates,
-            ),
-          idleMs: admittedIdleMs,
-        });
         result.push({
           type: "command",
           eventName,
           command: raw.command,
           name,
           description,
-          ...(admittedIdleMs === undefined ? {} : { idleMs: admittedIdleMs, idleRegistration }),
-          timeoutMs: admittedTimeoutMs,
+          timeoutMs: Math.floor(timeoutSeconds * 1_000),
           source: `${path}#${label}`,
         });
       }
@@ -591,10 +479,6 @@ function parseCommandResult(
   }
   const output = result.stdout.trim();
   if (!output) return undefined;
-  if (hook.eventName === "conversation_idle") {
-    if (output !== "{}") logger.warn("conversation_idle hook output was ignored", { source: hook.source });
-    return undefined;
-  }
   try {
     const parsed = JSON.parse(output);
     if (!isObject(parsed)) throw new Error("hook output must be a JSON object");
@@ -628,23 +512,12 @@ function parseCommandResult(
 export class GhostHookRunner {
   private readonly logger: Logger;
   private readonly handlerTimeoutMs: number;
-  private readonly conversationIdleDelayMs: number;
   private readonly handlers: Record<GhostHookEvent["type"], RegisteredHook[]> = {
     before_prompt: [],
     session_stop: [],
-    conversation_idle: [],
   };
   private commands: CommandHook[];
   private readonly commandRunner: NonNullable<GhostHookRunnerOptions["commandRunner"]>;
-  private readonly idleTargets = new Map<string, IdleTarget>();
-  private readonly idleDuplicates = new Map<string, number>();
-  /**
-   * Idle registrations a replaced configuration retired. A deadline armed
-   * against one of them still fires; it must settle as a no-op, not as the
-   * "unknown registration" invariant violation reserved for corrupt state.
-   */
-  private readonly retiredIdleRegistrations = new Set<string>();
-  private readonly builtin: Record<string, GhostBuiltinHookSettings>;
   private commandConfig?: GhostHookCommandConfig;
   private readonly configWrites = new Map<string, Promise<unknown>>();
 
@@ -652,72 +525,22 @@ export class GhostHookRunner {
     options: GhostHookRunnerOptions & {
       commands?: CommandHook[];
       commandConfig?: GhostHookCommandConfig;
-      builtin?: Record<string, GhostBuiltinHookSettings>;
     } = {},
   ) {
     this.logger = options.logger ?? silentLogger;
     this.handlerTimeoutMs = options.handlerTimeoutMs ?? GHOST_HOOK_HANDLER_TIMEOUT_MS;
-    this.conversationIdleDelayMs = options.conversationIdleDelayMs ?? GHOST_CONVERSATION_IDLE_DELAY_MS;
-    if (!Number.isSafeInteger(this.conversationIdleDelayMs)
-      || this.conversationIdleDelayMs < 1_000
-      || this.conversationIdleDelayMs > 86_400_000
-      || this.conversationIdleDelayMs % 1_000 !== 0) {
-      throw new RangeError(
-        "conversationIdleDelayMs must be a whole-second integer in [1000, 86400000]",
-      );
-    }
-    this.commands = [];
-    this.builtin = options.builtin ?? {};
+    this.commands = options.commands ?? [];
     this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
-    const commands = options.commands ?? [];
-    this.assertIdleRegistrationsFree(commands);
-    this.installCommands(commands);
   }
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
     const document = readCommandHooksDocument(path);
     return new GhostHookRunner({
       ...options,
-      ...parseHooksDocument(document, path),
+      commands: parseHooksDocument(document, path),
       commandConfig: { path, document },
     });
-  }
-
-  /** The startup `builtin.<key>` tuning for one built-in hook; `{}` when absent. */
-  builtinSettings(key: string): GhostBuiltinHookSettings {
-    return this.builtin[key] ?? {};
-  }
-
-  /** A command may not take an idle registration id another command or a built-in handler holds. */
-  private assertIdleRegistrationsFree(commands: CommandHook[]): void {
-    const seen = new Set<string>();
-    for (const command of commands) {
-      const id = command.idleRegistration?.id;
-      if (id === undefined) continue;
-      const existing = this.idleTargets.get(id);
-      if (seen.has(id) || (existing !== undefined && "handler" in existing)) {
-        throw new Error(`Duplicate conversation_idle registration ${JSON.stringify(id)}.`);
-      }
-      seen.add(id);
-    }
-  }
-
-  /** Swap the live command hooks: every old idle registration retires, every new one arms. */
-  private installCommands(commands: CommandHook[]): void {
-    for (const command of this.commands) {
-      const id = command.idleRegistration?.id;
-      if (id === undefined) continue;
-      this.idleTargets.delete(id);
-      this.retiredIdleRegistrations.add(id);
-    }
-    for (const command of commands) {
-      if (!command.idleRegistration) continue;
-      const id = command.idleRegistration.id;
-      this.idleTargets.set(id, { registration: command.idleRegistration, command });
-      this.retiredIdleRegistrations.delete(id);
-    }
-    this.commands = commands;
   }
 
   /** The admitted `hooks.json`, or undefined for a runner built without one. */
@@ -728,23 +551,19 @@ export class GhostHookRunner {
   /**
    * Admit `document` as the new `hooks.json`, write it through a temporary
    * file and one rename, then swap the live command hooks. Handlers registered
-   * in-process are untouched. `before_prompt` and `session_stop` changes apply
-   * to the next boundary; a changed idle registration arms from the next owner
-   * activity, and a deadline already armed against a retired one settles as a
-   * no-op. Replacements are serialized so two writers cannot interleave the
-   * file and the live set; a clash with a built-in idle registration is
-   * refused before the file changes.
+   * in-process are untouched, and the new commands apply at the next boundary.
+   * Replacements are serialized so two writers cannot interleave the file and
+   * the live set.
    */
   async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
-    const { commands } = parseHooksDocument(document, config.path);
-    this.assertIdleRegistrationsFree(commands);
+    const commands = parseHooksDocument(document, config.path);
     const admitted = document as Record<string, unknown>;
     return serializeByKey(this.configWrites, config.path, async () => {
       await mkdir(dirname(config.path), { recursive: true });
       await writePrivateJsonAtomic(config.path, admitted);
-      this.installCommands(commands);
+      this.commands = commands;
       this.commandConfig = { path: config.path, document: admitted };
       return this.commandConfig;
     });
@@ -766,40 +585,15 @@ export class GhostHookRunner {
             `${event} hook description`,
             240,
           ),
-          ...(event === "conversation_idle"
-            ? { idleMs: idleDelayMs(options.idleSeconds, this.conversationIdleDelayMs, `${event} idleSeconds`) }
-            : {}),
           timeoutMs: timeoutMs(options.timeoutSeconds, this.handlerTimeoutMs, `${event} timeoutSeconds`),
         };
-        if (event !== "conversation_idle" && options.registrationId !== undefined) {
-          throw new Error("registrationId is supported only for conversation_idle hooks.");
-        }
         if (options.settingsKey !== undefined) {
           if (!SETTINGS_KEY.test(options.settingsKey)) {
             throw new Error("settingsKey must match [a-z][a-z0-9_]*.");
           }
           registered.settingsKey = options.settingsKey;
         }
-        if (event === "conversation_idle") {
-          const idleMs = registered.idleMs as number;
-          const id = explicitIdleRegistrationId(
-            options.registrationId,
-            `${event} registrationId`,
-          ) ?? derivedIdleRegistrationId(
-            "extension",
-            [registered.name, registered.description, idleMs, registered.timeoutMs],
-            this.idleDuplicates,
-          );
-          if (this.idleTargets.has(id)) {
-            throw new Error(`Duplicate conversation_idle registration ${JSON.stringify(id)}.`);
-          }
-          registered.idleRegistration = Object.freeze({ id, idleMs });
-        }
         this.handlers[event].push(registered);
-        if (event !== "conversation_idle") return undefined;
-        const registration = registered.idleRegistration as GhostConversationIdleRegistration;
-        this.idleTargets.set(registration.id, { registration, handler: registered });
-        return registration;
       },
     } as GhostHookAPI);
   }
@@ -827,24 +621,8 @@ export class GhostHookRunner {
     return this.handlers[event].length > 0 || this.commands.some((hook) => hook.eventName === event);
   }
 
-  conversationIdleDelaysMs(): readonly number[] {
-    return [...new Set(this.conversationIdleRegistrations().map(({ idleMs }) => idleMs))]
-      .sort((left, right) => left - right);
-  }
-
-  conversationIdleRegistrations(): readonly GhostConversationIdleRegistration[] {
-    return [
-      ...this.handlers.conversation_idle
-        .map(({ idleRegistration }) => idleRegistration)
-        .filter((value): value is GhostConversationIdleRegistration => value !== undefined),
-      ...this.commands
-        .map(({ idleRegistration }) => idleRegistration)
-        .filter((value): value is GhostConversationIdleRegistration => value !== undefined),
-    ];
-  }
-
   status(): GhostHookStatus {
-    const eventOrder = ["before_prompt", "session_stop", "conversation_idle"] as const;
+    const eventOrder = ["before_prompt", "session_stop"] as const;
     const events = eventOrder.map((event) => ({
       event,
       count: this.handlers[event].length
@@ -858,7 +636,6 @@ export class GhostHookRunner {
           source: "builtin",
           name: hook.name,
           description: hook.description,
-          ...(hook.idleMs === undefined ? {} : { idleSeconds: hook.idleMs / 1_000 }),
           ...(hook.settingsKey === undefined ? {} : { settingsKey: hook.settingsKey }),
         });
       }
@@ -868,7 +645,6 @@ export class GhostHookRunner {
           source: "config",
           name: hook.name,
           description: hook.description,
-          ...(hook.idleMs === undefined ? {} : { idleSeconds: hook.idleMs / 1_000 }),
         });
       }
     }
@@ -995,40 +771,4 @@ export class GhostHookRunner {
     return undefined;
   }
 
-  async emitConversationIdle(
-    event: GhostConversationIdleEvent,
-    dueIdleMs: readonly number[] = this.conversationIdleDelaysMs(),
-  ): Promise<void> {
-    if (event.signal.aborted) return;
-    const due = new Set(dueIdleMs);
-    for (const hook of this.handlers.conversation_idle.filter(({ idleMs }) =>
-      idleMs !== undefined && due.has(idleMs)
-    )) {
-      await this.runHandler(hook.handler, event, hook.timeoutMs);
-      if (event.signal.aborted) return;
-    }
-    for (const command of this.commands.filter((hook) =>
-      hook.eventName === "conversation_idle" && hook.idleMs !== undefined && due.has(hook.idleMs)
-    )) {
-      await this.runCommandFailOpen(command, event);
-      if (event.signal.aborted) return;
-    }
-  }
-
-  async emitConversationIdleRegistration(
-    event: GhostConversationIdleEvent,
-    registration: GhostConversationIdleRegistration,
-  ): Promise<void> {
-    if (event.signal.aborted) return;
-    const target = this.idleTargets.get(registration.id);
-    if (!target || target.registration.idleMs !== registration.idleMs) {
-      if (this.retiredIdleRegistrations.has(registration.id)) return;
-      throw new Error("Unknown conversation_idle registration.");
-    }
-    if ("handler" in target) {
-      await this.runHandler(target.handler.handler, event, target.handler.timeoutMs);
-    } else {
-      await this.runCommandFailOpen(target.command, event);
-    }
-  }
 }

@@ -8,23 +8,15 @@ TestCase {
     function validStatus(): var {
         return {
             active: true,
-            total: 4,
+            total: 3,
             events: [
                 { event: "before_prompt", count: 1 },
-                { event: "session_stop", count: 2 },
-                { event: "conversation_idle", count: 1 }
+                { event: "session_stop", count: 2 }
             ],
             hooks: [
                 { event: "before_prompt", source: "config", name: "Prompt policy", description: "Adds policy." },
                 { event: "session_stop", source: "builtin", name: "Continuity", description: "Checks completion." },
-                { event: "session_stop", source: "config", name: "Style", description: "Checks prose." },
-                {
-                    event: "conversation_idle",
-                    source: "builtin",
-                    name: "Memory upkeep",
-                    description: "Updates durable context.",
-                    idleSeconds: 600
-                }
+                { event: "session_stop", source: "config", name: "Style", description: "Checks prose." }
             ]
         };
     }
@@ -32,14 +24,12 @@ TestCase {
     function test_normalizesExactRedactedStatus(): void {
         const status = HookStatus.normalize(validStatus());
         verify(status !== null);
-        compare(status.total, 4);
-        compare(status.events.length, 3);
+        compare(status.total, 3);
+        compare(status.events.length, 2);
         compare(status.hooks[1].name, "Continuity");
-        compare(status.hooks[3].idleSeconds, 600);
         compare(HookStatus.label("session_stop"), "Session stop");
-        compare(HookStatus.trigger("session_stop", 0), "After each assistant pass");
-        compare(HookStatus.trigger("conversation_idle", 600),
-            "After 10 minutes of conversation inactivity");
+        compare(HookStatus.trigger("session_stop"), "After each assistant pass");
+        compare(HookStatus.trigger("before_prompt"), "Before each owner prompt");
     }
 
     function test_acceptsExactEmptyStatus(): void {
@@ -53,41 +43,17 @@ TestCase {
         compare(status.total, 0);
     }
 
-    function test_acceptsIdleSecondBoundaries(): void {
-        const one = validStatus();
-        one.hooks[3].idleSeconds = 1;
-        verify(HookStatus.normalize(one) !== null);
-        const maximum = validStatus();
-        maximum.hooks[3].idleSeconds = 86400;
-        verify(HookStatus.normalize(maximum) !== null);
-    }
-
-    function test_rejectsFractionalOrOutOfRangeIdleSeconds(): void {
-        for (const value of [0, 1.5, 86401]) {
-            const body = validStatus();
-            body.hooks[3].idleSeconds = value;
-            compare(HookStatus.normalize(body), null);
-        }
-        const missing = validStatus();
-        delete missing.hooks[3].idleSeconds;
-        compare(HookStatus.normalize(missing), null);
-        const misplaced = validStatus();
-        misplaced.hooks[0].idleSeconds = 60;
-        compare(HookStatus.normalize(misplaced), null);
-    }
-
     function test_rejectsUnknownOutOfOrderOrInconsistentRows(): void {
         const unknown = validStatus();
-        unknown.events[0].event = "agent_end";
+        unknown.events[0].event = "conversation_idle";
         compare(HookStatus.normalize(unknown), null);
 
         const eventOrder = validStatus();
-        eventOrder.events = [eventOrder.events[1], eventOrder.events[0], eventOrder.events[2]];
+        eventOrder.events = [eventOrder.events[1], eventOrder.events[0]];
         compare(HookStatus.normalize(eventOrder), null);
 
         const hookOrder = validStatus();
-        hookOrder.hooks = [hookOrder.hooks[1], hookOrder.hooks[0],
-            hookOrder.hooks[2], hookOrder.hooks[3]];
+        hookOrder.hooks = [hookOrder.hooks[1], hookOrder.hooks[0], hookOrder.hooks[2]];
         compare(HookStatus.normalize(hookOrder), null);
 
         const count = validStatus();
@@ -113,13 +79,13 @@ TestCase {
         compare(HookStatus.normalize(tunedConfig), null);
 
         const badKey = validStatus();
-        badKey.hooks[3].settingsKey = "Memory-Upkeep";
+        badKey.hooks[1].settingsKey = "Review";
         compare(HookStatus.normalize(badKey), null);
 
         const tuned = validStatus();
-        tuned.hooks[3].settingsKey = "memory_upkeep";
-        compare(HookStatus.normalize(tuned).hooks[3].settingsKey, "memory_upkeep");
-        compare(HookStatus.normalize(tuned).hooks[1].settingsKey, undefined);
+        tuned.hooks[1].settingsKey = "review";
+        compare(HookStatus.normalize(tuned).hooks[1].settingsKey, "review");
+        compare(HookStatus.normalize(tuned).hooks[2].settingsKey, undefined);
 
         const badSource = validStatus();
         badSource.hooks[0].source = "extension";
@@ -134,7 +100,7 @@ TestCase {
         compare(HookStatus.normalize(extraRoot), null);
 
         const extraHook = validStatus();
-        extraHook.hooks[0].path = "/private/hooks.json";
+        extraHook.hooks[0].idleSeconds = 60;
         compare(HookStatus.normalize(extraHook), null);
     }
 

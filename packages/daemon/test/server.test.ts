@@ -278,19 +278,17 @@ describe("GET /api/hooks", () => {
       total: 3,
       events: [
         { event: "before_prompt", count: 1 },
-        { event: "session_stop", count: 1 },
-        { event: "conversation_idle", count: 1 },
+        { event: "session_stop", count: 2 },
       ],
       hooks: [
         { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
         { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
-          event: "conversation_idle",
+          event: "session_stop",
           source: "builtin",
-          name: "Idle upkeep",
-          description: "Runs after inactivity.",
-          idleSeconds: 60,
-          settingsKey: "memory_upkeep",
+          name: "Review",
+          description: "Reviews the pass.",
+          settingsKey: "review",
         },
       ],
     };
@@ -322,19 +320,17 @@ describe("GET /api/hooks", () => {
       total: 3,
       events: [
         { event: "before_prompt", count: 1 },
-        { event: "session_stop", count: 1 },
-        { event: "conversation_idle", count: 1 },
+        { event: "session_stop", count: 2 },
       ],
       hooks: [
         { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
         { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
         {
-          event: "conversation_idle",
+          event: "session_stop",
           source: "builtin",
-          name: "Idle upkeep",
-          description: "Runs after inactivity.",
-          idleSeconds: 60,
-          settingsKey: "memory_upkeep",
+          name: "Review",
+          description: "Reviews the pass.",
+          settingsKey: "review",
         },
       ],
     });
@@ -1278,41 +1274,6 @@ describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
     expect(await response.json()).toMatchObject({
       error: { code: "session_resources_unavailable" },
     });
-  });
-});
-
-describe("POST /api/ghosts/:name/sessions/:id/recap", () => {
-  it("returns a non-persisted Pi recap and enforces the route boundary", async () => {
-    const base = await serve([
-      { kind: "text", text: "We are shaping the launch notes." },
-      { kind: "text", text: "You are shaping the launch notes. Next: finish the opening section." },
-    ]);
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-recap" } });
-    const transcriptUrl = `${base}/api/ghosts/casper/sessions/${piSegment("conv-recap")}/transcript`;
-    const before = await (await fetch(transcriptUrl)).json() as { total: number };
-    const recapUrl = `${base}/api/ghosts/casper/sessions/${piSegment("conv-recap")}/recap`;
-
-    const response = await fetch(recapUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      recap: "You are shaping the launch notes. Next: finish the opening section.",
-    });
-    const after = await (await fetch(transcriptUrl)).json() as { total: number };
-    expect(after.total).toBe(before.total);
-
-    expect((await fetch(recapUrl)).status).toBe(405);
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("missing")}/recap`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-    )).status).toBe(404);
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${claudeSegment("conv-recap")}/recap`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: "{}" },
-    )).status).toBe(409);
   });
 });
 

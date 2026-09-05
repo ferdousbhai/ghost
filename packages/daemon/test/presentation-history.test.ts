@@ -17,8 +17,8 @@ import {
   presentationHistoryPath,
   type PresentationHistoryIdentity,
   type PresentationHistoryV1,
+  type SettledTurn,
 } from "../src/presentation-history.js";
-import type { SettledMaintenanceTurn } from "../src/conversation-maintenance.js";
 
 let root: string | null = null;
 
@@ -39,12 +39,11 @@ const identity: PresentationHistoryIdentity = {
   conversationId: "conversation-1",
 };
 
-function turn(ordinal: number, text = `answer-${ordinal}`): SettledMaintenanceTurn {
+function turn(ordinal: number, text = `answer-${ordinal}`): SettledTurn {
   return {
     source: { runtime: "pi", createdAt: "2026-08-31T10:00:00.000Z" },
     sourceRevision: { kind: "pi-leaf", value: `leaf-${ordinal}` },
     sourceOrdinal: ordinal,
-    cwd: "/tmp/project",
     ownerPrompt: `prompt-${ordinal}`,
     assistantText: text,
     outcome: "completed",
@@ -114,7 +113,7 @@ describe("presentation history", () => {
     const dir = sessionDir();
     const store = new PresentationHistoryStore();
     const claudeIdentity = { runtime: "claude-code" as const, conversationId: "claude-1" };
-    const claudeTurn: SettledMaintenanceTurn = {
+    const claudeTurn: SettledTurn = {
       source: {
         runtime: "claude-code",
         createdAt: "2026-08-31T10:00:00.000Z",
@@ -122,7 +121,6 @@ describe("presentation history", () => {
       },
       sourceRevision: { kind: "claude-owner-turn", value: 1 },
       sourceOrdinal: 2,
-      cwd: "/tmp/project",
       ownerPrompt: "prompt",
       assistantText: "answer",
       outcome: "completed",

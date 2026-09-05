@@ -1,12 +1,6 @@
 import { join } from "node:path";
 import { readDaemonControlFile, writeDaemonControlFile } from "./control-file.js";
 import type { ConversationRuntime } from "./conversation-identity.js";
-import {
-  sourceKey,
-  validRuntimeSourceRevision,
-  type MaintenanceSourceRevision,
-  type SettledMaintenanceTurn,
-} from "./conversation-maintenance.js";
 import { GhostError } from "./ghosts.js";
 import { serializeByKey } from "./promise-chain.js";
 import { sessionFileNameFor } from "./session-files.js";
@@ -15,10 +9,31 @@ export const PRESENTATION_HISTORY_MAX_BYTES = 16 * 1_048_576;
 export const PRESENTATION_HISTORY_MAX_TURNS = 1_000;
 export const PRESENTATION_HISTORY_MAX_TEXT_CHARS = 32_000;
 
+/** Which native revision a journalled turn came from, per runtime. */
+export type SourceRevision =
+  | { kind: "pi-leaf"; value: string }
+  | { kind: "claude-owner-turn"; value: number };
+
+/** The native conversation a journalled turn belongs to. */
+export type SourceIdentity =
+  | { runtime: "pi"; createdAt: string }
+  | { runtime: "claude-code"; createdAt: string; resumeId: string };
+
+/** One owner turn a runtime has finished and made durable in its own storage. */
+export interface SettledTurn {
+  source: SourceIdentity;
+  sourceRevision: SourceRevision;
+  /** 1-based position of this owner turn in its native conversation. */
+  sourceOrdinal: number;
+  ownerPrompt: string;
+  assistantText: string;
+  outcome: "completed" | "failed";
+}
+
 export interface PresentationTurn {
   sequence: number;
   sourceOrdinal: number;
-  sourceRevision: MaintenanceSourceRevision;
+  sourceRevision: SourceRevision;
   settledAt: string;
   ownerText: string;
   ownerTextTruncated: boolean;
@@ -44,7 +59,7 @@ export interface PresentationHistoryV1 {
   lastSequence: number;
   droppedThroughSequence: number;
   lastSourceOrdinal: number | null;
-  lastSourceRevision: MaintenanceSourceRevision | null;
+  lastSourceRevision: SourceRevision | null;
   turns: PresentationTurn[];
 }
 
@@ -73,6 +88,26 @@ function safeNonnegative(value: unknown): value is number {
 
 function positiveOrdinal(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 1;
+}
+
+function validSourceRevision(value: unknown): value is SourceRevision {
+  if (!object(value) || !exactKeys(value, ["kind", "value"])) return false;
+  return value.kind === "pi-leaf"
+    ? typeof value.value === "string" && value.value.length > 0 && value.value.length <= 4_096
+    : value.kind === "claude-owner-turn" && Number.isSafeInteger(value.value) && (value.value as number) >= 1;
+}
+
+export function validRuntimeSourceRevision(
+  runtime: ConversationRuntime,
+  value: unknown,
+): value is SourceRevision {
+  return validSourceRevision(value)
+    && (runtime === "pi" ? value.kind === "pi-leaf" : value.kind === "claude-owner-turn");
+}
+
+/** One string per revision identity, for equality and dedup across stores. */
+export function sourceKey(source: SourceRevision): string {
+  return `${source.kind}:${String(source.value)}`;
 }
 
 function iso(value: unknown): value is string {
@@ -243,7 +278,7 @@ export class PresentationHistoryStore {
   async recordSettledTurn(
     sessionDir: string,
     identity: PresentationHistoryIdentity,
-    turn: SettledMaintenanceTurn,
+    turn: SettledTurn,
   ): Promise<PresentationHistoryV1> {
     const path = presentationHistoryPath(sessionDir, identity.runtime, identity.conversationId);
     return serializeByKey(this.queues, path, async () => {
@@ -300,7 +335,7 @@ export class PresentationHistoryStore {
   private validateSettledTurn(
     path: string,
     identity: PresentationHistoryIdentity,
-    turn: SettledMaintenanceTurn,
+    turn: SettledTurn,
   ): void {
     if (!validRuntimeSourceRevision(identity.runtime, turn.sourceRevision)
       || !positiveOrdinal(turn.sourceOrdinal)
