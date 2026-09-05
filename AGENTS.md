@@ -22,17 +22,9 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 ## The three ways to hurt yourself
 
-1. **Touching the live install.** `ghostd.service` and `ghost-shell.service` run on this machine against the owner's real ghost, `~/ghosts/dous`. Reading it is fine. Never start a daemon against it, never write into its `sessions/`, never contact `127.0.0.1:7717` from a test. Test against a scratch ghost home.
+1. **Testing against the live install.** `ghostd.service` and `ghost-shell.service` run on this machine against the owner's real ghost, `~/ghosts/dous`, from this checkout's `dist` and `packages/shell/qml`. Tests never start a daemon against it, write into its `sessions/`, or contact `127.0.0.1:7717`; they use a scratch ghost home. Restarting the live units after `pnpm build` is how a change ships here: do it, then verify with `ghost status` and a turn.
 2. **Driving the HUD on the owner's desktop.** A plain `quickshell -p` joins the live session bus and puts a mock ghost in the real tray. Verify shell changes only through `packages/shell/dev/preview.sh`, which runs a nested Hyprland with private HOME, XDG dirs, and dbus, and refuses the live port and `~/ghosts`. No headless QML platform either — tray and layer-shell behavior is what is being verified.
 3. **Killing by pattern.** Several agent sessions share this checkout, and their processes carry this path in argv. Never `pkill -f`, `pgrep | kill`, or kill a PID found by name. Kill only a PID you captured at spawn.
-
-## Shared working tree
-
-Other agent sessions edit this same checkout and branch concurrently.
-
-- Stage by explicit file path. Never `git add -A`, `git add .`, or `git add <dir>`; they sweep a peer's untracked files and hunks into your commit.
-- Check `git status` for `??` files and foreign hunks in shared files (`server.ts`, `server.test.ts`, `CONTRACTS.md`) before committing; stage only your own hunks.
-- Finish one unit (code + tests green) → run `/simplify` and apply until nothing major remains → re-run tests → commit. One commit per unit; never batch.
 
 ## Hit every surface
 
@@ -70,4 +62,4 @@ pnpm build
 
 Verify with the smallest proof: the test files you touched (`pnpm --filter <pkg> test -- <file>`) plus `typecheck` for the packages you changed. Run the repo-wide suite only when asked. Behavior changes ship with a focused test. The stable system-prompt policy text is budgeted by `packages/daemon/test/prompt-budget.test.ts`, so raising a ceiling there is a deliberate decision that has to be justified in the commit message. The root workspace commands do not cover `packages/desktop-helper`; run its `uv` checks from that package when it changes.
 
-The daemon runs on Bun (`engines.bun`), not Node. After a build, the live install picks up changes only via `systemctl --user restart ghostd` — that is the owner's call, not yours.
+The daemon runs on Bun (`engines.bun`), not Node. The live install picks up a build only via `systemctl --user restart ghostd.service ghost-shell.service`.
