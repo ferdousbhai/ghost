@@ -167,7 +167,7 @@ function obsidianReadiness(
     status: installed ? "skipped" : "missing",
     reason: installed
       ? "The installed skill was not admitted by the machine skill loader."
-      : "The upstream Obsidian CLI skill is not installed at its standard path.",
+      : "The optional Obsidian CLI skill is not installed at its standard path.",
   };
 }
 

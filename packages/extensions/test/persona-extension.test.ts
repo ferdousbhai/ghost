@@ -56,7 +56,7 @@ describe("persona extension", () => {
     expect(prompt).toContain("## Memory");
     expect(prompt).toContain(JSON.stringify(join(fixture.dir, "memory")));
     expect(prompt).toContain("Never use private memory for owner facts or preferences");
-    expect(prompt).toContain("Put those in Obsidian through its CLI");
+    expect(prompt).toContain("Put those in the owner's documents");
     expect(prompt).toContain("apprentice-question");
     expect(prompt).not.toContain("I explained how to start");
     expect(prompt.indexOf("working-habit")).toBeLessThan(prompt.indexOf("apprentice-question"));

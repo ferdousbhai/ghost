@@ -59,6 +59,7 @@ import {
   deriveMemoryIndex,
   openGhostHome,
   openRegularFileNoFollow,
+  resolveDocumentsDirectory,
   type GhostToolCapabilities,
   type AnyGhostToolDefinition,
   type CollectedGhostExtension,
@@ -109,7 +110,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
-  SHARED_OBSIDIAN_POLICY,
+  renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
   renderScheduledWorkPolicy,
@@ -1450,7 +1451,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
-      SHARED_OBSIDIAN_POLICY,
+      renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
       ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       renderSelfMaintenancePolicy({

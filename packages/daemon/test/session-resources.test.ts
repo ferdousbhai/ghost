@@ -46,7 +46,7 @@ function mcp(
 }
 
 describe("session resource admission", () => {
-  it("shows skill precedence, required Obsidian readiness, and every MCP claim outcome", () => {
+  it("shows skill precedence, optional Obsidian readiness, and every MCP claim outcome", () => {
     const ghostMcp = "/home/owner/ghosts/casper/mcp.json";
     const projectMcp = "/work/project/.omp/mcp.json";
     const view = buildSessionResourceView({

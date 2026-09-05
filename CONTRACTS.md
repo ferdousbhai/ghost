@@ -15,25 +15,30 @@ Durable state has three scopes:
 
 - **Ghost-private:** character, memory, conversations, settings, and runtime
   sidecars live in one ghost home.
-- **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in an
-  Obsidian vault selected by Obsidian. Every ghost accesses it exclusively with
-  the official Obsidian CLI and the upstream `obsidian-cli` machine skill.
+- **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in the
+  owner's XDG Documents directory, which every ghost reads and writes with its
+  runtime's native file and search tools.
 - **External:** trusted projects, browser downloads, screenshots, systemd user
   timers, and Secret Service credentials stay in the machine facility that owns
   them.
 
-Ghost never infers an Obsidian vault path, scans for `.obsidian`, assumes
-`~/Documents`, or reads/writes vault files directly. The CLI's current vault is
-the default; `vault=<name>` selects an owner-named vault. Obsidian state is
-unaffected by creating, renaming, deleting, or uninstalling a ghost.
-Ghost does not use the separate Obsidian Headless client: owner-shared note and
-task operations require the desktop-linked CLI and therefore a graphical
-Obsidian instance.
+The Documents directory is resolved like the screenshot directory:
+`XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; never a
+hard-coded path. It is persistent owner context, not a Ghost-owned store: Ghost
+neither indexes it nor injects any part of it at session start, and the system
+prompt only names the directory.
+
+An Obsidian vault is a folder of Markdown, typically under Documents. Ghost
+reads and writes it as ordinary files and leaves `.obsidian/` alone. Obsidian
+itself is optional, and the `obsidian` CLI is reachable only through the
+owner-installed `obsidian-cli` machine skill, admitted by ordinary machine-skill
+discovery. Vault content is unaffected by creating, renaming, deleting, or
+uninstalling a ghost.
 
 There is no Ghost plan mode, todo store, plan/todo API, or progress UI. Runtime
 native planning may exist, but durable owner-visible plans and tasks belong in
-Obsidian. Background jobs remain Ghost runtime state because they control work
-currently executing in a conversation.
+the owner's documents. Background jobs remain Ghost runtime state because they
+control work currently executing in a conversation.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -60,8 +65,9 @@ The default root is `~/ghosts`; each direct child is one ghost:
 The directory is the atomic lifecycle unit. Rename and deletion hold a
 filesystem-identity lease and move the whole home on the same filesystem.
 Deletion goes to freedesktop Trash, with a recoverable `.trash/` fallback for
-`EXDEV`; Ghost never recursively removes a home. Machine credentials, Obsidian,
-trusted projects, screenshots, downloads, and timers are not moved with it.
+`EXDEV`; Ghost never recursively removes a home. Machine credentials, owner
+documents, trusted projects, screenshots, downloads, and timers are not moved
+with it.
 The lifecycle implementation and crash recovery are in
 [`home-operations.ts`](packages/daemon/src/home-operations.ts),
 [`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
@@ -83,7 +89,8 @@ shows the owner a draft and waits for confirmation before replacing it.
 `memory/*.md` is this ghost's private internal continuity: subjective
 reflections, ghost-specific interpretations, and commitments about its own
 behavior. It is not the owner's knowledge store. Owner facts and preferences,
-shared decisions, project knowledge, notes, plans, and tasks go to Obsidian.
+shared decisions, project knowledge, notes, plans, and tasks go to the owner's
+documents.
 The owner can inspect memory for transparency; other ghosts do not consume it.
 
 Each memory is one Markdown file named by a lowercase kebab-case slug. Content
@@ -171,8 +178,9 @@ allowlists, and recovery state machines live beside their focused tests in
 - Provider and MCP credential values live in Linux Secret Service. `models.json`
   and `mcp.json` hold service/account references only. See
   [`docs/keyring.md`](docs/keyring.md).
-- Finished artifacts go to the destination the owner requested. Ghost has no
-  default Documents destination or automatic document index.
+- Finished artifacts go to the destination the owner requested, defaulting to
+  the owner's Documents directory when none was named. Ghost keeps no index of
+  it.
 - Delegated coding work has one private `task-record/v2` JSON record under the
   ghost home's mode-0700 `.tasks/` directory. Records move to Trash with their
   parent conversation and are not portable runtime configuration.
@@ -217,13 +225,13 @@ backup: Trash and snapper are undo, not retention.
 
 Both runtimes receive the same Ghost character, private memory index, first
 meeting policy, Omarchy computer-use policy, scheduled-work policy,
-self-maintenance policy, shared
-Obsidian policy, and—when native worker services are configured—delegation
-policy and tools. Normal machine-skill discovery admits the owner-installed
-`obsidian-cli` skill into each runtime's standard skill index; the shared-state
-policy does not duplicate its path or contents. Obsidian content is fetched
-only when relevant through `obsidian`, never injected automatically at session
-start.
+self-maintenance policy, owner-context policy, and—when native worker services
+are configured—delegation policy and tools. The owner-context policy names the
+Documents directory in one sentence and nothing else about it; ordinary
+machine-skill discovery separately admits an owner-installed `obsidian-cli`
+skill into each runtime's standard skill index. Owner documents are read only
+when relevant, with the runtime's own file and search tools, never injected
+automatically at session start.
 
 The operational cwd defaults to the owner home and may be rebound to one
 trusted project. Ghost home remains a separately named private resource root.
@@ -264,7 +272,7 @@ Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
 `ask` without denying or replacing any native tool. Claude's complete native
 tool preset remains available; Ghost's browser/screen/desktop and supervised
 delegation tools are additive. Ghost disables Claude auto-memory; shared
-persistence is Obsidian and private continuity is Ghost memory.
+persistence is the owner's documents and private continuity is Ghost memory.
 
 The Claude Code path is native-first. A capability already supplied by the
 native `claude_code` preset keeps Claude's tool name, schema, result, and
@@ -342,8 +350,8 @@ it never invents a Git worktree, branch, commit, or approval flow for a task.
 Awaited harness hooks are `before_prompt`, `session_stop`, and
 `conversation_idle`. Their JSON protocol, failure behavior, and settings are
 defined in [`docs/hooks.md`](docs/hooks.md). Built-in idle maintenance may write
-or consolidate only private memory; shared knowledge and task maintenance uses
-Obsidian during ordinary runtime work.
+or consolidate only private memory; shared knowledge and task maintenance
+happens in the owner's documents during ordinary runtime work.
 
 One built-in review pipeline runs at `session_stop` on both runtimes. Per ghost,
 `settings.yml` selects `review.mode` (`off` default, `lint`, `advisory`, or
@@ -427,7 +435,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT\|DELETE /sessions/:id/project…` | Read, preview, bind/reload/unbind, or abandon an unpublished trusted-project draft. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
-| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips, and standard Obsidian-skill readiness. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
+| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips, and the optional `obsidian-cli` skill's readiness. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
 | `POST /sessions/:id/recap` | Non-persisted bounded Pi recap; failure returns `recap:null`. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
@@ -595,13 +603,10 @@ fail-closed state machine lives in
   authoritatively inactive or absent.
 - Logs redact secrets and private payloads. Journal identity fields are `GHOST`
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.
-- Package install/upgrade must not enable Ghost until the desktop owner has the
-  official Obsidian CLI registered, `obsidian version` succeeds with the app
-  open, and the upstream skill exists at
-  `~/.agents/skills/obsidian-cli/SKILL.md`. Root ALPM hooks may only report this
-  requirement; issue #54 owns the supported user-level readiness gate.
+- Package install/upgrade gates Ghost on nothing owner-level: no application,
+  CLI, or machine skill is required before enabling the services.
 - Package removal preserves ghost homes, XDG config/state, Secret Service
-  items, the Obsidian skill, and all vaults.
+  items, owner documents, and any owner-installed machine skill.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute

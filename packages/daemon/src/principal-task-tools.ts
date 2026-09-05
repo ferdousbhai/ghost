@@ -36,7 +36,7 @@ export const PRINCIPAL_TASK_POLICY = [
   "# Coding delegation",
   "You are the driver and own the outcome. Escalate to a native Pi, Codex, or Claude Code specialist through task when work is beyond what you can finish reliably in your own turn (a multi-file code change, long research, anything you have failed at twice), with a bounded assignment, and tell the owner in one sentence that you escalated and why. Do not escalate what you can do; escalations are counted and should fall as you improve.",
   "Retain the task id and use task_get or task_list later. Use task_send only to steer a running task and task_cancel only when cancellation is actually needed. The specialist owns coding mechanics; do not poll in a tight loop or claim work you have not inspected.",
-  "Escalating never replaces your private memory, shared Obsidian notes and tasks, continuity, schedules, communications, browser, computer, CLI, recap, queue, titles, or other owner-agent responsibilities.",
+  "Escalating never replaces your private memory, the owner's notes and tasks, continuity, schedules, communications, browser, computer, CLI, recap, queue, titles, or other owner-agent responsibilities.",
 ].join("\n");
 
 export interface PrincipalTaskContext {

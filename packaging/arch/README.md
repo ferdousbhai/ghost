@@ -38,49 +38,29 @@ select explicit owner executables or wrappers in the daemon service environment;
 restart ghostd after changing that environment. Missing, malformed, logged-out,
 or SDK-incomplete harnesses remain visibly unavailable instead of falling back.
 
-## Required Obsidian setup
+## Owner-shared state, and optional Obsidian
 
-The package depends on Obsidian 1.12.7 or newer and npm. Obsidian is Ghost's
-owner-wide persistent knowledge and task store, shared by every ghost; its vault
-is selected only through the CLI, never a presumed filesystem location.
+Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
+Documents directory. Every ghost reads and writes it with its runtime's native
+file tools; the package installs nothing there and gates nothing on it.
 
-Complete Obsidian's [official CLI registration](https://obsidian.md/help/cli)
-in **Settings → General → Command line interface**, then install the upstream
-`obsidian-cli` skill as the desktop owner:
+An Obsidian vault is a folder of Markdown, usually kept under Documents, and a
+ghost edits those notes as ordinary files while leaving `.obsidian/` alone. To
+let a ghost drive Obsidian itself instead, install the optional `obsidian`
+package, complete its [official CLI
+registration](https://obsidian.md/help/cli) in **Settings → General → Command
+line interface**, and install the upstream skill as the desktop owner:
 
 ```sh
 npx -y skills@latest add https://github.com/kepano/obsidian-skills \
   --global --yes --skill obsidian-cli
-
-obsidian version
-test -f ~/.agents/skills/obsidian-cli/SKILL.md
 ```
 
-Run `obsidian version` while Obsidian is open. Some Arch repackagings of the
-application omit the official standalone CLI payload; installing the GUI alone
-does not satisfy the check. The ALPM package hook only prints these instructions
-because it runs as root and must not guess which desktop user's home to modify.
-For a bounded source-checkout proof, keep Obsidian open and run:
-
-```sh
-bash packaging/arch/accept-obsidian.sh
-# Or target an owner-named vault explicitly:
-bash packaging/arch/accept-obsidian.sh --vault "Owner Notes"
-```
-
-The harness validates version output rather than trusting exit status, exercises
-CLI create/read/search/tasks/delete, and permanently removes only the unique
-marker-owned note it created. It never resolves or reads the vault path.
-Under the current release hold, there is no supported end-user Omarchy install
-flow. #54 must make that flow perform and verify these owner-level steps before
-it can become supported.
-
-Normal machine-skill discovery admits
-`~/.agents/skills/obsidian-cli/SKILL.md`; the shared-state policy does not add a
-second link. Every vault operation uses `obsidian`; Ghost never scans for
-`.obsidian`, assumes a vault under `~/Documents`, or falls back to editing vault
-files. Removing Ghost does not remove the owner-installed skill or any vault
-data.
+Normal machine-skill discovery then admits
+`~/.agents/skills/obsidian-cli/SKILL.md` like any other machine skill; the
+owner-context policy does not add a second link. The CLI needs Obsidian
+running, which is why it is a convenience rather than the shared-state path.
+Removing Ghost does not remove the owner-installed skill or any vault data.
 
 ## Optional CLI integrations
 
@@ -172,8 +152,8 @@ The package owns only files under `/usr`, plus the system Quickshell symlink at
 `/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, docs, memory, sessions, provider credentials, and API tokens
-untouched. Its removal hook likewise leaves the owner-installed Obsidian skill
-and every vault, note, and task untouched.
+untouched. Its removal hook likewise leaves owner documents and any
+owner-installed machine skill untouched.
 
 An upgrade requires `systemctl --user reenable --now ghostd.service
 ghost-shell.service`; re-enabling also moves an installation made with the old

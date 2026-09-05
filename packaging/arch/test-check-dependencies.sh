@@ -39,27 +39,20 @@ require_srcinfo_dependency() {
   fi
 }
 
-require_obsidian_readiness_before_service() {
+# Installing Ghost gates on nothing owner-level, so each hook has one job: say
+# how to bring the services up on this login.
+require_install_hook_activation() {
   local install_script="$1"
   local hook="$2"
   local service_command="$3"
-  local output setup_line service_line
+  local output
   output="$(bash -c 'source "$1"; "$2"' ghost-install-hook "$install_script" "$hook")"
-  for expected in \
-    'npx -y skills@latest add https://github.com/kepano/obsidian-skills' \
-    'obsidian version' \
-    'test -f ~/.agents/skills/obsidian-cli/SKILL.md' \
-    "$service_command"; do
-    if ! grep -Fq -- "$expected" <<< "$output"; then
-      printf '%s %s does not print %s\n' "$install_script" "$hook" "$expected" >&2
-      exit 1
-    fi
-  done
-  setup_line="$(grep -nF -m1 -- 'obsidian version' <<< "$output" | cut -d: -f1)"
-  service_line="$(grep -nF -m1 -- "$service_command" <<< "$output" | cut -d: -f1)"
-  if (( setup_line >= service_line )); then
-    printf '%s %s prints service activation before Obsidian readiness\n' \
-      "$install_script" "$hook" >&2
+  if ! grep -Fq -- "$service_command" <<< "$output"; then
+    printf '%s %s does not print %s\n' "$install_script" "$hook" "$service_command" >&2
+    exit 1
+  fi
+  if grep -Fqi -- 'obsidian' <<< "$output"; then
+    printf '%s %s still gates enabling Ghost on Obsidian\n' "$install_script" "$hook" >&2
     exit 1
   fi
 }
@@ -88,14 +81,13 @@ python -c 'import yaml' >/dev/null 2>&1 || {
 for install_script in \
   "$script_dir/ghost-dev.install" \
   "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"; do
-  require_obsidian_readiness_before_service "$install_script" post_install \
+  require_install_hook_activation "$install_script" post_install \
     'systemctl --user enable --now ghostd.service ghost-shell.service'
-  require_obsidian_readiness_before_service "$install_script" post_upgrade \
+  require_install_hook_activation "$install_script" post_upgrade \
     'systemctl --user reenable --now ghostd.service ghost-shell.service'
 done
 
 bash "$script_dir/test-ci-dependencies.sh"
-bash "$script_dir/test-accept-obsidian.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
 python "$source_root/packaging/release/test-public-candidate.py"
@@ -134,11 +126,14 @@ require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
   "$work/ghost-dev.SRCINFO"
+# Obsidian is one optional way to reach a vault, never an install gate.
+require_srcinfo_entry optdepends \
+  'obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill' \
+  "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
 # The keyring store shells out to libsecret's secret-tool at runtime.
 require_srcinfo_dependency libsecret "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency npm "$work/ghost-dev.SRCINFO"
-require_srcinfo_dependency obsidian "$work/ghost-dev.SRCINFO"
 # pi otherwise downloads these into its cache on the first grep/find call.
 require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
@@ -157,10 +152,13 @@ require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
 require_srcinfo_entry optdepends \
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime' \
   "$work/ghost/.SRCINFO"
+# Obsidian is one optional way to reach a vault, never an install gate.
+require_srcinfo_entry optdepends \
+  'obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill' \
+  "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
 require_srcinfo_dependency libsecret "$work/ghost/.SRCINFO"
 require_srcinfo_dependency npm "$work/ghost/.SRCINFO"
-require_srcinfo_dependency obsidian "$work/ghost/.SRCINFO"
 require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
 require_srcinfo_entry depends 'systemd>=254' "$work/ghost/.SRCINFO"

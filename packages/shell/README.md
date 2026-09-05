@@ -31,15 +31,15 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   cumulative QML `XMLHttpRequest` SSE bodies directly; request objects remain
   strongly owned until terminal settlement.
 - The shell edits durable state only through authenticated daemon routes. It
-  never reads ghost homes or Obsidian vault files directly.
+  never reads ghost homes or the owner's documents directly.
 - `ask` replaces the composer while owner input is pending. It is not tool
   approval. Enter answers, Escape dismisses, and restored cards preserve how a
   question settled.
 - While streaming, Enter steers, Ctrl+Enter queues a follow-up, and Shift+Enter
   inserts a newline.
 - The work strip is background-job control only: bounded output, status, cancel,
-  and visible-HUD polling while work runs. Plans and tasks live in Obsidian; the
-  shell has no plan mode or progress/todo projection.
+  and visible-HUD polling while work runs. Plans and tasks live in the owner's
+  documents; the shell has no plan mode or progress/todo projection.
 - Delegation is a separate conversation-scoped destination for starting,
   inspecting, following up on, and cancelling native coding workers. New work
   requires the current trusted project; the HUD never accepts arbitrary cwd or

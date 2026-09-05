@@ -18,7 +18,7 @@ import { FIRST_MEETING_SECTION } from "../src/greeting.js";
 import {
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
-  SHARED_OBSIDIAN_POLICY,
+  renderOwnerContextPolicy,
 } from "../src/machine-skills.js";
 import { PRINCIPAL_TASK_POLICY } from "../src/principal-task-tools.js";
 import { renderScheduledWorkPolicy } from "../src/schedules.js";
@@ -30,6 +30,7 @@ const GHOST_NAME = "casper";
 const MEMORY_ROOT = "/home/owner/ghosts/casper/memory";
 const UNIT_DIR = "/home/owner/.config/systemd/user";
 const CHECKOUT = "/home/owner/src/ghost";
+const DOCUMENTS = "/home/owner/Documents";
 const SESSION_ID = "01JZZZZZZZZZZZZZZZZZZZZZZZ";
 const RUNNING: RunningSource = {
   version: "0.0.1",
@@ -64,7 +65,7 @@ function renderStablePolicy(): Record<string, string> {
     Memory: promptSection("## Memory"),
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
-    "Shared Obsidian": SHARED_OBSIDIAN_POLICY,
+    "Owner context": renderOwnerContextPolicy(DOCUMENTS),
     Delegation: PRINCIPAL_TASK_POLICY,
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
@@ -79,18 +80,18 @@ function renderStablePolicy(): Record<string, string> {
 
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
-  "Character file": 941,
-  Memory: 1540,
+  "Character file": 940,
+  Memory: 1537,
   "Computer use": 415,
-  "Finished work": 471,
-  "Shared Obsidian": 1080,
-  Delegation: 919,
+  "Finished work": 404,
+  "Owner context": 765,
+  Delegation: 918,
   "Scheduled work": 1399,
   "Self-maintenance": 2187,
   "First meeting": 470,
 };
 
-const TOTAL_CEILING = 9422;
+const TOTAL_CEILING = 9035;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

@@ -37,10 +37,10 @@ Detailed external protocols have one home:
 ## Persistent state
 
 Character and private memory live in the ghost home. Owner-visible knowledge,
-notes, plans, and tasks live in the Obsidian vault selected by Obsidian. Both
-runtimes use the official `obsidian` CLI and the upstream skill admitted through
-normal machine-skill discovery. The daemon has no Documents index, vault-path
-resolver, notes API, plan mode, or todo store. Active background jobs remain
+notes, plans, and tasks live in the owner's XDG Documents directory, which both
+runtimes read and write with their native file tools; an Obsidian vault there is
+a folder of Markdown. The daemon has no document index, notes API, plan mode, or
+todo store. Active background jobs remain
 conversation runtime state.
 
 ## Local development

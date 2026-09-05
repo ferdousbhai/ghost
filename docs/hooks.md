@@ -472,7 +472,7 @@ logged and fail open.
 
 Ghost's built-in idle-memory hook uses `smol_model` and only memory list/read/
 search plus one receipt-journaled write. Transcript text is fenced as untrusted
-data. It cannot access Obsidian, character, deletion, network/MCP,
+data. It cannot access owner documents, character, deletion, network/MCP,
 shell, or general session tools. A new owner action, conversation delete,
 whole-home move, or shutdown aborts and drains background work before
 proceeding. Its exact mode-0600 v1 state is stored per runtime-qualified

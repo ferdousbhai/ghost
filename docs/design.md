@@ -14,8 +14,8 @@ An owner installs Ghost, creates a named persona, binds a local or open-source
 model as its driver, adds a subscription or API key for the frontier teacher and
 specialists, and talks through the HUD or `ghost` CLI. Pi is the default runtime; an installed Claude
 Code is an optional native runtime. Both feel like the same ghost because they
-receive the same character, private memory policy, machine skills, Obsidian
-policy, and trusted-project snapshot. The runtime still owns its native way of
+receive the same character, private memory policy, machine skills,
+owner-context policy, and trusted-project snapshot. The runtime still owns its native way of
 working.
 
 The official repository stays a narrow, opinionated core. Owners extend a ghost
@@ -48,12 +48,12 @@ than becoming parallel Ghost frameworks.
   what the adapter has to absorb.
 - **Three persistence scopes.** Character and subjective continuity are
   ghost-private. Owner-visible knowledge, preferences, decisions, notes, plans,
-  and tasks are shared through Obsidian. Projects and machine artifacts remain
-  owned by their native facility.
-- **Obsidian owns shared state.** Ghost admits the upstream `obsidian-cli`
-  through normal machine-skill discovery and uses the official CLI exclusively.
-  It has no notes database, task store, plan mode, Documents index, vault-path
-  convention, or raw vault-file adapter.
+  and tasks live in the owner's Documents directory. Projects and machine
+  artifacts remain owned by their native facility.
+- **The owner's documents are the shared store.** Ghost names that directory in
+  the prompt and reads it with the runtime's native file and search tools. An
+  Obsidian vault there is a folder of Markdown like any other. Ghost has no
+  notes database, task store, plan mode, document index, or vault adapter.
 - **Files over an application database.** Personas and inspectable policy stay
   greppable and backup-friendly. Derived runtime state is isolated under
   `.pi/`; credential values live only in Linux Secret Service.
@@ -98,12 +98,11 @@ than becoming parallel Ghost frameworks.
 The useful idea is an always-available AI teammate with a name, a chat thread,
 tools, and continuity. Ghost's distinction is local custody: the persona works
 on the owner's actual Linux desktop, its private state is readable, shared notes
-remain the owner's Obsidian vault, and credentials remain in machine-native
+remain the owner's own files, and credentials remain in machine-native
 stores. That custody covers Ghost's own source: a ghost maintains the clone the
 owner names for it, and every way back is a facility the machine already has.
 
-Onboarding is: install and verify Obsidian CLI/skill → create a ghost → bind a
-local or open-source driver, then optionally a subscription or API key for the
-teacher and specialist roles → summon the HUD → talk. Packaging
-must not call this supported until the owner-level Obsidian readiness gate in
-#54 is implemented.
+Onboarding is: create a ghost → bind a local or open-source driver, then
+optionally a subscription or API key for the teacher and specialist roles →
+summon the HUD → talk. Nothing owner-level has to be installed or verified
+first.

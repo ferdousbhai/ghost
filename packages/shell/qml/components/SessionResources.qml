@@ -298,7 +298,7 @@ Rectangle {
                 visible: root.snapshot !== null
                 spacing: Theme.gap
 
-                SectionLabel { label: "Obsidian readiness" }
+                SectionLabel { label: "Obsidian CLI skill (optional)" }
 
                 Rectangle {
                     width: parent.width

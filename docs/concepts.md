@@ -43,7 +43,7 @@ in the layout appears when it is used
 The home is the atomic lifecycle unit. Rename moves the directory (so every
 conversation id stays valid); delete moves it to the freedesktop Trash. Ghost
 never recursively removes a home, and neither operation touches credentials,
-Obsidian, trusted projects, screenshots, downloads, or timers.
+owner documents, trusted projects, screenshots, downloads, or timers.
 
 ## Three state scopes
 
@@ -55,30 +55,31 @@ enforced in the system prompt as well as in code
 | Scope | Holds | Owned by |
 |---|---|---|
 | Ghost-private | character, memory, conversations, settings, runtime sidecars | one ghost home |
-| Owner-shared | notes, knowledge, decisions, plans, tasks | an Obsidian vault, reached only through the official `obsidian` CLI |
+| Owner-shared | notes, knowledge, decisions, plans, tasks | the owner's XDG Documents directory, read and written as ordinary files |
 | External | trusted projects, downloads, screenshots, systemd user timers, credentials | the machine facility that already owns them |
 
 Private memory is for the ghost's own continuity. Owner facts, preferences,
-shared decisions, project knowledge, and durable tasks go to Obsidian, where
-the owner and every other ghost can see them. Finished deliverables go to the
-destination the owner asked for — never into a ghost home.
+shared decisions, project knowledge, and durable tasks go to the owner's
+documents, where the owner and every other ghost can see them. Finished
+deliverables go to the destination the owner asked for — the documents
+directory when none was named, and never into a ghost home.
 
-### Why Ghost never touches vault files
+### Documents, and what a vault is
 
-Obsidian's own CLI selects the current vault. Ghost therefore:
+The directory is resolved the way screenshots resolve the Pictures directory:
+`XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`. Ghost never
+hard-codes a path, never indexes the directory, and never injects any of it at
+session start — the system prompt names the directory in one sentence, and the
+ghost reads it with the runtime's native file and search tools when a request
+may depend on it.
 
-- never infers a vault path, scans for `.obsidian`, or assumes `~/Documents`;
-- uses `vault=<name>` when the owner names a different vault;
-- has no notes database, task store, or raw vault-file adapter to fall back to.
-
-The consequence is deliberate: with Obsidian closed, shared-state operations
-fail visibly and say setup is incomplete. A raw-file fallback would silently
-write into a vault whose sync, plugins, and indexes Ghost does not own, and
-would make the vault path a Ghost-owned convention rather than the owner's
-choice. The `obsidian-cli` skill enters through ordinary machine-skill
-discovery under `~/.agents/skills/`; the shared-state policy does not duplicate
-its contents. Obsidian state is unaffected by creating, renaming, deleting, or
-uninstalling a ghost.
+An Obsidian vault is a folder of Markdown, usually under Documents. Ghost reads
+and writes those notes as ordinary files and leaves `.obsidian/` alone, so a
+ghost is useful whether or not Obsidian is installed or running. If the owner
+installed the `obsidian-cli` skill under `~/.agents/skills/`, ordinary
+machine-skill discovery admits it and the `obsidian` CLI becomes one more tool;
+the owner-context policy does not duplicate its contents. Vault content is
+unaffected by creating, renaming, deleting, or uninstalling a ghost.
 
 ## Surfaces
 
@@ -129,8 +130,8 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   [claude-code-runtime.md](claude-code-runtime.md).
 
 Both runtimes receive the same Ghost-owned context: character, private memory
-index, first-meeting policy, computer-use policy, scheduled-work policy, shared
-Obsidian policy, and delegation policy. Owner questions, image understanding,
+index, first-meeting policy, computer-use policy, scheduled-work policy,
+owner-context policy, and delegation policy. Owner questions, image understanding,
 browser/screen/desktop control, and supervised delegation work on both. The
 runtime still owns its own mechanics, so the same ghost feels like itself on
 either while working the way that harness works.
@@ -203,8 +204,8 @@ If you expect one of these, it is missing on purpose:
 
 - **No plan mode, todo store, or plan/todo API.** A runtime's native planning
   may exist inside a turn, but durable owner-visible plans and tasks belong in
-  Obsidian. There are intentionally no `/plan` or `/todo` routes and no plan or
-  todo CLI verbs.
+  the owner's documents. There are intentionally no `/plan` or `/todo` routes
+  and no plan or todo CLI verbs.
 - **No second browser backend** and no separate ghost browser profile — the one
   paired Chromium, or no browser at all.
 - **No executable project extensions.** Project plugins, executable hooks and
@@ -216,7 +217,8 @@ If you expect one of these, it is missing on purpose:
   scrubbed before the pi runtime is built; Ghost does not discover a credential
   the owner did not give it
   ([`env-scrub.ts`](../packages/daemon/src/env-scrub.ts)).
-- **No Documents convention** and no automatic document index.
+- **No document index.** The Documents directory is named in the prompt and
+  read on demand; nothing about it is scanned or injected at session start.
 - **No Ghost-owned worktree, branch, commit, or approval flow** for delegated
   work. Ghost owns admission, durable lifecycle, bounded status, and exact
   process-tree cleanup; the installed harness owns the coding.

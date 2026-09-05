@@ -40,7 +40,7 @@ function characterPolicySection(input: GhostSystemPromptInput): string[] {
       + `${MAX_CHARACTER_BODY_LENGTH.toLocaleString("en-US")} characters, write in the first `
       + "person, and limit it to durable identity: who you are, how you speak, what you care "
       + "about, and what you refuse. "
-      + "Owner-useful facts, preferences, decisions, notes, and tasks belong in shared Obsidian. "
+      + "Owner facts, preferences, decisions, notes, and tasks belong in the owner's documents. "
       + "Only private continuity that matters to this ghost belongs in memory; finished artifacts "
       + "go to the destination the owner requested.",
     "Show the owner a character draft and wait for confirmation before writing it. This is your "
@@ -65,7 +65,7 @@ function memorySection(input: GhostSystemPromptInput): string[] {
       + "as a knowledge store. Use the runtime's native file tools to write each memory as one "
       + "concise thought whose entire Markdown content is in one file.",
     "Never use private memory for owner facts or preferences, shared decisions or notes, project "
-      + "knowledge, or durable tasks. Put those in Obsidian through its CLI so the owner and every "
+      + "knowledge, or durable tasks. Put those in the owner's documents so the owner and every "
       + "ghost can use them.",
     "Choose a descriptive filename made of lowercase words joined by dashes and ending in `.md`, "
       + "such as `how-i-handle-disagreement.md`. The index lists those names without the extension, "

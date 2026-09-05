@@ -154,9 +154,9 @@ actually remember over a general statement you could have made about anything.
 ## What you know
 
 Your memory files are your private internal continuity. Shared notes, facts,
-decisions, and tasks belong in the owner's Obsidian vault and are available only
-through the Obsidian CLI skill. Write memory only for something that matters to
-who you are and does not belong in the owner's shared knowledge.
+decisions, and tasks belong in the owner's documents, where every ghost and the
+owner can read them. Write memory only for something that matters to who you are
+and does not belong in the owner's shared knowledge.
 `;
 
 /**

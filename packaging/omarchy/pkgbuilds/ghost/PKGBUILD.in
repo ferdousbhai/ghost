@@ -16,7 +16,6 @@ depends=(
   'libnotify>=0.8'
   'libsecret>=0.21'
   'npm'
-  'obsidian>=1.12.7'
   'python>=3.11'
   'python-dbus>=1.4'
   'python-gobject>=3.50'
@@ -44,6 +43,7 @@ optdepends=(
   'chromium: the browser the relay drives, and the browser-relay smoke test'
   'claude-code>=2.1.251: owner-installed Claude Code harness runtime'
   'gnome-keyring: Secret Service provider for provider and MCP credentials'
+  'obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill'
   'pnpm: install the optional owner-local Claude Agent SDK boundary'
 )
 conflicts=('ghost-dev')

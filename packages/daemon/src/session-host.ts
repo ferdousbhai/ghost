@@ -10,7 +10,11 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
-import { collectGhostExtension, openGhostHome } from "@ghost/extensions";
+import {
+  collectGhostExtension,
+  openGhostHome,
+  resolveDocumentsDirectory,
+} from "@ghost/extensions";
 import {
   convertToLlm,
   createAgentSession,
@@ -88,7 +92,7 @@ import {
   machineSkillPaths,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
-  SHARED_OBSIDIAN_POLICY,
+  renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
   maintenanceStatePath,
@@ -3390,7 +3394,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
-      SHARED_OBSIDIAN_POLICY,
+      renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),
       ...(this.taskServices ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir),
       renderSelfMaintenancePolicy({

@@ -1,7 +1,7 @@
 # Ghost
 
-Your ghost, on your machine. An AI persona with private memory, shared Obsidian
-knowledge, docs, and tools — running locally as an
+Your ghost, on your machine. An AI persona with private memory, the owner's own
+documents, and tools — running locally as an
 [Omarchy](https://omarchy.org)-native desktop app,
 built on the [pi](https://github.com/earendil-works/pi) coding agent
 (`@earendil-works/pi-coding-agent`, `pi-agent-core`, `pi-ai`).
@@ -20,10 +20,10 @@ remain the explicit in-process extension surface. Native delegated workers and
 the optional Claude Code principal retain their own project discovery and
 subagents. Ghost replaces
 pi's coding-oriented system prompt with its character and bounded private
-memory index, plus the owner-installed `obsidian-cli` skill through normal
-machine-skill discovery. Both runtimes use Obsidian's CLI-selected vault as
-owner-visible persistent state shared by every ghost; they never infer that the
-vault is `~/Documents` or access it as raw files. Claude keeps its complete,
+memory index. Both runtimes treat the owner's XDG Documents directory as the
+persistent owner-visible state every ghost shares, reading and writing it with
+their native file tools; an Obsidian vault there is just a folder of Markdown.
+Nothing in it is indexed or injected at session start. Claude keeps its complete,
 unfiltered native tool preset and receives the same Ghost-owned context as an
 append; Ghost tools are added only for capabilities that preset lacks. Browser
 and desktop capabilities remain available. A ghost can also maintain the code it
@@ -34,7 +34,8 @@ tool activity beside the recovered summoning orb from the earlier summon-ghost
 interface, naming the call the ghost is inside of while it runs.
 
 Idle maintenance may write one ghost-private reflection and consolidates memory
-only under index pressure; shared knowledge goes through Obsidian instead. Every
+only under index pressure; shared knowledge goes to the owner's documents
+instead. Every
 memory write redacts common credential forms before disk.
 Provider and MCP secrets live in Linux Secret Service, while portable config
 holds only keyring references; see [docs/keyring.md](docs/keyring.md).

@@ -50,6 +50,8 @@ export {
 } from "./extension-api.js";
 export { fenceUntrusted } from "./untrusted.js";
 
+export { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
+
 export {
   browserSessionFor,
   closeAllBrowserSessions,

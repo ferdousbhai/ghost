@@ -109,8 +109,9 @@ Ghost does not deny or replace any tool in Claude's native preset. Native
 scheduling, notifications, remote triggers, worktrees, agents, and every other
 preset tool retain Claude's own semantics and storage. Ghost's in-process
 browser/screen/desktop and supervised delegation tools are additive. Claude
-auto-memory is disabled. Owner-visible durable knowledge, plans, and tasks use
-Obsidian; ghost-private continuity uses the ghost home's memory files.
+auto-memory is disabled. Owner-visible durable knowledge, plans, and tasks live
+in the owner's documents; ghost-private continuity uses the ghost home's memory
+files.
 
 This is a native-first boundary: if the `claude_code` preset already provides a
 capability, Claude uses that native tool with its original name, input schema,
@@ -157,12 +158,12 @@ snapshot, credential-free project MCP, and its in-process tools. Executable
 project hooks/plugins/tools, LSP, and project agent definitions remain disabled
 pending the isolation boundary in #31.
 
-Normal machine-skill discovery admits the owner-installed `obsidian-cli` skill
-into Claude's standard skill index. The shared policy does not inject a second
-link. Claude uses `obsidian` exclusively, with the current CLI vault by default
-or `vault=<name>` when the owner names one. It never scans for a vault, assumes
-`~/Documents`, or edits vault files directly. Missing
-skill/CLI/application readiness is reported as incomplete setup.
+Claude reads and writes the owner's XDG Documents directory — an Obsidian vault
+there included — with its own native file and search tools; the owner-context
+policy names the directory and nothing more. Normal machine-skill discovery
+admits an owner-installed `obsidian-cli` skill into Claude's standard skill
+index, and the policy does not inject a second link. Neither Obsidian nor that
+skill is required.
 
 ### As the advisor
 

@@ -11,7 +11,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   loadMachineSkills,
   machineSkillPaths,
-  SHARED_OBSIDIAN_POLICY,
+  renderOwnerContextPolicy,
 } from "../src/machine-skills.js";
 
 const roots: string[] = [];
@@ -29,12 +29,15 @@ function writeSkill(path: string, name: string, description: string): void {
 }
 
 describe("machine skills", () => {
-  it("keeps shared-state policy separate from normal machine-skill discovery", () => {
-    expect(SHARED_OBSIDIAN_POLICY).toContain("shared by every ghost on this machine");
-    expect(SHARED_OBSIDIAN_POLICY).toContain("Never infer or scan for a vault path");
-    expect(SHARED_OBSIDIAN_POLICY).toContain("do not fall back to direct vault-file access");
-    expect(SHARED_OBSIDIAN_POLICY).not.toContain("SKILL.md");
-    expect(SHARED_OBSIDIAN_POLICY).not.toContain(".agents/skills");
+  it("names the owner's documents directory and keeps skill paths out of the policy", () => {
+    const policy = renderOwnerContextPolicy("/home/owner/Documents");
+    expect(policy).toContain('"/home/owner/Documents"');
+    expect(policy).toContain("shared by every ghost on this machine");
+    expect(policy).toContain("A vault is a folder of Markdown");
+    expect(policy).toContain("leave its `.obsidian/` directory alone");
+    expect(policy).toContain("only when the owner installed its machine skill");
+    expect(policy).not.toContain("SKILL.md");
+    expect(policy).not.toContain(".agents/skills");
   });
 
   it("admits ambient skills without a name allowlist and follows standard symlinks", async () => {

@@ -1279,7 +1279,7 @@ FloatingWindow {
             open: hud.pendingDeleteGhost !== ""
             title: "Banish " + hud.pendingDeleteGhost + "?"
             body: "Its persona, memories, credentials, and conversations move to Trash. "
-                + "Shared Obsidian notes stay on this machine. Type “"
+                + "The owner's own documents stay on this machine. Type “"
                 + hud.pendingDeleteGhost + "” to confirm."
             challenge: hud.pendingDeleteGhost
             confirmText: "Banish"

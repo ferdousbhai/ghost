@@ -22,7 +22,6 @@ pkgbase = ghost-dev
 	depends = libnotify>=0.8
 	depends = libsecret>=0.21
 	depends = npm
-	depends = obsidian>=1.12.7
 	depends = python>=3.11
 	depends = python-dbus>=1.4
 	depends = python-gobject>=3.50
@@ -39,6 +38,7 @@ pkgbase = ghost-dev
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
 	optdepends = claude-code>=2.1.251: owner-installed Claude Code harness runtime
 	optdepends = gnome-keyring: Secret Service provider for provider and MCP credentials
+	optdepends = obsidian>=1.12.7: drive an Obsidian vault through its official CLI skill
 	optdepends = pnpm: install the optional owner-local Claude Agent SDK boundary
 	provides = ghost
 	conflicts = ghost

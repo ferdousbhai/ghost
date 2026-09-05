@@ -1,7 +1,7 @@
-import { constants, readFileSync } from "node:fs";
+import { constants } from "node:fs";
 import { lstat, open, readdir, rm, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, extname, isAbsolute, join, resolve } from "node:path";
+import { basename, extname, resolve } from "node:path";
 import { GhostError } from "../errors.js";
 import {
   descriptorPath,
@@ -10,6 +10,7 @@ import {
   openDirectoryNoFollow,
   withDescriptorLock,
 } from "../linux-fs.js";
+import { expandHome, resolveUserDirectory } from "../xdg-user-dirs.js";
 
 /**
  * Ghost's captures land where the desktop's own screenshots land.
@@ -26,28 +27,7 @@ export function resolveScreenshotDirectory(
 ): string {
   const configured = env.OMARCHY_SCREENSHOT_DIR?.trim();
   if (configured) return resolve(expandHome(configured, home));
-  const pictures = env.XDG_PICTURES_DIR?.trim() ?? readUserDir("XDG_PICTURES_DIR", home);
-  if (pictures) return resolve(expandHome(pictures, home));
-  return join(home, "Pictures");
-}
-
-function expandHome(path: string, home: string): string {
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return join(home, path.slice(2));
-  if (path.startsWith("$HOME/")) return join(home, path.slice("$HOME/".length));
-  return isAbsolute(path) ? path : join(home, path);
-}
-
-/** One `NAME="value"` line out of the freedesktop user-dirs file. */
-function readUserDir(name: string, home: string): string | null {
-  let contents: string;
-  try {
-    contents = readFileSync(join(home, ".config", "user-dirs.dirs"), "utf8");
-  } catch {
-    return null;
-  }
-  const match = new RegExp(`^\\s*${name}\\s*=\\s*"?([^"\\n]+)"?\\s*$`, "m").exec(contents);
-  return match?.[1]?.trim() || null;
+  return resolveUserDirectory("XDG_PICTURES_DIR", "Pictures", env, home);
 }
 
 /**

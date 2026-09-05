@@ -61,7 +61,7 @@ ones you intend to accept:
 claude --version && claude auth status --json   # >= 2.1.251, loggedIn:true
 codex --version
 pi --version
-obsidian version                                # >= 1.12.7, Obsidian open
+obsidian version                                # optional CLI, Obsidian open
 ```
 
 **Record:** `$EV/00-harnesses.txt`. A harness you skip must still show a
@@ -280,58 +280,42 @@ different number for the first beta is a naming choice, not a blocker.
 
 ---
 
-## Phase 2 — Clean-account Obsidian setup
+## Phase 2 — Clean-account owner-shared state
 
 Run every step as the *desktop owner account you will accept on*, never as root.
 
-### 2.1 Register the official CLI
-
-Open Obsidian → **Settings → General → Command line interface** and complete
-the official Linux registration (https://obsidian.md/help/cli). With Obsidian
-still open:
+### 2.1 The Documents directory
 
 ```sh
-command -v obsidian && obsidian version
+xdg-user-dir DOCUMENTS
+ls -d "$(xdg-user-dir DOCUMENTS)"
 ```
 
-**Pass:** a version ≥ `1.12.7`.
-**Fail:** command not found, or an error — some Arch repackagings of the app
-omit the standalone CLI payload; installing the GUI alone does not satisfy this.
-**Record:** `$EV/02-obsidian-version.txt` plus a screenshot of the settings pane.
+**Pass:** the directory the ghost will be told about exists and belongs to this
+account. Nothing has to be installed or registered — owner-shared state is
+ordinary files.
+**Record:** `$EV/02-documents.txt`.
 
-### 2.2 Install the upstream skill
+### 2.2 Optional: the `obsidian` CLI skill
+
+Only if you intend to accept the optional CLI path as well:
 
 ```sh
 npx -y skills@latest add https://github.com/kepano/obsidian-skills \
   --global --yes --skill obsidian-cli
 test -f ~/.agents/skills/obsidian-cli/SKILL.md && echo present
+command -v obsidian && obsidian version
 ```
 
-**Pass:** `present`.
+**Pass:** `present`, and a version from a running Obsidian. Skipping this step
+is a supported configuration, not a gap: a ghost still edits vault Markdown
+with its native file tools.
 **Record:** `$EV/02-skill.txt`.
 
-### 2.3 Readiness harness
-
-```sh
-bash packaging/arch/accept-obsidian.sh 2>&1 | tee "$EV/02-accept-obsidian.log"
-# or, for an explicitly named vault:
-bash packaging/arch/accept-obsidian.sh --vault "Owner Notes"
-```
-
-**Pass:** `Obsidian <x.y.z> readiness passed; permanently deleted ghost-obsidian-acceptance-…`.
-**Fail:** it refuses as root, refuses a missing `SKILL.md`, refuses an
-unregistered CLI, refuses a version below 1.12.7 (parsed from output, not from
-exit status), or refuses to overwrite a pre-existing acceptance note.
-
-**What it covers:** CLI presence and version, and one end-to-end
-create → read → search → tasks → permanent-delete cycle on a uniquely named
-marker note it owns, with vault selection only through the CLI.
-**What it does not cover:** the GUI registration itself; that a *session* admits
-the skill through normal machine-skill discovery; two-ghost shared visibility
-with per-ghost privacy; and the visible-failure behaviour when the skill,
-command, registration, or running app is missing. Those are session-level
-proofs, already checked on the source path in #17; re-observe them once in
-Phase 3.6 on the installed build.
+**What Phase 2 does not cover:** that a *session* admits the optional skill
+through normal machine-skill discovery, and two-ghost shared visibility with
+per-ghost privacy. Those are session-level proofs; observe them in Phase 3.6 on
+the installed build.
 
 ---
 
@@ -343,12 +327,10 @@ Phase 3.6 on the installed build.
 sudo pacman -U "$PKG" 2>&1 | tee "$EV/03-install.log"
 ```
 
-**Pass:** install succeeds and the `post_install` hook prints the Obsidian
-readiness steps, the Chromium extension path, the enable command, the optional
-integrations, and the keyring/ghost-home note.
-**Record:** the log — the hook text is the evidence that packaging *reports*
-owner-level Obsidian setup rather than performing it (#54 owns the supported
-gate).
+**Pass:** install succeeds and the `post_install` hook prints the Chromium
+extension path, the enable command, the optional integrations, and the
+keyring/ghost-home note — and gates enabling Ghost on nothing owner-level.
+**Record:** the log.
 
 ### 3.2 Enable the user services
 
@@ -404,11 +386,12 @@ output showing the item under Ghost's own schema.
 Run one Pi turn and — if Phase 5 is done — one Claude turn from the HUD, in two
 different ghosts, and confirm through them that:
 
-- the Obsidian skill is admitted once by ordinary machine-skill discovery
-  (`GET /sessions/:id/resources` shows its source and readiness);
-- a note or task one ghost creates is visible to the other;
+- a note one ghost writes into the Documents directory is visible to the other;
 - persona, conversations, and memory are not;
-- with Obsidian closed, the operation fails visibly with no raw-file fallback.
+- the system prompt names the Documents directory and injects none of its
+  contents;
+- if you installed the optional skill, `GET /sessions/:id/resources` shows it
+  admitted once by ordinary machine-skill discovery.
 
 **Record:** `$EV/03-shared-state.md` with the bounded transcript excerpts.
 
@@ -760,11 +743,11 @@ sudo pacman -U <newer ghost-dev package> 2>&1 | tee "$EV/07-upgrade.log"
 systemctl --user reenable --now ghostd.service ghost-shell.service
 ```
 
-**Pass:** `post_upgrade` prints the Obsidian re-verification steps and the
-`reenable` instruction; after reenable both units are wanted by
-`graphical-session.target`, not `default.target`; the state fingerprint is
-unchanged; the relay stays paired; conversations, private per-ghost memory, and
-Obsidian notes/tasks are all still reachable (re-run §3.8 and one turn).
+**Pass:** `post_upgrade` prints the `reenable` instruction; after reenable both
+units are wanted by `graphical-session.target`, not `default.target`; the state
+fingerprint is unchanged; the relay stays paired; conversations, private
+per-ghost memory, and owner documents are all still reachable (re-run §3.8 and
+one turn).
 
 ### 7.2 Uninstall
 
@@ -779,8 +762,8 @@ diff "$EV/07-state-before.txt" "$EV/07-state-after-remove.txt"
 ```
 
 **Pass:** package-owned `/usr` paths and the Quickshell symlink are gone;
-`~/ghosts`, `~/.config/ghost`, `~/.local/state/ghost`, Secret Service items, the
-Obsidian skill, and every vault are untouched; `pre_remove`/`post_remove` print
+`~/ghosts`, `~/.config/ghost`, `~/.local/state/ghost`, Secret Service items, any
+owner-installed skill, and every document are untouched; `pre_remove`/`post_remove` print
 the disable instruction and the preservation note.
 
 ### 7.3 Reinstall
@@ -801,7 +784,7 @@ keyring, complete Phase 2 for that account, install the package, enable the two
 units, and run one turn.
 
 **Pass:** the new account gets its own empty `~/ghosts`, its own tokens, and its
-own Obsidian registration; nothing leaks from the first account.
+own Documents directory; nothing leaks from the first account.
 **Record:** `$EV/07-clean-account.md`.
 
 ### 7.5 Omarchy channel — blocked
@@ -834,10 +817,10 @@ Candidate build
 [ ] built from a clean worktree at the candidate SHA           — 00-worktree.txt
 [ ] gitleaks: history + source/runtime/pkg extractions clean   — 01-secret-scan.txt
 
-Obsidian readiness
-[ ] clean-account install + official CLI registration       — 02-obsidian-version.txt, screenshot
-[ ] upstream skill + obsidian version + SKILL.md            — 02-skill.txt
-[ ] bounded manual evidence for the package                 — 02-accept-obsidian.log, 03-install.log
+Owner-shared state
+[ ] clean-account Documents directory resolves and exists   — 02-documents.txt
+[ ] optional obsidian-cli skill, if accepted                — 02-skill.txt
+[ ] install hook gates Ghost on nothing owner-level         — 03-install.log
 
 Installed native delegation
 [ ] ghost delegation human/JSON/quiet, bounded + daemon-free — 04-delegation-*.txt
@@ -877,7 +860,7 @@ Packaged owner acceptance
 - **Owner decisions:** candidate freeze, version and scope selection (§1.6),
   authorizing live mutation, configuring a publication destination, lifting the
   release hold.
-- **GUI steps:** Obsidian's CLI registration pane, HUD/tray appearance, the
+- **GUI steps:** HUD/tray appearance, the
   provider login window, Chromium **Load unpacked** and pairing, and visual
   computer-use results. Screenshots plus bounded traces are their evidence.
 - **Model behaviour:** whether a ghost *chooses* the right operation in a turn.
@@ -898,8 +881,8 @@ Packaged owner acceptance
 
 None of these exist today; each would replace a hand-run block above.
 
-- A packaged post-install readiness command that runs `accept-obsidian.sh`,
-  `service-browser-smoke.sh`, and `ghost delegation` in one pass (belongs with
+- A packaged post-install readiness command that runs
+  `service-browser-smoke.sh` and `ghost delegation` in one pass (belongs with
   #54).
 - A delegated-task lifecycle harness driving `POST /sessions/:id/tasks` and its
   `send`/`cancel` routes against a scratch daemon, so §4.2 is scripted rather

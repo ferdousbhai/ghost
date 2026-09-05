@@ -22,9 +22,6 @@ of — this page.
 - **A running, unlocked Secret Service** (`gnome-keyring` is the usual one).
   Provider and MCP credentials go there; the daemon does not prompt, unlock, or
   fall back to a file. See [keyring.md](keyring.md).
-- **Obsidian 1.12.7+**, set up as in step 2. Obsidian is the owner-wide shared
-  knowledge and task store for every ghost, and Ghost is not considered
-  installed until it works.
 - **A model provider you can sign into** — an OpenRouter account is enough, and
   its free models cost nothing — or an installed, authenticated Claude Code
   ([claude-code-runtime.md](claude-code-runtime.md)).
@@ -45,35 +42,27 @@ sudo pacman -U ghost-dev-*.pkg.tar.zst
 browser relay at `/usr/share/ghost/chromium-extension`, and the two user units
 under `/usr/lib/systemd/user/`. It creates nothing in your home directory.
 
-The post-install hook prints the Obsidian steps below, the relay path, and the
-enable command. Details, dependency reasoning, and the uninstall path are in
+The post-install hook prints the relay path and the enable command. Details, dependency reasoning, and the uninstall path are in
 [`packaging/arch/README.md`](../packaging/arch/README.md).
 
-## 2. Finish the required Obsidian setup
+## 2. Where shared notes go
 
-The package hook runs as root and can only *report* this; you do it as the
-desktop owner.
+Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
+usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
+it with its runtime's native file tools, and keeps its own private continuity
+in the ghost home instead. Ghost does not index the directory or read any of it
+until a request calls for it.
 
-1. Open Obsidian and enable **Settings → General → Command line interface**
-   (Obsidian's [official CLI registration](https://obsidian.md/help/cli)).
-2. Install the upstream skill:
+An Obsidian vault is just a folder of Markdown, usually kept there. A ghost
+edits those notes as ordinary files and leaves `.obsidian/` alone, so Obsidian
+does not have to be installed or running. If you want a ghost to drive Obsidian
+itself, register its [official CLI](https://obsidian.md/help/cli) and install
+the upstream skill; ordinary skill discovery picks it up:
 
-   ```sh
-   npx -y skills@latest add https://github.com/kepano/obsidian-skills \
-     --global --yes --skill obsidian-cli
-   ```
-
-3. With Obsidian still open, verify both boundaries:
-
-   ```sh
-   obsidian version
-   test -f ~/.agents/skills/obsidian-cli/SKILL.md
-   ```
-
-Some Arch repackagings of Obsidian omit the standalone CLI payload, so the GUI
-alone does not satisfy `obsidian version`. Ghost never guesses a vault path,
-so without this a ghost simply has no shared notes or tasks — it does not fall
-back to reading vault files.
+```sh
+npx -y skills@latest add https://github.com/kepano/obsidian-skills \
+  --global --yes --skill obsidian-cli
+```
 
 ## 3. Start the services
 
@@ -250,8 +239,8 @@ and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
 host).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
-leaves personas, memory, conversations, credentials, tokens, the Obsidian skill,
-and every vault untouched.
+leaves personas, memory, conversations, credentials, tokens, your documents,
+and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
 
@@ -274,7 +263,7 @@ and every vault untouched.
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
 | A keyring error on login or when a session opens | the Secret Service must be running with its default collection unlocked — see [keyring.md](keyring.md) |
-| Obsidian operations fail | Obsidian must be *running*; re-check `obsidian version` and the skill file from step 2 |
+| `obsidian` CLI operations fail | the CLI is optional and needs Obsidian *running*; a ghost can always edit vault notes as plain files instead |
 | The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
 

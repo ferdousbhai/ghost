@@ -182,7 +182,7 @@ export class Normalizer {
  * credentials do not: no `agent.db` is created there any more.
  *
  * The remaining visible files pin this fixture's ghost-owned persona, memory,
- * and policy state. Owner-shared Obsidian notes and Claude's native transcript
+ * and policy state. The owner's own documents and Claude's native transcript
  * have separate lifecycles and deliberately are not represented here.
  */
 export function ghostHomeSnapshot(
