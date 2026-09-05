@@ -2,10 +2,15 @@ import type { AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import { fenceUntrusted } from "@ghost/extensions";
 import type { GhostModelRoleBinding } from "./models.js";
 import {
+  CLAUDE_CODE_DRIVER_PROVIDER,
+  type ClaudeSmolCompleter,
+  EMPTY_SMOL_CATALOG,
+  SMOL_MODEL_ROLE,
+  type SmolRuntime,
   assistantText,
+  contextPrompt,
   resolveSmolModel,
   smolCatalogFromRuntime,
-  type SmolRuntime,
 } from "./smol.js";
 
 
@@ -207,9 +212,13 @@ export function cleanGreeting(raw: string): string | null {
 
 
 export interface GenerateGreetingInput {
-  readonly runtime: SmolRuntime;
+  readonly runtime?: SmolRuntime;
   readonly context: GreetingContextInput;
   readonly ref?: GhostModelRoleBinding | null;
+  /** The chat model's provider; an unset smol role follows it. */
+  readonly chatProvider?: string | null;
+  /** Answers a `claude-code/<model>` resolution. */
+  readonly claude?: ClaudeSmolCompleter;
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
 }
@@ -225,11 +234,23 @@ export async function generateGreeting(
   input: GenerateGreetingInput,
 ): Promise<string | null> {
   try {
-    const resolved = resolveSmolModel(smolCatalogFromRuntime(input.runtime), input.ref);
-    const model = input.runtime.getModel(resolved.model.provider, resolved.model.id);
-    if (!model) return null;
+    const catalog = input.runtime ? smolCatalogFromRuntime(input.runtime) : EMPTY_SMOL_CATALOG;
+    const resolved = resolveSmolModel(catalog, input.ref, SMOL_MODEL_ROLE, {
+      chatProvider: input.chatProvider ?? null,
+    });
     const timeout = AbortSignal.timeout(input.timeoutMs ?? GREETING_TIMEOUT_MS);
     const signal = input.signal ? AbortSignal.any([input.signal, timeout]) : timeout;
+    if (resolved.model.provider === CLAUDE_CODE_DRIVER_PROVIDER) {
+      if (!input.claude) return null;
+      return cleanGreeting(await input.claude({
+        modelId: resolved.model.id,
+        role: SMOL_MODEL_ROLE,
+        prompt: contextPrompt(buildGreetingContext(input.context)),
+        signal,
+      }));
+    }
+    const model = input.runtime?.getModel(resolved.model.provider, resolved.model.id);
+    if (!model || !input.runtime) return null;
     const response: AssistantMessage = await input.runtime.complete(
       model as Model<never>,
       buildGreetingContext(input.context),

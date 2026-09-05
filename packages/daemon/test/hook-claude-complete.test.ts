@@ -74,7 +74,7 @@ async function review(home: string, claude: HookClaudeOptions): Promise<string> 
   );
 }
 
-describe("Claude Code as the advisor", () => {
+describe("Claude Code answering a background role", () => {
   it("answers the review with one toolless query and no project discovery", async () => {
     const temp = makeTempGhosts();
     try {
@@ -92,9 +92,8 @@ describe("Claude Code as the advisor", () => {
       expect(seen.options).toEqual({
         cwd: ghostPaths(realpathSync(home)).sessionDir,
         pathToClaudeCodeExecutable: "/usr/bin/claude",
-        // A one-line stub only: the advisor prompt itself heads the user message.
-        systemPrompt: "Follow the review instructions in the user message exactly "
-          + "and reply with the JSON they specify.",
+        // A one-line stub only: the role's prompt itself heads the user message.
+        systemPrompt: "Follow the instructions in the user message exactly.",
         settingSources: [],
         skills: [],
         plugins: [],
@@ -155,30 +154,60 @@ describe("Claude Code as the advisor", () => {
     }
   });
 
-  it("rejects a non-advisor role bound to the Claude Code harness", async () => {
+  it("answers the smol role too, with the model the binding names", async () => {
     const temp = makeTempGhosts();
     try {
       const home = claudeGhost(temp.root, "smol_model");
+      const seen: { prompt?: unknown; options?: ClaudeQueryOptions } = {};
       await expect(completeHookSmol(
         { ghost_home: home, prompt: "title this conversation" },
         {
           runtimeFactory: noPiRuntime,
           claude: {
             probe: { read: async () => probed({ loggedIn: true }) },
-            loadSdk: async () => fakeSdk([], {}),
+            loadSdk: async () => fakeSdk([resultMessage("Weekend plans\n")], seen),
             environment,
           },
         },
-      )).rejects.toMatchObject({
-        code: "smol_model_unavailable",
-        reason: "unsupported_role",
-      });
+      )).resolves.toBe("Weekend plans");
+      // `default` is the owner's own Claude Code default: no model is named.
+      expect(seen.options).not.toHaveProperty("model");
     } finally {
       temp.cleanup();
     }
   });
 
-  it("rejects a Claude Code binding that names a model id", async () => {
+  it("follows a Claude Code driver: an unset smol role is Sonnet, an unset advisor is Fable", async () => {
+    const temp = makeTempGhosts();
+    try {
+      const home = join(temp.root, "casper");
+      mkdirSync(ghostPaths(home).sessionDir, { recursive: true });
+      writeFileSync(join(home, "character.md"), "# Casper\n", "utf8");
+      writeFileSync(join(home, "models.json"), JSON.stringify({
+        providers: {},
+        roles: { chat_model: { provider: "claude-code", modelId: "default" } },
+      }), "utf8");
+      for (const [role, model] of [["smol_model", "sonnet"], ["advisor_model", "fable"]] as const) {
+        const seen: { prompt?: unknown; options?: ClaudeQueryOptions } = {};
+        await expect(completeHookSmol(
+          { ghost_home: home, prompt: "go", role },
+          {
+            runtimeFactory: noPiRuntime,
+            claude: {
+              probe: { read: async () => probed({ loggedIn: true }) },
+              loadSdk: async () => fakeSdk([resultMessage("ok\n")], seen),
+              environment,
+            },
+          },
+        )).resolves.toBe("ok");
+        expect(seen.options?.model).toBe(model);
+      }
+    } finally {
+      temp.cleanup();
+    }
+  });
+
+  it("hands a named Claude Code model to the query", async () => {
     const temp = makeTempGhosts();
     try {
       const home = join(temp.root, "casper");
@@ -192,10 +221,13 @@ describe("Claude Code as the advisor", () => {
         }),
         "utf8",
       );
-      await expect(review(home, { environment })).rejects.toMatchObject({
-        code: "smol_model_unavailable",
-        reason: "unknown_model",
-      });
+      const seen: { prompt?: unknown; options?: ClaudeQueryOptions } = {};
+      await expect(review(home, {
+        probe: { read: async () => probed({ loggedIn: true }) },
+        loadSdk: async () => fakeSdk([resultMessage("notes\n")], seen),
+        environment,
+      })).resolves.toBe("notes");
+      expect(seen.options?.model).toBe("opus");
     } finally {
       temp.cleanup();
     }

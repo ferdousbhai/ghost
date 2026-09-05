@@ -151,11 +151,12 @@ Claude reads and writes the owner's XDG Documents directory with its own
 native file and search tools; the owner-context policy names the directory and
 nothing more.
 
-### As the advisor
+### As the background roles
 
-Claude Code can also serve `roles.advisor_model`, the frontier teacher that
-`ghostd hook-smol-complete --role advisor` and `inspect_image` reach. That
-query is not a principal session: no persona, no Ghost tools, no warm query, no resume metadata, and nothing written to Claude
+Claude Code also answers `smol_model` and `advisor_model`: by default on a
+Claude-driven ghost (`claude-code/sonnet` and `claude-code/fable`), or wherever
+`models.json` names `claude-code/<model>`; the id is handed to Claude Code as
+its model name. That query is not a principal session: no persona, no Ghost tools, no warm query, no resume metadata, and nothing written to Claude
 Code's own session storage. It goes through the same SDK loader, executable
 probe, and reviewed child environment as the principal path, and it is
 independent of which runtime drives the ghost — a Pi-driven ghost gets Claude

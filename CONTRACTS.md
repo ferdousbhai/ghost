@@ -337,7 +337,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries. |
-| `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
+| `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. A Claude conversation's title lives on its resume sidecar. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
 | `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
@@ -394,16 +394,20 @@ in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) and
 [`claude-code.ts`](packages/daemon/src/claude-code.ts) are normative.
 
 Roles are `chat_model`, `smol_model`, and `advisor_model`, each with an
-optional ordered fallback chain. `claude-code/default` is valid as the primary
-chat runtime and as the primary `advisor_model`; it is not a Pi provider model
-and is never a role fallback. `chat_model` unset leaves the choice to Pi's
+optional ordered fallback chain. `chat_model` unset leaves the choice to Pi's
 catalog default; Ghost keeps no model list, no catalog API, and no local-runner
 detection — a local endpoint is an ordinary provider entry in `models.json`.
-`smol_model` serves titles, greetings, and command-hook completions; unset, it
-chooses the cheapest usable model, treating an authenticated subscription as
-zero marginal cost. `advisor_model` is the frontier teacher and reads images
-for a chat model that cannot; unset, Ghost's preference list picks a strong
-reasoner. An explicit unusable binding fails loudly rather than silently
+`smol_model` serves titles, greetings, and command-hook completions;
+`advisor_model` is the frontier teacher and reads images for a chat model that
+cannot. Unset, both follow the driver: on a `claude-code` chat model they are
+`claude-code/sonnet` and `claude-code/fable`; on a Pi provider the smol role is
+that provider's small tier, then the cheapest usable model anywhere, and the
+advisor role is Ghost's preference list. The rule is
+[`resolveSmolModel`](packages/daemon/src/smol.ts). The `claude-code` provider
+is the Claude Code harness, not a Pi provider: `default` as `chat_model` is
+whatever the installed `claude` defaults to, any other id on `smol_model` or
+`advisor_model` is handed to Claude Code as a model name, and it is never a
+role fallback. An explicit unusable binding fails loudly rather than silently
 switching models.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed

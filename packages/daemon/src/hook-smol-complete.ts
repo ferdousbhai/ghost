@@ -7,6 +7,7 @@ import {
   ghostAuthPath,
   ghostModelsPath,
   readGhostModels,
+  resolveChatModelRef,
   resolveModelRoleRef,
   resolveSmolModelRef,
 } from "./models.js";
@@ -17,13 +18,15 @@ import {
 } from "./hook-claude-complete.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
-  assistantText,
-  resolveSmolModel,
+  CLAUDE_CODE_DRIVER_PROVIDER,
+  EMPTY_SMOL_CATALOG,
   type HookModelRole,
-  smolCatalogFromRuntime,
-  smolModelLabel,
   SmolModelUnavailableError,
   type SmolRuntime,
+  assistantText,
+  resolveSmolModel,
+  smolCatalogFromRuntime,
+  smolModelLabel,
 } from "./smol.js";
 
 export const HOOK_SMOL_MAX_STDIN_BYTES = 1024 * 1024;
@@ -71,11 +74,18 @@ export async function completeHookSmol(
   const ref = role === "smol_model"
     ? resolveSmolModelRef(models)
     : resolveModelRoleRef(models, role);
-  // Claude Code is a harness, not a model in Pi's catalogue: it answers the
-  // advisor role through its own SDK, with no Pi runtime in the picture.
-  if (isClaudeCodeRoleRef(ref)) {
+  const chatProvider = resolveChatModelRef(models)?.provider ?? null;
+  // Claude Code is a harness, not a model in Pi's catalogue: an explicit
+  // claude-code binding, or an unset role on a Claude-driven ghost, answers
+  // through its own SDK with no Pi runtime in the picture.
+  const claudeRef = isClaudeCodeRoleRef(ref)
+    ? ref
+    : !ref && chatProvider === CLAUDE_CODE_DRIVER_PROVIDER
+      ? resolveSmolModel(EMPTY_SMOL_CATALOG, null, role, { chatProvider }).model
+      : null;
+  if (claudeRef) {
     return completeHookClaude({
-      ref,
+      ref: { provider: claudeRef.provider, modelId: "modelId" in claudeRef ? claudeRef.modelId : claudeRef.id },
       role,
       prompt: input.prompt,
       cwd: paths.sessionDir,
@@ -91,7 +101,7 @@ export async function completeHookSmol(
   });
 
   try {
-    const resolved = resolveSmolModel(smolCatalogFromRuntime(runtime), ref, role);
+    const resolved = resolveSmolModel(smolCatalogFromRuntime(runtime), ref, role, { chatProvider });
     const model = runtime.getModel(resolved.model.provider, resolved.model.id);
     if (!model) {
       throw new SmolModelUnavailableError(

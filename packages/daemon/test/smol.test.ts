@@ -63,6 +63,27 @@ describe("resolveSmolModel", () => {
     expect(resolveSmolModel(catalog).model.id).toBe("cheap");
   });
 
+  it("follows the chat model's provider before anything cheaper elsewhere", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "free-tiny", cost: cost(0), credentialed: true },
+      { provider: "openai-codex", id: "gpt-5.6-sol", subscription: true },
+      { provider: "openai-codex", id: "gpt-5.6-mini", subscription: true },
+    ]);
+    const resolved = resolveSmolModel(catalog, null, "smol_model", { chatProvider: "openai-codex" });
+    expect(resolved).toMatchObject({ model: { provider: "openai-codex", id: "gpt-5.6-mini" }, via: "driver" });
+    // Nothing usable from that provider: the global cheapest still answers.
+    expect(resolveSmolModel(catalog, null, "smol_model", { chatProvider: "anthropic" }).model)
+      .toMatchObject({ provider: "openrouter", id: "free-tiny" });
+  });
+
+  it("names Claude Code's own Sonnet and Fable for a Claude-driven ghost", () => {
+    const empty = catalogOf([]);
+    expect(resolveSmolModel(empty, null, "smol_model", { chatProvider: "claude-code" }))
+      .toEqual({ model: { provider: "claude-code", id: "sonnet" }, via: "driver" });
+    expect(resolveSmolModel(empty, null, ADVISOR_MODEL_ROLE, { chatProvider: "claude-code" }))
+      .toEqual({ model: { provider: "claude-code", id: "fable" }, via: "driver" });
+  });
+
   it("honours an explicit roles.smol_model binding", () => {
     const catalog = catalogOf([
       { provider: "metered", id: "cheap", cost: cost(0.25) },

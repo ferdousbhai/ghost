@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import { preferredRoleModel } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
@@ -6,6 +6,18 @@ import type { GhostPiRuntime } from "./pi-runtime.js";
 export const SMOL_MODEL_ROLE = "smol_model";
 export const ADVISOR_MODEL_ROLE = "advisor_model";
 export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
+
+/**
+ * Claude Code is a harness, not a catalogue entry, so its role defaults are
+ * names Claude Code itself resolves: the driver is whatever `claude` defaults
+ * to, the cheap work goes to Sonnet, and the teacher is Fable.
+ */
+export const CLAUDE_CODE_DRIVER_PROVIDER = "claude-code";
+export const CLAUDE_CODE_SMOL_MODEL_ID = "sonnet";
+export const CLAUDE_CODE_ADVISOR_MODEL_ID = "fable";
+
+/** Model ids that read as a provider's small tier, whatever it charges. */
+const SMALL_TIER_HINT = /mini|nano|haiku|flash|lite|small|fast|turbo/i;
 
 
 export type SmolModel = Pick<Model<Api>, "provider" | "id">
@@ -34,7 +46,13 @@ export interface SmolModelCatalog {
 
 export interface ResolvedSmolModel {
   readonly model: SmolModel;
-  readonly via: "role" | "cheapest" | "preferred";
+  /** `driver` means the choice followed the chat model's provider. */
+  readonly via: "role" | "cheapest" | "preferred" | "driver";
+}
+
+export interface ResolveSmolOptions {
+  /** The chat model's provider; an unset role follows it before anything else. */
+  readonly chatProvider?: string | null;
 }
 
 /**
@@ -95,15 +113,46 @@ export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidat
     });
 }
 
+function publishedCost(candidate: SmolCandidate, side: "input" | "output"): number {
+  const cost = candidate.model.cost?.[side];
+  return typeof cost === "number" && Number.isFinite(cost) ? cost : Number.POSITIVE_INFINITY;
+}
+
 /**
- * Resolve the smol model: an explicit ref is honoured or errors loudly;
- * otherwise the cheapest usable model; a genuinely empty catalogue is a loud
- * error.
+ * The provider's own small tier: its cheapest usable model, with a name that
+ * reads as small winning over a subscription's flat zero cost.
+ */
+export function smallestWithinProvider(
+  catalog: SmolModelCatalog,
+  provider: string,
+): SmolCandidate | undefined {
+  const within = catalog.usable().filter((candidate) => candidate.model.provider === provider);
+  return within.slice().sort((a, b) => {
+    const hint = Number(!SMALL_TIER_HINT.test(a.model.id)) - Number(!SMALL_TIER_HINT.test(b.model.id));
+    if (hint !== 0) return hint;
+    for (const side of ["input", "output"] as const) {
+      const byCost = publishedCost(a, side) - publishedCost(b, side);
+      if (byCost !== 0 && Number.isFinite(byCost)) return byCost < 0 ? -1 : 1;
+      if (publishedCost(a, side) !== publishedCost(b, side)) {
+        return publishedCost(a, side) < publishedCost(b, side) ? -1 : 1;
+      }
+    }
+    return smolModelLabel(a.model).localeCompare(smolModelLabel(b.model));
+  })[0];
+}
+
+/**
+ * Resolve a background-work model: an explicit ref is honoured or errors
+ * loudly; otherwise the role follows the chat model's provider (Claude Code
+ * names its own Sonnet and Fable; a pi provider offers its small tier); then
+ * the advisor preference list or the cheapest usable model; a genuinely empty
+ * catalogue is a loud error.
  */
 export function resolveSmolModel(
   catalog: SmolModelCatalog,
   ref?: GhostModelRoleBinding | null,
   role: HookModelRole = SMOL_MODEL_ROLE,
+  options: ResolveSmolOptions = {},
 ): ResolvedSmolModel {
   if (ref?.provider && ref.modelId) {
     const candidate = catalog.find(ref.provider, ref.modelId);
@@ -126,6 +175,16 @@ export function resolveSmolModel(
     return { model: candidate.model, via: "role" };
   }
 
+  if (options.chatProvider === CLAUDE_CODE_DRIVER_PROVIDER) {
+    return {
+      model: {
+        provider: CLAUDE_CODE_DRIVER_PROVIDER,
+        id: role === ADVISOR_MODEL_ROLE ? CLAUDE_CODE_ADVISOR_MODEL_ID : CLAUDE_CODE_SMOL_MODEL_ID,
+      },
+      via: "driver",
+    };
+  }
+
   if (role === ADVISOR_MODEL_ROLE) {
     const preferred = preferredRoleModel(
       "advisor",
@@ -140,6 +199,11 @@ export function resolveSmolModel(
     }
     return { model: preferred, via: "preferred" };
   }
+
+  const withinDriver = options.chatProvider
+    ? smallestWithinProvider(catalog, options.chatProvider)
+    : undefined;
+  if (withinDriver) return { model: withinDriver.model, via: "driver" };
 
   const cheapest = rankSmolModels(catalog)[0];
   if (!cheapest) {
@@ -184,6 +248,34 @@ function toCandidate(runtime: SmolRuntime, model: SmolModel): SmolCandidate {
  * usability the model switcher reports, computed synchronously so a background
  * title or greeting never blocks on an availability probe.
  */
+/** A catalogue with nothing in it, for a ghost whose background work never touches pi. */
+export const EMPTY_SMOL_CATALOG: SmolModelCatalog = {
+  usable: () => [],
+  find: () => undefined,
+  hasCredentials: () => false,
+};
+
+/** One Claude Code completion for a background role: the prompt text in, the reply text out. */
+export type ClaudeSmolCompleter = (
+  input: { modelId: string; role: HookModelRole; prompt: string; signal?: AbortSignal },
+) => Promise<string>;
+
+/** Flatten a pi completion context into the one user message a Claude Code query takes. */
+export function contextPrompt(context: Context): string {
+  const parts: string[] = [];
+  if (context.systemPrompt) parts.push(context.systemPrompt);
+  for (const message of context.messages) {
+    const content = typeof message.content === "string"
+      ? message.content
+      : message.content
+          .filter((part): part is { type: "text"; text: string } => part.type === "text")
+          .map((part) => part.text)
+          .join("");
+    parts.push(content);
+  }
+  return parts.join("\n\n");
+}
+
 export function smolCatalogFromRuntime(runtime: SmolRuntime): SmolModelCatalog {
   return {
     usable: () =>

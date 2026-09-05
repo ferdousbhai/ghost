@@ -125,6 +125,8 @@ import {
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
+import { completeHookClaude } from "./hook-claude-complete.js";
+import type { ClaudeSmolCompleter } from "./smol.js";
 import type { TrashPathResult } from "./trash.js";
 import {
   bindConversationId,
@@ -428,10 +430,13 @@ function passEntryMatches(
  * runs one completion on the cheapest usable model (see title.ts).
  */
 export type TitleGenerator = (input: {
-  session: AgentSession;
-  runtime: GhostPiRuntime;
+  /** The open pi session and its runtime; absent for a Claude Code conversation. */
+  session?: AgentSession;
+  runtime?: GhostPiRuntime;
   ghostName: string;
   configDir: string;
+  /** Where a Claude Code completion runs from; nothing there is read. */
+  sessionDir: string;
   firstPrompt: string;
   signal: AbortSignal;
 }) => Promise<string>;
@@ -450,15 +455,45 @@ export interface TitleConfig {
 
 const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
 
-const defaultTitleGenerator: TitleGenerator = async ({ runtime, configDir, firstPrompt, signal }) => {
-  let ref = null;
+/** Background roles answered by Claude Code run one query from the session directory. */
+function claudeSmolCompleter(sessionDir: string): ClaudeSmolCompleter {
+  return ({ modelId, role, prompt, signal }) => completeHookClaude({
+    ref: { provider: CLAUDE_CODE_PROVIDER_ID, modelId },
+    role,
+    prompt,
+    cwd: sessionDir,
+    ...(signal ? { signal } : {}),
+  });
+}
+
+/** The smol binding and the chat provider it follows; a broken models.json means neither. */
+function backgroundRoleRefs(configDir: string): {
+  ref: GhostModelRoleBinding | null;
+  chatProvider: string | null;
+} {
   try {
-    ref = resolveSmolModelRef(readGhostModels(configDir));
+    const models = readGhostModels(configDir);
+    return {
+      ref: resolveSmolModelRef(models),
+      chatProvider: resolveChatModelRef(models)?.provider ?? null,
+    };
   } catch {
-    // A broken models.json is not fatal to titling: fall back to cheapest usable.
-    ref = null;
+    return { ref: null, chatProvider: null };
   }
-  return generateTitle({ runtime, firstPrompt, ref, signal });
+}
+
+const defaultTitleGenerator: TitleGenerator = async (
+  { runtime, configDir, sessionDir, firstPrompt, signal },
+) => {
+  const { ref, chatProvider } = backgroundRoleRefs(configDir);
+  return generateTitle({
+    ...(runtime ? { runtime } : {}),
+    firstPrompt,
+    ref,
+    chatProvider,
+    claude: claudeSmolCompleter(sessionDir),
+    signal,
+  });
 };
 
 function scheduleTitleTimeout(
@@ -1223,6 +1258,7 @@ function transcriptFromPresentation(
   id: string,
   presentation: PresentationHistoryV1 | null,
   options: { limit?: number; offset?: number } = {},
+  title: string = CLAUDE_CONVERSATION_TITLE,
 ): Transcript {
   const all = presentation?.turns.flatMap((turn): TranscriptMessage[] => {
     const timestamp = Date.parse(turn.settledAt);
@@ -1247,7 +1283,7 @@ function transcriptFromPresentation(
   }) ?? [];
   return {
     ...conversationIdentity("claude-code", id),
-    title: CLAUDE_CONVERSATION_TITLE,
+    title,
     ...pageTranscript(all, options),
     historyTruncated: presentation?.historyPrefixOmitted ?? true,
   };
@@ -2675,6 +2711,10 @@ export class SessionHost {
     return async (turn) => {
       if (recorded || !turn) return;
       recorded = true;
+      // The first settled turn names the conversation, as pi's first turn does.
+      if (turn.sourceOrdinal === 1 && this.titleEnabled) {
+        this.startClaudeTitle(ghostName, conversationId, turn.ownerPrompt);
+      }
       try {
         const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
         await this.homeOperations.withLease(ghostName, () =>
@@ -2692,6 +2732,44 @@ export class SessionHost {
           });
       }
     };
+  }
+
+  /**
+   * Fire-and-forget titling for a Claude Code conversation: one smol
+   * completion, stored on the resume sidecar, announced so listings refresh.
+   */
+  private startClaudeTitle(ghostName: string, conversationId: string, firstPrompt: string): void {
+    const logger = this.logger.child({ ghost: ghostName, conversation: conversationId });
+    const controller = new AbortController();
+    const timer = this.titleTimeoutScheduler(() => controller.abort(), this.titleTimeoutMs);
+    timer.unref?.();
+    void Promise.resolve()
+      .then(async () => {
+        const ghost = this.registry.get(ghostName);
+        const paths = ghostPaths(ghost.dir);
+        const raw = await this.generateTitle({
+          ghostName,
+          configDir: paths.home,
+          sessionDir: paths.sessionDir,
+          firstPrompt,
+          signal: controller.signal,
+        });
+        const title = raw.trim();
+        if (!title) return;
+        const current = await this.claudeCode.readSession(ghost, conversationId);
+        if (!current || current.title) return;
+        await this.homeOperations.withLease(ghostName, () =>
+          this.claudeCode.setConversationTitle(ghost, conversationId, title));
+        logger.info("named ghost conversation", { runtime: "claude-code", title });
+        await this.announceConversationUpdated(ghostName, "claude-code", conversationId);
+      })
+      .catch((error: unknown) => {
+        logger.warn("conversation title generation failed", {
+          runtime: "claude-code",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => timer.dispose());
   }
 
   private async preparePiOwnerPass(
@@ -3732,6 +3810,7 @@ export class SessionHost {
       runtime: hosted.modelRuntime,
       ghostName,
       configDir,
+      sessionDir: ghostPaths(hosted.ghost.dir).sessionDir,
       firstPrompt,
       signal: controller.signal,
     }));
@@ -3851,16 +3930,14 @@ export class SessionHost {
     ghost: Ghost;
     context: GreetingContextInput;
   }): Promise<string | null> {
-    const configDir = ghostPaths(input.ghost.dir).home;
-    let ref: GhostModelRoleBinding | null = null;
-    try {
-      ref = resolveSmolModelRef(readGhostModels(configDir));
-    } catch {
-      // A broken models.json is not fatal to greeting: fall back to cheapest usable.
-      ref = null;
+    const paths = ghostPaths(input.ghost.dir);
+    const { ref, chatProvider } = backgroundRoleRefs(paths.home);
+    const claude = claudeSmolCompleter(paths.sessionDir);
+    if (chatProvider === CLAUDE_CODE_PROVIDER_ID && !ref) {
+      return generateGreeting({ context: input.context, ref, chatProvider, claude });
     }
     return this.withGreetingRuntime(input.ghost, (runtime) =>
-      generateGreeting({ runtime, context: input.context, ref }));
+      generateGreeting({ runtime, context: input.context, ref, chatProvider, claude }));
   }
 
   /**
@@ -4049,13 +4126,20 @@ export class SessionHost {
     title: string,
     runtime: ConversationRuntime = "pi",
   ): Promise<string> {
-    assertPiConversation(runtime, "Conversation renaming");
     if (!/\P{C}/u.test(title)) {
       throw new GhostError(
         "invalid_request",
         "A conversation title needs at least one printable character.",
         400,
       );
+    }
+    if (runtime === "claude-code") {
+      const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
+      const ghost = this.registry.get(ghostName);
+      const stored = await this.homeOperations.withLease(ghostName, () =>
+        this.claudeCode.setConversationTitle(ghost, id, title));
+      await this.announceConversationUpdated(ghostName, "claude-code", id);
+      return stored;
     }
     return this.homeOperations.withLease(ghostName, () =>
       this.renameConversationLeased(ghostName, conversationId, title)
@@ -4074,15 +4158,6 @@ export class SessionHost {
     const sessionFile = join(paths.sessionDir, sessionFileNameFor(id));
     await this.conversationFileProbe("title-write", sessionFile);
     if (!existsSync(sessionFile) && !this.sessions.has(key) && !this.opening.has(key)) {
-      // Claude Code owns its own conversation's name; Ghost only mirrors the
-      // runtime label into the listing and has nothing to write to.
-      if (existsSync(claudeSessionMetadataPath(paths.sessionDir, id))) {
-        throw new GhostError(
-          "not_supported",
-          "A Claude Code conversation cannot be renamed from Ghost.",
-          409,
-        );
-      }
       throw new GhostError(
         "not_found",
         `This ghost has no conversation ${JSON.stringify(id)}.`,
@@ -4568,7 +4643,7 @@ export class SessionHost {
       ...piSessions,
       ...claudeSessions.filter((info) => isValidConversationId(info.conversationId)).map((info) => ({
         ...conversationIdentity("claude-code", info.conversationId),
-        title: CLAUDE_CONVERSATION_TITLE,
+        title: info.title ?? CLAUDE_CONVERSATION_TITLE,
         createdAt: info.created,
         updatedAt: info.modified,
         messageCount: info.messageCount,
@@ -4631,7 +4706,7 @@ export class SessionHost {
         paths.sessionDir,
         { runtime, conversationId: id },
       );
-      return transcriptFromPresentation(id, presentation, options);
+      return transcriptFromPresentation(id, presentation, options, native.title ?? CLAUDE_CONVERSATION_TITLE);
     }
     const path = join(paths.sessionDir, sessionFileNameFor(id));
     await this.conversationFileProbe("transcript-read", path);

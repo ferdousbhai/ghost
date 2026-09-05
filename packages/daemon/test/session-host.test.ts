@@ -5263,7 +5263,7 @@ describe("renaming a conversation", () => {
     expect(await titleOf("conv-live")).toBe("Watching it work");
   });
 
-  it("refuses a Claude Code conversation, whose name that runtime owns", async () => {
+  it("names a Claude Code conversation on its resume sidecar and lists it", async () => {
     const { dir } = await setup([{ kind: "text", text: "ok" }]);
     const sessionDir = ghostPaths(dir).sessionDir;
     mkdirSync(sessionDir, { recursive: true });
@@ -5280,10 +5280,16 @@ describe("renaming a conversation", () => {
       }),
       { encoding: "utf8", mode: 0o600 },
     );
-    expect((await host!.listSessions("casper")).map((session) => session.id))
-      .toContain("claude-code:claude-conv");
-    await expect(host!.renameConversation("casper", "claude-conv", "Mine now", "claude-code"))
-      .rejects.toMatchObject({ code: "not_supported", status: 409 });
+    expect((await host!.listSessions("casper")).find((session) => session.id === "claude-code:claude-conv"))
+      .toMatchObject({ title: "Claude Code" });
+    await expect(host!.renameConversation("casper", "claude-conv", " Mine now ", "claude-code"))
+      .resolves.toBe("Mine now");
+    expect((await host!.listSessions("casper")).find((session) => session.id === "claude-code:claude-conv"))
+      .toMatchObject({ title: "Mine now" });
+    const stored = JSON.parse(readFileSync(claudeSessionMetadataPath(sessionDir, "claude-conv"), "utf8"));
+    expect(stored).toMatchObject({ version: 3, title: "Mine now", cwd: dir });
+    await expect(host!.renameConversation("casper", "missing-conv", "Nope", "claude-code"))
+      .rejects.toMatchObject({ code: "not_found", status: 404 });
   });
 
   it("404s an unknown conversation and refuses a title with nothing in it", async () => {

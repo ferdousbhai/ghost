@@ -138,13 +138,13 @@ never leaves the ghost home. Credential values never enter logs or API
 responses.
 
 Roles are `chat_model` (the conversation), `smol_model` (titles, greetings,
-command-hook completions; unset, the cheapest usable model), and
-`advisor_model` (the frontier teacher and image reader; unset, a strong
-reasoner from Ghost's preference list), each with an optional fallback chain.
-`chat_model` unset leaves the choice to pi. `claude-code/default` is valid only
-as the chat runtime or the advisor. There is no model catalog API and no
-local-runner detection: `ghost model <provider>/<id>` writes the binding, and
-a local endpoint is an ordinary provider in `models.json`.
+command-hook completions), and `advisor_model` (the frontier teacher and image
+reader), each with an optional fallback chain. The two background roles follow
+the driver when unset: a Claude Code ghost gets Sonnet and Fable through Claude
+Code, a pi ghost gets its provider's small tier and Ghost's advisor preference.
+`chat_model` unset leaves the choice to pi. There is no model catalog API and
+no local-runner detection: `ghost model <provider>/<id>` writes the binding,
+and a local endpoint is an ordinary provider in `models.json`.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use the runtime's own retry and fallback chains; Ghost adds no turn,

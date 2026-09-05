@@ -185,7 +185,12 @@ export interface ClaudeSessionMetadata {
   messageCount: number;
   ownerTurnCount: number;
   cwd?: string;
+  /** The listing title, generated after the first turn or set by the owner. */
+  title?: string;
 }
+
+/** Bound the same way the daemon bounds an owner-written title. */
+export const MAX_CLAUDE_CONVERSATION_TITLE_SCALARS = 120;
 
 type LoadedClaudeSessionMetadata = ClaudeSessionMetadata & { resumeBlocked?: true };
 
@@ -852,6 +857,7 @@ const CLAUDE_METADATA_V3_FIELDS = new Set([
   ...CLAUDE_METADATA_COMMON_FIELDS,
   "cwd",
   "projectSnapshot",
+  "title",
 ]);
 const CLAUDE_RESUME_STARTED_FIELDS = new Set(["version", "runtime", "conversationId"]);
 function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
@@ -890,7 +896,11 @@ function parseMetadata(path: string, raw: string): ClaudeSessionMetadata {
     || (value.ownerTurnCount === undefined && value.messageCount % 2 !== 0)
     || (value.version === 1 && value.cwd !== undefined)
     || ((value.version === 2 || value.version === 3)
-      && (typeof value.cwd !== "string" || !isAbsolute(value.cwd)))) {
+      && (typeof value.cwd !== "string" || !isAbsolute(value.cwd)))
+    || (value.title !== undefined
+      && (typeof value.title !== "string"
+        || !isBoundedScalarString(value.title, MAX_CLAUDE_CONVERSATION_TITLE_SCALARS)
+        || !/\P{C}/u.test(value.title)))) {
     throw new GhostError(
       "claude_session_invalid",
       `${path} does not match the claude-code session metadata contract.`,
@@ -2377,6 +2387,7 @@ export class ClaudeCodeRuntime {
           messageCount,
           ownerTurnCount: ownerTurnId,
           cwd: runtimeCwd,
+          ...(metadata?.title ? { title: metadata.title } : {}),
         };
         this.assertTurnAdmitted(options.signal);
         await settleResumeMetadata(paths.sessionDir, metadata);
@@ -2512,6 +2523,34 @@ export class ClaudeCodeRuntime {
    * Point-read one conversation's resume sidecar (recovering a settling write
    * exactly as a listing would), or null when the conversation does not exist.
    */
+  /**
+   * Store the listing title on the resume sidecar. The turn that is settling
+   * carries the title it read at admission forward, so a title set mid-turn
+   * survives the turn's own metadata write only when it landed before that
+   * read; the next title write wins either way.
+   */
+  async setConversationTitle(ghost: Ghost, conversationId: string, title: string): Promise<string> {
+    requireRawConversationId(conversationId);
+    const trimmed = title.trim();
+    if (!trimmed || !isBoundedScalarString(trimmed, MAX_CLAUDE_CONVERSATION_TITLE_SCALARS)
+      || !/\P{C}/u.test(trimmed)) {
+      throw new GhostError("invalid_request", "A conversation title needs at least one printable character.", 400);
+    }
+    const { sessionDir } = ghostPaths(ghost.dir);
+    const loaded = await readMetadata(sessionDir, conversationId);
+    if (!loaded) {
+      throw new GhostError("not_found", `This ghost has no conversation ${JSON.stringify(conversationId)}.`, 404);
+    }
+    const { resumeBlocked: _blocked, ...metadata } = loaded;
+    await writeMetadata(sessionDir, {
+      ...metadata,
+      version: 3,
+      cwd: metadata.cwd ?? ghostPaths(ghost.dir).home,
+      title: trimmed,
+    });
+    return trimmed;
+  }
+
   async readSession(ghost: Ghost, conversationId: string): Promise<ClaudeSessionMetadata | null> {
     requireRawConversationId(conversationId);
     const { sessionDir } = ghostPaths(ghost.dir);

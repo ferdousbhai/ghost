@@ -1,12 +1,17 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import {
+  CLAUDE_CODE_DRIVER_PROVIDER,
+  type ClaudeSmolCompleter,
+  EMPTY_SMOL_CATALOG,
+  SMOL_MODEL_ROLE,
+  SmolModelUnavailableError,
+  type SmolRuntime,
   assistantText,
+  contextPrompt,
   resolveSmolModel,
   smolCatalogFromRuntime,
   smolModelLabel,
-  SmolModelUnavailableError,
-  type SmolRuntime,
 } from "./smol.js";
 
 /**
@@ -62,9 +67,14 @@ export function cleanTitle(raw: string): string {
 }
 
 export interface GenerateTitleInput {
-  readonly runtime: SmolRuntime;
+  /** Absent when the ghost's background work never touches pi (a Claude Code driver). */
+  readonly runtime?: SmolRuntime;
   readonly firstPrompt: string;
   readonly ref?: GhostModelRoleBinding | null;
+  /** The chat model's provider; an unset smol role follows it. */
+  readonly chatProvider?: string | null;
+  /** Answers a `claude-code/<model>` resolution. */
+  readonly claude?: ClaudeSmolCompleter;
   readonly signal?: AbortSignal | undefined;
 }
 
@@ -75,10 +85,33 @@ export interface GenerateTitleInput {
  * so the fire-and-forget caller can log-and-forget. Never mutates a session.
  */
 export async function generateTitle(input: GenerateTitleInput): Promise<string> {
-  const catalog = smolCatalogFromRuntime(input.runtime);
-  const resolved = resolveSmolModel(catalog, input.ref);
-  const model = input.runtime.getModel(resolved.model.provider, resolved.model.id);
-  if (!model) {
+  const catalog = input.runtime ? smolCatalogFromRuntime(input.runtime) : EMPTY_SMOL_CATALOG;
+  const resolved = resolveSmolModel(catalog, input.ref, SMOL_MODEL_ROLE, {
+    chatProvider: input.chatProvider ?? null,
+  });
+  if (resolved.model.provider === CLAUDE_CODE_DRIVER_PROVIDER) {
+    if (!input.claude) {
+      throw new SmolModelUnavailableError(
+        `${smolModelLabel(resolved.model)} has no Claude Code completer here.`,
+        "unknown_model",
+      );
+    }
+    const title = cleanTitle(await input.claude({
+      modelId: resolved.model.id,
+      role: SMOL_MODEL_ROLE,
+      prompt: contextPrompt(buildTitleContext(input.firstPrompt)),
+      ...(input.signal ? { signal: input.signal } : {}),
+    }));
+    if (!title) {
+      throw new SmolModelUnavailableError(
+        `${smolModelLabel(resolved.model)} returned no usable title text.`,
+        "empty_response",
+      );
+    }
+    return title;
+  }
+  const model = input.runtime?.getModel(resolved.model.provider, resolved.model.id);
+  if (!model || !input.runtime) {
     throw new SmolModelUnavailableError(
       `The resolved smol model ${smolModelLabel(resolved.model)} vanished from the catalogue.`,
       "unknown_model",

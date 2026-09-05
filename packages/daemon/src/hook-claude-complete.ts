@@ -1,14 +1,12 @@
 /**
- * Claude Code as the review advisor.
+ * Claude Code answering a background role.
  *
- * `roles.advisor_model: claude-code/default` binds the teacher that judges
- * every settled turn to the owner's installed, authenticated Claude Code
- * rather than to a Pi provider model. One review is one non-interactive Agent
- * SDK query whose only user message is the batch prompt the review already
- * assembled — advisor system prompt included — and nothing else: no tools, no
- * MCP, no skills, no plugins, no filesystem settings, and no session
- * persistence. It is independent of the principal runtime — a Pi-driven and a
- * Claude-driven ghost both reach it.
+ * A `claude-code/<model>` binding on `smol_model` or `advisor_model` (or the
+ * driver-following default, Sonnet and Fable) runs one non-interactive Agent
+ * SDK query on the owner's installed, authenticated Claude Code: one user
+ * message in, the reply text out, and nothing else — no tools, no MCP, no
+ * skills, no plugins, no filesystem settings, no session persistence. It is
+ * independent of the principal runtime; a Pi-driven ghost reaches it too.
  *
  * The SDK loader, executable probe, and reviewed child environment are the
  * principal runtime's; the daemon injects its own instances so a review reuses
@@ -34,7 +32,7 @@ import { resultErrorMessage } from "./claude-pi-messages.js";
 import { captureClaudeCodeEnvironment } from "./env-scrub.js";
 import { silentLogger, type Logger } from "./log.js";
 import type { GhostModelRoleBinding } from "./models.js";
-import { ADVISOR_MODEL_ROLE, SmolModelUnavailableError, type HookModelRole } from "./smol.js";
+import { SmolModelUnavailableError, type HookModelRole } from "./smol.js";
 
 /** The daemon's shared Claude Code plumbing; each default is stand-alone. */
 export interface HookClaudeOptions {
@@ -68,12 +66,9 @@ export function isClaudeCodeRoleRef(
 
 /**
  * A system prompt is set only to keep the `claude_code` coding-agent preset
- * from loading. The advisor's own instructions already head the batch prompt,
- * so repeating them here would send that text twice on every reviewed turn.
+ * from loading; the role's own instructions head the user message.
  */
-const ADVISOR_SYSTEM_STUB =
-  "Follow the review instructions in the user message exactly "
-  + "and reply with the JSON they specify.";
+const ROLE_SYSTEM_STUB = "Follow the instructions in the user message exactly.";
 
 /**
  * The complete query the teacher runs. Everything that would let Claude act on,
@@ -82,17 +77,21 @@ const ADVISOR_SYSTEM_STUB =
  * filesystem hooks out, and `tools: []` with no MCP server leaves the model
  * nothing to call.
  */
-function advisorQueryOptions(input: {
+function roleQueryOptions(input: {
   binaryPath: string;
   cwd: string;
+  modelId: string;
   environment: Readonly<NodeJS.ProcessEnv>;
   abortController: AbortController;
 }): ClaudeQueryOptions {
   return {
     cwd: input.cwd,
     pathToClaudeCodeExecutable: input.binaryPath,
+    // `default` is whatever the owner's Claude Code defaults to; any other id
+    // is handed to Claude Code as-is (an alias like `sonnet` or a full name).
+    ...(input.modelId === CLAUDE_CODE_DEFAULT_MODEL_ID ? {} : { model: input.modelId }),
     // A custom string, so Claude Code's coding-agent preset never loads.
-    systemPrompt: ADVISOR_SYSTEM_STUB,
+    systemPrompt: ROLE_SYSTEM_STUB,
     settingSources: [],
     skills: [],
     plugins: [],
@@ -108,36 +107,31 @@ function advisorQueryOptions(input: {
   };
 }
 
-function unusable(role: HookModelRole, detail: string, reason: string): SmolModelUnavailableError {
+function unusable(
+  ref: GhostModelRoleBinding,
+  role: HookModelRole,
+  detail: string,
+  reason: string,
+): SmolModelUnavailableError {
   return new SmolModelUnavailableError(
-    `This ghost's ${role} role names `
-    + `${CLAUDE_CODE_PROVIDER_ID}/${CLAUDE_CODE_DEFAULT_MODEL_ID}, but ${detail}`,
+    `This ghost's ${role} role names ${CLAUDE_CODE_PROVIDER_ID}/${ref.modelId}, but ${detail}`,
     reason,
   );
 }
 
-/** One review pass answered by Claude Code. Returns the reply text verbatim. */
+/** One completion answered by Claude Code. Returns the reply text verbatim. */
 export async function completeHookClaude(
   input: HookClaudeInput,
   options: HookClaudeOptions = {},
 ): Promise<string> {
-  if (input.ref.modelId !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
+  if (input.ref.provider !== CLAUDE_CODE_PROVIDER_ID || !input.ref.modelId.trim()) {
     throw new SmolModelUnavailableError(
-      `This ghost's ${input.role} role names `
-      + `${CLAUDE_CODE_PROVIDER_ID}/${input.ref.modelId}, which is not a model: the only `
-      + `Claude Code binding is ${CLAUDE_CODE_PROVIDER_ID}/${CLAUDE_CODE_DEFAULT_MODEL_ID}.`,
+      `This ghost's ${input.role} role names ${input.ref.provider}/${input.ref.modelId}, `
+      + `which is not a Claude Code model.`,
       "unknown_model",
     );
   }
-  if (input.role !== ADVISOR_MODEL_ROLE) {
-    throw new SmolModelUnavailableError(
-      `${CLAUDE_CODE_PROVIDER_ID}/${CLAUDE_CODE_DEFAULT_MODEL_ID} cannot serve the `
-      + `${input.role} role: the review advisor is the only hook role it answers. Point `
-      + `roles.${input.role} in models.json at a provider model.`,
-      "unsupported_role",
-    );
-  }
-  if (input.signal?.aborted) throw input.signal.reason ?? new Error("Review aborted.");
+  if (input.signal?.aborted) throw input.signal.reason ?? new Error("Completion aborted.");
 
   const environment = options.environment ?? captureClaudeCodeEnvironment();
   const probe = options.probe ?? new ClaudeCodeProbe({ environment });
@@ -146,6 +140,7 @@ export async function completeHookClaude(
     probed = await probe.read();
   } catch (cause) {
     throw unusable(
+      input.ref,
       input.role,
       `the installed \`claude\` executable could not be used: ${(cause as Error).message}`,
       "unknown_model",
@@ -153,6 +148,7 @@ export async function completeHookClaude(
   }
   if (!isClaudeCodeAuthenticated(probed.authStatus)) {
     throw unusable(
+      input.ref,
       input.role,
       "Claude Code reports no usable native authentication. Sign in to the installed "
       + `\`claude\` executable, or point roles.${input.role} at an authenticated model.`,
@@ -162,7 +158,7 @@ export async function completeHookClaude(
 
   const sdk = await (options.loadSdk ?? loadOwnerSdk)(input.signal);
   await mkdir(input.cwd, { recursive: true });
-  (options.logger ?? silentLogger).debug?.("advisor review served by Claude Code");
+  (options.logger ?? silentLogger).debug?.(`${input.role} completion served by Claude Code`);
 
   const abortController = new AbortController();
   const abort = () => abortController.abort();
@@ -171,9 +167,10 @@ export async function completeHookClaude(
   try {
     const query = sdk.query({
       prompt: input.prompt,
-      options: advisorQueryOptions({
+      options: roleQueryOptions({
         binaryPath: probed.binaryPath,
         cwd: input.cwd,
+        modelId: input.ref.modelId,
         environment,
         abortController,
       }),
@@ -182,7 +179,7 @@ export async function completeHookClaude(
       if (message.type !== "result") continue;
       if (message.subtype !== "success" || message.is_error) {
         throw new SmolModelUnavailableError(
-          "Claude Code failed the advisor review: "
+          `Claude Code failed the ${input.role} completion: `
           + (resultErrorMessage(message) || `the query ended with ${message.subtype}.`),
           "provider_error",
         );
@@ -198,7 +195,7 @@ export async function completeHookClaude(
   const reply = text?.trim();
   if (!reply) {
     throw new SmolModelUnavailableError(
-      "Claude Code returned no advisor review text.",
+      `Claude Code returned no ${input.role} text.`,
       "empty_response",
     );
   }
