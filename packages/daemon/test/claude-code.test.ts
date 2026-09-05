@@ -54,7 +54,7 @@ import {
   PresentationHistoryStore,
   presentationHistoryPath,
 } from "../src/presentation-history.js";
-import { GhostHookRunner } from "../src/hooks.js";
+import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS } from "../src/hooks.js";
 import type { Logger } from "../src/log.js";
 import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
@@ -2636,10 +2636,10 @@ fi
       emit: (event) => events.push(event),
     });
 
-    // The hook owns its stopping policy and may continue beyond Ghost's former
-    // host cap. Every pass is another prompt into the one warm query, not
-    // another query.
-    const passCount = hookContinuationPasses + 1;
+    // The hook keeps asking for twelve; Ghost honors MAX_SESSION_STOP_CONTINUATIONS
+    // and then accepts. Every pass is another prompt into the one warm query,
+    // not another query.
+    const passCount = MAX_SESSION_STOP_CONTINUATIONS + 1;
     const activePerTurn = [false, ...Array(passCount - 1).fill(true)];
     expect(lifecycle.queries).toBe(1);
     expect(seenOptions).toHaveLength(1);

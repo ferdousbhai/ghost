@@ -50,7 +50,7 @@ import {
   type GhostModelDefinition,
   type GhostModelsFile,
 } from "../src/models.js";
-import { GhostHookRunner } from "../src/hooks.js";
+import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS } from "../src/hooks.js";
 import {
   PI_NATIVE_TOOL_NAMES,
   SessionHost,
@@ -2502,10 +2502,11 @@ describe("SessionHost.runTurn", () => {
         }
       });
     });
-    // The hook owns its stopping policy and may continue beyond Ghost's former
-    // host cap. Avoid the upstream canned-phrasing retry: this test owns the
-    // retry via Ghost's session_stop hook and must observe every pass itself.
-    const passCount = hookContinuationPasses + 1;
+    // The hook keeps asking for twelve; Ghost honors MAX_SESSION_STOP_CONTINUATIONS
+    // of them and then accepts the pass, so the hook sees one more pass than
+    // that. This test owns the retry via Ghost's session_stop hook and must
+    // observe every pass itself.
+    const passCount = MAX_SESSION_STOP_CONTINUATIONS + 1;
     const passTexts = [
       "The first answer circles around the point.",
       "Here is the direct answer.",
