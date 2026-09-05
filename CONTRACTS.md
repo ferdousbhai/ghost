@@ -289,6 +289,13 @@ extension factories are Pi-native executable extensions and do not enter
 Claude. These exceptions must stay visible in the resource/API surfaces and
 must not be presented as shared capabilities.
 
+Claude Code also serves the review teacher, independently of which runtime
+drives the ghost: a Pi-driven ghost and a Claude-driven ghost both reach it by
+binding `roles.advisor_model` to `claude-code/default`. That teacher query is
+not a principal session — no persona, no project snapshot, no Ghost tools, no
+warm query, no resume metadata — and it is admitted through the same SDK loader,
+executable probe, and reviewed child environment as the principal path.
+
 ### Ask, jobs, delegation, hooks, and maintenance
 
 `ask` is owner input, never tool approval. Pi's model-facing `ask` input and
@@ -477,8 +484,18 @@ in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) and
 Roles are `chat_model`, `smol_model`, `slow_model`, `vision_model`,
 `plan_model`, `designer_model`, `commit_model`, `tiny_model`, `task_model`, and
 `advisor_model`. Each may have an ordered fallback chain where the runtime
-supports it. `claude-code/default` is valid only as the primary chat runtime;
-it is not a Pi provider model and is never a role fallback.
+supports it. `claude-code/default` is valid as the primary chat runtime and, as
+the one exception, as the primary `advisor_model`; it is not a Pi provider model
+and is never a role fallback. As the advisor it is the review teacher: one
+non-interactive Claude Agent SDK query per reviewed turn, whose only user
+message is the assembled advisor batch prompt (the advisor system prompt heads
+it, so the SDK system prompt is a one-line stub that only keeps Claude Code's
+coding-agent preset from loading), with no tools, no MCP, no skills, no
+plugins, no filesystem settings, no project discovery, and no session
+persistence, capped at one turn. Its reply text is the completion, under
+the same byte bound as any advisor reply. When Claude Code is missing or
+unauthenticated the explicit binding fails loudly, exactly like an unusable
+explicit smol binding, and the review pass then fails open with a warning.
 
 `chat_model` uses an explicit usable selection or Pi's catalog default.
 `smol_model` serves titles, greetings, and trusted command-hook completions. If

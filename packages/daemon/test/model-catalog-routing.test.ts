@@ -228,7 +228,7 @@ describe("ModelCatalog primary and full-chain mutations", () => {
     ])).rejects.toMatchObject({ code: "duplicate_route_model", status: 400 });
   });
 
-  it("enforces vision capability and keeps Claude Code out of every Ghost role/chain", async () => {
+  it("enforces vision capability and keeps Claude Code out of every other role/chain", async () => {
     const { catalog } = setup();
 
     await expect(catalog.setModelRoute(
@@ -243,7 +243,7 @@ describe("ModelCatalog primary and full-chain mutations", () => {
     ])).rejects.toMatchObject({ code: "model_has_no_vision", status: 400 });
     await expect(catalog.setModelRoute(
       "casper",
-      "advisor_model",
+      "slow_model",
       "primary",
       "claude-code",
       "default",
@@ -251,6 +251,28 @@ describe("ModelCatalog primary and full-chain mutations", () => {
     await expect(catalog.replaceModelFallbacks("casper", "chat_model", [
       { provider: "claude-code", id: "default" },
     ])).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+    await expect(catalog.replaceModelFallbacks("casper", "advisor_model", [
+      { provider: "claude-code", id: "default" },
+    ])).rejects.toMatchObject({ code: "unsupported_model_route", status: 400 });
+  });
+
+  it("binds the advisor role to Claude Code as the review teacher", async () => {
+    const { catalog } = setup();
+
+    const routing = await catalog.setModelRoute(
+      "casper",
+      "advisor_model",
+      "primary",
+      "claude-code",
+      "default",
+    );
+    const advisor = routing.roles.find((role) => role.role === "advisor_model");
+    expect(advisor?.source).toBe("explicit");
+    expect(advisor?.primary).toMatchObject({
+      provider: "claude-code",
+      id: "default",
+      resolved: true,
+    });
   });
 });
 

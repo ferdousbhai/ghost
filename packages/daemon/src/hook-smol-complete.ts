@@ -1,7 +1,7 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
-import { scrubProviderEnv } from "./env-scrub.js";
+import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
 import { ghostPaths, isGhostHome } from "./ghosts.js";
 import {
   ghostAuthPath,
@@ -10,6 +10,11 @@ import {
   resolveModelRoleRef,
   resolveSmolModelRef,
 } from "./models.js";
+import {
+  completeHookClaude,
+  isClaudeCodeRoleRef,
+  type HookClaudeOptions,
+} from "./hook-claude-complete.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
   assistantText,
@@ -41,6 +46,8 @@ export interface HookSmolOptions {
     allowModelNetwork: boolean;
   }) => Promise<HookSmolRuntime>;
   signal?: AbortSignal;
+  /** Plumbing for a role bound to the Claude Code harness instead of a model. */
+  claude?: HookClaudeOptions;
 }
 
 function hookContext(prompt: string): Context {
@@ -59,6 +66,23 @@ export async function completeHookSmol(
   const home = await realpath(resolve(input.ghost_home));
   if (!isGhostHome(home)) throw new Error(`${home} is not a Ghost home.`);
   const paths = ghostPaths(home);
+  const models = readGhostModels(paths.home);
+  const role = input.role ?? "smol_model";
+  const ref = role === "smol_model"
+    ? resolveSmolModelRef(models)
+    : resolveModelRoleRef(models, role);
+  // Claude Code is a harness, not a model in Pi's catalogue: it answers the
+  // advisor role through its own SDK, with no Pi runtime in the picture.
+  if (isClaudeCodeRoleRef(ref)) {
+    return completeHookClaude({
+      ref,
+      role,
+      prompt: input.prompt,
+      cwd: paths.sessionDir,
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, options.claude ?? {});
+  }
+
   const runtimeFactory = options.runtimeFactory ?? createGhostPiRuntime;
   const runtime = await runtimeFactory({
     authPath: ghostAuthPath(paths.agentDir),
@@ -67,11 +91,6 @@ export async function completeHookSmol(
   });
 
   try {
-    const models = readGhostModels(paths.home);
-    const role = input.role ?? "smol_model";
-    const ref = role === "smol_model"
-      ? resolveSmolModelRef(models)
-      : resolveModelRoleRef(models, role);
     const resolved = resolveSmolModel(smolCatalogFromRuntime(runtime), ref, role);
     const model = runtime.getModel(resolved.model.provider, resolved.model.id);
     if (!model) {
@@ -150,11 +169,16 @@ export async function hookSmolCompleteCommand(argv: string[]): Promise<number> {
   }
   try {
     // This subcommand bypasses daemon boot, so it owns the same credential
-    // isolation before constructing a pi runtime.
+    // isolation before constructing a pi runtime — and, like the daemon, it
+    // captures Claude's reviewed child environment before that scrub.
+    const claudeEnvironment = captureClaudeCodeEnvironment(process.env);
     scrubProviderEnv(process.env, { offline: false });
     const input = parseInput(await readStdin());
     const signal = AbortSignal.timeout(HOOK_SMOL_TIMEOUT_MS);
-    const text = await completeHookSmol(input, { signal });
+    const text = await completeHookSmol(input, {
+      signal,
+      claude: { environment: claudeEnvironment },
+    });
     process.stdout.write(`${JSON.stringify({ text })}\n`);
     return 0;
   } catch (error) {

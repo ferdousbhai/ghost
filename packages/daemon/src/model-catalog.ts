@@ -519,12 +519,16 @@ export class ModelCatalog {
     id: string,
   ): CatalogModel | null {
     if (provider !== CLAUDE_CODE_PROVIDER_ID) return null;
-    if (role === "chat_model" && target === "primary" && id === CLAUDE_CODE_DEFAULT_MODEL_ID) {
+    // The advisor role is the one exception: the review hook drives Claude Code
+    // as a toolless teacher through its own SDK, whatever the principal runtime.
+    const harnessRole = role === "chat_model" || role === "advisor_model";
+    if (harnessRole && target === "primary" && id === CLAUDE_CODE_DEFAULT_MODEL_ID) {
       return CLAUDE_CODE_MODEL;
     }
     throw new GhostError(
       "unsupported_model_route",
-      "Claude Code can only be the primary chat model; it cannot be a role fallback.",
+      "Claude Code can only be the primary chat model or the primary advisor model; "
+      + "it cannot be a role fallback.",
       400,
     );
   }

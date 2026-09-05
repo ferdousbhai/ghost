@@ -164,6 +164,21 @@ or `vault=<name>` when the owner names one. It never scans for a vault, assumes
 `~/Documents`, or edits vault files directly. Missing
 skill/CLI/application readiness is reported as incomplete setup.
 
+### As the advisor
+
+Claude Code also serves the review teacher, bound as `roles.advisor_model`.
+That query is not a principal session: no persona, no project snapshot, no
+Ghost tools, no warm query, no resume metadata, and nothing written to Claude
+Code's own session storage. It goes through the same SDK loader, executable
+probe, and reviewed child environment as the principal path, and it is
+independent of which runtime drives the ghost — a Pi-driven ghost gets Claude
+as its teacher exactly as a Claude-driven one does. A missing or signed-out
+`claude` makes the binding raise the same unusable-model error an explicit
+unusable smol binding raises; the review pass around it then fails open.
+`CONTRACTS.md` states the exact query it runs; the pipeline it feeds is in
+[`docs/hooks.md`](hooks.md), and the code is
+[`hook-claude-complete.ts`](../packages/daemon/src/hook-claude-complete.ts).
+
 ## Environment and credential isolation
 
 Ghost captures a Claude child environment before globally scrubbing provider

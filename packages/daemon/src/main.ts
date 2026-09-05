@@ -20,7 +20,7 @@ import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
-import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
+import { completeHookSmol, hookSmolCompleteCommand } from "./hook-smol-complete.js";
 import { createJournalSink } from "./journal.js";
 import { detectLocalModelProviders } from "./local-models.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
@@ -73,9 +73,9 @@ Subcommands:
                            401. --rotate mints a new one and invalidates the old.
   remote                   Show or change the daemon's tailnet exposure through
                            Tailscale Serve. Defaults to status.
-  hook-smol-complete       Internal command-hook bridge. Reads ghost_home and
-                           prompt as JSON on stdin and writes one smol-model
-                           completion as JSON on stdout.
+  hook-smol-complete       Internal command-hook bridge. Reads ghost_home,
+                           prompt, and an optional role as JSON on stdin and
+                           writes that role's one completion as JSON on stdout.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
@@ -468,6 +468,13 @@ async function serveDaemon(
     binaryPath: nativeHarnessEnvironments.claudeBinary ?? null,
     loadSdk: loadClaudeAgentSdk,
   });
+  // One validated SDK install, one executable probe, one reviewed child
+  // environment: the principal runtime and the review advisor share them.
+  const claudeCode = {
+    environment: claudeCodeEnvironment,
+    probe: claudeCodeProbe,
+    loadSdk: loadClaudeAgentSdk,
+  };
   const nativeHarnesses = createNativeHarnessCatalog(
     claudeAgentSdk,
     nativeHarnessEnvironments,
@@ -490,11 +497,7 @@ async function serveDaemon(
     extensionOptions: {
       ...(relay ? { relayTransport: relay } : {}),
     },
-    claudeCode: {
-      environment: claudeCodeEnvironment,
-      probe: claudeCodeProbe,
-      loadSdk: loadClaudeAgentSdk,
-    },
+    claudeCode,
   });
   host.attachTaskServices({
     ownership: nativeTaskScopes,
@@ -515,7 +518,16 @@ async function serveDaemon(
     ]),
   });
   await host.restoreTaskServices();
-  await hooks.register(createReviewHook({ logger, ownerHome }));
+  await hooks.register(createReviewHook({
+    logger,
+    ownerHome,
+    // An `advisor_model` bound to Claude Code answers through the same
+    // install, probe, and child environment as the principal runtime.
+    complete: (input, options) => completeHookSmol(input, {
+      ...options,
+      claude: { ...claudeCode, logger },
+    }),
+  }));
   const maintenance = new ConversationMaintenance({
     registry,
     homeOperations,

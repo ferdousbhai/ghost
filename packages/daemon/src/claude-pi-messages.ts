@@ -95,7 +95,8 @@ function parseToolInput(block: Extract<StreamBlock, { kind: "tool" }>): Record<s
   return {};
 }
 
-function resultErrorMessage(result: SDKResultMessage): string {
+/** The SDK's own text for a failed result; empty for a successful one. */
+export function resultErrorMessage(result: SDKResultMessage): string {
   if (result.subtype === "success") return "";
   return result.errors.filter(Boolean).join("\n") || `Claude Code ended with ${result.subtype}.`;
 }

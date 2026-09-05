@@ -15,7 +15,9 @@ import {
   type GhostBeforePromptEvent,
   type GhostSessionStopEvent,
 } from "../src/hooks.js";
-import type { HookSmolInput } from "../src/hook-smol-complete.js";
+import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { ClaudeAgentSdkModule } from "../src/claude-agent-sdk-loader.js";
+import { completeHookSmol, type HookSmolInput } from "../src/hook-smol-complete.js";
 import { tempDir, useCleanups } from "./helpers/fixtures.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
@@ -193,6 +195,62 @@ describe("review hook", () => {
     expect((await runner.emitBeforePrompt(promptEvent(home)))?.additionalContext)
       .toContain("Second independent blocker");
     expect((await runner.emitSessionStop(stopEvent(home, { turn_id: 5 })))?.continue).toBe(true);
+  });
+
+  it("delivers notes written by Claude Code when the advisor role names it", async () => {
+    const home = scratchGhostHome("review:\n  mode: advisory\n");
+    writeFileSync(join(home, "character.md"), "# Casper\n", "utf8");
+    writeFileSync(
+      join(home, "models.json"),
+      JSON.stringify({
+        providers: {},
+        roles: { advisor_model: { provider: "claude-code", modelId: "default" } },
+      }),
+      "utf8",
+    );
+    const notes = JSON.stringify({
+      notes: [{ severity: "concern", text: "The rewrite drops the aborted-turn path." }],
+    });
+    let teacherPrompt = "";
+    const runner = new GhostHookRunner({ logger: recordingLogger() });
+    await runner.register(createReviewHook({
+      complete: (input, options) => completeHookSmol(input, {
+        ...options,
+        runtimeFactory: async () => {
+          throw new Error("the Claude advisor path must not construct a pi runtime");
+        },
+        claude: {
+          probe: {
+            read: async () => ({
+              binaryPath: "/usr/bin/claude",
+              executableIdentity: "identity",
+              cliVersion: "2.1.251",
+              authStatus: { loggedIn: true },
+            }),
+          },
+          loadSdk: async () => ({
+            query: ({ prompt }: { prompt: unknown }) => {
+              teacherPrompt = String(prompt);
+              return (async function* () {
+                yield {
+                  type: "result",
+                  subtype: "success",
+                  is_error: false,
+                  result: notes,
+                } as SDKMessage;
+              })();
+            },
+          } as unknown as ClaudeAgentSdkModule),
+          environment: {},
+        },
+      }),
+    }));
+
+    const result = await runner.emitSessionStop(withAssistant(home, "Rewrote the handler."));
+    expect(ghostSessionStopContinuation(result)).toBeUndefined();
+    expect(teacherPrompt).toContain("<turn-delta>");
+    expect((await runner.emitBeforePrompt(promptEvent(home)))?.additionalContext)
+      .toContain("The rewrite drops the aborted-turn path.");
   });
 
   it("passes already-delivered lint rule ids to the model prompt", async () => {

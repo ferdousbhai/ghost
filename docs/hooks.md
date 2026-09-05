@@ -331,6 +331,25 @@ preserves oh-my-pi compatibility: Ghost's `WATCHDOG.md` format and its `nit`,
 as-is. OMP's `WATCHDOG.yml` advisor roster is not read yet. When no nested Git
 root resolves, the binding root is the boundary. Unreadable policy is skipped.
 
+The teacher can be the owner's installed Claude Code instead of a provider
+model, whichever runtime drives the ghost:
+
+```json
+{ "roles": { "advisor_model": { "provider": "claude-code", "modelId": "default" } } }
+```
+
+Bound that way, each reviewed turn costs one Claude turn on the owner's own
+Claude Code subscription or account — Ghost never sees that credential. The
+review runs as one non-interactive Agent SDK query with no tools at all, so it
+reads no `CLAUDE.md`, no project settings, and no file on disk: its only inputs
+are the advisor prompt and the turn delta already assembled for the review, and
+nothing is persisted to Claude Code's session storage. When `claude` is missing
+or signed out the
+binding raises the same unusable-model error an explicit unusable `smol_model`
+binding raises, rather than silently switching models; the review pass around it
+still fails open. `claude-code/default` is accepted for `advisor_model` and
+`chat_model` only, never as a fallback.
+
 Model output is bounded structured JSON. Output-only prompt-injection and
 destructive-command combinations are quarantined before model notes enter the
 shared delivery core. The FIFO guard suppresses normalized duplicates,
