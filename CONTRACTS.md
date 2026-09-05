@@ -57,7 +57,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
   models.json
   mcp.json
   sessions/
-  .tasks/
   .pi/
   .memory-maintenance.json
 ```
@@ -181,9 +180,6 @@ allowlists, and recovery state machines live beside their focused tests in
 - Finished artifacts go to the destination the owner requested, defaulting to
   the owner's Documents directory when none was named. Ghost keeps no index of
   it.
-- Delegated coding work has one private `task-record/v2` JSON record under the
-  ghost home's mode-0700 `.tasks/` directory. Records move to Trash with their
-  parent conversation and are not portable runtime configuration.
 
 ### State survival
 
@@ -194,7 +190,6 @@ ghost home directory, which moves as one unit.
 | --- | --- | --- | --- | --- | --- | --- |
 | `character.md`, `memory/*.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
 | Conversations and sidecars under `sessions/` | survives; Pi JSONL is the durable history | moves with the home; Claude transcripts stay in Claude Code's own storage, only resume metadata moves | to Trash with the home | unchanged | unchanged | preserved |
-| `.tasks/` records | survive; a non-terminal record becomes `interrupted` with `daemon_restarted` after its scope is quiesced | moves with the home | to Trash with the home | as a restart | unchanged | preserved |
 | `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Project trust ledger (`$XDG_STATE_HOME/ghost/project-trust.json`) | survives | untouched; the ledger is owner-wide and identity-bound, never ghost-scoped | untouched | unchanged | unchanged | preserved |
@@ -225,8 +220,7 @@ backup: Trash and snapper are undo, not retention.
 
 Both runtimes receive the same Ghost character, private memory index, first
 meeting policy, Omarchy computer-use policy, scheduled-work policy,
-self-maintenance policy, owner-context policy, and—when native worker services
-are configured—delegation policy and tools. The owner-context policy names the
+self-maintenance policy, and owner-context policy. The owner-context policy names the
 Documents directory in one sentence and nothing else about it; ordinary
 machine-skill discovery separately admits an owner-installed `obsidian-cli`
 skill into each runtime's standard skill index. Owner documents are read only
@@ -249,7 +243,7 @@ file, search, Bash, compaction, steering/follow-up, and branch behavior —
 supplying its own summary instructions and pinning Pi's raw retained-tail
 target to 500 tokens (Pi may keep more to respect message and tool-call
 boundaries; Claude Code's native compaction is unaffected) — and
-adds `ask`, supervised native-worker delegation, background jobs, browser,
+adds `ask`, background jobs, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their
 native image understanding. The exact assembly is
@@ -270,9 +264,9 @@ Claude keeps its native preset, including `AskUserQuestion`, image
 understanding, subagents, background tasks, todos, web tools, and planning.
 Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
 `ask` without denying or replacing any native tool. Claude's complete native
-tool preset remains available; Ghost's browser/screen/desktop and supervised
-delegation tools are additive. Ghost disables Claude auto-memory; shared
-persistence is the owner's documents and private continuity is Ghost memory.
+tool preset remains available; Ghost's browser/screen/desktop tools are
+additive. Ghost disables Claude auto-memory; shared persistence is the owner's
+documents and private continuity is Ghost memory.
 
 The Claude Code path is native-first. A capability already supplied by the
 native `claude_code` preset keeps Claude's tool name, schema, result, and
@@ -285,8 +279,7 @@ without a Ghost allowlist change.
 
 Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
-browser/screen/desktop control, and supervised delegation are available on
-both principal paths. Runtime mechanics remain native. Pi exposes its
+and browser/screen/desktop control are available on both principal paths. Runtime mechanics remain native. Pi exposes its
 transcript, branches, commands, steering, and `GhostJob` state through daemon
 APIs; Claude serves a thin settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
@@ -307,7 +300,7 @@ not a principal session — no persona, no project snapshot, no Ghost tools, no
 warm query, no resume metadata — and it is admitted through the same SDK loader,
 executable probe, and reviewed child environment as the principal path.
 
-### Ask, jobs, delegation, hooks, and maintenance
+### Ask, jobs, hooks, and maintenance
 
 `ask` is owner input, never tool approval. Pi's model-facing `ask` input and
 output match Claude Code's native `AskUserQuestion` contract: one to four
@@ -326,26 +319,10 @@ running jobs. Jobs are process-local and an unopened conversation reports
 `[]`. Claude keeps its native Bash and background tasks; they do not appear in
 the `GhostJob` API.
 
-Delegated coding tasks are conversation-scoped work executed by an installed
-Pi, Codex, or Claude Code harness. Starting one requires a current trusted
-project binding; arbitrary cwd is never authority. Ghost durably records its
-bounded assignment, lifecycle, events, result, exact project-binding receipt,
-and private process-ownership receipt. Tasks have no Ghost concurrency limit.
-Running work accepts follow-up or cancellation; cancellation, shutdown, and
-startup recovery do not publish a terminal state until the exact captured
-systemd user scope is confirmed quiescent. A restart interrupts rather than
-resumes prior work. The lifecycle is implemented by
-[`tasks.ts`](packages/daemon/src/tasks.ts), the three native adapters, and
-[`native-task-scope.ts`](packages/daemon/src/native-task-scope.ts).
-
-The principal delegation policy names when to escalate: the ghost drives its
-own turn and hands a specialist only work it cannot finish reliably, and the
-review journal records how many times each reviewed turn escalated.
-
-The installed harness owns its native project discovery, skills, agents, MCP,
-tools, model/auth behavior, and session semantics. Ghost owns only admission,
-bounded protocol projection, durable lifecycle, and exact process-tree cleanup;
-it never invents a Git worktree, branch, commit, or approval flow for a task.
+There is no Ghost-owned delegation system. A ghost that wants a specialist
+runs the owner's installed `pi`, `codex`, or `claude -p` from its own Bash;
+that harness owns its project discovery, tools, auth, and session semantics,
+and the review journal records how many times each reviewed turn did so.
 
 Awaited harness hooks are `before_prompt`, `session_stop`, and
 `conversation_idle`. Their JSON protocol, failure behavior, and settings are
@@ -414,7 +391,6 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /api/hooks` | Redacted hook status. |
 | `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
-| `GET /api/harnesses` | Bounded availability/authentication for native Pi, Codex, and Claude Code workers. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
@@ -442,9 +418,6 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue Pi steering or follow-up text. |
-| `GET\|POST /sessions/:id/tasks` | List bounded task projections or start one trusted-project native worker. |
-| `GET /sessions/:id/tasks/:taskId` | Read one owned task with bounded events/result. |
-| `POST /sessions/:id/tasks/:taskId/{send,cancel}` | Follow up on running work or request confirmed cancellation. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
@@ -479,9 +452,8 @@ account, not a model, so it is the top-level `ghost login <provider>`,
 whole flow and the CLI holds no secret, only rendering each polled `LoginView`
 and posting the answer the owner types. There are no plan or todo commands.
 
-Two read-only commands are daemon-free and work while ghostd is stopped.
-`ghost delegation` probes installed native-worker harnesses without opening
-ghost data. `ghost flywheel export --out <dir>` reads the ghost home's review
+One read-only command is daemon-free and works while ghostd is stopped:
+`ghost flywheel export --out <dir>` reads the ghost home's review
 journals and the runtime transcripts they name — pi's JSONL under `sessions/`
 and, through the Claude resume sidecar's `sessionId`, Claude Code's own SDK
 transcript — and writes the training dataset in
@@ -553,7 +525,7 @@ hosted-session, concurrency, or spend cap.
   and the `extension-api.ts` seam. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
   authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
-  jobs, delegated-task admission and process ownership, HTTP, and the `ghost`
+  jobs, HTTP, and the `ghost`
   CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
   talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
@@ -596,11 +568,6 @@ fail-closed state machine lives in
   fsync.
 - Browser/session/process teardown tracks exact captured owners and PIDs. No
   cleanup may kill by pattern or remove a broad directory.
-- Native delegated work runs in an exact receipt-bound
-  `ghost-task-<UUID>.scope` under the user manager. Ghost requires
-  `systemd>=254`, never adopts a pre-existing unit, and reaches a terminal
-  cancellation/interruption state only after the whole captured scope is
-  authoritatively inactive or absent.
 - Logs redact secrets and private payloads. Journal identity fields are `GHOST`
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
@@ -615,9 +582,7 @@ fail-closed state machine lives in
   process, and there is no guardian process and no rebuild-and-restart tool. A
   ghost restarts ghostd by scheduling `systemctl --user restart ghostd.service`
   in a transient `systemd-run --user` unit whose `--description` carries the
-  reason, and the same reason is in the commit. That is the principal acting
-  through its own Bash, so the delegated-task rule against inventing a Git
-  worktree, branch, or commit does not apply to it. See
+  reason, and the same reason is in the commit. See
   [`docs/self-maintenance.md`](docs/self-maintenance.md).
 
 Focused tests beside the implementation are part of these contracts. GitHub

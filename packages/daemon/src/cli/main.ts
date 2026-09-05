@@ -10,7 +10,6 @@ import {
 } from "./args.js";
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
-import { delegationCommand } from "./delegation.js";
 import { FLYWHEEL_ARGS, flywheelCommand } from "./flywheel.js";
 import { ghostsCommand } from "./ghosts.js";
 import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
@@ -201,14 +200,6 @@ export const COMMANDS: readonly Command[] = [
     run: watchCommand,
   },
   {
-    verb: "delegation",
-    usage: "delegation [--json] [-q]",
-    summary: "Inspect local native coding-worker availability.",
-    example: "ghost delegation --json",
-    positionals: [0, 0],
-    run: delegationCommand,
-  },
-  {
     verb: "flywheel",
     usage: "flywheel export --out <dir> [--since <iso>] [--holdout <fraction>]"
       + " [--system full|character] [--context-turns <n>] [--max-tool-result-chars <n>]"
@@ -300,9 +291,6 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
     stderr: options.stderr ?? process.stderr,
     fetch: options.fetch ?? globalThis.fetch,
     stdin: options.stdin ?? process.stdin,
-    ...(options.nativeHarnesses === undefined
-      ? {}
-      : { nativeHarnesses: options.nativeHarnesses }),
     ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
   };
 }

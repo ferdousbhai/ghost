@@ -37,11 +37,6 @@ FocusScope {
             icon: "M4 3h16a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zM6 9l4 3-4 3M12 15h4"
         },
         {
-            id: "delegation",
-            label: "Delegation",
-            icon: "M12 5a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 8v4M7 17l5-5 5 5"
-        },
-        {
             id: "hooks",
             label: root.activeHookCount > 0
                 ? "Hooks · " + root.activeHookCount + " loaded" : "Hooks",

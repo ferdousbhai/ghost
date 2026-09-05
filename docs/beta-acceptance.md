@@ -37,7 +37,6 @@ Convention: each step names the command, then **Pass**, **Fail**, and
 ### 0.1 Host
 
 ```sh
-systemctl --version | head -1                      # systemd >= 254
 systemctl --user is-active graphical-session.target
 bun --version                                      # >= 1.3.14 runtime, >= 1.4.0 to build
 secret-tool --version && busctl --user list | grep -c org.freedesktop.secrets
@@ -427,109 +426,6 @@ confirm the honesty metadata comes back.
 
 ---
 
-## Phase 4 — Installed native delegation
-
-### 4.1 `ghost delegation` in all three modes, daemon-free
-
-```sh
-ghost delegation            | tee "$EV/04-delegation-human.txt"
-ghost delegation --json     | tee "$EV/04-delegation.json"
-ghost delegation -q         | tee "$EV/04-delegation-quiet.txt"
-GHOSTD_PORT=9 ghost delegation --json   # must be byte-identical to the above
-```
-
-**Pass:** a three-row table (`pi`, `codex`, `claude-code`) with
-`availability` ∈ {available, unavailable} and `authentication` ∈
-{authenticated, logged_out, unknown}; `--json` emits exactly
-`{"harnesses":[…]}` with only those three fields per row; `-q` emits
-`N/3 available`; the `GHOSTD_PORT=9` run matches, proving the verb never opens
-ghostd or ghost data.
-**Fail:** any row asserting availability for a harness you did not install, any
-network egress, or any mutation under `~/ghosts`.
-**Record:** all three outputs plus the port-9 diff.
-
-### 4.2 Trusted disposable project
-
-```sh
-mkdir -p ~/ghost-beta/demo && git -C ~/ghost-beta/demo init -q
-```
-
-Bind it as the trusted project from the HUD's project chip (`PUT
-/sessions/:id/project`); an arbitrary cwd is never authority. Then, in a Pi
-conversation and again in a Claude conversation, exercise the full lifecycle
-through the principal task tools: `task` (create), `task_list`, `task_get`
-(bounded events and result), `task_send` while it is still running, and
-`task_cancel`.
-
-Mirror each state for the record over the API:
-
-```sh
-TOKEN=$(ghostd api-token --quiet)
-curl -s -H "authorization: Bearer $TOKEN" \
-  http://127.0.0.1:7717/sessions/<sessionId>/tasks | tee "$EV/04-tasks.json"
-curl -s -H "authorization: Bearer $TOKEN" \
-  http://127.0.0.1:7717/sessions/<sessionId>/tasks/<taskId>
-```
-
-**Pass:** every terminal and reverse state is reachable and visible — created,
-running, followed-up, cancelled, and the confirmed-quiescent terminal state that
-cancellation only publishes after the captured scope is gone.
-**Record:** `$EV/04-lifecycle-pi.md`, `$EV/04-lifecycle-claude.md`, the JSON.
-
-### 4.3 Every advertised worker, plus truthful negative states
-
-Start one task per worker (`pi`, `codex`, `claude-code`). Then, for a harness
-you deliberately did not install or did not log into, confirm `ghost delegation`
-and a `task` attempt both report unavailable / logged-out **without starting a
-provider turn** (no token spend, no session in `ghost sessions`).
-
-**Record:** `$EV/04-workers.md` with one line per worker and per negative state.
-
-### 4.4 Delete a conversation with active work
-
-```sh
-ghost rm -s <sessionId> --yes; echo "exit=$?"     # while a task is running
-```
-
-**Pass:** refused with exit code `6` and error code `tasks_active`. After the
-workers settle, re-run: the delete succeeds, `~/ghosts/<ghost>/.tasks/` no
-longer holds the record, and the terminal delegated history moved with the
-transcript into the private Trash transaction.
-**Record:** both runs, plus a `find ~/ghosts/<ghost>/.tasks -type f` before and
-after and the Trash destination reported by the delete.
-
-### 4.5 Restart during receipt-owned work
-
-```sh
-systemctl --user list-units --all 'ghost-task-*.scope' | tee "$EV/04-scopes-before.txt"
-systemctl --user list-units --all > "$EV/04-units-before.txt"     # start a task first
-systemctl --user restart ghostd.service                            # owner-authorized
-systemctl --user list-units --all 'ghost-task-*.scope' | tee "$EV/04-scopes-after.txt"
-systemctl --user list-units --all > "$EV/04-units-after.txt"
-diff "$EV/04-units-before.txt" "$EV/04-units-after.txt"
-```
-
-**Pass:** the exact `ghost-task-<UUID>.scope` units captured before the restart
-are recovered and quiesced (inactive or absent), their task rows read
-*interrupted* rather than resumed, and the diff shows no other user unit or
-process touched.
-**Fail:** a scope still active after the daemon publishes a terminal state, or
-any unrelated unit in the diff.
-
-### 4.6 `systemd >= 254` refusal
-
-```sh
-grep -n 'systemd' packaging/arch/.SRCINFO
-pacman -Qi ghost-dev | grep -i depends
-```
-
-**Pass:** the direct dependency `systemd>=254` is declared and pacman records
-it, so an unsupported system cannot install Ghost at all.
-**Note:** proving the actual refusal needs a separate pre-254 image; see
-*Not covered*.
-
----
-
 ## Phase 5 — Claude SDK boundary
 
 The install root is
@@ -543,7 +439,6 @@ SDK="${XDG_DATA_HOME:-$HOME/.local/share}/ghost/claude-agent-sdk/0.3.170"
 
 ```sh
 ls "$SDK" 2>&1                       # must not exist yet
-ghost delegation | tee "$EV/05-no-sdk.txt"
 ghost model claude-code/default && ghost say --new "hello"; echo "exit=$?"
 ```
 
@@ -563,7 +458,6 @@ pnpm add --dir "$SDK" --save-exact \
   @modelcontextprotocol/sdk@1.29.0 \
   zod@4.4.3
 systemctl --user restart ghostd.service          # owner-authorized
-ghost delegation | tee "$EV/05-sdk-installed.txt"
 ```
 
 **Pass:** exactly those four packages at those versions; `claude-code` becomes
@@ -577,13 +471,11 @@ ghost model claude-code/default
 ghost say --new "Summarize this repository's CONTRACTS.md in three lines."
 ```
 
-Then start one delegated task with agent `claude-code` in the trusted project
 from §4.2.
 
 **Pass:** both paths run; Ghost never prompts for or stores a Claude credential
 — confirm with `secret-tool search --all service claude` (no Ghost-schema item)
 and by grepping `~/.config/ghost` for any Claude secret.
-**Record:** `$EV/05-principal.md`, `$EV/05-delegated.md`, `$EV/05-no-creds.txt`.
 
 ### 5.4 Removal fails closed, with no stale reuse
 
@@ -592,14 +484,12 @@ mv "$SDK/node_modules" "$SDK/node_modules.away"
 ghost say -s <claudeSessionId> "still there?"; echo "exit=$?"
 ```
 
-**Pass:** the next Claude turn — principal or delegated, new session or a warm
 reused one — errors with
 `Claude Agent SDK 0.3.170 is restart-required: …`, and keeps failing until the
 daemon restarts. Nothing runs on stale or mismatched code.
 
 ```sh
 systemctl --user restart ghostd.service
-ghost delegation | tee "$EV/05-sdk-removed.txt"     # claude-code unavailable again
 mv "$SDK/node_modules.away" "$SDK/node_modules"     # restore
 ```
 
@@ -822,18 +712,14 @@ Owner-shared state
 [ ] optional obsidian-cli skill, if accepted                — 02-skill.txt
 [ ] install hook gates Ghost on nothing owner-level         — 03-install.log
 
-Installed native delegation
-[ ] ghost delegation human/JSON/quiet, bounded + daemon-free — 04-delegation-*.txt
 [ ] full task lifecycle, Pi and Claude                       — 04-lifecycle-*.md, 04-tasks.json
 [ ] all three workers + truthful unavailable/logged-out      — 04-workers.md
 [ ] delete with active work -> tasks_active; then Trash move  — 04-delete.txt
 [ ] restart recovery/quiesce; unrelated units untouched       — 04-scopes-*.txt, 04-units.diff
-[ ] systemd>=254 direct dependency (refusal: see Not covered) — .SRCINFO, pacman -Qi
 
 Claude SDK boundary
 [ ] runtime + installed package exclude SDK code             — 01-payload.txt, 01-runtime-smoke.log
 [ ] no SDK -> Claude fails closed, Pi usable                  — 05-no-sdk.txt
-[ ] exact graph installed -> principal + delegated, no creds  — 05-principal.md, 05-delegated.md, 05-no-creds.txt
 [ ] removal/mismatch -> fails closed, no stale reuse          — 05-sdk-removed.txt
 
 Scheduled work (disposable ghost)
@@ -882,9 +768,8 @@ Packaged owner acceptance
 None of these exist today; each would replace a hand-run block above.
 
 - A packaged post-install readiness command that runs
-  `service-browser-smoke.sh` and `ghost delegation` in one pass (belongs with
+  `service-browser-smoke.sh` in one pass (belongs with
   #54).
-- A delegated-task lifecycle harness driving `POST /sessions/:id/tasks` and its
   `send`/`cancel` routes against a scratch daemon, so §4.2 is scripted rather
   than narrated.
 - A schedule-ownership harness that plants the legacy and prefix-neighbour

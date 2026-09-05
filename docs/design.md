@@ -34,8 +34,8 @@ than becoming parallel Ghost frameworks.
   nothing else is bound. Frontier models bind only to the teacher and
   specialist roles,
   `advisor_model`, `task_model`, and `slow_model`, and are reached through the
-  review hook's advisor pass on `session_stop` and through the durable task
-  system. Those supervisor hooks are the training signal for the
+  review hook's advisor pass on `session_stop` and through the specialist CLIs
+  the ghost runs from Bash. Those supervisor hooks are the training signal for the
   continual-learning flywheel in #64. The adapter trains on the owner's GPU
   when there is one and otherwise, per ghost and by opt-in, on Fireworks AI
   through the owner's own account with only the redacted review journal
@@ -61,10 +61,9 @@ than becoming parallel Ghost frameworks.
   Code's supported settings/hooks. It adds machinery only for product boundaries
   the runtimes do not own: persona lifecycle, daemon sessions, the HUD, browser
   relay, desktop sidecar, shared authentication policy, and recoverable moves.
-- **Delegation supervises native workers.** A trusted project can launch the
-  owner's installed Pi, Codex, or Claude Code as independent work. Ghost owns
-  admission, durable lifecycle, bounded status, and exact process cleanup; the
-  harness owns its coding behavior and project resources.
+- **No delegation subsystem.** A ghost that needs a specialist runs the
+  owner's installed `pi`, `codex`, or `claude -p` from its own Bash, like any
+  other command. Ghost keeps no task records, scopes, or worker API.
 - **Self-maintenance through the machine's own facilities.** A ghost may edit,
   build, and restart its own source. The clone it is allowed to touch is named
   by `self.checkout` in its `settings.yml` and is bound like any other trusted

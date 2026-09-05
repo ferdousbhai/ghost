@@ -13,8 +13,7 @@ Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
 toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
 tree. Ghost, pi, provider, and MCP application code plus required static assets
-remain packaged for offline use. Native delegated-task ownership requires the
-package's direct `systemd>=254` dependency.
+remain packaged for offline use.
 
 `fd` and `ripgrep` are explicit runtime dependencies because Pi's native
 `find` and `grep` tools invoke them. The
@@ -30,13 +29,11 @@ makepkg --cleanbuild
 
 ## Native coding workers
 
-Ghost does not install Pi, Codex, Claude Code, or the optional Claude Agent SDK
-graph. Install and authenticate only the native harnesses the owner wants, then
-run `ghost delegation` to inspect their bounded availability without opening a
-ghost. `GHOST_PI_BINARY`, `GHOST_CODEX_BINARY`, and `GHOST_CLAUDE_BINARY` may
-select explicit owner executables or wrappers in the daemon service environment;
-restart ghostd after changing that environment. Missing, malformed, logged-out,
-or SDK-incomplete harnesses remain visibly unavailable instead of falling back.
+Ghost does not install Claude Code or the optional Claude Agent SDK graph.
+`GHOST_CLAUDE_BINARY` may select an explicit owner executable or wrapper in the
+daemon service environment; restart ghostd after changing that environment. A
+missing, malformed, logged-out, or SDK-incomplete Claude Code remains visibly
+unavailable instead of falling back.
 
 ## Owner-shared state, and optional Obsidian
 

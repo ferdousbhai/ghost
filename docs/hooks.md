@@ -2,10 +2,9 @@
 
 Ghost owns an awaited lifecycle boundary above its two principal conversation
 harnesses. A hook has the same behavior whether the owner-facing conversation
-uses pi or the owner-local Claude Code runtime. Delegated native Pi, Codex, and
-Claude coding workers do not enter this Ghost hook lifecycle: each worker keeps
-its native project/user hook behavior inside its receipt-bound task scope, and
-Ghost does not translate, duplicate, or await those hooks as principal events.
+uses pi or the owner-local Claude Code runtime. A `pi`, `codex`, or `claude -p`
+child the ghost runs from Bash keeps its own native hook behavior; Ghost does
+not translate, duplicate, or await those hooks as principal events.
 
 Ghost supports three events. `before_prompt` runs after the user submits a prompt
 but before the model request. It can add advisory context to that request without
@@ -97,8 +96,8 @@ to that identity.
 
 This file configures Ghost's machine-level awaited command hooks. They run for
 both principal pi and principal Claude Code conversations, above either model
-harness, and commands run with the daemon user's permissions. They never run as
-delegated-worker hooks. It is therefore a trusted machine configuration
+harness, and commands run with the daemon user's permissions. It is therefore
+a trusted machine configuration
 surface, not portable ghost data.
 
 Ghost-owned hook extensions are a separate, pi-only mechanism. Direct,

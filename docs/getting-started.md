@@ -249,9 +249,6 @@ and any skill you installed untouched.
   in your own Chromium and paste the token. Read
   [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
   first — the ghost acts in the session you are signed into.
-- **Delegated coding work.** `ghost delegation` reports which native harnesses
-  (pi, Codex, Claude Code) are installed and authenticated. It is the one
-  command that needs no daemon and opens no ghost data.
 - **Hooks and the review pass.** [hooks.md](hooks.md).
 - **Phone access.** `ghostd remote status` (or the HUD's Phone access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only.

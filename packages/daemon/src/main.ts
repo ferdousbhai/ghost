@@ -7,10 +7,8 @@ import { createReviewHook } from "./review-hook.js";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
-import { ClaudeCodeProbe } from "./claude-code.js";
+import { CLAUDE_CODE_BINARY_ENV, ClaudeCodeProbe } from "./claude-code.js";
 import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
-import { ClaudeTaskAdapter } from "./claude-task-adapter.js";
-import { CodexTaskAdapter } from "./codex-task-adapter.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
 import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
@@ -26,17 +24,6 @@ import { detectLocalModelProviders } from "./local-models.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { ModelCatalog } from "./model-catalog.js";
-import {
-  captureNativeHarnessEnvironments,
-  createNativeHarnessCatalog,
-  type NativeHarnessEnvironments,
-} from "./native-harness-runtime.js";
-import {
-  captureNativeTaskControlEnvironment,
-  SystemdNativeTaskScopeManager,
-} from "./native-task-scope.js";
-import { PiTaskAdapter } from "./pi-task-adapter.js";
-import type { TaskAdapter } from "./tasks.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
 import { resolveRunningSource } from "./running-source.js";
@@ -367,12 +354,10 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Capture the reviewed native child profiles and the two user-bus selectors
-  // before the process-global provider scrub. The scope-control snapshot can
-  // never carry provider values.
+  // Capture the reviewed Claude child profile before the process-global
+  // provider scrub.
   const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
-  const nativeHarnessEnvironments = captureNativeHarnessEnvironments(process.env);
-  const nativeTaskControlEnvironment = captureNativeTaskControlEnvironment(process.env);
+  const claudeBinary = process.env[CLAUDE_CODE_BINARY_ENV];
 
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
@@ -416,8 +401,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       hooks,
       hooksPath,
       claudeCodeEnvironment,
-      nativeHarnessEnvironments,
-      nativeTaskControlEnvironment,
+      claudeBinary,
     );
   } finally {
     await homeReservation.close();
@@ -430,8 +414,7 @@ async function serveDaemon(
   hooks: GhostHookRunner,
   hooksPath: string,
   claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
-  nativeHarnessEnvironments: NativeHarnessEnvironments,
-  nativeTaskControlEnvironment: Readonly<NodeJS.ProcessEnv>,
+  claudeBinary: string | undefined,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -465,7 +448,7 @@ async function serveDaemon(
   const loadClaudeAgentSdk = () => claudeAgentSdk.load();
   const claudeCodeProbe = new ClaudeCodeProbe({
     environment: claudeCodeEnvironment,
-    binaryPath: nativeHarnessEnvironments.claudeBinary ?? null,
+    binaryPath: claudeBinary ?? null,
     loadSdk: loadClaudeAgentSdk,
   });
   // One validated SDK install, one executable probe, one reviewed child
@@ -475,13 +458,6 @@ async function serveDaemon(
     probe: claudeCodeProbe,
     loadSdk: loadClaudeAgentSdk,
   };
-  const nativeHarnesses = createNativeHarnessCatalog(
-    claudeAgentSdk,
-    nativeHarnessEnvironments,
-  );
-  const nativeTaskScopes = new SystemdNativeTaskScopeManager({
-    controlEnvironment: nativeTaskControlEnvironment,
-  });
   const host = new SessionHost({
     registry,
     homeOperations,
@@ -499,25 +475,6 @@ async function serveDaemon(
     },
     claudeCode,
   });
-  host.attachTaskServices({
-    ownership: nativeTaskScopes,
-    adapters: new Map<string, TaskAdapter>([
-      ["claude-code", new ClaudeTaskAdapter({
-        catalog: nativeHarnesses,
-        sdkLoader: claudeAgentSdk,
-        environment: nativeHarnessEnvironments.claude,
-      })],
-      ["codex", new CodexTaskAdapter({
-        catalog: nativeHarnesses,
-        environment: nativeHarnessEnvironments.codex,
-      })],
-      ["pi", new PiTaskAdapter({
-        catalog: nativeHarnesses,
-        environment: nativeHarnessEnvironments.pi,
-      })],
-    ]),
-  });
-  await host.restoreTaskServices();
   await hooks.register(createReviewHook({
     logger,
     ownerHome,
@@ -589,7 +546,6 @@ async function serveDaemon(
       homeOperations,
       login,
       catalog: modelCatalog,
-      nativeHarnesses,
       mcp,
       hooks,
       runningSource,

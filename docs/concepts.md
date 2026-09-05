@@ -37,7 +37,7 @@ in the layout appears when it is used
   kebab-case file. It is not the owner's knowledge store, and no other ghost
   reads it. Limits, redaction, and the session-start index are in
   [`memory-file.ts`](../packages/extensions/src/memory-file.ts).
-- Sessions, sidecars, delegated-task records, and runtime scratch state live
+- Sessions, sidecars, and runtime scratch state live
   under the same home.
 
 The home is the atomic lifecycle unit. Rename moves the directory (so every
@@ -85,7 +85,7 @@ unaffected by creating, renaming, deleting, or uninstalling a ghost.
 
 | Surface | Owns | Code |
 |---|---|---|
-| `ghostd` daemon | sessions, state transitions, models, credentials, MCP, hooks, delegation admission and process ownership, the HTTP API | [`server.ts`](../packages/daemon/src/server.ts), [`session-host.ts`](../packages/daemon/src/session-host.ts) |
+| `ghostd` daemon | sessions, state transitions, models, credentials, MCP, hooks, the HTTP API | [`server.ts`](../packages/daemon/src/server.ts), [`session-host.ts`](../packages/daemon/src/session-host.ts) |
 | `ghost` CLI | a terminal client over that API — nothing else | [`cli/main.ts`](../packages/daemon/src/cli/main.ts) |
 | Quickshell HUD | the Omarchy desktop surfaces: chat, roster, panes, tray, bar indicator | [`packages/shell/qml/`](../packages/shell/qml) |
 | Chromium relay | the opt-in MV3 extension that lends the ghost the browser the owner already uses | [`packages/chromium-extension/`](../packages/chromium-extension/extension) |
@@ -119,7 +119,7 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   runtime, credential store, settings, and resource snapshot, with pi's
   inherited system prompt, ambient config/MCP, and automatic credential
   discovery kept out. Pi's native file, search, Bash, compaction, steering,
-  and branch behavior is kept; Ghost adds `ask`, delegation, background jobs,
+  and branch behavior is kept; Ghost adds `ask`, background jobs,
   browser, screen, desktop, and MCP.
 - **Claude Code** is optional and native-first: `claude-code/default` runs the
   official Claude Agent SDK against the owner's installed, unmodified `claude`,
@@ -130,9 +130,9 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   [claude-code-runtime.md](claude-code-runtime.md).
 
 Both runtimes receive the same Ghost-owned context: character, private memory
-index, first-meeting policy, computer-use policy, scheduled-work policy,
-owner-context policy, and delegation policy. Owner questions, image understanding,
-browser/screen/desktop control, and supervised delegation work on both. The
+index, first-meeting policy, computer-use policy, scheduled-work policy, and
+owner-context policy. Owner questions, image understanding, and
+browser/screen/desktop control work on both. The
 runtime still owns its own mechanics, so the same ghost feels like itself on
 either while working the way that harness works.
 
@@ -219,9 +219,9 @@ If you expect one of these, it is missing on purpose:
   ([`env-scrub.ts`](../packages/daemon/src/env-scrub.ts)).
 - **No document index.** The Documents directory is named in the prompt and
   read on demand; nothing about it is scanned or injected at session start.
-- **No Ghost-owned worktree, branch, commit, or approval flow** for delegated
-  work. Ghost owns admission, durable lifecycle, bounded status, and exact
-  process-tree cleanup; the installed harness owns the coding.
+- **No delegation subsystem.** No task records, worker scopes, or `/tasks`
+  API; a ghost runs `pi`, `codex`, or `claude -p` from Bash when it wants a
+  specialist.
 - **No throttles**, as above.
 
 ## Where to go next

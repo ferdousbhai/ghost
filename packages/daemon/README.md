@@ -22,9 +22,6 @@ development guide.
 - [`mcp-manager.ts`](src/mcp-manager.ts) — explicit Ghost/project MCP
 - [`hooks.ts`](src/hooks.ts) — awaited harness hooks
 - [`jobs.ts`](src/jobs.ts) — foreground/background Bash lifecycle
-- [`tasks.ts`](src/tasks.ts), [`native-task-scope.ts`](src/native-task-scope.ts)
-  — durable native-worker lifecycle and exact systemd-scope ownership
-- [`*-task-adapter.ts`](src/pi-task-adapter.ts) — Pi, Codex, and Claude Code
   native protocol adapters
 - [`cli/main.ts`](src/cli/main.ts) — `ghost` HTTP client commands
 
@@ -76,12 +73,4 @@ reviewed child environment is captured separately.
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
 the authenticated HTTP API, and renders the same conversations and jobs as the
-HUD. `ghost delegation` is the exception: it performs a bounded, read-only
-probe of the owner-installed Pi, Codex, and Claude Code worker harnesses without
-opening daemon or ghost state. Run `ghost help` or `ghost skill` for the current
-command catalog.
-
-Principal sessions can supervise native workers only from a currently trusted
-project. Ghost persists bounded task progress under `.tasks/` and owns the
-worker's exact systemd user scope; each harness keeps its native project,
-skills, agents, MCP, tools, and authentication behavior.
+HUD. Run `ghost help` or `ghost skill` for the current command catalog.

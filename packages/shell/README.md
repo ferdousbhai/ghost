@@ -15,7 +15,7 @@ qml/shell.qml             process entry and surfaces
 qml/GhostHud.qml          chat window
 qml/GhostBarWidget.qml    embeddable status widget
 qml/TrayBridge.qml        StatusNotifier bridge
-qml/components/           chat, delegation, ask, jobs, queue, tools, routing, orb
+qml/components/           chat, ask, jobs, queue, tools, routing, orb
 qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
 contrib/                  Omarchy integration
 dev/                      isolated preview, mock daemon, checks

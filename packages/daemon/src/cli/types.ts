@@ -1,6 +1,5 @@
 import type { ParsedCliArgs } from "./args.js";
 import type { DaemonClient } from "./client.js";
-import type { NativeHarnessCatalog } from "../native-harness-catalog.js";
 
 export interface CliWritable {
   write(chunk: string): unknown;
@@ -24,8 +23,6 @@ export interface GhostCliOptions {
   stderr?: CliWritable;
   fetch?: CliFetch;
   stdin?: CliStdin;
-  /** Test/embedding seam for the local read-only delegation catalogue. */
-  nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
   /** Test/embedding seam for terminal prompts; defaults to a readline over the real TTY. */
   prompt?: CliPrompt;
 }
@@ -37,7 +34,6 @@ export interface CliRuntime {
   stderr: CliWritable;
   fetch: CliFetch;
   stdin: CliStdin;
-  nativeHarnesses?: Pick<NativeHarnessCatalog, "list">;
   prompt?: CliPrompt;
 }
 

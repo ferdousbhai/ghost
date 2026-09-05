@@ -24,7 +24,7 @@ depends=(
   'python-pillow>=10'
   'qrencode'
   'ripgrep'
-  'systemd>=254'
+  'systemd'
   'qt6-5compat>=6.8'
   'quickshell>=0.3'
   'wtype>=0.4'

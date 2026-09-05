@@ -8,36 +8,6 @@ import {
   runStagedShutdown,
 } from "../src/main.js";
 import { isDirectInvocation } from "../src/direct-invocation.js";
-import { captureNativeHarnessEnvironments } from "../src/native-harness-runtime.js";
-
-describe("daemon native harness environment capture", () => {
-  it("captures explicit selectors separately without retaining provider secrets", () => {
-    const captured = captureNativeHarnessEnvironments({
-      HOME: "/home/owner",
-      PATH: "/usr/bin",
-      GHOST_CLAUDE_BINARY: "/opt/wrappers/claude",
-      GHOST_CODEX_BINARY: "/opt/wrappers/codex",
-      GHOST_PI_BINARY: "/opt/wrappers/pi",
-      ANTHROPIC_API_KEY: "must-not-cross",
-      OPENAI_API_KEY: "must-not-cross",
-    });
-
-    expect(captured).toMatchObject({
-      claudeBinary: "/opt/wrappers/claude",
-      codexBinary: "/opt/wrappers/codex",
-      piBinary: "/opt/wrappers/pi",
-    });
-    for (const environment of [captured.claude, captured.codex, captured.pi]) {
-      expect(environment).toMatchObject({ HOME: "/home/owner", PATH: "/usr/bin" });
-      expect(environment.ANTHROPIC_API_KEY).toBeUndefined();
-      expect(environment.OPENAI_API_KEY).toBeUndefined();
-      expect(environment.GHOST_CLAUDE_BINARY).toBeUndefined();
-      expect(environment.GHOST_CODEX_BINARY).toBeUndefined();
-      expect(environment.GHOST_PI_BINARY).toBeUndefined();
-    }
-  });
-});
-
 describe("parseArgs", () => {
   it("defaults to no overrides", () => {
     expect(parseArgs([])).toEqual({

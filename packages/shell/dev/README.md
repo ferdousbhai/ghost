@@ -55,7 +55,6 @@ drive that exact nested instance:
 
 ```sh
 qs -p qml/shell.qml ipc call ghost section memory
-qs -p qml/shell.qml ipc call ghost section delegation
 qs -p qml/shell.qml ipc call ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
@@ -94,14 +93,11 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Character / Memory / Commands / Delegation /
+  bottom, and the permanent Chat / Character / Memory / Commands /
   Hooks / MCP / Remote / Phone access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when
   hidden/unfocused, hide only when already focused.
-  Memory is read-only. Ghost/project custom agent definitions are preview-only,
-  while Delegation is the supported native-worker surface: the mock shows
-  Pi/Codex/Claude availability, task creation from the trusted current project,
-  bounded event/result inspection, running follow-up, and cancellation.
+  Memory is read-only. Ghost/project custom agent definitions are preview-only.
   Character edits `character.md`. Memory rows offer confirmed, recoverable
   deletion.
   Commands shows the session's searchable Ghost catalog and stages a chosen slash

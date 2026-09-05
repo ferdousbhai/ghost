@@ -44,7 +44,6 @@ import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claudeSessionMetadataPath } from "../src/claude-code.js";
-import { conversationIdentity } from "../src/conversation-identity.js";
 import {
   ConversationMaintenance,
   maintenanceStatePath,
@@ -97,39 +96,6 @@ import {
   type MockProvider,
 } from "./helpers/mock-provider.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
-import type { TaskAdapter } from "../src/tasks.js";
-import type { PrincipalTaskContext } from "../src/principal-task-tools.js";
-import { FakeNativeTaskScopeManager } from "./helpers/task-scope.js";
-
-const inertTaskServices = () => ({
-  ownership: new FakeNativeTaskScopeManager(),
-  adapters: new Map<string, TaskAdapter>([["codex", {
-    async start() {
-      throw new Error("inert test adapter");
-    },
-  }]]),
-});
-
-/** Whether the host holds a principal-task capability for this conversation. */
-function principalTaskTurnActive(
-  ghostName: string,
-  runtime: "pi" | "claude-code",
-  conversationId: string,
-): boolean {
-  const internals = host as unknown as {
-    principalTaskCapabilities: Map<string, {
-      ghostName: string;
-      runtime: "pi" | "claude-code";
-      conversationId: string;
-    }>;
-  };
-  return [...internals.principalTaskCapabilities.values()].some((candidate) =>
-    candidate.ghostName === ghostName
-    && candidate.runtime === runtime
-    && candidate.conversationId === conversationId
-  );
-}
-
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
 let host: SessionHost | null = null;
@@ -1775,238 +1741,6 @@ describe("SessionHost.open", () => {
     const handle = await host!.open("casper", "vision-tools");
     expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
     expect(handle.session.getToolDefinition("inspect_image")).toBeDefined();
-  });
-
-  it("adds principal task tools without removing any existing Pi capability", async () => {
-    await setup();
-    host!.attachTaskServices(inertTaskServices());
-    expect(() => host!.attachTaskServices(inertTaskServices())).toThrow(/already attached/u);
-    const handle = await host!.open("casper", "delegation");
-    const names = handle.session.getActiveToolNames();
-    expect(names).toEqual(expect.arrayContaining([
-      ...PI_NATIVE_TOOL_NAMES,
-      "ask",
-      "jobs",
-      "task",
-      "task_list",
-      "task_get",
-      "task_send",
-      "task_cancel",
-      "ghost_browser",
-      "ghost_desktop",
-      "ghost_screen",
-    ]));
-    expect(await modelSystemPrompt("delegation")).toContain("# Coding delegation");
-  });
-
-  it("allows only the private principal capability during an active unpublished first turn", async () => {
-    const barrier = createMockProviderBarrier();
-    const { dir } = await setup(
-      [{ kind: "text", text: "held", barrier }],
-      { title: { enabled: false } },
-    );
-    host!.attachTaskServices(inertTaskServices());
-    await host!.restoreTaskServices();
-    const conversationId = "active-unpublished-delegation";
-    const handle = await host!.open("casper", conversationId);
-    const list = handle.session.getToolDefinition("task_list");
-    expect(list).toBeDefined();
-    const turn = host!.runTurn("casper", {
-      sessionId: conversationId,
-      prompt: "hold this owner turn",
-      emit: () => {},
-    });
-    await barrier.waitForArrivals();
-    const transcript = join(ghostPaths(dir).sessionDir, sessionFileNameFor(conversationId));
-    unlinkSync(transcript);
-
-    expect(principalTaskTurnActive("casper", "pi", conversationId)).toBe(true);
-    await expect(list!.execute(
-      "active-call",
-      {},
-      undefined,
-      undefined,
-      {} as never,
-    )).resolves.toBeDefined();
-    barrier.release();
-    await turn;
-    if (existsSync(transcript)) unlinkSync(transcript);
-    expect(existsSync(transcript)).toBe(false);
-    await expect(list!.execute(
-      "inactive-call",
-      {},
-      undefined,
-      undefined,
-      {} as never,
-    )).rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
-  });
-
-  it.each(["pi", "claude-code"] as const)(
-    "rejects a stale %s principal callback during a new same-id first turn",
-    async (runtime) => {
-      await setup([{ kind: "text", text: "unused" }]);
-      host!.attachTaskServices(inertTaskServices());
-      await host!.restoreTaskServices();
-      const conversationId = `reincarnated-${runtime}`;
-      const internals = host as unknown as {
-        beginPrincipalTaskTurn(
-          ghostName: string,
-          selectedRuntime: typeof runtime,
-          id: string,
-        ): unknown;
-        finishPrincipalTaskTurn(capability: unknown): void;
-        invalidatePrincipalTaskParent(
-          ghostName: string,
-          selectedRuntime: typeof runtime,
-          id: string,
-        ): void;
-        principalTaskContext(
-          ghostName: string,
-          selectedRuntime: typeof runtime,
-          id: string,
-          cwd: string,
-        ): Promise<PrincipalTaskContext>;
-      };
-      const oldCapability = internals.beginPrincipalTaskTurn(
-        "casper",
-        runtime,
-        conversationId,
-      );
-      const oldContext = await internals.principalTaskContext(
-        "casper",
-        runtime,
-        conversationId,
-        temp!.ownerHome,
-      );
-      await expect(oldContext.operation(async () => "old turn"))
-        .resolves.toBe("old turn");
-
-      internals.invalidatePrincipalTaskParent("casper", runtime, conversationId);
-      const currentCapability = internals.beginPrincipalTaskTurn(
-        "casper",
-        runtime,
-        conversationId,
-      );
-      const currentContext = await internals.principalTaskContext(
-        "casper",
-        runtime,
-        conversationId,
-        temp!.ownerHome,
-      );
-      // A late finally from the old incarnation cannot clear the newer turn.
-      internals.finishPrincipalTaskTurn(oldCapability);
-      await expect(oldContext.operation(async () => "stale"))
-        .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
-      await expect(currentContext.operation(async () => "current turn"))
-        .resolves.toBe("current turn");
-
-      internals.finishPrincipalTaskTurn(currentCapability);
-      await expect(currentContext.operation(async () => "after turn"))
-        .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
-    },
-  );
-
-  it("preserves Pi's retained bridge across no-op lifecycle failures and retires it on close", async () => {
-    const afterAbandon = createMockProviderBarrier();
-    const afterRollback = createMockProviderBarrier();
-    const afterRecreate = createMockProviderBarrier();
-    let rejectDelete = true;
-    await setup([
-      { kind: "text", text: "published" },
-      { kind: "text", text: "after abandon", barrier: afterAbandon },
-      { kind: "text", text: "after rollback", barrier: afterRollback },
-      { kind: "text", text: "after recreate", barrier: afterRecreate },
-    ], {
-      title: { enabled: false },
-      transactionWriter: async (path) => {
-        if (rejectDelete && basename(path).startsWith(".ghost-delete-")) {
-          throw new Error("injected pre-publication delete failure");
-        }
-        throw new Error(`unexpected transaction write ${path}`);
-      },
-    });
-    host!.attachTaskServices(inertTaskServices());
-    await host!.restoreTaskServices();
-    const id = "retained-pi-lifecycle";
-    const original = await host!.open("casper", id);
-    const oldList = original.session.getToolDefinition("task_list");
-    expect(oldList).toBeDefined();
-    await host!.runTurn("casper", { sessionId: id, prompt: "publish", emit: () => {} });
-
-    await expect(host!.abandonProjectDraft("casper", id, "pi"))
-      .rejects.toMatchObject({ code: "project_draft_published", status: 409 });
-    const second = host!.runTurn("casper", { sessionId: id, prompt: "again", emit: () => {} });
-    await afterAbandon.waitForArrivals();
-    await expect(oldList!.execute("after-abandon", {}, undefined, undefined, {} as never))
-      .resolves.toBeDefined();
-    afterAbandon.release();
-    await second;
-
-    await expect(host!.deleteSession("casper", id, "pi"))
-      .rejects.toThrow("injected pre-publication delete failure");
-    const third = host!.runTurn("casper", { sessionId: id, prompt: "still here", emit: () => {} });
-    await afterRollback.waitForArrivals();
-    await expect(oldList!.execute("after-rollback", {}, undefined, undefined, {} as never))
-      .resolves.toBeDefined();
-    afterRollback.release();
-    await third;
-
-    rejectDelete = false;
-    await host!.close("casper", id);
-    const replacement = await host!.open("casper", id);
-    const newList = replacement.session.getToolDefinition("task_list");
-    expect(newList).toBeDefined();
-    const fourth = host!.runTurn("casper", { sessionId: id, prompt: "new bridge", emit: () => {} });
-    await afterRecreate.waitForArrivals();
-    await expect(oldList!.execute("stale-bridge", {}, undefined, undefined, {} as never))
-      .rejects.toMatchObject({ code: "task_parent_unpublished", status: 409 });
-    await expect(newList!.execute("new-bridge", {}, undefined, undefined, {} as never))
-      .resolves.toBeDefined();
-    afterRecreate.release();
-    await fourth;
-  });
-
-  it("refuses task-service attachment after session activity", async () => {
-    await setup();
-    await host!.open("casper", "already-open");
-    expect(() => host!.attachTaskServices(inertTaskServices()))
-      .toThrow(/before session activity/u);
-  });
-
-  it("keeps the principal usable when its private task store is unsafe", async () => {
-    const barrier = createMockProviderBarrier();
-    const { dir } = await setup([{ kind: "text", text: "hello", barrier }]);
-    const taskDir = join(ghostPaths(dir).home, ".tasks");
-    mkdirSync(taskDir, { mode: 0o755 });
-    chmodSync(taskDir, 0o755);
-    host!.attachTaskServices(inertTaskServices());
-    const handle = await host!.open("casper", "unsafe-task-store");
-    expect(handle.session.getToolDefinition("read")).toBeDefined();
-    const list = handle.session.getToolDefinition("task_list");
-    expect(list).toBeDefined();
-    const turn = host!.runTurn("casper", {
-      sessionId: "unsafe-task-store",
-      prompt: "hold this owner turn",
-      emit: () => {},
-    });
-    await barrier.waitForArrivals();
-    try {
-      expect(principalTaskTurnActive("casper", "pi", "unsafe-task-store")).toBe(true);
-      await expect(list!.execute(
-        "call",
-        {},
-        undefined,
-        undefined,
-        {} as never,
-      )).rejects.toMatchObject({
-        code: "tasks_unavailable",
-        message: "Delegated coding tasks are unavailable.",
-        status: 503,
-      });
-    } finally {
-      barrier.release();
-      await turn;
-    }
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {
@@ -6894,10 +6628,7 @@ describe("session listing", () => {
         + basename(source),
     );
     const pending = (
-      artifact: Exclude<
-        TrashedConversation["artifacts"][number]["artifact"],
-        "delegated-tasks"
-      >,
+      artifact: TrashedConversation["artifacts"][number]["artifact"],
       source: string,
       trash = trashFor(source),
     ) => ({ artifact, source, trash, kind: "fallback" as const });
@@ -7777,8 +7508,6 @@ describe("SessionHost.renameGhost", () => {
         if (failClose) throw new Error("relay close failed");
       },
     });
-    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
-      .projectBindings;
     const project = join(temp!.ownerHome, "rename-revocation-project");
     mkdirSync(project);
     const preview = await host!.previewProject("casper", "rename-revocation", "pi", project);
@@ -7787,143 +7516,18 @@ describe("SessionHost.renameGhost", () => {
       trustToken: preview.trustToken,
       expectedGeneration: 0,
     });
-    const parent = { id: "pi:rename-revocation", runtime: "pi", conversationId: "rename-revocation" } as const;
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
-    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
 
     await expect(host!.renameGhost("casper", "wisp"))
       .rejects.toMatchObject({ code: "browser_cleanup_pending", status: 503 });
     expect(existsSync(dir)).toBe(true);
     expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
     expect(temp!.registry.get("casper").dir).toBe(dir);
-    await expect(authority.launchNative(
-      receipt,
-      new AbortController().signal,
-      parent,
-      () => "old-home-launch",
-    )).resolves.toBe("old-home-launch");
 
     failClose = false;
     await expect(host!.renameGhost("casper", "wisp"))
       .resolves.toMatchObject({ name: "wisp" });
     expect(closed).toEqual([dir, dir]);
-    await expect(authority.launchNative(
-      receipt,
-      new AbortController().signal,
-      parent,
-      () => "must-not-launch",
-    )).rejects.toBeInstanceOf(Error);
   });
-
-  it("does not restore old-name authority when the registry move succeeds before reporting failure", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
-      .projectBindings;
-    const project = join(temp!.ownerHome, "post-registry-revocation-project");
-    mkdirSync(project);
-    const conversationId = "post-registry-revocation";
-    const preview = await host!.previewProject("casper", conversationId, "pi", project);
-    await host!.bindProject("casper", conversationId, "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    const parent = conversationIdentity("pi", conversationId);
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
-    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
-    const rename = temp!.registry.rename.bind(temp!.registry);
-    vi.spyOn(temp!.registry, "rename").mockImplementationOnce((from, to) => {
-      rename(from, to);
-      throw new Error("injected post-registry failure");
-    });
-
-    await expect(host!.renameGhost("casper", "wisp"))
-      .rejects.toThrow("injected post-registry failure");
-    expect(existsSync(dir)).toBe(false);
-    expect(temp!.registry.get("wisp").dir).toBe(join(temp!.root, "wisp"));
-    await expect(authority.launchNative(
-      receipt,
-      new AbortController().signal,
-      parent,
-      () => "must-not-launch",
-    )).rejects.toBeInstanceOf(Error);
-  });
-
-  it("rolls back a registry-error revocation only when lstat proves the old home remains", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
-      .projectBindings;
-    const project = join(temp!.ownerHome, "present-registry-error-project");
-    mkdirSync(project);
-    const conversationId = "present-registry-error";
-    const preview = await host!.previewProject("casper", conversationId, "pi", project);
-    await host!.bindProject("casper", conversationId, "pi", {
-      root: project,
-      trustToken: preview.trustToken,
-      expectedGeneration: 0,
-    });
-    const parent = conversationIdentity("pi", conversationId);
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const receipt = await bindings.mintTaskBinding(sessionDir, parent);
-    const authority = bindings.taskBindingAuthority(sessionDir, "casper");
-    vi.spyOn(temp!.registry, "rename").mockImplementationOnce(() => {
-      throw new Error("registry failed before moving");
-    });
-
-    await expect(host!.renameGhost("casper", "wisp"))
-      .rejects.toThrow("registry failed before moving");
-    expect(existsSync(dir)).toBe(true);
-    await expect(authority.launchNative(
-      receipt,
-      new AbortController().signal,
-      parent,
-      () => "old authority remains",
-    )).resolves.toBe("old authority remains");
-  });
-
-  it.each(["before", "after"] as const)(
-    "keeps scope authority revoked when the registry %s-move outcome is unreadable",
-    async (phase) => {
-      const ioError = Object.assign(new Error("injected lstat I/O failure"), { code: "EIO" });
-      const { dir } = await setup([{ kind: "text", text: "unused" }], {
-        ghostHomeLstat: async () => { throw ioError; },
-      });
-      const bindings = (host as unknown as { projectBindings: ProjectBindingStore })
-        .projectBindings;
-      const project = join(temp!.ownerHome, `indeterminate-${phase}-project`);
-      mkdirSync(project);
-      const conversationId = `indeterminate-${phase}`;
-      const preview = await host!.previewProject("casper", conversationId, "pi", project);
-      await host!.bindProject("casper", conversationId, "pi", {
-        root: project,
-        trustToken: preview.trustToken,
-        expectedGeneration: 0,
-      });
-      const parent = conversationIdentity("pi", conversationId);
-      const sessionDir = ghostPaths(dir).sessionDir;
-      const receipt = await bindings.mintTaskBinding(sessionDir, parent);
-      const authority = bindings.taskBindingAuthority(sessionDir, "casper");
-      const rename = temp!.registry.rename.bind(temp!.registry);
-      vi.spyOn(temp!.registry, "rename").mockImplementationOnce((from, to) => {
-        if (phase === "after") rename(from, to);
-        throw new Error(`registry ${phase}-move failure`);
-      });
-
-      await expect(host!.renameGhost("casper", "wisp")).rejects.toMatchObject({
-        code: "ghost_move_recovery_pending",
-        status: 503,
-      });
-      expect(existsSync(dir)).toBe(phase === "before");
-      await expect(authority.launchNative(
-        receipt,
-        new AbortController().signal,
-        parent,
-        () => "must not launch",
-      )).rejects.toMatchObject({ code: "task_binding_changed" });
-    },
-  );
 
   it("drains maintenance and transfers its identity after the home rename but before release", async () => {
     const moveDrained = deferred();

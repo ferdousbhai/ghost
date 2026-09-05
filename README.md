@@ -16,9 +16,8 @@ explicitly trusted project. Remote sharing uses the built-in tailnet viewer
 over Tailscale Serve. Project plugins, agent definitions, custom code tools, and
 LSP remain disabled in principal sessions pending a per-session isolation
 boundary; trusted visible `hooks/pre` and `hooks/post` files in the ghost home
-remain the explicit in-process extension surface. Native delegated workers and
-the optional Claude Code principal retain their own project discovery and
-subagents. Ghost replaces
+remain the explicit in-process extension surface. The optional Claude Code
+principal retains its own project discovery and subagents. Ghost replaces
 pi's coding-oriented system prompt with its character and bounded private
 memory index. Both runtimes treat the owner's XDG Documents directory as the
 persistent owner-visible state every ghost shares, reading and writing it with
@@ -49,7 +48,6 @@ ghost say "What should I focus on today?"
 ghost sessions
 ghost show -s cli-abc
 ghost login <provider>
-ghost delegation
 ```
 
 Status: beta release candidate. See CONTRACTS.md for the data and API

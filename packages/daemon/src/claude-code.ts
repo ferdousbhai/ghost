@@ -118,12 +118,6 @@ import {
 } from "./schedules.js";
 import type { SettledMaintenanceTurn } from "./conversation-maintenance.js";
 import type { EffectiveProjectMcpRead } from "./mcp-catalog.js";
-import {
-  createPrincipalTaskTools,
-  PRINCIPAL_TASK_POLICY,
-  PRINCIPAL_TASK_TOOL_NAMES,
-  type PrincipalTaskContext,
-} from "./principal-task-tools.js";
 import type { RunTurnOptions } from "./session-host.js";
 import { pathIsWithin } from "./path-within.js";
 import { loadGhostSettings } from "./ghost-settings.js";
@@ -1435,7 +1429,6 @@ async function buildPersona(
   homeDir: string,
   ghostName: string,
   scheduleUnitDir: string,
-  includeTaskDelegation: boolean,
   self: { ownerHome: string; running: RunningSource | null; sessionId: string },
 ): Promise<string> {
   const home = openGhostHome(homeDir);
@@ -1452,7 +1445,6 @@ async function buildPersona(
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
-      ...(includeTaskDelegation ? [PRINCIPAL_TASK_POLICY] : []),
       renderScheduledWorkPolicy(ghostName, scheduleUnitDir),
       renderSelfMaintenancePolicy({
         ghostName,
@@ -1526,26 +1518,6 @@ async function buildMcpTools(
   );
   const tools = await bridgeClaudeCodeTools(resolved, homeDir, sdk);
   return { tools, names: resolved.toolNames };
-}
-
-async function withPrincipalTaskTools(
-  bridge: { tools: SdkMcpToolDefinition[]; names: string[] },
-  principalTasks: PrincipalTaskContext,
-  sdk: ClaudeAgentSdkModule,
-): Promise<{ tools: SdkMcpToolDefinition[]; names: string[] }> {
-  const taskExtension = await collectGhostExtension(createPrincipalTaskTools(principalTasks));
-  return {
-    tools: [
-      ...bridge.tools,
-      ...bridgeCollectedClaudeCodeTools(
-        taskExtension,
-        PRINCIPAL_TASK_TOOL_NAMES,
-        { cwd: principalTasks.cwd },
-        sdk,
-      ),
-    ],
-    names: [...bridge.names, ...PRINCIPAL_TASK_TOOL_NAMES],
-  };
 }
 
 export async function bridgeClaudeCodeTools(
@@ -2147,7 +2119,6 @@ interface WarmClaudeQuery {
   readonly identity: string;
   readonly exited: Promise<void>;
   readonly terminateProcessGroup: () => void;
-  readonly principalTasks?: ClaudePrincipalTaskContextLease;
   readonly ask: AskBroker;
   readonly resources: SessionResourceView;
   projectMcpFailed: boolean;
@@ -2157,17 +2128,6 @@ interface ClaudeSessionPersona {
   readonly prompt: string;
   idleTimer?: ReturnType<typeof setTimeout>;
 }
-
-export interface ClaudePrincipalTaskContextLease {
-  readonly context: PrincipalTaskContext;
-  retire(): void;
-}
-
-export type ClaudePrincipalTaskContextFactory = (
-  ghostName: string,
-  conversationId: string,
-  cwd: string,
-) => Promise<ClaudePrincipalTaskContextLease>;
 
 /**
  * Everything a warm query cannot change after construction. Compared verbatim,
@@ -2252,7 +2212,6 @@ export class ClaudeCodeRuntime {
   private readonly probe: ClaudeCodeProbe;
   private readonly loadSdk: () => Promise<ClaudeAgentSdkModule>;
   private readonly hooks: GhostHookRunner;
-  private principalTaskContext: ClaudePrincipalTaskContextFactory | undefined;
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
@@ -2330,18 +2289,6 @@ export class ClaudeCodeRuntime {
       ...(options.readAuthStatus ? { readAuthStatus: options.readAuthStatus } : {}),
     });
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
-  }
-
-  /** Install principal task tools before this runtime admits any conversation. */
-  attachPrincipalTaskTools(factory: ClaudePrincipalTaskContextFactory): void {
-    if (this.principalTaskContext) {
-      throw new Error("Principal task tools are already attached to Claude Code.");
-    }
-    if (this.disposed || this.busy.size > 0 || this.active.size > 0
-      || this.turns.size > 0 || this.warm.size > 0 || this.personas.size > 0) {
-      throw new Error("Principal task tools must be attached before Claude Code activity.");
-    }
-    this.principalTaskContext = factory;
   }
 
   invalidateAuthProbe(): void {
@@ -2746,9 +2693,7 @@ export class ClaudeCodeRuntime {
         cwd: runtimeCwd,
         modelId,
         systemPrompt,
-        toolNames: this.principalTaskContext
-          ? [...baseBridge.names, ...PRINCIPAL_TASK_TOOL_NAMES]
-          : baseBridge.names,
+        toolNames: baseBridge.names,
         projectMcpServers: approvedProject.mcpServers,
       });
       // Nothing the query was built from may have changed under a warm process;
@@ -2800,21 +2745,12 @@ export class ClaudeCodeRuntime {
                 });
               }
             : undefined;
-          let principalTasks: ClaudePrincipalTaskContextLease | undefined;
           const ask = new AskBroker();
-          let bridge = baseBridge;
+          const bridge = baseBridge;
           try {
-            principalTasks = this.principalTaskContext
-              ? await this.principalTaskContext(ghost.name, conversationId, runtimeCwd)
-              : undefined;
             this.assertTurnAdmitted(options.signal);
-            if (principalTasks) {
-              bridge = await withPrincipalTaskTools(baseBridge, principalTasks.context, sdk);
-              this.assertTurnAdmitted(options.signal);
-            }
           } catch (cause) {
             input.close();
-            principalTasks?.retire();
             throw cause;
           }
           let sdkOptions: ClaudeQueryOptions;
@@ -2847,7 +2783,6 @@ export class ClaudeCodeRuntime {
             });
           } catch (cause) {
             input.close();
-            principalTasks?.retire();
             throw cause;
           }
           let created: Query;
@@ -2857,7 +2792,6 @@ export class ClaudeCodeRuntime {
               : sdk.query({ prompt: input.messages, options: sdkOptions });
           } catch (cause) {
             input.close();
-            principalTasks?.retire();
             throw new ClaudeCodeProcessError("Failed to start the Claude Code runtime.", { cause });
           }
           let exited: Promise<void>;
@@ -2880,7 +2814,6 @@ export class ClaudeCodeRuntime {
             identity,
             exited,
             terminateProcessGroup: processExit?.terminate ?? (() => {}),
-            ...(principalTasks ? { principalTasks } : {}),
             ask,
             resources,
             projectMcpFailed: false,
@@ -3179,7 +3112,6 @@ export class ClaudeCodeRuntime {
     if (!warm || (expected && warm !== expected)) return;
     this.warm.delete(key);
     warm.ask.close();
-    warm.principalTasks?.retire();
     let exits = this.retiring.get(key);
     if (!exits) {
       exits = new Set();
@@ -3234,7 +3166,6 @@ export class ClaudeCodeRuntime {
       home,
       ghostName,
       this.scheduleUnitDir,
-      this.principalTaskContext !== undefined,
       { ownerHome: this.ownerHome, running: this.runningSource, sessionId: conversationId },
     );
     // A turn racing another turn of the same conversation is already refused by

@@ -77,7 +77,6 @@ epoch="$("${builder_command[@]}" git -C "$fixture" \
 ownership_checker="$script_dir/check-workflow-git-ownership.py"
 python "$ownership_checker" "$workflow"
 bash "$script_dir/test-workflow-action-pins.sh"
-bash "$script_dir/test-native-task-scope-workflow.sh"
 bash "$script_dir/test-release-workflow-security.sh"
 python "$repo_root/.github/scripts/test-release-draft.py"
 python "$repo_root/.github/scripts/test-validate-release-workflow.py"

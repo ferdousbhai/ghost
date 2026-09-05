@@ -20,7 +20,6 @@ import {
   OWNER_DELIVERABLE_POLICY,
   renderOwnerContextPolicy,
 } from "../src/machine-skills.js";
-import { PRINCIPAL_TASK_POLICY } from "../src/principal-task-tools.js";
 import { renderScheduledWorkPolicy } from "../src/schedules.js";
 import { renderSelfMaintenancePolicy } from "../src/self-maintenance.js";
 import type { RunningSource } from "../src/running-source.js";
@@ -66,7 +65,6 @@ function renderStablePolicy(): Record<string, string> {
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
-    Delegation: PRINCIPAL_TASK_POLICY,
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
       ghostName: GHOST_NAME,
@@ -85,13 +83,12 @@ const CEILINGS: Record<string, number> = {
   "Computer use": 415,
   "Finished work": 404,
   "Owner context": 765,
-  Delegation: 918,
   "Scheduled work": 1399,
   "Self-maintenance": 2187,
   "First meeting": 470,
 };
 
-const TOTAL_CEILING = 9035;
+const TOTAL_CEILING = 8117;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

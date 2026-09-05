@@ -10,7 +10,6 @@ Composer 1.0 Composer.qml
 CommandsBrowser 1.0 CommandsBrowser.qml
 ConfirmDialog 1.0 ConfirmDialog.qml
 Conversations 1.0 Conversations.qml
-DelegationBrowser 1.0 DelegationBrowser.qml
 CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
 GhostGlyph 1.0 GhostGlyph.qml

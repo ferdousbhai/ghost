@@ -82,12 +82,10 @@ query lifecycle, and resume transaction are executable in
 adapter is
 [`claude-pi-messages.ts`](../packages/daemon/src/claude-pi-messages.ts).
 
-The principal also receives Ghost's conversation-scoped task tools when native
-worker services are configured. A delegated Claude task is a different
-boundary: it receives one freshly revalidated trusted-project cwd and retains
-Claude Code's native project settings, skills, agents, MCP, tools, persistence,
-and subagents. Ghost injects no principal persona or project snapshot there; it
-owns only the bounded task record, exact executable admission, and receipt-bound
+When a ghost runs `claude -p` from its own Bash, that child is a plain Claude
+Code process: it retains Claude Code's native project settings, skills, agents,
+MCP, tools, persistence, and subagents, and Ghost injects no principal persona
+or project snapshot there. Ghost owns nothing about it beyond the Bash job that
 systemd scope. Both paths use the same pinned SDK loader and authenticated
 installed executable.
 
@@ -108,10 +106,9 @@ installed executable.
 Ghost does not deny or replace any tool in Claude's native preset. Native
 scheduling, notifications, remote triggers, worktrees, agents, and every other
 preset tool retain Claude's own semantics and storage. Ghost's in-process
-browser/screen/desktop and supervised delegation tools are additive. Claude
-auto-memory is disabled. Owner-visible durable knowledge, plans, and tasks live
-in the owner's documents; ghost-private continuity uses the ghost home's memory
-files.
+browser/screen/desktop tools are additive. Claude auto-memory is disabled.
+Owner-visible durable knowledge, plans, and tasks live in the owner's documents;
+ghost-private continuity uses the ghost home's memory files.
 
 This is a native-first boundary: if the `claude_code` preset already provides a
 capability, Claude uses that native tool with its original name, input schema,
@@ -136,7 +133,6 @@ chat-redirect behavior do not depend on which principal runtime is active.
 | Owner questions | Ghost `ask`, using the native Claude signature and result | Native `AskUserQuestion`, routed through the same broker and HUD |
 | Image understanding | Model-native when the chat model accepts images; otherwise `inspect_image` | Native vision; no redundant `inspect_image` |
 | Browser, screen, desktop | Ghost runtime-neutral tools | The same Ghost tools through the SDK MCP bridge |
-| Supervised delegation | Ghost principal task tools | The same Ghost principal task tools through the SDK MCP bridge |
 | Files, search, shell | Pi-native tools; Ghost wraps Bash in `GhostJob` | Claude-native tools and background tasks |
 | Skills, rules, prompts | Admitted declarative snapshot | The same admitted bytes appended to Claude's native prompt |
 | MCP | Ghost-home and trusted-project rows through Ghost's MCP manager | Credential-free trusted-project rows only |
