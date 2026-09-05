@@ -381,8 +381,11 @@ persisted as an assistant answer.
 
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
-[`cli/main.ts`](packages/daemon/src/cli/main.ts). It supports conversation,
-ask, job, model, MCP, hooks, status, and skill operations. Signing in is a provider
+[`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
+HUD reaches is a named verb there (ghost roster, rename, character, greeting,
+conversations and their title/pin/read/fork/delete/reanswer, ask, jobs,
+resources, commands, project, model, MCP, hooks, remote, status, skill), so a
+ghost can drive and verify itself from Bash without raw HTTP. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the

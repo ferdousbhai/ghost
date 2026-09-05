@@ -1,4 +1,4 @@
-import { readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ListeningServer } from "../src/server.js";
@@ -84,6 +84,26 @@ describe("ghost CLI against a real daemon server", () => {
     });
   });
 
+
+  it("reaches ghost admin and conversation state through named verbs", async () => {
+    const shown = await cli(["character", "-g", "casper"]);
+    expect(shown.code).toBe(0);
+    const file = join(env.XDG_CONFIG_HOME!, "character.md");
+    mkdirSync(env.XDG_CONFIG_HOME!, { recursive: true });
+    writeFileSync(file, "# Casper\n\nA quiet ghost.\n");
+    expect(await cli(["character", "set", file, "-g", "casper", "--json"])).toMatchObject({ code: 0 });
+    expect((await cli(["character", "-g", "casper"])).stdout).toContain("A quiet ghost.");
+
+    const read = await cli(["read", "-g", "casper", "-s", "conv", "--json"]);
+    expect(read.code).toBe(0);
+    expect(JSON.parse(read.stdout)).toMatchObject({ ok: true });
+    expect(JSON.parse((await cli(["resources", "-g", "casper", "-s", "conv", "--json"])).stdout))
+      .toHaveProperty("skills");
+    expect(JSON.parse((await cli(["project", "-g", "casper", "-s", "conv", "--json"])).stdout))
+      .toHaveProperty("generation");
+    expect(await cli(["remote"])).toMatchObject({ code: 5 });
+    expect(await cli(["delete", "-g", "casper", "-s", "conv"])).toMatchObject({ code: 2 });
+  });
 
   it("keeps destructive removal behind --yes", async () => {
     const result = await cli(["rm", "casper"]);
