@@ -436,7 +436,8 @@ hosted-session, concurrency, or spend cap.
   opt-in MV3 relay into the owner's Chromium. An unpaired extension dials
   `/relay` with a six-digit code (`RELAY_PAIR_SUBPROTOCOL_PREFIX`) instead of a
   token; the owner allows that code in the HUD or with `ghost browser allow`,
-  and the daemon answers with a `paired` frame carrying the token. Pairing and
+  and the daemon answers with a `paired` frame carrying the token (`pairing`
+  frames every ping interval keep the waiting worker alive). Pairing and
   workspace ownership are capability-scoped; there is no second browser
   backend. Client text
   frames are capped at `MAX_RELAY_MESSAGE_BYTES`

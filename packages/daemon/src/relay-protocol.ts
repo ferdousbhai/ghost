@@ -91,7 +91,22 @@ export interface RelayPairedFrame {
   readonly token: string;
 }
 
-export type RelayServerFrame = RelayWelcomeFrame | RelayRequestFrame | RelayPairedFrame;
+/**
+ * Sent to a pairing socket on arrival and then every ping interval. It tells
+ * the extension which code the daemon is holding, and — the real reason — it
+ * is traffic: an idle MV3 worker is reaped after ~30s, and a reaped worker
+ * would come back asking with a different code.
+ */
+export interface RelayPairingFrame {
+  readonly t: "pairing";
+  readonly code: string;
+}
+
+export type RelayServerFrame =
+  | RelayWelcomeFrame
+  | RelayRequestFrame
+  | RelayPairedFrame
+  | RelayPairingFrame;
 
 export type ParsedClientFrame =
   | { readonly ok: true; readonly frame: RelayClientFrame }

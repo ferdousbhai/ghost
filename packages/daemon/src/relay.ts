@@ -104,6 +104,8 @@ interface PendingPairing {
   readonly socket: WebSocket;
   readonly since: Date;
   readonly timer: NodeJS.Timeout;
+  /** Keeps the extension's service worker alive while the owner decides. */
+  readonly keepalive: NodeJS.Timeout;
 }
 
 interface Pending {
@@ -386,7 +388,16 @@ export class RelayHub implements RelayTransport {
       }
     }, this.#pairingTimeoutMs);
     timer.unref?.();
-    this.#pairing = { code, socket: ws, since: new Date(), timer };
+    const pairingFrame = encodeServerFrame({ t: "pairing", code });
+    const keepalive = setInterval(() => {
+      try {
+        ws.send(pairingFrame);
+      } catch {
+        // Its close event performs the cleanup.
+      }
+    }, this.#pingIntervalMs);
+    keepalive.unref?.();
+    this.#pairing = { code, socket: ws, since: new Date(), timer, keepalive };
     ws.on("error", (error: Error) => {
       this.#logger.warn("relay pairing socket error", { error: error.message });
     });
@@ -394,8 +405,10 @@ export class RelayHub implements RelayTransport {
       this.#clients.delete(ws);
       if (this.#pairing?.socket !== ws) return;
       clearTimeout(this.#pairing.timer);
+      clearInterval(this.#pairing.keepalive);
       this.#pairing = undefined;
     });
+    ws.send(pairingFrame);
     this.#logger.info("relay pairing requested", { code });
   }
 
@@ -403,6 +416,7 @@ export class RelayHub implements RelayTransport {
     const pairing = this.#pairing;
     if (!pairing) return;
     clearTimeout(pairing.timer);
+    clearInterval(pairing.keepalive);
     this.#pairing = undefined;
     try {
       pairing.socket.close(code, reason);
@@ -433,6 +447,7 @@ export class RelayHub implements RelayTransport {
       throw error;
     }
     clearTimeout(pairing.timer);
+    clearInterval(pairing.keepalive);
     this.#pairing = undefined;
     try {
       pairing.socket.send(encodeServerFrame({ t: "paired", token }), () => {

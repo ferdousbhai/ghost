@@ -128,8 +128,8 @@ describe("POST /api/relay/pair", () => {
       });
       expect(allowed.status).toBe(200);
       expect(await allowed.json()).toMatchObject({ ok: true, outcome: "paired", pairing: null });
-      await expect.poll(() => frames.length).toBe(1);
-      expect(frames[0]).toEqual({ t: "paired", token: TOKEN });
+      await expect.poll(() => frames.some((frame) => (frame as { t: string }).t === "paired")).toBe(true);
+      expect(frames).toContainEqual({ t: "paired", token: TOKEN });
     } finally {
       socket.removeAllListeners();
       socket.terminate();

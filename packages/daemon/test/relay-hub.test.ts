@@ -228,7 +228,8 @@ describe("pairing by code", () => {
 
     expect(hub.resolvePairing("482913", true)).toBe("paired");
     expect(await closed).toMatchObject({ code: 1000 });
-    expect(frames).toEqual([{ t: "paired", token: TOKEN }]);
+    expect(frames.filter((frame) => (frame as { t: string }).t !== "pairing"))
+      .toEqual([{ t: "paired", token: TOKEN }]);
     expect(hub.status().pairing).toBeNull();
 
     // And the token it was handed pairs it for real.
@@ -240,7 +241,7 @@ describe("pairing by code", () => {
     const { frames, closed } = await requestPairing("111222");
     expect(hub.resolvePairing("111222", false)).toBe("denied");
     expect(await closed).toMatchObject({ code: RELAY_CLOSE_PAIRING_DENIED });
-    expect(frames).toEqual([]);
+    expect(frames).toEqual([{ t: "pairing", code: "111222" }]);
     expect(hub.status().pairing).toBeNull();
   });
 
@@ -262,6 +263,16 @@ describe("pairing by code", () => {
     await requestPairing("123456");
     expect(hub.connected).toBe(true);
     expect(hub.status()).toMatchObject({ connected: true, pairing: { code: "123456" } });
+  });
+
+  it("keeps the waiting worker alive with pairing frames", async () => {
+    await hub.close();
+    hub = new RelayHub({ token: TOKEN, pingIntervalMs: 30, helloTimeoutMs: 100, closeTimeoutMs: 100 });
+    server.removeAllListeners("upgrade");
+    attachRelay(server, hub);
+    const { frames } = await requestPairing("135790");
+    await waitFor(() => frames.length >= 3, 2_000);
+    expect(frames.slice(0, 3)).toEqual(Array(3).fill({ t: "pairing", code: "135790" }));
   });
 
   it("never publishes the token in its status", async () => {
