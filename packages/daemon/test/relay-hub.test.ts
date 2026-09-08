@@ -18,10 +18,13 @@ import {
   closeRelaySocket,
   createRelayHub,
   MAX_RELAY_MESSAGE_BYTES,
+  RELAY_CLOSE_PAIRING_DENIED,
+  RELAY_CLOSE_PAIRING_EXPIRED,
   RelayHub,
 } from "../src/relay.js";
 import {
   RELAY_PATH,
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
@@ -192,6 +195,80 @@ function waitFor(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
   });
 }
 
+
+async function requestPairing(code: string): Promise<{
+  socket: WebSocket;
+  frames: unknown[];
+  closed: Promise<{ code: number; reason: string }>;
+}> {
+  const socket = new WebSocket(
+    `ws://127.0.0.1:${port}${RELAY_PATH}`,
+    [RELAY_SUBPROTOCOL, `${RELAY_PAIR_SUBPROTOCOL_PREFIX}${code}`],
+    { origin: "chrome-extension://fakefakefake" },
+  );
+  openSockets.push(socket);
+  const frames: unknown[] = [];
+  socket.on("message", (data) => frames.push(JSON.parse(data.toString())));
+  const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+    socket.once("close", (closeCode, reason) => resolve({ code: closeCode, reason: reason.toString() }));
+  });
+  await new Promise<void>((resolve, reject) => {
+    socket.once("open", resolve);
+    socket.once("error", reject);
+  });
+  await waitFor(() => hub.status().pairing?.code === code, 2_000);
+  return { socket, frames, closed };
+}
+
+describe("pairing by code", () => {
+  it("parks an unpaired browser and hands it the token when the owner allows", async () => {
+    const { frames, closed } = await requestPairing("482913");
+    expect(hub.status().pairing).toMatchObject({ code: "482913" });
+    expect(hub.connected).toBe(false);
+
+    expect(hub.resolvePairing("482913", true)).toBe("paired");
+    expect(await closed).toMatchObject({ code: 1000 });
+    expect(frames).toEqual([{ t: "paired", token: TOKEN }]);
+    expect(hub.status().pairing).toBeNull();
+
+    // And the token it was handed pairs it for real.
+    await connectExtension();
+    expect(hub.connected).toBe(true);
+  });
+
+  it("closes a denied browser without the token and forgets the code", async () => {
+    const { frames, closed } = await requestPairing("111222");
+    expect(hub.resolvePairing("111222", false)).toBe("denied");
+    expect(await closed).toMatchObject({ code: RELAY_CLOSE_PAIRING_DENIED });
+    expect(frames).toEqual([]);
+    expect(hub.status().pairing).toBeNull();
+  });
+
+  it("answers only the code the owner can see", async () => {
+    await requestPairing("333444");
+    expect(hub.resolvePairing("999999", true)).toBe("unknown");
+    expect(hub.status().pairing).toMatchObject({ code: "333444" });
+  });
+
+  it("keeps the newest request and expires the one it replaced", async () => {
+    const first = await requestPairing("555666");
+    await requestPairing("777888");
+    expect(await first.closed).toMatchObject({ code: RELAY_CLOSE_PAIRING_EXPIRED });
+    expect(hub.status().pairing).toMatchObject({ code: "777888" });
+  });
+
+  it("does not let a pairing request displace the paired browser", async () => {
+    await connectExtension();
+    await requestPairing("123456");
+    expect(hub.connected).toBe(true);
+    expect(hub.status()).toMatchObject({ connected: true, pairing: { code: "123456" } });
+  });
+
+  it("never publishes the token in its status", async () => {
+    await requestPairing("246810");
+    expect(JSON.stringify(hub.status())).not.toContain(TOKEN);
+  });
+});
 
 describe("pairing", () => {
   it("accepts the extension and reports who connected", async () => {

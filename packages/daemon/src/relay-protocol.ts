@@ -3,6 +3,8 @@ import {
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
+  RELAY_PAIR_CODE_PATTERN,
   RELAY_PATH,
   type RelayOp,
 } from "@ghost/extensions";
@@ -15,6 +17,8 @@ export {
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
+  RELAY_PAIR_CODE_PATTERN,
   type RelayOp,
 };
 
@@ -77,7 +81,17 @@ export interface RelayRequestFrame {
   readonly timeoutMs: number;
 }
 
-export type RelayServerFrame = RelayWelcomeFrame | RelayRequestFrame;
+/**
+ * Sent once, to a pairing socket, when the owner allows its code. The token is
+ * the same one `ghostd relay-token` prints; the extension stores it and redials
+ * as a paired client.
+ */
+export interface RelayPairedFrame {
+  readonly t: "paired";
+  readonly token: string;
+}
+
+export type RelayServerFrame = RelayWelcomeFrame | RelayRequestFrame | RelayPairedFrame;
 
 export type ParsedClientFrame =
   | { readonly ok: true; readonly frame: RelayClientFrame }
@@ -178,7 +192,8 @@ export interface RelayUpgradeRequest {
 }
 
 export type RelayUpgradeDecision =
-  | { readonly ok: true; readonly subprotocol: string }
+  /** A paired client; `pairing` is the code of an unpaired one asking to be. */
+  | { readonly ok: true; readonly subprotocol: string; readonly pairing?: string }
   | { readonly ok: false; readonly status: number; readonly reason: string };
 
 export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -229,16 +244,32 @@ export function authorizeRelayUpgrade(
 
   const presented = tokenFrom(request, offered);
   if (presented === undefined) {
-    return { ok: false, status: 401, reason: "No pairing token. Run `ghostd relay-token`." };
+    const code = pairingCodeFrom(offered);
+    if (code === undefined) {
+      return { ok: false, status: 401, reason: "No pairing token or code. Pair the extension first." };
+    }
+    if (!RELAY_PAIR_CODE_PATTERN.test(code)) {
+      return { ok: false, status: 400, reason: "A pairing code is six digits." };
+    }
+    return { ok: true, subprotocol: RELAY_SUBPROTOCOL, pairing: code };
   }
   if (!relayTokenMatches(expectedToken, presented)) {
     return {
       ok: false,
       status: 401,
-      reason: "That pairing token is not this daemon's. Run `ghostd relay-token` again.",
+      reason: "That pairing token is not this daemon's. Clear it in the extension popup and pair again.",
     };
   }
   return { ok: true, subprotocol: RELAY_SUBPROTOCOL };
+}
+
+function pairingCodeFrom(offered: readonly string[]): string | undefined {
+  for (const protocol of offered) {
+    if (protocol.startsWith(RELAY_PAIR_SUBPROTOCOL_PREFIX)) {
+      return protocol.slice(RELAY_PAIR_SUBPROTOCOL_PREFIX.length).trim();
+    }
+  }
+  return undefined;
 }
 
 function parseSubprotocols(header: string | string[] | undefined): string[] {

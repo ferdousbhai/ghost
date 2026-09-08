@@ -95,6 +95,34 @@ export async function commandsCommand(parsed: ParsedCliArgs, ctx: CliContext): P
 }
 
 /** `ghost remote [status|on|off]`: the Tailscale Serve viewer. */
+export async function browserCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const [action = "status", code] = parsed.positionals;
+  let body: unknown;
+  if (action === "status") body = (await ctx.client.request("GET", "/api/relay/status")).body;
+  else if (action === "allow" || action === "deny") {
+    if (!code) throw new ArgsError(`ghost browser ${action} needs the code the extension shows.`);
+    body = (await ctx.client.request("POST", "/api/relay/pair", {
+      code: code.replace(/\s+/g, ""),
+      allow: action === "allow",
+    })).body;
+  } else throw new ArgsError(`ghost browser does not know "${action}"; use status, allow, or deny.`);
+  emit(ctx, body, (result) => {
+    const status = result as {
+      enabled?: boolean;
+      connected?: boolean;
+      peer?: string | null;
+      pairing?: { code: string } | null;
+      outcome?: string;
+    };
+    if (status.outcome) return `${status.outcome}\n`;
+    if (status.enabled === false) return "off\n";
+    if (status.connected) return `connected${status.peer ? ` ${status.peer}` : ""}\n`;
+    if (status.pairing) return `pairing requested: code ${status.pairing.code} (ghost browser allow ${status.pairing.code})\n`;
+    return "not connected\n";
+  });
+  return 0;
+}
+
 export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "status"] = parsed.positionals;
   let body: unknown;

@@ -15,6 +15,7 @@ import {
   greetingCommand,
   readCommand,
   reanswerCommand,
+  browserCommand,
   remoteCommand,
   renameCommand,
   resourcesCommand,
@@ -273,6 +274,14 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost commands -s cli-abc",
     positionals: [0, 0],
     run: commandsCommand,
+  },
+  {
+    verb: "browser",
+    usage: "browser [status|allow <code>|deny <code>] [--json] [-q]",
+    summary: "Show the Chromium relay, or answer a browser asking to pair.",
+    example: "ghost browser allow 482913",
+    positionals: [0, 2],
+    run: browserCommand,
   },
   {
     verb: "remote",

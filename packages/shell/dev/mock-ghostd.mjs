@@ -79,6 +79,22 @@ if (REMOTE_PROBLEM !== "" && !Object.hasOwn(REMOTE_PROBLEMS, REMOTE_PROBLEM)) {
 }
 
 let remoteEnabled = false;
+// --relay-pairing=482913 starts the mock with a browser waiting for Allow.
+let relayPairingCode = opt("--relay-pairing", process.env.GHOST_RELAY_PAIRING ?? "");
+function relaySnapshot() {
+  return {
+    enabled: true,
+    connected: false,
+    peer: null,
+    since: null,
+    pairing: relayPairingCode === "" ? null : { code: relayPairingCode, since: new Date().toISOString() },
+    protocol: 4,
+    path: "/relay",
+    url: null,
+    pending: 0,
+    tokenPath: null,
+  };
+}
 
 function remoteSnapshot() {
   const { breaks, ...problemFields } = REMOTE_PROBLEMS[REMOTE_PROBLEM] ?? {};
@@ -1455,6 +1471,23 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, hooksStatus());
   }
 
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "relay" && parts[2] === "status") {
+    return json(res, 200, relaySnapshot());
+  }
+  if (parts.length === 3 && parts[0] === "api" && parts[1] === "relay" && parts[2] === "pair") {
+    if (req.method !== "POST") return json(res, 405, {
+      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
+    });
+    const body = await readBody(req).catch(() => null);
+    if (typeof body?.code !== "string" || typeof body?.allow !== "boolean") {
+      return json(res, 400, { error: { code: "invalid_request", message: '"code" and "allow" are required' } });
+    }
+    if (relayPairingCode === "" || body.code !== relayPairingCode) {
+      return json(res, 404, { error: { code: "pairing_not_found", message: "No browser is waiting to pair with that code." } });
+    }
+    relayPairingCode = "";
+    return json(res, 200, { ok: true, outcome: body.allow ? "paired" : "denied", ...relaySnapshot() });
+  }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
     if (req.method === "GET") return json(res, 200, remoteSnapshot());
     if (req.method !== "POST") return json(res, 405, {

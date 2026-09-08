@@ -56,6 +56,11 @@ export const RELAY_CLOSE_TIMEOUT_MS = 1_000;
 export const RELAY_TIMEOUT_GRACE_MS = 2_000;
 export const RELAY_CLOSE_GOING_AWAY = 1001;
 export const RELAY_CLOSE_SHUTDOWN = 4000;
+/** Close code for a pairing the owner denied; the extension stops redialing. */
+export const RELAY_CLOSE_PAIRING_DENIED = 4001;
+/** Close code for a pairing nobody answered; the extension redials with a new code. */
+export const RELAY_CLOSE_PAIRING_EXPIRED = 4002;
+export const RELAY_PAIRING_TIMEOUT_MS = 10 * 60_000;
 export const MAX_RELAY_MESSAGE_BYTES = Math.ceil(MAX_SCREENSHOT_BYTES / 3) * 4
   + 256 * 1024;
 
@@ -67,6 +72,7 @@ function rawDataBytes(data: RawData): number {
 
 export interface RelayHubOptions {
   token?: string;
+  pairingTimeoutMs?: number;
   logger?: Logger;
   pingIntervalMs?: number;
   helloTimeoutMs?: number;
@@ -75,15 +81,29 @@ export interface RelayHubOptions {
   publicUrl?: string;
 }
 
+export interface RelayPairing {
+  code: string;
+  since: string;
+}
+
 export interface RelayStatus {
   connected: boolean;
   peer: string | null;
   since: string | null;
+  /** An unpaired browser waiting for the owner's Allow, or null. */
+  pairing: RelayPairing | null;
   protocol: number;
   path: string;
   url: string | null;
   pending: number;
   tokenPath: string | null;
+}
+
+interface PendingPairing {
+  readonly code: string;
+  readonly socket: WebSocket;
+  readonly since: Date;
+  readonly timer: NodeJS.Timeout;
 }
 
 interface Pending {
@@ -122,6 +142,7 @@ export class RelayHub implements RelayTransport {
   readonly #pingIntervalMs: number;
   readonly #helloTimeoutMs: number;
   readonly #closeTimeoutMs: number;
+  readonly #pairingTimeoutMs: number;
   readonly #wss: WebSocketServer;
   readonly #pending = new Map<number, Pending>();
   readonly #clients = new Set<WebSocket>();
@@ -136,6 +157,7 @@ export class RelayHub implements RelayTransport {
   #helloTimer: NodeJS.Timeout | undefined;
   #alive = true;
   #publicUrl: string | undefined;
+  #pairing: PendingPairing | undefined;
   #closed = false;
   #closePromise: Promise<void> | undefined;
 
@@ -149,6 +171,7 @@ export class RelayHub implements RelayTransport {
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? RELAY_CLOSE_TIMEOUT_MS;
+    this.#pairingTimeoutMs = options.pairingTimeoutMs ?? RELAY_PAIRING_TIMEOUT_MS;
     this.#incarnation = options.incarnation ?? randomUUID();
     this.#publicUrl = options.publicUrl;
     // ws applies maxPayload while assembling fragmented messages, before the
@@ -245,6 +268,9 @@ export class RelayHub implements RelayTransport {
       connected: this.connected,
       peer: this.#peer ?? null,
       since: this.#since?.toISOString() ?? null,
+      pairing: this.#pairing
+        ? { code: this.#pairing.code, since: this.#pairing.since.toISOString() }
+        : null,
       protocol: RELAY_PROTOCOL_VERSION,
       path: RELAY_PATH,
       url: this.#publicUrl ?? null,
@@ -287,6 +313,13 @@ export class RelayHub implements RelayTransport {
         origin: request.headers.origin ?? null,
       });
       refuse(socket, decision.status, decision.reason);
+      return;
+    }
+    if (decision.pairing !== undefined) {
+      const code = decision.pairing;
+      this.#wss.handleUpgrade(request, socket, head, (ws) => {
+        this.#adoptPairing(ws, code);
+      });
       return;
     }
     if (this.connected) {
@@ -332,6 +365,90 @@ export class RelayHub implements RelayTransport {
   #tokenOrMint(): string {
     if (this.#token === undefined) this.#token = readOrCreateRelayToken().token;
     return this.#token;
+  }
+
+  /**
+   * Park an unpaired browser until the owner answers. One at a time: a newer
+   * request replaces the older, so the code on screen is always the live one.
+   * Nothing the socket sends is read; the only thing it will ever receive is a
+   * `paired` frame or a close.
+   */
+  #adoptPairing(ws: WebSocket, code: string): void {
+    if (this.#closed) {
+      ws.terminate();
+      return;
+    }
+    this.#dropPairing(RELAY_CLOSE_PAIRING_EXPIRED, "another browser asked to pair");
+    this.#clients.add(ws);
+    const timer = setTimeout(() => {
+      if (this.#pairing?.socket === ws) {
+        this.#dropPairing(RELAY_CLOSE_PAIRING_EXPIRED, "nobody answered the pairing request");
+      }
+    }, this.#pairingTimeoutMs);
+    timer.unref?.();
+    this.#pairing = { code, socket: ws, since: new Date(), timer };
+    ws.on("error", (error: Error) => {
+      this.#logger.warn("relay pairing socket error", { error: error.message });
+    });
+    ws.on("close", () => {
+      this.#clients.delete(ws);
+      if (this.#pairing?.socket !== ws) return;
+      clearTimeout(this.#pairing.timer);
+      this.#pairing = undefined;
+    });
+    this.#logger.info("relay pairing requested", { code });
+  }
+
+  #dropPairing(code: number, reason: string): void {
+    const pairing = this.#pairing;
+    if (!pairing) return;
+    clearTimeout(pairing.timer);
+    this.#pairing = undefined;
+    try {
+      pairing.socket.close(code, reason);
+    } catch {
+      // Its close event performs the final cleanup.
+    }
+  }
+
+  /**
+   * The owner's answer to the pending pairing. `allow` hands the token to the
+   * waiting extension and closes the socket so it redials as a paired client.
+   * The code must match what the owner can see: an answer to a stale code is
+   * "unknown", never applied to whatever is pending now.
+   */
+  resolvePairing(code: string, allow: boolean): "paired" | "denied" | "unknown" {
+    const pairing = this.#pairing;
+    if (!pairing || pairing.code !== code) return "unknown";
+    if (!allow) {
+      this.#dropPairing(RELAY_CLOSE_PAIRING_DENIED, "pairing denied");
+      this.#logger.info("relay pairing denied", { code });
+      return "denied";
+    }
+    let token: string;
+    try {
+      token = this.#tokenOrMint();
+    } catch (error) {
+      this.#dropPairing(RELAY_CLOSE_PAIRING_EXPIRED, `no relay token: ${(error as Error).message}`);
+      throw error;
+    }
+    clearTimeout(pairing.timer);
+    this.#pairing = undefined;
+    try {
+      pairing.socket.send(encodeServerFrame({ t: "paired", token }), () => {
+        try {
+          pairing.socket.close(1000, "paired");
+        } catch {
+          // Closed already; nothing to undo.
+        }
+      });
+    } catch (error) {
+      this.#logger.warn("relay pairing socket rejected the token", {
+        error: (error as Error).message,
+      });
+    }
+    this.#logger.info("relay paired", { code });
+    return "paired";
   }
 
   #adopt(ws: WebSocket): void {
@@ -526,6 +643,7 @@ export class RelayHub implements RelayTransport {
     this.#closed = true;
     this.#stopHelloDeadline();
     this.#stopPinging();
+    this.#dropPairing(RELAY_CLOSE_GOING_AWAY, "ghostd is shutting down");
     this.#failPending("The daemon is shutting down.");
     const socket = this.#socket;
     this.#negotiatedSocket = undefined;

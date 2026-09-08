@@ -234,9 +234,10 @@ and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
 
-- **Lend the ghost your browser.** It has none until you pair the relay:
-  `ghostd relay-token`, then load `/usr/share/ghost/chromium-extension` unpacked
-  in your own Chromium and paste the token. Read
+- **Lend the ghost your browser.** It has none until you pair the relay: load
+  `/usr/share/ghost/chromium-extension` unpacked in your own Chromium, then
+  open the HUD and press Allow when it shows the same code as the extension's
+  popup. Read
   [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
   first — the ghost acts in the session you are signed into.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,

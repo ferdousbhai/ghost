@@ -22,6 +22,7 @@ import {
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
 
@@ -36,6 +37,7 @@ interface ExtensionProtocol {
   PROTOCOL_VERSION: number;
   SUBPROTOCOL: string;
   TOKEN_SUBPROTOCOL_PREFIX: string;
+  PAIR_SUBPROTOCOL_PREFIX: string;
   RELAY_PATH: string;
   OPS: string[];
   FAILURES: Record<string, string>;
@@ -54,6 +56,7 @@ describe("the extension agrees with the daemon about the protocol", () => {
     expect(extension.PROTOCOL_VERSION).toBe(RELAY_PROTOCOL_VERSION);
     expect(extension.SUBPROTOCOL).toBe(RELAY_SUBPROTOCOL);
     expect(extension.TOKEN_SUBPROTOCOL_PREFIX).toBe(RELAY_TOKEN_SUBPROTOCOL_PREFIX);
+    expect(extension.PAIR_SUBPROTOCOL_PREFIX).toBe(RELAY_PAIR_SUBPROTOCOL_PREFIX);
     expect(extension.RELAY_PATH).toBe(RELAY_PATH);
   });
 

@@ -831,6 +831,92 @@ Singleton {
     }
 
 
+    // The browser relay's pairing prompt is daemon-global as well. GhostHud
+    // polls it only while shown: the code the extension popup displays has to
+    // match the one here, and that is what makes Allow safe to click.
+    /** `{code, since}` while a browser is waiting for Allow, else null. */
+    property var relayPairing: null
+    property bool relayResolving: false
+    property string relayError: ""
+    property var relayRequest: null
+    property var relayRequestFactory: null
+
+    function makeRelayRequest(): var {
+        return typeof root.relayRequestFactory === "function"
+            ? root.relayRequestFactory() : new XMLHttpRequest();
+    }
+
+    /** The pending pairing from a relay status body, or null. */
+    function relayPairingFrom(body: var): var {
+        if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+        const pairing = body.pairing;
+        if (!pairing || typeof pairing !== "object" || typeof pairing.code !== "string"
+                || !/^[0-9]{6}$/.test(pairing.code)) return null;
+        return {
+            code: pairing.code,
+            since: typeof pairing.since === "string" ? pairing.since : ""
+        };
+    }
+
+    function refreshRelay(): void {
+        if (root.relayResolving) return;
+        if (root.relayRequest && root.relayRequest.readyState !== 4) return;
+        const xhr = root.makeRelayRequest();
+        root.relayRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.relayRequest) return;
+            root.relayRequest = null;
+            let pairing = null;
+            if (xhr.status === 200) {
+                try {
+                    pairing = root.relayPairingFrom(JSON.parse(xhr.responseText));
+                } catch (error) {
+                    pairing = null;
+                }
+            }
+            root.relayPairing = pairing;
+        };
+        root.dispatch(xhr, "GET", "/api/relay/status", ({}), null,
+            function () { return root.relayRequest === xhr; });
+    }
+
+    /** Answer the pairing whose code the owner can see. */
+    function resolveRelayPairing(code: string, allow: bool): void {
+        if (root.relayResolving || typeof code !== "string" || code === ""
+                || typeof allow !== "boolean") return;
+        const previous = root.relayRequest;
+        root.relayRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.makeRelayRequest();
+        root.relayRequest = xhr;
+        root.relayResolving = true;
+        root.relayError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.relayRequest) return;
+            root.relayRequest = null;
+            root.relayResolving = false;
+            if (xhr.status === 200) {
+                let pairing = null;
+                try {
+                    pairing = root.relayPairingFrom(JSON.parse(xhr.responseText));
+                } catch (error) {
+                    pairing = null;
+                }
+                root.relayPairing = pairing;
+            } else if (xhr.status === 404) {
+                // Expired, or answered from the CLI: either way it is gone.
+                root.relayPairing = null;
+            } else {
+                root.relayError = root.describeError(xhr,
+                    (allow ? "allow" : "deny") + " browser pairing");
+            }
+        };
+        root.dispatch(xhr, "POST", "/api/relay/pair",
+            ({ "Content-Type": "application/json" }),
+            JSON.stringify({ code: code, allow: allow }),
+            function () { return root.relayRequest === xhr; });
+    }
+
     function makeGhostRequest(): var {
         return typeof root.ghostRequestFactory === "function"
             ? root.ghostRequestFactory() : new XMLHttpRequest();

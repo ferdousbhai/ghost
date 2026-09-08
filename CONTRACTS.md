@@ -322,7 +322,8 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET /api/hooks` | Redacted hook status. |
-| `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. |
+| `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. `pairing` is `{ code, since }` while an unpaired browser waits for Allow, else `null`. |
+| `POST /api/relay/pair` | Owner answers the pending pairing: `{ code, allow }`. Allow hands the relay token to that browser over its socket; a stale code is `404 pairing_not_found`. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
@@ -432,8 +433,12 @@ hosted-session, concurrency, or spend cap.
   `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
   ships no speech stack of its own.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
-  opt-in MV3 relay into the owner's Chromium. Pairing and workspace ownership
-  are capability-scoped; there is no second browser backend. Client text
+  opt-in MV3 relay into the owner's Chromium. An unpaired extension dials
+  `/relay` with a six-digit code (`RELAY_PAIR_SUBPROTOCOL_PREFIX`) instead of a
+  token; the owner allows that code in the HUD or with `ghost browser allow`,
+  and the daemon answers with a `paired` frame carrying the token. Pairing and
+  workspace ownership are capability-scoped; there is no second browser
+  backend. Client text
   frames are capped at `MAX_RELAY_MESSAGE_BYTES`
   ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)

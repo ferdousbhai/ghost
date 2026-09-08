@@ -163,8 +163,18 @@ FloatingWindow {
         hud.loginOpen = false;
         hud.currentSection = "chat";
         Ghostd.refresh();
+        Ghostd.refreshRelay();
         Dictation.refresh();
         composer.take();
+    }
+
+    // The pairing prompt has no event stream; a cheap unauthenticated poll
+    // while the HUD is up is what makes it appear.
+    Timer {
+        interval: 3000
+        repeat: true
+        running: hud.shown && Ghostd.reachable
+        onTriggered: Ghostd.refreshRelay()
     }
 
     function close(): void {
@@ -1106,6 +1116,28 @@ FloatingWindow {
             error: hud.pendingDeleteSessionId !== "" ? Ghostd.sessionsError : ""
             onConfirmed: Ghostd.deleteConversation(hud.pendingDeleteSessionId)
             onDismissed: hud.dismissDelete()
+        }
+
+        // A browser extension asking to pair shows a six-digit code in its
+        // popup. The same code here is the whole check: Allow only on a match.
+        ConfirmDialog {
+            id: pairDialog
+
+            readonly property string code: Ghostd.relayPairing ? Ghostd.relayPairing.code : ""
+
+            anchors.fill: parent
+            open: Ghostd.relayPairing !== null
+            title: "Let a browser pair?"
+            body: "A Chromium extension wants to drive tabs for your ghosts. "
+                + "Its popup shows code " + pairDialog.code.slice(0, 3) + " "
+                + pairDialog.code.slice(3) + ". Allow only if that matches."
+            confirmText: "Allow"
+            cancelText: "Deny"
+            destructive: false
+            busy: Ghostd.relayResolving
+            error: Ghostd.relayError
+            onConfirmed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, true)
+            onDismissed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, false)
         }
 
         // Branching overwrites the composer with the branched message's text.

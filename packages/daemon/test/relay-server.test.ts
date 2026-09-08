@@ -15,6 +15,7 @@ import { WebSocket } from "ws";
 import { createDaemonServer, relayHubOf, startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RelayHub } from "../src/relay.js";
 import {
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
@@ -90,6 +91,59 @@ describe("GET /api/relay/status", () => {
     expect((await fetch(`${base}/api/relay`)).status).toBe(404);
     expect((await fetch(`${base}/api/nonsense`)).status).toBe(404);
     expect((await fetch(`${base}/relay`)).status).toBe(404);
+  });
+});
+
+describe("POST /api/relay/pair", () => {
+  it("delivers the token to the browser whose code the owner allowed", async () => {
+    const relay = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 });
+    const base = await serve(relay);
+    const socket = new WebSocket(
+      `ws://127.0.0.1:${listening?.port}${RELAY_PATH}`,
+      [RELAY_SUBPROTOCOL, `${RELAY_PAIR_SUBPROTOCOL_PREFIX}482913`],
+      { origin: "chrome-extension://fake" },
+    );
+    const frames: unknown[] = [];
+    socket.on("message", (data) => frames.push(JSON.parse(data.toString())));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once("open", resolve);
+        socket.once("error", reject);
+      });
+      await expect.poll(() => relay.status().pairing?.code).toBe("482913");
+      const status = await (await fetch(`${base}/api/relay/status`)).json() as Record<string, unknown>;
+      expect(status).toMatchObject({ pairing: { code: "482913" } });
+
+      const wrong = await fetch(`${base}/api/relay/pair`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "000000", allow: true }),
+      });
+      expect(wrong.status).toBe(404);
+
+      const allowed = await fetch(`${base}/api/relay/pair`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: "482913", allow: true }),
+      });
+      expect(allowed.status).toBe(200);
+      expect(await allowed.json()).toMatchObject({ ok: true, outcome: "paired", pairing: null });
+      await expect.poll(() => frames.length).toBe(1);
+      expect(frames[0]).toEqual({ t: "paired", token: TOKEN });
+    } finally {
+      socket.removeAllListeners();
+      socket.terminate();
+    }
+  });
+
+  it("rejects a malformed answer and a missing relay plainly", async () => {
+    const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
+    const bad = await fetch(`${base}/api/relay/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ code: 482913 }),
+    });
+    expect(bad.status).toBe(400);
   });
 });
 

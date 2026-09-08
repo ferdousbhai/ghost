@@ -89,6 +89,17 @@ export const RELAY_SUBPROTOCOL = "ghost-relay.v1";
 /** Prefix for the pairing token when it rides in `Sec-WebSocket-Protocol`. */
 export const RELAY_TOKEN_SUBPROTOCOL_PREFIX = "ghost-token.";
 
+/**
+ * Prefix for a pairing *code* in `Sec-WebSocket-Protocol`. An unpaired extension
+ * dials with a short code instead of a token; the owner approves that code in
+ * the HUD or CLI and the daemon hands the token back over the same socket.
+ */
+export const RELAY_PAIR_SUBPROTOCOL_PREFIX = "ghost-pair.";
+
+/** A pairing code is six digits: readable on both screens, unguessable enough
+ * for a loopback-only socket the owner approves by hand. */
+export const RELAY_PAIR_CODE_PATTERN = /^[0-9]{6}$/;
+
 export const RELAY_PATH = "/relay";
 
 /**
@@ -181,7 +192,9 @@ export const RELAY_OFF_MESSAGE =
  */
 export const RELAY_RECOVERY_HINT =
   "Chromium has to be running with the Ghost relay extension installed and "
-  + "paired (the extension's popup shows the connection status). If none is "
+  + "paired (the extension's popup shows the connection status; an unpaired one "
+  + "shows a code the owner allows in the HUD or with `ghost browser allow "
+  + "<code>`). If none is "
   + "running you may start one yourself, but detach it from the daemon's service "
   + "unit or restarting ghostd kills it and every tab in it: "
   + "`systemd-run --user --scope -- chromium`.";

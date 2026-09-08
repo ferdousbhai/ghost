@@ -1377,6 +1377,41 @@ export function createDaemonServer(options: ServerOptions): Server {
             : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
           return;
         }
+        if (segments[1] === "relay" && segments[2] === "pair" && segments.length === 3) {
+          if (method !== "POST") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          if (!relay) {
+            errorResponse(response, 404, "not_found", "The relay is off (GHOSTD_RELAY).");
+            return;
+          }
+          const body = await readJsonObjectBody(request, maxBodyBytes) as {
+            code?: unknown;
+            allow?: unknown;
+          };
+          if (typeof body.code !== "string" || typeof body.allow !== "boolean") {
+            errorResponse(
+              response,
+              400,
+              "invalid_request",
+              '"code" must be the pairing code shown in the browser and "allow" a boolean.',
+            );
+            return;
+          }
+          const outcome = relay.resolvePairing(body.code.trim(), body.allow);
+          if (outcome === "unknown") {
+            errorResponse(
+              response,
+              404,
+              "pairing_not_found",
+              "No browser is waiting to pair with that code.",
+            );
+            return;
+          }
+          jsonResponse(response, 200, { ok: true, outcome, ...relay.status() });
+          return;
+        }
         if (segments.length === 3 && segments[1] === "hooks" && segments[2] === "config") {
           return await handleHookConfig(method, request, response);
         }

@@ -19,6 +19,7 @@ import {
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
+  RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
 import {
@@ -166,7 +167,31 @@ describe("who may open a relay socket", () => {
     const decision = upgrade({ headers: { "sec-websocket-protocol": RELAY_SUBPROTOCOL } });
     expect(decision).toMatchObject({ ok: false, status: 401 });
     if (decision.ok) return;
-    expect(decision.reason).toMatch(/ghostd relay-token/);
+    expect(decision.reason).toMatch(/[Pp]air/);
+  });
+
+  it("admits an unpaired extension that offers a six-digit pairing code", () => {
+    const decision = upgrade({
+      headers: { "sec-websocket-protocol": `${RELAY_SUBPROTOCOL}, ${RELAY_PAIR_SUBPROTOCOL_PREFIX}482913` },
+    });
+    expect(decision).toEqual({ ok: true, subprotocol: RELAY_SUBPROTOCOL, pairing: "482913" });
+  });
+
+  it("refuses a pairing code that is not six digits", () => {
+    const decision = upgrade({
+      headers: { "sec-websocket-protocol": `${RELAY_SUBPROTOCOL}, ${RELAY_PAIR_SUBPROTOCOL_PREFIX}abc` },
+    });
+    expect(decision).toMatchObject({ ok: false, status: 400 });
+  });
+
+  it("still refuses a web page that offers a pairing code", () => {
+    const decision = upgrade({
+      headers: {
+        origin: "https://evil.example",
+        "sec-websocket-protocol": `${RELAY_SUBPROTOCOL}, ${RELAY_PAIR_SUBPROTOCOL_PREFIX}482913`,
+      },
+    });
+    expect(decision).toMatchObject({ ok: false, status: 403 });
   });
 
   it("refuses the wrong token", () => {
