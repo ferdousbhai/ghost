@@ -46,18 +46,15 @@ conflicts=('ghost-dev')
 options=('!debug' '!strip')
 install=ghost.install
 
-_runtime="ghost-runtime-${pkgver}-linux-${CARCH}.tar.zst"
-_source_url="https://github.com/@@RELEASE_REPOSITORY@@/releases/download/v${pkgver}/ghost-${pkgver}.tar.gz"
-_runtime_url="https://github.com/@@RELEASE_REPOSITORY@@/releases/download/v${pkgver}/${_runtime}"
-source=(
-  "ghost-${pkgver}.tar.gz::${_source_url}"
-  "${_runtime}::${_runtime_url}"
-)
+# Omarchy's sync-upstream follows the GitHub release named in
+# .omarchy/package.json and rewrites pkgver and both checksum arrays.
+_release="https://github.com/@@RELEASE_REPOSITORY@@/releases/download/v${pkgver}"
+_runtime="ghost-runtime-${pkgver}-linux-x86_64.tar.zst"
+source=("ghost-${pkgver}.tar.gz::${_release}/ghost-${pkgver}.tar.gz")
+source_x86_64=("${_runtime}::${_release}/${_runtime}")
 noextract=("${_runtime}")
-sha256sums=(
-  '@@SOURCE_SHA256@@'
-  '@@RUNTIME_SHA256@@'
-)
+sha256sums=('@@SOURCE_SHA256@@')
+sha256sums_x86_64=('@@RUNTIME_SHA256@@')
 
 _release_identity() {
   local manifest="$1"

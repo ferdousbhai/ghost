@@ -56,9 +56,11 @@ creates the annotated tag and the GitHub release carrying:
 - `ghost-runtime-<version>-linux-x86_64.tar.zst` and its `.sha256`;
 - `SHA256SUMS`.
 
-Omarchy's `upstream.sh` hook reads exactly those assets from the newest
-non-draft, non-prerelease `vX.Y.Z` tag. The rendered contribution in
-`out/omarchy-ghost-<version>` is what goes into `pkgbuilds/ghost` of
+The contribution's `.omarchy/package.json` declares that release feed
+(`upstream.github`, the runtime asset per architecture, and the source archive
+URL), so omarchy-pkgs' `sync-upstream` rewrites `pkgver` and both checksum
+arrays on its own when a newer `vX.Y.Z` tag appears. The rendered contribution
+in `out/omarchy-ghost-<version>` is what goes into `pkgbuilds/ghost` of
 [omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs); the menu
 entries and install/remove scripts for the Omarchy repository itself are in
 [`../omarchy/`](../omarchy/). Ghost does not operate a pacman repository or

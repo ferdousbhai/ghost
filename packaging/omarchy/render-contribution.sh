@@ -16,11 +16,9 @@ release_repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 bash "$release_root/render-arch-package.sh" "$@"
 rm -- "$output/.SRCINFO"
 install -d -m755 -- "$output/.omarchy"
-install -m644 -- "$template_root/.omarchy/package.json" \
-  "$output/.omarchy/package.json"
 sed "s|@@RELEASE_REPOSITORY@@|$release_repository|g" \
-  "$template_root/.omarchy/upstream.sh.in" > "$output/.omarchy/upstream.sh"
-chmod 755 -- "$output/.omarchy/upstream.sh"
+  "$template_root/.omarchy/package.json.in" > "$output/.omarchy/package.json"
+chmod 644 -- "$output/.omarchy/package.json"
 
 if grep -REn '@@[A-Z0-9_]+@@' "$output"; then
   printf 'unrendered Omarchy contribution token remains\n' >&2

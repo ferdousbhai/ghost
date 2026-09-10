@@ -34,7 +34,6 @@ mapfile -t inventory < <(
 expected=(
   .omarchy
   .omarchy/package.json
-  .omarchy/upstream.sh
   PKGBUILD
   ghost.install
 )
@@ -44,10 +43,16 @@ expected=(
 [[ "$(stat -c '%a' "$contribution/PKGBUILD")" == 644 ]]
 [[ "$(stat -c '%a' "$contribution/ghost.install")" == 644 ]]
 [[ "$(stat -c '%a' "$contribution/.omarchy/package.json")" == 644 ]]
-[[ "$(stat -c '%a' "$contribution/.omarchy/upstream.sh")" == 755 ]]
-jq -e '. == {source: "local"}' \
-  "$contribution/.omarchy/package.json" >/dev/null
-! jq -e 'has("release_ring")' "$contribution/.omarchy/package.json" >/dev/null
+# The declarative upstream block is what omarchy-pkgs' sync-upstream reads;
+# a hook alongside it would be an error there.
+jq -e --arg repository "$repository" '
+  .source == "local"
+  and .release_ring == "fast"
+  and .upstream.github == $repository
+  and .upstream.digests == true
+  and .upstream.assets.x86_64 == ["ghost-runtime-{pkgver}-linux-x86_64.tar.zst"]
+  and .upstream.sources.any == ["https://github.com/\($repository)/releases/download/{tag}/ghost-{pkgver}.tar.gz"]
+' "$contribution/.omarchy/package.json" >/dev/null
 
 srcinfo="$work/ghost.SRCINFO"
 (
@@ -58,68 +63,19 @@ grep -Fxq 'pkgbase = ghost' "$srcinfo"
 grep -Fxq 'pkgname = ghost' "$srcinfo"
 grep -Fxq $'\tconflicts = ghost-dev' "$srcinfo"
 grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
-grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-x86_64.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-x86_64.tar.zst' "$srcinfo"
+grep -Fxq $'\tsource_x86_64 = ghost-runtime-1.2.3-linux-x86_64.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-x86_64.tar.zst' "$srcinfo"
+grep -Fxq $'\tsha256sums = '"$source_sha" "$srcinfo"
+grep -Fxq $'\tsha256sums_x86_64 = '"$runtime_sha" "$srcinfo"
 ! grep -Eq 'ghost-ai|summon-ghost|AUR|aur' "$contribution/PKGBUILD"
 
-fake_bin="$work/bin"
-mkdir -- "$fake_bin"
-apply_fixture="$fake_bin/curl"
-sed \
-  -e "s|@@REPOSITORY@@|$repository|g" \
-  -e "s|@@VERSION@@|$version|g" \
-  "$script_root/test-fixtures/curl" > "$apply_fixture"
-chmod 755 -- "$apply_fixture"
-hook_output="$work/hook.json"
-PATH="$fake_bin:$PATH" \
-  GHOST_OMARCHY_FIXTURE_SOURCE_SHA="$source_sha" \
-  GHOST_OMARCHY_FIXTURE_RUNTIME_SHA="$runtime_sha" \
-  bash "$contribution/.omarchy/upstream.sh" > "$hook_output"
-jq -e --arg source "$source_sha" --arg runtime "$runtime_sha" '
-  . == {
-    pkgver: "1.2.3",
-    sha256sums: {any: [$source, $runtime]}
-  }
-' "$hook_output" >/dev/null
-
-for mode in \
-  duplicate-checksum \
-  wrong-checksum-url \
-  malformed-asset-after-valid \
-  malformed-release-after-valid; do
-  if PATH="$fake_bin:$PATH" \
-      GHOST_OMARCHY_FIXTURE_MODE="$mode" \
-      GHOST_OMARCHY_FIXTURE_SOURCE_SHA="$source_sha" \
-      GHOST_OMARCHY_FIXTURE_RUNTIME_SHA="$runtime_sha" \
-      bash "$contribution/.omarchy/upstream.sh" >/dev/null 2>&1; then
-    printf 'upstream hook accepted fixture mode %s\n' "$mode" >&2
-    exit 1
-  fi
-done
-
-# Model the only fields official sync-upstream rewrites: pkgver, pkgrel, and
-# the checksum array. The updated recipe must derive the new source identity;
-# it must not retain a rendered commit or epoch from the first release.
+# Model the only fields sync-upstream rewrites: pkgver, pkgrel, and the
+# checksum arrays. The updated recipe must derive the new source identity; it
+# must not retain a rendered commit or epoch from the first release.
 next_version=2.0.0
-next_source_sha=2222222222222222222222222222222222222222222222222222222222222222
-next_runtime_sha=3333333333333333333333333333333333333333333333333333333333333333
-next_bin="$work/next-bin"
-mkdir -- "$next_bin"
-sed \
-  -e "s|@@REPOSITORY@@|$repository|g" \
-  -e "s|@@VERSION@@|$next_version|g" \
-  "$script_root/test-fixtures/curl" > "$next_bin/curl"
-chmod 755 -- "$next_bin/curl"
-next_update="$work/next-update.json"
-PATH="$next_bin:$PATH" \
-  GHOST_OMARCHY_FIXTURE_SOURCE_SHA="$next_source_sha" \
-  GHOST_OMARCHY_FIXTURE_RUNTIME_SHA="$next_runtime_sha" \
-  bash "$contribution/.omarchy/upstream.sh" > "$next_update"
-[[ "$(jq -r '.pkgver' "$next_update")" == "$next_version" ]]
-mapfile -t next_hashes < <(jq -r '.sha256sums.any[]' "$next_update")
-[[ "${#next_hashes[@]}" -eq 2 ]]
-[[ "${next_hashes[0]}" == "$next_source_sha" ]]
-[[ "${next_hashes[1]}" == "$next_runtime_sha" ]]
-
+next_hashes=(
+  2222222222222222222222222222222222222222222222222222222222222222
+  3333333333333333333333333333333333333333333333333333333333333333
+)
 updated="$work/updated-ghost"
 cp -a -- "$contribution" "$updated"
 sed -i \
@@ -136,8 +92,8 @@ updated_srcinfo="$work/updated.SRCINFO"
   makepkg --printsrcinfo
 ) > "$updated_srcinfo"
 grep -Fxq $'\tpkgver = 2.0.0' "$updated_srcinfo"
-grep -Fxq $'\tsha256sums = '"$next_source_sha" "$updated_srcinfo"
-grep -Fxq $'\tsha256sums = '"$next_runtime_sha" "$updated_srcinfo"
+grep -Fxq $'\tsha256sums = '"${next_hashes[0]}" "$updated_srcinfo"
+grep -Fxq $'\tsha256sums_x86_64 = '"${next_hashes[1]}" "$updated_srcinfo"
 grep -Fq '/releases/download/v2.0.0/ghost-2.0.0.tar.gz' "$updated_srcinfo"
 
 srcdir="$work/update-src"
