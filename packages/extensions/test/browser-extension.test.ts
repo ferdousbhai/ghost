@@ -647,6 +647,12 @@ describe("find and refs", () => {
       .rejects.toThrowError(/Current refs: e1, e5/);
   });
 
+  it("takes a selector as the find query", async () => {
+    const harness = await openWithMatches();
+    const result = await harness.call(GHOST_BROWSER, { action: "find", selector: "h1" });
+    expect(result.details).toMatchObject({ action: "find", query: "h1" });
+  });
+
   it("needs a query", async () => {
     const harness = await openWithMatches();
     const error = await expectGhostError(

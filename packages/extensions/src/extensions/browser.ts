@@ -172,7 +172,8 @@ export function createBrowserExtension(
         })),
         selector: Type.Optional(Type.String({
           description:
-            "For click and type, instead of a ref. A CSS selector for the element.",
+            "For click and type, instead of a ref. A CSS selector for the element. "
+            + "For find it is accepted as the query.",
         })),
         text: Type.Optional(Type.String({
           description: "For type. The text to put in the field, replacing what is there.",
@@ -351,7 +352,9 @@ export function createBrowserExtension(
           }
 
           case "find": {
-            const query = params.query?.trim();
+            // `selector` is the click/type spelling; a find that arrives with it
+            // instead of `query` means the same thing.
+            const query = (params.query ?? params.selector)?.trim();
             if (!query) {
               throw new GhostBrowserError(
                 "invalid_input",

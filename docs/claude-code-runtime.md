@@ -36,6 +36,13 @@ graph under Ghost's versioned XDG data root; the versions are
 `CLAUDE_AGENT_SDK_VERSION` and its peers in
 [`claude-agent-sdk-loader.ts`](../packages/daemon/src/claude-agent-sdk-loader.ts),
 and the daemon refuses a mismatched or partial graph rather than loading it.
+The release check (`packaging/release/test-claude-sdk-boundary.sh`) holds this
+page to the same pins, so the exact graph is named here once:
+
+- `@anthropic-ai/claude-agent-sdk@0.3.170`
+- `@anthropic-ai/sdk@0.93.0`
+- `@modelcontextprotocol/sdk@1.29.0`
+- `zod@4.4.3`
 
 The stored role is:
 
