@@ -27,6 +27,12 @@ SendSIGKILL=yes
 # GHOST_CLAUDE_BINARY wrapper backed by the owner's credential mechanism.
 Environment=GHOSTD_HOST=127.0.0.1
 
+# systemd's default PATH is /usr/local/bin:/usr/bin, and the login PATH the
+# user manager imports arrives only after the graphical session is up. Claude
+# Code's official installer puts `claude` in ~/.local/bin, so name the owner's
+# tool directories here rather than depend on start-up order.
+Environment=PATH=%h/.local/bin:%h/.local/share/mise/shims:%h/.bun/bin:/usr/local/bin:/usr/bin
+
 # Local-only service; nothing here should reach outside the user's own files.
 # %h is ONE writable bind mount, not per-directory carve-outs: ghost deletion
 # renames a default ghost home into %h/.local/share/Trash, and rename(2) across

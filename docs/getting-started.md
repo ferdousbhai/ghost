@@ -256,6 +256,7 @@ and any skill you installed untouched.
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
 | The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
+| "Claude Code is not installed at \"claude\"" although `claude --version` works in your shell | The daemon's PATH is the unit's, not your shell's: `ghostd.service` names `~/.local/bin`, mise shims, and `~/.bun/bin`. A `claude` elsewhere needs `GHOST_CLAUDE_BINARY` in a drop-in (`systemctl --user edit ghostd.service`) |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
 
 After an upgrade, re-enable rather than restart, so an installation made with

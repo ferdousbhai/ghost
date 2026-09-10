@@ -48,8 +48,10 @@ The stored role is:
 ```
 
 There is no `providers.claude-code` entry and no Claude credential in the
-ghost's `.pi/auth.json`. `GHOST_CLAUDE_BINARY` may select an explicit owner wrapper when
-`claude` is not on the daemon PATH or a native route needs environment setup.
+ghost's `.pi/auth.json`. The daemon's PATH is set by `ghostd.service` (`~/.local/bin`, mise shims,
+`~/.bun/bin`, then the system directories), not by the owner's shell.
+`GHOST_CLAUDE_BINARY` may select an explicit owner wrapper when
+`claude` lives elsewhere or a native route needs environment setup.
 Ghost treats that wrapper as an owner trust boundary and never unwraps it.
 
 ## Runtime boundary
