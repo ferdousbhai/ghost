@@ -89,9 +89,8 @@ done
 
 bash "$script_dir/test-ci-dependencies.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
+bash "$source_root/packaging/release/test-runtime-source.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
-python "$source_root/packaging/release/test-public-candidate.py"
-python "$script_dir/test-seal-regular-inputs.py"
 bash "$source_root/packaging/omarchy/test-contribution.sh"
 
 # Every packaging test suite must be invoked by some other packaging or CI
@@ -105,7 +104,7 @@ while IFS= read -r suite; do
       "$suite" >&2
     exit 1
   fi
-done < <(find "$source_root/packaging" "$source_root/.github/scripts" \
+done < <(find "$source_root/packaging" \
   -name __pycache__ -prune \
   -o -name 'test-*' -type f -print | sort)
 
@@ -133,8 +132,7 @@ require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency systemd "$work/ghost-dev.SRCINFO"
 
-GHOST_RELEASE_REPOSITORY=example/ghost-releases \
-  bash "$source_root/packaging/release/render-arch-package.sh" \
+bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost" \
   0.0.1 \
   0000000000000000000000000000000000000000000000000000000000000000 \

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+# omarchy:summary=Remove Ghost, keeping every ghost home and credential
+# omarchy:requires-sudo=true
+
+set -e
+
+if omarchy-pkg-present ghost; then
+  systemctl --user disable --now ghost-shell.service ghostd.service 2>/dev/null || true
+  systemctl --user daemon-reload
+  omarchy-pkg-drop ghost
+  echo "Ghost was removed. Your ghosts (~/ghosts), settings, and state are still there."
+else
+  echo "Ghost was not installed."
+fi

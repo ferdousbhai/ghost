@@ -11,7 +11,7 @@ usage='render-contribution.sh <output-dir> <version> <source-sha256> <runtime-sh
   exit 1
 }
 output="${1:?usage: $usage}"
-release_repository="${GHOST_RELEASE_REPOSITORY:?GHOST_RELEASE_REPOSITORY=owner/repository is required}"
+release_repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 
 bash "$release_root/render-arch-package.sh" "$@"
 rm -- "$output/.SRCINFO"

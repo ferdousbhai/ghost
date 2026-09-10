@@ -450,14 +450,16 @@ hosted-session, concurrency, or spend cap.
   Client errors retain the operation: unavailable transport is `not_found`,
   deadlines/size are `limit_exceeded`, and malformed protocol is `invalid_format`.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
-  candidates, not user data or service activation policy.
+  inputs, not user data or service activation policy. A release is cut locally
+  by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
+  `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
+  archive, runtime archive, and `SHA256SUMS` that Omarchy's package hook
+  reads. The only install path for owners is Omarchy's package repository.
 
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md),
 [`docs/claude-code-runtime.md`](docs/claude-code-runtime.md), and
-[`docs/desktop-helper.md`](docs/desktop-helper.md). Release publication's
-fail-closed state machine lives in
-[`docs/release-publication.md`](docs/release-publication.md).
+[`docs/desktop-helper.md`](docs/desktop-helper.md).
 
 ## Harness and lifecycle invariants
 

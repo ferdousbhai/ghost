@@ -47,7 +47,7 @@ grep -Fq 'https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-linux
 grep -Fq '951ee2aee855f08595aeec6225226a298d3fea83a3dcd6465c09cbccdf7e848f' \
   "$smoke"
 grep -Fq 'GHOST_RUNTIME_SMOKE_BUN="$bun"' "$smoke"
-if grep -Fq 7717 "$smoke" "$script_dir/ci-smoke-minimum-bun.sh"; then
+if grep -Fq 7717 "$smoke"; then
   printf 'minimum Bun gate names the live daemon port\n' >&2
   exit 1
 fi

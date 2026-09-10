@@ -10,7 +10,7 @@ version="${1:?usage: $usage}"
 source_sha="${2:?usage: $usage}"
 runtime_sha="${3:?usage: $usage}"
 script_root="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-: "${GHOST_RELEASE_REPOSITORY:?GHOST_RELEASE_REPOSITORY=owner/repository is required}"
+: "${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 
 work_parent="${GHOST_RELEASE_WORK_ROOT:-$script_root/work}"
 mkdir -p "$work_parent"

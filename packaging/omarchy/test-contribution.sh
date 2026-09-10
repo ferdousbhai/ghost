@@ -14,7 +14,7 @@ trap cleanup EXIT
 version=1.2.3
 source_sha=0000000000000000000000000000000000000000000000000000000000000000
 runtime_sha=1111111111111111111111111111111111111111111111111111111111111111
-repository=example/ghost-releases
+repository=example/ghost
 
 for mask in 022 077; do
   mkdir -m755 -- "$work/$mask"
@@ -57,8 +57,8 @@ srcinfo="$work/ghost.SRCINFO"
 grep -Fxq 'pkgbase = ghost' "$srcinfo"
 grep -Fxq 'pkgname = ghost' "$srcinfo"
 grep -Fxq $'\tconflicts = ghost-dev' "$srcinfo"
-grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost-releases/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
-grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-x86_64.tar.zst::https://github.com/example/ghost-releases/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-x86_64.tar.zst' "$srcinfo"
+grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
+grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-x86_64.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-x86_64.tar.zst' "$srcinfo"
 ! grep -Eq 'ghost-ai|summon-ghost|AUR|aur' "$contribution/PKGBUILD"
 
 fake_bin="$work/bin"
@@ -261,3 +261,19 @@ if check >/dev/null 2>&1; then
 fi
 
 printf 'Omarchy contribution dry-run fixtures passed\n'
+
+# The Omarchy menu scripts and entries travel upstream verbatim.
+for script in "$script_root"/bin/omarchy-ghost-install "$script_root"/bin/omarchy-ghost-remove; do
+  bash -n "$script"
+  [[ "$(stat -c '%a' "$script")" == 755 ]]
+  grep -q '^# omarchy:summary=' "$script"
+done
+grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-ghost-install"
+grep -Fq 'systemctl --user enable --now ghostd.service ghost-shell.service' "$script_root/bin/omarchy-ghost-install"
+grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-ghost-remove"
+grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
+grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"
+grep -Fq 'omarchy-ghost-install' "$script_root/omarchy-menu.jsonc"
+grep -Fq 'omarchy-ghost-remove' "$script_root/omarchy-menu.jsonc"
+
+printf 'Omarchy contribution test passed\n'

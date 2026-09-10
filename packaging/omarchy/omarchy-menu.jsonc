@@ -1,0 +1,6 @@
+// The two Omarchy menu entries for Ghost, in the shape of
+// default/omarchy/omarchy-menu.jsonc upstream: Install → AI and Remove → AI.
+{
+  "install.ai.ghost": {"icon":"󰊠","label":"Ghost","disabled":"omarchy-pkg-present ghost","action":"omarchy-launch-floating-terminal-with-presentation omarchy-ghost-install"},
+  "remove.ai.ghost": {"icon":"󰊠","label":"Ghost","when":"omarchy-pkg-present ghost","action":"omarchy-launch-floating-terminal-with-presentation omarchy-ghost-remove"}
+}

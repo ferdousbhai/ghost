@@ -1,10 +1,4 @@
-# Omarchy package and checkout recipe
-
-> **RELEASE HOLD:** this checkout recipe is for development and isolated
-> acceptance only. Do not create a release repository or tag, dispatch the
-> release workflow, publish a package, submit an Omarchy contribution, or install
-> it on the owner's live machine until the owner lifts the hold and #17 is
-> complete for the exact candidate.
+# Checkout package recipe
 
 `PKGBUILD` builds `ghost-dev`, the rolling checkout package. It provides and
 conflicts with stable `ghost`, so the variants cannot be installed together.
@@ -62,10 +56,11 @@ environment boundary are in
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost` package uses the
 [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
-and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost creates only
-the source/runtime candidate and an Omarchy contribution template; Omarchy
-owns the stable package build, signing, repository, and promotion. Ghost has no
-generic Arch publication channel, pacman repository, or package-signing key.
+and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
+source and runtime inputs as a GitHub release (`../release/publish.sh`) and
+renders the Omarchy contribution; Omarchy owns the stable package build,
+signing, repository, and promotion. Ghost has no generic Arch publication
+channel, pacman repository, or package-signing key.
 
 The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
 system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
@@ -117,7 +112,8 @@ provider credentials, and API/relay tokens untouched.
 `smoke.sh` validates a staged package tree, including daemon startup metadata,
 the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
-archive, and the Arch workflow builds the package in a clean container.
+archive, and the Arch workflow builds the package in a clean container on
+every push, which is the whole of CI: releases are cut locally.
 
 For a real service-context check on a graphical Arch login, run:
 

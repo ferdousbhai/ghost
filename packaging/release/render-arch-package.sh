@@ -12,7 +12,7 @@ output="${1:?usage: $usage}"
 version="${2:?usage: $usage}"
 source_sha="${3:?usage: $usage}"
 runtime_sha="${4:?usage: $usage}"
-release_repository="${GHOST_RELEASE_REPOSITORY:?GHOST_RELEASE_REPOSITORY=owner/repository is required}"
+release_repository="${GHOST_RELEASE_REPOSITORY:-ferdousbhai/ghost}"
 
 if [[ "$version" =~ ^(0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})[.](0|[1-9][0-9]{0,4})$ ]]; then
   major="${BASH_REMATCH[1]}"

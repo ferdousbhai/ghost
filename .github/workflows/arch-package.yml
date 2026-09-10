@@ -20,10 +20,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Verify container-local source resolution
-        shell: bash
-        run: bash packaging/arch/test-ci-source-repo.sh
-
       - name: Install declared package dependencies
         shell: bash
         run: |
@@ -49,31 +45,12 @@ jobs:
           uv run --frozen ruff check src tests
           uv run --frozen mypy
 
+      # makepkg refuses to run as root.
       - name: Create unprivileged package builder
         shell: bash
-        run: /usr/bin/useradd --create-home builder
-
-      - name: Verify CI privilege boundaries
-        shell: bash
         run: |
-          PATH=/usr/bin /usr/bin/bash packaging/arch/test-ci-git-ownership.sh builder
-          PATH=/usr/bin /usr/bin/bash packaging/arch/test-ci-release-root.sh builder
-          PATH=/usr/bin /usr/bin/bash packaging/arch/test-release-checksums.sh builder
-
-      - name: Prepare builder-owned release paths
-        shell: bash
-        run: |
-          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
-            /usr/bin/bash packaging/arch/prepare-ci-release-environment.sh \
-              builder "$GITHUB_ENV" "$GITHUB_WORKSPACE"
-
-      - name: Verify package check dependency coverage
-        shell: bash
-        run: |
-          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
-            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
-            GHOST_ARCH_DEPENDENCY_TEST_ROOT=/home/builder \
-            /usr/bin/bash -c 'set -euo pipefail; /usr/bin/bash packaging/arch/test-check-dependencies.sh; /usr/bin/bash packaging/release/test-runtime-source.sh'
+          /usr/bin/useradd --create-home builder
+          chown -R builder "$GITHUB_WORKSPACE"
 
       - name: Build and smoke-test the package
         shell: bash
@@ -84,90 +61,3 @@ jobs:
             GITHUB_SHA="$GITHUB_SHA" \
             /usr/bin/bash \
               "$GITHUB_WORKSPACE/packaging/arch/ci-build-development.sh"
-
-      - name: Build and verify stable release sources offline
-        env:
-          GHOST_RELEASE_ACTION_METADATA: actions/checkout=3d3c42e5aac5ba805825da76410c181273ba90b1
-          GHOST_RELEASE_CONTAINER_METADATA: package=archlinux:base-devel
-          GHOST_RELEASE_REPOSITORY: ${{ vars.GHOST_RELEASE_REPOSITORY }}
-        shell: bash
-        run: |
-          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
-            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
-            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
-            GHOST_CI_RELEASE_OUTER="$GHOST_CI_RELEASE_OUTER" \
-            GHOST_CI_RELEASE_OUT="$GHOST_CI_RELEASE_OUT" \
-            GHOST_CI_RELEASE_WORK="$GHOST_CI_RELEASE_WORK" \
-            GHOST_CI_RELEASE_OUTER_DEVICE="$GHOST_CI_RELEASE_OUTER_DEVICE" \
-            GHOST_CI_RELEASE_OUTER_INODE="$GHOST_CI_RELEASE_OUTER_INODE" \
-            GHOST_CI_RELEASE_OUT_DEVICE="$GHOST_CI_RELEASE_OUT_DEVICE" \
-            GHOST_CI_RELEASE_OUT_INODE="$GHOST_CI_RELEASE_OUT_INODE" \
-            GHOST_CI_RELEASE_WORK_DEVICE="$GHOST_CI_RELEASE_WORK_DEVICE" \
-            GHOST_CI_RELEASE_WORK_INODE="$GHOST_CI_RELEASE_WORK_INODE" \
-            GHOST_RELEASE_ACTION_METADATA="$GHOST_RELEASE_ACTION_METADATA" \
-            GHOST_RELEASE_CONTAINER_METADATA="$GHOST_RELEASE_CONTAINER_METADATA" \
-            GHOST_RELEASE_REPOSITORY="$GHOST_RELEASE_REPOSITORY" \
-            GITHUB_REPOSITORY="$GITHUB_REPOSITORY" \
-            GITHUB_WORKFLOW_REF="$GITHUB_WORKFLOW_REF" \
-            GITHUB_RUN_ID="$GITHUB_RUN_ID" \
-            GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
-            /usr/bin/bash \
-              "$GITHUB_WORKSPACE/packaging/release/ci-build-stable.sh"
-
-      - name: Verify runtime with minimum supported Bun
-        shell: bash
-        run: |
-          exec /usr/bin/runuser -u builder -- /usr/bin/env -i \
-            HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
-            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
-            GHOST_CI_RELEASE_OUTER="$GHOST_CI_RELEASE_OUTER" \
-            GHOST_CI_RELEASE_OUT="$GHOST_CI_RELEASE_OUT" \
-            GHOST_CI_RELEASE_WORK="$GHOST_CI_RELEASE_WORK" \
-            GHOST_CI_RELEASE_OUTER_DEVICE="$GHOST_CI_RELEASE_OUTER_DEVICE" \
-            GHOST_CI_RELEASE_OUTER_INODE="$GHOST_CI_RELEASE_OUTER_INODE" \
-            GHOST_CI_RELEASE_OUT_DEVICE="$GHOST_CI_RELEASE_OUT_DEVICE" \
-            GHOST_CI_RELEASE_OUT_INODE="$GHOST_CI_RELEASE_OUT_INODE" \
-            GHOST_CI_RELEASE_WORK_DEVICE="$GHOST_CI_RELEASE_WORK_DEVICE" \
-            GHOST_CI_RELEASE_WORK_INODE="$GHOST_CI_RELEASE_WORK_INODE" \
-            /usr/bin/bash \
-              "$GITHUB_WORKSPACE/packaging/release/ci-smoke-minimum-bun.sh"
-
-      - name: Seal release artifacts for upload
-        if: vars.GHOST_RELEASE_REPOSITORY != ''
-        shell: bash
-        run: |
-          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
-            /usr/bin/python \
-              "$GHOST_CI_RELEASE_OUTER/seal-ci-release-artifacts.py" \
-              builder "$GHOST_CI_RELEASE_OUTER" \
-              "$GHOST_CI_RELEASE_OUTER_DEVICE" \
-              "$GHOST_CI_RELEASE_OUTER_INODE" \
-              "$GHOST_CI_RELEASE_OUT_DEVICE" \
-              "$GHOST_CI_RELEASE_OUT_INODE" \
-              "$GHOST_CI_RELEASE_SEALED_DEVICE" \
-              "$GHOST_CI_RELEASE_SEALED_INODE"
-
-      - name: Upload sealed public candidate
-        if: vars.GHOST_RELEASE_REPOSITORY != ''
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: ghost-public-candidate-${{ github.sha }}-${{ github.run_attempt }}
-          path: ${{ env.GHOST_CI_RELEASE_SEALED }}/*
-          if-no-files-found: error
-
-      - name: Remove trusted release outer
-        if: always() && env.GHOST_CI_RELEASE_OUTER != ''
-        shell: bash
-        run: |
-          exec /usr/bin/env -i HOME=/root PATH=/usr/bin TMPDIR=/var/tmp \
-            /usr/bin/bash \
-              "$GHOST_CI_RELEASE_OUTER/remove-ci-release-root" builder \
-              "$GHOST_CI_RELEASE_OUTER" \
-              "$GHOST_CI_RELEASE_OUTER_DEVICE" \
-              "$GHOST_CI_RELEASE_OUTER_INODE" \
-              "$GHOST_CI_RELEASE_OUT_DEVICE" \
-              "$GHOST_CI_RELEASE_OUT_INODE" \
-              "$GHOST_CI_RELEASE_WORK_DEVICE" \
-              "$GHOST_CI_RELEASE_WORK_INODE" \
-              "$GHOST_CI_RELEASE_SEALED_DEVICE" \
-              "$GHOST_CI_RELEASE_SEALED_INODE"

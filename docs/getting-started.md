@@ -7,11 +7,6 @@ a placeholder.
 For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
 of — this page.
 
-> **Development install.** There is no public Ghost package or repository yet:
-> the release is on hold until [#17](https://github.com/ferdousbhai/ghost/issues/17)
-> closes, and the supported Omarchy install flow is
-> [#54](https://github.com/ferdousbhai/ghost/issues/54). Today you build the
-> rolling `ghost-dev` package from a checkout, as below.
 
 ## 0. What you need
 
@@ -23,7 +18,16 @@ of — this page.
   its free models cost nothing — or an installed, authenticated Claude Code
   ([claude-code-runtime.md](claude-code-runtime.md)).
 
-## 1. Build and install the package
+## 1. Install the package
+
+Open the Omarchy menu, then **Install → AI → Ghost**. That installs the `ghost`
+package from Omarchy's repository, enables the two user services for this
+login, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
+afterwards; sections 2 and 3 describe what it did. Until the package is in
+Omarchy's repository, the entry is not there yet
+([#54](https://github.com/ferdousbhai/ghost/issues/54)).
+
+To work on Ghost itself, build the rolling checkout package instead:
 
 ```sh
 git clone https://github.com/ferdousbhai/ghost.git

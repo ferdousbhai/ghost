@@ -4,7 +4,9 @@ Ghost is installed. The package does not edit Hyprland or Omarchy
 configuration. Optional summon key and bar snippets are under
 /usr/share/doc/ghost/shell-contrib/.
 
-To relay the browser you already use, load this directory unpacked in Chromium:
+To relay the browser you already use, load this directory unpacked in Chromium
+(or add it to --load-extension= in ~/.config/chromium-flags.conf), then press
+Allow in the HUD when it shows the code from the extension's popup:
 
   /usr/share/ghost/chromium-extension
 
