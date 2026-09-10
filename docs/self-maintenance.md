@@ -16,6 +16,8 @@ Three rules hold the whole thing up:
 3. **History is already written.** `git log` in the checkout for what changed,
    `journalctl --user -t ghostd` for what the daemon did, the conversation
    transcript for why. Read them before retrying a change that failed.
+   `ghost status` prints the commit the running daemon was built from, so you
+   can tell whether a change has actually reached the process.
 
 ## Run ghostd from a clone
 
