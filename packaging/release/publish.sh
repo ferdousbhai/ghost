@@ -7,7 +7,8 @@
 #
 #   packaging/release/publish.sh <version> [--dry-run]
 #
-# --dry-run builds, verifies, and renders, and stops before the tag and release.
+# --dry-run builds, verifies, and renders from the committed tree and stops
+# before the tag and release; it does not need HEAD to be pushed.
 set -euo pipefail
 
 usage='publish.sh <version> [--dry-run]'
@@ -34,14 +35,16 @@ cd -- "$source_root"
   printf 'the tree is dirty; commit or drop the changes first\n' >&2
   exit 1
 }
-git fetch -q origin master
-[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || {
-  printf 'HEAD is not origin/master; push (or pull) first\n' >&2
-  exit 1
-}
-if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-  printf 'tag %s already exists\n' "$tag" >&2
-  exit 1
+if (( ! dry_run )); then
+  git fetch -q origin master
+  [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || {
+    printf 'HEAD is not origin/master; push (or pull) first\n' >&2
+    exit 1
+  }
+  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+    printf 'tag %s already exists\n' "$tag" >&2
+    exit 1
+  fi
 fi
 bash "$script_root/verify-release-version.sh" "$source_root" | grep -Fxq "$version" || {
   printf 'the manifests do not all say %s; bump the version first\n' "$version" >&2
@@ -51,8 +54,9 @@ bash "$script_root/verify-release-version.sh" "$source_root" | grep -Fxq "$versi
 
 commit="$(git rev-parse 'HEAD^{commit}')"
 epoch="$(git show -s --format=%ct "$commit")"
-rm -rf -- "$out"
-mkdir -p -- "$out"
+work="$script_root/work"
+rm -rf -- "$out" "$work"
+mkdir -p -- "$out" "$work"
 
 bash "$script_root/prepare-pnpm-engine.sh" "$source_root"
 pnpm fetch --frozen-lockfile
@@ -67,12 +71,14 @@ SOURCE_DATE_EPOCH="$epoch" \
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$script_root/make-source-archive.sh" \
     "$source_root" "$out/ghost-$version.tar.gz" "$version" HEAD
-bash "$script_root/verify-release-source.sh" "$source_root" "$version" "$commit" "$epoch"
-GHOST_RELEASE_WORK_ROOT="$script_root/work" \
+# The verifier reads the sanitized archive, not this tree.
+tar -xf "$out/ghost-$version.tar.gz" -C "$work"
+bash "$script_root/verify-release-source.sh" "$work/ghost-$version" "$version" "$commit" "$epoch"
+GHOST_RELEASE_WORK_ROOT="$work" \
   bash "$script_root/smoke-runtime-source.sh" \
     "$out/ghost-runtime-$version-linux-x86_64.tar.zst" \
     "$source_root" "$version" x86_64 "$commit" "$epoch"
-rm -rf -- "$out/work"
+rm -rf -- "$work"
 bash "$script_root/write-sha256sums.sh" "$out"
 
 source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
