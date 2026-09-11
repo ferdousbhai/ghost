@@ -2306,8 +2306,10 @@ export class SessionHost {
 
   /** The background jobs of one open conversation; a closed one has none. */
   listJobs(ghostName: string, sessionId?: string | null, runtime: ConversationRuntime = "pi"): GhostJobSnapshot[] {
-    assertPiConversation(runtime, "Background jobs");
     this.registry.get(ghostName);
+    if (runtime === "claude-code") {
+      return this.claudeCode.listJobs(ghostName, requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
+    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     const now = Date.now();
     return hosted ? hosted.jobs.list().map((job) => jobSnapshot(job, now)) : [];
@@ -2319,7 +2321,7 @@ export class SessionHost {
     jobId: string,
     runtime: ConversationRuntime = "pi",
   ): { outcome: CancelJobOutcome; job: GhostJobSnapshot | null } {
-    assertPiConversation(runtime, "Background jobs");
+    assertPiConversation(runtime, "Cancelling a job");
     this.registry.get(ghostName);
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) return { outcome: "not_found", job: null };

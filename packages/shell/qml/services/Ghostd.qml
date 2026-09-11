@@ -2203,16 +2203,6 @@ Singleton {
         }
         const sessionId = root.ensureSession(ghost);
         root.prepareWorkIdentity(ghost, sessionId);
-        // Background jobs are Ghost's pi runtime state; Claude keeps its own
-        // and the daemon answers 409, which is not an error worth a banner.
-        const identity = root.parseConversationActionId(sessionId);
-        if (identity && identity.runtime === "claude-code") {
-            root.retireWorkRequest();
-            root.workJobs = [];
-            root.workJobsError = "";
-            root.workJobsLoaded = true;
-            return;
-        }
         root.fetchWorkJobs(force, ghost, sessionId);
     }
 

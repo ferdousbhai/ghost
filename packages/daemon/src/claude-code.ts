@@ -65,6 +65,8 @@ import {
 } from "@ghost/extensions";
 import * as z from "zod";
 import { createClaudePiMessagesAdapter, type ClaudePiMessagesAdapter } from "./claude-pi-messages.js";
+import type { GhostJobSnapshot } from "./jobs.js";
+import type { PiMessagesEvent } from "./pi-messages.js";
 import {
   isValidConversationId,
   requireRawConversationId,
@@ -1745,6 +1747,17 @@ function claudeInputChannel(): ClaudeInputChannel {
  * `setSystemPrompt` — so a turn that disagrees with any of them retires this
  * query and starts a new one rather than answering under a stale prompt.
  */
+const MAX_MIRRORED_BASH_JOBS = 50;
+
+interface MirroredBashJob {
+  readonly id: string;
+  readonly command: string;
+  status: "running" | "completed" | "failed";
+  readonly startedAt: number;
+  endedAt?: number;
+  output: string;
+}
+
 /** The shape `SessionHost.queuedMessages` returns for either runtime. */
 export interface ClaudeQueuedMessages {
   streaming: boolean;
@@ -1871,6 +1884,13 @@ export class ClaudeCodeRuntime {
    * the current result lands, then run as continuations of the same stream.
    */
   private readonly queues = new Map<string, { steering: string[]; followUp: string[] }>();
+  /**
+   * Claude's native Bash calls, mirrored read-only from the turn's tool
+   * events so the Jobs strip lists them as it lists pi's GhostJobs. Ghost
+   * cannot cancel or read inside a native call; start, end, command, and the
+   * result summary are what the SDK shows.
+   */
+  private readonly bashJobs = new Map<string, MirroredBashJob[]>();
   private readonly active = new Map<
     string,
     { query: Query; abortController: AbortController; adapter: ClaudePiMessagesAdapter }
@@ -2062,7 +2082,10 @@ export class ClaudeCodeRuntime {
     // run. `tool_execution_start.cwd` is activity-local by contract, and a
     // Claude conversation cannot move its cwd mid-turn.
     let turnCwd = process.cwd();
-    const adapter = createClaudePiMessagesAdapter(options.emit, {
+    const adapter = createClaudePiMessagesAdapter((event) => {
+      this.observeBashJob(key, event);
+      options.emit(event);
+    }, {
       includeThinking: options.includeThinking,
       getCwd: () => turnCwd,
     });
@@ -2609,6 +2632,51 @@ export class ClaudeCodeRuntime {
    * Point-read one conversation's resume sidecar (recovering a settling write
    * exactly as a listing would), or null when the conversation does not exist.
    */
+  private observeBashJob(key: string, event: PiMessagesEvent): void {
+    if (event.type === "tool_execution_start" && event.toolName === "Bash") {
+      let jobs = this.bashJobs.get(key);
+      if (!jobs) {
+        jobs = [];
+        this.bashJobs.set(key, jobs);
+      }
+      const args = event.arguments as { command?: unknown } | undefined;
+      jobs.push({
+        id: event.id,
+        command: typeof args?.command === "string" ? args.command : "",
+        status: "running",
+        startedAt: Date.now(),
+        output: "",
+      });
+      if (jobs.length > MAX_MIRRORED_BASH_JOBS) jobs.splice(0, jobs.length - MAX_MIRRORED_BASH_JOBS);
+      return;
+    }
+    if (event.type === "tool_execution_end" && event.toolName === "Bash") {
+      const job = this.bashJobs.get(key)?.find((candidate) => candidate.id === event.id);
+      if (job?.status !== "running") return;
+      job.status = event.isError ? "failed" : "completed";
+      job.endedAt = Date.now();
+      job.output = event.summary ?? "";
+    }
+  }
+
+  /** Claude's Bash calls in one conversation, as the jobs API lists pi's. */
+  listJobs(ghostName: string, conversationId: string): GhostJobSnapshot[] {
+    requireRawConversationId(conversationId);
+    const key = JSON.stringify([ghostName, conversationId]);
+    const now = Date.now();
+    return (this.bashJobs.get(key) ?? []).map((job) => ({
+      id: job.id,
+      label: "bash",
+      command: job.command,
+      status: job.status,
+      startedAt: new Date(job.startedAt).toISOString(),
+      ...(job.endedAt === undefined ? {} : { endedAt: new Date(job.endedAt).toISOString() }),
+      durationMs: Math.max(0, (job.endedAt ?? now) - job.startedAt),
+      output: job.output,
+      outputTruncated: false,
+    }));
+  }
+
   /** The owner's queued steering and follow-ups for one conversation. */
   queuedMessages(ghostName: string, conversationId: string): ClaudeQueuedMessages {
     requireRawConversationId(conversationId);

@@ -4053,6 +4053,43 @@ while :; do /bin/sleep 10; done
     ]);
   });
 
+  it("mirrors Claude's native Bash calls into the jobs list, read-only", async () => {
+    setupClaudeHost({
+      createQuery: (input, lifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume ?? "s";
+        const stream = (event: unknown) => sdkMessage({
+          type: "stream_event", parent_tool_use_id: null, uuid: `s-${Math.random()}`, session_id: sessionId, event,
+        });
+        const messages = [
+          stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "bash-1", name: "Bash", input: {} } }),
+          stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"command":"uname -m"}' } }),
+          stream({ type: "content_block_stop", index: 0 }),
+          sdkMessage({
+            type: "user", parent_tool_use_id: null, uuid: "u-1", session_id: sessionId,
+            message: { role: "user", content: [{ type: "tool_result", tool_use_id: "bash-1", content: "x86_64\n" }] },
+          }),
+          ...responseMessages(sessionId, "It is x86_64."),
+        ];
+        return fakeQuery(messages, lifecycle, input.prompt);
+      },
+    });
+    let midTurn: ReturnType<NonNullable<typeof host>["listJobs"]> = [];
+    await host!.runTurn("casper", {
+      sessionId: "conversation-1",
+      prompt: "what arch?",
+      emit: (event) => {
+        if (event.type === "tool_execution_start") midTurn = host!.listJobs("casper", "conversation-1", "claude-code");
+      },
+    });
+    expect(midTurn).toMatchObject([{ id: "bash-1", label: "bash", command: "uname -m", status: "running" }]);
+    const jobs = host!.listJobs("casper", "conversation-1", "claude-code");
+    expect(jobs).toMatchObject([{ id: "bash-1", command: "uname -m", status: "completed", output: expect.stringContaining("x86_64") }]);
+    expect(jobs[0]?.endedAt).toBeTypeOf("string");
+    // Ghost cannot reach inside a native call, so cancel stays pi-only.
+    expect(() => host!.cancelJob("casper", "conversation-1", "bash-1", "claude-code"))
+      .toThrow(/pi only/);
+  });
+
   it("refuses to queue into a Claude conversation that is not streaming", async () => {
     setupClaudeHost();
     await expect(host!.queueMessage("casper", "conversation-1", "steer", "x", "claude-code"))
