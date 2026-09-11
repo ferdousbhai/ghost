@@ -60,20 +60,20 @@ TestCase {
     }
 
 
-    function test_liveTrailingPreambleWaitsBesideTheOrb(): void {
-        // The tool call has not arrived yet. Holding the block back is what
-        // keeps it from appearing in the column and vanishing a beat later.
+    function test_liveTrailingBlockStreamsInTheColumn(): void {
+        // No tool call has followed it, so it is the reply as far as anyone
+        // can know; the final text is only final at the end of the stream.
         const blocks = { 0: textBlock("Checking your Dropbox") };
         const turn = TurnBlocks.split(blocks, [], true);
-        compare(turn.body, "");
-        compare(turn.status, "Checking your Dropbox");
+        compare(turn.body, "Checking your Dropbox");
+        compare(turn.status, "");
     }
 
-    function test_liveBlockMovesToTheColumnOnceItOutgrowsAPreamble(): void {
-        const long = "y".repeat(TurnBlocks.PREAMBLE_LIMIT + 1);
-        const turn = TurnBlocks.split({ 0: textBlock(long) }, [], true);
-        compare(turn.body, long);
-        compare(turn.status, "");
+    function test_liveBlockMovesBesideTheOrbWhenItsToolCallStarts(): void {
+        const blocks = { 0: textBlock("Checking your Dropbox") };
+        const turn = TurnBlocks.split(blocks, [1], true);
+        compare(turn.body, "");
+        compare(turn.status, "Checking your Dropbox");
     }
 
     function test_liveAnswerAfterAToolCallStreamsIntoTheColumn(): void {
@@ -82,15 +82,15 @@ TestCase {
             2: textBlock("It is dated")
         };
         const turn = TurnBlocks.split(blocks, [1], true);
-        // The trailing block is provisional and short, so it holds — but the
-        // settled preamble before the call is what the orb is saying.
-        compare(turn.status, "It is dated");
-        compare(turn.body, "");
+        // Text after the last call is the reply in progress; the orb stops
+        // repeating the preamble and reports the runtime's state.
+        compare(turn.body, "It is dated");
+        compare(turn.status, "");
     }
 
     function test_statusIsOneLineWithoutADoubledStop(): void {
         const blocks = { 0: textBlock("Reading the page\n  for train times…") };
-        compare(TurnBlocks.split(blocks, [], true).status,
+        compare(TurnBlocks.split(blocks, [1], true).status,
             "Reading the page for train times");
     }
 

@@ -11,6 +11,12 @@
 // The split needs no classifier. A text block only *becomes* a preamble because
 // a tool call came after it — that is structural, and both the live stream
 // (content indices) and a restored transcript (ordered content parts) carry it.
+// Until that call arrives, a block streams in the reading column like any
+// answer: the final text is never known before the end of the stream, so the
+// column shows it as it comes and the orb takes a block back only when the
+// call that makes it narration actually starts. A short preamble therefore
+// appears in the column for a beat and then moves beside the orb — a small,
+// honest motion, against holding every short answer out of sight until `done`.
 
 /**
  * Longest a block can be and still be status. A preamble is one sentence by
@@ -68,12 +74,7 @@ function split(blocks, toolIndices, streaming) {
         // `trim`, not `oneLine`: this only asks whether the block is blank, and
         // collapsing a reply that grows on every tick is quadratic work.
         if (!block || block.kind !== "text" || String(block.text || "").trim() === "") continue;
-        // The trailing block of a live turn has no tool call after it *yet*.
-        // Holding it back until it outgrows a preamble is what keeps a
-        // "Checking your Dropbox" out of the reading column, at the cost of a
-        // short final answer surfacing there a beat before the orb fades.
-        var provisional = Boolean(streaming) && index === last && index > lastTool;
-        if ((index < lastTool || provisional) && isPreamble(block.text))
+        if (index < lastTool && isPreamble(block.text))
             preambles.push(block.text);
         else
             reply.push(block.text);
@@ -84,9 +85,13 @@ function split(blocks, toolIndices, streaming) {
     // Its last preamble is the reply rather than an empty row.
     if (reply.length === 0 && !streaming && latest !== "")
         return { body: latest.trim(), status: "" };
+    // The orb speaks the last preamble only while its tool call is what the
+    // turn is doing; once text follows the last call, that text is the reply
+    // in progress and the orb reports the runtime's state instead.
+    var insideCalls = Boolean(streaming) && lastTool > last;
     return {
         body: reply.join("\n\n"),
-        status: streaming ? asStatus(latest) : ""
+        status: insideCalls ? asStatus(latest) : ""
     };
 }
 
