@@ -2420,8 +2420,10 @@ export class SessionHost {
     sessionId?: string | null,
     runtime: ConversationRuntime = "pi",
   ): QueuedMessages {
-    assertPiConversation(runtime, "Message queues");
     this.registry.get(ghostName);
+    if (runtime === "claude-code") {
+      return this.claudeCode.queuedMessages(ghostName, requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
+    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
     return {
@@ -2439,8 +2441,10 @@ export class SessionHost {
     text: string,
     runtime: ConversationRuntime = "pi",
   ): Promise<QueuedMessages> {
-    assertPiConversation(runtime, "Message queues");
     this.registry.get(ghostName);
+    if (runtime === "claude-code") {
+      return this.claudeCode.queueMessage(ghostName, requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY), mode, text);
+    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted?.session.isStreaming) {
       throw new GhostError(
@@ -2704,10 +2708,10 @@ export class SessionHost {
     ghostName: string,
     conversationId: string,
   ): (turn?: SettledTurn) => Promise<void> {
-    let recorded = false;
+    // Called once per settled exchange: a queued follow-up adds a second
+    // exchange to the same owner turn, and the journal keeps both.
     return async (turn) => {
-      if (recorded || !turn) return;
-      recorded = true;
+      if (!turn) return;
       // The first settled turn names the conversation, as pi's first turn does.
       if (turn.sourceOrdinal === 1 && this.titleEnabled) {
         this.startClaudeTitle(ghostName, conversationId, turn.ownerPrompt);

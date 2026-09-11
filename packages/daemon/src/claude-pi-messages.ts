@@ -25,6 +25,8 @@ import {
 export interface ClaudePiMessagesAdapter {
   setInternalMcpServerName(name: string): void;
   handle(message: SDKMessage): void;
+  /** A steer or follow-up the owner queued mid-turn, shown where pi shows its own. */
+  ownerMessage(text: string): void;
   recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;
@@ -359,6 +361,10 @@ export function createClaudePiMessagesAdapter(
           errorMessage: resultErrorMessage(message),
         });
       }
+    },
+    ownerMessage(text) {
+      ensureStarted();
+      send({ type: "owner_message", text });
     },
     recordUsage(result) {
       if (!terminal) addResultUsage(result);

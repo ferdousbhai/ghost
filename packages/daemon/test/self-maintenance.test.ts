@@ -103,6 +103,20 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).not.toContain("The loop:");
   });
 
+  it("points a fix in shared code upstream and gates the push on the owner", () => {
+    const policy = renderSelfMaintenancePolicy({
+      ghostName: "aria",
+      checkout: CHECKOUT,
+      running: RUNNING,
+    });
+    expect(policy).toContain("branch from upstream master");
+    expect(policy).toContain("`CONTRIBUTING.md` in the checkout");
+    expect(policy).toContain("ask before you push");
+    // No checkout means nothing to send upstream.
+    expect(renderSelfMaintenancePolicy({ ghostName: "aria", checkout: null, running: RUNNING }))
+      .not.toContain("CONTRIBUTING.md");
+  });
+
   it("keeps the restart wake in this conversation when the session id is known", () => {
     const policy = renderSelfMaintenancePolicy({
       ghostName: "aria",

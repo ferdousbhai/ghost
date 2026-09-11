@@ -242,9 +242,10 @@ Claude auto-memory; persistence is the owner's documents.
 
 Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
-and browser/screen/desktop control are available on both principal paths. Runtime mechanics remain native. Pi exposes its
-transcript, branches, commands, steering, and `GhostJob` state through daemon
-APIs; Claude serves a thin settled-turn presentation transcript and otherwise
+and browser/screen/desktop control are available on both principal paths. Steering and follow-ups into a live turn work on both.
+Runtime mechanics remain native. Pi exposes its transcript, branches,
+commands, and `GhostJob` state through daemon APIs; Claude serves a
+settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
 warm query.
 
@@ -348,7 +349,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404. |
 | `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
-| `GET\|POST /sessions/:id/queue` | Inspect/enqueue Pi steering or follow-up text. |
+| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn, on either runtime. A steer reaches the model mid-turn (pi injects it; Claude Code receives it on its input channel); a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
@@ -469,7 +470,7 @@ Protocols implemented by a sidecar have one detailed document:
   Quickshell bus. Tests use scratch homes and the shell preview's private
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a session. A conversation rejects conflicting owners;
-  queued Pi steering/follow-ups are the explicit exception.
+  queued steering/follow-ups into its live turn are the explicit exception.
 - Home rename/delete, MCP mutation, model refresh, fork, and conversation
   deletion use explicit leases and publish only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on

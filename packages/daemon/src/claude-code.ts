@@ -64,7 +64,7 @@ import {
   type GhostToolResult,
 } from "@ghost/extensions";
 import * as z from "zod";
-import { createClaudePiMessagesAdapter } from "./claude-pi-messages.js";
+import { createClaudePiMessagesAdapter, type ClaudePiMessagesAdapter } from "./claude-pi-messages.js";
 import {
   isValidConversationId,
   requireRawConversationId,
@@ -1744,6 +1744,14 @@ function claudeInputChannel(): ClaudeInputChannel {
  * `setSystemPrompt` — so a turn that disagrees with any of them retires this
  * query and starts a new one rather than answering under a stale prompt.
  */
+/** The shape `SessionHost.queuedMessages` returns for either runtime. */
+export interface ClaudeQueuedMessages {
+  streaming: boolean;
+  count: number;
+  steering: readonly string[];
+  followUp: readonly string[];
+}
+
 interface WarmClaudeQuery {
   readonly query: Query;
   readonly messages: AsyncIterator<SDKMessage>;
@@ -1856,9 +1864,15 @@ export class ClaudeCodeRuntime {
   private readonly machineSkills: string[];
   private readonly askTimeoutMs: () => number;
   private readonly busy = new Set<string>();
+  /**
+   * What the owner queued into a live turn: steering already pushed into the
+   * SDK input (Claude Code delivers it mid-turn), and follow-ups held until
+   * the current result lands, then run as continuations of the same stream.
+   */
+  private readonly queues = new Map<string, { steering: string[]; followUp: string[] }>();
   private readonly active = new Map<
     string,
-    { query: Query; abortController: AbortController }
+    { query: Query; abortController: AbortController; adapter: ClaudePiMessagesAdapter }
   >();
   private readonly turns = new Map<
     string,
@@ -2111,7 +2125,8 @@ export class ClaudeCodeRuntime {
       if (ownerTurnCount >= Number.MAX_SAFE_INTEGER) {
         throw new ClaudeCodeProcessError("Claude Code's owner turn count overflowed.");
       }
-      const ownerTurnId = ownerTurnCount + 1;
+      let ownerTurnId = ownerTurnCount + 1;
+      let ownerPrompt = options.prompt;
       const admittedSdkSessionId = metadata && metadata.resumeBlocked !== true
         ? metadata.sessionId
         : randomUUID();
@@ -2356,7 +2371,7 @@ export class ClaudeCodeRuntime {
           }
           adapter.handle(message);
         };
-        this.active.set(key, { query: live.query, abortController: live.abortController });
+        this.active.set(key, { query: live.query, abortController: live.abortController, adapter });
         // Cancellation is forceful: SDK close/abort owns transport teardown.
         // `interrupt()` is a request over that same transport, so sending it and
         // immediately closing can only race the request.
@@ -2445,7 +2460,7 @@ export class ClaudeCodeRuntime {
           },
           sourceRevision: { kind: "claude-owner-turn", value: ownerTurnId },
           sourceOrdinal: ownerTurnId,
-          ownerPrompt: options.prompt,
+          ownerPrompt,
           assistantText: resultText,
           outcome: completed.subtype === "success" ? "completed" : "failed",
         };
@@ -2473,7 +2488,7 @@ export class ClaudeCodeRuntime {
             session_file: claudeSessionMetadataPath(paths.sessionDir, conversationId),
             ...(sdkTranscript ? { transcript_path: sdkTranscript } : {}),
             stop_hook_active: stopHookActive,
-            owner_prompt: options.prompt,
+            owner_prompt: ownerPrompt,
             signal: options.signal ?? new AbortController().signal,
             ghost_name: ghost.name,
             ghost_home: paths.home,
@@ -2491,6 +2506,33 @@ export class ClaudeCodeRuntime {
               continuations,
               code: "stop_hook_bounded",
             });
+          }
+          // A follow-up the owner queued runs now, in this same stream, the
+          // way pi dequeues its follow-ups: the exchange so far is journalled
+          // as its own settled turn and the next prompt goes in.
+          const queue = this.queues.get(key);
+          const followUp = completed.subtype === "success" && !options.signal?.aborted
+            ? queue?.followUp.shift()
+            : undefined;
+          if (followUp !== undefined) {
+            try {
+              await recordSettledTurn?.(settledTurn);
+            } catch (error) {
+              logger.warn("settled turn record failed", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+            settledTurn = undefined;
+            adapter.recordUsage(completed);
+            adapter.ownerMessage(followUp);
+            if (queue) queue.steering = [];
+            ownerTurnId += 1;
+            ownerPrompt = followUp;
+            prompt = followUp;
+            stopHookActive = false;
+            continuations = 0;
+            postQueryWorkPending = false;
+            continue;
           }
           postQueryWorkPending = false;
           pendingTerminalResult = completed;
@@ -2538,6 +2580,8 @@ export class ClaudeCodeRuntime {
         this.retireWarm(key);
         terminalEmissionFailure = { cause };
       }
+      // Anything still queued belongs to a turn that is over.
+      this.queues.delete(key);
       // Whatever survived the turn starts its idle countdown here, so a warm
       // process is never held by a conversation nobody is talking to.
       this.armSessionIdle(key);
@@ -2549,6 +2593,59 @@ export class ClaudeCodeRuntime {
    * Point-read one conversation's resume sidecar (recovering a settling write
    * exactly as a listing would), or null when the conversation does not exist.
    */
+  /** The owner's queued steering and follow-ups for one conversation. */
+  queuedMessages(ghostName: string, conversationId: string): ClaudeQueuedMessages {
+    requireRawConversationId(conversationId);
+    const key = JSON.stringify([ghostName, conversationId]);
+    const queue = this.queues.get(key);
+    const steering = queue ? [...queue.steering] : [];
+    const followUp = queue ? [...queue.followUp] : [];
+    return {
+      streaming: this.active.has(key),
+      count: steering.length + followUp.length,
+      steering,
+      followUp,
+    };
+  }
+
+  /**
+   * Queue owner text into a live turn. A steer goes into the SDK input at once
+   * and Claude Code hands it to the model mid-turn; a follow-up waits for the
+   * current result and then continues the same stream. Either needs a turn
+   * that is actually running.
+   */
+  queueMessage(
+    ghostName: string,
+    conversationId: string,
+    mode: "steer" | "followUp",
+    text: string,
+  ): ClaudeQueuedMessages {
+    requireRawConversationId(conversationId);
+    const key = JSON.stringify([ghostName, conversationId]);
+    const live = this.active.get(key);
+    const warm = this.warm.get(key);
+    if (!live || !warm) {
+      throw new GhostError(
+        "session_not_streaming",
+        "This conversation is not currently streaming; send a normal message instead.",
+        409,
+      );
+    }
+    let queue = this.queues.get(key);
+    if (!queue) {
+      queue = { steering: [], followUp: [] };
+      this.queues.set(key, queue);
+    }
+    if (mode === "steer") {
+      warm.input.push(text);
+      queue.steering.push(text);
+      live.adapter.ownerMessage(text);
+    } else {
+      queue.followUp.push(text);
+    }
+    return this.queuedMessages(ghostName, conversationId);
+  }
+
   /**
    * Store the listing title on the resume sidecar. The turn that is settling
    * carries the title it read at admission forward, so a title set mid-turn

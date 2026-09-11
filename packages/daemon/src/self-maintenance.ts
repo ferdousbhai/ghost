@@ -91,8 +91,9 @@ function checkoutLines(input: SelfMaintenanceInput): string[] {
 function loopLines(checkout: string | null): string[] {
   if (checkout === null) return [];
   return [
-    "The loop: edit on a branch → run the touched package's tests and `typecheck` → commit with the reason in the message → `pnpm build` → restart.",
+    "The loop: `git fetch` and branch from upstream master → edit → run the touched package's tests and `typecheck` → commit with the reason in the message → `pnpm build` → restart.",
     "This is you working in your own Bash, not a delegated task, so the task rules about worktrees and branches do not apply here.",
+    "Your home is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. A fix there is worth sending upstream: the recipe is `CONTRIBUTING.md` in the checkout. The PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
   ];
 }
 

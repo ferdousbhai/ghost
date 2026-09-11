@@ -3955,6 +3955,94 @@ while :; do /bin/sleep 10; done
     expect(lifecycle.closed).toBeGreaterThanOrEqual(1);
   });
 
+  it("runs a queued follow-up as a continuation of the same stream and journals both exchanges", async () => {
+    let queued = false;
+    const { paths, seenPrompts } = setupClaudeHost({
+      createQuery: (input, lifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume ?? "s";
+        return fakeQuery(
+          (turn) => responseMessages(sessionId, turn === 1 ? "First answer." : "Second answer."),
+          lifecycle,
+          input.prompt,
+          async (message) => {
+            seenPrompts.push(message);
+            if (!queued) {
+              queued = true;
+              // The owner queues while the first prompt is still being answered.
+              const state = await host!.queueMessage("casper", "conversation-1", "followUp", "and then?", "claude-code");
+              expect(state).toMatchObject({ streaming: true, followUp: ["and then?"], steering: [] });
+            }
+          },
+        );
+      },
+    });
+    const events: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conversation-1",
+      prompt: "first?",
+      emit: (event) => events.push(event),
+    });
+    const types = events.map((event) => event.type);
+    expect(types.filter((type) => type === "done")).toHaveLength(1);
+    expect(events).toContainEqual({ type: "owner_message", text: "and then?" });
+    const deltas = events.flatMap((event) => (event.type === "text_delta" ? [event.delta] : []));
+    expect(deltas).toEqual(["First answer.", "Second answer."]);
+    expect(seenPrompts.map((message) => (message.message.content as Array<{ text: string }>)[0]?.text))
+      .toEqual(["first?", "and then?"]);
+    expect(host!.queuedMessages("casper", "conversation-1", "claude-code"))
+      .toEqual({ streaming: false, count: 0, steering: [], followUp: [] });
+    const journal = JSON.parse(readFileSync(
+      presentationHistoryPath(paths.sessionDir, "claude-code", "conversation-1"),
+      "utf8",
+    )) as { turns: Array<{ ownerText: string; assistantText: string; sourceOrdinal: number }> };
+    expect(journal.turns.map((turn) => [turn.sourceOrdinal, turn.ownerText, turn.assistantText])).toEqual([
+      [1, "first?", "First answer."],
+      [2, "and then?", "Second answer."],
+    ]);
+  });
+
+  it("hands a steer to Claude Code mid-turn and shows it on the wire", async () => {
+    let steered = false;
+    const { seenPrompts } = setupClaudeHost({
+      createQuery: (input, lifecycle) => {
+        const sessionId = input.options.sessionId ?? input.options.resume ?? "s";
+        return fakeQuery(
+          // The steer is delivered inside the running turn: it is not a turn
+          // of its own and produces no second result.
+          (turn) => (turn === 1 ? responseMessages(sessionId, "Steered answer.") : []),
+          lifecycle,
+          input.prompt,
+          async (message) => {
+            seenPrompts.push(message);
+            if (!steered) {
+              steered = true;
+              const state = await host!.queueMessage("casper", "conversation-1", "steer", "shorter, please", "claude-code");
+              expect(state).toMatchObject({ streaming: true, steering: ["shorter, please"], followUp: [] });
+            }
+          },
+        );
+      },
+    });
+    const events: PiMessagesEvent[] = [];
+    await host!.runTurn("casper", {
+      sessionId: "conversation-1",
+      prompt: "tell me a story",
+      emit: (event) => events.push(event),
+    });
+    expect(events).toContainEqual({ type: "owner_message", text: "shorter, please" });
+    // The fake pulls its input lazily, so the steer is observed through the
+    // queue state above rather than through seenPrompts; the real SDK pumps
+    // the input channel to the CLI on its own.
+    expect(seenPrompts).toHaveLength(1);
+    expect(events.at(-1)?.type).toBe("done");
+  });
+
+  it("refuses to queue into a Claude conversation that is not streaming", async () => {
+    setupClaudeHost();
+    await expect(host!.queueMessage("casper", "conversation-1", "steer", "x", "claude-code"))
+      .rejects.toMatchObject({ code: "session_not_streaming" });
+  });
+
   it("starts Claude with the ghost's mcp.json rows and reports the ones the SDK cannot take", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     writeFileSync(join(paths.home, "mcp.json"), JSON.stringify({
