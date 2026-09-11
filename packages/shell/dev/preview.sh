@@ -154,8 +154,28 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-mapfile -t dbus_details < <(dbus-daemon --session --fork \
-  --address="unix:abstract=ghost-shell-preview-$BASHPID" --print-address=1 --print-pid=1)
+# A session bus with no service directories: nothing can be dbus-activated
+# on it. With the stock session config, Quickshell's portal registration
+# activated an xdg-desktop-portal-hyprland on this private bus, which then
+# crashed on exit when the nested compositor went away (ghost#66) — a
+# coredump the host reports as if its own portal had failed.
+dbus_config=$preview_root/dbus.conf
+cat >"$dbus_config" <<EOF_DBUS
+<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig>
+  <type>session</type>
+  <listen>unix:abstract=ghost-shell-preview-$BASHPID</listen>
+  <keep_umask/>
+  <policy context="default">
+    <allow send_destination="*" eavesdrop="true"/>
+    <allow eavesdrop="true"/>
+    <allow own="*"/>
+  </policy>
+</busconfig>
+EOF_DBUS
+mapfile -t dbus_details < <(dbus-daemon --config-file="$dbus_config" --fork \
+  --print-address=1 --print-pid=1)
 if (( ${#dbus_details[@]} != 2 )); then
   echo "preview: could not start the isolated session bus" >&2
   exit 1
