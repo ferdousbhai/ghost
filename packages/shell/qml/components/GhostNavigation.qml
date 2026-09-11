@@ -22,6 +22,11 @@ FocusScope {
             icon: "M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"
         },
         {
+            id: "board",
+            label: "Board",
+            icon: "M9 6h12M9 12h12M9 18h12M3 6l1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"
+        },
+        {
             id: "character",
             label: "Character",
             icon: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 9h3M16 13h3M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4M6 17a4 4 0 0 1 8 0"
@@ -46,11 +51,6 @@ FocusScope {
             id: "mcp",
             label: "MCP",
             icon: "M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 7v5M7.5 17.5l3-5M16.5 17.5l-3-5"
-        },
-        {
-            id: "board",
-            label: "Board",
-            icon: "M3 4h5v16H3zM10 4h5v10h-5zM17 4h4v13h-4z"
         },
         {
             id: "remote",
