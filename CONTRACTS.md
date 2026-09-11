@@ -225,22 +225,20 @@ versioned XDG data root with exact package/version/entry validation. Detailed
 installation and environment guarantees are in
 [`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
 
-Claude keeps its native preset, including `AskUserQuestion`, image
-understanding, subagents, background tasks, todos, web tools, and planning.
-Ghost routes `AskUserQuestion` through the same daemon broker and HUD as Pi's
-`ask` without denying or replacing any native tool. Claude's complete native
-tool preset remains available; Ghost's browser/screen/desktop tools are
-additive. Ghost disables Claude auto-memory; persistence is the owner's
-documents.
-
-The Claude Code path is native-first. A capability already supplied by the
-native `claude_code` preset keeps Claude's tool name, schema, result, and
-semantics; Ghost integrates its callbacks and events with daemon/HUD surfaces
-instead of registering a substitute. Additive Ghost tools are limited to
-Ghost-specific capabilities the preset does not supply, and must not shadow a
-native tool. This rule follows the harness Claude models are trained to use and
-lets new native tools arrive with the installed compatible Claude Code version
-without a Ghost allowlist change.
+Both runtimes give a ghost the same capabilities. Claude does not get its
+`claude_code` preset; it gets the explicit native list
+`CLAUDE_CODE_NATIVE_TOOLS` in [`claude-code.ts`](packages/daemon/src/claude-code.ts):
+`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, and `AskUserQuestion` — pi's
+built-in `bash`, `read`, `write`, `edit`, `find`, and `grep` under Claude's
+names, plus the owner question. Subagents, web tools, todos, planning,
+notebooks, worktrees, scheduling, and every other preset tool stay out, and a
+new native tool enters only by a deliberate change to that list. Ghost routes
+`AskUserQuestion` through the same daemon broker and HUD as Pi's `ask`.
+Ghost's browser/screen/desktop tools and the ghost's MCP servers are added on
+both paths. Where a listed native tool supplies a capability, it keeps Claude's
+name, schema, result, and semantics; Ghost integrates its callbacks and events
+with daemon/HUD surfaces instead of registering a substitute. Ghost disables
+Claude auto-memory; persistence is the owner's documents.
 
 Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
@@ -286,7 +284,9 @@ the `GhostJob` API.
 
 There is no Ghost-owned delegation system. A ghost that wants a specialist
 runs the owner's installed `pi`, `codex`, or `claude -p` from its own Bash;
-that harness owns its project discovery, tools, auth, and session semantics.
+that harness runs with the owner's own settings for it — its full tool set,
+project discovery, auth, and session semantics — untouched by the runtime
+parity list above.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in

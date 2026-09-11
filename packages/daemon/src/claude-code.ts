@@ -1302,6 +1302,26 @@ function bridgeCollectedClaudeCodeTools(
   });
 }
 
+/**
+ * The native tools a Ghost-driven Claude Code session gets: pi's built-in set
+ * (read, write, edit, bash, find, grep) under Claude's names, plus the owner
+ * question. Everything else in Claude's `claude_code` preset — subagents, web
+ * tools, todos, planning, notebooks, worktrees, scheduling — stays out so both
+ * runtimes give a ghost the same capabilities; Ghost's own tools (browser,
+ * screen, desktop, MCP) are added through the internal MCP server on both.
+ * A ghost that delegates to `claude`, `codex`, or `pi` from Bash gets that
+ * harness with the owner's own settings, untouched by this list.
+ */
+export const CLAUDE_CODE_NATIVE_TOOLS: readonly string[] = [
+  "Bash",
+  "Read",
+  "Write",
+  "Edit",
+  "Glob",
+  "Grep",
+  "AskUserQuestion",
+];
+
 function queryOptions(input: {
   sdk: ClaudeAgentSdkModule;
   binaryPath: string;
@@ -1343,10 +1363,9 @@ function queryOptions(input: {
     skills: [],
     plugins: [],
     strictMcpConfig: true,
-    // Keep the complete native tool vocabulary Claude was trained against.
-    // `allowedTools` pre-approves additive Ghost MCP tools; it does not filter
-    // the native preset, and Ghost deliberately supplies no denylist.
-    tools: { type: "preset", preset: "claude_code" },
+    // The explicit list is the runtime-parity contract (CONTRACTS.md, Claude
+    // Code). `allowedTools` pre-approves the additive Ghost MCP tools.
+    tools: [...CLAUDE_CODE_NATIVE_TOOLS],
     allowedTools: input.toolNames.map((name) =>
       `mcp__${input.internalMcpServerName}__${name}`),
     permissionMode: "bypassPermissions",

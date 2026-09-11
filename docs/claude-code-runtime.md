@@ -106,21 +106,21 @@ installed executable.
 
 ### What Ghost adds or redirects
 
-Ghost does not deny or replace any tool in Claude's native preset. Native
-scheduling, notifications, remote triggers, worktrees, agents, and every other
-preset tool retain Claude's own semantics and storage. Ghost's in-process
+Claude runs with the explicit native tool list `CLAUDE_CODE_NATIVE_TOOLS`
+(`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, `AskUserQuestion`) rather
+than its `claude_code` preset, so a ghost has the same capabilities on Claude
+as on pi. Native scheduling, notifications, remote triggers, worktrees,
+subagents, web tools, todos, and planning are not offered to a ghost; a ghost
+that wants one of those harnesses in full runs `claude -p`, `codex`, or `pi`
+from Bash, where the owner's own settings apply. Ghost's in-process
 browser/screen/desktop tools are additive. Claude auto-memory is disabled;
 durable knowledge, plans, tasks, and the ghost's own notes live in the owner's
 documents.
 
-This is a native-first boundary: if the `claude_code` preset already provides a
-capability, Claude uses that native tool with its original name, input schema,
-output, and behavior. Ghost may project its interaction into an existing UI—as
-with `AskUserQuestion`—but does not wrap it in a competing model-facing tool.
-Ghost adds a tool only for a Ghost-specific capability absent from the preset,
-and additive tools may not shadow native ones. The preset is not enumerated by
-Ghost, so compatible Claude Code releases can add native tools without a daemon
-change.
+A listed native tool keeps its original name, input schema, output, and
+behavior. Ghost may project its interaction into an existing UI — as with
+`AskUserQuestion` — but does not wrap it in a competing model-facing tool, and
+additive tools may not shadow native ones.
 
 Claude's model-facing question signature stays native. Pi's `ask` mirrors the
 same `questions`/`header`/`options`/`multiSelect` input and

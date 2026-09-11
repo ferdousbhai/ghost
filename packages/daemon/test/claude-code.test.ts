@@ -1782,7 +1782,7 @@ fi
     expect(seenOptions).toHaveLength(1);
     expect(seenOptions[0]).toMatchObject({
       cwd: temp!.ownerHome,
-      tools: { type: "preset", preset: "claude_code" },
+      tools: ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "AskUserQuestion"],
       skills: [],
       plugins: [],
       settingSources: [],

@@ -111,8 +111,9 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
 - **Claude Code** is optional and native-first: `claude-code/default` runs the
   official Claude Agent SDK against the owner's installed, unmodified `claude`,
   authenticated by any method its own CLI reports as logged in. Ghost never
-  receives or stores that credential. Claude keeps its complete native preset
-  and Ghost adds only what the preset lacks. Setup is in
+  receives or stores that credential. Claude gets the same tool capabilities
+  as pi (an explicit native list, not its full preset) and Ghost adds the
+  same Ghost tools on both. Setup is in
   [claude-code-runtime.md](claude-code-runtime.md).
 
 Both runtimes receive the same Ghost-owned context: character, first-meeting
@@ -215,8 +216,9 @@ If you expect one of these, it is missing on purpose:
   owner's documents; the directory is named in the prompt and read on demand.
 - **No trusted projects.** A conversation has a cwd, not a bound project tree
   whose instructions, skills, and MCP are scanned in. Plugins, executable hooks
-  and tools beyond the ghost's own, LSP, and custom subagents stay disabled for
-  pi; Claude keeps its own native subagents.
+  and tools beyond the ghost's own, LSP, and subagents stay disabled on both
+  runtimes; a ghost that wants a full harness runs it from Bash with the
+  owner's own settings.
 - **No delegation subsystem.** No task records, worker scopes, or `/tasks`
   API; a ghost runs `pi`, `codex`, or `claude -p` from Bash when it wants a
   specialist, and that harness owns its own discovery, tools, and auth.
