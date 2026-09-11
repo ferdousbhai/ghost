@@ -636,7 +636,6 @@ Singleton {
     property var liveConversationKeys: []
     readonly property bool anyStreaming: root.liveConversationKeys.length > 0
     property var blocks: ({})         // contentIndex -> { kind, text }
-    property var toolNames: []        // tool names seen this turn, in order
     property var toolActivities: []   // stateful cards for the current assistant row
     property var toolIdsByContent: ({})
     property int assistantRow: -1
@@ -1429,7 +1428,6 @@ Singleton {
         return {
             role: String(row.role || ""),
             text: String(row.text || ""),
-            tools: String(row.tools || ""),
             toolActivity: Array.isArray(row.toolActivity) ? row.toolActivity.slice() : [],
             error: String(row.error || ""),
             pending: row.pending === true,
@@ -1474,7 +1472,6 @@ Singleton {
             queueSubmitting: false,
             queueError: "",
             blocks: ({}),
-            toolNames: [],
             toolActivities: [],
             toolIdsByContent: ({}),
             assistantRow: -1,
@@ -1544,7 +1541,6 @@ Singleton {
         state.queueSubmitting = root.queueSubmitting;
         state.queueError = root.queueError;
         state.blocks = root.blocks;
-        state.toolNames = root.toolNames.slice();
         state.toolActivities = root.toolActivities.slice();
         state.toolIdsByContent = root.toolIdsByContent;
         state.assistantRow = root.assistantRow;
@@ -1577,7 +1573,6 @@ Singleton {
         root.queueSubmitting = state.queueSubmitting;
         root.queueError = state.queueError;
         root.blocks = state.blocks;
-        root.toolNames = state.toolNames;
         root.toolActivities = state.toolActivities;
         root.toolIdsByContent = state.toolIdsByContent;
         root.assistantRow = state.assistantRow;
@@ -1605,7 +1600,6 @@ Singleton {
         root.queueSubmitting = false;
         root.queueError = "";
         root.blocks = ({});
-        root.toolNames = [];
         root.toolActivities = [];
         root.toolIdsByContent = ({});
         root.assistantRow = -1;
@@ -2986,7 +2980,6 @@ Singleton {
                 role: row.role,
                 text: row.text + (row.contentTruncated
                     ? "\n\n*[Saved message truncated]*" : ""),
-                tools: "",
                 toolActivity: row.role === "assistant"
                     ? root.messageTools({ content: row.parts }) : [],
                 error: row.error || "",
@@ -3210,11 +3203,11 @@ Singleton {
 
         root.beginTurnFor(state);
         root.appendTurnRow(state, {
-            role: "user", text: prompt, tools: "", toolActivity: [], error: "", pending: false,
+            role: "user", text: prompt, toolActivity: [], error: "", pending: false,
             entryId: ""
         });
         root.appendTurnRow(state, {
-            role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
+            role: "assistant", text: "", toolActivity: [], error: "", pending: true,
             entryId: ""
         });
         state.assistantRow = state.rows.length - 1;
@@ -3285,7 +3278,6 @@ Singleton {
 
     function resetAssistantSegmentFor(state: var): void {
         state.blocks = ({});
-        state.toolNames = [];
         state.toolActivities = [];
         state.toolIdsByContent = ({});
         state.presentationDirty = true;
@@ -3456,7 +3448,6 @@ Singleton {
             break;
         case "toolcall_start":
             state.activity = event.toolName;
-            state.toolNames = state.toolNames.concat([event.toolName]);
             state.presentationDirty = true;
             state.toolIdsByContent[event.contentIndex] = event.id;
             root.updateToolFor(state, event.id, {
@@ -3535,7 +3526,7 @@ Singleton {
             }
             root.rehydrateTurn(state, event.transcript.messages);
             root.appendTurnRow(state, {
-                role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
+                role: "assistant", text: "", toolActivity: [], error: "", pending: true,
                 entryId: ""
             });
             state.assistantRow = state.rows.length - 1;
@@ -3614,9 +3605,6 @@ Singleton {
         if (row.text !== turn.body)
             root.setTurnRow(state, state.assistantRow, "text", turn.body);
         if (state.statusText !== turn.status) state.statusText = turn.status;
-        const tools = state.toolNames.join(", ");
-        if (row.tools !== tools)
-            root.setTurnRow(state, state.assistantRow, "tools", tools);
         state.presentationDirty = false;
         root.projectTurnFields(state);
     }
@@ -3719,11 +3707,11 @@ Singleton {
         state.activity = "";
 
         root.appendTurnRow(state, {
-            role: "user", text: message, tools: "", toolActivity: [], error: "", pending: false,
+            role: "user", text: message, toolActivity: [], error: "", pending: false,
             entryId: ""
         });
         root.appendTurnRow(state, {
-            role: "assistant", text: "", tools: "", toolActivity: [], error: "", pending: true,
+            role: "assistant", text: "", toolActivity: [], error: "", pending: true,
             entryId: ""
         });
         state.assistantRow = state.rows.length - 1;

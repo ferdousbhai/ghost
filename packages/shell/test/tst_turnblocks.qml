@@ -43,6 +43,57 @@ TestCase {
         compare(turn.body, section + "\n\nHere they are.");
     }
 
+    function test_shortAnswerBeforeAToolCallIsNotStatus(): void {
+        // Under the limit, but two sentences: the ghost answered and then kept
+        // working. A preamble is one sentence, and a block ruled a preamble is
+        // dropped from the settled transcript — so this one has to stay.
+        const answer = "bluetooth's on and powered, nothing paired yet. put "
+            + "your AirPods in pairing mode first: leave them in the case, "
+            + "open the lid, hold the back button until the light blinks.";
+        verify(answer.length <= 200);
+        const blocks = { 0: textBlock(answer), 2: textBlock("Paired.") };
+        const turn = TurnBlocks.split(blocks, [1], false);
+        compare(turn.body, answer + "\n\nPaired.");
+        // And it never hides beside the orb mid-turn either.
+        compare(TurnBlocks.split({ 0: textBlock(answer) }, [1], true).status, "");
+    }
+
+    function test_unpunctuatedNarrationIsStillStatus(): void {
+        // The commonest narration shape has no stop at all. Counting zero
+        // sentences must not promote it into the reading column.
+        const blocks = { 0: textBlock("Checking your Dropbox"), 2: textBlock("Found it.") };
+        const turn = TurnBlocks.split(blocks, [1], false);
+        compare(turn.body, "Found it.");
+    }
+
+    function test_aStopInsideAWordEndsNoSentence(): void {
+        // `package.json` is not two sentences; this stays narration.
+        const blocks = { 0: textBlock("Reading package.json"), 2: textBlock("Version 2.1.0 there.") };
+        compare(TurnBlocks.split(blocks, [1], false).body, "Version 2.1.0 there.");
+    }
+
+    function test_theOrbDoesNotNarrateAStepAlreadyFinished(): void {
+        // Two calls. The text before the second one is an answer, not a
+        // preamble, so it stays in the column — and the orb must fall silent
+        // rather than reach back to the narration for the *first* call, which
+        // would report one step while the column describes the next.
+        const blocks = {
+            0: textBlock("Let me look."),
+            2: textBlock("Found the file. Now I will patch it.")
+        };
+        const turn = TurnBlocks.split(blocks, [1, 3], true);
+        compare(turn.body, "Found the file. Now I will patch it.");
+        compare(turn.status, "");
+    }
+
+    function test_theOrbStillFollowsTheMostRecentNarration(): void {
+        const blocks = {
+            0: textBlock("Let me look."),
+            2: textBlock("Now the calendar.")
+        };
+        compare(TurnBlocks.split(blocks, [1, 3], true).status, "Now the calendar");
+    }
+
     function test_toolOnlyTurnKeepsItsLastWords(): void {
         // Nothing followed the calls, so the narration is all the ghost said.
         // An empty row would be worse than a slightly dull one.

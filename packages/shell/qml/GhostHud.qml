@@ -638,7 +638,6 @@ FloatingWindow {
                             // for the expected-warning list.
                             required property string role
                             required property string text
-                            required property string tools
                             required property var toolActivity
                             required property string error
                             required property bool pending
@@ -649,7 +648,6 @@ FloatingWindow {
                             rowIndex: index
                             speaker: role
                             body: text
-                            toolTrail: tools
                             activities: toolActivity
                             failure: error
                             busy: pending

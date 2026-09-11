@@ -132,7 +132,7 @@ TestCase {
     function test_completeHistoryCrossesDefaultPageWithoutDuplicates(): void {
         const state = activeState("long");
         state.rows = [{
-            role: "user", text: "old-visible-row", tools: "", toolActivity: [],
+            role: "user", text: "old-visible-row", toolActivity: [],
             error: "", pending: false, entryId: "old"
         }];
         Ghostd.showTurnState("casper", state.sessionId);
@@ -261,7 +261,7 @@ TestCase {
     function test_emptyPageCompletesAndClearsOldRows(): void {
         const state = activeState("empty");
         state.rows = [{
-            role: "assistant", text: "stale", tools: "", toolActivity: [],
+            role: "assistant", text: "stale", toolActivity: [],
             error: "", pending: false, entryId: "stale"
         }];
         Ghostd.showTurnState("casper", state.sessionId);
@@ -276,7 +276,7 @@ TestCase {
     function test_open404IsAnHonestEmptyTranscript(): void {
         const state = activeState("not-started");
         state.rows = [{
-            role: "user", text: "local placeholder", tools: "", toolActivity: [],
+            role: "user", text: "local placeholder", toolActivity: [],
             error: "", pending: false, entryId: "local"
         }];
         Ghostd.showTurnState("casper", state.sessionId);
@@ -297,7 +297,7 @@ TestCase {
         // and publishes nothing until the total is reached.
         const shortState = activeState("short");
         shortState.rows = [{
-            role: "user", text: "known-good", tools: "", toolActivity: [],
+            role: "user", text: "known-good", toolActivity: [],
             error: "", pending: false, entryId: "known"
         }];
         Ghostd.showTurnState("casper", shortState.sessionId);
@@ -493,7 +493,7 @@ TestCase {
     function test_httpFailureIsHonestAndKeepsKnownHistory(): void {
         const state = activeState("failure");
         state.rows = [{
-            role: "user", text: "known history", tools: "", toolActivity: [],
+            role: "user", text: "known history", toolActivity: [],
             error: "", pending: false, entryId: "known"
         }];
         Ghostd.showTurnState("casper", state.sessionId);

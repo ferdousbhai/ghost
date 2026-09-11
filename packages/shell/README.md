@@ -42,7 +42,9 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   documents; the shell has no plan mode or progress/todo projection.
 - Tool activity is transient beside the orb. Settled replies keep failed calls
   and asks visible by default; the complete trace is available behind the steps
-  disclosure.
+  disclosure, which the message reveals on hover along with its copy and edit
+  controls. A turn that ran tools and said nothing keeps the count painted —
+  there is no text to hover over, so it is the whole row.
 - Context panels expose character, commands, hooks, resources, MCP, the bound
   model, remote access, and connection state.
 - Dictation is Omarchy's Voxtype. The composer shows a toggle only while its

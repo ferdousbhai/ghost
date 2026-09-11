@@ -20,19 +20,40 @@
 
 /**
  * Longest a block can be and still be status. A preamble is one sentence by
- * nature; a longer block that happens to precede a tool call is a section of a
+ * nature, so this is half of the test and {@link sentenceCount} is the other:
+ * a longer block, or one that runs on to a second sentence, is a section of a
  * multi-step answer and stays in the reply.
  */
 var PREAMBLE_LIMIT = 200;
+
+/**
+ * Where a sentence ends: a stop that meets whitespace or the end of the block.
+ * A stop inside a word ends nothing — `package.json`, `£4.20` — and narration
+ * routinely carries no stop at all ("Checking your Dropbox").
+ */
+var SENTENCE_END = /[.!?\u2026]+(?:\s|$)/gu;
 
 function oneLine(value) {
     return String(value || "").replace(/\s+/gu, " ").trim();
 }
 
+function sentenceCount(text) {
+    var matches = String(text || "").match(SENTENCE_END);
+    return matches === null ? 0 : matches.length;
+}
+
 function isPreamble(text) {
     // The cheap test first: nothing shorter than the limit can grow past it
     // once whitespace is collapsed, and this runs on every 50ms flush tick.
-    return String(text || "").length <= PREAMBLE_LIMIT || oneLine(text).length <= PREAMBLE_LIMIT;
+    var within = String(text || "").length <= PREAMBLE_LIMIT
+        || oneLine(text).length <= PREAMBLE_LIMIT;
+    // Then the other half of the definition above, which the limit alone only
+    // approximates. A short block that runs to a second sentence is answering,
+    // not announcing, and a block ruled a preamble is *discarded* once the
+    // turn settles — so guessing wrong here costs the transcript words the
+    // ghost really said. An unpunctuated block counts as one sentence, which
+    // keeps the commonest narration shape of all on the status line.
+    return within && sentenceCount(text) <= 1;
 }
 
 /**
@@ -67,20 +88,25 @@ function split(blocks, toolIndices, streaming) {
     var last = indices.length > 0 ? indices[indices.length - 1] : -1;
 
     var reply = [];
-    var preambles = [];
+    // The last text block before the final tool call, and whether it was
+    // narration. Only *that* block can describe the call now running: an
+    // earlier preamble describes a step already finished, and reporting it
+    // would have the orb narrating one step while the column shows the text
+    // describing the next.
+    var latest = "";
     for (var i = 0; i < indices.length; i++) {
         var index = indices[i];
         var block = blocks[index];
         // `trim`, not `oneLine`: this only asks whether the block is blank, and
         // collapsing a reply that grows on every tick is quadratic work.
         if (!block || block.kind !== "text" || String(block.text || "").trim() === "") continue;
-        if (index < lastTool && isPreamble(block.text))
-            preambles.push(block.text);
-        else
+        if (index < lastTool && isPreamble(block.text)) {
+            latest = block.text;
+        } else {
+            if (index < lastTool) latest = "";
             reply.push(block.text);
+        }
     }
-
-    var latest = preambles.length > 0 ? preambles[preambles.length - 1] : "";
     // A turn that spent itself entirely on tool calls has nothing else to say.
     // Its last preamble is the reply rather than an empty row.
     if (reply.length === 0 && !streaming && latest !== "")

@@ -39,11 +39,11 @@ TestCase {
         const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
         Ghostd.beginTurnFor(state);
         Ghostd.appendTurnRow(state, {
-            role: "user", text: "Start", tools: "", toolActivity: [],
+            role: "user", text: "Start", toolActivity: [],
             error: "", pending: false, entryId: ""
         });
         Ghostd.appendTurnRow(state, {
-            role: "assistant", text: "", tools: "", toolActivity: [],
+            role: "assistant", text: "", toolActivity: [],
             error: "", pending: true, entryId: ""
         });
         state.assistantRow = state.rows.length - 1;

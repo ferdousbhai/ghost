@@ -57,7 +57,6 @@ TestCase {
         width: 600
         speaker: "assistant"
         body: tc.streamed
-        toolTrail: ""
         activities: []
         failure: ""
         busy: !tc.settled
@@ -71,7 +70,6 @@ TestCase {
         width: 600
         speaker: "user"
         body: tc.prompt
-        toolTrail: ""
         activities: []
         failure: ""
         busy: true

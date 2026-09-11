@@ -41,11 +41,11 @@ TestCase {
         const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
         Ghostd.beginTurnFor(state);
         Ghostd.appendTurnRow(state, {
-            role: "user", text: prompt, tools: "", toolActivity: [],
+            role: "user", text: prompt, toolActivity: [],
             error: "", pending: false, entryId: ""
         });
         Ghostd.appendTurnRow(state, {
-            role: "assistant", text: "", tools: "", toolActivity: [],
+            role: "assistant", text: "", toolActivity: [],
             error: "", pending: true, entryId: ""
         });
         state.assistantRow = state.rows.length - 1;
@@ -158,11 +158,11 @@ TestCase {
         ]).length, 2);
 
         Ghostd.appendTurnRow(pi, {
-            role: "assistant", text: "Pi history", tools: "", toolActivity: [],
+            role: "assistant", text: "Pi history", toolActivity: [],
             error: "", pending: false, entryId: "pi-entry"
         });
         Ghostd.appendTurnRow(claude, {
-            role: "assistant", text: "Claude history", tools: "", toolActivity: [],
+            role: "assistant", text: "Claude history", toolActivity: [],
             error: "", pending: false, entryId: "claude-entry"
         });
 

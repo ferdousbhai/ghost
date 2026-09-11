@@ -20,7 +20,6 @@ Item {
 
     required property string speaker
     required property string body
-    required property string toolTrail
     required property var activities
     required property string failure
     required property bool busy
@@ -213,12 +212,13 @@ Item {
         // bubble; what it does not claim is a 130-column line on a maximised
         // HUD. The measure only bites past that width.
         width: root.mine
+            // The actions are a row under the prompt now, so the capsule has
+            // to be wide enough to hold them rather than to sit beside them.
             ? Math.min(parent.width * 0.82,
-                Math.max(tailText.implicitWidth
-                    + (root.hasActions
-                        ? messageActions.implicitWidth + Theme.gap : 0)
+                Math.max(Math.max(tailText.implicitWidth,
+                    root.hasActions ? messageActions.implicitWidth : 0)
                     + root.contentInset * 2, 72))
-            : Math.min(parent.width, Theme.readingMeasure + root.contentInset * 2)
+            : Math.min(parent.width, Theme.readingMeasure)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
 
@@ -255,14 +255,21 @@ Item {
 
             Item {
                 id: message
+                objectName: "messageHoverArea"
 
                 width: parent.width
                 height: implicitHeight
                 visible: root.hasBody || root.hasActions
-                implicitHeight: Math.max(
-                    root.hasBody ? bodyView.implicitHeight : 0,
-                    root.hasActions
-                        ? messageActions.y + messageActions.height : 0)
+                // The actions row sits below the text, so it is the bottom
+                // whenever it is there at all — plus the overhang each control
+                // gives its own hit area (the negative margins further down).
+                // This Item is what `messageHover` watches, so anything the
+                // pointer can touch has to be inside it: a hit area reaching
+                // past the bottom edge would make the control fade out just as
+                // the pointer arrived on it from below.
+                implicitHeight: root.hasActions
+                    ? messageActions.y + messageActions.height + Theme.gap / 2
+                    : (root.hasBody ? bodyView.implicitHeight : 0)
 
                 HoverHandler {
                     id: messageHover
@@ -302,59 +309,23 @@ Item {
                     }
                 }
 
-                // QQuickText does not expose cursor geometry for rich text,
-                // and lineLaidOut only reports its plain-text path. A hidden,
-                // read-only document gives us the horizontal end cursor for
-                // both formats without changing the rendered typography. Only
-                // the tail is measured: the body's last line is in it, and
-                // re-measuring the settled blocks would cost what rendering
-                // them a block at a time was meant to save.
-                TextEdit {
-                    id: bodyMeasure
-
-                    readonly property rect endRect: {
-                        // A method call alone is not a binding dependency. The
-                        // geometry reads make the cursor follow reflow as the
-                        // HUD or the user capsule changes width.
-                        bodyMeasure.width;
-                        bodyMeasure.contentHeight;
-                        return bodyMeasure.positionToRectangle(bodyMeasure.length);
-                    }
-
-                    width: parent.width
-                    visible: false
-                    readOnly: true
-                    text: root.liveTail
-                    textFormat: root.plainBody
-                        ? TextEdit.PlainText : TextEdit.MarkdownText
-                    font.family: root.commandOutput
-                        ? Theme.fontFamilyMono : Theme.fontFamily
-                    font.pixelSize: Theme.fontSize
-                    wrapMode: TextEdit.Wrap
-                }
-
-                // Settled actions sit on the final text line instead of
-                // claiming a line of their own. If the last line reaches the
-                // reading edge, they wrap below it like any other inline item.
+                // The actions sit under the text, never in it. Placing them
+                // on the final text line meant positioning them from a hidden
+                // TextEdit's end cursor and trusting it to agree with what a
+                // Text actually painted — which it cannot for a markdown block
+                // that owns its own layout (a code fence, a table, a list), so
+                // the controls landed on top of the words. A row of its own
+                // costs one line and is right by construction.
                 Row {
                     id: messageActions
-
-                    readonly property real finalLineHeight:
-                        bodyMeasure.endRect.height * Theme.lineHeight
-                    readonly property real inlineX: bodyMeasure.endRect.x
-                        + Theme.gap
-                    readonly property bool fitsInline: root.hasBody
-                        && messageActions.inlineX + messageActions.implicitWidth
-                            <= message.width
+                    objectName: "messageActions"
 
                     visible: root.hasActions
                     spacing: Theme.gap
-                    x: messageActions.fitsInline ? messageActions.inlineX : 0
-                    y: messageActions.fitsInline
-                        ? bodyView.implicitHeight
-                            - (messageActions.finalLineHeight + height) / 2
-                        : (root.hasBody
-                            ? bodyView.implicitHeight + Theme.gap / 2 : 0)
+                    x: root.mine
+                        ? message.width - width - Theme.gap / 2
+                        : Theme.gap / 2
+                    y: root.hasBody ? bodyView.implicitHeight + Theme.gap / 2 : 0
 
                     Item {
                         id: copyAction
@@ -429,8 +400,17 @@ Item {
                     // here that has to say how much it is hiding.
                     Text {
                         id: trailToggle
+                        objectName: "trailToggle"
 
                         visible: !root.mine && root.quietToolCount > 0
+                        // Hover-revealed like its neighbours, with two cases
+                        // that must stay painted: an open trail keeps its own
+                        // way shut, and a turn that spent itself entirely on
+                        // tool calls has no text to hover over — hiding the
+                        // count there leaves a row that reserves height and
+                        // draws nothing, with the trail unreachable.
+                        opacity: messageHover.hovered || root.toolsOpen
+                            || !root.hasBody ? 1 : 0
                         text: root.toolsOpen
                             ? "hide"
                             : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")

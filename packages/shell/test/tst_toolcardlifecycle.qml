@@ -21,7 +21,6 @@ TestCase {
                 width: 500
                 speaker: "assistant"
                 body: ""
-                toolTrail: ""
                 activities: toolActivity
                 failure: ""
                 busy: true

@@ -34,11 +34,11 @@ Item {
         Ghostd.showTurnState("unicode", "pi:split");
         Ghostd.beginTurnFor(root.state);
         Ghostd.appendTurnRow(root.state, {
-            role: "user", text: "stream unicode", tools: "", toolActivity: [],
+            role: "user", text: "stream unicode", toolActivity: [],
             error: "", pending: false, entryId: ""
         });
         Ghostd.appendTurnRow(root.state, {
-            role: "assistant", text: "", tools: "", toolActivity: [],
+            role: "assistant", text: "", toolActivity: [],
             error: "", pending: true, entryId: ""
         });
         root.state.assistantRow = 1;

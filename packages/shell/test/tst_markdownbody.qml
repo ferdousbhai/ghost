@@ -61,45 +61,6 @@ TestCase {
         }
     }
 
-    // Bubble renders with Text so its link colour and line height stay themed.
-    Text {
-        id: inlineBody
-        y: 300
-        width: 180
-        textFormat: Text.MarkdownText
-        wrapMode: Text.Wrap
-        font.pixelSize: 14
-        lineHeight: 1.35
-        text: "This **opening sentence** is deliberately wide enough to wrap.\n\nEnd."
-    }
-
-    // Text.lineLaidOut only reports plain-text layout. Bubble uses a hidden
-    // read-only document for the final horizontal cursor in both formats.
-    TextEdit {
-        id: inlineMeasure
-        width: inlineBody.width
-        visible: false
-        readOnly: true
-        textFormat: TextEdit.MarkdownText
-        wrapMode: TextEdit.Wrap
-        font: inlineBody.font
-        text: inlineBody.text
-        readonly property rect endRect: {
-            inlineMeasure.width;
-            inlineMeasure.contentHeight;
-            return inlineMeasure.positionToRectangle(inlineMeasure.length);
-        }
-    }
-
-    Item {
-        id: inlineAction
-        width: 16
-        height: 16
-        x: inlineBody.x + inlineMeasure.endRect.x + 4
-        y: inlineBody.y + inlineBody.implicitHeight
-            - (inlineMeasure.endRect.height * inlineBody.lineHeight + height) / 2
-    }
-
     function test_lineHeightReachesMarkdown(): void {
         verify(airy.contentHeight > tight.contentHeight);
     }
@@ -109,14 +70,5 @@ TestCase {
         compare(body.hoveredLink, "https://example.com");
         mouseClick(body, 20, 8);
         compare(tc.activated, "https://example.com");
-    }
-
-    function test_finalLineMetricsKeepActionInline(): void {
-        verify(inlineBody.implicitHeight > inlineMeasure.endRect.height);
-        verify(inlineMeasure.endRect.x > 20);
-        verify(inlineAction.x + inlineAction.width <= inlineBody.width);
-        verify(inlineAction.y >= inlineBody.y);
-        verify(inlineAction.y + inlineAction.height
-            <= inlineBody.y + inlineBody.implicitHeight);
     }
 }
