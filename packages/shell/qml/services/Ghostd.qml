@@ -449,6 +449,8 @@ Singleton {
     property var sessionResources: null
     property bool sessionResourcesLoading: false
     property string sessionResourcesError: ""
+    /** True while the error only says the runtime has not started yet. */
+    property bool sessionResourcesPending: false
     property string sessionResourcesGhost: ""
     property string sessionResourcesSessionId: ""
 
@@ -1782,6 +1784,7 @@ Singleton {
         root.sessionResources = null;
         root.sessionResourcesLoading = false;
         root.sessionResourcesError = "";
+        root.sessionResourcesPending = false;
         root.sessionResourcesGhost = "";
         root.sessionResourcesSessionId = "";
         if (request && request.readyState !== 4) request.abort();
@@ -1861,6 +1864,7 @@ Singleton {
         root.sessionResources = null;
         root.sessionResourcesLoading = true;
         root.sessionResourcesError = "";
+        root.sessionResourcesPending = false;
         root.sessionResourcesGhost = ghost;
         root.sessionResourcesSessionId = sessionId;
         xhr.onreadystatechange = function () {
@@ -1873,6 +1877,7 @@ Singleton {
                     if (!root.applySessionResources(JSON.parse(xhr.responseText), ghost, sessionId))
                         throw new Error("invalid resource snapshot");
                     root.sessionResourcesError = "";
+        root.sessionResourcesPending = false;
                     root.reachable = true;
                 } catch (error) {
                     root.sessionResources = null;
@@ -1880,7 +1885,8 @@ Singleton {
                 }
             } else {
                 root.sessionResources = null;
-                root.sessionResourcesError = root.errorCode(xhr) === "session_resources_unavailable"
+                root.sessionResourcesPending = root.errorCode(xhr) === "session_resources_unavailable";
+                root.sessionResourcesError = root.sessionResourcesPending
                     ? "Send a message to start Claude Code, then refresh."
                     : root.describeError(xhr, "GET session resources");
             }

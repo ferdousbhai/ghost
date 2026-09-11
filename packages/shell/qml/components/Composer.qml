@@ -29,7 +29,10 @@ Item {
     readonly property bool slashPanelOpen: !root.slashDismissed && field.activeFocus
         && root.slashIntent && (Ghostd.commandsLoading || root.slashMatches.length > 0)
 
-    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), 160)
+    /** The tallest the field grows before it scrolls; the HUD sets it from its height. */
+    property int maxHeight: 160
+
+    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight)
 
     function take(): void {
         field.forceActiveFocus();
@@ -287,6 +290,8 @@ Item {
         }
 
         Flickable {
+            id: scroller
+
             anchors.fill: parent
             anchors.margins: Theme.pad / 2
             // One column of air after the prompt, the way a shell leaves one.
@@ -298,6 +303,22 @@ Item {
             contentHeight: field.implicitHeight
             clip: true
             interactive: contentHeight > height
+
+            // Once the field is as tall as it gets, the caret has to stay in
+            // view: typing past the bottom scrolls, and deleting lines never
+            // leaves a blank band where text used to be.
+            function keepCursorVisible(): void {
+                const rect = field.cursorRectangle;
+                if (rect.y < scroller.contentY) scroller.contentY = rect.y;
+                else if (rect.y + rect.height > scroller.contentY + scroller.height)
+                    scroller.contentY = rect.y + rect.height - scroller.height;
+            }
+            onContentHeightChanged: {
+                scroller.contentY = Math.max(0, Math.min(scroller.contentY,
+                    scroller.contentHeight - scroller.height));
+                scroller.keepCursorVisible();
+            }
+            onHeightChanged: scroller.keepCursorVisible()
 
             TextEdit {
                 id: field
@@ -317,6 +338,8 @@ Item {
                 // Qt gives the delegate the cursor's height and position; the
                 // width is ours, and in a fixed-width face there is exactly one
                 // right answer for it.
+                onCursorRectangleChanged: scroller.keepCursorVisible()
+
                 cursorDelegate: Rectangle {
                     width: Theme.charWidth
                     color: Theme.ghostAmber
@@ -360,8 +383,11 @@ Item {
                     }
                 }
 
+                // The hint sits after the block caret, the way a shell prompt
+                // leaves the cursor cell to the cursor.
                 Text {
                     anchors.fill: parent
+                    anchors.leftMargin: field.activeFocus ? Theme.charWidth : 0
                     visible: field.text === ""
                     text: Ghostd.activeGhost === ""
                         ? "No ghost selected"

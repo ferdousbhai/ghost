@@ -105,46 +105,13 @@ Rectangle {
                 }
             }
 
-            Rectangle {
+            ActionButton {
                 id: refreshButton
 
-                width: refreshLabel.implicitWidth + Theme.pad * 1.5
-                height: Theme.controlHeight
-                radius: Theme.radius
-                color: refreshArea.containsMouse ? Theme.film(0.08) : Theme.film(0.04)
-                border.width: activeFocus ? 1 : 0
-                border.color: Theme.amber(0.55)
-                activeFocusOnTab: true
+                label: Ghostd.commandsLoading ? "Refreshing" : "Refresh"
                 enabled: Ghostd.activeGhost !== "" && !Ghostd.commandsLoading
-
-                Accessible.role: Accessible.Button
                 Accessible.name: "Refresh commands"
-
-                Text {
-                    id: refreshLabel
-                    anchors.centerIn: parent
-                    text: Ghostd.commandsLoading ? "Refreshing" : "Refresh"
-                    color: refreshButton.enabled ? Theme.foreground : Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-
-                MouseArea {
-                    id: refreshArea
-                    anchors.fill: parent
-                    enabled: refreshButton.enabled
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: Ghostd.fetchCommands(true)
-                }
-
-                Keys.onPressed: event => {
-                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                            || event.key === Qt.Key_Space) && refreshButton.enabled) {
-                        Ghostd.fetchCommands(true);
-                        event.accepted = true;
-                    }
-                }
+                onClicked: Ghostd.fetchCommands(true)
             }
         }
 
@@ -279,7 +246,7 @@ Rectangle {
             Column {
                 width: parent.width
                 visible: !Ghostd.commandsLoading && Ghostd.commandsError === ""
-                    && root.resultCount === 0
+                    && Ghostd.commandsNotice === "" && root.resultCount === 0
                 spacing: Theme.gap / 2
 
                 Text {

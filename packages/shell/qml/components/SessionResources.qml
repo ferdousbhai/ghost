@@ -262,9 +262,9 @@ Rectangle {
                 height: errorText.implicitHeight + Theme.pad
                 visible: Ghostd.sessionResourcesError !== ""
                 radius: Theme.radius
-                color: Theme.rose(0.08)
+                color: Ghostd.sessionResourcesPending ? Theme.film(0.05) : Theme.rose(0.08)
                 border.width: 1
-                border.color: Theme.rose(0.18)
+                border.color: Ghostd.sessionResourcesPending ? Theme.film(0.12) : Theme.rose(0.18)
 
                 Text {
                     id: errorText
@@ -275,7 +275,7 @@ Rectangle {
                     anchors.verticalCenter: parent.verticalCenter
                     text: Ghostd.sessionResourcesError
                     textFormat: Text.PlainText
-                    color: Theme.danger
+                    color: Ghostd.sessionResourcesPending ? Theme.foregroundDim : Theme.danger
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     wrapMode: Text.WordWrap

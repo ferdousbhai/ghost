@@ -192,75 +192,21 @@ Rectangle {
                 }
             }
 
-            Rectangle {
+            ActionButton {
                 id: refreshButton
-                implicitWidth: refreshLabel.implicitWidth + Theme.pad * 1.5
-                implicitHeight: Theme.controlHeight
-                radius: Theme.radius
-                color: refreshArea.containsMouse ? Theme.film(0.08) : Theme.film(0.04)
-                enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpLoading && !Ghostd.mcpMutating
-                activeFocusOnTab: true
 
-                Text {
-                    id: refreshLabel
-                    anchors.centerIn: parent
-                    text: Ghostd.mcpLoading ? "Refreshing" : "Refresh"
-                    color: refreshButton.enabled ? Theme.foreground : Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-                MouseArea {
-                    id: refreshArea
-                    anchors.fill: parent
-                    enabled: refreshButton.enabled
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: Ghostd.fetchMcp(true)
-                }
-                Keys.onPressed: event => {
-                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                            || event.key === Qt.Key_Space) && refreshButton.enabled) {
-                        Ghostd.fetchMcp(true);
-                        event.accepted = true;
-                    }
-                }
+                label: Ghostd.mcpLoading ? "Refreshing" : "Refresh"
+                enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpLoading && !Ghostd.mcpMutating
+                onClicked: Ghostd.fetchMcp(true)
             }
 
-            Rectangle {
+            ActionButton {
                 id: addButton
-                implicitWidth: addLabel.implicitWidth + Theme.pad * 1.5
-                implicitHeight: Theme.controlHeight
-                radius: Theme.radius
-                color: addArea.containsMouse ? Theme.amber(0.18) : Theme.amber(0.12)
-                border.width: 1
-                border.color: Theme.amber(0.24)
-                enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpMutating
-                activeFocusOnTab: true
 
-                Text {
-                    id: addLabel
-                    anchors.centerIn: parent
-                    text: "+ Add server"
-                    color: addButton.enabled ? Theme.ghostAmberBright : Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    font.weight: Font.DemiBold
-                }
-                MouseArea {
-                    id: addArea
-                    anchors.fill: parent
-                    enabled: addButton.enabled
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.beginAdd()
-                }
-                Keys.onPressed: event => {
-                    if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-                            || event.key === Qt.Key_Space) && addButton.enabled) {
-                        root.beginAdd();
-                        event.accepted = true;
-                    }
-                }
+                label: "+ Add server"
+                primary: true
+                enabled: Ghostd.activeGhost !== "" && !Ghostd.mcpMutating
+                onClicked: root.beginAdd()
             }
         }
 

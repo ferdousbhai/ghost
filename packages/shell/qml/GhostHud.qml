@@ -969,6 +969,9 @@ FloatingWindow {
                         id: composer
                         visible: Ghostd.pendingAsk === null
                         Layout.fillWidth: true
+                        // Room for a real draft before it scrolls, never the
+                        // whole pane: the transcript above must stay in view.
+                        maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
 
                         onSubmitted: (prompt, mode) => {
                             if (mode === "prompt") Ghostd.send(prompt);
