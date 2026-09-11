@@ -72,7 +72,7 @@ refresh_payload() {
 format=ghost-runtime-source/v3
 version=$version
 os=linux
-arch=x86_64
+arch=any
 source_commit=$commit
 source_date_epoch=$epoch
 bun_build_version=$bun_build_version
@@ -89,7 +89,7 @@ refresh_payload "$runtime_root"
 verify() {
   GHOST_RELEASE_WORK_ROOT="$work/verify-work" \
     bash "$script_dir/verify-runtime-source.sh" \
-      "$1" "$source_root" "$version" x86_64 "$commit" "$epoch"
+      "$1" "$source_root" "$version" any "$commit" "$epoch"
 }
 
 assert_rejected() {

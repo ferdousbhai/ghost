@@ -5,7 +5,8 @@ public inputs from which Omarchy builds the stable `ghost` package, and
 publishes them as a GitHub release on `ferdousbhai/ghost`:
 
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
-2. `ghost-runtime-<version>-linux-x86_64.tar.zst`, containing the ordinary
+2. `ghost-runtime-<version>-linux-any.tar.zst` (one archive for every Linux
+   architecture Bun runs on; the payload has no native code), containing the ordinary
    Bun-target `ghostd` and `ghost` bundles, required static assets, fixed
    launchers, and exact bundled-package license closure; and
 3. their checksums and release metadata.
@@ -53,7 +54,7 @@ writes `SHA256SUMS`, renders the stable `PKGBUILD` through
 creates the annotated tag and the GitHub release carrying:
 
 - `ghost-<version>.tar.gz`;
-- `ghost-runtime-<version>-linux-x86_64.tar.zst` and its `.sha256`;
+- `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
 - `SHA256SUMS`.
 
 The contribution's `.omarchy/package.json` declares that release feed

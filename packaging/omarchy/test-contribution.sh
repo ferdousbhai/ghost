@@ -50,8 +50,11 @@ jq -e --arg repository "$repository" '
   and .release_ring == "fast"
   and .upstream.github == $repository
   and .upstream.digests == true
-  and .upstream.assets.x86_64 == ["ghost-runtime-{pkgver}-linux-x86_64.tar.zst"]
-  and .upstream.sources.any == ["https://github.com/\($repository)/releases/download/{tag}/ghost-{pkgver}.tar.gz"]
+  and (.upstream | has("assets") | not)
+  and .upstream.sources.any == [
+    "https://github.com/\($repository)/releases/download/{tag}/ghost-{pkgver}.tar.gz",
+    "https://github.com/\($repository)/releases/download/{tag}/ghost-runtime-{pkgver}-linux-any.tar.zst"
+  ]
 ' "$contribution/.omarchy/package.json" >/dev/null
 
 srcinfo="$work/ghost.SRCINFO"
@@ -63,9 +66,10 @@ grep -Fxq 'pkgbase = ghost' "$srcinfo"
 grep -Fxq 'pkgname = ghost' "$srcinfo"
 grep -Fxq $'\tconflicts = ghost-dev' "$srcinfo"
 grep -Fxq $'\tsource = ghost-1.2.3.tar.gz::https://github.com/example/ghost/releases/download/v1.2.3/ghost-1.2.3.tar.gz' "$srcinfo"
-grep -Fxq $'\tsource_x86_64 = ghost-runtime-1.2.3-linux-x86_64.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-x86_64.tar.zst' "$srcinfo"
+grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-any.tar.zst::https://github.com/example/ghost/releases/download/v1.2.3/ghost-runtime-1.2.3-linux-any.tar.zst' "$srcinfo"
+grep -Fxq $'\tarch = any' "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$source_sha" "$srcinfo"
-grep -Fxq $'\tsha256sums_x86_64 = '"$runtime_sha" "$srcinfo"
+grep -Fxq $'\tsha256sums = '"$runtime_sha" "$srcinfo"
 ! grep -Eq 'ghost-ai|summon-ghost|AUR|aur' "$contribution/PKGBUILD"
 
 # Model the only fields sync-upstream rewrites: pkgver, pkgrel, and the
@@ -93,15 +97,16 @@ updated_srcinfo="$work/updated.SRCINFO"
 ) > "$updated_srcinfo"
 grep -Fxq $'\tpkgver = 2.0.0' "$updated_srcinfo"
 grep -Fxq $'\tsha256sums = '"${next_hashes[0]}" "$updated_srcinfo"
-grep -Fxq $'\tsha256sums_x86_64 = '"${next_hashes[1]}" "$updated_srcinfo"
+grep -Fxq $'\tsha256sums = '"${next_hashes[1]}" "$updated_srcinfo"
 grep -Fq '/releases/download/v2.0.0/ghost-2.0.0.tar.gz' "$updated_srcinfo"
 
 srcdir="$work/update-src"
 CARCH=x86_64
+# The runtime archive is architecture-independent; the recipe never uses CARCH.
 # shellcheck disable=SC1090
 source "$updated/PKGBUILD"
 source_root="$srcdir/ghost-$pkgver"
-runtime_root="$srcdir/runtime/ghost-runtime-$pkgver-linux-$CARCH"
+runtime_root="$srcdir/runtime/ghost-runtime-$pkgver-linux-any"
 manifest="$source_root/RELEASE-SOURCE.MANIFEST"
 next_commit=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 next_epoch=234567890
@@ -203,7 +208,7 @@ write_runtime_manifest() {
     'format=ghost-runtime-source/v3' \
     "version=$pkgver" \
     'os=linux' \
-    "arch=$CARCH" \
+    "arch=any" \
     "source_commit=$commit" \
     "source_date_epoch=$next_epoch" \
     > "$runtime_root/MANIFEST"

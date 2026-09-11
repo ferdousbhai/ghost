@@ -39,7 +39,9 @@ export async function freePort(host = "127.0.0.1"): Promise<number> {
 export async function waitUntilServing(
   port: number,
   child: { exitCode: number | null },
-  timeoutMs = 15_000,
+  // Generous on purpose: a cold start on a slow or emulated machine (the
+  // aarch64 proof for ghost#52 took eight seconds) must not read as failure.
+  timeoutMs = 30_000,
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -48,7 +50,7 @@ export async function waitUntilServing(
     }
     try {
       const response = await fetch(`http://127.0.0.1:${port}/api/relay/status`, {
-        signal: AbortSignal.timeout(250),
+        signal: AbortSignal.timeout(2_000),
       });
       if (response.status === 200) return;
     } catch {

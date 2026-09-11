@@ -67,7 +67,7 @@ GHOST_CLAUDE_SDK_BOUNDARY_TEST_ROOT="$script_root/work" \
   bash "$script_root/test-claude-sdk-boundary.sh"
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$script_root/build-runtime-source.sh" \
-    "$source_root" "$out" "$version" x86_64 "$commit"
+    "$source_root" "$out" "$version" any "$commit"
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$script_root/make-source-archive.sh" \
     "$source_root" "$out/ghost-$version.tar.gz" "$version" HEAD
@@ -76,13 +76,13 @@ tar -xf "$out/ghost-$version.tar.gz" -C "$work"
 bash "$script_root/verify-release-source.sh" "$work/ghost-$version" "$version" "$commit" "$epoch"
 GHOST_RELEASE_WORK_ROOT="$work" \
   bash "$script_root/smoke-runtime-source.sh" \
-    "$out/ghost-runtime-$version-linux-x86_64.tar.zst" \
-    "$source_root" "$version" x86_64 "$commit" "$epoch"
+    "$out/ghost-runtime-$version-linux-any.tar.zst" \
+    "$source_root" "$version" any "$commit" "$epoch"
 rm -rf -- "$work"
 bash "$script_root/write-sha256sums.sh" "$out"
 
 source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
-runtime_sha="$(sha256sum "$out/ghost-runtime-$version-linux-x86_64.tar.zst" | cut -d' ' -f1)"
+runtime_sha="$(sha256sum "$out/ghost-runtime-$version-linux-any.tar.zst" | cut -d' ' -f1)"
 GHOST_RELEASE_REPOSITORY="$repository" \
   bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
 GHOST_RELEASE_REPOSITORY="$repository" \
@@ -104,8 +104,8 @@ gh release create "$tag" \
   --notes "Source and runtime inputs for the Omarchy \`ghost\` package. Install through Omarchy: Install → AI → Ghost." \
   -- \
   "$out/ghost-$version.tar.gz" \
-  "$out/ghost-runtime-$version-linux-x86_64.tar.zst" \
-  "$out/ghost-runtime-$version-linux-x86_64.tar.zst.sha256" \
+  "$out/ghost-runtime-$version-linux-any.tar.zst" \
+  "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
   "$out/SHA256SUMS" \
   "$out/omarchy-ghost-$version/PKGBUILD" \
   "$out/omarchy-ghost-$version/ghost.install"

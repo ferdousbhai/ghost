@@ -15,13 +15,15 @@ output_dir="$(realpath "$output_dir")"
   printf 'invalid release version: %s\n' "$version" >&2
   exit 1
 }
-[[ "$arch" == x86_64 ]] || {
-  printf 'unsupported release architecture: %s\n' "$arch" >&2
+# The payload is Bun-target JavaScript (plus wasm) with no native modules, so
+# one archive serves every Linux architecture Bun runs on; "any" is the only
+# architecture token (proved on aarch64 under emulation, ghost#52).
+[[ "$arch" == any ]] || {
+  printf 'unsupported release architecture: %s (the runtime archive is "any")\n' "$arch" >&2
   exit 1
 }
-[[ "$(uname -s)" == Linux && "$(uname -m)" == "$arch" ]] || {
-  printf 'release host %s/%s does not match linux/%s\n' \
-    "$(uname -s)" "$(uname -m)" "$arch" >&2
+[[ "$(uname -s)" == Linux ]] || {
+  printf 'release host %s is not linux\n' "$(uname -s)" >&2
   exit 1
 }
 source_version="$(bun -e \
