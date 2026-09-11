@@ -23,14 +23,28 @@ Item {
         && (root.rows.length > 0 || root.diagnostics.length > 0)
     property bool expanded: false
 
+    // Named, the way pi lists them at session start; the click adds paths
+    // and reasons. Anything not admitted is named too, with its status.
     function summary(): string {
         if (!root.snapshot) return "";
-        const skills = root.snapshot.skills.filter(function (row) { return row.status === "admitted"; }).length;
-        const servers = root.snapshot.mcpServers.filter(function (row) { return row.status === "admitted"; }).length;
+        const admitted = function (rows) {
+            return rows.filter(function (row) { return row.status === "admitted"; })
+                .map(function (row) { return row.name; });
+        };
+        const skills = admitted(root.snapshot.skills);
+        const servers = admitted(root.snapshot.mcpServers);
         const parts = [];
-        parts.push(skills + (skills === 1 ? " skill" : " skills"));
-        parts.push(servers + (servers === 1 ? " MCP server" : " MCP servers"));
+        parts.push(skills.length === 0 ? "no skills" : "skills " + skills.join(", "));
+        parts.push(servers.length === 0 ? "no MCP servers" : "mcp " + servers.join(", "));
         return parts.join(" · ");
+    }
+
+    function missing(): string {
+        const named = root.rows.filter(function (entry) { return entry.row.status !== "admitted"; })
+            .map(function (entry) { return entry.row.name + " " + entry.row.status; });
+        if (root.diagnostics.length > 0)
+            named.push(root.diagnostics.length + (root.diagnostics.length === 1 ? " error" : " errors"));
+        return named.length === 0 ? "" : "not loaded: " + named.join(", ");
     }
 
     function statusColor(status: string): color {
@@ -75,34 +89,26 @@ Item {
         width: parent.width
         spacing: Theme.gap / 2
 
-        Row {
-            spacing: Theme.gap / 2
+        Text {
+            id: summaryText
+            width: parent.width
+            text: (root.expanded ? "▾ " : "▸ ") + root.summary()
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: Theme.foregroundFaint
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeCaption
+        }
 
-            Text {
-                id: summaryText
-                text: root.summary()
-                textFormat: Text.PlainText
-                color: Theme.foregroundFaint
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeCaption
-            }
-
-            Text {
-                visible: root.notAdmitted > 0
-                text: "· " + root.notAdmitted + " not loaded"
-                textFormat: Text.PlainText
-                color: Theme.danger
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeCaption
-            }
-
-            Text {
-                text: root.expanded ? "▾" : "▸"
-                textFormat: Text.PlainText
-                color: Theme.foregroundFaint
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeCaption
-            }
+        Text {
+            visible: root.notAdmitted > 0
+            width: parent.width
+            text: "  " + root.missing()
+            textFormat: Text.PlainText
+            wrapMode: Text.Wrap
+            color: Theme.danger
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeCaption
         }
 
         Column {

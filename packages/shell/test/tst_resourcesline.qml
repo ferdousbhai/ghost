@@ -38,7 +38,8 @@ TestCase {
             mcpDiagnostics: []
         };
         verify(item.shown);
-        compare(item.summary(), "1 skill · 1 MCP server");
+        compare(item.summary(), "skills research · mcp fs");
+        compare(item.missing(), "not loaded: old shadowed, oauth skipped, 1 error");
         compare(item.notAdmitted, 3);
         compare(item.rows.length, 4);
         compare(item.detail(item.rows[1].row), "shadowed by /g/old");
