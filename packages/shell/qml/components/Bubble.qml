@@ -360,6 +360,7 @@ Item {
                         id: copyAction
 
                         visible: !root.mine && root.hasBody
+                        opacity: messageHover.hovered ? 1 : 0
                         width: 16
                         height: 16
                         Accessible.role: Accessible.Button

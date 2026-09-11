@@ -127,7 +127,8 @@ way that harness works.
 
 MCP rows mean the same on both runtimes, credentials and cwd included; the
 two pi-only shapes (`${VAR}` expansion and `auth`/`oauth` blocks) are skipped
-on Claude and shown as skipped in the Resources pane.
+on Claude and shown as skipped in the resources line at the top of the
+conversation.
 
 ## Models and roles
 

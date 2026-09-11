@@ -131,7 +131,7 @@ FloatingWindow {
     minimumSize: Qt.size(568, 360)
 
     function showSection(section: string): void {
-        if (["chat", "commands", "hooks", "resources", "mcp", "remote", "character", "board"]
+        if (["chat", "commands", "hooks", "mcp", "remote", "character", "board"]
                 .indexOf(section) < 0)
             return;
         hud.loginOpen = false;
@@ -142,8 +142,6 @@ FloatingWindow {
             Ghostd.fetchCommands(false);
         } else if (section === "hooks") {
             Ghostd.fetchHooks(false);
-        } else if (section === "resources") {
-            Ghostd.fetchSessionResources(false);
         } else if (section === "mcp") {
             Ghostd.fetchMcp(false);
         } else if (section === "character") {
@@ -631,6 +629,7 @@ FloatingWindow {
                         spacing: Theme.gap
                         model: Ghostd.transcript
                         cacheBuffer: 400
+                        header: ResourcesLine { width: transcriptView.width }
 
                         delegate: Bubble {
                             // One required property per ListModel role. qmllint
@@ -1052,14 +1051,6 @@ FloatingWindow {
             HooksBrowser {
                 id: hooksBrowser
                 visible: hud.currentSection === "hooks"
-                    && !hud.loginOpen
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-
-            SessionResources {
-                id: sessionResources
-                visible: hud.currentSection === "resources"
                     && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
