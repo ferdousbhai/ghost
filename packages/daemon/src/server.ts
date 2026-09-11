@@ -1269,6 +1269,10 @@ export function createDaemonServer(options: ServerOptions): Server {
   };
 
   const server = createServer((request, response) => {
+    // Nothing a request carries may take the process down. A throw anywhere
+    // in the handler answers 500 (or is logged when the reply already began)
+    // instead of becoming an unhandled rejection, which exits Bun — a path
+    // of "//" once did exactly that, from the tailnet viewer.
     void (async () => {
       applyCors(request, response);
       const method = request.method ?? "GET";
@@ -1278,7 +1282,13 @@ export function createDaemonServer(options: ServerOptions): Server {
         response.writeHead(204).end();
         return;
       }
-      const url = new URL(request.url ?? "/", "http://127.0.0.1");
+      let url: URL;
+      try {
+        url = new URL(request.url ?? "/", "http://127.0.0.1");
+      } catch {
+        errorResponse(response, 400, "invalid_request", "The request path is not a valid URL.");
+        return;
+      }
       const segments = url.pathname.split("/").filter(Boolean);
       const admission = await authenticate(request, response, method, segments);
       if (!admission) return;
@@ -1782,7 +1792,19 @@ export function createDaemonServer(options: ServerOptions): Server {
         });
         errorResponse(response, 500, "internal_error", "The daemon failed to handle the request.");
       }
-    })();
+    })().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error("request handler failed", { method: request.method ?? "GET", error: message });
+      if (!response.headersSent) {
+        errorResponse(response, 500, "internal_error", "The daemon could not handle this request.");
+      } else {
+        try {
+          response.destroy();
+        } catch {
+          // The socket is already gone.
+        }
+      }
+    });
   });
 
   if (relay) {

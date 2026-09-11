@@ -218,6 +218,10 @@ describe("who may open a relay socket", () => {
     })).toMatchObject({ ok: false, status: 400 });
   });
 
+  it("refuses a malformed upgrade path instead of throwing", () => {
+    expect(upgrade({ url: "//" })).toMatchObject({ ok: false, status: 400 });
+  });
+
   it("refuses any path that is not the relay", () => {
     expect(upgrade({ url: "/api/ghosts" })).toMatchObject({ ok: false, status: 404 });
   });

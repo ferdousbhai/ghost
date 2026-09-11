@@ -228,7 +228,12 @@ export function authorizeRelayUpgrade(
   request: RelayUpgradeRequest,
   expectedToken: string,
 ): RelayUpgradeDecision {
-  const path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  let path: string;
+  try {
+    path = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
+  } catch {
+    return { ok: false, status: 400, reason: "The upgrade path is not a valid URL." };
+  }
   if (path !== RELAY_PATH) {
     return { ok: false, status: 404, reason: "Not a relay endpoint." };
   }

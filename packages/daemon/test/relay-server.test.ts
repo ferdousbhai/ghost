@@ -85,6 +85,30 @@ describe("GET /api/relay/status", () => {
     expect(response.status).toBe(405);
   });
 
+  it("answers a malformed request path with 400 and keeps serving", async () => {
+    const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
+    // "//" is a protocol-relative reference and not a URL against the loopback
+    // base; it used to throw out of the listener and exit the process.
+    // fetch() normalises the path; send the raw request line curl sends.
+    const bad = await new Promise<{ status: number; body: string }>((resolve, reject) => {
+      const req = request(
+        { host: "127.0.0.1", port: listening?.port, path: "//", method: "GET" },
+        (res) => {
+          let body = "";
+          res.setEncoding("utf8");
+          res.on("data", (chunk: string) => { body += chunk; });
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    expect(bad.status).toBe(400);
+    expect(JSON.parse(bad.body)).toMatchObject({ error: { code: "invalid_request" } });
+    const alive = await fetch(`${base}/api/relay/status`);
+    expect(alive.status).toBe(200);
+  });
+
   it("leaves the ghost routes exactly where they were", async () => {
     const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
     expect((await fetch(`${base}/api/ghosts`)).status).toBe(200);
