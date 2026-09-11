@@ -219,17 +219,17 @@ fi
 printf 'Omarchy contribution dry-run fixtures passed\n'
 
 # The Omarchy menu scripts and entries travel upstream verbatim.
-for script in "$script_root"/bin/omarchy-ghost-install "$script_root"/bin/omarchy-ghost-remove; do
+for script in "$script_root"/bin/omarchy-install-ai-ghost "$script_root"/bin/omarchy-remove-ai-ghost; do
   bash -n "$script"
   [[ "$(stat -c '%a' "$script")" == 755 ]]
   grep -q '^# omarchy:summary=' "$script"
 done
-grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-ghost-install"
-grep -Fq 'systemctl --user enable --now ghostd.service ghost-shell.service' "$script_root/bin/omarchy-ghost-install"
-grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-ghost-remove"
+grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-install-ai-ghost"
+grep -Fq 'systemctl --user enable --now ghostd.service ghost-shell.service' "$script_root/bin/omarchy-install-ai-ghost"
+grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"
-grep -Fq 'omarchy-ghost-install' "$script_root/omarchy-menu.jsonc"
-grep -Fq 'omarchy-ghost-remove' "$script_root/omarchy-menu.jsonc"
+grep -Fq 'omarchy-install-ai-ghost' "$script_root/omarchy-menu.jsonc"
+grep -Fq 'omarchy-remove-ai-ghost' "$script_root/omarchy-menu.jsonc"
 
 printf 'Omarchy contribution test passed\n'
