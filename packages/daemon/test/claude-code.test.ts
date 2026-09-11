@@ -1,3 +1,4 @@
+import { DAEMON_VERSION } from "../src/version.js";
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
@@ -1353,7 +1354,7 @@ fi
       AWS_PROFILE: "owner-bedrock",
       AWS_SHARED_CREDENTIALS_FILE: "/home/owner/.aws/credentials",
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-      CLAUDE_AGENT_SDK_CLIENT_APP: "ghostd/0.0.1",
+      CLAUDE_AGENT_SDK_CLIENT_APP: `ghostd/${DAEMON_VERSION}`,
     });
     for (const name of [
       "ANTHROPIC_API_KEY",

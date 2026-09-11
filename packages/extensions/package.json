@@ -1,6 +1,6 @@
 {
   "name": "@ghost/extensions",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "license": "Apache-2.0",
   "description": "Ghost's built-in extensions \u2014 the plain-file ghost home as an AI persona \u2014 plus the ghost-home/v2 reader/writer.",

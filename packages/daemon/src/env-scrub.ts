@@ -30,6 +30,8 @@
  * credential variables added by a future pi release.
  */
 
+import { DAEMON_VERSION } from "./version.js";
+
 export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   // Direct provider credentials read by pi-ai or the Claude Code HTTP agent.
   "AI_GATEWAY_API_KEY",
@@ -440,7 +442,7 @@ export function captureNativeHarnessEnvironment(
     if (source[name] !== undefined) environment[name] = source[name];
   }
   if (profile.startsWith("claude-")) {
-    environment.CLAUDE_AGENT_SDK_CLIENT_APP = "ghostd/0.0.1";
+    environment.CLAUDE_AGENT_SDK_CLIENT_APP = `ghostd/${DAEMON_VERSION}`;
   }
   if (profile === "claude-principal") {
     environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";

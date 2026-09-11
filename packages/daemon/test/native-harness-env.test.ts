@@ -1,3 +1,4 @@
+import { DAEMON_VERSION } from "../src/version.js";
 import { describe, expect, it } from "vitest";
 import {
   captureClaudeCodeEnvironment,
@@ -67,7 +68,7 @@ describe("native harness environment capture", () => {
       ANTHROPIC_BASE_URL: "https://router.invalid",
       AWS_PROFILE: "owner-profile",
       VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-      CLAUDE_AGENT_SDK_CLIENT_APP: "ghostd/0.0.1",
+      CLAUDE_AGENT_SDK_CLIENT_APP: `ghostd/${DAEMON_VERSION}`,
     });
     expect(native.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBeUndefined();
     expect(principal.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");

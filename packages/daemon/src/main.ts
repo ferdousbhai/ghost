@@ -24,6 +24,7 @@ import { ModelSelection } from "./model-selection.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
 import { resolveRunningSource } from "./running-source.js";
+import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
@@ -304,17 +305,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { overrides, logLevel, help, version };
 }
 
-async function readVersion(): Promise<string> {
-  // A bundled runtime carries its version; a source checkout reads package.json.
-  if (process.env.GHOSTD_VERSION) return process.env.GHOSTD_VERSION;
-  const { readFile } = await import("node:fs/promises");
-  const { fileURLToPath } = await import("node:url");
-  const { dirname, join } = await import("node:path");
-  const here = dirname(fileURLToPath(import.meta.url));
-  const text = await readFile(join(here, "..", "package.json"), "utf8");
-  return (JSON.parse(text) as { version?: string }).version ?? "0.0.0";
-}
-
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state, remote touches config and Tailscale Serve, and login takes
@@ -337,7 +327,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 0;
   }
   if (parsed.version) {
-    process.stdout.write(`${await readVersion()}\n`);
+    process.stdout.write(`${DAEMON_VERSION}\n`);
     return 0;
   }
 
@@ -419,7 +409,7 @@ async function serveDaemon(
   const scheduleRuntimeUnitDir = resolveScheduleRuntimeUnitDirectory();
   // What is running: the source checkout behind this process, if it has one.
   const runningSource = resolveRunningSource(
-    await readVersion(),
+    DAEMON_VERSION,
     dirname(fileURLToPath(import.meta.url)),
   );
   registry.ensureRoot();
