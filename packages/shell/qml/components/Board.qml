@@ -104,6 +104,14 @@ Rectangle {
         }
 
         Flickable {
+            id: lanes
+
+            // Few columns share the pane; many scroll sideways at a readable width.
+            readonly property int columnCount: root.hasBoard ? root.board.columns.length : 0
+            readonly property real columnWidth: columnCount === 0 ? 0
+                : Math.max(Theme.pad * 9, Math.min(Theme.pad * 14,
+                    (width - Theme.gap * (columnCount - 1)) / columnCount))
+
             Layout.fillWidth: true
             Layout.fillHeight: true
             contentWidth: columns.implicitWidth
@@ -123,7 +131,7 @@ Rectangle {
                         id: columnBox
 
                         required property var modelData
-                        width: Theme.pad * 20
+                        width: lanes.columnWidth
                         height: columns.height
                         radius: Theme.radius
                         color: Theme.film(0.04)
