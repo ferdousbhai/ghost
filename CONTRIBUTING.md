@@ -27,6 +27,8 @@ gh repo fork --remote --remote-name fork
 ```
 
 After this, `origin` is `ferdousbhai/ghost` and `fork` is the owner's copy.
+An owner who can push to `ferdousbhai/ghost` itself skips the fork: topic
+branches go to `origin`, and `fork` below reads `origin`.
 
 ## Every time
 
