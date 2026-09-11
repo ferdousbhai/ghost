@@ -23,8 +23,9 @@ SendSIGKILL=yes
 # The daemon first captures its reviewed native Claude Code environment, then
 # scrubs every provider/cloud credential before constructing pi (env-scrub.ts).
 # Do NOT put credential values in this unit or an EnvironmentFile. pi provider
-# credentials belong in Secret Service; Claude can use an owner-installed
-# GHOST_CLAUDE_BINARY wrapper backed by the owner's credential mechanism.
+# credentials belong in pi's own file-backed store, <ghost>/.pi/auth.json;
+# Claude can use an owner-installed GHOST_CLAUDE_BINARY wrapper backed by the
+# owner's credential mechanism.
 Environment=GHOSTD_HOST=127.0.0.1
 
 # systemd's default PATH is /usr/local/bin:/usr/bin, and the login PATH the
