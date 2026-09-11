@@ -212,6 +212,7 @@ If you expect one of these, it is missing on purpose:
   the owner's documents.
 - **No private memory store and no document index.** Notes are files in the
   owner's documents; the directory is named in the prompt and read on demand.
+  The board is the same idea: `board.md` there, rendered read-only by the HUD.
 - **No trusted projects.** A conversation has a cwd, not a bound project tree
   whose instructions, skills, and MCP are scanned in. Plugins, executable hooks
   and tools beyond the ghost's own, LSP, and subagents stay disabled on both

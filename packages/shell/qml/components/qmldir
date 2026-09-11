@@ -21,6 +21,7 @@ McpBrowser 1.0 McpBrowser.qml
 ModelLogin 1.0 ModelLogin.qml
 PencilGlyph 1.0 PencilGlyph.qml
 QueueLine 1.0 QueueLine.qml
+Board 1.0 Board.qml
 RemoteAccess 1.0 RemoteAccess.qml
 RenameSession 1.0 RenameSession.qml
 Roster 1.0 Roster.qml

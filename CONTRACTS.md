@@ -30,10 +30,15 @@ prompt only names the directory.
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.
 
-There is no Ghost plan mode, todo store, plan/todo API, or progress UI. Runtime
-native planning may exist, but durable owner-visible plans and tasks belong in
-the owner's documents. Background jobs remain Ghost runtime state because they
-control work currently executing in a conversation.
+There is no Ghost plan mode, todo store, or plan/todo API. Runtime native
+planning may exist, but durable owner-visible plans and tasks belong in the
+owner's documents. The one owner-visible view of them is the board:
+`board.md` in the documents directory, `##` headings as columns and list items
+as cards, edited by the owner and every harness with file tools and rendered
+read-only by the HUD, the tailnet viewer, and `ghost board` through
+`GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background jobs
+remain Ghost runtime state because they control work currently executing in a
+conversation.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -343,6 +348,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. `pairing` is `{ code, since }` while an unpaired browser waits for Allow, else `null`. |
 | `POST /api/relay/pair` | Owner answers the pending pairing: `{ code, allow }`. Allow hands the relay token to that browser over its socket; a stale code is `404 pairing_not_found`. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
+| `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |

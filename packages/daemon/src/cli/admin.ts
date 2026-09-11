@@ -95,6 +95,33 @@ export async function commandsCommand(parsed: ParsedCliArgs, ctx: CliContext): P
 }
 
 /** `ghost remote [status|on|off]`: the Tailscale Serve viewer. */
+export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const body = (await ctx.client.request("GET", "/api/board")).body;
+  emit(ctx, body, (result) => {
+    const board = result as {
+      path: string;
+      exists: boolean;
+      title: string | null;
+      columns: Array<{ title: string; cards: Array<{ text: string; done?: boolean; notes: string[] }> }>;
+      truncated: boolean;
+    };
+    if (!board.exists) return `no board yet: create ${board.path} with ## columns and - cards\n`;
+    const lines: string[] = [];
+    if (board.title) lines.push(board.title);
+    for (const column of board.columns) {
+      lines.push(`## ${column.title} (${column.cards.length})`);
+      for (const card of column.cards) {
+        const box = card.done === undefined ? "" : card.done ? "[x] " : "[ ] ";
+        lines.push(`  ${box}${card.text}`);
+        for (const note of card.notes) lines.push(`      ${note}`);
+      }
+    }
+    if (board.truncated) lines.push("(board truncated)");
+    return `${lines.join("\n")}\n`;
+  });
+  return 0;
+}
+
 export async function browserCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "status", code] = parsed.positionals;
   let body: unknown;

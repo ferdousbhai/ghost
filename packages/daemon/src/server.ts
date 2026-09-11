@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
@@ -20,7 +22,9 @@ import {
   homeOperationsFor,
   type HomeOperationCoordinator,
 } from "./home-operations.js";
-import { MAX_CHARACTER_BODY_LENGTH, openGhostHome } from "@ghost/extensions";
+import { MAX_CHARACTER_BODY_LENGTH, openGhostHome,
+  resolveDocumentsDirectory,
+} from "@ghost/extensions";
 import {
   assertValidGhostName,
   GhostError,
@@ -1436,6 +1440,16 @@ export function createDaemonServer(options: ServerOptions): Server {
             events: [],
             hooks: [],
           }));
+          return;
+        }
+        if (segments.length === 2 && segments[1] === "board") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          // The owner's board.md, parsed. Guests may read it: it is the one
+          // owner document meant to be looked at, and it is read-only here.
+          jsonResponse(response, 200, await readBoard(resolveDocumentsDirectory(process.env, homedir())));
           return;
         }
         if (segments.length === 2 && segments[1] === "status") {

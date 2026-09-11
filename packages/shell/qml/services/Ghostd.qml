@@ -833,6 +833,79 @@ Singleton {
     }
 
 
+    // The owner's board: Documents/board.md, parsed by the daemon and shown
+    // read-only. Polled while its pane is up; edits happen in the file.
+    property var board: null
+    property string boardError: ""
+    property bool boardLoading: false
+    property var boardRequest: null
+    property var boardRequestFactory: null
+
+    function makeBoardRequest(): var {
+        return typeof root.boardRequestFactory === "function"
+            ? root.boardRequestFactory() : new XMLHttpRequest();
+    }
+
+    /** The daemon's Board, or null when the body is not one. */
+    function boardFrom(body: var): var {
+        if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+        if (typeof body.path !== "string" || typeof body.exists !== "boolean"
+                || !Array.isArray(body.columns)) return null;
+        const columns = [];
+        for (const column of body.columns) {
+            if (!column || typeof column.title !== "string" || !Array.isArray(column.cards)) return null;
+            const cards = [];
+            for (const card of column.cards) {
+                if (!card || typeof card.text !== "string") return null;
+                cards.push({
+                    text: card.text,
+                    done: card.done === true ? true : (card.done === false ? false : null),
+                    notes: Array.isArray(card.notes) ? card.notes.filter(n => typeof n === "string") : []
+                });
+            }
+            columns.push({ title: column.title, cards: cards });
+        }
+        return {
+            path: body.path,
+            exists: body.exists,
+            title: typeof body.title === "string" ? body.title : "",
+            modified: typeof body.modified === "string" ? body.modified : "",
+            truncated: body.truncated === true,
+            columns: columns
+        };
+    }
+
+    function refreshBoard(): void {
+        if (root.boardRequest && root.boardRequest.readyState !== 4) return;
+        const xhr = root.makeBoardRequest();
+        root.boardRequest = xhr;
+        root.boardLoading = true;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.boardRequest) return;
+            root.boardRequest = null;
+            root.boardLoading = false;
+            if (xhr.status === 200) {
+                let parsed = null;
+                try {
+                    parsed = root.boardFrom(JSON.parse(xhr.responseText));
+                } catch (error) {
+                    parsed = null;
+                }
+                if (parsed === null) {
+                    root.boardError = "ghostd sent a malformed board";
+                } else {
+                    root.board = parsed;
+                    root.boardError = "";
+                    root.reachable = true;
+                }
+            } else {
+                root.boardError = root.describeError(xhr, "GET board");
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/board", ({}), null,
+            function () { return root.boardRequest === xhr; });
+    }
+
     // The browser relay's pairing prompt is daemon-global as well. GhostHud
     // polls it only while shown: the code the extension popup displays has to
     // match the one here, and that is what makes Allow safe to click.

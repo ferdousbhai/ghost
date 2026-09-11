@@ -48,6 +48,11 @@ FocusScope {
             icon: "M12 7a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM5 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM12 7v5M7.5 17.5l3-5M16.5 17.5l-3-5"
         },
         {
+            id: "board",
+            label: "Board",
+            icon: "M3 4h5v16H3zM10 4h5v10h-5zM17 4h4v13h-4z"
+        },
+        {
             id: "remote",
             label: "Remote access",
             icon: "M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2zM10 5h4M11 18h2"

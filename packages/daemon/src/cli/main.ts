@@ -16,6 +16,7 @@ import {
   greetingCommand,
   readCommand,
   reanswerCommand,
+  boardCommand,
   browserCommand,
   remoteCommand,
   renameCommand,
@@ -275,6 +276,14 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost commands -s cli-abc",
     positionals: [0, 0],
     run: commandsCommand,
+  },
+  {
+    verb: "board",
+    usage: "board [--json] [-q]",
+    summary: "Show the owner's board (Documents/board.md) as columns and cards.",
+    example: "ghost board",
+    positionals: [0, 0],
+    run: boardCommand,
   },
   {
     verb: "browser",

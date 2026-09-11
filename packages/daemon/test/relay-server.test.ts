@@ -8,7 +8,10 @@
  * status payload is the one place a token could accidentally be published to an
  * unauthenticated route.
  */
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, request } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
@@ -115,6 +118,32 @@ describe("GET /api/relay/status", () => {
     expect((await fetch(`${base}/api/relay`)).status).toBe(404);
     expect((await fetch(`${base}/api/nonsense`)).status).toBe(404);
     expect((await fetch(`${base}/relay`)).status).toBe(404);
+  });
+});
+
+describe("GET /api/board", () => {
+  it("serves the owner's board.md parsed, and says when there is none", async () => {
+    const documents = mkdtempSync(join(tmpdir(), "ghost-board-route-"));
+    const previous = process.env.XDG_DOCUMENTS_DIR;
+    process.env.XDG_DOCUMENTS_DIR = documents;
+    try {
+      const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
+      const empty = await (await fetch(`${base}/api/board`)).json() as { exists: boolean; columns: unknown[] };
+      expect(empty).toMatchObject({ exists: false, columns: [] });
+      writeFileSync(join(documents, "board.md"), "# Work\n## Now\n- [ ] ship it\n  note\n## Done\n- [x] pair\n");
+      const board = await (await fetch(`${base}/api/board`)).json() as {
+        exists: boolean; title: string; columns: Array<{ title: string; cards: Array<{ text: string; done?: boolean }> }>;
+      };
+      expect(board.exists).toBe(true);
+      expect(board.title).toBe("Work");
+      expect(board.columns.map((column) => column.title)).toEqual(["Now", "Done"]);
+      expect(board.columns[0]?.cards[0]).toMatchObject({ text: "ship it", done: false, notes: ["note"] });
+      expect((await fetch(`${base}/api/board`, { method: "POST" })).status).toBe(405);
+    } finally {
+      if (previous === undefined) delete process.env.XDG_DOCUMENTS_DIR;
+      else process.env.XDG_DOCUMENTS_DIR = previous;
+      rmSync(documents, { recursive: true, force: true });
+    }
   });
 });
 

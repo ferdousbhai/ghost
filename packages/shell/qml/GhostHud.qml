@@ -148,6 +148,8 @@ FloatingWindow {
             Ghostd.fetchMcp(false);
         } else if (section === "character") {
             Ghostd.fetchCharacter(false);
+        } else if (section === "board") {
+            Ghostd.refreshBoard();
         }
     }
 
@@ -1074,6 +1076,15 @@ FloatingWindow {
             RemoteAccess {
                 id: remoteAccess
                 visible: hud.currentSection === "remote"
+                    && !hud.loginOpen
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                onCloseRequested: hud.showSection("chat")
+            }
+
+            Board {
+                id: boardPane
+                visible: hud.currentSection === "board"
                     && !hud.loginOpen
                 Layout.fillWidth: true
                 Layout.fillHeight: true
