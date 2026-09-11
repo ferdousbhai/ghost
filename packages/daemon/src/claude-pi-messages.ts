@@ -13,6 +13,7 @@ import type {
   SDKMessage,
   SDKResultMessage,
 } from "@anthropic-ai/claude-agent-sdk";
+import type { PresentationPart } from "./presentation-history.js";
 import {
   addUsage,
   copyUsage,
@@ -34,6 +35,8 @@ export interface ClaudePiMessagesAdapter {
   beginExchange(ownerText: string): void;
   /** The assistant text of the current exchange so far; a result carries none when interrupted. */
   exchangeText(): string;
+  /** The exchange's prose and tool calls in order, for the reopen transcript. */
+  exchangeParts(): PresentationPart[];
   recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;
@@ -129,6 +132,13 @@ export function createClaudePiMessagesAdapter(
   let terminal = false;
   let emittedText = false;
   let exchangeText = "";
+  let exchangeParts: PresentationPart[] = [];
+  const appendExchangeText = (text: string): void => {
+    exchangeText += text;
+    const last = exchangeParts.at(-1);
+    if (last?.type === "text") last.text += text;
+    else exchangeParts.push({ type: "text", text });
+  };
   let internalMcpServerName = "ghost";
   const totalUsage = zeroUsage();
 
@@ -159,7 +169,7 @@ export function createClaudePiMessagesAdapter(
     send({ type: "text_start", contentIndex: block.wireIndex });
     if (initial) {
       block.content += initial;
-      exchangeText += initial;
+      appendExchangeText(initial);
       emittedText = true;
       send({ type: "text_delta", contentIndex: block.wireIndex, delta: initial });
     }
@@ -229,6 +239,7 @@ export function createClaudePiMessagesAdapter(
     // file or idling. `tool_progress` carries no arguments and arrives only
     // for slow calls, so it cannot open this window.
     executing.set(block.id, block.name);
+    exchangeParts.push({ type: "toolCall", id: block.id, name: block.name, arguments: args });
     send({
       type: "tool_execution_start",
       id: block.id,
@@ -260,6 +271,10 @@ export function createClaudePiMessagesAdapter(
       const toolName = executing.get(result.tool_use_id);
       if (toolName === undefined) continue;
       executing.delete(result.tool_use_id);
+      if (result.is_error === true) {
+        const call = exchangeParts.find((part) => part.type === "toolCall" && part.id === result.tool_use_id);
+        if (call?.type === "toolCall") call.failed = true;
+      }
       // `toolResultSummary` reads pi's `{ content: [...] }` shape; a provider
       // block may carry its text directly instead. Which of a tool's results
       // are worth showing is the HUD's call, made once for both runtimes.
@@ -317,7 +332,7 @@ export function createClaudePiMessagesAdapter(
       if (!block) return;
       if (event.delta.type === "text_delta" && block.kind === "text") {
         block.content += event.delta.text;
-        exchangeText += event.delta.text;
+        appendExchangeText(event.delta.text);
         emittedText = true;
         send({ type: "text_delta", contentIndex: block.wireIndex, delta: event.delta.text });
       } else if (event.delta.type === "thinking_delta" && block.kind === "thinking") {
@@ -377,9 +392,13 @@ export function createClaudePiMessagesAdapter(
       ensureStarted();
       send({ type: "owner_message", text: ownerText });
       exchangeText = "";
+      exchangeParts = [];
     },
     exchangeText() {
       return exchangeText;
+    },
+    exchangeParts() {
+      return exchangeParts.map((part) => ({ ...part }));
     },
     recordUsage(result) {
       if (!terminal) addResultUsage(result);

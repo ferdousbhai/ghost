@@ -14,7 +14,7 @@ afterEach(() => {
   dir = null;
 });
 
-function transcript(name: string, lines: object[]): string {
+function transcript(name: string, lines: unknown[]): string {
   dir ??= mkdtempSync(join(tmpdir(), "ghost-claude-history-"));
   const path = join(dir, name);
   writeFileSync(path, `${lines.map((line) => JSON.stringify(line)).join("\n")}\n`);

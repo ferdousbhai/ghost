@@ -19,6 +19,24 @@ export type SourceIdentity =
   | { runtime: "pi"; createdAt: string }
   | { runtime: "claude-code"; createdAt: string; resumeId: string };
 
+/**
+ * What the assistant produced in one exchange, in order: prose and the tool
+ * calls between it. This is what lets a reopened Claude conversation show
+ * its tool cards and interstitial text the way a pi transcript does.
+ */
+export type PresentationPart =
+  | { type: "text"; text: string }
+  | {
+    type: "toolCall";
+    id: string;
+    name: string;
+    arguments: Record<string, unknown>;
+    failed?: true;
+  };
+
+export const PRESENTATION_HISTORY_MAX_PARTS = 200;
+export const PRESENTATION_HISTORY_MAX_PART_ARGUMENT_CHARS = 8_000;
+
 /** One owner turn a runtime has finished and made durable in its own storage. */
 export interface SettledTurn {
   source: SourceIdentity;
@@ -27,6 +45,8 @@ export interface SettledTurn {
   sourceOrdinal: number;
   ownerPrompt: string;
   assistantText: string;
+  /** Ordered prose and tool calls; absent when the runtime supplies only the final text. */
+  assistantParts?: readonly PresentationPart[];
   outcome: "completed" | "failed";
 }
 
@@ -39,6 +59,7 @@ export interface PresentationTurn {
   ownerTextTruncated: boolean;
   assistantText: string;
   assistantTextTruncated: boolean;
+  assistantParts?: PresentationPart[];
   outcome: "completed" | "failed";
 }
 
@@ -124,7 +145,34 @@ function invalidHistory(path: string): GhostError {
   );
 }
 
+function validPart(value: unknown): value is PresentationPart {
+  if (!object(value)) return false;
+  if (value.type === "text") {
+    return exactKeys(value, ["type", "text"])
+      && typeof value.text === "string"
+      && value.text.length <= PRESENTATION_HISTORY_MAX_TEXT_CHARS;
+  }
+  if (value.type !== "toolCall") return false;
+  const keys = Object.keys(value).filter((key) => key !== "failed");
+  return keys.length === 4
+    && ["type", "id", "name", "arguments"].every((key) => keys.includes(key))
+    && typeof value.id === "string" && value.id !== ""
+    && typeof value.name === "string" && value.name !== ""
+    && object(value.arguments)
+    && JSON.stringify(value.arguments).length <= PRESENTATION_HISTORY_MAX_PART_ARGUMENT_CHARS
+    && (value.failed === undefined || value.failed === true);
+}
+
 function validTurn(runtime: ConversationRuntime, value: unknown): value is PresentationTurn {
+  if (!object(value)) return false;
+  const { assistantParts, ...rest } = value;
+  if (assistantParts !== undefined
+    && (!Array.isArray(assistantParts)
+      || assistantParts.length > PRESENTATION_HISTORY_MAX_PARTS
+      || !assistantParts.every(validPart))) {
+    return false;
+  }
+  value = rest;
   return object(value)
     && exactKeys(value, [
       "sequence",
@@ -221,6 +269,31 @@ function parseHistory(
   return value as unknown as PresentationHistoryV1;
 }
 
+/**
+ * Parts worth keeping: only when a tool call is among them (plain prose is
+ * already `assistantText`), capped in count, text, and argument size.
+ */
+function boundedParts(parts: readonly PresentationPart[] | undefined): PresentationPart[] | undefined {
+  if (!parts?.some((part) => part.type === "toolCall")) return undefined;
+  const kept: PresentationPart[] = [];
+  for (const part of parts.slice(0, PRESENTATION_HISTORY_MAX_PARTS)) {
+    if (part.type === "text") {
+      const text = truncateText(part.text).text;
+      if (text.trim() !== "") kept.push({ type: "text", text });
+      continue;
+    }
+    const oversized = JSON.stringify(part.arguments).length > PRESENTATION_HISTORY_MAX_PART_ARGUMENT_CHARS;
+    kept.push({
+      type: "toolCall",
+      id: part.id,
+      name: part.name,
+      arguments: oversized ? { truncated: true } : part.arguments,
+      ...(part.failed ? { failed: true } : {}),
+    });
+  }
+  return kept;
+}
+
 function truncateText(value: string): { text: string; truncated: boolean } {
   return value.length <= PRESENTATION_HISTORY_MAX_TEXT_CHARS
     ? { text: value, truncated: false }
@@ -303,6 +376,7 @@ export class PresentationHistoryStore {
 
       const owner = truncateText(turn.ownerPrompt);
       const assistant = truncateText(turn.assistantText);
+      const parts = boundedParts(turn.assistantParts);
       if (state.lastSequence >= Number.MAX_SAFE_INTEGER) throw invalidHistory(path);
       state.lastSequence += 1;
       state.lastSourceOrdinal = turn.sourceOrdinal;
@@ -316,6 +390,7 @@ export class PresentationHistoryStore {
         ownerTextTruncated: owner.truncated,
         assistantText: assistant.text,
         assistantTextTruncated: assistant.truncated,
+        ...(parts ? { assistantParts: parts } : {}),
         outcome: turn.outcome,
       });
       let text = serialized(state);

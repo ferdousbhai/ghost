@@ -2478,6 +2478,7 @@ export class ClaudeCodeRuntime {
           sourceOrdinal: ownerTurnId,
           ownerPrompt,
           assistantText: resultText,
+          assistantParts: adapter.exchangeParts(),
           outcome: completed.subtype === "success" || interruptedForSteer ? "completed" : "failed",
         };
         if (completed.subtype !== "success" && !interruptedForSteer) {

@@ -308,3 +308,44 @@ describe("Claude Agent SDK -> pi-messages", () => {
     ]);
   });
 });
+
+describe("exchange parts", () => {
+  it("collects prose and tool calls in order, marks failures, and resets per exchange", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.handle(streamEvent({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "Checking " },
+    }));
+    adapter.handle(streamEvent({
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "the file." },
+    }));
+    adapter.handle(streamEvent({ type: "content_block_stop", index: 0 }));
+    callTool(adapter, {
+      index: 1,
+      block: { type: "tool_use", id: "call-1", name: "Read", input: {} },
+      partialJson: '{"file_path":"/etc/hostname"}',
+    });
+    adapter.handle(toolResults([{ type: "tool_result", tool_use_id: "call-1", content: "nope", is_error: true }]));
+    adapter.handle(streamEvent({
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "It failed." },
+    }));
+    adapter.handle(streamEvent({ type: "content_block_stop", index: 0 }));
+    expect(adapter.exchangeParts()).toEqual([
+      { type: "text", text: "Checking the file." },
+      { type: "toolCall", id: "call-1", name: "Read", arguments: { file_path: "/etc/hostname" }, failed: true },
+      { type: "text", text: "It failed." },
+    ]);
+    expect(adapter.exchangeText()).toBe("Checking the file.It failed.");
+
+    adapter.beginExchange("and now?");
+    expect(adapter.exchangeParts()).toEqual([]);
+    expect(adapter.exchangeText()).toBe("");
+    expect(events).toContainEqual({ type: "owner_message", text: "and now?" });
+  });
+});

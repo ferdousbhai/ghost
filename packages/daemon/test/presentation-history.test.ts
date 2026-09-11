@@ -129,6 +129,53 @@ describe("presentation history", () => {
       .rejects.toMatchObject({ code: "presentation_history_invalid", status: 500 });
   });
 
+  it("keeps an exchange's ordered parts when a tool call is among them, bounded", async () => {
+    const dir = sessionDir();
+    const store = new PresentationHistoryStore();
+    const huge = { blob: "y".repeat(9_000) };
+    const state = await store.recordSettledTurn(dir, identity, {
+      ...turn(1, "Done."),
+      assistantParts: [
+        { type: "text", text: "Checking the file" },
+        { type: "toolCall", id: "call-1", name: "Read", arguments: { file_path: "/etc/hostname" } },
+        { type: "toolCall", id: "call-2", name: "Bash", arguments: huge, failed: true },
+        { type: "text", text: "   " },
+        { type: "text", text: "Done." },
+      ],
+    });
+    expect(state.turns[0]?.assistantParts).toEqual([
+      { type: "text", text: "Checking the file" },
+      { type: "toolCall", id: "call-1", name: "Read", arguments: { file_path: "/etc/hostname" } },
+      { type: "toolCall", id: "call-2", name: "Bash", arguments: { truncated: true }, failed: true },
+      { type: "text", text: "Done." },
+    ]);
+    // Plain prose is already assistantText; parts without a tool call are not stored.
+    const prose = await store.recordSettledTurn(dir, identity, {
+      ...turn(2, "Just words."),
+      assistantParts: [{ type: "text", text: "Just words." }],
+    });
+    expect(prose.turns[1]).not.toHaveProperty("assistantParts");
+    // The stored journal reads back with its parts intact.
+    const reread = await store.read(dir, identity);
+    expect(reread?.turns[0]?.assistantParts).toHaveLength(4);
+  });
+
+  it("rejects a stored journal whose parts are malformed", async () => {
+    const dir = sessionDir();
+    const store = new PresentationHistoryStore();
+    const state = await store.recordSettledTurn(dir, identity, {
+      ...turn(1, "Done."),
+      assistantParts: [{ type: "toolCall", id: "call-1", name: "Read", arguments: {} }],
+    });
+    const path = presentationHistoryPath(dir, identity.runtime, identity.conversationId);
+    const tampered = JSON.parse(readFileSync(path, "utf8")) as PresentationHistoryV1;
+    (tampered.turns[0] as { assistantParts: unknown }).assistantParts = [{ type: "toolCall", id: "" }];
+    writeFileSync(path, `${JSON.stringify(tampered)}\n`);
+    await expect(store.read(dir, identity))
+      .rejects.toMatchObject({ code: "presentation_history_invalid" });
+    expect(state.turns).toHaveLength(1);
+  });
+
   it("truncates owner and assistant text without hiding that it did so", async () => {
     const dir = sessionDir();
     const store = new PresentationHistoryStore();

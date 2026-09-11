@@ -1275,7 +1275,14 @@ function transcriptFromPresentation(
       },
       {
         role: "assistant",
-        content: [{ type: "text", text: turn.assistantText }],
+        // Parts carry the tool cards and the prose between them; a turn
+        // journalled before parts existed, or one with no tool call, has
+        // its final text alone.
+        content: turn.assistantParts?.length
+          ? turn.assistantParts.map((part) => (part.type === "toolCall"
+            ? { ...part, cwd: null }
+            : part))
+          : [{ type: "text", text: turn.assistantText }],
         timestamp,
         entryId: `presentation:${turn.sequence}:assistant`,
         parentId: `presentation:${turn.sequence}:owner`,

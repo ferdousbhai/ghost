@@ -106,8 +106,10 @@ conversation cwd records, tool-call cwd records, and crash markers are
 bounded sidecars under `sessions/`.
 
 Each Claude conversation also gets a bounded presentation-journal sidecar
-(`*.claude-code.presentation.json`): one owner prompt plus final assistant text
-per settled turn, so the HUD can render the conversation. It is display state,
+(`*.claude-code.presentation.json`): per settled exchange, the owner prompt,
+the final assistant text, and — when the exchange used tools — its ordered
+prose and tool calls (`assistantParts`), so the HUD reopens the conversation
+with the same tool cards and interstitial text a pi transcript shows. It is display state,
 never runtime resume state — a journal alone never publishes a conversation id,
 a journal-write failure only logs and marks the missed prefix unavailable on
 the next write, and the sidecar moves to Trash with its conversation. Pi
@@ -245,7 +247,8 @@ Claude auto-memory; persistence is the owner's documents.
 
 Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
-and browser/screen/desktop control are available on both principal paths. Steering and follow-ups into a live turn work on both.
+and browser/screen/desktop control are available on both principal paths. Steering and follow-ups into a live turn work on both, and a reopened
+conversation shows its tool cards and interstitial text on both.
 Runtime mechanics remain native. Pi exposes its transcript, branches,
 commands, and `GhostJob` state through daemon APIs; Claude serves a
 settled-turn presentation transcript and otherwise
