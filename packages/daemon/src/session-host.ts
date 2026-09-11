@@ -86,6 +86,7 @@ import type { CommandRunner } from "./tailscale-identity.js";
 import {
   loadMachineSkills,
   machineSkillPaths,
+  HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
   OWNER_HOOKS_POLICY,
@@ -2060,6 +2061,7 @@ export class SessionHost {
       ...(this.extensionOptions.extraSections ?? []),
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      HARNESS_LIMITS_POLICY,
       CONTEXT_WINDOW_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, this.ownerHome)),

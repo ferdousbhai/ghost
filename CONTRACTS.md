@@ -179,8 +179,11 @@ backup: Trash and snapper are undo, not retention.
 ## Runtime contract
 
 Both runtimes receive the same Ghost character, first
-meeting policy, Omarchy computer-use policy, scheduled-work policy,
-self-maintenance policy, and owner-context policy. The owner-context policy names the
+meeting policy, Omarchy computer-use policy, other-harnesses policy (the
+owner's agent CLIs run from Bash; their session and weekly windows are read
+from Omarchy's usage records; a limit ends in a handoff note in the owner's
+documents), scheduled-work policy, self-maintenance policy, and
+owner-context policy. The owner-context policy names the
 Documents directory in one sentence and nothing else about it. Owner
 documents are read only
 when relevant, with the runtime's own file and search tools, never injected
@@ -294,8 +297,11 @@ same jobs list from the turn's tool events (command, running/completed/failed,
 result summary), so the Jobs strip reads the same on both runtimes. Cancel is
 pi-only: Ghost cannot reach inside a native call.
 
-There is no Ghost-owned delegation system. A ghost that wants a specialist
-runs the owner's installed `pi`, `codex`, or `claude -p` from its own Bash;
+There is no Ghost-owned delegation system and no limits tool. A ghost that
+wants a specialist runs the owner's installed `pi`, `codex`, `omp`, or
+`claude -p` from its own Bash, after reading that harness's window in
+Omarchy's usage record (`HARNESS_LIMITS_POLICY` in
+[`machine-skills.ts`](packages/daemon/src/machine-skills.ts));
 that harness runs with the owner's own settings for it — its full tool set,
 project discovery, auth, and session semantics — untouched by the runtime
 parity list above.

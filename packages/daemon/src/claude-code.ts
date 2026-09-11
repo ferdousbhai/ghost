@@ -107,6 +107,7 @@ import { silentLogger, type Logger } from "./log.js";
 import {
   loadMachineSkills,
   machineSkillPaths,
+  HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
   OWNER_HOOKS_POLICY,
@@ -1169,6 +1170,7 @@ async function buildPersona(
     extraSections: [
       OMARCHY_COMPUTER_USE_POLICY,
       OWNER_DELIVERABLE_POLICY,
+      HARNESS_LIMITS_POLICY,
       OWNER_HOOKS_POLICY,
       renderOwnerContextPolicy(resolveDocumentsDirectory(process.env, self.ownerHome)),
       renderScheduledWorkPolicy(ghostName, schedule.unitDir, schedule.cliPath),

@@ -117,8 +117,10 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   [claude-code-runtime.md](claude-code-runtime.md).
 
 Both runtimes receive the same Ghost-owned context: character, first-meeting
-policy, computer-use policy, scheduled-work policy, self-maintenance policy,
-hooks policy, and owner-context policy. Owner questions, image understanding,
+policy, computer-use policy, other-harnesses policy (delegate from Bash,
+check Omarchy's usage windows first, hand off through documents on a limit),
+scheduled-work policy, self-maintenance policy, hooks policy, and
+owner-context policy. Owner questions, image understanding,
 and browser/screen/desktop control work on both. The runtime still owns its
 own mechanics, so the same ghost feels like itself on either while working the
 way that harness works.

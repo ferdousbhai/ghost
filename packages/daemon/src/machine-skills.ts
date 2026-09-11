@@ -9,6 +9,26 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
   "Use `ghost_desktop` and `ghost_screen` only when Omarchy has no route, a tried CLI route fails, or the task must manipulate content inside an arbitrary application. Use `ghost_browser` for browser pages.",
 ].join("\n");
 
+/**
+ * The other agent harnesses on the machine, and the windows they run under.
+ * Ghost owns no delegation system and no limits tool: a ghost runs the owner's
+ * installed CLIs from Bash, and Omarchy's agents panel already measures their
+ * windows into one JSON file per harness, which Bash can read.
+ */
+export const HARNESS_LIMITS_POLICY = [
+  "## Other harnesses and their limits",
+  "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs are yours to run "
+    + "from Bash (`claude -p`, `codex`, `pi`, `omp`); each keeps the owner's own settings, "
+    + "auth, and tools. Omarchy tracks each harness's session and weekly windows: before "
+    + "handing work to one, read `~/.local/state/omarchy/agents/usage/<agent>.json` (under "
+    + "`$XDG_STATE_HOME` when that is set; `limits[]` carries label, `percent` used, "
+    + "`resetsAt`; refresh with "
+    + "`omarchy agent usage-update`) and prefer the harness with room. When a run stops on "
+    + "a limit, write a handoff note in the owner's documents — what was done, what is "
+    + "verified, the exact next step — and continue on another harness or after the reset. "
+    + "Never spend a window you were not asked to spend.",
+].join("\n");
+
 /** Where finished owner-facing work goes, outside private ghost-home state. */
 export const OWNER_DELIVERABLE_POLICY = [
   "## Finished work",

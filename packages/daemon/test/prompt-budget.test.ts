@@ -17,6 +17,7 @@ import { buildGhostSystemPrompt } from "@ghost/extensions";
 import { FIRST_MEETING_SECTION } from "../src/greeting.js";
 import { CONTEXT_WINDOW_POLICY } from "../src/context-windows.js";
 import {
+  HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
   OWNER_DELIVERABLE_POLICY,
   OWNER_HOOKS_POLICY,
@@ -62,6 +63,7 @@ function renderStablePolicy(): Record<string, string> {
     "Character file": promptSection("## Character file"),
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
     "Finished work": OWNER_DELIVERABLE_POLICY,
+    "Other harnesses": HARNESS_LIMITS_POLICY,
     "Context windows": CONTEXT_WINDOW_POLICY,
     Hooks: OWNER_HOOKS_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
@@ -81,6 +83,7 @@ const CEILINGS: Record<string, number> = {
   "Character file": 928,
   "Computer use": 415,
   "Finished work": 250,
+  "Other harnesses": 774,
   "Context windows": 693,
   Hooks: 462,
   "Owner context": 822,
@@ -89,7 +92,7 @@ const CEILINGS: Record<string, number> = {
   "First meeting": 431,
 };
 
-const TOTAL_CEILING = 7813;
+const TOTAL_CEILING = 8587;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(
