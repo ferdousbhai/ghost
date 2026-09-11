@@ -25,15 +25,11 @@ package from Omarchy's repository, enables the two user services for this
 login, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
 afterwards; sections 2 and 3 describe what it did. Until the package is in
 Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
-build the same package yourself from the release, which carries its
-`PKGBUILD`:
+the same package is built from the latest release, which carries its
+`PKGBUILD`; one line does the whole thing on Omarchy:
 
 ```sh
-mkdir ghost-pkg && cd ghost-pkg
-curl -fsSLO https://github.com/ferdousbhai/ghost/releases/latest/download/PKGBUILD
-curl -fsSLO https://github.com/ferdousbhai/ghost/releases/latest/download/ghost.install
-makepkg -si
-systemctl --user enable --now ghostd.service ghost-shell.service
+curl -fsSL https://summonghost.com/install | bash
 ```
 
 To work on Ghost itself, build the rolling checkout package instead:
