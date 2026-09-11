@@ -25,8 +25,15 @@ import {
 export interface ClaudePiMessagesAdapter {
   setInternalMcpServerName(name: string): void;
   handle(message: SDKMessage): void;
-  /** A steer or follow-up the owner queued mid-turn, shown where pi shows its own. */
-  ownerMessage(text: string): void;
+  /**
+   * The next exchange of the same stream: a steer or follow-up the owner
+   * queued. Closes whatever block the previous exchange left open, shows the
+   * owner text where pi shows its dequeued messages, and starts a fresh
+   * exchange text.
+   */
+  beginExchange(ownerText: string): void;
+  /** The assistant text of the current exchange so far; a result carries none when interrupted. */
+  exchangeText(): string;
   recordUsage(result: SDKResultMessage): void;
   finishError(error: unknown, aborted?: boolean): void;
   isTerminal(): boolean;
@@ -121,6 +128,7 @@ export function createClaudePiMessagesAdapter(
   let started = false;
   let terminal = false;
   let emittedText = false;
+  let exchangeText = "";
   let internalMcpServerName = "ghost";
   const totalUsage = zeroUsage();
 
@@ -151,6 +159,7 @@ export function createClaudePiMessagesAdapter(
     send({ type: "text_start", contentIndex: block.wireIndex });
     if (initial) {
       block.content += initial;
+      exchangeText += initial;
       emittedText = true;
       send({ type: "text_delta", contentIndex: block.wireIndex, delta: initial });
     }
@@ -308,6 +317,7 @@ export function createClaudePiMessagesAdapter(
       if (!block) return;
       if (event.delta.type === "text_delta" && block.kind === "text") {
         block.content += event.delta.text;
+        exchangeText += event.delta.text;
         emittedText = true;
         send({ type: "text_delta", contentIndex: block.wireIndex, delta: event.delta.text });
       } else if (event.delta.type === "thinking_delta" && block.kind === "thinking") {
@@ -362,9 +372,14 @@ export function createClaudePiMessagesAdapter(
         });
       }
     },
-    ownerMessage(text) {
+    beginExchange(ownerText) {
+      for (const rawIndex of [...blocks.keys()]) closeBlock(rawIndex);
       ensureStarted();
-      send({ type: "owner_message", text });
+      send({ type: "owner_message", text: ownerText });
+      exchangeText = "";
+    },
+    exchangeText() {
+      return exchangeText;
     },
     recordUsage(result) {
       if (!terminal) addResultUsage(result);

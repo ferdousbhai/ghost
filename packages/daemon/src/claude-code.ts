@@ -2449,9 +2449,15 @@ export class ClaudeCodeRuntime {
           break;
         }
 
-        const resultText = "result" in completed && typeof completed.result === "string"
+        const queue = this.queues.get(key);
+        // A steer interrupts the query on purpose; that result is the end of
+        // an exchange, not a failure, and the stream stays good for the next.
+        const interruptedForSteer = completed.subtype === "error_during_execution"
+          && (queue?.steering.length ?? 0) > 0
+          && !options.signal?.aborted;
+        const resultText = ("result" in completed && typeof completed.result === "string"
           ? completed.result
-          : "";
+          : "") || adapter.exchangeText();
         settledTurn = {
           source: {
             runtime: "claude-code",
@@ -2462,9 +2468,9 @@ export class ClaudeCodeRuntime {
           sourceOrdinal: ownerTurnId,
           ownerPrompt,
           assistantText: resultText,
-          outcome: completed.subtype === "success" ? "completed" : "failed",
+          outcome: completed.subtype === "success" || interruptedForSteer ? "completed" : "failed",
         };
-        if (completed.subtype !== "success") {
+        if (completed.subtype !== "success" && !interruptedForSteer) {
           // Terminal SDK errors have a valid resume id and accounting, but the
           // stream itself is no longer a trustworthy place for another turn.
           this.retireWarm(key, live);
@@ -2507,12 +2513,12 @@ export class ClaudeCodeRuntime {
               code: "stop_hook_bounded",
             });
           }
-          // A follow-up the owner queued runs now, in this same stream, the
-          // way pi dequeues its follow-ups: the exchange so far is journalled
-          // as its own settled turn and the next prompt goes in.
-          const queue = this.queues.get(key);
-          const followUp = completed.subtype === "success" && !options.signal?.aborted
-            ? queue?.followUp.shift()
+          // A steer or follow-up the owner queued runs now, in this same
+          // stream, the way pi dequeues its own: the exchange so far is
+          // journalled as its own settled turn and the next prompt goes in.
+          const followUp = (completed.subtype === "success" || interruptedForSteer)
+              && !options.signal?.aborted
+            ? (queue?.steering.shift() ?? queue?.followUp.shift())
             : undefined;
           if (followUp !== undefined) {
             try {
@@ -2524,8 +2530,7 @@ export class ClaudeCodeRuntime {
             }
             settledTurn = undefined;
             adapter.recordUsage(completed);
-            adapter.ownerMessage(followUp);
-            if (queue) queue.steering = [];
+            adapter.beginExchange(followUp);
             ownerTurnId += 1;
             ownerPrompt = followUp;
             prompt = followUp;
@@ -2609,9 +2614,9 @@ export class ClaudeCodeRuntime {
   }
 
   /**
-   * Queue owner text into a live turn. A steer goes into the SDK input at once
-   * and Claude Code hands it to the model mid-turn; a follow-up waits for the
-   * current result and then continues the same stream. Either needs a turn
+   * Queue owner text into a live turn. A steer interrupts the running query
+   * and continues the same stream with the steer text; a follow-up waits for
+   * the current result and then continues the stream. Either needs a turn
    * that is actually running.
    */
   queueMessage(
@@ -2637,9 +2642,19 @@ export class ClaudeCodeRuntime {
       this.queues.set(key, queue);
     }
     if (mode === "steer") {
-      warm.input.push(text);
+      // Claude Code treats a message pushed mid-turn as the *next* turn, not
+      // as steering. Interrupting ends the running turn with an
+      // `error_during_execution` result; the turn loop then continues the
+      // same stream with this text, and the model answers with everything it
+      // had already produced in context — which is what steering means.
       queue.steering.push(text);
-      live.adapter.ownerMessage(text);
+      void Promise.resolve()
+        .then(() => live.query.interrupt())
+        .catch((error: unknown) => {
+          this.logger.warn("Claude Code interrupt for a steer failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
     } else {
       queue.followUp.push(text);
     }

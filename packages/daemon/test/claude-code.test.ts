@@ -4001,15 +4001,19 @@ while :; do /bin/sleep 10; done
     ]);
   });
 
-  it("hands a steer to Claude Code mid-turn and shows it on the wire", async () => {
+  it("steers by interrupting the query and continuing the stream, keeping the partial text", async () => {
     let steered = false;
-    const { seenPrompts } = setupClaudeHost({
+    let seenLifecycle: { interrupted: number } | undefined;
+    const { paths, seenPrompts } = setupClaudeHost({
       createQuery: (input, lifecycle) => {
+        seenLifecycle = lifecycle;
         const sessionId = input.options.sessionId ?? input.options.resume ?? "s";
+        const interrupted = responseMessages(sessionId, "Once upon a").map((message) =>
+          (message.type === "result"
+            ? sdkMessage({ ...message, subtype: "error_during_execution", is_error: true, errors: [] })
+            : message));
         return fakeQuery(
-          // The steer is delivered inside the running turn: it is not a turn
-          // of its own and produces no second result.
-          (turn) => (turn === 1 ? responseMessages(sessionId, "Steered answer.") : []),
+          (turn) => (turn === 1 ? interrupted : responseMessages(sessionId, "Steered answer.")),
           lifecycle,
           input.prompt,
           async (message) => {
@@ -4029,12 +4033,22 @@ while :; do /bin/sleep 10; done
       prompt: "tell me a story",
       emit: (event) => events.push(event),
     });
+    expect(seenLifecycle?.interrupted).toBe(1);
     expect(events).toContainEqual({ type: "owner_message", text: "shorter, please" });
-    // The fake pulls its input lazily, so the steer is observed through the
-    // queue state above rather than through seenPrompts; the real SDK pumps
-    // the input channel to the CLI on its own.
-    expect(seenPrompts).toHaveLength(1);
+    const deltas = events.flatMap((event) => (event.type === "text_delta" ? [event.delta] : []));
+    expect(deltas).toEqual(["Once upon a", "Steered answer."]);
+    expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.at(-1)?.type).toBe("done");
+    expect(seenPrompts.map((message) => (message.message.content as Array<{ text: string }>)[0]?.text))
+      .toEqual(["tell me a story", "shorter, please"]);
+    const journal = JSON.parse(readFileSync(
+      presentationHistoryPath(paths.sessionDir, "claude-code", "conversation-1"),
+      "utf8",
+    )) as { turns: Array<{ ownerText: string; assistantText: string; outcome: string }> };
+    expect(journal.turns.map((turn) => [turn.ownerText, turn.assistantText, turn.outcome])).toEqual([
+      ["tell me a story", "Once upon a", "completed"],
+      ["shorter, please", "Steered answer.", "completed"],
+    ]);
   });
 
   it("refuses to queue into a Claude conversation that is not streaming", async () => {
