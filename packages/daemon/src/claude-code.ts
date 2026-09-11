@@ -1438,9 +1438,9 @@ async function answerClaudeQuestion(
 }
 
 /**
- * The ghost's `mcp.json` rows Claude Code can start: credential-free stdio,
- * http, or sse rows without an explicit cwd. Everything else is reported as
- * skipped; Claude's SDK would otherwise persist those values in its own files.
+ * The ghost's `mcp.json` rows Claude Code can start: stdio, http, or sse rows,
+ * credentials and cwd included, minus the two shapes the SDK cannot express
+ * (see `claudeMcpConfigUnrepresentable`). Those are reported as skipped.
  */
 function ghostMcpServers(
   effective: EffectiveMcpRead,
@@ -1465,11 +1465,11 @@ function ghostMcpServers(
     }
     const config = server.config as OmpMcpServerConfig;
     if (config.enabled === false) continue;
-    if (claudeMcpConfigCarriesSecrets(config)) {
+    if (claudeMcpConfigUnrepresentable(config)) {
       reject(
         server.name,
-        "row skipped because Claude Code would persist its env, header, auth, OAuth, URL "
-          + "credentials, or environment expansion in its own session files.",
+        "row skipped because the Claude Agent SDK has no equivalent of its "
+          + "environment-variable expansion or its auth/oauth block.",
       );
       continue;
     }
@@ -1576,21 +1576,16 @@ function nonEmptyRecord(value: unknown): boolean {
     && Object.keys(value as Record<string, unknown>).length > 0);
 }
 
-function claudeMcpConfigCarriesSecrets(config: OmpMcpServerConfig): boolean {
+/**
+ * What the SDK's MCP config cannot say. `env` and `headers` go through as the
+ * literal values mcp.json holds, the same as on pi (CONTRACTS.md names the
+ * cost: Claude Code keeps a copy of its MCP configuration in its own storage).
+ * `${VAR}` expansion would resolve against Claude's scrubbed environment and
+ * silently differ from pi, and pi's `auth`/`oauth` blocks have no SDK shape.
+ */
+function claudeMcpConfigUnrepresentable(config: OmpMcpServerConfig): boolean {
   if (containsEnvironmentExpansion(config)) return true;
-  if (nonEmptyRecord(config.auth) || nonEmptyRecord(config.oauth)) return true;
-  const type = config.type ?? "stdio";
-  if (type === "stdio") return nonEmptyRecord((config as OmpMcpStdioServerConfig).env);
-  const remote = config as OmpMcpHttpServerConfig | OmpMcpSseServerConfig;
-  if (nonEmptyRecord(remote.headers)) return true;
-  try {
-    const url = new URL(remote.url);
-    return Boolean(url.username || url.password || url.search || url.hash);
-  } catch {
-    // Validation reports malformed URLs before this point. Treat any remaining
-    // unparsable value as unsafe instead of persisting an opaque credential.
-    return true;
-  }
+  return nonEmptyRecord(config.auth) || nonEmptyRecord(config.oauth);
 }
 
 /**

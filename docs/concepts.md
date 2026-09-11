@@ -123,10 +123,9 @@ and browser/screen/desktop control work on both. The runtime still owns its
 own mechanics, so the same ghost feels like itself on either while working the
 way that harness works.
 
-One capability gap is deliberate and stays visible in the API rather than
-being papered over: an MCP row that carries a credential is admitted by pi and
-skipped by Claude, because Claude Code would copy it into its own session
-storage outside the ghost home.
+MCP rows mean the same on both runtimes, credentials and cwd included; the
+two pi-only shapes (`${VAR}` expansion and `auth`/`oauth` blocks) are skipped
+on Claude and shown as skipped in the Resources pane.
 
 ## Models and roles
 

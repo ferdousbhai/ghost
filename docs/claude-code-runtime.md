@@ -69,8 +69,8 @@ Before each admitted owner turn Ghost:
 2. resolves and fingerprints the executable, checks its minimum version, then
    runs isolated `claude auth status --json` and requires `loggedIn:true`;
 3. builds or reuses the conversation persona;
-4. exposes Ghost tools as one in-process SDK MCP server and translates only the
-   credential-free ghost-home MCP rows;
+4. exposes Ghost tools as one in-process SDK MCP server and translates the
+   ghost-home MCP rows (all but `${VAR}` expansion and `auth`/`oauth` blocks);
 5. routes native `AskUserQuestion` permission callbacks through Ghost's
    conversation-scoped ask broker and existing HUD dialog;
 6. starts or reuses one warm SDK query and maps its messages onto Ghost's
@@ -152,8 +152,8 @@ session; the presentation journal is a daemon-owned display record, not an
 emulation of Claude's transcript.
 
 Filesystem setting sources, SDK plugin/skill discovery, and ambient MCP are
-empty. Ghost supplies only the explicit machine/ghost declarative snapshot,
-credential-free ghost-home MCP, and its in-process tools. Nothing is discovered
+empty. Ghost supplies only the explicit machine/ghost declarative snapshot, the
+ghost-home MCP rows, and its in-process tools. Nothing is discovered
 from the working directory.
 
 Claude reads and writes the owner's XDG Documents directory with its own

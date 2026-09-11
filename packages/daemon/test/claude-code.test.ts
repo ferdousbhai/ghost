@@ -3955,13 +3955,14 @@ while :; do /bin/sleep 10; done
     expect(lifecycle.closed).toBeGreaterThanOrEqual(1);
   });
 
-  it("starts Claude with the ghost's credential-free mcp.json rows and reports the rest", async () => {
+  it("starts Claude with the ghost's mcp.json rows and reports the ones the SDK cannot take", async () => {
     const { paths, seenOptions } = setupClaudeHost();
     writeFileSync(join(paths.home, "mcp.json"), JSON.stringify({
       mcpServers: {
         plain: { type: "stdio", command: process.execPath, args: ["--version"] },
         rooted: { type: "stdio", command: process.execPath, args: ["--version"], cwd: paths.home },
         secret: { type: "stdio", command: process.execPath, env: { TOKEN: "x" } },
+        expanded: { type: "stdio", command: process.execPath, env: { TOKEN: "$" + "{TOKEN}" } },
         remote: { type: "http", url: "https://mcp.example.test/", timeout: 1_500 },
         off: { type: "stdio", command: process.execPath, enabled: false },
       },
@@ -3972,7 +3973,9 @@ while :; do /bin/sleep 10; done
       emit: () => {},
     });
     const launched = seenOptions[0]?.mcpServers ?? {};
-    expect(Object.keys(launched).sort()).toEqual(["ghost", "plain", "remote", "rooted"]);
+    expect(Object.keys(launched).sort()).toEqual(["ghost", "plain", "remote", "rooted", "secret"]);
+    // Literal credentials travel as they do on pi.
+    expect(launched.secret).toMatchObject({ type: "stdio", command: process.execPath, env: { TOKEN: "x" } });
     expect(launched.plain).toMatchObject({ type: "stdio", command: process.execPath, args: ["--version"] });
     // The SDK has no cwd field, so a row's cwd becomes a shell wrapper.
     expect(launched.rooted).toMatchObject({
@@ -3986,7 +3989,8 @@ while :; do /bin/sleep 10; done
       expect.objectContaining({ name: "plain", source: "ghost", status: "admitted", enabled: true }),
       expect.objectContaining({ name: "remote", source: "ghost", status: "admitted", enabled: true }),
       expect.objectContaining({ name: "rooted", source: "ghost", status: "admitted", enabled: true }),
-      expect.objectContaining({ name: "secret", source: "ghost", status: "skipped", enabled: false }),
+      expect.objectContaining({ name: "secret", source: "ghost", status: "admitted", enabled: true }),
+      expect.objectContaining({ name: "expanded", source: "ghost", status: "skipped", enabled: false }),
       expect.objectContaining({ name: "off", source: "ghost", status: "disabled", enabled: false }),
     ]));
     expect(resources.mcpServers.every((server) => server.path === join(paths.home, "mcp.json"))).toBe(true);

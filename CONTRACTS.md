@@ -248,14 +248,15 @@ APIs; Claude serves a thin settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
 warm query.
 
-One deliberate capability gap remains. An MCP row whose `env`, `headers`,
-`auth`, `oauth`, URL, or `${VAR}` expansion carries a credential is admitted by
-Pi and skipped by Claude, because Claude Code copies a session's MCP
-configuration into its own storage outside the ghost home, where Ghost's
-lifecycle (Trash on delete, move on rename) and redaction do not reach. The
-skip is reported in the session's resources and must not be presented as a
-shared capability. A row's per-server `cwd` is honored on both runtimes (on
-Claude through a shell wrapper, since the SDK's stdio config has no cwd).
+MCP rows mean the same thing on both runtimes: `env`, `headers`, URL
+credentials, and per-server `cwd` (on Claude through a shell wrapper, since the
+SDK's stdio config has no cwd) all go through. Two shapes have no SDK
+equivalent and are skipped on Claude, reported as such in the session's
+resources: `${VAR}` expansion (it would resolve against Claude's scrubbed
+environment and silently differ from pi) and pi's `auth`/`oauth` blocks. The
+cost of the parity is named here: Claude Code keeps a copy of a session's MCP
+configuration, credentials included, in its own storage outside the ghost home,
+which Ghost's Trash-on-delete and rename do not reach.
 
 Claude Code can also serve the `advisor_model` role, independently of which
 runtime drives the ghost: both bind `roles.advisor_model` to
