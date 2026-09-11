@@ -24,8 +24,17 @@ Open the Omarchy menu, then **Install → AI → Ghost**. That installs the `gho
 package from Omarchy's repository, enables the two user services for this
 login, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
 afterwards; sections 2 and 3 describe what it did. Until the package is in
-Omarchy's repository, the entry is not there yet
-([#54](https://github.com/ferdousbhai/ghost/issues/54)).
+Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
+build the same package yourself from the release, which carries its
+`PKGBUILD`:
+
+```sh
+mkdir ghost-pkg && cd ghost-pkg
+curl -fsSLO https://github.com/ferdousbhai/ghost/releases/latest/download/PKGBUILD
+curl -fsSLO https://github.com/ferdousbhai/ghost/releases/latest/download/ghost.install
+makepkg -si
+systemctl --user enable --now ghostd.service ghost-shell.service
+```
 
 To work on Ghost itself, build the rolling checkout package instead:
 

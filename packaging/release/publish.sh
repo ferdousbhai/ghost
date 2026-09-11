@@ -106,7 +106,9 @@ gh release create "$tag" \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-x86_64.tar.zst" \
   "$out/ghost-runtime-$version-linux-x86_64.tar.zst.sha256" \
-  "$out/SHA256SUMS"
+  "$out/SHA256SUMS" \
+  "$out/omarchy-ghost-$version/PKGBUILD" \
+  "$out/omarchy-ghost-$version/ghost.install"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 printf 'next: copy %s to pkgbuilds/ghost in a fork of omacom/omarchy-pkgs and open the pull request\n' \
