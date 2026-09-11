@@ -44,7 +44,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   character.md
   skills/<name>/SKILL.md
   commands/<name>.md
-  rules/  prompts/  hooks/
+  rules/  prompts/
   AGENTS.md  CLAUDE.md
   settings.yml
   models.json
@@ -87,9 +87,9 @@ by the owner. Nothing there is indexed or injected at session start.
 
 ### Declarative resources
 
-Visible ghost-home instructions, skills, rules, Markdown commands/prompts, MCP,
-and trusted `hooks/pre` and `hooks/post` factories form an immutable session
-snapshot. Hidden compatibility roots inside a ghost home are not aliases.
+Visible ghost-home instructions, skills, rules, Markdown commands/prompts, and
+MCP form an immutable session snapshot. A ghost home carries no executable
+extension code; the only hooks are the owner's `hooks.json` commands. Hidden compatibility roots inside a ghost home are not aliases.
 Machine skills under `~/.agents/skills/` and `~/.pi/agent/skills/` enter at
 lowest precedence, then ghost resources. There is no skill-name allowlist and
 no third, per-directory resource root: whatever tree a conversation works in
@@ -248,13 +248,14 @@ APIs; Claude serves a thin settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
 warm query.
 
-Two deliberate capability gaps remain. Pi's MCP manager admits every ghost-home
-MCP row, including secret resolution and per-server cwd; Claude admits only the
-credential-free rows its SDK can represent and reports the rest as skipped in
-the session's resources. Trusted ghost-home `hooks/pre` and `hooks/post`
-extension factories are Pi-native executable extensions and do not enter
-Claude. These exceptions must stay visible in the resource/API surfaces and
-must not be presented as shared capabilities.
+One deliberate capability gap remains. An MCP row whose `env`, `headers`,
+`auth`, `oauth`, URL, or `${VAR}` expansion carries a credential is admitted by
+Pi and skipped by Claude, because Claude Code copies a session's MCP
+configuration into its own storage outside the ghost home, where Ghost's
+lifecycle (Trash on delete, move on rename) and redaction do not reach. The
+skip is reported in the session's resources and must not be presented as a
+shared capability. A row's per-server `cwd` is honored on both runtimes (on
+Claude through a shell wrapper, since the SDK's stdio config has no cwd).
 
 Claude Code can also serve the `advisor_model` role, independently of which
 runtime drives the ghost: both bind `roles.advisor_model` to

@@ -68,25 +68,9 @@ harness, and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.
 
-Ghost-owned hook extensions are a separate, pi-only mechanism. Direct,
-non-hidden `.js`/`.ts` regular files in a trusted ghost home's visible
-`hooks/pre/` and `hooks/post/` directories are Ghost extension factories
-written against `packages/extensions/src/extension-api.ts` (`registerTool`,
-`before_agent_start`); they run in-process with the daemon user's permissions
-and are adapted to pi by the daemon. Ghost opens the home and each parent
-directory without following links,
-opens the entry itself with `O_NOFOLLOW`, verifies that it is a regular file,
-and imports that pinned descriptor before binding the factory to the session.
-All dot-prefixed entries are ignored before extension or file-type checks, so
-they neither execute nor produce hook diagnostics. Visible symbolic-link entries
-and directories are rejected. The conversation cwd and hidden compatibility
-directories never contribute executable hooks.
-
-Treat a ghost home containing those visible hook files as executable code. Do
-not place an unreviewed archive or somebody else's hook extension there; remove
-the hook files before opening a session if the home is not trusted. The
-machine-level `hooks.json` commands and ghost-owned extensions do not share
-configuration, ordering, or cross-runtime semantics.
+There is no second hook mechanism. A ghost home carries no executable
+extension code; everything a hook does is a command in `hooks.json`, and it
+runs the same way for both runtimes.
 
 Each machine command runs in an owned process group. Abort, timeout, or the
 bounded 1 MiB stdout/stderr limit terminates the whole descendant tree (TERM,

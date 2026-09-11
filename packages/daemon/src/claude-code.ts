@@ -1483,18 +1483,18 @@ function ghostMcpServers(
     const type = config.type ?? "stdio";
     if (type === "stdio") {
       const stdio = config as OmpMcpStdioServerConfig;
-      if (stdio.cwd) {
-        reject(
-          server.name,
-          "row rejected because Claude Code MCP rows cannot set an explicit cwd.",
-        );
-        continue;
-      }
+      // The SDK's stdio config has no cwd field; a row's cwd is honored the
+      // way a shell would, so the same mcp.json means the same thing on pi.
+      const launch = stdio.cwd
+        ? {
+          command: "/bin/sh",
+          args: ["-c", 'cd "$0" && exec "$@"', stdio.cwd, stdio.command, ...(stdio.args ?? [])],
+        }
+        : { command: stdio.command, ...(stdio.args ? { args: stdio.args } : {}) };
       entries.push([server.name, {
         type: "stdio",
-        command: stdio.command,
+        ...launch,
         alwaysLoad: true,
-        ...(stdio.args ? { args: stdio.args } : {}),
         ...(stdio.env ? { env: stdio.env } : {}),
         ...(stdio.timeout !== undefined ? { timeout: stdio.timeout } : {}),
       }]);

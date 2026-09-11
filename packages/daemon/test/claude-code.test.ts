@@ -3960,6 +3960,7 @@ while :; do /bin/sleep 10; done
     writeFileSync(join(paths.home, "mcp.json"), JSON.stringify({
       mcpServers: {
         plain: { type: "stdio", command: process.execPath, args: ["--version"] },
+        rooted: { type: "stdio", command: process.execPath, args: ["--version"], cwd: paths.home },
         secret: { type: "stdio", command: process.execPath, env: { TOKEN: "x" } },
         remote: { type: "http", url: "https://mcp.example.test/", timeout: 1_500 },
         off: { type: "stdio", command: process.execPath, enabled: false },
@@ -3971,13 +3972,20 @@ while :; do /bin/sleep 10; done
       emit: () => {},
     });
     const launched = seenOptions[0]?.mcpServers ?? {};
-    expect(Object.keys(launched).sort()).toEqual(["ghost", "plain", "remote"]);
+    expect(Object.keys(launched).sort()).toEqual(["ghost", "plain", "remote", "rooted"]);
     expect(launched.plain).toMatchObject({ type: "stdio", command: process.execPath, args: ["--version"] });
+    // The SDK has no cwd field, so a row's cwd becomes a shell wrapper.
+    expect(launched.rooted).toMatchObject({
+      type: "stdio",
+      command: "/bin/sh",
+      args: ["-c", 'cd "$0" && exec "$@"', paths.home, process.execPath, "--version"],
+    });
     expect(launched.remote).toMatchObject({ type: "http", url: "https://mcp.example.test/", timeout: 1_500 });
     const resources = await host!.admittedResources("casper", "ghost-mcp", "claude-code");
     expect(resources.mcpServers).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "plain", source: "ghost", status: "admitted", enabled: true }),
       expect.objectContaining({ name: "remote", source: "ghost", status: "admitted", enabled: true }),
+      expect.objectContaining({ name: "rooted", source: "ghost", status: "admitted", enabled: true }),
       expect.objectContaining({ name: "secret", source: "ghost", status: "skipped", enabled: false }),
       expect.objectContaining({ name: "off", source: "ghost", status: "disabled", enabled: false }),
     ]));

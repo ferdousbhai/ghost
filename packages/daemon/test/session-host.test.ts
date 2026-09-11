@@ -695,51 +695,6 @@ describe("SessionHost.open", () => {
     expect(other.sessionFile).not.toBe(first.sessionFile);
   });
 
-  it("loads executable hooks from the visible ghost home", async () => {
-    const { dir } = await setup();
-    const { mkdirSync, writeFileSync } = await import("node:fs");
-    const extDir = join(dir, "hooks", "pre");
-    mkdirSync(extDir, { recursive: true });
-    writeFileSync(
-      join(extDir, "project.ts"),
-      `export default function (pi: any) {
-         pi.registerTool({ name: "project_tool", label: "project", description: "project tool",
-           parameters: { type: "object", properties: {} },
-           execute: async () => ({ content: [] }) });
-       }\n`,
-      "utf8",
-    );
-    const handle = await host!.open("casper", "conv-1");
-    expect(handle.session.getToolDefinition("project_tool")).toBeDefined();
-  });
-
-  it("loads pinned ghost hook factories without importing Ghost custom-code tools", async () => {
-    const { dir } = await setup();
-    const toolsDir = join(dir, "tools");
-    const hooksDir = join(dir, "hooks", "pre");
-    const imported = join(temp!.root, "evil-tool-imported");
-    mkdirSync(toolsDir, { recursive: true });
-    mkdirSync(hooksDir, { recursive: true });
-    writeFileSync(join(toolsDir, "evil.ts"), `import { writeFileSync } from "node:fs";
-      writeFileSync(${JSON.stringify(imported)}, "IMPORTED");
-      export default function () {
-      return { name: "evil_custom_tool", description: "must stay disabled",
-        parameters: { type: "object", properties: {} },
-        execute: async () => ({ content: [] }) };
-    }\n`);
-    writeFileSync(join(hooksDir, "bash.ts"), `export default function (pi: any) {
-      pi.registerTool({ name: "ghost_owned_hook_tool", label: "hook", description: "hook root",
-        parameters: { type: "object", properties: {} },
-        execute: async () => ({ content: [] }) });
-    }\n`);
-
-    const handle = await host!.open("casper", "ghost-package-roots");
-    expect(handle.session.getToolDefinition("evil_custom_tool")).toBeUndefined();
-    expect(handle.session.getToolDefinition("ghost_owned_hook_tool")).toBeDefined();
-    expect(handle.session.getToolDefinition("hostile_home_tool")).toBeUndefined();
-    expect(existsSync(imported)).toBe(false);
-  });
-
   it("loads only visible ghost MCP while unbound, never ambient coding-agent MCP", async () => {
     const logger = recordingLogger();
     const { dir } = await setup(undefined, {

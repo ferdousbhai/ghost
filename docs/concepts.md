@@ -123,12 +123,10 @@ and browser/screen/desktop control work on both. The runtime still owns its
 own mechanics, so the same ghost feels like itself on either while working the
 way that harness works.
 
-Two capability gaps are deliberate and stay visible in the API rather than
-being papered over: Pi admits every ghost-home MCP row with secret resolution,
-while Claude admits only the credential-free rows its SDK can represent and
-reports the rest as skipped; and ghost-home `hooks/pre` / `hooks/post`
-extension factories are Pi-native executable extensions that do not enter
-Claude.
+One capability gap is deliberate and stays visible in the API rather than
+being papered over: an MCP row that carries a credential is admitted by pi and
+skipped by Claude, because Claude Code would copy it into its own session
+storage outside the ghost home.
 
 ## Models and roles
 
@@ -154,8 +152,7 @@ concurrency, hosted-session, or spend cap.
 ## Extending a ghost
 
 A ghost is extended with readable files, not code: instructions, skills, rules,
-Markdown commands and prompts, MCP servers, and, for pi, trusted `hooks/pre`
-and `hooks/post` factories in the ghost home. Machine skills under
+Markdown commands and prompts, and MCP servers in the ghost home. Machine skills under
 `~/.agents/skills/` and `~/.pi/agent/skills/` enter at lowest precedence, then
 ghost-home resources. There is no skill-name allowlist, and the admitted set is
 an immutable per-session snapshot the owner can inspect through the session

@@ -143,7 +143,6 @@ import type { RunningSource } from "./running-source.js";
 import { renderSelfMaintenancePolicy, resolveSelfCheckout, resolveSettingsCwd } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
-import { loadGhostHookExtensions } from "./hook-extensions.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";
@@ -2132,14 +2131,6 @@ export class SessionHost {
       operations: createLocalBashOperations(),
       onSettled: (job) => this.deliverJobResult(key, job),
     });
-    const hookExtensions = await loadGhostHookExtensions(paths.home);
-    extensionFactories.push(...hookExtensions.factories);
-    for (const error of hookExtensions.errors) {
-      logger.error("extension failed to load", {
-        path: error.path,
-        error: error.error,
-      });
-    }
     const liveMcp = mcp;
     extensionFactories.push(mcpToolsExtension(liveMcp));
     const chatRef = resolveChatModelRef(readGhostModels(paths.home));
