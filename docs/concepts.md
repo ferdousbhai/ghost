@@ -239,5 +239,6 @@ If you expect one of these, it is missing on purpose:
   [desktop-helper.md](desktop-helper.md),
   [injection-defense.md](injection-defense.md) — one document per protocol.
 - [self-maintenance.md](self-maintenance.md) — how a ghost edits and restarts
-  itself; [packaging/release/README.md](../packaging/release/README.md) — how
+  itself; [`CONTRIBUTING.md`](../CONTRIBUTING.md) — how a ghost or a human
+  sends a fix upstream; [packaging/release/README.md](../packaging/release/README.md) — how
   a release is cut and reaches Omarchy.

@@ -122,6 +122,7 @@ import { loadGhostSettings } from "./ghost-settings.js";
 import type { RunningSource } from "./running-source.js";
 import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
 import { claudeSdkTranscriptPath } from "./claude-sdk-files.js";
+import { CLAUDE_HISTORY_TOOL_NAME, createClaudeHistoryTool, type ClaudeHistoryFile } from "./claude-history.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
 import { loadDeclarativeSnapshot } from "./declarative-resources.js";
 import {
@@ -2212,12 +2213,21 @@ export class ClaudeCodeRuntime {
       }
       const sdk = await this.loadSdk();
       this.assertTurnAdmitted(options.signal);
-      const baseBridge = await buildMcpTools(
+      const ghostBridge = await buildMcpTools(
         paths.home,
         ghost.name,
         this.extensionOptions,
         sdk,
       );
+      // `history` is pi's context-window tool; here it reads Claude Code's
+      // own transcripts, so a ghost can search its past on either runtime.
+      const baseBridge = {
+        tools: [
+          ...ghostBridge.tools,
+          createClaudeHistoryTool(sdk, (all) => this.historyFiles(ghost, conversationId, all)),
+        ],
+        names: [...ghostBridge.names, CLAUDE_HISTORY_TOOL_NAME],
+      };
       this.assertTurnAdmitted(options.signal);
       try {
         await this.probe.assertExecutable(probed);
@@ -2697,6 +2707,28 @@ export class ClaudeCodeRuntime {
     const metadata: ClaudeSessionMetadata = { ...loaded };
     delete (metadata as LoadedClaudeSessionMetadata).resumeBlocked;
     return metadata;
+  }
+
+  /**
+   * The transcripts `history` may read: this conversation's first, then, when
+   * asked for all, every other conversation of the ghost that has one.
+   */
+  private async historyFiles(
+    ghost: Ghost,
+    conversationId: string,
+    all: boolean,
+  ): Promise<ClaudeHistoryFile[]> {
+    const files: ClaudeHistoryFile[] = [];
+    const current = await this.readSession(ghost, conversationId);
+    const currentPath = current ? claudeSdkTranscriptPath(current.sessionId, this.environment) : undefined;
+    if (currentPath) files.push({ path: currentPath, label: "" });
+    if (!all) return files;
+    for (const session of await this.listSessions(ghost)) {
+      if (session.conversationId === conversationId) continue;
+      const path = claudeSdkTranscriptPath(session.sessionId, this.environment);
+      if (path) files.push({ path, label: session.title ?? session.conversationId });
+    }
+    return files;
   }
 
   async listSessions(ghost: Ghost): Promise<ClaudeSessionMetadata[]> {

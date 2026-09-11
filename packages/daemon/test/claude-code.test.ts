@@ -1904,6 +1904,8 @@ fi
     expect(appended).not.toContain("~/.config/systemd/user");
     expect(appended).not.toContain("legacy.md");
     expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_browser");
+    // pi's context-window `history`, here over Claude Code's own transcripts.
+    expect(seenOptions[0]?.allowedTools).toContain("mcp__ghost__ghost_history");
     // The query stays warm between turns, so nothing is closed yet.
     expect(lifecycle.closed).toBe(0);
     const sessionId = seenOptions[0]?.sessionId;

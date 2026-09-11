@@ -103,7 +103,8 @@ never enter a session.
 What the ghost does:
 
 1. Read the clone's `CLAUDE.md` and `CONTRACTS.md` first. They are its self map.
-2. Branch, edit, run the touched package tests and `typecheck`.
+2. `git fetch`, branch from `origin/master`, edit, run the touched package
+   tests and `typecheck`.
 3. Commit with the reason in the message.
 4. `pnpm build`.
 5. Tell you it is going down, finish the turn, then schedule the restart.
@@ -118,6 +119,15 @@ shutdown drain is in [`main.ts`](../packages/daemon/src/main.ts) and the unit's
 `TimeoutStopSec` in
 [`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the
 outer bound behind it.
+
+## Send it upstream
+
+The ghost home is one owner's. `packages/`, `CONTRACTS.md`, and `docs/` are
+every ghost's, so a fix there that is not an owner preference belongs in a pull
+request. The recipe is [`CONTRIBUTING.md`](../CONTRIBUTING.md) in the clone:
+you set up `gh auth` and a fork remote once, the ghost branches from fetched
+`origin/master` before it edits, and it shows you the branch and asks before
+it pushes, because the push and the PR go out under your GitHub account.
 
 ## Verify
 

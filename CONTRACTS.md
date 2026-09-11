@@ -207,7 +207,10 @@ is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
 line, `new_context` rolls over on demand with the ghost's own handoff, and
 `history` searches and reads the transcript across windows
 ([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
-pi-posthorse). Claude Code's native compaction is unaffected. Ghost adds
+pi-posthorse). Claude Code keeps its native compaction, and its `history`
+(`ghost_history`, [`claude-history.ts`](packages/daemon/src/claude-history.ts))
+searches and reads Claude Code's own transcripts — the current conversation, or
+every conversation of the ghost — with the same search-then-read interface. Ghost adds
 `ask`, background jobs, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their

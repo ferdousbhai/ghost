@@ -113,7 +113,8 @@ as on pi. Native scheduling, notifications, remote triggers, worktrees,
 subagents, web tools, todos, and planning are not offered to a ghost; a ghost
 that wants one of those harnesses in full runs `claude -p`, `codex`, or `pi`
 from Bash, where the owner's own settings apply. Ghost's in-process
-browser/screen/desktop tools are additive. Claude auto-memory is disabled;
+browser/screen/desktop tools are additive, and so is `ghost_history`, which
+reads Claude Code's own transcripts the way pi's `history` reads its JSONL. Claude auto-memory is disabled;
 durable knowledge, plans, tasks, and the ghost's own notes live in the owner's
 documents.
 
