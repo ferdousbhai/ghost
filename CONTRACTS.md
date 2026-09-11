@@ -45,7 +45,7 @@ The default root is `~/ghosts`; each direct child is one ghost:
   skills/<name>/SKILL.md
   commands/<name>.md
   rules/  prompts/
-  AGENTS.md  CLAUDE.md
+  AGENTS.md            (CLAUDE.md is read only when AGENTS.md is absent)
   settings.yml
   models.json
   mcp.json
@@ -161,8 +161,9 @@ ghost home directory, which moves as one unit.
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
 The rollback column assumes Omarchy's btrfs layout, where `/` is the `@`
-subvolume and `/home` is `@home` with no snapper config of its own. Confirm it
-before relying on the column:
+subvolume and `/home` is `@home` with no snapper config of its own (verified
+on Omarchy 4.0.0.alpha, 2026-09-11: snapper lists one config, `root`, for
+`/`). On another layout, confirm before relying on the column:
 
 ```sh
 findmnt -no SOURCE / /home
