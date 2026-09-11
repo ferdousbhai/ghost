@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { DAEMON_VERSION } from "../version.js";
 import { homedir } from "node:os";
 import { isDirectInvocation } from "../direct-invocation.js";
 import {
@@ -363,13 +364,9 @@ export function commandHelp(verb: string): string {
 }
 
 export function version(runtime: Pick<CliRuntime, "env">): string {
-  // The literal `process.env.GHOSTD_VERSION` read is load-bearing: the release
-  // bundle bakes the version by textual substitution of exactly that
-  // expression (scripts/build-runtime.sh --define). The injected env is
-  // consulted first so the test seam still overrides it.
-  return runtime.env.GHOSTD_VERSION?.trim()
-    || process.env.GHOSTD_VERSION?.trim()
-    || "0.0.0";
+  // The injected env is consulted first so the test seam still overrides the
+  // build-time define and the checkout's package.json behind DAEMON_VERSION.
+  return runtime.env.GHOSTD_VERSION?.trim() || DAEMON_VERSION;
 }
 
 function runtimeOptions(options: GhostCliOptions): CliRuntime {
