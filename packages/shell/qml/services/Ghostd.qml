@@ -1391,6 +1391,7 @@ Singleton {
             lastStreamActivity: 0,
             activity: "",
             statusText: "",
+            limitNotice: "",
             lastError: "",
             pendingAsk: null,
             askSubmitting: false,
@@ -2902,6 +2903,7 @@ Singleton {
     function rehydrateTurn(state: var, messages: var): void {
         state.activity = "";
         state.statusText = "";
+        state.limitNotice = "";
         const storedRows = TurnBlocks.rows(messages);
         state.hydratedRowCount = storedRows.length;
         const rows = CommandTranscript.merge(storedRows, root.commandExchangesFor(state));
@@ -3201,6 +3203,7 @@ Singleton {
         root.resetInteractionStateFor(state);
         state.activity = "waiting for ghostd";
         state.lastError = "";
+        state.limitNotice = "";
         state.streaming = true;
         state.lastStreamActivity = Date.now();
         root.updateLiveConversationKeys();
@@ -3446,6 +3449,12 @@ Singleton {
                 ? "switching model · " + event.to
                 : "using fallback · " + event.model;
             break;
+        case "limit_reached":
+            // The terminal error that follows says "provider failed"; this
+            // says what actually happened and when the window opens again.
+            state.limitNotice = root.limitNoticeText(event);
+            state.activity = "limit reached";
+            break;
         case "branch_changed":
             if (!root.transcriptMatchesIdentity(event.transcript, state)) {
                 root.endTurnState(state, "ghostd sent mismatched branch state");
@@ -3466,7 +3475,7 @@ Singleton {
             break;
         case "error":
             root.endTurnState(state,
-                event.errorMessage || ("the ghost stopped: " + event.reason));
+                state.limitNotice || event.errorMessage || ("the ghost stopped: " + event.reason));
             break;
         default:
             console.warn("ghost: unknown pi-messages event:", event.type);
@@ -3537,6 +3546,20 @@ Singleton {
             root.setTurnRow(state, state.assistantRow, "tools", tools);
         state.presentationDirty = false;
         root.projectTurnFields(state);
+    }
+
+    /** "Claude Code weekly limit reached · resets Thu 20:00", from a limit_reached event. */
+    function limitNoticeText(event: var): string {
+        const harness = event.harness === "claude-code" ? "Claude Code" : "pi";
+        const kind = String(event.kind || "limit").replace("_", " ");
+        const window = event.window ? " (" + String(event.window).replace(/_/g, " ") + ")" : "";
+        let resets = "";
+        if (event.resetsAt) {
+            const at = new Date(event.resetsAt);
+            if (!isNaN(at.getTime()))
+                resets = " · resets " + Qt.formatDateTime(at, "ddd HH:mm");
+        }
+        return harness + " " + kind + window + " reached" + resets;
     }
 
     function endTurnState(state: var, errorMessage: string): void {

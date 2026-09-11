@@ -121,6 +121,7 @@ export type PiMessagesEvent =
       usage: Usage;
       responseId?: string;
     }
+  | LimitReachedEvent
   | {
       type: "error";
       reason: string;
@@ -128,6 +129,34 @@ export type PiMessagesEvent =
       errorMessage?: string;
       responseId?: string;
     };
+
+/**
+ * A harness or provider refused on quota. Sent before the terminal `error`
+ * (or on its own when the runtime reports a limit without ending the turn),
+ * so the HUD and hooks can say "limit, resets at …" instead of a generic
+ * failure. `resetsAt` is ISO time when the runtime knows it.
+ */
+export interface LimitReachedEvent {
+  type: "limit_reached";
+  harness: "pi" | "claude-code";
+  kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
+  window?: string;
+  resetsAt?: string;
+  message: string;
+}
+
+const LIMIT_PATTERNS: ReadonlyArray<[RegExp, LimitReachedEvent["kind"]]> = [
+  [/\b429\b|rate.?limit|too many requests/iu, "rate_limit"],
+  [/usage limit|hit your limit|limit reached|quota|exceeded your|out of credits|insufficient(_| )credits/iu, "usage_limit"],
+  [/overloaded|capacity|503\b|529\b/iu, "overloaded"],
+  [/billing|payment|credit balance/iu, "billing"],
+];
+
+/** The kind of limit a runtime's error text describes, or null for an ordinary failure. */
+export function classifyLimitMessage(text: string): LimitReachedEvent["kind"] | null {
+  for (const [pattern, kind] of LIMIT_PATTERNS) if (pattern.test(text)) return kind;
+  return null;
+}
 
 export interface TranscriptWireView {
   id: string;
@@ -572,6 +601,10 @@ export function createPiMessagesAdapter(
     finishDone(reason) {
       ensureStarted();
       if (lastStopReason === "error" || lastStopReason === "aborted") {
+        const kind = lastStopReason === "error" && lastErrorMessage
+          ? classifyLimitMessage(lastErrorMessage)
+          : null;
+        if (kind) send({ type: "limit_reached", harness: "pi", kind, message: lastErrorMessage ?? "" });
         send({
           type: "error",
           reason: lastStopReason,
@@ -588,11 +621,14 @@ export function createPiMessagesAdapter(
     },
     finishError(error, aborted = false) {
       ensureStarted();
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const kind = aborted ? null : classifyLimitMessage(errorMessage);
+      if (kind) send({ type: "limit_reached", harness: "pi", kind, message: errorMessage });
       send({
         type: "error",
         reason: aborted ? "aborted" : "error",
         usage: copyUsage(usage),
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage,
       });
     },
     isTerminal() {

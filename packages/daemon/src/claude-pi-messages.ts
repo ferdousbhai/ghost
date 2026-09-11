@@ -16,6 +16,7 @@ import type {
 import type { PresentationPart } from "./presentation-history.js";
 import {
   addUsage,
+  classifyLimitMessage,
   copyUsage,
   toolResultSummary,
   zeroUsage,
@@ -362,6 +363,25 @@ export function createClaudePiMessagesAdapter(
         handleToolResults((message.message as { content?: unknown } | undefined)?.content);
         return;
       }
+      if (message.type === "rate_limit_event") {
+        // Claude Code reports its claude.ai windows as it goes; only a
+        // rejection is a limit. Warnings stay quiet — the policy already tells
+        // the ghost where to read utilisation when it plans.
+        const info = message.rate_limit_info;
+        if (info.status === "rejected") {
+          const overage = info.isUsingOverage === true || info.overageInUse === true;
+          const resets = info.resetsAt ?? info.overageResetsAt;
+          send({
+            type: "limit_reached",
+            harness: "claude-code",
+            kind: overage ? "billing" : "usage_limit",
+            ...(info.rateLimitType ? { window: info.rateLimitType } : {}),
+            ...(resets ? { resetsAt: new Date(resets * 1000).toISOString() } : {}),
+            message: `Claude Code ${info.rateLimitType ?? "usage"} limit reached.`,
+          });
+        }
+        return;
+      }
       if (message.type !== "result") return;
 
       // Older Claude Code builds can omit partial events. Preserve the answer
@@ -378,12 +398,17 @@ export function createClaudePiMessagesAdapter(
         const reason = message.stop_reason === "max_tokens" ? "length" : "stop";
         send({ type: "done", reason, usage, responseId: message.session_id });
       } else {
+        const errorMessage = resultErrorMessage(message);
+        const kind = classifyLimitMessage(errorMessage);
+        if (kind) {
+          send({ type: "limit_reached", harness: "claude-code", kind, message: errorMessage });
+        }
         send({
           type: "error",
           reason: "error",
           usage,
           responseId: message.session_id,
-          errorMessage: resultErrorMessage(message),
+          errorMessage,
         });
       }
     },

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  classifyLimitMessage,
   createPiMessagesAdapter,
   encodeSseEvent,
   parsePiMessagesRequest,
@@ -458,5 +459,31 @@ describe("parsePiMessagesRequest", () => {
       { type: "image", data: "..." },
       { type: "text", text: "b" },
     ])).toBe("a\nb");
+  });
+});
+
+describe("limit_reached", () => {
+  it("classifies quota refusals and leaves ordinary failures alone", () => {
+    expect(classifyLimitMessage("429 Too Many Requests")).toBe("rate_limit");
+    expect(classifyLimitMessage("You've hit your usage limit until 5pm")).toBe("usage_limit");
+    expect(classifyLimitMessage("Insufficient credits on this key")).toBe("usage_limit");
+    expect(classifyLimitMessage("The upstream model is overloaded (529)")).toBe("overloaded");
+    expect(classifyLimitMessage("Your credit balance is too low")).toBe("billing");
+    expect(classifyLimitMessage("ECONNRESET while reading the response")).toBeNull();
+  });
+
+  it("sends limit_reached before the terminal error for a quota refusal", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createPiMessagesAdapter((event) => events.push(event));
+    adapter.finishError(new Error("Rate limit exceeded: 429"));
+    expect(events.map((event) => event.type)).toEqual(["start", "limit_reached", "error"]);
+    expect(events[1]).toMatchObject({ harness: "pi", kind: "rate_limit", message: "Rate limit exceeded: 429" });
+  });
+
+  it("does not call an abort or a plain failure a limit", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createPiMessagesAdapter((event) => events.push(event));
+    adapter.finishError(new Error("rate limit"), true);
+    expect(events.map((event) => event.type)).toEqual(["start", "error"]);
   });
 });

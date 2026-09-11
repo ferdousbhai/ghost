@@ -349,3 +349,44 @@ describe("exchange parts", () => {
     expect(events).toContainEqual({ type: "owner_message", text: "and now?" });
   });
 });
+
+describe("limits", () => {
+  it("reports a rejected claude.ai window as limit_reached with its reset time", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.handle(message({
+      type: "rate_limit_event",
+      uuid: "rl-1",
+      session_id: "session-1",
+      rate_limit_info: { status: "allowed_warning", rateLimitType: "five_hour", utilization: 0.9 },
+    }));
+    expect(events).toEqual([]);
+    adapter.handle(message({
+      type: "rate_limit_event",
+      uuid: "rl-2",
+      session_id: "session-1",
+      rate_limit_info: { status: "rejected", rateLimitType: "seven_day", resetsAt: 1_789_600_000 },
+    }));
+    expect(events).toEqual([{
+      type: "limit_reached",
+      harness: "claude-code",
+      kind: "usage_limit",
+      window: "seven_day",
+      resetsAt: new Date(1_789_600_000 * 1000).toISOString(),
+      message: "Claude Code seven_day limit reached.",
+    }]);
+  });
+
+  it("classifies a quota error result and still ends the turn with error", () => {
+    const events: PiMessagesEvent[] = [];
+    const adapter = createClaudePiMessagesAdapter((event) => events.push(event));
+    adapter.handle(message({
+      ...JSON.parse(JSON.stringify(success())),
+      subtype: "error_during_execution",
+      is_error: true,
+      errors: ["You've hit your usage limit."],
+    }));
+    expect(events.map((event) => event.type)).toEqual(["start", "limit_reached", "error"]);
+    expect(events[1]).toMatchObject({ harness: "claude-code", kind: "usage_limit" });
+  });
+});

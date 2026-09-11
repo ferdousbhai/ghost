@@ -90,7 +90,12 @@ export async function sayCommand(
     options: { sessionId: conversationId },
   }, (unknownEvent) => {
     const event = unknownEvent as StreamEvent;
-    if (event.type === "error") {
+    if (event.type === "limit_reached") {
+      const limit = event as unknown as { harness?: string; kind?: string; window?: string; resetsAt?: string };
+      const when = limit.resetsAt ? ` · resets ${new Date(limit.resetsAt).toLocaleString()}` : "";
+      const kind = String(limit.kind ?? "limit").replace("_", " ");
+      ctx.runtime.stderr.write(`ghost: ${limit.harness ?? "runtime"} ${kind}${limit.window ? ` (${limit.window})` : ""} reached${when}\n`);
+    } else if (event.type === "error") {
       terminal = "error";
       ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);
     } else if (event.type === "done" && terminal !== "error") terminal = "done";
