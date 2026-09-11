@@ -63,6 +63,12 @@ install -Dm644 "$source_root/packages/shell/contrib/systemd/ghost-shell.service"
   "$pkgdir/usr/lib/systemd/user/ghost-shell.service"
 install -Dm644 "$source_root/packages/shell/contrib/ghost.desktop" \
   "$pkgdir/usr/share/applications/ghost.desktop"
+install -Dm644 "$source_root/packages/shell/contrib/icons/ghost.svg" \
+  "$pkgdir/usr/share/icons/hicolor/scalable/apps/ghost.svg"
+for size in 48 128 256; do
+  install -Dm644 "$source_root/packages/shell/contrib/icons/ghost-$size.png" \
+    "$pkgdir/usr/share/icons/hicolor/${size}x${size}/apps/ghost.png"
+done
 install -Dm755 "$source_root/packaging/arch/service-browser-smoke.sh" \
   "$pkgdir/usr/lib/ghost/package-smoke/service-browser-smoke.sh"
 

@@ -51,6 +51,8 @@ require_file /usr/share/ghost/chromium-extension/manifest.json
 require_file /usr/lib/systemd/user/ghostd.service
 require_file /usr/lib/systemd/user/ghost-shell.service
 require_file /usr/share/applications/ghost.desktop
+require_file /usr/share/icons/hicolor/scalable/apps/ghost.svg
+require_file /usr/share/icons/hicolor/128x128/apps/ghost.png
 require_file /usr/lib/ghost/runtime/ghostd.js
 require_file /usr/lib/ghost/runtime/ghost.js
 require_file /usr/lib/ghost/runtime/photon_rs_bg.wasm
