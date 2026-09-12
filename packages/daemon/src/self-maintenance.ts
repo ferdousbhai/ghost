@@ -58,7 +58,7 @@ function loopLines(checkout: string | null): string[] {
   return [
     "The loop: `git fetch` and branch from upstream master → edit → run the touched package's tests and `typecheck` → commit with the reason in the message → `pnpm build` → restart.",
     "This is you working in your own Bash, not a delegated task, so the task rules about worktrees and branches do not apply here.",
-    "Your home is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When something you did there would help every owner, a bug fixed, a real efficiency gain, a policy line that proved wrong, consider offering it upstream; the recipe is `CONTRIBUTING.md` in the checkout. The PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
+    "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When something you did there would help every owner, a bug fixed, a real efficiency gain, a policy line that proved wrong, consider offering it upstream; the recipe is `CONTRIBUTING.md` in the checkout. The PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
   ];
 }
 
