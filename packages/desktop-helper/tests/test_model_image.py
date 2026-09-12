@@ -6,6 +6,7 @@ import base64
 import io
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from ghost_desktop_helper.model_image import (
@@ -26,7 +27,7 @@ def test_scale_is_the_monitor_scale_then_the_provider_edge_cap():
     assert model_scale(1920, 1200, 1.0) == MODEL_IMAGE_MAX_EDGE / 1920
     assert model_scale(3840, 2160, 1.0) == MODEL_IMAGE_MAX_EDGE / 3840
     # A scaled display whose logical size still exceeds the cap gets both.
-    assert model_scale(5120, 2880, 1.5) == (1 / 1.5) * (MODEL_IMAGE_MAX_EDGE / (5120 / 1.5))
+    assert model_scale(5120, 2880, 1.5) == pytest.approx(MODEL_IMAGE_MAX_EDGE / 5120)
 
 
 def test_a_capture_at_logical_size_needs_no_copy(tmp_path: Path):
