@@ -101,9 +101,11 @@ describe("windows", () => {
     expect(items[1]?.text).toContain("[context window] Handoff: handoff");
   });
 
-  it("keeps the prompt section short and names both tools", () => {
+  it("keeps the prompt section short and names the recovery tool", () => {
     expect(CONTEXT_WINDOW_POLICY.startsWith("## Context windows")).toBe(true);
     expect(CONTEXT_WINDOW_POLICY).toContain("`history`");
-    expect(CONTEXT_WINDOW_POLICY).toContain("`new_context`");
+    // The reminder that fires before the line says what to save and how;
+    // `new_context` describes itself, so the section does not repeat it.
+    expect(CONTEXT_WINDOW_POLICY.length).toBeLessThan(450);
   });
 });

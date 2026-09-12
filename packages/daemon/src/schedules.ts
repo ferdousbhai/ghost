@@ -31,7 +31,7 @@ import { silentLogger, type Logger } from "./log.js";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
 const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
-const MAX_SCHEDULE_SLUG_LENGTH = 64;
+export const MAX_SCHEDULE_SLUG_LENGTH = 64;
 
 const TIMER_SUFFIXES = [".timer"] as const;
 const UNIT_SUFFIXES = [...TIMER_SUFFIXES, ".service"] as const;
@@ -200,32 +200,9 @@ export function renderScheduledWorkPolicy(
 ): string {
   if (!isAbsolute(unitDir)) throw new TypeError("schedule unit directory must be absolute");
   if (!isAbsolute(cliPath)) throw new TypeError("ghost CLI path must be absolute");
-  const unit = `${scheduleUnitPrefix(ghostName)}<slug>`;
   return [
     "## Scheduled work",
-    "Clock work is a systemd user timer written through Bash; Ghost has no scheduler. A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
-    `Write both units in ${JSON.stringify(resolve(unitDir))}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
-    "The `ghost` CLI authenticates itself:",
-    "```ini",
-    `# ${unit}.service`,
-    "[Service]",
-    "Type=oneshot",
-    "# Or the turn is SIGTERMed after ~90s, mid-answer.",
-    "TimeoutStartSec=infinity",
-    `ExecStart=${cliPath} say --new --ghost ${ghostName} "<the prompt>"`,
-    "```",
-    "```ini",
-    `# ${unit}.timer`,
-    "[Timer]",
-    "OnCalendar=Mon..Fri 09:00 America/New_York",
-    "# Catch up after sleep or downtime.",
-    "Persistent=true",
-    "[Install]",
-    "WantedBy=timers.target",
-    "```",
-    "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
-    "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
-    "Timers fire only while the owner is logged in (the daemon runs in their graphical session), so promise no check-ins while they are away.",
+    `Clock work is a systemd user timer written through Bash, both units in ${JSON.stringify(resolve(unitDir))} named \`${scheduleUnitPrefix(ghostName)}<slug>\`; Ghost has no scheduler. Read \`ghost help timers\` before writing one. Timers fire only while the owner is logged in, so promise no check-ins while they are away.`,
   ].join("\n");
 }
 

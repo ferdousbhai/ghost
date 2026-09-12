@@ -119,6 +119,27 @@ describe("a ghost's own shell addresses its conversation", () => {
   });
 });
 
+describe("ghost help <topic>", () => {
+  it("renders a recipe for the ghost the shell belongs to, without a daemon", async () => {
+    const result = await runCli(["help", "timers"], {
+      env: { GHOSTD_PORT: "7718", GHOST: "casper", XDG_CONFIG_HOME: "/tmp/ghost-cli-unit/xdg", PATH: "/nonexistent" },
+      home: "/tmp/ghost-cli-unit",
+    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("ghost-timer-v1-6-casper-<slug>");
+    expect(result.stdout).toContain('"/tmp/ghost-cli-unit/xdg/systemd/user"');
+    expect(result.stdout).toContain("ExecStart=/usr/bin/ghost say --new --ghost casper");
+  });
+
+  it("wakes the shell's own conversation in the restart recipe", async () => {
+    const result = await runCli(["help", "self"], {
+      env: { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "pi:conv-mine", PATH: "/nonexistent" },
+      home: "/tmp/ghost-cli-unit",
+    });
+    expect(result.stdout).toContain("ghost say --ghost casper --session pi:conv-mine");
+  });
+});
+
 describe("CLI argv parser", () => {
   it("parses long, equals, short-value, boolean, and terminator forms", () => {
     expect(parseArgs([

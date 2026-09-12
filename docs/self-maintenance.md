@@ -80,6 +80,10 @@ re-execs `qs`. `systemctl --user reload ghost-shell` runs the unit's
 ghosts, hooks, and sessions. That is a data refresh, not a QML reload. Use
 restart for code.
 
+The ghost's prompt carries only what runs it and which clone is its checkout;
+the loop, the restart unit, and the undo list are `ghost help self`, read on
+the turn that needs them.
+
 ## Which checkout
 
 There is nothing to configure. When ghostd runs from a clone, that clone is

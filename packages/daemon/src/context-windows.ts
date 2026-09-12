@@ -32,7 +32,7 @@ const HISTORY_SEARCH_LIMIT = 50;
 
 export const CONTEXT_WINDOW_POLICY = [
   "## Context windows",
-  "When your context fills, Ghost starts a fresh window holding only a recovery record of the owner's inputs and the last tool batch, never a model-written summary; earlier conversation stays in the transcript, reachable through `history` (search, then read by entry id). A best-effort checkpoint reminder may arrive first: save goal, progress, decisions, and next steps to a note in the owner's documents, then call `new_context` with a concise handoff. A recovery record preserves inputs, not progress: after a rollover, reread the relevant notes and history and verify live state before continuing stateful or external work.",
+  "When your context fills, Ghost rolls into a fresh window holding only a recovery record of the owner's inputs and the last tool batch; earlier turns come back through `history`, and a checkpoint reminder may arrive first with what to save. A recovery record preserves inputs, not progress: after a rollover, reread notes and history and verify live state before continuing stateful work.",
 ].join("\n");
 
 export interface ContextWindowSettings {
@@ -624,7 +624,7 @@ export function ghostContextWindowsExtension(settings: ContextWindowSettings): E
       name: "new_context",
       label: "New Context",
       description:
-        "Start a fresh context window after this tool batch. Earlier conversation leaves active context without a generated summary but stays recoverable through history. Pass concise continuation state in handoff, or save richer state to a note first.",
+        "Start a fresh context window after this tool batch; earlier conversation stays recoverable through history. Pass concise continuation state in handoff, or save richer state to a note first.",
       promptSnippet: "start a fresh context window with an optional handoff",
       parameters: Type.Object({
         handoff: Type.Optional(Type.String({
@@ -650,7 +650,7 @@ export function ghostContextWindowsExtension(settings: ContextWindowSettings): E
       name: "history",
       label: "History",
       description:
-        "Search or read this ghost's session transcript, including earlier context windows. Search prioritizes original content before handoffs and history lookups; all remain searchable. Current branch by default; all=true searches every session of this ghost, newest first. Reads return stored images and page long text with the next offset.",
+        "Search or read this ghost's transcript, including earlier context windows: search (current branch, or every session newest first with all=true; original content ranks before handoffs and history lookups), then read by entry id. Reads return stored images and page long text with the next offset.",
       promptSnippet: "recover earlier conversation that left the active context window",
       promptGuidelines: ["Use history search first, then history read with the returned entry id"],
       parameters: Type.Object({

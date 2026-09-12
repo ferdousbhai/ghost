@@ -15,16 +15,12 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
  * windows into one JSON file per harness, which Bash can read.
  */
 export const HARNESS_LIMITS_POLICY = [
-  "## Other harnesses and their limits",
+  "## Other harnesses",
   "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs are yours to run "
     + "from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, "
-    + "auth, and tools. Before handing work to one, read its session and weekly windows in "
-    + "`~/.local/state/omarchy/agents/usage/<agent>.json` (`$XDG_STATE_HOME` replaces "
-    + "`~/.local/state` when set; each `limits[]` entry carries a label, `percent` as a 0–1 "
-    + "fraction used, and `resetsAt`; `omarchy agent usage-update` refreshes) and prefer the "
-    + "harness with room. When a run stops on a limit, write a handoff note in the owner's "
-    + "documents (done, verified, exact next step) and continue on another harness or after "
-    + "the reset. Never spend a window you were not asked to spend.",
+    + "auth, and tools. Read `ghost help harnesses` before handing work to one: it names each "
+    + "harness's usage windows and the handoff note. Never spend a window you were not asked "
+    + "to spend.",
 ].join("\n");
 
 /**
@@ -53,11 +49,10 @@ export const OWNER_DELIVERABLE_POLICY = [
 export const OWNER_HOOKS_POLICY = [
   "## Hooks and MCP",
   "The owner's hooks are `before_prompt` and `session_stop` commands in "
-    + "`~/.config/ghost/hooks.json` (`ghost hooks show`, `ghost hooks set <file>`). None ship; "
-    + "when the owner asks for one, write it there and say what it runs.",
-  "An MCP server added with `ghost mcp add` starts disabled because its tools cost context: "
-    + "`ghost mcp enable <name>` when needed, or run the toolset in a `pi` subagent from Bash "
-    + "instead.",
+    + "`~/.config/ghost/hooks.json` (`ghost hooks --help`); none ship, and one you write at "
+    + "the owner's request is described to them. An MCP server from `ghost mcp add` starts "
+    + "disabled because its tools cost context: enable it only when needed, or run the toolset "
+    + "in a `pi` subagent from Bash.",
 ].join("\n");
 
 /** The owner's own directory: persistent context every ghost on this machine shares. */

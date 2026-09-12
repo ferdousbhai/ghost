@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readdir, rm, symlink, unlink, writeFile } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderHelpTopic } from "../src/help-topics.js";
 import {
   ghostCliPath,
   isValidScheduleSlug,
@@ -116,15 +117,8 @@ describe("which units belong to a ghost", () => {
     const policy = renderScheduledWorkPolicy("aria-ops", "/srv/owner config/systemd/user");
     expect(policy).toContain('"/srv/owner config/systemd/user"');
     expect(policy).toContain("ghost-timer-v1-8-aria-ops-<slug>");
-    expect(policy).toContain("[a-z0-9]+(?:-[a-z0-9]+)*");
+    expect(policy).toContain("`ghost help timers`");
     expect(policy).not.toContain("~/.config/systemd/user");
-  });
-
-  it("names what happens to missed slots under each Persistent= setting", () => {
-    const policy = renderScheduledWorkPolicy("aria", "/home/owner/.config/systemd/user");
-    expect(policy).toContain("`Persistent=true` runs one catch-up");
-    expect(policy).toContain("`Persistent=false` drops them");
-    expect(policy).toContain("not a timer primitive");
   });
 });
 
@@ -556,7 +550,7 @@ describe("ghostCliPath", () => {
     chmodSync(join(bin, "ghost"), 0o755);
     expect(ghostCliPath({ PATH: `${join(root, "empty")}:${bin}` })).toBe(join(bin, "ghost"));
     expect(ghostCliPath({ PATH: join(root, "empty") })).toBe("/usr/bin/ghost");
-    expect(renderScheduledWorkPolicy("casper", "/tmp/units", join(bin, "ghost")))
+    expect(renderHelpTopic("timers", { ghostName: "casper", unitDir: "/tmp/units", cliPath: join(bin, "ghost") }))
       .toContain(`ExecStart=${join(bin, "ghost")} say --new --ghost casper`);
   });
 });

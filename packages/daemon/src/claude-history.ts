@@ -162,9 +162,8 @@ export function createClaudeHistoryTool(
 ): SdkMcpToolDefinition {
   return sdk.tool(
     CLAUDE_HISTORY_TOOL_NAME,
-    "Search or read this ghost's conversation history, including earlier turns no longer in context. "
-      + "Use op \"search\" with a query first, then op \"read\" with a returned entry id. "
-      + "Set all=true to search every conversation of this ghost instead of the current one.",
+    "Search or read this ghost's conversation history, including turns no longer in context: "
+      + "search with a query, then read by a returned entry id; all=true searches every conversation of this ghost.",
     {
       op: z.enum(["search", "read"]).describe("Operation to perform"),
       query: z.string().optional().describe("Case-insensitive text to find (search)"),

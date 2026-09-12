@@ -89,11 +89,11 @@ export class AskCancelledError extends Error {
 export const ASK_TOOL_NAME = "ask";
 
 export const ASK_TOOL_DESCRIPTION = [
-  "Ask the owner one to four multiple-choice questions and wait for the answers.",
-  "Use this only for genuine decisions that require owner input, not routine judgment or approval.",
-  "Each question needs a short header and two to four distinct described options; the UI adds an",
-  "Other choice automatically. Put your recommended option first and suffix its label with",
-  "`(Recommended)`. Use `multiSelect` when choices are not mutually exclusive.",
+  "Ask the owner one to four multiple-choice questions and wait for the answers, only for",
+  "decisions that need the owner, not routine judgment or approval. Each question: a short",
+  "header and two to four distinct described options (the UI adds Other); put your",
+  "recommended option first, its label suffixed `(Recommended)`; `multiSelect` when choices",
+  "are not mutually exclusive.",
 ].join(" ");
 
 /** Questions as the shell renders them, with model-only fields removed. */

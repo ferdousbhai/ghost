@@ -51,33 +51,6 @@ function checkoutLines(checkout: string | null, running: RunningSource | null): 
   ];
 }
 
-function loopLines(checkout: string | null): string[] {
-  if (checkout === null) return [];
-  return [
-    "The loop: `git fetch`, branch from upstream master, edit, run the touched package's tests and `typecheck`, commit with the reason, `pnpm build`, restart. This is your own Bash, not a delegated task: no worktrees or task branches.",
-    "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When your work there would help every owner (a bug fixed, a real efficiency gain, a policy line that proved wrong), consider offering it upstream via `CONTRIBUTING.md` in the checkout; the PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
-  ];
-}
-
-function restartLines(ghostName: string, sessionId: string | undefined): string[] {
-  const session = sessionId === undefined ? "" : ` --session ${sessionId}`;
-  return [
-    "To restart yourself, finish the turn and tell the owner first; the daemon drains for 5 seconds, then forces:",
-    "```sh",
-    'systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \\',
-    '  --description="<reason>" \\',
-    "  sh -c 'systemctl --user restart ghostd.service; \\",
-    "         for i in $(seq 30); do ghost status -q >/dev/null 2>&1 && break; sleep 1; done; \\",
-    `         ghost say --ghost ${ghostName}${session} "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'`,
-    "```",
-    "The timestamped unit name keeps two restarts apart, the wait loop covers the daemon not yet listening, and the transient unit survives the restart because it is not your child.",
-    ...(sessionId === undefined
-      ? ["Without a session id the wake lands in your latest conversation."]
-      : []),
-    "A HUD change needs `systemctl --user restart ghost-shell.service`; reloading that unit refetches daemon data, it does not reload QML.",
-  ];
-}
-
 /** The exact policy a ghost is given for changing and restarting its own software. */
 export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string {
   const checkout = input.running?.root ?? null;
@@ -85,10 +58,6 @@ export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string
     "## Self-maintenance",
     whatRunsYou(input.running),
     ...checkoutLines(checkout, input.running),
-    ...loopLines(checkout),
-    ...restartLines(input.ghostName, input.sessionId),
-    "`ghost status` names a newer Ghost release and the exact command that installs it here; tell the owner, and run it only when they ask.",
-    "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
-    "Undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper for the system. Never `rm -rf` a checkout.",
+    "Read `ghost help self` before editing, restarting, or updating yourself. `ghost status` names a newer release when one exists; install it only when the owner asks.",
   ].join("\n");
 }

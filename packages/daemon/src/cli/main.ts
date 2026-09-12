@@ -5,6 +5,7 @@ import { isDirectInvocation } from "../direct-invocation.js";
 import {
   ArgsError,
   flagBoolean,
+  flagString,
   parseArgs,
   type ArgsSpec,
   type ParsedCliArgs,
@@ -25,6 +26,9 @@ import {
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { ghostsCommand } from "./ghosts.js";
+import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
+import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
+import { preferredGhostName, preferredSessionId } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
@@ -326,12 +330,24 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "help",
-    usage: "help [command|exit-codes]",
-    summary: "Show command help or the stable exit-code table.",
-    example: "ghost help exit-codes",
+    usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}] [-g <name>] [-s <id>]`,
+    summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
+    example: "ghost help timers",
     positionals: [0, 1],
     run: (parsed, ctx) => {
       const topic = parsed.positionals[0];
+      if (topic !== undefined && isHelpTopic(topic)) {
+        // Rendered for the ghost the shell belongs to; no daemon needed.
+        const ghostName = preferredGhostName(ctx.runtime, flagString(parsed, "ghost")) ?? "<ghost>";
+        const sessionId = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+        ctx.runtime.stdout.write(renderHelpTopic(topic, {
+          ghostName,
+          unitDir: resolveScheduleUnitDirectory(ctx.runtime.home, ctx.runtime.env),
+          cliPath: ghostCliPath(ctx.runtime.env),
+          ...(sessionId === undefined ? {} : { sessionId }),
+        }));
+        return EXIT_CODE.success;
+      }
       ctx.runtime.stdout.write(
         topic === "exit-codes" ? EXIT_CODES_TEXT : topic ? commandHelp(topic) : USAGE,
       );

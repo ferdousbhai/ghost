@@ -407,7 +407,12 @@ state goes through the daemon. Its command catalog is defined in
 HUD reaches is a named verb there (ghost roster, rename, character, greeting,
 conversations and their title/pin/read/fork/delete/reanswer, ask,
 resources, commands, model, MCP, hooks, remote, status, skill), so a
-ghost can drive and verify itself from Bash without raw HTTP. Addressing is
+ghost can drive and verify itself from Bash without raw HTTP. `ghost help
+<topic>` prints the recipes the system prompt only points at (`timers`,
+`self`, `harnesses`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
+and needing no daemon; they are prompt-visible contract text like the policy
+sections. Addressing is
 `-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell carries
 both variables. Signing in is a provider

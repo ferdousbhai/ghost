@@ -19,9 +19,10 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).toContain(`Your checkout is ${JSON.stringify(CHECKOUT)}`);
     // The same clone powers every ghost on the machine.
     expect(policy).toContain("shared by every ghost on this machine");
-    // Updates are reported by `ghost status` and applied only on the owner's word.
-    expect(policy).toContain("`ghost status` names a newer Ghost release");
-    expect(policy).toContain("run it only when they ask");
+    // The long recipes live in `ghost help self`; the prompt points there.
+    expect(policy).toContain("Read `ghost help self` before editing, restarting, or updating yourself");
+    expect(policy).toContain("install it only when the owner asks");
+    expect(policy).not.toContain("systemd-run");
   });
 
   it("gives a packaged install no checkout and no edit loop", () => {
@@ -31,8 +32,7 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).toContain("There is no checkout");
     expect(policy).toContain("https://github.com/ferdousbhai/ghost");
     expect(policy).toContain("Never edit a checkout you were not given.");
-    expect(policy).not.toContain("The loop:");
-    expect(policy).not.toContain("CONTRIBUTING.md");
+    expect(policy).not.toContain("systemd-run");
   });
 
   it("says the source is unknown when nothing resolved it", () => {
@@ -41,42 +41,5 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).not.toContain("You are ghostd");
     expect(policy).toContain("No checkout is known to this process");
     expect(policy).not.toContain("packaged install.");
-  });
-
-  it("points a fix in shared code upstream and gates the push on the owner", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
-    expect(policy).toContain("branch from upstream master");
-    // An encouragement, not a rule: it names the work worth offering and leaves the choice.
-    expect(policy).toContain("consider offering it upstream");
-    expect(policy).toContain("a real efficiency gain");
-    expect(policy).toContain("`CONTRIBUTING.md` in the checkout");
-    expect(policy).toContain("ask before you push");
-  });
-
-  it("keeps the restart wake in this conversation when the session id is known", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING, sessionId: "cli-abc123" });
-    expect(policy).toContain("ghost say --ghost aria --session cli-abc123");
-    expect(policy).toContain('--unit="ghost-restart-$(date +%s)"');
-    expect(policy).not.toContain("your latest conversation");
-  });
-
-  it("omits the session flag and says where the wake lands without one", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
-    expect(policy).toContain("ghost say --ghost aria \"You restarted ghostd");
-    expect(policy).not.toContain("--session");
-    expect(policy).toContain("your latest conversation");
-  });
-
-  it("does not offer a shell reload that would not reload QML", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
-    expect(policy).toContain("systemctl --user restart ghost-shell.service");
-    expect(policy).not.toContain("reload ghost-shell.service");
-  });
-
-  it("names where history lives and how to undo", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
-    expect(policy).toContain("journalctl --user -t ghostd");
-    expect(policy).toContain("`git revert`");
-    expect(policy).toContain("Never `rm -rf` a checkout.");
   });
 });

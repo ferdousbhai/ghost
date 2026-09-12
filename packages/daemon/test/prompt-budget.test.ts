@@ -84,17 +84,17 @@ const CEILINGS: Record<string, number> = {
   "Character file": 630,
   "Computer use": 359,
   "Finished work": 176,
-  "Other harnesses": 770,
+  "Other harnesses": 372,
   "Background work": 588,
-  "Context windows": 643,
-  Hooks: 424,
+  "Context windows": 406,
+  Hooks: 372,
   "Owner context": 958,
-  "Scheduled work": 1347,
-  "Self-maintenance": 2345,
+  "Scheduled work": 324,
+  "Self-maintenance": 578,
   "First meeting": 334,
 };
 
-const TOTAL_CEILING = 8574;
+const TOTAL_CEILING = 5097;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(
