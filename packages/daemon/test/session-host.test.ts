@@ -196,7 +196,6 @@ async function setup(
     | "transactionMarkerLstat"
     | "ghostHomeLstat"
     | "logger"
-    | "jobs"
     | "scheduleCommandRunner"
   > = {},
   providerOptions: Omit<Parameters<typeof startMockProvider>[0], "script"> = {},
@@ -5049,90 +5048,15 @@ describe("conversation titles", () => {
   });
 });
 
-describe("background jobs", () => {
-  const transcriptText = async (sessionId: string) =>
-    JSON.stringify((await host!.readTranscript("casper", sessionId)).messages);
-  const waitForTranscript = async (sessionId: string, text: string) => {
-    const deadline = Date.now() + 10_000;
-    while (Date.now() < deadline) {
-      if ((await transcriptText(sessionId)).includes(text)) return;
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
-    throw new Error(`transcript never contained ${JSON.stringify(text)}`);
-  };
-
-  it("starts a background bash job and delivers its result as a follow-up turn", async () => {
+describe("a ghost's shell", () => {
+  it("carries the ghost and the runtime-qualified conversation id", async () => {
     await setup([
-      { kind: "tool", name: "bash", args: { command: "sleep 0.2; echo finished-job", background: true, label: "slow echo" } },
-      { kind: "text", text: "Started it." },
-      { kind: "text", text: "The job finished." },
+      { kind: "tool", name: "bash", args: { command: 'echo "$GHOST/$GHOST_SESSION"' } },
+      { kind: "text", text: "Checked." },
     ]);
-    const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-jobs", prompt: "Run it in the background.", emit: (event) => events.push(event) });
-
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "tool_execution_end",
-      toolName: "bash",
-      isError: false,
-      summary: expect.stringContaining("Started background job"),
-    }));
-    expect(host!.listJobs("casper", "conv-jobs")).toMatchObject([{ label: "slow echo", command: "sleep 0.2; echo finished-job" }]);
-
-    await waitFor(() => provider!.requests.find((request) =>
-      JSON.stringify(request.messages).includes("Background job") && JSON.stringify(request.messages).includes("finished-job")) ?? null, 10_000);
-    await waitForTranscript("conv-jobs", "The job finished.");
-    expect(host!.listJobs("casper", "conv-jobs")).toMatchObject([{ status: "completed", exitCode: 0, output: expect.stringContaining("finished-job") }]);
-
-    const listed: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-jobs", prompt: "/jobs", emit: (event) => listed.push(event) });
-    expect(listed).toContainEqual(expect.objectContaining({
-      type: "command_output",
-      command: "/jobs",
-      output: expect.stringContaining("[completed] slow echo"),
-    }));
-  });
-
-  it("moves a long foreground command to the background after the wait budget", async () => {
-    await setup([
-      { kind: "tool", name: "bash", args: { command: "echo early; sleep 0.8; echo late-output" } },
-      { kind: "text", text: "Carrying on." },
-      { kind: "text", text: "Got the late output." },
-    ], { jobs: { autoBackgroundMs: 200 } });
-    const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", { sessionId: "conv-auto-jobs", prompt: "Run the slow thing.", emit: (event) => events.push(event) });
-
-    expect(events).toContainEqual(expect.objectContaining({
-      type: "tool_execution_end",
-      toolName: "bash",
-      isError: false,
-      summary: expect.stringContaining("continuing as background job"),
-    }));
-    expect(host!.listJobs("casper", "conv-auto-jobs")).toMatchObject([{ status: "running" }]);
-    await waitFor(() => provider!.requests.find((request) =>
-      JSON.stringify(request.messages).includes("Background job") && JSON.stringify(request.messages).includes("late-output")) ?? null, 10_000);
-    await waitForTranscript("conv-auto-jobs", "Got the late output.");
-  });
-
-  it("cancels a job through the host, keeps a session with running jobs, and kills jobs on close", async () => {
-    await setup([
-      { kind: "tool", name: "bash", args: { command: "sleep 30", background: true } },
-      { kind: "text", text: "Waiting in the background." },
-      { kind: "text", text: "Noted the cancellation." },
-    ]);
-    await host!.runTurn("casper", { sessionId: "conv-cancel-jobs", prompt: "Sleep in the background.", emit: () => {} });
-    const [job] = host!.listJobs("casper", "conv-cancel-jobs");
-    expect(job).toMatchObject({ status: "running" });
-
-    expect(host!.cancelJob("casper", "conv-cancel-jobs", "missing")).toMatchObject({ outcome: "not_found", job: null });
-    expect(host!.cancelJob("casper", "conv-cancel-jobs", job!.id)).toMatchObject({ outcome: "cancelled" });
-    await waitFor(() => host!.listJobs("casper", "conv-cancel-jobs")[0]?.status === "cancelled" ? true : null);
-    await waitFor(() => provider!.requests.find((request) =>
-      JSON.stringify(request.messages).includes("Background job") && JSON.stringify(request.messages).includes("was cancelled")) ?? null, 10_000);
-    await waitForTranscript("conv-cancel-jobs", "Noted the cancellation.");
-    expect(host!.cancelJob("casper", "conv-cancel-jobs", job!.id)).toMatchObject({ outcome: "already_settled" });
-
-    await host!.close("casper", "conv-cancel-jobs");
-    expect(host!.listJobs("casper", "conv-cancel-jobs")).toEqual([]);
+    await host!.runTurn("casper", { sessionId: "conv-env", prompt: "Who are you?", emit: () => {} });
+    const toolResults = provider!.requests.map((request) => JSON.stringify(request.messages)).join("\n");
+    expect(toolResults).toContain("casper/pi:conv-env");
   });
 });
 

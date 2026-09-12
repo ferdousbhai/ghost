@@ -923,10 +923,6 @@ FloatingWindow {
                         Layout.fillWidth: true
                     }
 
-                    WorkStrip {
-                        Layout.fillWidth: true
-                    }
-
                     QueueLine {
                         Layout.fillWidth: true
                         steering: Ghostd.steeringQueue

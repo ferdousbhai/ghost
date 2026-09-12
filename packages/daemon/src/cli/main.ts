@@ -42,7 +42,6 @@ import {
   type CommandDocumentation,
 } from "./usage.js";
 import { watchCommand } from "./watch.js";
-import { jobsCommand } from "./work.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
@@ -162,14 +161,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost ask answer 1 -s cli-abc",
     positionals: [0, 2],
     run: askCommand,
-  },
-  {
-    verb: "jobs",
-    usage: "jobs [show <jobId>|cancel <jobId>] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Inspect or cancel background jobs.",
-    example: "ghost jobs show job-1 -s cli-abc",
-    positionals: [0, 2],
-    run: jobsCommand,
   },
   {
     verb: "model",

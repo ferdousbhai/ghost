@@ -29,6 +29,21 @@ export const HARNESS_LIMITS_POLICY = [
     + "Never spend a window you were not asked to spend.",
 ].join("\n");
 
+/**
+ * Background work is the shell's: a detached command, a log file, and a
+ * `ghost say --follow-up` at the end. Ghost keeps no job table of its own.
+ */
+export const BACKGROUND_WORK_POLICY = [
+  "## Background work",
+  "A command that should outlive the tool call runs detached, logs to a file, and wakes you when "
+    + "it ends: `setsid -f bash -c 'cmd > /tmp/job.log 2>&1; ghost say --follow-up -q \"Background "
+    + "job finished (exit $?), log /tmp/job.log\" >/dev/null 2>&1'`. `$GHOST` and `$GHOST_SESSION` "
+    + "are set in your shell, so `ghost` verbs address this conversation without `-g`/`-s`, and "
+    + "`ghost say --follow-up` reaches you mid-turn or starts your next turn. Nothing else watches "
+    + "the job: read its log to check on it, note its PID if you may need to stop it, and use the "
+    + "runtime's own background option where it has one.",
+].join("\n");
+
 /** Where finished owner-facing work goes, outside private ghost-home state. */
 export const OWNER_DELIVERABLE_POLICY = [
   "## Finished work",

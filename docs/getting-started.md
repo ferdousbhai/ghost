@@ -206,10 +206,14 @@ ghost show -s cli-abc
 `ghost say` streams the turn; tool activity goes to stderr so stdout stays the
 answer. It continues the most recently updated conversation unless you pass
 `--new` or `-s <id>` (an id or any unique prefix). While a turn is running,
-`--steer` and `--follow-up` queue text into it.
+`--steer` and `--follow-up` queue text into it; a `--follow-up` to an idle
+conversation becomes its next turn, which is how a ghost's own background
+command reports back.
 
 The CLI picks its ghost in this order: `-g/--ghost`, `$GHOST`, the default
-saved by `ghost use`, then the sole installed ghost. It is an HTTP client and
+saved by `ghost use`, then the sole installed ghost; the session is `-s`,
+then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
+carries both variables. It is an HTTP client and
 nothing else — it never edits a ghost home directly, so the HUD sees everything
 it does immediately, and the reverse.
 

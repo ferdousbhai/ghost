@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { EXIT_CODE } from "./client.js";
+import { CliError, EXIT_CODE } from "./client.js";
 import {
   latestSession,
   listSessions,
+  preferredSessionId,
   resolveGhost,
   resolveSessionPrefix,
   resolveTarget,
@@ -50,6 +51,19 @@ function toolDescription(event: StreamEvent): string {
   return `${name}: ${truncate(detail, 80)}`;
 }
 
+/** Which conversation a fresh turn joins: `--new`, then `-s`/`$GHOST_SESSION`, then the latest. */
+async function turnConversationId(
+  ctx: CliContext,
+  name: string,
+  startNew: boolean,
+  requestedSession: string | undefined,
+): Promise<string> {
+  if (startNew) return newConversationId();
+  const sessions = await listSessions(ctx.client, name);
+  if (requestedSession) return resolveSessionPrefix(sessions, requestedSession).conversationId;
+  return latestSession(sessions)?.conversationId ?? newConversationId();
+}
+
 export async function sayCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
@@ -63,24 +77,28 @@ export async function sayCommand(
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const requestedSession = flagString(parsed, "session");
+  const requestedSession = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
 
+  // The conversation an idle --follow-up turns into a fresh turn of.
+  let idleFollowUp: string | undefined;
   if (steering || followUp) {
-    const { path } = await resolveTarget(ctx.client, ctx, parsed);
-    const response = await ctx.client.request("POST", `${path}/queue`, {
-      mode: steering ? "steer" : "followUp",
-      text,
-    });
-    emit(ctx, response.body);
-    return 0;
+    const { session, path } = await resolveTarget(ctx.client, ctx, parsed);
+    try {
+      const response = await ctx.client.request("POST", `${path}/queue`, {
+        mode: steering ? "steer" : "followUp",
+        text,
+      });
+      emit(ctx, response.body);
+      return 0;
+    } catch (error) {
+      // A follow-up to an idle conversation is its next turn: this is how a
+      // background command wakes the ghost that started it.
+      if (!followUp || !(error instanceof CliError) || error.code !== "session_not_streaming") throw error;
+      idleFollowUp = session.conversationId;
+    }
   }
-
-  const sessions = startNew ? [] : await listSessions(ctx.client, name);
-  const fallbackSession = latestSession(sessions);
-  let conversationId: string;
-  if (startNew) conversationId = newConversationId();
-  else if (requestedSession) conversationId = resolveSessionPrefix(sessions, requestedSession).conversationId;
-  else conversationId = fallbackSession?.conversationId ?? newConversationId();
+  const conversationId = idleFollowUp
+    ?? await turnConversationId(ctx, name, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
   let finalText = "";

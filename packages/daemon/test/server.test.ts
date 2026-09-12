@@ -2397,18 +2397,3 @@ describe("routing and transport", () => {
   });
 });
 
-describe("background job routes", () => {
-  it("lists an unopened conversation's jobs as empty and 404s an unknown cancel", async () => {
-    const base = await serve();
-    const listed = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs`);
-    expect(listed.status).toBe(200);
-    expect(await listed.json()).toEqual({ jobs: [] });
-
-    const cancelled = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs/job-1/cancel`, { method: "POST" });
-    expect(cancelled.status).toBe(404);
-    expect(await cancelled.json()).toMatchObject({ error: { code: "not_found" } });
-
-    const wrongMethod = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-jobs")}/jobs`, { method: "DELETE" });
-    expect(wrongMethod.status).toBe(405);
-  });
-});

@@ -105,9 +105,10 @@ runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
   runtime, credential store, settings, and resource snapshot, with pi's
   inherited system prompt, ambient config/MCP, and automatic credential
   discovery kept out. Pi's native file, search, Bash, steering, and branch
-  behavior is kept; Ghost adds `ask`, background jobs, browser, screen,
-  desktop, MCP, and context windows (`new_context`, `history`) in place of
-  summarizing compaction.
+  behavior is kept; Ghost adds `ask`, browser, screen, desktop, MCP, and
+  context windows (`new_context`, `history`) in place of summarizing
+  compaction. Background work is shell work: a detached command that ends
+  with `ghost say --follow-up`, on either runtime.
 - **Claude Code** is optional and native-first: `claude-code/default` runs the
   official Claude Agent SDK against the owner's installed, unmodified `claude`,
   authenticated by any method its own CLI reports as logged in. Ghost never

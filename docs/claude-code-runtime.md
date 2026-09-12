@@ -88,7 +88,7 @@ adapter is
 When a ghost runs `claude -p` from its own Bash, that child is a plain Claude
 Code process: it retains Claude Code's native project settings, skills, agents,
 MCP, tools, persistence, and subagents, and Ghost injects no principal persona
-there. Ghost owns nothing about it beyond the Bash job that
+there. Ghost owns nothing about it beyond the Bash call that
 systemd scope. Both paths use the same pinned SDK loader and authenticated
 installed executable.
 
@@ -137,11 +137,11 @@ chat-redirect behavior do not depend on which principal runtime is active.
 | Owner questions | Ghost `ask`, using the native Claude signature and result | Native `AskUserQuestion`, routed through the same broker and HUD |
 | Image understanding | Model-native when the chat model accepts images; otherwise `inspect_image` | Native vision; no redundant `inspect_image` |
 | Browser, screen, desktop | Ghost runtime-neutral tools | The same Ghost tools through the SDK MCP bridge |
-| Files, search, shell | Pi-native tools; Ghost wraps Bash in `GhostJob` | Claude-native tools and background tasks |
+| Files, search, shell | Pi-native tools, Bash with `GHOST`/`GHOST_SESSION` in its environment | Claude-native tools and background tasks; the same two variables in the query environment |
 | Skills, rules, prompts | Admitted declarative snapshot | The same admitted bytes appended to Claude's native prompt |
 | MCP | Every ghost-home row through Ghost's MCP manager | Credential-free ghost-home rows only; the rest report as skipped |
 | Ghost-home executable hook extensions | Pi-native extension factories | Not admitted |
-| Transcript, branches, commands, job API | Daemon-visible Pi session state | Native opaque Claude session state; the transcript API serves a thin settled-turn presentation journal, the rest stays unsupported |
+| Transcript, branches, commands | Daemon-visible Pi session state | Native opaque Claude session state; the transcript API serves a thin settled-turn presentation journal, the rest stays unsupported |
 
 The last three differences are boundaries, not substitute tools. MCP is a
 real remaining capability gap: the current Claude snapshot cannot persist
@@ -214,8 +214,8 @@ earlier-history-unavailable notice; a failed journal write never fails the
 turn and surfaces the same way.
 The working directory is fixed by Claude's resume metadata after its first
 published message; a new conversation starts in the ghost's configured cwd.
-Background jobs exposed by Claude's native harness
-remain native; Ghost's own process-local job API applies to Pi sessions.
+Background work is shell work on both runtimes: a detached command ending in
+`ghost say --follow-up`, which Claude's native background tasks may also use.
 
 `authMethod`, `apiProvider`, `subscriptionType`, SDK token usage, and
 `total_cost_usd` are descriptive turn/status metadata. Ghost does not infer

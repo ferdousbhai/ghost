@@ -1578,36 +1578,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "jobs") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const conversation = decodeConversationIdentity(segments[4] ?? "");
-          jsonResponse(response, 200, {
-            jobs: options.host.listJobs(ghostName, conversation.conversationId, conversation.runtime),
-          });
-          return;
-        }
-        if (segments.length === 8 && segments[3] === "sessions" && segments[5] === "jobs" && segments[7] === "cancel") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const conversation = decodeConversationIdentity(segments[4] ?? "");
-          const result = options.host.cancelJob(
-            ghostName,
-            conversation.conversationId,
-            decodePathSegment(segments[6] ?? ""),
-            conversation.runtime,
-          );
-          if (result.outcome === "not_found") {
-            errorResponse(response, 404, "not_found", "This conversation has no such background job.");
-            return;
-          }
-          jsonResponse(response, 200, result);
-          return;
-        }
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "commands") {
           if (method !== "GET") {
             errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);

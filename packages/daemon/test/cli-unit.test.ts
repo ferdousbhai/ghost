@@ -1,6 +1,5 @@
 
 import { describe, expect, it } from "vitest";
-import { formatDuration } from "../src/jobs.js";
 import type { SessionSummary } from "../src/session-host.js";
 import { ArgsError, parseArgs } from "../src/cli/args.js";
 import { EXIT_CODES } from "../src/cli/client.js";
@@ -63,6 +62,63 @@ function askDaemon(questions: Array<Record<string, unknown>>): {
   return { fetch, paths, posted: () => posted };
 }
 
+function sseResponse(events: unknown[]): Response {
+  return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
+    status: 200,
+    headers: { "content-type": "text/event-stream" },
+  });
+}
+
+describe("a ghost's own shell addresses its conversation", () => {
+  const env = { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "pi:conv-mine" };
+  const sessions = [session("conv-other"), session("conv-mine")];
+
+  it("reads $GHOST_SESSION in place of -s", async () => {
+    const paths: string[] = [];
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      paths.push(path);
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/ask")) return jsonResponse({ ask: null });
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const result = await runCli(["ask", "--json"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result.code).toBe(0);
+    expect(paths).toContain(`/api/ghosts/casper/sessions/${encodeURIComponent("pi:conv-mine")}/ask`);
+  });
+
+  it("turns a follow-up to an idle conversation into its next turn", async () => {
+    const calls: Array<{ path: string; body: unknown }> = [];
+    const fetch: CliFetch = async (input, init) => {
+      const path = new URL(input).pathname;
+      calls.push({ path, body: init?.body ? JSON.parse(String(init.body)) : undefined });
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/queue")) {
+        return jsonResponse({ error: { code: "session_not_streaming", message: "idle" } }, 409);
+      }
+      if (path === "/api/ghosts/casper/messages") {
+        return sseResponse([{ type: "text_delta", delta: "Noted." }, { type: "done", reason: "stop" }]);
+      }
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const result = await runCli(["say", "--follow-up", "-q", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result).toMatchObject({ code: 0, stdout: "Noted.\n" });
+    const turn = calls.find((call) => call.path === "/api/ghosts/casper/messages");
+    expect(turn?.body).toMatchObject({ options: { sessionId: "conv-mine" } });
+  });
+
+  it("still fails a follow-up on any other conflict", async () => {
+    const fetch: CliFetch = async (input) => {
+      const path = new URL(input).pathname;
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
+      if (path.endsWith("/queue")) return jsonResponse({ error: { code: "session_busy", message: "busy" } }, 409);
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const result = await runCli(["say", "--follow-up", "x"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result.code).toBe(EXIT_CODES.find((entry) => entry.meaning === "busy or conflict")?.code);
+  });
+});
+
 describe("CLI argv parser", () => {
   it("parses long, equals, short-value, boolean, and terminator forms", () => {
     expect(parseArgs([
@@ -96,8 +152,6 @@ describe("CLI output and addressing helpers", () => {
     expect(relativeTime("2026-08-29T11:57:00.000Z", now)).toBe("3m");
     expect(relativeTime("2026-08-29T10:00:00.000Z", now)).toBe("2h");
     expect(relativeTime("2026-08-25T12:00:00.000Z", now)).toBe("4d");
-    expect(formatDuration(999)).toBe("999ms");
-    expect(formatDuration(61_000)).toBe("1m01s");
   });
 
   it("resolves exact and unique public/raw prefixes and refuses ambiguity", () => {

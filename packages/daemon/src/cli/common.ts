@@ -56,8 +56,9 @@ export async function listGhosts(client: DaemonClient): Promise<Ghost[]> {
 
 /**
  * The ghost the owner named, without asking anyone which ghosts exist: `-g`,
- * then `$GHOST`, then the private `ghost use` default. This half of the
- * addressing order is identical for daemon-backed and daemon-free verbs.
+ * then `$GHOST` (which a ghost's own shell carries), then the private
+ * `ghost use` default. This half of the addressing order is identical for
+ * daemon-backed and daemon-free verbs.
  */
 export function preferredGhostName(
   runtime: Pick<CliRuntime, "env" | "home">,
@@ -121,13 +122,22 @@ export async function resolveSession(
   return { session, sessions };
 }
 
+/** `-s`, then `$GHOST_SESSION` (set in a ghost's own shell), else the latest session. */
+export function preferredSessionId(
+  runtime: Pick<CliRuntime, "env">,
+  requested?: string,
+): string | undefined {
+  return requested?.trim() || runtime.env.GHOST_SESSION?.trim() || undefined;
+}
+
 export async function resolveTarget(
   client: DaemonClient,
   ctx: Pick<CliContext, "runtime">,
   parsed: ParsedCliArgs,
 ): Promise<{ name: string; session: SessionSummary; path: string }> {
   const { name } = await resolveGhost(client, ctx.runtime, flagString(parsed, "ghost"));
-  const { session } = await resolveSession(client, name, flagString(parsed, "session"));
+  const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const { session } = await resolveSession(client, name, requested);
   return { name, session, path: sessionPath(name, session.id) };
 }
 

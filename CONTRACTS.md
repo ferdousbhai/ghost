@@ -36,9 +36,9 @@ owner's documents. The one owner-visible view of them is the board:
 `board.md` in the documents directory, `##` headings as columns and list items
 as cards, edited by the owner and every harness with file tools and rendered
 read-only by the HUD, the tailnet viewer, and `ghost board` through
-`GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background jobs
-remain Ghost runtime state because they control work currently executing in a
-conversation.
+`GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background work
+is the shell's: Ghost keeps no job table (see "Ask, background work, and
+hooks").
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -208,7 +208,11 @@ runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
 automatic credential discovery, themes, prompt templates, executable code
 found in the cwd, and native task tool do not enter the session. Ghost keeps Pi's native
-file, search, Bash, steering/follow-up, and branch behavior. Compaction is
+file, search, Bash, steering/follow-up, and branch behavior; Bash is Pi's own
+tool with `GHOST` and `GHOST_SESSION` added to its environment
+(`conversationEnvironment` in
+[`conversation-identity.ts`](packages/daemon/src/conversation-identity.ts)).
+Compaction is
 Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
 `session_before_compact` handler returns a compaction whose summary is a
 bounded recovery record (owner inputs of the current window, the unconsumed
@@ -222,7 +226,7 @@ pi-posthorse). Claude Code keeps its native compaction, and its `history`
 (`ghost_history`, [`claude-history.ts`](packages/daemon/src/claude-history.ts))
 searches and reads Claude Code's own transcripts — the current conversation, or
 every conversation of the ghost — with the same search-then-read interface. Ghost adds
-`ask`, background jobs, browser,
+`ask`, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their
 native image understanding. The exact assembly is
@@ -237,7 +241,8 @@ accepts any method for which `claude auth status --json` says `loggedIn: true`;
 it never receives or stores the credential. The SDK is loaded only from Ghost's
 versioned XDG data root with exact package/version/entry validation. Detailed
 installation and environment guarantees are in
-[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
+[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md). The query's
+environment carries the same `GHOST` and `GHOST_SESSION` as Pi's Bash.
 
 Both runtimes give a ghost the same capabilities. Claude does not get its
 `claude_code` preset; it gets the explicit native list
@@ -258,8 +263,8 @@ Ghost-owned model capabilities have one cross-runtime contract even when the
 runtime supplies the implementation: owner questions, image understanding,
 and browser/screen/desktop control are available on both principal paths. Steering and follow-ups into a live turn work on both, and a reopened
 conversation shows its tool cards and interstitial text on both.
-Runtime mechanics remain native. Pi exposes its transcript, branches,
-commands, and `GhostJob` state through daemon APIs; Claude serves a
+Runtime mechanics remain native. Pi exposes its transcript, branches, and
+commands through daemon APIs; Claude serves a
 settled-turn presentation transcript and otherwise
 owns the corresponding session and background-task state inside its opaque
 warm query.
@@ -281,7 +286,7 @@ Ghost tools, no warm query, no resume metadata — and it is
 admitted through the same SDK loader, executable probe, and reviewed child
 environment as the principal path.
 
-### Ask, jobs, and hooks
+### Ask, background work, and hooks
 
 `ask` is owner input, never tool approval. Pi's model-facing `ask` input and
 output match Claude Code's native `AskUserQuestion` contract: one to four
@@ -293,14 +298,14 @@ valid response wins. The daemon-wide timeout is `DEFAULT_ASK_TIMEOUT_SECONDS`
 in [`config.ts`](packages/daemon/src/config.ts); zero waits forever. A model-facing timeout returns an empty answer map and never
 invents an owner selection.
 
-In Pi, every Bash command is represented by a `GhostJob`. Foreground commands
-wait for the configured budget, then continue as background jobs. Job
-completion is fed back into the same conversation; closing the session cancels
-running jobs. Jobs are process-local and an unopened conversation reports
-`[]`. Claude keeps its native Bash; its calls are mirrored read-only into the
-same jobs list from the turn's tool events (command, running/completed/failed,
-result summary), so the Jobs strip reads the same on both runtimes. Cancel is
-pi-only: Ghost cannot reach inside a native call.
+Background work is shell work on both runtimes: a ghost detaches a command
+(`setsid -f`), logs to a file, and ends it with `ghost say --follow-up`, which
+queues into a live turn or, when the conversation is idle, starts its next
+turn. Both runtimes put `GHOST` and `GHOST_SESSION` in the Bash environment so
+the CLI addresses the right conversation without flags. Ghost keeps no job
+table, no jobs API, no jobs strip, and cannot cancel what it did not start;
+the policy text is `BACKGROUND_WORK_POLICY` in
+[`machine-skills.ts`](packages/daemon/src/machine-skills.ts).
 
 There is no Ghost-owned delegation system and no limits tool. A ghost that
 wants a specialist runs the owner's installed `pi`, `codex`, `omp`, or
@@ -366,11 +371,9 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. A Claude conversation's title lives on its resume sidecar. |
 | `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
-| `GET /sessions/:id/jobs` | `{ jobs }` for the open conversation. |
-| `POST /sessions/:id/jobs/:jobId/cancel` | `{ outcome, job }`; unknown is 404; pi only. |
 | `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
-| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn, on either runtime. A steer reaches the model mid-turn (pi injects it; Claude Code receives it on its input channel); a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. |
+| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn, on either runtime. A steer reaches the model mid-turn (pi injects it; Claude Code receives it on its input channel); a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
@@ -402,9 +405,12 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches is a named verb there (ghost roster, rename, character, greeting,
-conversations and their title/pin/read/fork/delete/reanswer, ask, jobs,
+conversations and their title/pin/read/fork/delete/reanswer, ask,
 resources, commands, model, MCP, hooks, remote, status, skill), so a
-ghost can drive and verify itself from Bash without raw HTTP. Signing in is a provider
+ghost can drive and verify itself from Bash without raw HTTP. Addressing is
+`-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
+`$GHOST_SESSION`, then the latest conversation; a ghost's own shell carries
+both variables. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the
@@ -450,7 +456,7 @@ hosted-session, concurrency, or spend cap.
   and the `extension-api.ts` seam. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
   authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
-  jobs, HTTP, and the `ghost`
+  HTTP, and the `ghost`
   CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
   talks only to authenticated HTTP/SSE and never edits daemon-validated ghost

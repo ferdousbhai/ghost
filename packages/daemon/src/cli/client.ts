@@ -17,10 +17,19 @@ const CONTROL_REQUEST_TIMEOUT_MS = 5_000;
 const STREAM_OPEN_TIMEOUT_MS = SSE_KEEPALIVE_INTERVAL_MS;
 
 export class CliError extends Error {
-  constructor(readonly exitCode: number, message: string) {
+  /** The daemon's error code when the failure was an HTTP error body. */
+  readonly code: string | undefined;
+
+  constructor(readonly exitCode: number, message: string, code?: string) {
     super(message);
     this.name = "CliError";
+    this.code = code;
   }
+}
+
+function daemonErrorCode(body: unknown): string | undefined {
+  const error = (body as { error?: { code?: unknown } } | null)?.error;
+  return typeof error?.code === "string" ? error.code : undefined;
 }
 
 export const EXIT_CODE = {
@@ -67,9 +76,10 @@ function statusError(status: number, body: unknown, tokenPath: string): CliError
     );
   }
   const message = describeErrorBody(body, `daemon returned HTTP ${status}`);
-  if (status === 404) return new CliError(EXIT_CODE.notFound, message);
-  if (status === 409) return new CliError(EXIT_CODE.conflict, message);
-  return new CliError(EXIT_CODE.failure, message);
+  const code = daemonErrorCode(body);
+  if (status === 404) return new CliError(EXIT_CODE.notFound, message, code);
+  if (status === 409) return new CliError(EXIT_CODE.conflict, message, code);
+  return new CliError(EXIT_CODE.failure, message, code);
 }
 
 async function responseBody(response: Response): Promise<unknown> {

@@ -105,8 +105,8 @@ Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.
 - `focus` `{ address | name }` → focus a window.
 - `workspace` `{ id | name }` → switch workspace.
 - (No `exec` here — the helper stays scoped to desktop control, not arbitrary
-  process launch. The principal runtime owns shell execution: Pi uses Ghost's
-  job-aware Bash replacement and Claude Code keeps its native Bash. The
+  process launch. The principal runtime owns shell execution: each runtime
+  keeps its own native Bash. The
   helper's value is the GUI/Wayland/accessibility reach either shell lacks,
   with honesty metadata and lock-safe routing.)
 

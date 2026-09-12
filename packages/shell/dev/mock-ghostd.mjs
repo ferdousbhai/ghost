@@ -33,8 +33,6 @@ const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
-const NO_JOBS = flag("--no-jobs");
-const MOCK_STARTED_AT = Date.now();
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
@@ -629,99 +627,6 @@ const sessionSummary = (s) => ({
 });
 
 
-// Jobs are keyed by the full runtime-qualified conversation id, like the route.
-const jobStore = new Map();
-const workKey = (name, conversationId) => JSON.stringify([name, conversationId]);
-
-function dropWork(name, conversationId = null) {
-  for (const key of [...jobStore.keys()]) {
-    const [storedName, storedConversation] = JSON.parse(key);
-    if (storedName === name && (conversationId === null || storedConversation === conversationId))
-      jobStore.delete(key);
-  }
-}
-
-function moveWorkGhost(from, to) {
-  for (const [key, value] of [...jobStore.entries()]) {
-    const [storedName, conversationId] = JSON.parse(key);
-    if (storedName !== from) continue;
-    jobStore.delete(key);
-    jobStore.set(workKey(to, conversationId), value);
-  }
-}
-
-function initialJobs() {
-  if (NO_JOBS) return [];
-  return [
-    {
-      id: "job-build",
-      label: "Build shell preview",
-      command: "pnpm --filter @ghost/shell build",
-      status: "running",
-      startedAt: new Date(MOCK_STARTED_AT).toISOString(),
-      durationMs: 0,
-      output: "Preparing the Quickshell preview…\nCompiling QML resources…",
-      outputTruncated: false,
-    },
-    {
-      id: "job-history",
-      label: "Long verification log",
-      command: "pnpm test -- --verbose",
-      status: "completed",
-      startedAt: new Date(MOCK_STARTED_AT - 48_000).toISOString(),
-      endedAt: new Date(MOCK_STARTED_AT - 3_000).toISOString(),
-      durationMs: 45_000,
-      exitCode: 0,
-      output: Array.from({ length: 400 }, (_, index) => `verification line ${index + 1}`).join("\n"),
-      outputTruncated: true,
-    },
-    {
-      id: "job-lint",
-      label: "Lint experimental theme",
-      command: "pnpm lint",
-      status: "failed",
-      startedAt: new Date(MOCK_STARTED_AT - 195_000).toISOString(),
-      endedAt: new Date(MOCK_STARTED_AT - 5_000).toISOString(),
-      durationMs: 190_000,
-      exitCode: 2,
-      output: "qmllint: experimental-theme.qml:42: Unknown property",
-      outputTruncated: false,
-    },
-  ];
-}
-
-function jobsFor(name, conversationId) {
-  const key = workKey(name, conversationId);
-  if (!jobStore.has(key)) jobStore.set(key, initialJobs());
-  const jobs = jobStore.get(key);
-  const running = jobs.find((job) => job.id === "job-build" && job.status === "running");
-  const elapsed = Date.now() - MOCK_STARTED_AT;
-  if (running && elapsed >= 20_000) {
-    running.status = "completed";
-    running.endedAt = new Date(MOCK_STARTED_AT + 20_000).toISOString();
-    running.durationMs = 20_000;
-    running.exitCode = 0;
-    running.output += "\nPreview build complete.";
-  } else if (running) {
-    running.durationMs = Math.max(0, elapsed);
-  }
-  return jobs;
-}
-
-function jobsSnapshot(name, conversationId) {
-  return { jobs: structuredClone(jobsFor(name, conversationId)) };
-}
-
-function cancelJob(name, conversationId, jobId) {
-  const job = jobsFor(name, conversationId).find((candidate) => candidate.id === jobId);
-  if (!job) return null;
-  if (job.status !== "running") return { outcome: "already_settled", job: structuredClone(job) };
-  const endedAt = Date.now();
-  job.status = "cancelled";
-  job.endedAt = new Date(endedAt).toISOString();
-  job.durationMs = Math.max(0, endedAt - Date.parse(job.startedAt));
-  return { outcome: "cancelled", job: structuredClone(job) };
-}
 
 
 function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
@@ -1598,7 +1503,6 @@ const mockServer = createServer(async (req, res) => {
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
-    dropWork(name);
     deletedContext.delete(name);
     writtenCharacter.delete(name);
     mcpStore.delete(name);
@@ -1631,7 +1535,6 @@ const mockServer = createServer(async (req, res) => {
         store.delete(name);
       }
     }
-    moveWorkGhost(name, next);
     if (OWNS_GHOSTS_ROOT) renameSync(ghost.dir, join(GHOSTS_ROOT, next));
     ghost.name = next;
     ghost.dir = join(GHOSTS_ROOT, next);
@@ -1704,25 +1607,6 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 200, mcpSnapshot(name));
     }
   }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "jobs"
-      && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    return json(res, 200, jobsSnapshot(name, conversation.id));
-  }
-  if (parts[3] === "sessions" && parts.length === 8 && parts[5] === "jobs"
-      && parts[7] === "cancel" && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, {
-      error: { code: "invalid_conversation_id", message: "invalid conversation id" },
-    });
-    const result = cancelJob(name, conversation.id, decodeURIComponent(parts[6]));
-    return result
-      ? json(res, 200, result)
-      : json(res, 404, { error: { code: "not_found", message: "No such background job." } });
-  }
   if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
     await readBody(req).catch(() => ({}));
     // The delay is the point, not an accident: the real daemon runs a model to
@@ -1751,7 +1635,6 @@ const mockServer = createServer(async (req, res) => {
     }
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
-      dropWork(name, conversation.id);
       publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
     }
     return deleted

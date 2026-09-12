@@ -7,7 +7,6 @@
  * be mistaken for an ordinary model prompt.
  */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
-import { formatJobList, type GhostJobManager } from "./jobs.js";
 
 export type GhostCommandAvailability = "available" | "partial" | "unsupported";
 
@@ -37,7 +36,6 @@ const BUILTINS: readonly BuiltinSpec[] = [
   { name: "context", description: "Show how much of the model's context window is used", availability: "available" },
   { name: "tools", description: "List the tools active in this conversation", availability: "available" },
   { name: "dirs", description: "Show the directories this conversation works in", availability: "available" },
-  { name: "jobs", description: "List this conversation's background jobs", availability: "available" },
   { name: "compact", description: "Summarize older history to free context", availability: "available", hint: "[instructions]" },
   { name: "browser", description: "Browser mode", availability: "unsupported", reason: "Ghost's browser tools own this surface." },
   { name: "computer", description: "Computer use mode", availability: "unsupported", reason: "Ghost's desktop tools own this surface." },
@@ -165,7 +163,6 @@ export function classifyGhostBuiltin(text: string): GhostBuiltinDispatch {
 
 export interface GhostBuiltinContext {
   session: AgentSession;
-  jobs: GhostJobManager;
   cwd: string;
   ghostHome: string;
 }
@@ -204,8 +201,6 @@ export async function executeGhostBuiltin(
     }
     case "/tools":
       return session.getActiveToolNames().map((name) => `- ${name}`).join("\n") || "No tools are active.";
-    case "/jobs":
-      return formatJobList(context.jobs.list());
     case "/dirs":
       return [
         `cwd: ${context.cwd}`,

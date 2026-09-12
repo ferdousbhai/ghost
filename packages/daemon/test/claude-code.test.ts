@@ -1347,7 +1347,13 @@ fi
     });
 
     const queryEnv = seenOptions[0]?.env;
-    expect(queryEnv).toBe(probeEnvironment);
+    // The probe's sanitized environment exactly, plus the conversation's own
+    // identity, which is what a `ghost` command in a Bash call addresses.
+    expect(queryEnv).toEqual({
+      ...probeEnvironment,
+      GHOST: "casper",
+      GHOST_SESSION: "claude-code:native-auth-query",
+    });
     expect(queryEnv).toMatchObject({
       ANTHROPIC_BASE_URL: "https://router.invalid",
       CLAUDE_CODE_USE_BEDROCK: "1",
@@ -1397,7 +1403,8 @@ fi
       emit: () => {},
     });
     expect(seenOptions).toHaveLength(2);
-    expect(seenOptions[1]?.env).toBe(seenOptions[0]?.env);
+    // A cold resume of the same conversation builds the same environment again.
+    expect(seenOptions[1]?.env).toEqual(seenOptions[0]?.env);
     expect(JSON.stringify(logger.records)).not.toContain(secret);
     expect(JSON.stringify(logger.records)).not.toContain("native-aws-secret");
   });
@@ -4053,41 +4060,10 @@ while :; do /bin/sleep 10; done
     ]);
   });
 
-  it("mirrors Claude's native Bash calls into the jobs list, read-only", async () => {
-    setupClaudeHost({
-      createQuery: (input, lifecycle) => {
-        const sessionId = input.options.sessionId ?? input.options.resume ?? "s";
-        const stream = (event: unknown) => sdkMessage({
-          type: "stream_event", parent_tool_use_id: null, uuid: `s-${Math.random()}`, session_id: sessionId, event,
-        });
-        const messages = [
-          stream({ type: "content_block_start", index: 0, content_block: { type: "tool_use", id: "bash-1", name: "Bash", input: {} } }),
-          stream({ type: "content_block_delta", index: 0, delta: { type: "input_json_delta", partial_json: '{"command":"uname -m"}' } }),
-          stream({ type: "content_block_stop", index: 0 }),
-          sdkMessage({
-            type: "user", parent_tool_use_id: null, uuid: "u-1", session_id: sessionId,
-            message: { role: "user", content: [{ type: "tool_result", tool_use_id: "bash-1", content: "x86_64\n" }] },
-          }),
-          ...responseMessages(sessionId, "It is x86_64."),
-        ];
-        return fakeQuery(messages, lifecycle, input.prompt);
-      },
-    });
-    let midTurn: ReturnType<NonNullable<typeof host>["listJobs"]> = [];
-    await host!.runTurn("casper", {
-      sessionId: "conversation-1",
-      prompt: "what arch?",
-      emit: (event) => {
-        if (event.type === "tool_execution_start") midTurn = host!.listJobs("casper", "conversation-1", "claude-code");
-      },
-    });
-    expect(midTurn).toMatchObject([{ id: "bash-1", label: "bash", command: "uname -m", status: "running" }]);
-    const jobs = host!.listJobs("casper", "conversation-1", "claude-code");
-    expect(jobs).toMatchObject([{ id: "bash-1", command: "uname -m", status: "completed", output: expect.stringContaining("x86_64") }]);
-    expect(jobs[0]?.endedAt).toBeTypeOf("string");
-    // Ghost cannot reach inside a native call, so cancel stays pi-only.
-    expect(() => host!.cancelJob("casper", "conversation-1", "bash-1", "claude-code"))
-      .toThrow(/pi only/);
+  it("names the ghost and conversation in the query environment", async () => {
+    const { seenOptions } = setupClaudeHost();
+    await host!.runTurn("casper", { sessionId: "conversation-1", prompt: "hi", emit: () => {} });
+    expect(seenOptions[0]?.env).toMatchObject({ GHOST: "casper", GHOST_SESSION: "claude-code:conversation-1" });
   });
 
   it("refuses to queue into a Claude conversation that is not streaming", async () => {

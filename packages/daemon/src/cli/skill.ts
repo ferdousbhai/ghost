@@ -23,7 +23,10 @@ description: Talk to local AI personas through the authenticated ghostd HTTP dae
 
 Ghost selection is \`-g\`, then \`$GHOST\`, then the private \`ghost use\`
 default, then the sole installed ghost. Session selection is \`-s\` with an
-exact id or unique public/raw-id prefix, then the most recently updated session.
+exact id or unique public/raw-id prefix, then \`$GHOST_SESSION\`, then the most
+recently updated session. A ghost's own shell carries \`$GHOST\` and
+\`$GHOST_SESSION\`; \`ghost say --follow-up\` from there queues into a live turn or
+starts the next one.
 Destructive commands require \`--yes\`. Only \`ghost login\` prompts; under
 \`--json\` it refuses every prompt \`--key-stdin\` cannot answer.
 

@@ -78,3 +78,16 @@ export function requireConversationIdentity(id: string): ConversationIdentity {
     400,
   );
 }
+
+/**
+ * How a shell command started by a ghost names its own conversation: the
+ * variables the `ghost` CLI reads in place of `-g` and `-s`. Both runtimes
+ * put them in their bash environment.
+ */
+export function conversationEnvironment(
+  ghostName: string,
+  conversationId: string,
+  runtime: ConversationRuntime,
+): { GHOST: string; GHOST_SESSION: string } {
+  return { GHOST: ghostName, GHOST_SESSION: conversationIdentity(runtime, conversationId).id };
+}
