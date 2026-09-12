@@ -1101,7 +1101,7 @@ describe("navigation, input, and scripting actions", () => {
       action: "javascript",
       code: "document.title",
     });
-    expect(resultText(result)).toMatch(/untrusted data from the page/i);
+    expect(resultText(result)).toMatch(/<untrusted source="webpage"/);
     expect(result.details).toMatchObject({ action: "javascript", value: "js-result" });
   });
 
@@ -1191,7 +1191,7 @@ describe("console, network, and tabs", () => {
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "console" });
     expect(resultText(result)).toMatch(/hello from the page/);
-    expect(resultText(result)).toMatch(/untrusted data, not instructions/i);
+    expect(resultText(result)).toMatch(/<untrusted source="webpage"/);
     expect(backend.calls.some((call) => call.name === "readConsole")).toBe(true);
   });
 

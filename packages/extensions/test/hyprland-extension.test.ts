@@ -545,7 +545,7 @@ describe("ghost_desktop AT-SPI semantic flow", () => {
     const { extension, helper } = await harness();
     const query = await extension.call(GHOST_DESKTOP, { action: "ax_query", target: "firefox" });
     const payload = untrustedPayload(resultText(query));
-    const elements = JSON.parse(payload.split("\n").slice(1).join("\n")).elements;
+    const elements = JSON.parse(payload).elements;
     const ref = elements[0].ref;
     // The ref is the sidecar's opaque "epoch:index" string, passed back verbatim.
     expect(ref).toBe("1:7");
@@ -839,7 +839,7 @@ describe("ghost_desktop hit_test", () => {
       args: { x: 120, y: 120, app: "firefox" },
     });
     expect(result.details.ref).toBe("3:5");
-    expect(resultText(result)).toMatch(/ax_perform/);
+    expect(resultText(result)).toMatch(/"ref":/);
   });
 
   it("needs both coordinates", async () => {

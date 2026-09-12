@@ -814,10 +814,7 @@ export function createHyprlandExtension(
             }
             const result = await helper.request<AxQueryResult>("ax_query", args, opts);
             const condensed = condenseAxQuery(result);
-            const hint =
-              "Each element has a ref: use it with ax_perform (invoke), ax_set "
-              + "(write text/value), click (ref), or type (ref).";
-            return untrustedTextResult(`${hint}\n${JSON.stringify(condensed)}`, {
+            return untrustedTextResult(JSON.stringify(condensed), {
               count: condensed["count"],
               returned: (condensed["elements"] as unknown[]).length,
               omitted: condensed["omitted"],
@@ -897,10 +894,7 @@ export function createHyprlandExtension(
             );
             const condensed = condenseAxHitTest(result);
             const element = asRecord(condensed["element"]);
-            const hint =
-              "The element under that point has a ref: use it with ax_perform "
-              + "(invoke), ax_set (write), click (ref), or type (ref).";
-            return untrustedTextResult(`${hint}\n${JSON.stringify(condensed)}`, {
+            return untrustedTextResult(JSON.stringify(condensed), {
               ref: element?.["ref"] ?? null,
               role: element?.["role"] ?? null,
             }, "desktop");
