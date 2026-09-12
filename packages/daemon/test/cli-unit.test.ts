@@ -287,6 +287,7 @@ describe("CLI API adaptation", () => {
         return jsonResponse({
           version: "1.4.0",
           source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
+          update: { latest: "1.5.0", command: "omarchy-update", url: "https://github.com/ferdousbhai/ghost/releases/tag/v1.5.0" },
         });
       }
       return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
@@ -298,6 +299,7 @@ describe("CLI API adaptation", () => {
     });
     expect(response.stdout).toContain("daemon version 1.4.0");
     expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
+    expect(response.stdout).toContain("update         1.5.0 is available · run: omarchy-update");
     expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
   });
 });

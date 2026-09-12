@@ -91,11 +91,11 @@ const CEILINGS: Record<string, number> = {
   Hooks: 462,
   "Owner context": 1125,
   "Scheduled work": 1399,
-  "Self-maintenance": 2413,
+  "Self-maintenance": 2607,
   "First meeting": 431,
 };
 
-const TOTAL_CEILING = 9561;
+const TOTAL_CEILING = 9755;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

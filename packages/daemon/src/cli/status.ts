@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { Ghost } from "../ghosts.js";
 import type { RemoteStatus } from "../remote-serve.js";
 import type { RunningSource } from "../running-source.js";
+import type { UpdateAvailable } from "../update-check.js";
 import type { ParsedCliArgs } from "./args.js";
 import { readDefaultGhost } from "./common.js";
 import { emit } from "./output.js";
@@ -10,6 +11,7 @@ import type { CliContext } from "./types.js";
 interface DaemonStatus {
   version: RunningSource["version"] | null;
   source?: { commit: RunningSource["commit"]; root: RunningSource["root"] };
+  update?: UpdateAvailable | null;
 }
 
 export async function statusCommand(
@@ -33,7 +35,9 @@ export async function statusCommand(
     ghostCount: ghosts.length,
     defaultGhost,
     version: ctx.version,
-    ...(daemon ? { daemonVersion: daemon.body.version, source: daemon.body.source ?? null } : {}),
+    ...(daemon
+      ? { daemonVersion: daemon.body.version, source: daemon.body.source ?? null, update: daemon.body.update ?? null }
+      : {}),
     ...(remote ? { remote: remote.body } : { remote: { state: "unavailable" } }),
   };
   emit(ctx, result, () => {
@@ -50,6 +54,9 @@ export async function statusCommand(
       lines.push(`daemon version ${daemon.body.version ?? "unknown"}`);
       lines.push(`daemon commit  ${daemon.body.source?.commit ?? "unknown"}`);
       lines.push(`daemon source  ${daemon.body.source?.root ?? "packaged install"}`);
+      if (daemon.body.update) {
+        lines.push(`update         ${daemon.body.update.latest} is available · run: ${daemon.body.update.command}`);
+      }
     }
     if (remote) {
       const url = remote.body.url ? ` ${remote.body.url}` : "";

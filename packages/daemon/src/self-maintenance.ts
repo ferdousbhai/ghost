@@ -126,6 +126,7 @@ export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string
     ...checkoutLines(input),
     ...loopLines(input.checkout),
     ...restartLines(input.ghostName, input.sessionId),
+    "`ghost status` names a newer Ghost release when one exists, with the exact command that installs it here; tell the owner it is available, and run that command only when they ask for the update.",
     "Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.",
     "To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.",
   ].join("\n");

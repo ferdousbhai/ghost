@@ -57,6 +57,9 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).toContain(RUNNING.commit ?? "");
     expect(policy).toContain(JSON.stringify(CHECKOUT));
     expect(policy).toContain("This checkout is what runs you");
+    // Updates are reported by `ghost status` and applied only on the owner's word.
+    expect(policy).toContain("`ghost status` names a newer Ghost release");
+    expect(policy).toContain("only when they ask for the update");
   });
 
   it("says a checkout that is not the running root cannot be adopted alone", () => {

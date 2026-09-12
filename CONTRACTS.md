@@ -354,7 +354,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /api/relay/pair` | Owner answers the pending pairing: `{ code, allow }`. Allow hands the relay token to that browser over its socket; a stale code is `404 pairing_not_found`. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
-| `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. |
+| `GET /api/status` | Owner-only `{ version, source: { commit, root }, update }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `update` is the daily release check's last answer, `{ latest, command, url }` or `null`; `command` is what installs it on this machine (`omarchy-update` for the package, pull + build + restart for a checkout). Ghost never applies an update itself; `--offline` skips the check ([`update-check.ts`](packages/daemon/src/update-check.ts)). |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |

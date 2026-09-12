@@ -28,6 +28,7 @@ import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
+import { UpdateChecker } from "./update-check.js";
 import { SessionHost } from "./session-host.js";
 import {
   resolveScheduleRuntimeUnitDirectory,
@@ -412,6 +413,11 @@ async function serveDaemon(
     DAEMON_VERSION,
     dirname(fileURLToPath(import.meta.url)),
   );
+  // Offline forbids every catalogue call, the release check included.
+  const updates = config.offline
+    ? null
+    : new UpdateChecker({ version: runningSource.version, sourceRoot: runningSource.root, logger });
+  updates?.start();
   registry.ensureRoot();
   try {
     await Promise.all(registry.list().map(async (ghost) => {
@@ -490,6 +496,7 @@ async function serveDaemon(
       mcp,
       hooks,
       runningSource,
+      update: () => updates?.current ?? null,
       logger,
       port: config.port,
       address: config.host,

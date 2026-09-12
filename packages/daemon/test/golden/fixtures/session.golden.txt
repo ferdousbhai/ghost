@@ -91,6 +91,7 @@ The timestamp keeps two restarts from colliding on the same transient unit name.
 The wait loop covers the daemon not listening yet when systemd already considers it started.
 The transient unit survives the restart because it is its own unit, not a child of yours.
 A HUD change needs `systemctl --user restart ghost-shell.service` instead; reloading that unit only refetches daemon data, it does not reload QML.
+`ghost status` names a newer Ghost release when one exists, with the exact command that installs it here; tell the owner it is available, and run that command only when they ask for the update.
 Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.
 To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.
 
@@ -218,6 +219,7 @@ The timestamp keeps two restarts from colliding on the same transient unit name.
 The wait loop covers the daemon not listening yet when systemd already considers it started.
 The transient unit survives the restart because it is its own unit, not a child of yours.
 A HUD change needs `systemctl --user restart ghost-shell.service` instead; reloading that unit only refetches daemon data, it does not reload QML.
+`ghost status` names a newer Ghost release when one exists, with the exact command that installs it here; tell the owner it is available, and run that command only when they ask for the update.
 Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.
 To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.
 

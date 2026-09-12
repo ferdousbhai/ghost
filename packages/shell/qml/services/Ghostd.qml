@@ -63,6 +63,34 @@ Singleton {
     // Remote access is daemon-global rather than ghost- or conversation-scoped,
     // so its owner/request state survives ghost and conversation switches.
 
+    function validUpdate(update: var): bool {
+        return !!update && typeof update === "object" && !Array.isArray(update)
+            && typeof update.latest === "string" && update.latest !== ""
+            && typeof update.command === "string" && update.command !== "";
+    }
+
+    /** What the daemon knows about newer releases; nothing else in /api/status is read here. */
+    function fetchDaemonStatus(): void {
+        if (root.statusRequest && root.statusRequest.readyState !== 4) return;
+        const xhr = typeof root.statusRequestFactory === "function"
+            ? root.statusRequestFactory() : new XMLHttpRequest();
+        root.statusRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.statusRequest) return;
+            root.statusRequest = null;
+            if (xhr.status !== 200) return;
+            try {
+                const body = JSON.parse(xhr.responseText);
+                root.updateAvailable = root.validUpdate(body.update) ? body.update : null;
+                root.reachable = true;
+            } catch (error) {
+                root.updateAvailable = null;
+            }
+        };
+        root.dispatch(xhr, "GET", "/api/status", ({}), null,
+            function () { return root.statusRequest === xhr; });
+    }
+
     function makeRemoteRequest(): var {
         return typeof root.remoteRequestFactory === "function"
             ? root.remoteRequestFactory() : new XMLHttpRequest();
@@ -406,6 +434,11 @@ Singleton {
     readonly property string remoteUrl: typeof root.remoteStatus.url === "string" ? root.remoteStatus.url : ""
     property bool remoteLoading: false
     property bool remoteMutating: false
+    /**
+     * A newer Ghost release the daemon knows about, `{ latest, command, url }`,
+     * or null. The daemon checks once a day; this is only its last answer.
+     */
+    property var updateAvailable: null
     property string remoteError: ""
     /** Authenticated SVG responses become a data URL for QML's Image, whose
         network loader cannot attach the bearer header itself. */
@@ -576,6 +609,9 @@ Singleton {
     /** Test seam; production constructs native character XHRs. */
     property var characterRequestFactory: null
     property var remoteRequest: null
+    property var statusRequest: null
+    /** Test seam; production constructs the native XHR. */
+    property var statusRequestFactory: null
     property var remoteQrRequest: null
     /** Test seam; production constructs native QML XHRs. */
     property var remoteRequestFactory: null
@@ -977,6 +1013,7 @@ Singleton {
 
     function refresh(): void {
         root.fetchHooks(false);
+        root.fetchDaemonStatus();
         root.retireListRequest();
         const generation = root.listGeneration;
         const xhr = root.makeGhostRequest();

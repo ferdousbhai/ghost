@@ -49,6 +49,7 @@ import {
 } from "./pi-messages.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
+import type { UpdateAvailable } from "./update-check.js";
 import type { SessionHost } from "./session-host.js";
 
 export interface ServerOptions {
@@ -65,6 +66,8 @@ export interface ServerOptions {
   models?: ModelSelection;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
+  /** The last update check's answer, for `GET /api/status`; omitted or null means none known. */
+  update?: () => UpdateAvailable | null;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -1473,6 +1476,7 @@ export function createDaemonServer(options: ServerOptions): Server {
               commit: options.runningSource?.commit ?? null,
               root: options.runningSource?.root ?? null,
             },
+            update: options.update?.() ?? null,
           });
           return;
         }

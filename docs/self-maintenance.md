@@ -179,6 +179,18 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 > build will collide with yours, and a restart will ship whatever happened to be
 > built last. Give the ghost its own clone.
 
+## Updates
+
+The daemon asks GitHub for the latest release once shortly after boot and
+then daily, and `GET /api/status` carries the answer as `update`. `ghost
+status` prints it as one line with the exact command for this install
+(`omarchy-update` for the package; a pull, build, and restart for a checkout),
+the HUD shows the same line above the conversation and copies the command on a
+click, and the ghost's policy tells it to say an update is available and to run
+that command only when the owner asks. `--offline` skips the check. Nothing
+downloads or installs on its own: Omarchy's package pipeline follows Ghost's
+releases, and a checkout is the owner's to pull.
+
 ## Not built, on purpose
 
 - **No container sandbox with snapshot and rewind.** Ghost runs on the owner's

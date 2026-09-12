@@ -64,6 +64,7 @@ async function serve(
     conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
+    update?: ServerOptions["update"];
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -105,6 +106,7 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
+    ...(serverOptions.update === undefined ? {} : { update: serverOptions.update }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -2397,3 +2399,16 @@ describe("routing and transport", () => {
   });
 });
 
+describe("GET /api/status", () => {
+  it("reports the last update check, and null when none is known", async () => {
+    const base = await serve(undefined, {
+      update: () => ({ latest: "0.9.0", command: "omarchy-update", url: "https://github.com/ferdousbhai/ghost/releases/tag/v0.9.0" }),
+    });
+    const status = await fetch(`${base}/api/status`);
+    expect(status.status).toBe(200);
+    expect(await status.json()).toMatchObject({ update: { latest: "0.9.0", command: "omarchy-update" } });
+    await listening!.close();
+    const quiet = await serve();
+    expect(await (await fetch(`${quiet}/api/status`)).json()).toMatchObject({ update: null });
+  });
+});
