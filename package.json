@@ -8,7 +8,9 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "lint": "biome check . --diagnostic-level=warn --error-on-warnings"
+    "lint": "biome check . --diagnostic-level=warn --error-on-warnings",
+    "verify": "bash .githooks/verify",
+    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.10"

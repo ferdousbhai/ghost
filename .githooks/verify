@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# The whole gate, once: typecheck, lint, every package's tests. A green run
+# on a clean tree is remembered by that tree's hash, so the pre-push hook can
+# skip a suite that already passed on exactly what is being pushed.
+#
+#   pnpm verify        run the gate, remember a green clean tree
+#   .githooks/verify --check   exit 0 only if HEAD's tree is remembered green
+set -euo pipefail
+cd -- "$(git rev-parse --show-toplevel)"
+
+marker="$(git rev-parse --git-dir)/ghost-verified-tree"
+tree="$(git rev-parse 'HEAD^{tree}')"
+
+if [[ "${1:-}" == --check ]]; then
+  [[ -f "$marker" && "$(cat "$marker")" == "$tree" ]]
+  exit
+fi
+
+pnpm typecheck
+pnpm lint
+pnpm test
+
+# A dirty tree was not what the suite proved; only a clean HEAD earns the marker.
+if [[ -z "$(git status --porcelain)" ]]; then
+  printf '%s\n' "$tree" > "$marker"
+else
+  rm -f "$marker"
+  printf 'verify: green, but the working tree is dirty, so HEAD is not marked verified\n' >&2
+fi

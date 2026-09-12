@@ -111,5 +111,5 @@ gh release create "$tag" \
   "$out/omarchy-ghost-$version/ghost.install"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
-printf 'next: copy %s to pkgbuilds/ghost in a fork of omacom/omarchy-pkgs and open the pull request\n' \
+printf 'next: "After publishing" in packaging/release/README.md; the rendered contribution is %s\n' \
   "$out/omarchy-ghost-$version"

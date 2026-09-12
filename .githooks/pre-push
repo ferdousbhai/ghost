@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# A master push runs the whole gate unless this exact tree already passed it
+# (`pnpm verify`). Branches push freely; `git push --no-verify` is the escape
+# hatch, and it is typed on purpose.
+set -euo pipefail
+hooks="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  [[ "$remote_ref" == refs/heads/master ]] || continue
+  if "$hooks/verify" --check; then
+    printf 'pre-push: this tree already passed the gate\n' >&2
+    continue
+  fi
+  printf 'pre-push: running the gate before master takes this push\n' >&2
+  "$hooks/verify"
+done

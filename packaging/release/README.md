@@ -38,12 +38,17 @@ plus scratch-daemon behavior before installation.
 
 ## Cutting a release
 
-Releases are cut from this machine, not from CI. On a pushed, clean `master`
-whose manifests already carry the version (`verify-release-version.sh`):
+Releases are cut from this machine, not from CI. Bump the six manifests
+`verify-release-version.sh` reads, commit as `release: <version> — <one line>`,
+push (the `pre-push` hook runs the whole gate), then publish:
 
 ```sh
-packaging/release/publish.sh 0.1.0 --dry-run   # build, verify, render; no tag
-packaging/release/publish.sh 0.1.0             # tag v0.1.0 and publish
+old=0.1.0; new=0.1.1
+sed -i "s/\"version\": \"$old\"/\"version\": \"$new\"/" package.json packages/*/package.json \
+  packages/chromium-extension/extension/manifest.json
+packaging/release/verify-release-version.sh .    # prints the one version they all say
+packaging/release/publish.sh 0.1.1 --dry-run     # build, verify, render; no tag
+packaging/release/publish.sh 0.1.1               # tag v0.1.1 and publish
 ```
 
 The script builds the runtime and source archives with `SOURCE_DATE_EPOCH`
@@ -67,6 +72,22 @@ entries and install/remove scripts for the Omarchy repository itself are in
 [`../omarchy/`](../omarchy/). Ghost does not operate a pacman repository or
 package-signing key: Omarchy builds, signs, and promotes the package through
 its `edge` → `rc` → `stable` channels.
+
+## After publishing
+
+Two things do not follow the tag on their own:
+
+- **Until omarchy-pkgs carries the package**, its pull request tracks the
+  release by hand. The fork's branch is `ferdousbhai/omarchy-pkgs` `ghost`;
+  replace `pkgbuilds/ghost` there with `out/omarchy-ghost-<version>`, commit
+  `ghost: <version>`, push. Once the package is merged, `sync-upstream` does
+  this for every later tag and this step disappears.
+- **A checkout install** (`~/.local/bin/ghostd` pointing at a clone, see
+  [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md)) is
+  updated by the command `ghost status` prints on its `update` line: a
+  fast-forward pull, `pnpm install --frozen-lockfile`, `pnpm build`, and a
+  restart of both user units. The daemon checks for releases at boot and daily,
+  so the line appears within a day, or at once after a daemon restart.
 
 `ghost-dev` remains the checkout-only rolling recipe under
 [`../arch/`](../arch/). It provides and conflicts with `ghost` so the two
