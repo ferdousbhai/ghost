@@ -19,7 +19,6 @@ TestCase {
     function cleanup(): void {
         Ghostd.streaming = false;
         Ghostd.activity = "";
-        Ghostd.statusText = "";
         Ghostd.toolActivities = [];
         Ghostd.lastError = "";
     }
@@ -42,13 +41,6 @@ TestCase {
         compare(line.phrase, "Thinking");
 
         Ghostd.toolActivities = [tool("Read", "running", { file_path: "docs/design.md" })];
-        compare(line.phrase, "Reading docs/design.md");
-
-        Ghostd.statusText = "Checking whether the last train still runs";
-        compare(line.phrase, "Checking whether the last train still runs");
-
-        // The ghost stops narrating; the call it is still inside of takes over.
-        Ghostd.statusText = "";
         compare(line.phrase, "Reading docs/design.md");
 
         // The call settles and there is nothing left to name.

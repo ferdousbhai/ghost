@@ -8,10 +8,10 @@
 // real sentence available for almost every moment of a turn — and a real one
 // outranks any invented one.
 //
-// The ladder, in order: the ghost's own narration when it announced itself
-// ("Checking your Dropbox for the invoice" — TurnBlocks.js makes that call),
-// then the tool call that is running, rendered by the same ToolTrace the
-// transcript cards use, then the plain state the runtime reported. Nothing
+// The ladder, in order: the tool call that is running, rendered by the same
+// ToolTrace the transcript cards use, then the plain state the runtime
+// reported. The ghost's own narration is not repeated here: it streams in the
+// reading column, where the next text overwrites it (TurnBlocks.js). Nothing
 // rotates: a line changes when the work changes, and the ellipsis is what says
 // it is still going.
 import QtQuick
@@ -37,11 +37,9 @@ Item {
         }
         return null;
     }
-    readonly property string narration: Ghostd.statusText
     readonly property string toolLine: root.liveTool
         ? ToolTrace.text(root.liveTool, false, false, false) : ""
-    readonly property string phrase: root.narration !== "" ? root.narration
-        : root.toolLine !== "" ? root.toolLine
+    readonly property string phrase: root.toolLine !== "" ? root.toolLine
         : root.stateLine(Ghostd.activity)
 
     /**
@@ -69,8 +67,6 @@ Item {
     clip: false
 
     // The phrase says what is happening; these say it is still happening.
-    // TurnBlocks strips a narration's trailing stop so the ghost's own sentence
-    // does not end up with four of them.
     Timer {
         interval: 430
         repeat: true

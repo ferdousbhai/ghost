@@ -498,13 +498,6 @@ Singleton {
     property int commandTurnAnchor: 0
     property bool streaming: false
     property string activity: ""
-    /**
-     * The ghost's own words for what it is doing right now, or "" when it is
-     * working silently. A model narrating itself ("Checking your Dropbox for
-     * the invoice") is status, not reply: it belongs beside the orb for as long
-     * as it is true, and nowhere afterwards. See TurnBlocks.js for the split.
-     */
-    property string statusText: ""
     property var pendingAsk: null
     property bool askSubmitting: false
     property string askError: ""
@@ -1433,7 +1426,6 @@ Singleton {
             request: null,
             lastStreamActivity: 0,
             activity: "",
-            statusText: "",
             limitNotice: "",
             lastError: "",
             pendingAsk: null,
@@ -1503,7 +1495,6 @@ Singleton {
         state.streaming = root.streaming;
         state.request = root.request;
         state.activity = root.activity;
-        state.statusText = root.statusText;
         state.lastError = root.lastError;
         state.pendingAsk = root.pendingAsk;
         state.askSubmitting = root.askSubmitting;
@@ -1535,7 +1526,6 @@ Singleton {
         root.streaming = state.streaming;
         root.request = state.request;
         root.activity = state.activity;
-        root.statusText = state.statusText;
         root.lastError = state.lastError;
         root.pendingAsk = state.pendingAsk;
         root.askSubmitting = state.askSubmitting;
@@ -1563,7 +1553,6 @@ Singleton {
         root.streaming = false;
         root.request = null;
         root.activity = "";
-        root.statusText = "";
         root.pendingAsk = null;
         root.askSubmitting = false;
         root.askError = "";
@@ -1650,7 +1639,7 @@ Singleton {
     function flushLiveTurns(): void {
         for (const key of root.liveConversationKeys) {
             const state = root.turnStates[key];
-            if (state) root.flushTurn(state, false, false);
+            if (state) root.flushTurn(state, false);
         }
     }
 
@@ -2783,8 +2772,8 @@ Singleton {
      * Older storage projections may give one turn several consecutive assistant
      * messages, while the live stream renders the whole turn as one row. They
      * are therefore regrouped before the split, or a restored answer scatters
-     * across several rows and a preamble is severed from the tool call that
-     * made it one.
+     * across several rows and an announcement is severed from the tool call
+     * it captions.
      *
      * A text-less row survives when it still carries tool activity. That is the
      * only thing standing between an unanswered `ask` and a dead conversation:
@@ -2793,7 +2782,6 @@ Singleton {
      */
     function rehydrateTurn(state: var, messages: var): void {
         state.activity = "";
-        state.statusText = "";
         state.limitNotice = "";
         const storedRows = TurnBlocks.rows(messages);
         state.hydratedRowCount = storedRows.length;
@@ -2878,9 +2866,11 @@ Singleton {
 
     function messageTools(message: var): var {
         if (!Array.isArray(message.content)) return [];
-        return message.content
-            .filter(part => part && part.type === "toolCall")
-            .map(part => ({
+        const captions = TurnBlocks.splitParts(message.content).captions;
+        const tools = [];
+        message.content.forEach((part, index) => {
+            if (!part || part.type !== "toolCall") return;
+            tools.push({
                 id: part.id || ("history-" + Math.random()),
                 name: part.name || "tool",
                 // Reading every restored call as complete quietly healed the
@@ -2894,7 +2884,9 @@ Singleton {
                 // writes on both sides of a persisted `!cd`.
                 cwd: typeof part.cwd === "string" ? part.cwd : "",
                 summary: "",
-                intent: "",
+                // What the ghost said it was doing before this call, so a
+                // restored card explains itself the way the live one did.
+                intent: captions[index] || "",
                 askBranch: part.ghostAsk || null,
                 // How the question actually settled, so a restored card can stop
                 // reporting an answer for one that was cancelled or timed out.
@@ -2902,7 +2894,9 @@ Singleton {
                 // unknown rather than guessing.
                 askSettled: part.ghostAsk && typeof part.ghostAsk.settled === "string"
                     ? part.ghostAsk.settled : ""
-            }));
+            });
+        });
+        return tools;
     }
 
     /**
@@ -3071,7 +3065,7 @@ Singleton {
         state.request = null;
         state.streaming = false;
         root.settleToolActivityFor(state, true);
-        root.flushTurn(state, true, false);
+        root.flushTurn(state, true);
         root.resetInteractionStateFor(state);
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
             root.setTurnRow(state, state.assistantRow, "pending", false);
@@ -3116,7 +3110,6 @@ Singleton {
     }
 
     function resetInteractionStateFor(state: var): void {
-        state.statusText = "";
         state.activity = "";
         root.resetAskStateFor(state);
         state.steeringQueue = [];
@@ -3278,8 +3271,7 @@ Singleton {
                 name: event.toolName,
                 status: "preparing",
                 arguments: ({}),
-                summary: "",
-                intent: ""
+                summary: ""
             });
             if (event.toolName === "ask") Qt.callLater(function () {
                 root.fetchPendingAskFor(state);
@@ -3293,20 +3285,22 @@ Singleton {
                 name: event.toolCall.name,
                 status: "queued",
                 arguments: event.toolCall.arguments || ({}),
-                summary: "",
-                intent: ""
+                summary: ""
             });
             root.resetAskStateFor(state);
             break;
         case "tool_execution_start":
             state.activity = event.toolName;
-            root.updateToolFor(state, event.id, {
+            const started = {
                 name: event.toolName,
                 status: "running",
                 arguments: event.arguments || ({}),
-                cwd: typeof event.cwd === "string" ? event.cwd : "",
-                intent: event.intent || ""
-            });
+                cwd: typeof event.cwd === "string" ? event.cwd : ""
+            };
+            // The runtime's own statement of purpose outranks the caption
+            // TurnBlocks recovered from the narration; "" would erase it.
+            if (event.intent) started.intent = event.intent;
+            root.updateToolFor(state, event.id, started);
             if (event.toolName === "ask") Qt.callLater(function () {
                 root.fetchPendingAskFor(state);
             });
@@ -3356,7 +3350,6 @@ Singleton {
             state.assistantRow = state.rows.length - 1;
             root.resetAssistantSegmentFor(state);
             state.activity = "";
-            state.statusText = "";
             break;
         case "done":
             root.endTurnState(state, "");
@@ -3416,19 +3409,26 @@ Singleton {
         root.syncToolActivityFor(state);
     }
 
-    function flushTurn(state: var, force: bool, segmentClosed: bool): void {
+    function flushTurn(state: var, force: bool): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
         // A builtin has no model blocks. Re-splitting an empty block buffer at
         // `done` must not erase the command_output row we just rendered.
         if (state.rows[state.assistantRow].role === "command") return;
         if (!force && !state.presentationDirty) return;
-        const turn = TurnBlocks.split(
-            state.blocks, Object.keys(state.toolIdsByContent),
-            state.streaming && !segmentClosed);
+        const turn = TurnBlocks.split(state.blocks, Object.keys(state.toolIdsByContent));
         const row = state.rows[state.assistantRow];
         if (row.text !== turn.body)
             root.setTurnRow(state, state.assistantRow, "text", turn.body);
-        if (state.statusText !== turn.status) state.statusText = turn.status;
+        // The text a call overwrote is that call's own announcement, unless
+        // the runtime already said what the call was for.
+        for (const index of Object.keys(turn.captions)) {
+            const caption = turn.captions[index];
+            if (caption === "") continue;
+            const id = state.toolIdsByContent[index];
+            const activity = state.toolActivities.find(item => item.id === id);
+            if (activity && !activity.intent)
+                root.updateToolFor(state, id, { intent: caption });
+        }
         state.presentationDirty = false;
         root.projectTurnFields(state);
     }
@@ -3453,9 +3453,9 @@ Singleton {
         if (!state.streaming) return;
         root.settleToolActivityFor(state, false);
         state.streaming = false;
-        // Re-split now the turn is closed: a trailing block held beside the orb
-        // while it might still have been a preamble is the reply after all.
-        root.flushTurn(state, true, false);
+        // Re-split now the turn is closed, so the last flush tick's text is
+        // what the row shows.
+        root.flushTurn(state, true);
         root.resetInteractionStateFor(state);
         let text = "";
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
@@ -3521,13 +3521,11 @@ Singleton {
         } else {
             root.settleToolActivityFor(state, false);
             // The HTTP turn continues, but this assistant segment ends where
-            // the dequeued owner message enters. Its trailing prose is a reply,
-            // not an in-progress status line.
-            root.flushTurn(state, true, true);
+            // the dequeued owner message enters; flush what it said.
+            root.flushTurn(state, true);
             if (hasAssistant)
                 root.setTurnRow(state, state.assistantRow, "pending", false);
         }
-        state.statusText = "";
         state.activity = "";
 
         root.appendTurnRow(state, {

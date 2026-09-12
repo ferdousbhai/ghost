@@ -82,12 +82,12 @@ TestCase {
 
         push(second, { type: "text_start", contentIndex: 0 });
         push(second, { type: "text_delta", contentIndex: 0, delta: secondText });
-        Ghostd.flushTurn(second.state, true, false);
+        Ghostd.flushTurn(second.state, true);
 
         // A background chunk updates its own rows without changing the open
         // conversation's visible transcript.
         push(first, { type: "text_delta", contentIndex: 0, delta: " continues" });
-        Ghostd.flushTurn(first.state, true, false);
+        Ghostd.flushTurn(first.state, true);
         compare(Ghostd.currentSessionId, "pi:two");
         compare(Ghostd.transcript.get(1).text, secondText);
 

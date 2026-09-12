@@ -60,7 +60,6 @@ TestCase {
 
     function makeInteractionDirty(state: var): void {
         state.activity = "read";
-        state.statusText = "Still reading";
         state.pendingAsk = ({ id: "ask-1" });
         state.askSubmitting = true;
         state.askError = "old ask error";
@@ -74,7 +73,6 @@ TestCase {
     function verifyInteractionSettled(state: var): void {
         verify(!state.streaming);
         compare(state.activity, "");
-        compare(state.statusText, "");
         compare(state.pendingAsk, null);
         verify(!state.askSubmitting);
         compare(state.askError, "");
@@ -82,6 +80,16 @@ TestCase {
         compare(state.followUpQueue.length, 0);
         verify(!state.queueSubmitting);
         compare(state.queueError, "");
+    }
+
+    function test_restoredToolCardCarriesTheNarrationThatAnnouncedIt(): void {
+        const tools = Ghostd.messageTools({ content: [
+            { type: "text", text: "Checking your Dropbox for the invoice." },
+            { type: "toolCall", id: "t1", name: "read", arguments: { path: "inv.pdf" } },
+            { type: "text", text: "It is dated the 14th." }
+        ] });
+        compare(tools.length, 1);
+        compare(tools[0].intent, "Checking your Dropbox for the invoice.");
     }
 
     function test_dequeuedSteerBecomesTranscriptRowWithoutReload(): void {
