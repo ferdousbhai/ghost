@@ -114,8 +114,11 @@ outer bound behind it.
 ## Send it upstream
 
 The ghost home is one owner's. `packages/`, `CONTRACTS.md`, and `docs/` are
-every ghost's, so a fix there that is not an owner preference belongs in a pull
-request. The recipe is [`CONTRIBUTING.md`](../CONTRIBUTING.md) in the clone:
+every ghost's, so when a ghost's work there would help every owner, a bug
+fixed, a real efficiency gain, a policy line that proved wrong in use, the
+policy nudges it to offer the change upstream. It is encouragement, not a
+rule: the ghost decides, and you decide at the push. The recipe is
+[`CONTRIBUTING.md`](../CONTRIBUTING.md) in the clone:
 you set up `gh auth` and a fork remote once, the ghost branches from fetched
 `origin/master` before it edits, and it shows you the branch and asks before
 it pushes, because the push and the PR go out under your GitHub account.

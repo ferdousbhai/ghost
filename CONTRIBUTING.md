@@ -1,8 +1,8 @@
 # Contributing
 
 Ghost is maintained by its owners and by the ghosts that run on it. A ghost
-reads this file from its own `self.checkout` clone when a fix belongs upstream;
-a human contributor follows the same steps.
+reads this file from the clone its daemon runs from when it decides a change
+is worth offering upstream; a human contributor follows the same steps.
 
 ## What belongs upstream
 

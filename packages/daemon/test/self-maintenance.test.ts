@@ -45,6 +45,9 @@ describe("renderSelfMaintenancePolicy", () => {
   it("points a fix in shared code upstream and gates the push on the owner", () => {
     const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
     expect(policy).toContain("branch from upstream master");
+    // An encouragement, not a rule: it names the work worth offering and leaves the choice.
+    expect(policy).toContain("consider offering it upstream");
+    expect(policy).toContain("a real efficiency gain");
     expect(policy).toContain("`CONTRIBUTING.md` in the checkout");
     expect(policy).toContain("ask before you push");
   });
