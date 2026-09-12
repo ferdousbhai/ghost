@@ -107,6 +107,15 @@ export interface HelperCaptureResult extends HonestyMetadata {
   readonly png_base64: string;
   readonly width: number;
   readonly height: number;
+  /**
+   * The model's copy when the capture was scaled to the desktop's logical
+   * size or the provider's edge cap (`model_image.py`); absent when the
+   * capture already is that size. `png_base64` is always the saved file.
+   */
+  readonly model_png_base64?: string;
+  readonly model_width?: number;
+  readonly model_height?: number;
+  readonly model_scale?: number;
   readonly capture_mode?: string;
   readonly output?: string;
   readonly region?: unknown;

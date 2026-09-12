@@ -189,3 +189,42 @@ def test_capture_growth_during_bounded_read_is_rejected(
         GhostDesktop._encode_png({"path": str(path)})
 
     assert not path.exists()
+
+
+class _ScaledHyprctl(FakeHyprctl):
+    """A 2x display, the shape Omarchy laptops usually have."""
+
+    def monitors(self) -> list[dict[str, Any]]:
+        return [{"id": 0, "name": "eDP-1", "focused": True, "scale": 2.0,
+                 "x": 0.0, "y": 0.0, "width": 960.0, "height": 540.0}]
+
+
+class _RealPngRunner(_PngRunner):
+    def __call__(self, argv: list[str], *, timeout: float | None = None) -> FakeResult:
+        self.calls.append((argv, timeout))
+        from PIL import Image
+
+        Image.new("RGB", (8, 4), "white").save(argv[-1], format="PNG")
+        return FakeResult()
+
+
+def test_output_capture_on_a_scaled_display_carries_a_logical_size_copy():
+    desktop = GhostDesktop(
+        hyprctl=_ScaledHyprctl(),
+        capture_router=_AvailableCaptureRouter(),
+        runner=_RealPngRunner(),
+    )
+    result = desktop.capture(target="screen", output="eDP-1")
+    assert (result["width"], result["height"]) == (8, 4)
+    assert (result["model_width"], result["model_height"], result["model_scale"]) == (4, 2, 0.5)
+    assert result["model_png_base64"] != result["png_base64"]
+
+
+def test_output_capture_at_scale_one_sends_the_capture_itself():
+    desktop = GhostDesktop(
+        hyprctl=FakeHyprctl(),
+        capture_router=_AvailableCaptureRouter(),
+        runner=_RealPngRunner(),
+    )
+    result = desktop.capture(target="screen", output="eDP-1")
+    assert "model_png_base64" not in result

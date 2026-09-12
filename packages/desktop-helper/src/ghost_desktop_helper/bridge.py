@@ -43,6 +43,7 @@ from ._vendor.omaharness.headless import HeadlessCapture
 from ._vendor.omaharness.inputs import MAX_CLICKS, Wtype, Ydotool
 from ._vendor.omaharness.keys import hypr_shortcut
 from ._vendor.omaharness.transaction import CompositorTransaction
+from .model_image import model_image
 
 _SKELETAL_TREE = 3
 _CHROMIUM_HINTS = ("chrom", "electron", "code", "slack", "discord", "spotify")
@@ -1162,12 +1163,38 @@ class GhostDesktop:
             f"Unknown capture target {target!r}; use 'window', 'screen', or 'region'"
         )
 
+    def _monitor_scale(
+        self, *, monitor_id: Any = None, point: tuple[float, float] | None = None
+    ) -> float:
+        """The scale of the monitor a capture came from: by Hyprland monitor id,
+        by the monitor containing a logical point, else the focused one."""
+        monitors = self.hyprctl.monitors()
+        chosen: dict[str, Any] | None = None
+        if monitor_id is not None:
+            chosen = next((m for m in monitors if m.get("id") == monitor_id), None)
+        if chosen is None and point is not None:
+            x, y = point
+            chosen = next(
+                (
+                    m
+                    for m in monitors
+                    if float(m.get("x", 0)) <= x < float(m.get("x", 0)) + float(m.get("width", 0))
+                    and float(m.get("y", 0)) <= y < float(m.get("y", 0)) + float(m.get("height", 0))
+                ),
+                None,
+            )
+        if chosen is None:
+            chosen = next((m for m in monitors if m.get("focused")), None)
+        return float((chosen or {}).get("scale") or 1.0) or 1.0
+
     def _capture_window(self, query: str | int | None) -> dict[str, Any]:
         window = self._resolve_window(query)
         result = self.capture_router.capture(
             window, background_fallback=self._headless_fallback
         )
-        payload = self._encode_png(result)
+        payload = self._encode_png(
+            result, scale=self._monitor_scale(monitor_id=window.get("monitor"))
+        )
         window = result.get("client", window)
         payload.update(
             {
@@ -1250,7 +1277,8 @@ class GhostDesktop:
                 "interference": [],
                 "warnings": [],
                 "output": monitor["name"],
-            }
+            },
+            scale=float(monitor.get("scale") or 1.0) or 1.0,
         )
 
     def _capture_region(self, region: dict[str, float]) -> dict[str, Any]:
@@ -1278,7 +1306,10 @@ class GhostDesktop:
                     "occluded or off-workspace content will not appear"
                 ],
                 "region": region,
-            }
+            },
+            scale=self._monitor_scale(
+                point=(float(region.get("x", 0)), float(region.get("y", 0)))
+            ),
         )
 
     @staticmethod
@@ -1290,16 +1321,19 @@ class GhostDesktop:
         return Path(handle.name)
 
     @staticmethod
-    def _encode_png(result: dict[str, Any]) -> dict[str, Any]:
+    def _encode_png(result: dict[str, Any], *, scale: float = 1.0) -> dict[str, Any]:
         path = Path(result["path"])
         try:
             encoded, width, height = _read_capture_png(path)
+            # The model's copy: logical size, capped; the file keeps every pixel.
+            scaled = model_image(path, width, height, scale) or {}
         finally:
             process.unlink_quietly(path)
         return {
             "png_base64": encoded,
             "width": width,
             "height": height,
+            **scaled,
             "backend": result.get("backend"),
             "capture_mode": result.get("capture_mode"),
             "background_safe": bool(result.get("background_safe")),

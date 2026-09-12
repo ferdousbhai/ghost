@@ -95,7 +95,7 @@ Input (layout-safe)
 - `mouse_move` `{ x, y, app?, coordinate_space? }` → park the pointer at a coordinate (a hover). Unlike click/drag the pointer is **left there**, not restored; it rides a no-cursor-restore transaction that keeps every other guardrail (lock, focus/workspace restore).
 
 Capture (the ladder + honesty)
-- `capture` `{ target: "window", name?, address? }` → PNG bytes (base64) via the 3-tier window ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false).
+- `capture` `{ target: "window", name?, address? }` → PNG bytes (base64) via the 3-tier window ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false). Every capture result also carries `model_png_base64` with `model_width`/`model_height`/`model_scale` when the capture was scaled for the model (`model_image.py`): to the monitor's logical size (physical ÷ scale, so image coordinates are the desktop coordinates input ops take) and within a 1568 px long edge, where vision providers downsample anyway. `png_base64` is always the full capture, and the field is absent when nothing changed.
 - `capture` `{ target: "screen", output? }` and `{ target: "region", region }` deliberately bypass the window router: direct `grim -o` / `grim -g` reads already-composited pixels without selecting, focusing, or moving a window. Results identify `grim-output` / `grim-region`; region capture warns that occluded content is absent.
 
 Every path reports full honesty metadata, refuses blank output, and bounds the
@@ -124,7 +124,8 @@ ax_set | hit_test | notify`. `ax_*` + `hit_test` are the semantic path;
 execFile arg arrays; no shell interpolation of model input.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
-to a vision-capable model — a text-only model reaches it through Ghost's
+to a vision-capable model (the logical-size `model_png_base64` copy when the
+helper made one; the saved file keeps every pixel) — a text-only model reaches it through Ghost's
 `inspect_image`, which uses the bound `advisor_model` — and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
 disturbed the desktop. `mode: "watch"` loops the same `capture` op N times over

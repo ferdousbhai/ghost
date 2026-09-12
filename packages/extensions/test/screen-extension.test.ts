@@ -402,6 +402,21 @@ describe("ghost_screen tool", () => {
     expect(result.details.injectionFlagged).toBeUndefined();
   });
 
+  it("hands the model the helper's logical-size copy and keeps the full file", async () => {
+    const helper = captureHelper({
+      width: 1920, height: 1200,
+      model_png_base64: "bW9kZWw=", model_width: 1200, model_height: 750, model_scale: 0.625,
+    });
+    const { harness } = await harnessFor(VISION_CHAT, helper);
+    const result = await harness.call(GHOST_SCREEN, { prompt: "What is on screen?" });
+    expect(resultImages(result)[0]?.data).toBe("bW9kZWw=");
+    expect(result.details).toMatchObject({ imageWidth: 1200, imageHeight: 750, imageScale: 0.625 });
+    expect(resultText(result)).toContain("Image coordinates are desktop coordinates");
+    // The saved file is the capture itself, not the model's copy.
+    const saved = await readFile(String(result.details.savedTo));
+    expect(saved.toString("base64")).toBe(TINY_PNG_BASE64);
+  });
+
   it("flags hostile text metadata without changing or withholding the image", async () => {
     const { harness } = await harnessFor(
       VISION_CHAT,
