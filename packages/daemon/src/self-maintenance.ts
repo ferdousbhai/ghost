@@ -39,10 +39,10 @@ function whatRunsYou(running: RunningSource | null): string {
   return `You are ghostd ${running.version}, commit ${running.commit ?? "unknown"}, running ${where}.`;
 }
 
-function checkoutLines(checkout: string | null): string[] {
+function checkoutLines(checkout: string | null, running: RunningSource | null): string[] {
   if (checkout === null) {
     return [
-      `There is no checkout: you run from a packaged install. Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md there).`,
+      `${running ? "There is no checkout: you run from a packaged install." : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md there).`,
       "Never edit a checkout you were not given.",
     ];
   }
@@ -84,7 +84,7 @@ export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string
   return [
     "## Self-maintenance",
     whatRunsYou(input.running),
-    ...checkoutLines(checkout),
+    ...checkoutLines(checkout, input.running),
     ...loopLines(checkout),
     ...restartLines(input.ghostName, input.sessionId),
     "`ghost status` names a newer Ghost release and the exact command that installs it here; tell the owner, and run it only when they ask.",

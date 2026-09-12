@@ -39,7 +39,8 @@ describe("renderSelfMaintenancePolicy", () => {
     const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: null });
     expect(policy).toContain("What runs you is unknown");
     expect(policy).not.toContain("You are ghostd");
-    expect(policy).toContain("There is no checkout");
+    expect(policy).toContain("No checkout is known to this process");
+    expect(policy).not.toContain("packaged install.");
   });
 
   it("points a fix in shared code upstream and gates the push on the owner", () => {
