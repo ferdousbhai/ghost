@@ -584,124 +584,89 @@ export function createHyprlandExtension(
         }),
         target: Type.Optional(Type.String({
           description:
-            "The window to act on. For focus/see: an address from state (0x…), a "
-            + "window class such as firefox, or a title fragment. For ax_query / "
-            + "ax_roles / key / type / click: which app's window (defaults to the "
-            + "last one you queried, else the focused one).",
+            "The window: an address from state (0x…), a class such as firefox, or a "
+            + "title fragment. Defaults to the last one queried, else the focused one.",
         })),
         workspace: Type.Optional(Type.String({
-          description: "For workspace: a workspace to switch to, such as 3, +1, or name:web.",
+          description: "For workspace: 3, +1, or name:web.",
         })),
         role: Type.Optional(Type.String({
-          description:
-            "For ax_query: keep only elements of this role, such as button, "
-            + "text, menu item, check box. Unknown roles are refused with the list "
-            + "actually present.",
+          description: "For ax_query: only this role (button, text, menu item, check box); an unknown role is refused with the roles present.",
         })),
         match: Type.Optional(Type.String({
-          description:
-            "For ax_query: keep only elements whose name/text/value contains this "
-            + "text (case-insensitive).",
+          description: "For ax_query: only elements whose name, text, or value contains this, case-insensitive.",
         })),
         states: Type.Optional(Type.String({
-          description:
-            "For ax_query: keep only elements with these states, comma-separated, "
-            + "such as focused,editable.",
+          description: "For ax_query: only elements with these comma-separated states, such as focused,editable.",
         })),
         limit: Type.Optional(Type.Integer({
           minimum: 1,
           maximum: MAX_AX_QUERY_LIMIT,
-          description:
-            `For ax_query: cap on elements returned (${1}-${MAX_AX_QUERY_LIMIT}). `
-            + `Defaults to ${DEFAULT_AX_QUERY_LIMIT}.`,
+          description: `For ax_query: elements to return, default ${DEFAULT_AX_QUERY_LIMIT}.`,
         })),
         ref: Type.Optional(Type.String({
           description:
-            "The element ref from a recent ax_query/ax_roles, for ax_perform, "
-            + "ax_set, click, or type. An opaque handle (pass it back exactly as "
-            + "given, do not compute with it); only valid until the next ax_query.",
+            "An element ref from the last ax_query, for ax_perform, ax_set, click, "
+            + "type; opaque, pass it back exactly, valid until the next ax_query.",
         })),
         ax_action: Type.Optional(Type.String({
           minLength: 1,
           maxLength: MAX_AX_ACTION_LENGTH,
           pattern: "^[^\\u0000-\\u001f\\u007f]+$",
-          description:
-            "For ax_perform: the application-defined semantic action to invoke. "
-            + "Pass one exposed by ax_query's actions list. Defaults to click.",
+          description: "For ax_perform: an action from ax_query's actions list, default click.",
         })),
         attribute: Type.Optional(stringEnum(AX_SET_ATTRIBUTES, {
-          description:
-            "For ax_set: which attribute to write. text replaces a field's text; "
-            + "value sets a slider/spinner number; focused grabs focus.",
+          description: "For ax_set: text replaces a field's text, value sets a number, focused grabs focus.",
         })),
         value: Type.Optional(Type.String({
-          description: "For ax_set: the new value (a string, or a number for value).",
+          description: "For ax_set: the new value.",
         })),
         chord: Type.Optional(Type.String({
-          description:
-            "For key: the keyboard chord, such as ctrl+s, alt+Tab, Return, "
-            + "super+1.",
+          description: "For key: a chord such as ctrl+s, alt+Tab, Return, super+1.",
         })),
         text: Type.Optional(Type.String({
           description: "For type: the text to type.",
         })),
         replace: Type.Optional(Type.Boolean({
-          description:
-            "For type: replace the field's existing text instead of inserting at "
-            + "the cursor. Defaults to false (insert).",
+          description: "For type: replace the field's text instead of inserting at the cursor.",
         })),
         x: Type.Optional(Type.Integer({
-          description:
-            "For click/scroll/mouse_move by coordinate, and drag: the x "
-            + "coordinate (drag's start).",
+          description: "x for click, scroll, mouse_move, and a drag's start.",
         })),
         y: Type.Optional(Type.Integer({
-          description:
-            "For click/scroll/mouse_move by coordinate, and drag: the y "
-            + "coordinate (drag's start).",
+          description: "y for click, scroll, mouse_move, and a drag's start.",
         })),
         x2: Type.Optional(Type.Integer({
-          description: "For drag: the x coordinate to release at (the drag's end).",
+          description: "For drag: x to release at.",
         })),
         y2: Type.Optional(Type.Integer({
-          description: "For drag: the y coordinate to release at (the drag's end).",
+          description: "For drag: y to release at.",
         })),
         coordinate_space: Type.Optional(stringEnum(["screen", "window"], {
-          description:
-            "For click/drag/scroll/mouse_move by coordinate: screen (whole "
-            + "desktop) or window (relative to the target window). Defaults to "
-            + "screen. hit_test coordinates are always screen-space.",
+          description: "screen (default) or window-relative coordinates; hit_test is always screen.",
         })),
         button: Type.Optional(stringEnum(MOUSE_BUTTONS, {
-          description:
-            "For click and drag: which pointer button — left, right, or middle. "
-            + "Defaults to left.",
+          description: "For click, drag: default left.",
         })),
         clicks: Type.Optional(Type.Integer({
           minimum: 1,
           maximum: MAX_CLICKS,
-          description:
-            `For click: how many times to click (1-${MAX_CLICKS}; 2 is a `
-            + "double-click). Defaults to 1.",
+          description: "For click: 2 is a double-click, default 1.",
         })),
         delta_y: Type.Optional(Type.Integer({
-          description:
-            "For scroll: vertical wheel amount; positive scrolls up, negative "
-            + "down.",
+          description: "For scroll: vertical amount, positive up.",
         })),
         delta_x: Type.Optional(Type.Integer({
-          description:
-            "For scroll: horizontal wheel amount; positive scrolls right. "
-            + "Defaults to 0.",
+          description: "For scroll: horizontal amount, positive right.",
         })),
         message: Type.Optional(Type.String({
-          description: "For notify: the notification body.",
+          description: "For notify: the body.",
         })),
         title: Type.Optional(Type.String({
-          description: "For notify: the notification title. Defaults to your name.",
+          description: "For notify: the title, default your name.",
         })),
         urgency: Type.Optional(stringEnum(NOTIFY_URGENCIES, {
-          description: "For notify: how loudly to interrupt. Defaults to normal.",
+          description: "For notify: default normal.",
         })),
       }),
       execute: async (_toolCallId, params, signal, _ctx) => {

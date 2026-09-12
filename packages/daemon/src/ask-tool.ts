@@ -17,20 +17,20 @@ const RESERVED_OPTION_LABELS = new Set([
 ]);
 
 const optionSchema = Type.Object({
-  label: Type.String({ description: "The concise display text for this choice (1-5 words)." }),
-  description: Type.String({ description: "What this choice means or what will happen if selected." }),
-  preview: Type.Optional(Type.String({ description: "Optional Markdown preview shown while this choice is focused." })),
+  label: Type.String({ description: "Display text, 1-5 words." }),
+  description: Type.String({ description: "What choosing it means or does." }),
+  preview: Type.Optional(Type.String({ description: "Markdown shown while this choice is focused." })),
 });
 
 const questionSchema = Type.Object({
-  question: Type.String({ description: "A clear, specific question that ends with a question mark." }),
-  header: Type.String({ maxLength: 12, description: "A very short label displayed above the question (max 12 characters)." }),
+  question: Type.String({ description: "The question, ending with a question mark." }),
+  header: Type.String({ maxLength: 12, description: "Label above the question, at most 12 characters." }),
   options: Type.Array(optionSchema, {
     minItems: 2,
     maxItems: 4,
-    description: "Two to four distinct choices. Do not add an Other option; the UI supplies it.",
+    description: "Two to four distinct choices; the UI adds Other.",
   }),
-  multiSelect: Type.Boolean({ description: "Whether the owner may select more than one choice." }),
+  multiSelect: Type.Boolean({ description: "Whether more than one choice may be selected." }),
 });
 
 const annotationSchema = Type.Object({
@@ -42,7 +42,7 @@ export const askToolSchema = Type.Object({
   questions: Type.Array(questionSchema, {
     minItems: 1,
     maxItems: 4,
-    description: "Questions to ask the owner (1-4 questions).",
+    description: "One to four questions.",
   }),
   answers: Type.Optional(Type.Record(Type.String(), Type.String())),
   annotations: Type.Optional(Type.Record(Type.String(), annotationSchema)),
