@@ -3,7 +3,7 @@
 # on a clean tree is remembered by that tree's hash, so the pre-push hook can
 # skip a suite that already passed on exactly what is being pushed.
 #
-#   pnpm verify        run the gate, remember a green clean tree
+#   pnpm verify        run the gate (what CI runs), remember a green clean tree
 #   .githooks/verify --check   exit 0 only if HEAD's tree is remembered green
 set -euo pipefail
 cd -- "$(git rev-parse --show-toplevel)"
@@ -19,6 +19,11 @@ fi
 pnpm typecheck
 pnpm lint
 pnpm test
+# What the Arch workflow checks beyond the workspace: the packaging scripts
+# (they diff packaging/arch/.SRCINFO against a fresh makepkg render) and the
+# Python sidecar's lint and types.
+bash packaging/arch/test-check-dependencies.sh
+(cd packages/desktop-helper && uv run --frozen ruff check src tests && uv run --frozen mypy)
 
 # A dirty tree was not what the suite proved; only a clean HEAD earns the marker.
 if [[ -z "$(git status --porcelain)" ]]; then

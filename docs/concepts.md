@@ -233,6 +233,17 @@ If you expect one of these, it is missing on purpose:
 - **No speech stack.** Dictation is Omarchy's Voxtype; the HUD only toggles
   it and mirrors its state file. The ghost does not speak.
 - **No built-in hooks, review pipeline, or model catalog.**
+- **No job manager.** Background work is shell work: a ghost detaches a
+  command and ends it with `ghost say --follow-up`, which wakes the
+  conversation that started it. Ghost keeps no job table, jobs API, or jobs
+  strip, and cannot cancel what it did not start.
+- **No narration classifier in the HUD.** The reading column shows the latest
+  text of a turn; each tool call overwrites the text that announced it, and
+  that text survives as the tool card's intent. No length limit or sentence
+  rule decides what is "status".
+- **No auto-updater.** The daemon only reports a newer release
+  (`GET /api/status`, `ghost status`, the HUD line); Omarchy's package pipeline
+  installs it, and a checkout is the owner's to pull.
 - **No throttles**, as above.
 
 ## Where to go next
