@@ -1,9 +1,9 @@
 /**
  * The runtime policy for a ghost changing its own source. Rendered from what
- * actually runs the process and the ghost's configured `self.checkout`, so the
- * prompt never claims a checkout is live when it is not.
+ * actually runs the process: the clone the daemon was built from is the one
+ * checkout, shared by every ghost on the machine, so a change there powers all
+ * of them after a build and restart. A packaged install has no checkout.
  */
-import { realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import type { GhostSettings } from "./ghost-settings.js";
 import { pathIsWithin } from "./path-within.js";
@@ -13,48 +13,20 @@ const GHOST_SOURCE_URL = "https://github.com/ferdousbhai/ghost";
 const PACKAGED_ROOT = "/usr/lib/ghost/runtime";
 
 /**
- * `self.checkout` is only usable when it is an absolute path under the owner
- * home; anything else is unwritable under the daemon's sandbox, so it is read
- * as unset rather than as an error.
- */
-export function resolveSelfCheckout(
-  settings: GhostSettings,
-  ownerHome: string,
-): string | null {
-  return ownerHomeDirectory(settings.getString("self.checkout"), ownerHome);
-}
-
-/**
- * `cwd` names where a new conversation starts, the owner home when unset. The
- * same rule as `self.checkout`: absolute, under the owner home, else unset.
+ * `cwd` names where a new conversation starts, the owner home when unset. It
+ * is only usable as an absolute path under the owner home; anything else is
+ * unwritable under the daemon's sandbox, so it reads as unset, not an error.
  */
 export function resolveSettingsCwd(settings: GhostSettings, ownerHome: string): string | null {
-  return ownerHomeDirectory(settings.getString("cwd"), ownerHome);
-}
-
-function ownerHomeDirectory(configured: string | undefined, ownerHome: string): string | null {
-  const trimmed = configured?.trim();
+  const trimmed = settings.getString("cwd")?.trim();
   if (!trimmed || !isAbsolute(trimmed)) return null;
   const path = resolve(trimmed);
   if (path === resolve(ownerHome) || !pathIsWithin(ownerHome, path)) return null;
   return path;
 }
 
-/** Same directory on disk, following symlinks, without failing on a missing one. */
-function sameDirectory(left: string, right: string): boolean {
-  const real = (path: string): string => {
-    try {
-      return realpathSync(path);
-    } catch {
-      return resolve(path);
-    }
-  };
-  return real(left) === real(right);
-}
-
 export interface SelfMaintenanceInput {
   readonly ghostName: string;
-  readonly checkout: string | null;
   readonly running: RunningSource | null;
   readonly sessionId?: string;
 }
@@ -67,23 +39,16 @@ function whatRunsYou(running: RunningSource | null): string {
   return `You are ghostd ${running.version}, commit ${running.commit ?? "unknown"}, running ${where}.`;
 }
 
-function checkoutLines(input: SelfMaintenanceInput): string[] {
-  const { checkout, running } = input;
+function checkoutLines(checkout: string | null): string[] {
   if (checkout === null) {
     return [
-      `No self checkout is configured. Your source is ${GHOST_SOURCE_URL}; the owner can point you at a clone under their home by putting \`self:\` with a nested \`checkout: <absolute path>\` in your \`settings.yml\`.`,
+      `There is no checkout to edit: you run from a packaged install. Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md in that repository).`,
       "Never edit a checkout you were not given.",
     ];
   }
-  const isRunningRoot = running?.root != null && sameDirectory(checkout, running.root);
   return [
-    `Your own checkout is ${JSON.stringify(checkout)}.`,
-    "Edit it directly with your file tools and Bash; no binding or approval comes first.",
+    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine, so a change there powers all of them after build + restart. Edit it directly with your file tools and Bash; no binding or approval comes first.`,
     "Read its `CLAUDE.md` and `CONTRACTS.md` first. They are your self map.",
-    isRunningRoot
-      ? "This checkout is what runs you: edits go live after build + restart."
-      : "This checkout is not what runs you; adopting a change needs the owner to point the ghostd launcher or package at it. Say so instead of pretending it is live.",
-    "A change to `self.checkout` in `settings.yml` applies to new conversations, not this one.",
     "Never edit a checkout you were not given.",
   ];
 }
@@ -120,11 +85,12 @@ function restartLines(ghostName: string, sessionId: string | undefined): string[
 
 /** The exact policy a ghost is given for changing and restarting its own software. */
 export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string {
+  const checkout = input.running?.root ?? null;
   return [
     "## Self-maintenance",
     whatRunsYou(input.running),
-    ...checkoutLines(input),
-    ...loopLines(input.checkout),
+    ...checkoutLines(checkout),
+    ...loopLines(checkout),
     ...restartLines(input.ghostName, input.sessionId),
     "`ghost status` names a newer Ghost release when one exists, with the exact command that installs it here; tell the owner it is available, and run that command only when they ask for the update.",
     "Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.",

@@ -7,9 +7,10 @@ that survives the daemon it restarts.
 
 Three rules hold the whole thing up:
 
-1. **One clone.** The ghost edits only the checkout named by `self.checkout` in
-   its `settings.yml`. Not the packaged install, not a tree it found, not one
-   you share with other agents.
+1. **One clone.** The ghost edits only the clone the daemon runs from, the
+   one `ghost status` prints as `daemon source`. Every ghost on the machine is
+   powered by that one daemon, so a change there reaches all of them. Not the
+   packaged install, not a tree it found, not one you share with other agents.
 2. **A restart is a handoff.** The daemon never restarts itself in process. It
    schedules `systemctl --user restart ghostd.service` in a transient
    `systemd-run --user` unit whose `--description` carries the reason.
@@ -79,22 +80,12 @@ re-execs `qs`. `systemctl --user reload ghost-shell` runs the unit's
 ghosts, hooks, and sessions. That is a data refresh, not a QML reload. Use
 restart for code.
 
-## Name the checkout
+## Which checkout
 
-In `~/ghosts/<name>/settings.yml`:
-
-```yaml
-self:
-  checkout: /home/<owner>/src/ghost
-```
-
-The path must be absolute and under the owner's home. Anything else is ignored
-rather than treated as an error. The value is read when a session opens, so a
-change applies to new conversations, not to one already running.
-
-Naming the checkout grants nothing the ghost's file tools and Bash do not
-already have: it edits the clone directly. Set `cwd:` in the same
-`settings.yml` to start new conversations inside it, or `!cd` into it from a
+There is nothing to configure. When ghostd runs from a clone, that clone is
+the checkout of every ghost on the machine, and the policy says so; when it
+runs from the package, no ghost has one. `cwd:` in a ghost's `settings.yml`
+can start its conversations inside the clone, or `!cd` into it from a
 conversation. Nothing is discovered from the clone; its skills, rules, and MCP
 never enter a session.
 
@@ -174,10 +165,10 @@ touches either is not a canary.
 
 Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 
-> **A shared tree is not a safe `self.checkout`.** If other agent sessions or
-> you edit the same working tree, the ghost's branch, its `git status`, and its
-> build will collide with yours, and a restart will ship whatever happened to be
-> built last. Give the ghost its own clone.
+> **A shared tree is not a safe clone to run from.** If other agent sessions
+> or you edit the same working tree, the ghost's branch, its `git status`, and
+> its build will collide with yours, and a restart will ship whatever happened
+> to be built last. Give the ghosts their own clone.
 
 ## Updates
 

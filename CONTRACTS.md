@@ -68,13 +68,13 @@ The lifecycle implementation and crash recovery are in
 [`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
-`settings.yml` may name the ghost's own git clone of this repository, as a
-`self:` mapping with a `checkout:` value that is an absolute path under the
-owner home; any other value reads as unset. It feeds the self-maintenance
-policy only. Naming it grants nothing the ghost's ordinary file tools and Bash
-do not already have; the checkout's own skills, rules, and MCP never enter a
-session. `settings.yml` may also name `cwd:`, the directory a new conversation
-starts in, under the same absolute-and-under-the-owner-home rule.
+The checkout a ghost may edit is the clone the daemon was built from
+(`GET /api/status` `source.root`), and it is the same for every ghost on the
+machine: one daemon powers them all, so a self-edit powers all of them after a
+build and restart. A packaged install has no checkout. No per-ghost setting
+names one; the checkout's own skills, rules, and MCP never enter a session.
+`settings.yml` may name `cwd:`, the directory a new conversation starts in, as
+an absolute path under the owner home; any other value reads as unset.
 
 ### Character and notes
 
@@ -162,7 +162,7 @@ ghost home directory, which moves as one unit.
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
-| The ghost's `self.checkout` clone | untouched | untouched | untouched | it is the source | unchanged | unchanged |
+| The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
 The rollback column assumes Omarchy's btrfs layout, where `/` is the `@`

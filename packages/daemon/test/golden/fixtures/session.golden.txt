@@ -77,7 +77,7 @@ Timers fire only while the owner is logged in — the daemon runs in their graph
 
 ## Self-maintenance
 What runs you is unknown to this process: no version, commit, or source root resolved.
-No self checkout is configured. Your source is https://github.com/ferdousbhai/ghost; the owner can point you at a clone under their home by putting `self:` with a nested `checkout: <absolute path>` in your `settings.yml`.
+There is no checkout to edit: you run from a packaged install. Your source is https://github.com/ferdousbhai/ghost; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md in that repository).
 Never edit a checkout you were not given.
 To restart yourself, finish the turn and tell the owner first — the daemon drains for 5 seconds and then forces. Then:
 ```sh
@@ -205,7 +205,7 @@ Timers fire only while the owner is logged in — the daemon runs in their graph
 
 ## Self-maintenance
 What runs you is unknown to this process: no version, commit, or source root resolved.
-No self checkout is configured. Your source is https://github.com/ferdousbhai/ghost; the owner can point you at a clone under their home by putting `self:` with a nested `checkout: <absolute path>` in your `settings.yml`.
+There is no checkout to edit: you run from a packaged install. Your source is https://github.com/ferdousbhai/ghost; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md in that repository).
 Never edit a checkout you were not given.
 To restart yourself, finish the turn and tell the owner first — the daemon drains for 5 seconds and then forces. Then:
 ```sh

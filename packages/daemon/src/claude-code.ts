@@ -121,9 +121,8 @@ import {
 import { readEffectiveMcp, type EffectiveMcpRead } from "./mcp-catalog.js";
 import type { SettledTurn } from "./presentation-history.js";
 import type { RunTurnOptions } from "./session-host.js";
-import { loadGhostSettings } from "./ghost-settings.js";
 import type { RunningSource } from "./running-source.js";
-import { renderSelfMaintenancePolicy, resolveSelfCheckout } from "./self-maintenance.js";
+import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { claudeSdkTranscriptPath } from "./claude-sdk-files.js";
 import { CLAUDE_HISTORY_TOOL_NAME, createClaudeHistoryTool, type ClaudeHistoryFile } from "./claude-history.js";
 import { claudeSessionMetadataPath as nativeClaudeSessionMetadataPath } from "./session-files.js";
@@ -1177,7 +1176,6 @@ async function buildPersona(
       renderScheduledWorkPolicy(ghostName, schedule.unitDir, schedule.cliPath),
       renderSelfMaintenancePolicy({
         ghostName,
-        checkout: resolveSelfCheckout(loadGhostSettings(homeDir), self.ownerHome),
         running: self.running,
         sessionId: self.sessionId,
       }),

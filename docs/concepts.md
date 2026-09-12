@@ -190,8 +190,9 @@ none. The protocol is in [hooks.md](hooks.md).
   HUD, browser relay, desktop sidecar, shared authentication policy, and
   recoverable moves.
 - **Self-maintenance through the machine's own facilities.** A ghost may edit,
-  build, and restart its own source. The clone it is allowed to touch is named
-  by `self.checkout` in its `settings.yml`; git is the code history and the
+  build, and restart its own source. The clone it is allowed to touch is the
+  one the daemon runs from, shared by every ghost on the machine, so one
+  ghost's change powers them all; git is the code history and the
   rollback, journald is the lifecycle history, systemd is the guardian, and
   Omarchy's snapper snapshots are the system rewind. Ghost builds no sandbox,
   no rebuild-and-restart tool, no event log, and no canary automation. The

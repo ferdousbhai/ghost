@@ -72,7 +72,6 @@ function renderStablePolicy(): Record<string, string> {
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
       ghostName: GHOST_NAME,
-      checkout: CHECKOUT,
       running: RUNNING,
       sessionId: SESSION_ID,
     }),
@@ -91,11 +90,11 @@ const CEILINGS: Record<string, number> = {
   Hooks: 462,
   "Owner context": 1125,
   "Scheduled work": 1399,
-  "Self-maintenance": 2607,
+  "Self-maintenance": 2581,
   "First meeting": 431,
 };
 
-const TOTAL_CEILING = 9755;
+const TOTAL_CEILING = 9729;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

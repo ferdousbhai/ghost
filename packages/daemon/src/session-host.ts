@@ -143,7 +143,7 @@ export {
 };
 import { pathIsWithin } from "./path-within.js";
 import type { RunningSource } from "./running-source.js";
-import { renderSelfMaintenancePolicy, resolveSelfCheckout, resolveSettingsCwd } from "./self-maintenance.js";
+import { renderSelfMaintenancePolicy, resolveSettingsCwd } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
@@ -2048,7 +2048,6 @@ export class SessionHost {
       renderScheduledWorkPolicy(ghostName, this.scheduleUnitDir, this.scheduleCliPath),
       renderSelfMaintenancePolicy({
         ghostName,
-        checkout: resolveSelfCheckout(settings, this.ownerHome),
         running: this.runningSource,
         sessionId: sessionKey,
       }),
