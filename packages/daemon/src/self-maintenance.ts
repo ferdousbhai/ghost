@@ -42,30 +42,27 @@ function whatRunsYou(running: RunningSource | null): string {
 function checkoutLines(checkout: string | null): string[] {
   if (checkout === null) {
     return [
-      `There is no checkout to edit: you run from a packaged install. Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md in that repository).`,
+      `There is no checkout: you run from a packaged install. Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone (docs/self-maintenance.md there).`,
       "Never edit a checkout you were not given.",
     ];
   }
   return [
-    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine, so a change there powers all of them after build + restart. Edit it directly with your file tools and Bash; no binding or approval comes first.`,
-    "Read its `CLAUDE.md` and `CONTRACTS.md` first. They are your self map.",
-    "Never edit a checkout you were not given.",
+    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine, so a change there powers all of them after build + restart. Edit it directly; read its \`CLAUDE.md\` and \`CONTRACTS.md\` first. Never edit a checkout you were not given.`,
   ];
 }
 
 function loopLines(checkout: string | null): string[] {
   if (checkout === null) return [];
   return [
-    "The loop: `git fetch` and branch from upstream master → edit → run the touched package's tests and `typecheck` → commit with the reason in the message → `pnpm build` → restart.",
-    "This is you working in your own Bash, not a delegated task, so the task rules about worktrees and branches do not apply here.",
-    "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When something you did there would help every owner, a bug fixed, a real efficiency gain, a policy line that proved wrong, consider offering it upstream; the recipe is `CONTRIBUTING.md` in the checkout. The PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
+    "The loop: `git fetch`, branch from upstream master, edit, run the touched package's tests and `typecheck`, commit with the reason, `pnpm build`, restart. This is your own Bash, not a delegated task: no worktrees or task branches.",
+    "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When your work there would help every owner (a bug fixed, a real efficiency gain, a policy line that proved wrong), consider offering it upstream via `CONTRIBUTING.md` in the checkout; the PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
   ];
 }
 
 function restartLines(ghostName: string, sessionId: string | undefined): string[] {
   const session = sessionId === undefined ? "" : ` --session ${sessionId}`;
   return [
-    "To restart yourself, finish the turn and tell the owner first — the daemon drains for 5 seconds and then forces. Then:",
+    "To restart yourself, finish the turn and tell the owner first; the daemon drains for 5 seconds, then forces:",
     "```sh",
     'systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \\',
     '  --description="<reason>" \\',
@@ -73,13 +70,11 @@ function restartLines(ghostName: string, sessionId: string | undefined): string[
     "         for i in $(seq 30); do ghost status -q >/dev/null 2>&1 && break; sleep 1; done; \\",
     `         ghost say --ghost ${ghostName}${session} "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'`,
     "```",
-    "The timestamp keeps two restarts from colliding on the same transient unit name.",
-    "The wait loop covers the daemon not listening yet when systemd already considers it started.",
-    "The transient unit survives the restart because it is its own unit, not a child of yours.",
+    "The timestamped unit name keeps two restarts apart, the wait loop covers the daemon not yet listening, and the transient unit survives the restart because it is not your child.",
     ...(sessionId === undefined
-      ? ["Without a session id the wake lands in your latest conversation, not necessarily this one."]
+      ? ["Without a session id the wake lands in your latest conversation."]
       : []),
-    "A HUD change needs `systemctl --user restart ghost-shell.service` instead; reloading that unit only refetches daemon data, it does not reload QML.",
+    "A HUD change needs `systemctl --user restart ghost-shell.service`; reloading that unit refetches daemon data, it does not reload QML.",
   ];
 }
 
@@ -92,8 +87,8 @@ export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string
     ...checkoutLines(checkout),
     ...loopLines(checkout),
     ...restartLines(input.ghostName, input.sessionId),
-    "`ghost status` names a newer Ghost release when one exists, with the exact command that installs it here; tell the owner it is available, and run that command only when they ask for the update.",
-    "Your history lives in three places: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, and your own transcript for why. Read them before retrying a change that failed.",
-    "To undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper to rewind the system. Never `rm -rf` a checkout.",
+    "`ghost status` names a newer Ghost release and the exact command that installs it here; tell the owner, and run it only when they ask.",
+    "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
+    "Undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper for the system. Never `rm -rf` a checkout.",
   ].join("\n");
 }

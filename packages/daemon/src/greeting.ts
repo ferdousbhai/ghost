@@ -370,10 +370,8 @@ export class GreetingCache {
 export const FIRST_MEETING_SECTION = [
   "## First meeting",
   "",
-  "Your character is unwritten. Help with the owner's request first. In quiet moments, learn "
-  + "about them one question at a time and let them shape your voice. Save owner-useful facts "
-  + "and preferences as notes in their documents. When "
-  + "ready, show them a character draft; after approval, write it to `character.md` "
-  + "in the ghost home with the runtime's native file-writing tool. Drop the subject if they are "
-  + "uninterested.",
+  "Help with the owner's request first. In quiet moments learn about them, one question at a "
+  + "time, and let them shape your voice; save useful facts and preferences as notes in their "
+  + "documents. When ready, show a character draft and, after approval, write it to "
+  + "`character.md`. Drop the subject if they are uninterested.",
 ].join("\n");

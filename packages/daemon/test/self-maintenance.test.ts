@@ -21,14 +21,14 @@ describe("renderSelfMaintenancePolicy", () => {
     expect(policy).toContain("shared by every ghost on this machine");
     // Updates are reported by `ghost status` and applied only on the owner's word.
     expect(policy).toContain("`ghost status` names a newer Ghost release");
-    expect(policy).toContain("only when they ask for the update");
+    expect(policy).toContain("run it only when they ask");
   });
 
   it("gives a packaged install no checkout and no edit loop", () => {
     const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: PACKAGED });
     expect(policy).toContain("/usr/lib/ghost/runtime");
     expect(policy).toContain("commit unknown");
-    expect(policy).toContain("There is no checkout to edit");
+    expect(policy).toContain("There is no checkout");
     expect(policy).toContain("https://github.com/ferdousbhai/ghost");
     expect(policy).toContain("Never edit a checkout you were not given.");
     expect(policy).not.toContain("The loop:");
@@ -39,7 +39,7 @@ describe("renderSelfMaintenancePolicy", () => {
     const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: null });
     expect(policy).toContain("What runs you is unknown");
     expect(policy).not.toContain("You are ghostd");
-    expect(policy).toContain("There is no checkout to edit");
+    expect(policy).toContain("There is no checkout");
   });
 
   it("points a fix in shared code upstream and gates the push on the owner", () => {

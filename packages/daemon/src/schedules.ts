@@ -203,8 +203,8 @@ export function renderScheduledWorkPolicy(
   const unit = `${scheduleUnitPrefix(ghostName)}<slug>`;
   return [
     "## Scheduled work",
-    "For clock work write a systemd **user timer** through Bash; Ghost has no scheduler. A timer is a text file the owner can edit, and stop with `systemctl --user disable --now`.",
-    `Write both units in ${JSON.stringify(resolve(unitDir))}, named \`${unit}\`, where \`<slug>\` is 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`. That versioned prefix is how your timers are swept when your ghost is deleted or renamed; nothing else is touched.`,
+    "Clock work is a systemd user timer written through Bash; Ghost has no scheduler. A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
+    `Write both units in ${JSON.stringify(resolve(unitDir))}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
     "The `ghost` CLI authenticates itself:",
     "```ini",
     `# ${unit}.service`,
@@ -223,9 +223,9 @@ export function renderScheduledWorkPolicy(
     "[Install]",
     "WantedBy=timers.target",
     "```",
-    "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running *every* missed slot is not a timer primitive: the service would have to track its own watermark.",
+    "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
-    "Timers fire only while the owner is logged in — the daemon runs in their graphical session — so promise no check-ins overnight or while they are away.",
+    "Timers fire only while the owner is logged in (the daemon runs in their graphical session), so promise no check-ins while they are away.",
   ].join("\n");
 }
 

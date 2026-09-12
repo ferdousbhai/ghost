@@ -5503,7 +5503,7 @@ describe("the first meeting", () => {
     expect(system).toContain("one question at a time");
     // The interview ends by writing the approved character with a native file tool.
     expect(system).toContain("write it to `character.md`");
-    expect(system).toContain("native file-writing tool");
+    expect(system).toContain("write it to `character.md`");
     // And it is a ritual, not a gate.
     expect(system).toContain("Help with the owner's request first");
   });

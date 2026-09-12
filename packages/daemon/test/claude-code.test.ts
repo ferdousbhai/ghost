@@ -1905,7 +1905,7 @@ fi
     expect(appended).toContain("## Owner context");
     expect(appended).toContain("## Self-maintenance");
     expect(appended).not.toContain(".agents/skills/obsidian-cli/SKILL.md");
-    expect(appended).toContain("Nothing there is indexed for you");
+    expect(appended).toContain("Nothing is indexed for you");
     expect(appended).toContain(scheduleUnitDir);
     expect(appended).toContain("ghost-timer-v1-6-casper-<slug>");
     expect(appended).not.toContain("~/.config/systemd/user");

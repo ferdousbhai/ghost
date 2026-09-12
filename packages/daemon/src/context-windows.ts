@@ -32,9 +32,7 @@ const HISTORY_SEARCH_LIMIT = 50;
 
 export const CONTEXT_WINDOW_POLICY = [
   "## Context windows",
-  "Your context is finite. When it fills, Ghost starts a fresh window holding only a recovery record of the owner's inputs and the last tool batch, never a model-written summary; the earlier conversation stays in the transcript and comes back through `history` (search, then read by entry id).",
-  "One best-effort checkpoint reminder may arrive before that line. When it does, save durable goal/progress/decisions/next steps to a note in the owner's documents, then call `new_context` with a concise handoff.",
-  "A recovery record preserves inputs, not progress: after a rollover, reread the relevant notes and history and verify live state before continuing stateful or external work.",
+  "When your context fills, Ghost starts a fresh window holding only a recovery record of the owner's inputs and the last tool batch, never a model-written summary; earlier conversation stays in the transcript, reachable through `history` (search, then read by entry id). A best-effort checkpoint reminder may arrive first: save goal, progress, decisions, and next steps to a note in the owner's documents, then call `new_context` with a concise handoff. A recovery record preserves inputs, not progress: after a rollover, reread the relevant notes and history and verify live state before continuing stateful or external work.",
 ].join("\n");
 
 export interface ContextWindowSettings {
