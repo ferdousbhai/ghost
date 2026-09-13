@@ -45,7 +45,7 @@ push (the `pre-push` hook runs the whole gate), then publish:
 ```sh
 old=0.1.0; new=0.1.1
 sed -i "s/\"version\": \"$old\"/\"version\": \"$new\"/" package.json packages/*/package.json \
-  packages/chromium-extension/extension/manifest.json
+  packages/chromium-extension/extension/manifest.json packages/shell/qml/manifest.json
 packaging/release/verify-release-version.sh .    # prints the one version they all say
 packaging/release/publish.sh 0.1.1 --dry-run     # build, verify, render; no tag
 packaging/release/publish.sh 0.1.1               # tag v0.1.1 and publish
@@ -74,6 +74,14 @@ package-signing key: Omarchy builds, signs, and promotes the package through
 its `edge` → `rc` → `stable` channels.
 
 ## After publishing
+
+`publish.sh` also pushes the HUD plugin subtree to its distribution mirror
+(`publish-plugin.sh`): `packages/shell/qml` split out with `git subtree split`,
+which is deterministic, so every publish fast-forwards and an installed copy's
+`omarchy plugin update` keeps working. The mirror exists because
+`omarchy plugin add` clones a repo whose root holds `manifest.json`, and this
+repository's root carries a `CLAUDE.md` symlink that the plugin validator
+refuses.
 
 Two things do not follow the tag on their own:
 

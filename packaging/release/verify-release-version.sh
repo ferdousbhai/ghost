@@ -15,6 +15,7 @@ const manifests = [
   "packages/shell/package.json",
   "packages/chromium-extension/package.json",
   "packages/chromium-extension/extension/manifest.json",
+  "packages/shell/qml/manifest.json",
 ];
 
 const versions = [];

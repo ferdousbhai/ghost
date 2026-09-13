@@ -483,6 +483,10 @@ hosted-session, concurrency, or spend cap.
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The package installs it to `/usr/share/ghost/plugin`; the per-user
   symlink into `~/.config/omarchy/plugins/` belongs to the install script.
+  The same subtree is published to a distribution mirror at release time
+  (`packaging/release/publish-plugin.sh`) so it can be installed with
+  `omarchy plugin add` and listed in Omarchy's plugin marketplace; the mirror is
+  a generated artifact, and this repository stays the source.
   It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
