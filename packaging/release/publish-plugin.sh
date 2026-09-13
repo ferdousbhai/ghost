@@ -20,7 +20,7 @@ dry_run=0
 
 script_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_root/../..")"
-mirror="${GHOST_PLUGIN_MIRROR:-git@github.com:ferdousbhai/omarchy-ghost.git}"
+mirror="${GHOST_PLUGIN_MIRROR:-https://github.com/ferdousbhai/omarchy-ghost.git}"
 prefix=packages/shell/qml
 tag="v$version"
 
