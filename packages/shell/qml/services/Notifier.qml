@@ -40,7 +40,7 @@ Singleton {
             "--urgency=" + urgency,
             // Omarchy persists this hint with the toast and runs it on click.
             // Other notification servers ignore unknown freedesktop hints.
-            "--hint=string:omarchy-exec:ghost-launch open",
+            "--hint=string:omarchy-exec:omarchy-shell shell summon ferdousbhai.ghost {}",
             "--hint=string:x-canonical-private-synchronous:ghost-" + ghost,
             ghost,
             root.excerpt(body)

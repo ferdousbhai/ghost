@@ -50,17 +50,16 @@ while IFS= read -r -d '' file; do
 done < <(find "$source_root/packages/desktop-helper/src" -type f \
   \( -name '*.py' -o -name LICENSE \) -print0)
 
-install_tree "$source_root/packages/shell/qml" "$sharedir/quickshell"
-install -d -m755 -o root -g root "$pkgdir/etc/xdg/quickshell"
-ln -s /usr/share/ghost/quickshell "$pkgdir/etc/xdg/quickshell/ghost"
+# The HUD is an omarchy-shell plugin. The package owns the files; the per-user
+# symlink into ~/.config/omarchy/plugins belongs to the install script, because
+# a package may not write into a home.
+install_tree "$source_root/packages/shell/qml" "$sharedir/plugin"
 
 install_tree "$source_root/packages/chromium-extension/extension" \
   "$sharedir/chromium-extension"
 
 install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
   "$pkgdir/usr/lib/systemd/user/ghostd.service"
-install -Dm644 "$source_root/packages/shell/contrib/systemd/ghost-shell.service" \
-  "$pkgdir/usr/lib/systemd/user/ghost-shell.service"
 install -Dm644 "$source_root/packages/shell/contrib/ghost.desktop" \
   "$pkgdir/usr/share/applications/ghost.desktop"
 install -Dm644 "$source_root/packages/shell/contrib/icons/ghost.svg" \

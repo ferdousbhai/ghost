@@ -73,7 +73,7 @@ function self(input: HelpTopicInput): string[] {
     ...(input.sessionId === undefined
       ? ["Without a session id the wake lands in your latest conversation."]
       : []),
-    "A HUD change needs `systemctl --user restart ghost-shell.service`; reloading that unit refetches daemon data, it does not reload QML.",
+    "A HUD change needs `omarchy-shell shell rescanPlugins`: the HUD is an omarchy-shell plugin, not a unit of yours, and a rescan reloads its QML in the running shell.",
     "`ghost status` names a newer Ghost release and the exact command that installs it here; tell the owner, and run it only when they ask.",
     "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
     "Undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper for the system. Never `rm -rf` a checkout.",

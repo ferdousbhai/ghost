@@ -45,11 +45,11 @@ require_unit_directive() {
 
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
 require_file /usr/lib/ghost/desktop-helper/ghost_desktop_helper/_vendor/omaharness/LICENSE
-require_file /usr/share/ghost/quickshell/shell.qml
-require_file /usr/share/ghost/quickshell/tray/ghost-tray.py
+require_file /usr/share/ghost/plugin/manifest.json
+require_file /usr/share/ghost/plugin/Panel.qml
+require_file /usr/share/ghost/plugin/Service.qml
 require_file /usr/share/ghost/chromium-extension/manifest.json
 require_file /usr/lib/systemd/user/ghostd.service
-require_file /usr/lib/systemd/user/ghost-shell.service
 require_file /usr/share/applications/ghost.desktop
 require_file /usr/share/icons/hicolor/scalable/apps/ghost.svg
 require_file /usr/share/icons/hicolor/128x128/apps/ghost.png
@@ -72,7 +72,7 @@ if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q
   exit 1
 fi
 for path in \
-  /usr/share/ghost/quickshell/shell.qml \
+  /usr/share/ghost/plugin/manifest.json \
   /usr/share/ghost/chromium-extension/manifest.json \
   /usr/share/applications/ghost.desktop; do
   if [[ "$(stat -c '%a' "$root$path")" != 644 ]]; then
@@ -101,8 +101,10 @@ for path in \
   fi
 done
 
-if [[ "$(readlink "$root/etc/xdg/quickshell/ghost")" != "/usr/share/ghost/quickshell" ]]; then
-  printf 'system Quickshell config link is missing or incorrect\n' >&2
+# The HUD is an omarchy-shell plugin: the package owns the files and the
+# install script makes the per-user link, so there is no system-wide link.
+if [[ -e "$root/etc/xdg/quickshell/ghost" ]]; then
+  printf 'package still installs a system Quickshell config link\n' >&2
   exit 1
 fi
 
@@ -157,10 +159,7 @@ if grep -Eq '^[[:space:]]*RestrictNamespaces=' \
   printf 'ghostd.service blocks namespaces required by the Chromium sandbox\n' >&2
   exit 1
 fi
-require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service WorkingDirectory '%h'
-require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service ExecStart \
   '/usr/bin/qs -c ghost --no-duplicate'
-require_unit_directive /usr/lib/systemd/user/ghost-shell.service Service ExecReload \
   '/usr/bin/qs -c ghost ipc call ghost refresh'
 
 # Every symlink in the installed payload must resolve inside that payload.
