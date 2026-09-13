@@ -6,7 +6,19 @@ commit with every consumer. Implementation detail belongs in code and tests.
 ## Product boundary
 
 Ghost is an owner-local Omarchy application: one owner, one machine, any number
-of ghosts. `ghostd` owns sessions and state transitions; the Quickshell HUD,
+of ghosts.
+
+The harness stays lean and extendable, and it gets there by subtraction: from
+2026-09-13 on, work here simplifies and never adds complexity. A change
+states what it deletes, or why nothing could be. A capability the runtime,
+the shell, Omarchy, or an installed CLI already provides is used, not
+rebuilt. An external component is adopted only when it replaces machinery of
+ours outright, never as a second backend beside it. New surface area (a tool,
+a route, a setting, a background loop) needs a constraint that nothing
+existing can meet, named in this file. When a rule here fights the task, the
+answer is to say so and get the owner's decision, not to add a special case.
+[`docs/concepts.md`](docs/concepts.md) lists what is deliberately absent and
+what would have to change for each absence to end. `ghostd` owns sessions and state transitions; the Quickshell HUD,
 terminal client, Chromium relay, and desktop helper are clients or sidecars.
 The daemon listens on loopback unless the owner explicitly enables the built-in
 Tailscale Serve viewer.
