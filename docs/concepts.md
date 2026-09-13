@@ -242,6 +242,14 @@ If you expect one of these, it is missing on purpose:
   text of a turn; each tool call overwrites the text that announced it, and
   that text survives as the tool card's intent. No length limit or sentence
   rule decides what is "status".
+- **No compositor plugin for background input.** Wayland lets input reach
+  only the focused window, so the helper's focus-borrowing transactions,
+  restore logic, and honesty metadata exist to make that safe and visible.
+  A Hyprland plugin with an independent seat would let those go, but only as a
+  replacement, never as a second backend beside them, and only once the seat
+  is a maintained interface rather than a plugin pinned to one Hyprland
+  commit. Until then the ghost tells the owner when a shot or a click
+  disturbed the desktop instead of pretending it did not.
 - **No auto-updater.** The daemon only reports a newer release
   (`GET /api/status`, `ghost status`, the HUD line); Omarchy's package pipeline
   installs it, and a checkout is the owner's to pull.
