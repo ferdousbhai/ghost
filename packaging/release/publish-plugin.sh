@@ -73,5 +73,14 @@ fi
 
 commit="$(printf '%s' "$message" | git commit-tree "$tree" ${parent:+-p "$parent"})"
 git push "$mirror" "$commit:refs/heads/master"
-git push "$mirror" "$commit:refs/tags/$tag"
-printf 'published the plugin mirror: %s %s (%s)\n' "$mirror" "$tag" "$commit"
+
+# A tag is immutable once a version is out. Publishing again after the tag
+# exists is a post-release fix to the same version: master moves, the tag
+# stays where the release put it, and the next version tags the new content.
+if git ls-remote --exit-code --tags "$mirror" "$tag" >/dev/null 2>&1; then
+  printf 'published the plugin mirror: %s master=%s (%s already tagged, left alone)\n' \
+    "$mirror" "$commit" "$tag"
+else
+  git push "$mirror" "$commit:refs/tags/$tag"
+  printf 'published the plugin mirror: %s %s (%s)\n' "$mirror" "$tag" "$commit"
+fi
