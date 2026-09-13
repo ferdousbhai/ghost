@@ -20,10 +20,11 @@ Item {
 
     // A rebuild of the host's panel Instantiator destroys and recreates a
     // visibly-open panel; the host's own open flag is what survives, so trust
-    // it over this instance's fresh state.
+    // it over this instance's fresh state. `isPluginOpen` is the third-party
+    // facade's spelling of that flag (PluginShellApi).
     onShellChanged: {
-        if (!hud.shown && root.shell && root.shell.openPanelIds
-            && root.shell.openPanelIds[root.selfId] === true)
+        if (!hud.shown && root.shell && root.shell.isPluginOpen
+            && root.shell.isPluginOpen(root.selfId))
             root.open("{}")
     }
 

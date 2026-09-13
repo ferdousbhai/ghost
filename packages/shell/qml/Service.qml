@@ -21,8 +21,15 @@ Item {
     // so a reconnect or repeated property assignment cannot raise two toasts.
     property string announcedAskId: ""
 
-    readonly property bool panelShown: Boolean(root.shell && root.shell.openPanelIds
-        && root.shell.openPanelIds[root.selfId] === true)
+    /**
+     * Whether the window is up, asked of the host at the moment it matters.
+     * The third-party facade exposes this as a call rather than a property
+     * (PluginShellApi), so it cannot be a binding; every caller here is an
+     * event handler, which is the only place the answer is needed.
+     */
+    function panelShown(): bool {
+        return Boolean(root.shell && root.shell.isPluginOpen && root.shell.isPluginOpen(root.selfId));
+    }
 
     function summon(payload: var): void {
         if (root.shell && root.shell.summon) root.shell.summon(root.selfId, JSON.stringify(payload || ({})));
@@ -65,7 +72,7 @@ Item {
         function status(): string {
             return JSON.stringify({
                 ghost: Ghostd.activeGhost,
-                shown: root.panelShown,
+                shown: root.panelShown(),
                 streaming: Ghostd.streaming,
                 reachable: Ghostd.reachable,
                 activity: Ghostd.activity,
@@ -85,11 +92,11 @@ Item {
         target: Ghostd
 
         function onTurnFinished(ghost: string, text: string): void {
-            if (!root.panelShown) Notifier.turnFinished(ghost, text);
+            if (!root.panelShown()) Notifier.turnFinished(ghost, text);
         }
 
         function onTurnFailed(ghost: string, message: string): void {
-            if (!root.panelShown) Notifier.turnFailed(ghost, message);
+            if (!root.panelShown()) Notifier.turnFailed(ghost, message);
         }
 
         function onPendingAskChanged(): void {
@@ -101,7 +108,7 @@ Item {
             const askId = String(ask.id || "");
             if (askId !== "" && askId === root.announcedAskId) return;
             root.announcedAskId = askId;
-            if (!root.panelShown) Notifier.askWaiting(Ghostd.activeGhost, ask);
+            if (!root.panelShown()) Notifier.askWaiting(Ghostd.activeGhost, ask);
         }
     }
 
