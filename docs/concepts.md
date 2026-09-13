@@ -73,7 +73,7 @@ tools when a request may depend on it.
 |---|---|---|
 | `ghostd` daemon | sessions, state transitions, models, credentials, MCP, hooks, the HTTP API | [`server.ts`](../packages/daemon/src/server.ts), [`session-host.ts`](../packages/daemon/src/session-host.ts) |
 | `ghost` CLI | a terminal client over that API, with a named verb for every daemon capability | [`cli/main.ts`](../packages/daemon/src/cli/main.ts) |
-| Quickshell HUD | the Omarchy desktop surfaces: chat, roster, panes, tray, bar indicator | [`packages/shell/qml/`](../packages/shell/qml) |
+| Ghost shell plugin | the Omarchy desktop surfaces: chat, roster, panes, bar dot | [`packages/shell/qml/`](../packages/shell/qml) |
 | Chromium relay | the opt-in MV3 extension that lends the ghost the browser the owner already uses | [`packages/chromium-extension/`](../packages/chromium-extension/extension) |
 | Desktop helper | the Python JSON-lines computer-use sidecar (AT-SPI, capture, input) | [`docs/desktop-helper.md`](desktop-helper.md) |
 
@@ -200,9 +200,13 @@ none. The protocol is in [hooks.md](hooks.md).
 - **One visible browser.** Ghost drives the owner's signed-in Chromium through
   the opt-in relay. A second ghost profile was removed because the owner could
   not see it and the tab is the useful isolation unit.
-- **Quickshell, not a web-app window.** The HUD and bar indicator belong to
-  the Omarchy desktop. The remote viewer is deliberately narrower and opt-in
-  over Tailscale Serve.
+- **A plugin in Omarchy's shell, not a shell of its own.** The HUD and bar dot
+  belong to the Omarchy desktop and run inside `omarchy-shell` as the
+  `ferdousbhai.ghost` plugin. Ghost hosted its own Quickshell process until
+  2026-09-13; that bought a second process, a systemd unit, a Python tray
+  helper, and a copy of the bar widget that could not reach the daemon
+  singletons, and all of it went when the plugin replaced it. The remote viewer
+  is deliberately narrower and opt-in over Tailscale Serve.
 - **Apache-2.0 and a fresh public history.** The predecessor history carried
   private identifiers; this repository is the open collaboration boundary.
 

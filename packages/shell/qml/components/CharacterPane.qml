@@ -6,7 +6,7 @@ pragma ComponentBehavior: Bound
 // cold session start later. Save is explicit — a persona is not a scratch
 // buffer — and a refused save keeps the draft under the daemon's reason.
 import QtQuick
-import qs.services
+import "../services"
 
 Rectangle {
     id: root

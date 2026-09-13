@@ -32,8 +32,8 @@ describe("ghost help topics", () => {
     expect(text).toContain("ghost say --ghost aria \"You restarted ghostd");
     expect(text).not.toContain("--session");
     expect(text).toContain("your latest conversation");
-    expect(text).toContain("systemctl --user restart ghost-shell.service");
-    expect(text).not.toContain("reload ghost-shell.service");
+    expect(text).toContain("omarchy-shell shell rescanPlugins");
+    expect(text).not.toContain("ghost-shell.service");
     expect(text).toContain("journalctl --user -t ghostd");
     expect(text).toContain("`git revert`");
     expect(text).toContain("Never `rm -rf` a checkout.");

@@ -82,9 +82,9 @@ for install_script in \
   "$script_dir/ghost-dev.install" \
   "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"; do
   require_install_hook_activation "$install_script" post_install \
-    'systemctl --user enable --now ghostd.service ghost-shell.service'
+    'systemctl --user enable --now ghostd.service'
   require_install_hook_activation "$install_script" post_upgrade \
-    'systemctl --user reenable --now ghostd.service ghost-shell.service'
+    'systemctl --user reenable --now ghostd.service'
 done
 
 bash "$script_dir/test-ci-dependencies.sh"

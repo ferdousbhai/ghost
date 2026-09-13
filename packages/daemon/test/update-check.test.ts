@@ -32,7 +32,7 @@ describe("the update command", () => {
     expect(updateCommand(null)).toBe("omarchy-update");
     expect(updateCommand("/home/owner/src/ghost")).toBe(
       'git -C "/home/owner/src/ghost" pull --ff-only && pnpm --dir "/home/owner/src/ghost" install --frozen-lockfile'
-        + ' && pnpm --dir "/home/owner/src/ghost" build && systemctl --user restart ghostd.service ghost-shell.service',
+        + ' && pnpm --dir "/home/owner/src/ghost" build && systemctl --user restart ghostd.service && omarchy-shell shell rescanPlugins',
     );
   });
 });

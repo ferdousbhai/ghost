@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 // While a card is being edited the list is frozen on the cards it had, so a
 // status refresh cannot rebuild the delegates under the caret.
 import QtQuick
-import qs.services
+import "../services"
 import "../services/HookStatus.js" as HookStatus
 import "../services/HookConfig.js" as HookConfig
 

@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // back, banishing hands the name to the HUD's modal, which is where the typed
 // confirmation the daemon demands is collected.
 import QtQuick
-import qs.services
+import "../services"
 
 Item {
     id: root

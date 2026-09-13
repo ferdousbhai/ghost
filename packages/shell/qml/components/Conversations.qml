@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 // in the listing and that order speaks for itself.
 import QtQuick
 import QtQuick.Layouts
-import qs.services
+import "../services"
 
 Item {
     id: root

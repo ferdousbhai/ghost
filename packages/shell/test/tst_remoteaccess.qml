@@ -1,7 +1,7 @@
 import QtQuick
 import QtTest
-import qs.components
-import qs.services
+import "../qml/components"
+import "../qml/services"
 
 TestCase {
     id: tc

@@ -1,20 +1,30 @@
 # `@ghost/shell`
 
-Ghost's Omarchy-native Quickshell client: chat HUD, persistent bar indicator,
-tray item, settings/context panels, and notifications.
+Ghost's Omarchy desktop surfaces, as an omarchy-shell plugin
+(`ferdousbhai.ghost`): chat HUD, bar dot, settings and context panes, and
+notifications. It runs inside the shell Omarchy already starts, so there is no
+second Quickshell process, no unit, and no tray helper.
 
-The HUD is a normal `FloatingWindow` (`xdg-toplevel`, app-id `ghost`), so
-Hyprland owns tiling, focus, resizing, and workspace movement. Persistent bar
-and tray surfaces remain in the layer/SNI world. `SUPER+CTRL+G` is
-launch-or-focus, hiding only when the focused HUD receives it again.
+The manifest declares three kinds: `service` (the daemon connection and the
+notifications a shut window would swallow), `panel` (the chat window), and
+`bar-widget` (the state dot). The HUD is a normal `FloatingWindow`
+(`xdg-toplevel`), so Hyprland owns tiling, focus, resizing, and workspace
+movement; it finds its own window by title, because a plugin's window carries
+the host shell's app-id. `SUPER+CTRL+G` is launch-or-focus, hiding only when
+the focused HUD receives it again.
+
+Every QML import here is a relative path. Inside the host, `qs.` resolves to
+Omarchy's shell root, so `import qs.services` would bind these files to
+Omarchy's modules instead of ours.
 
 ## Code map
 
 ```text
-qml/shell.qml             process entry and surfaces
+qml/manifest.json         plugin manifest: kinds and entry points
+qml/Service.qml           service kind: daemon connection, toasts, IPC
+qml/Panel.qml             panel kind: the host's open/close contract
 qml/GhostHud.qml          chat window
-qml/GhostBarWidget.qml    embeddable status widget
-qml/TrayBridge.qml        StatusNotifier bridge
+qml/GhostBarWidget.qml    bar-widget kind: the state dot
 qml/components/           chat, ask, jobs, queue, tools, routing, orb
 qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
 contrib/                  Omarchy integration

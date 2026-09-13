@@ -7,7 +7,7 @@ pragma ComponentBehavior: Bound
 // a style whose colours would compete with the shared neutral design tokens.
 import QtQuick
 import Qt5Compat.GraphicalEffects
-import qs.services
+import "../services"
 import "CommandCatalog.js" as CommandCatalog
 
 Item {

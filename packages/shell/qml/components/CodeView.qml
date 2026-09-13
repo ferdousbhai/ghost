@@ -26,7 +26,7 @@ pragma ComponentBehavior: Bound
 // The editor surface stays dark in light Omarchy themes; see Theme's editor
 // tokens for why.
 import QtQuick
-import qs.services
+import "../services"
 import "Highlighter.js" as Highlighter
 
 Item {

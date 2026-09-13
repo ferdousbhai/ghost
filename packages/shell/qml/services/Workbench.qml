@@ -19,7 +19,7 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import qs.services
+import "."
 import "EditorPolicy.js" as Editor
 
 Singleton {

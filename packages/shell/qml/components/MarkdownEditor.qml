@@ -34,7 +34,7 @@ pragma ComponentBehavior: Bound
 // this shell: Controls would drag in a style whose colours compete with the
 // shared design tokens.
 import QtQuick
-import qs.services
+import "../services"
 
 Item {
     id: root

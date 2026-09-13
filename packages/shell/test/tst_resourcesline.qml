@@ -1,7 +1,7 @@
 import QtQuick
 import QtTest
-import qs.services
-import qs.components
+import "../qml/services"
+import "../qml/components"
 
 // The resources line at the top of a conversation: what it says and when.
 TestCase {

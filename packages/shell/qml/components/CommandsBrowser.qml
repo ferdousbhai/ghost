@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // all participate in precedence there. Choosing one only stages it in chat;
 // Enter remains the explicit act that runs it.
 import QtQuick
-import qs.services
+import "../services"
 import "CommandCatalog.js" as CommandCatalog
 
 Rectangle {

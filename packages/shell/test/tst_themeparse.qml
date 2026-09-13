@@ -1,5 +1,5 @@
 import QtTest
-import qs.services
+import "../qml/services"
 
 // Theme reads two Omarchy files with one deliberately small TOML parser. What
 // it must never do is damage a value it did not understand: a theme is machine

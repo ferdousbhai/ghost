@@ -7,7 +7,7 @@ pragma ComponentBehavior: Bound
 // cold spectral blue belongs to the thinking orb, not here.
 import QtQuick
 import Qt5Compat.GraphicalEffects
-import qs.services
+import "../services"
 import "ToolTrace.js" as ToolTrace
 
 Rectangle {

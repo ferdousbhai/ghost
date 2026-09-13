@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // owns only selection, keyboard traversal, and the active/hover treatment.
 import QtQuick
 import QtQuick.Shapes
-import qs.services
+import "../services"
 
 FocusScope {
     id: root

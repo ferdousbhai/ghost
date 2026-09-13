@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 
 // Single-conversation stream settlement, driven through the real per-turn
 // path (ensureTurnState / beginTurnFor / handleTurnEvent / readTurnStream).

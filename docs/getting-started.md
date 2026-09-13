@@ -62,13 +62,15 @@ calls for it.
 ## 3. Start the services
 
 ```sh
-systemctl --user enable --now ghostd.service ghost-shell.service
-systemctl --user status ghostd.service ghost-shell.service --no-pager
+systemctl --user enable --now ghostd.service
+ln -sfn /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
+omarchy-shell shell rescanPlugins && omarchy plugin enable ferdousbhai.ghost
+systemctl --user status ghostd.service --no-pager
 ```
 
 Both units are `PartOf=graphical-session.target`: they come up with your
 compositor and die with it. `ghostd` binds `127.0.0.1:7717`; `ghost-shell` runs
-`qs -c ghost --no-duplicate`.
+`omarchy-shell shell toggle ferdousbhai.ghost`.
 
 Confirm the client can reach and authenticate to the daemon:
 
@@ -85,7 +87,8 @@ that file themselves, and `ghostd api-token` prints it for curl or debugging.
 `~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
 `/usr/share/doc/ghost/shell-contrib/` — `hyprland/ghost.lua` for Omarchy 4's
 Lua config, `hyprland/ghost.conf` for plain Hyprland. Until you do, open the
-HUD from the tray icon, from your app launcher, or with `ghost-launch open`.
+HUD from your app launcher, or with
+`omarchy-shell shell toggle ferdousbhai.ghost`.
 
 ## 4. Create a ghost
 
@@ -171,7 +174,8 @@ authenticated `claude` and the exact SDK closure described in
 
 ## 6. First conversation in the HUD
 
-Summon the HUD (`SUPER+CTRL+G`, the tray icon, or `ghost-launch open`). An
+Summon the HUD (`SUPER+CTRL+G`, your app launcher, or
+`omarchy-shell shell toggle ferdousbhai.ghost`). An
 empty conversation shows the ghost's glyph, its name, and the static line
 `What's on your mind?`. A greeting in that ghost's own voice — written by its
 `smol_model` — crossfades over the static line a moment later if it arrives; a
@@ -268,7 +272,7 @@ and any skill you installed untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| The HUD never appears | `ghost-launch open` starts `ghost-shell.service` if it is not running and says so if the shell never becomes ready; the shell needs a graphical session, and `qs -c ghost` resolves the packaged config through `/etc/xdg/quickshell/ghost` |
+| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, link it into `~/.config/omarchy/plugins/` and `omarchy-shell shell rescanPlugins`. |
 | "Claude Code is not installed at \"claude\"" although `claude --version` works in your shell | The daemon's PATH is the unit's, not your shell's: `ghostd.service` names `~/.local/bin`, mise shims, and `~/.bun/bin`. A `claude` elsewhere needs `GHOST_CLAUDE_BINARY` in a drop-in (`systemctl --user edit ghostd.service`) |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
 
@@ -276,5 +280,6 @@ After an upgrade, re-enable rather than restart, so an installation made with
 an older unit moves onto the graphical-session lifecycle:
 
 ```sh
-systemctl --user reenable --now ghostd.service ghost-shell.service
+systemctl --user reenable --now ghostd.service
+omarchy-shell shell rescanPlugins
 ```

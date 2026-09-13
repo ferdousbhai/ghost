@@ -1,7 +1,7 @@
 import QtQuick
 import QtTest
-import qs.components
-import qs.services
+import "../qml/components"
+import "../qml/services"
 
 // A long reply arriving a few characters at a time. The transcript used to hand
 // Qt the whole accumulated body on every flush tick, which parses the whole

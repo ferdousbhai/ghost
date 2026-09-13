@@ -6,7 +6,7 @@ pragma ComponentBehavior: Bound
 // explicitly acknowledged before the UI will send the new JSON.
 import QtQuick
 import QtQuick.Layouts
-import qs.services
+import "../services"
 import "McpConfig.js" as McpConfig
 
 Rectangle {

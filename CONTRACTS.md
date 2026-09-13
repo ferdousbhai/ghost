@@ -475,8 +475,15 @@ hosted-session, concurrency, or spend cap.
   authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
   HTTP, and the `ghost`
   CLI. Bun is the production runtime.
-- [`packages/shell`](packages/shell/qml/shell.qml) is a Quickshell client. It
-  talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
+- [`packages/shell`](packages/shell/qml/manifest.json) is an omarchy-shell
+  plugin, id `ferdousbhai.ghost`, declaring `service` (the daemon connection and
+  the notifications a shut window would swallow), `panel` (the chat window), and
+  `bar-widget` (the state dot) kinds. It runs inside Omarchy's own shell
+  process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
+  imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
+  root. The package installs it to `/usr/share/ghost/plugin`; the per-user
+  symlink into `~/.config/omarchy/plugins/` belongs to the install script.
+  It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
   owner's explicit direction. Dictation is Omarchy's Voxtype: the shell runs

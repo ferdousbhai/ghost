@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "ferdousbhai.ghost",
+  "name": "Ghost",
+  "version": "0.2.2",
+  "author": "Ferdous Bhai",
+  "license": "Apache-2.0",
+  "description": "An owner-local AI persona: a chat window with its own character, tools, and desktop reach, plus a bar dot that lights up while it is working. Needs the ghost package for the daemon. Summon with: omarchy-shell shell toggle ferdousbhai.ghost",
+  "kinds": ["service", "panel", "bar-widget"],
+  "entryPoints": {
+    "service": "Service.qml",
+    "panel": "Panel.qml",
+    "barWidget": "GhostBarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Ghost",
+    "description": "A dot that reports the ghost's state and opens its window.",
+    "category": "AI",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}

@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 
 // The daemon's release check reaches the HUD through /api/status. This pins
 // what Ghostd keeps from that row: a valid update, or nothing.

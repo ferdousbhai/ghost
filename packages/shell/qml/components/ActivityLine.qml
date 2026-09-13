@@ -15,7 +15,7 @@
 // rotates: a line changes when the work changes, and the ellipsis is what says
 // it is still going.
 import QtQuick
-import qs.services
+import "../services"
 import "ToolTrace.js" as ToolTrace
 
 Item {

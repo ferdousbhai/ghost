@@ -5,7 +5,7 @@
 // reason: it is the number the icon set is specified in.
 import QtQuick
 import QtQuick.Shapes
-import qs.services
+import "../services"
 
 Item {
     id: root
