@@ -1830,7 +1830,7 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, resolveCurrent(name));
   }
   if (parts[3] === "model" && parts.length === 4 && req.method === "PUT") {
-    const body = await readJson(req);
+    const body = await readBody(req).catch(() => null);
     const provider = typeof body?.provider === "string" ? body.provider : "";
     const id = typeof body?.id === "string" ? body.id : "";
     if (!provider || !id) {

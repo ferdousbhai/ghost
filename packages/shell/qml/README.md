@@ -1,7 +1,9 @@
 # Ghost — an omarchy-shell plugin
 
 An owner-local AI persona for Omarchy: a chat window with its own character,
-tools, and desktop reach, and a bar dot that lights up while it is working.
+tools, and desktop reach, and a bar mark that lights up while it is working.
+
+![Ghost running as an omarchy-shell plugin](preview.png)
 
 This repository is the HUD. It is published from
 [`ferdousbhai/ghost`](https://github.com/ferdousbhai/ghost), where the daemon,

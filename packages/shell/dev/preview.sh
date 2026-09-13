@@ -220,7 +220,8 @@ export OMARCHY_PATH=$omarchy_path
 
 # The plugin under test, and a shell.json that enables both of its visible
 # kinds. omarchy-shell reads $HOME/.config, not XDG_CONFIG_HOME, and takes a
-# user shell.json whole, so this carries a bar
+# user shell.json whole, so this carries a bar. Idle and lock are off: a
+# preview that blanks itself while you look at it is not a preview
 # layout too. The plugin directory is a symlink to the checkout, which is what
 # makes an edit-and-rescan loop work against the tree you are editing.
 mkdir -p "$HOME/.config/omarchy/plugins"
@@ -229,6 +230,7 @@ cat > "$HOME/.config/omarchy/shell.json" <<JSON
 {
   "version": 1,
   "plugins": [{ "id": "$plugin_id" }],
+  "disabledPlugins": ["omarchy.idle", "omarchy.lock"],
   "bar": {
     "position": "top",
     "layout": {
@@ -310,6 +312,11 @@ echo "  HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE"
 echo "  Hyprland pid=$hypr_pid; Quickshell pid=$quickshell_pid; mock port=$mock_port"
 
 if [[ -n ${GHOST_PREVIEW_SCREENSHOT:-} ]]; then
+  # Hyprland posts a standing "started without start-hyprland" notice in a
+  # nested session. It is true and irrelevant here, and it sits on top of what
+  # the screenshot is for.
+  hyprctl --instance "$nested_signature" dismissnotify >/dev/null 2>&1 || true
+  sleep 0.5
   grim "$GHOST_PREVIEW_SCREENSHOT"
   if [[ ! -s $GHOST_PREVIEW_SCREENSHOT ]]; then
     echo "preview: grim did not produce a screenshot" >&2
