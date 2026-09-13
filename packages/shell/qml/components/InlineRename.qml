@@ -17,7 +17,7 @@
 // reported rather than acted on — only the list can tell a rebuild apart from
 // the owner clicking away.
 import QtQuick
-import qs.services
+import "../services"
 
 TextInput {
     id: field

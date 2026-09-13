@@ -4,7 +4,7 @@ pragma ComponentBehavior: Bound
 // wait for it to end. Amber marks the live one; the queued ones stay on film.
 import QtQuick
 import QtQuick.Layouts
-import qs.services
+import "../services"
 
 ColumnLayout {
     id: root

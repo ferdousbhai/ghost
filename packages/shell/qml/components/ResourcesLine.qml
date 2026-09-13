@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // rows, and anything not admitted called out where the reader already is.
 // The daemon owns discovery; this only renders its snapshot.
 import QtQuick
-import qs.services
+import "../services"
 
 Item {
     id: root

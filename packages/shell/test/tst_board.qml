@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 
 // The board pane's service side: what the HUD makes of GET /api/board.
 TestCase {

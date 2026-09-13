@@ -12,7 +12,7 @@ pragma ComponentBehavior: Bound
 // column is the ghost's, not a bubble in it.
 import QtQuick
 import Quickshell
-import qs.services
+import "../services"
 import "MarkdownSegments.js" as MarkdownSegments
 
 Item {

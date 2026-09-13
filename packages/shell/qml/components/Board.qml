@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // it, and hands the file to the workbench when the owner wants to edit here.
 import QtQuick
 import QtQuick.Layouts
-import qs.services
+import "../services"
 
 Rectangle {
     id: root

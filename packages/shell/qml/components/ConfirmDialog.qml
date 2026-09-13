@@ -9,7 +9,7 @@ pragma ComponentBehavior: Bound
 // anchored inside a scrolling sidebar would scroll with it. The caller drives
 // `open`, `busy` and `error`; this only renders them and reports the answer.
 import QtQuick
-import qs.services
+import "../services"
 
 Item {
     id: root

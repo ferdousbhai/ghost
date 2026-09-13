@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 
 // The browser-relay pairing prompt: what the HUD service makes of the daemon's
 // relay status, and how Allow/Deny reach `/api/relay/pair`.

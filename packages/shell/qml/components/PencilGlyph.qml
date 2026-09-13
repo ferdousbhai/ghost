@@ -2,7 +2,7 @@
 // the ghost and copy glyphs.
 import QtQuick
 import QtQuick.Shapes
-import qs.services
+import "../services"
 
 Item {
     id: root

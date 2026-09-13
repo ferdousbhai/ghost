@@ -1,7 +1,7 @@
 import QtQuick
 import QtTest
-import qs.components
-import qs.services
+import "../qml/components"
+import "../qml/services"
 
 // The copy glyph, the edit pencil and the trail count are controls, not words.
 // They used to be placed on the reply's final text line from a hidden

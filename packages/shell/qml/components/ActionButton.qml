@@ -7,7 +7,7 @@
 // uppercase theirs at weight 700. In a fixed-width face it also separates an
 // action from the prose around it without a second typeface to do it with.
 import QtQuick
-import qs.services
+import "../services"
 
 Rectangle {
     id: button

@@ -32,8 +32,8 @@ import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 import Qt5Compat.GraphicalEffects
-import qs.services
-import qs.components
+import "services"
+import "components"
 
 FloatingWindow {
     id: hud
@@ -124,6 +124,10 @@ FloatingWindow {
     color: Theme.background
     title: Ghostd.activeGhost === "" ? "Ghost" : "Ghost — " + Ghostd.activeGhost
 
+    // How this window is named to the compositor, and the regex that finds it
+    // again. Both halves of launch-or-focus go through here.
+    readonly property string titlePattern: "^Ghost( — .*)?$"
+
     // A reasonable default; the WM resizes/tiles from here. minimumSize keeps a
     // tiled slice from collapsing the composer and roster into nothing.
     implicitWidth: 998
@@ -155,11 +159,12 @@ FloatingWindow {
         hud.shown = true;
         // The "focus" half of launch-or-focus. A freshly mapped toplevel is
         // auto-focused by Hyprland; this also pulls an already-open window
-        // (possibly on another workspace) to the foreground. Matches the
-        // app-id set by `//@ pragma AppId ghost` in shell.qml.
+        // (possibly on another workspace) to the foreground. The window is
+        // matched by title, not app-id: inside omarchy-shell the app-id is the
+        // host's, and only a root shell.qml may set one.
         // Hyprland 0.55+ dispatches Lua expressions. The old
         // `focuswindow class:ghost` spelling is parsed as invalid Lua.
-        Hyprland.dispatch('hl.dsp.focus({ window = "class:ghost" })');
+        Hyprland.dispatch('hl.dsp.focus({ window = "title:' + hud.titlePattern + '" })');
         hud.loginOpen = false;
         hud.currentSection = "chat";
         Ghostd.refresh();
@@ -203,7 +208,8 @@ FloatingWindow {
 
     function focused(): bool {
         const top = Hyprland.activeToplevel;
-        return !!(top && top.lastIpcObject && top.lastIpcObject["class"] === "ghost");
+        const title = top && top.lastIpcObject ? String(top.lastIpcObject["title"] || "") : "";
+        return title === "Ghost" || title.startsWith("Ghost — ");
     }
 
     // Materialize on summon: the content takes a breath of scale and opacity

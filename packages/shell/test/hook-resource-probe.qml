@@ -1,6 +1,6 @@
 import QtQuick
 import QtQuick.Window
-import qs.services
+import "../qml/services"
 import "../qml/components" as Components
 
 Window {

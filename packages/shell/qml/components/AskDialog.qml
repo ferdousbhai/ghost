@@ -15,7 +15,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Window
-import qs.services
+import "../services"
 
 Rectangle {
     id: root

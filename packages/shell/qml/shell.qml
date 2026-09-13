@@ -18,7 +18,7 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import qs.services
+import "services"
 
 ShellRoot {
     id: shell

@@ -17,7 +17,7 @@ pragma ComponentBehavior: Bound
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import qs.services
+import "services"
 import "TrayActions.js" as TrayActions
 
 Item {

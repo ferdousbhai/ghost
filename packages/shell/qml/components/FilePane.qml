@@ -27,7 +27,7 @@ pragma ComponentBehavior: Bound
 // type it into.
 import QtQuick
 import Quickshell.Io
-import qs.services
+import "../services"
 import "Highlighter.js" as Highlighter
 import "Merge.js" as Merge
 

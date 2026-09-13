@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+# Ghost's HUD is an omarchy-shell plugin, so previewing it means running a
+# nested omarchy-shell with this checkout's plugin in a private plugins dir.
 usage() {
-  echo "usage: $0 <quickshell-config-path> [mock-ghostd-port]" >&2
-  echo "       GHOSTD_PORT=<mock-ghostd-port> $0 <quickshell-config-path>" >&2
+  echo "usage: $0 <plugin-dir> [mock-ghostd-port]" >&2
+  echo "       GHOSTD_PORT=<mock-ghostd-port> $0 <plugin-dir>" >&2
 }
 
 if (( $# < 1 || $# > 2 )); then
@@ -11,7 +13,18 @@ if (( $# < 1 || $# > 2 )); then
   exit 2
 fi
 
-config_path=$(realpath -e -- "$1")
+plugin_dir=$(realpath -e -- "$1")
+if [[ ! -f $plugin_dir/manifest.json ]]; then
+  echo "preview: $plugin_dir has no manifest.json; pass the plugin directory" >&2
+  exit 2
+fi
+plugin_id=$(node -e 'process.stdout.write(require(process.argv[1]).id)' "$plugin_dir/manifest.json")
+omarchy_path=${OMARCHY_PATH:-/usr/share/omarchy}
+config_path=$omarchy_path/shell
+if [[ ! -f $config_path/shell.qml ]]; then
+  echo "preview: no omarchy-shell at $config_path; set OMARCHY_PATH" >&2
+  exit 1
+fi
 mock_port=${2:-${GHOSTD_PORT:-}}
 if [[ -z $mock_port || ! $mock_port =~ ^[0-9]+$ || $mock_port -lt 1 || $mock_port -gt 65535 ]]; then
   echo "preview: supply the already-running mock ghostd port (1-65535)" >&2
@@ -203,6 +216,29 @@ export DBUS_SESSION_BUS_ADDRESS=$dbus_address
 export GHOSTD_PORT=$mock_port
 export GHOSTS_ROOT=$preview_root/ghosts
 export QT_QPA_PLATFORM=wayland
+export OMARCHY_PATH=$omarchy_path
+
+# The plugin under test, and a shell.json that enables both of its visible
+# kinds. omarchy-shell reads $HOME/.config, not XDG_CONFIG_HOME, and takes a
+# user shell.json whole, so this carries a bar
+# layout too. The plugin directory is a symlink to the checkout, which is what
+# makes an edit-and-rescan loop work against the tree you are editing.
+mkdir -p "$HOME/.config/omarchy/plugins"
+ln -sfn "$plugin_dir" "$HOME/.config/omarchy/plugins/$plugin_id"
+cat > "$HOME/.config/omarchy/shell.json" <<JSON
+{
+  "version": 1,
+  "plugins": [{ "id": "$plugin_id" }],
+  "bar": {
+    "position": "top",
+    "layout": {
+      "left": [{ "id": "omarchy.menu" }],
+      "center": [{ "id": "omarchy.clock" }],
+      "right": [{ "id": "$plugin_id" }]
+    }
+  }
+}
+JSON
 unset HYPRLAND_INSTANCE_SIGNATURE
 
 setsid env WAYLAND_DISPLAY="$parent_socket" Hyprland --config "$hypr_config" \
@@ -252,19 +288,19 @@ for _ in {1..120}; do
     sed -n '1,200p' "$preview_root/quickshell.log" >&2
     exit 1
   fi
-  if qs -p "$config_path" ipc call ghost status >/dev/null 2>&1; then
+  if qs -p "$config_path" ipc call shell ping >/dev/null 2>&1; then
     shell_ready=1
     break
   fi
   sleep 0.1
 done
 if (( shell_ready == 0 )); then
-  echo "preview: the ghost IPC surface did not become ready" >&2
+  echo "preview: the omarchy-shell IPC surface did not become ready" >&2
   sed -n '1,200p' "$preview_root/quickshell.log" >&2
   exit 1
 fi
 
-qs -p "$config_path" ipc call ghost open >/dev/null
+qs -p "$config_path" ipc call shell summon "$plugin_id" '{}' >/dev/null
 sleep "${GHOST_PREVIEW_SETTLE_SECONDS:-1}"
 
 echo "preview: nested HUD is ready"

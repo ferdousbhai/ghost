@@ -5,7 +5,7 @@ pragma ComponentBehavior: Bound
 // enabled bit.
 import Quickshell
 import QtQuick
-import qs.services
+import "../services"
 
 Rectangle {
     id: root

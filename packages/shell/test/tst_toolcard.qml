@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 import "../qml/components/ToolTrace.js" as ToolTrace
 
 TestCase {

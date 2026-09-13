@@ -8,8 +8,8 @@
 // inside the omarchy-shell process, which cannot see these singletons — see
 // contrib/omarchy/ for the self-contained copy and the trade-off writeup.
 import QtQuick
-import qs.services
-import qs.components
+import "services"
+import "components"
 
 Item {
     id: root

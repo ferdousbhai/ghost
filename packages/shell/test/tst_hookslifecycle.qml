@@ -1,7 +1,7 @@
 import Quickshell
 import QtQuick
 import QtTest
-import qs.services
+import "../qml/services"
 
 TestCase {
     id: tc

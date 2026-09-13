@@ -13,7 +13,7 @@ pragma ComponentBehavior: Bound
 // beyond the keystroke.
 import QtQuick
 import QtQuick.Layouts
-import qs.services
+import "../services"
 
 Rectangle {
     id: root

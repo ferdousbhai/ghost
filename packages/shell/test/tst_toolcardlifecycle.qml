@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import qs.components
+import "../qml/components"
 
 TestCase {
     id: tc

@@ -1,7 +1,7 @@
 import QtQuick
 import QtTest
-import qs.components
-import qs.services
+import "../qml/components"
+import "../qml/services"
 
 // character.md editing goes through the daemon (GET|PUT /character), never a
 // direct disk write. The daemon owns the size cap: the shell renders the

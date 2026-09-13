@@ -19,7 +19,7 @@ pragma ComponentBehavior: Bound
 // past the logical diameter while the parent keeps a stable height.
 import QtQuick
 import Qt5Compat.GraphicalEffects
-import qs.services
+import "../services"
 import "OrbSeed.js" as OrbSeed
 
 Item {
