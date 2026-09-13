@@ -62,7 +62,6 @@ require_file /usr/share/doc/ghost/docs/claude-code-runtime.md
 require_executable /usr/bin/ghostd
 require_executable /usr/bin/ghost
 require_executable /usr/bin/ghost-desktop-helper
-require_executable /usr/bin/ghost-launch
 require_executable /usr/lib/ghost/package-smoke/service-browser-smoke.sh
 
 # Numeric ownership is checked on the package archive itself. An unprivileged
@@ -93,7 +92,6 @@ for path in \
   /usr/bin/ghostd \
   /usr/bin/ghost \
   /usr/bin/ghost-desktop-helper \
-  /usr/bin/ghost-launch \
   /usr/lib/ghost/package-smoke/service-browser-smoke.sh; do
   if [[ "$(stat -c '%a' "$root$path")" != 755 ]]; then
     printf 'packaged executable has an unsafe mode: %s\n' "$path" >&2
@@ -159,8 +157,6 @@ if grep -Eq '^[[:space:]]*RestrictNamespaces=' \
   printf 'ghostd.service blocks namespaces required by the Chromium sandbox\n' >&2
   exit 1
 fi
-  '/usr/bin/qs -c ghost --no-duplicate'
-  '/usr/bin/qs -c ghost ipc call ghost refresh'
 
 # Every symlink in the installed payload must resolve inside that payload.
 while IFS= read -r -d '' link; do

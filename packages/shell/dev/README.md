@@ -5,20 +5,19 @@ CONTRACTS.md API to build and demo every surface.
 
 ## Isolated HUD preview — the required verification path
 
-Development previews must **not** run directly on the owner's desktop. A plain
-`quickshell -p …` joins the live session bus, registers a second tray icon, and
-puts a mock-backed ghost beside the real one. The duplicate tray item and mock
-ghost are easy to mistake for owner state.
+Development previews must **not** run directly on the owner's desktop.
+Enabling this plugin in the live `omarchy-shell` puts a mock-backed ghost
+beside the real one, and a crash or syntax error in the plugin takes the
+owner's whole desktop shell down with it.
 
-The isolation stops at the runtime boundary, not the source tree. `preview.sh`
-resolves the supplied config path and loads that QML in place; it does not copy
-the tree. Independently, `~/.config/quickshell/ghost` is a symlink to this
-checkout's `packages/shell/qml/`, so the nested preview isolates what the
-preview displays but cannot isolate the owner's running shell from edits to the
-QML that shell loads. An agent editing `packages/shell/qml/` during a
-verification run hot-reloads the owner's HUD underneath the run and
-re-registers its tray helper. A crash or syntax error in that QML takes the
-owner's live shell down with it. Know that boundary before editing; prefer
+`preview.sh` runs a nested Hyprland **and a nested omarchy-shell** with a
+private HOME, seeds this checkout's plugin into that HOME's
+`~/.config/omarchy/plugins/`, and summons it over shell IPC. The isolation
+stops at the runtime boundary, not the source tree: the plugin is symlinked in
+place, not copied. Independently, the owner's own
+`~/.config/omarchy/plugins/ferdousbhai.ghost` is a symlink to a checkout, so
+editing that checkout's QML during a verification run hot-reloads the owner's
+live HUD underneath it. Know that boundary before editing; prefer
 passing `preview.sh` a scratch copy when a change is experimental. Copying by
 default would make the preview stop following the source it is meant to verify
 without removing the separate hazard created by the owner's symlink.
@@ -36,8 +35,8 @@ node dev/mock-ghostd.mjs --port 17717
 # --stall-stream (stream never settles).
 
 # Terminal 2: the one supported HUD preview command.
-bash dev/preview.sh qml/shell.qml 17717
-# Equivalently: GHOSTD_PORT=17717 bash dev/preview.sh qml/shell.qml
+bash dev/preview.sh qml 17717
+# Equivalently: GHOSTD_PORT=17717 bash dev/preview.sh qml
 ```
 
 The script rejects port 7717 explicitly and refuses a daemon roster beneath the
@@ -53,8 +52,8 @@ The ready message prints `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
 drive that exact nested instance:
 
 ```sh
-qs -p qml/shell.qml ipc call ghost section hooks
-qs -p qml/shell.qml ipc call ghost ask "who lives here?"
+omarchy-shell ghost section hooks
+omarchy-shell ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
 hyprctl dispatch 'hl.dsp.focus({ window = "class:ghost" })'
@@ -77,7 +76,7 @@ the HUD settles:
 
 ```sh
 GHOST_PREVIEW_SCREENSHOT=/tmp/ghost-hud.png \
-  bash dev/preview.sh qml/shell.qml 17717
+  bash dev/preview.sh qml 17717
 ```
 
 Press Ctrl-C in the preview terminal to tear down everything it started, then

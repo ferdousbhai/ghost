@@ -230,7 +230,8 @@ for script in "$script_root"/bin/omarchy-install-ai-ghost "$script_root"/bin/oma
   grep -q '^# omarchy:summary=' "$script"
 done
 grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-install-ai-ghost"
-grep -Fq 'systemctl --user enable --now ghostd.service ghost-shell.service' "$script_root/bin/omarchy-install-ai-ghost"
+grep -Fq 'systemctl --user enable --now ghostd.service' "$script_root/bin/omarchy-install-ai-ghost"
+grep -Fq 'omarchy plugin enable ferdousbhai.ghost' "$script_root/bin/omarchy-install-ai-ghost"
 grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"

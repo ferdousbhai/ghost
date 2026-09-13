@@ -41,8 +41,6 @@ install -Dm644 "$runtime_root/lib/photon_rs_bg.wasm" \
   "$pkgdir/usr/lib/ghost/runtime/photon_rs_bg.wasm"
 install -Dm755 "$source_root/packaging/arch/ghost-desktop-helper" \
   "$pkgdir/usr/bin/ghost-desktop-helper"
-install -Dm755 "$source_root/packages/shell/contrib/bin/ghost-launch" \
-  "$pkgdir/usr/bin/ghost-launch"
 
 while IFS= read -r -d '' file; do
   install -Dm644 "$file" \

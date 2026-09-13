@@ -76,21 +76,21 @@ reach the running daemon only after `pnpm build` and a restart.
 
 ### The shell
 
-`ghost-shell.service` runs `qs -c ghost --no-duplicate`, and `qs -c ghost`
-resolves `$XDG_CONFIG_HOME/quickshell/ghost/shell.qml`. The package installs the
-QML at `/usr/share/ghost/quickshell` and exposes it as the system config through
-`/etc/xdg/quickshell/ghost`. Point the user config at the clone instead:
+The HUD is an omarchy-shell plugin, not a unit of Ghost's. The package
+installs it at `/usr/share/ghost/plugin`, and omarchy-shell loads whatever
+`~/.config/omarchy/plugins/ferdousbhai.ghost` points at. Point it at the clone
+instead:
 
 ```sh
-mkdir -p ~/.config/quickshell
-ln -sfn ~/src/ghost/packages/shell/qml ~/.config/quickshell/ghost
+mkdir -p ~/.config/omarchy/plugins
+ln -sfn ~/src/ghost/packages/shell/qml ~/.config/omarchy/plugins/ferdousbhai.ghost
+omarchy-shell shell rescanPlugins
 ```
 
-Edited QML is picked up by `systemctl --user restart ghost-shell`, which
-re-execs `qs`. `systemctl --user reload ghost-shell` runs the unit's
-`ExecReload`, `qs -c ghost ipc call ghost refresh`, which re-polls the daemon for
-ghosts, hooks, and sessions. That is a data refresh, not a QML reload. Use
-restart for code.
+Saving a file under `~/.config/omarchy/plugins/` reloads the plugin in the
+running shell, so an edit lands without restarting anything; `omarchy-shell
+shell rescanPlugins` forces it. A syntax error there lands in the owner's whole
+desktop shell, which is why previews go through `dev/preview.sh`.
 
 The ghost's prompt carries only what runs it and which clone is its checkout;
 the loop, the restart unit, and the undo list are `ghost help self`, read on

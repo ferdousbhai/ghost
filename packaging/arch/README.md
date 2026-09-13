@@ -62,9 +62,9 @@ renders the Omarchy contribution; Omarchy owns the stable package build,
 signing, repository, and promotion. Ghost has no generic Arch publication
 channel, pacman repository, or package-signing key.
 
-The shell is installed at `/usr/share/ghost/quickshell` and exposed as the
-system Quickshell config `ghost`, so the existing `qs -c ghost` integration and
-`ghost-launch` command work without writing into a user's config directory.
+The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
+The package does not write into a user's config directory, so linking it into
+`~/.config/omarchy/plugins/` and enabling it is the install script's step.
 The browser relay is installed at `/usr/share/ghost/chromium-extension`; load
 that directory with Chromium's **Load unpacked** flow. The computer-use helper
 is installed in a private Python import directory and exposed through
@@ -88,8 +88,8 @@ leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 
-An upgrade requires `systemctl --user reenable --now ghostd.service
-ghost-shell.service`; re-enabling also moves an installation made with the old
+An upgrade requires `systemctl --user reenable --now ghostd.service` and
+`omarchy-shell shell rescanPlugins`; re-enabling also moves an installation made with the old
 daemon unit away from `default.target` and into the graphical-session lifecycle.
 A package rollback uses the normal pacman cache
 (`pacman -U /var/cache/pacman/pkg/<package>.pkg.tar.zst`) and likewise does not
@@ -97,10 +97,10 @@ roll back or delete user data. Ghost-home format changes must remain
 forward/restart-safe under `CONTRACTS.md`; packaging does not invent a second
 migration path.
 
-Before uninstalling `ghost-dev`, stop and disable both user units:
+Before uninstalling `ghost-dev`, stop and disable the user unit:
 
 ```sh
-systemctl --user disable --now ghost-shell.service ghostd.service
+systemctl --user disable --now ghostd.service
 sudo pacman -Rns ghost-dev
 ```
 
