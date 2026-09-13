@@ -75,13 +75,20 @@ its `edge` → `rc` → `stable` channels.
 
 ## After publishing
 
-`publish.sh` also pushes the HUD plugin subtree to its distribution mirror
-(`publish-plugin.sh`): `packages/shell/qml` split out with `git subtree split`,
-which is deterministic, so every publish fast-forwards and an installed copy's
-`omarchy plugin update` keeps working. The mirror exists because
-`omarchy plugin add` clones a repo whose root holds `manifest.json`, and this
-repository's root carries a `CLAUDE.md` symlink that the plugin validator
-refuses.
+`publish.sh` also pushes the HUD plugin to its distribution mirror
+(`publish-plugin.sh`), `packages/shell/qml` as a repository of its own. The
+mirror exists because `omarchy plugin add` clones a repo whose root holds
+`manifest.json`, and this repository's root carries a `CLAUDE.md` symlink that
+the plugin validator refuses.
+
+The mirror carries its own history, one commit per release, not this
+repository's. What `omarchy plugin update` shows a user before it runs new code
+in their shell should be the plugin's changes and nothing else, and a
+distribution artifact need not publish how the monorepo was built. Each release
+commits the current subtree on top of the mirror's previous tip, so the history
+stays linear and every publish fast-forwards — which matters because
+`omarchy plugin update` is a fast-forward pull and a force-push would strand
+every installed copy.
 
 Two things do not follow the tag on their own:
 

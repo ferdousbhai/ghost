@@ -485,8 +485,10 @@ hosted-session, concurrency, or spend cap.
   symlink into `~/.config/omarchy/plugins/` belongs to the install script.
   The same subtree is published to a distribution mirror at release time
   (`packaging/release/publish-plugin.sh`) so it can be installed with
-  `omarchy plugin add` and listed in Omarchy's plugin marketplace; the mirror is
-  a generated artifact, and this repository stays the source.
+  `omarchy plugin add` and listed in Omarchy's plugin marketplace. The mirror is
+  a generated artifact with a history of its own, one commit per release, and
+  this repository stays the source; a publish appends, never rewrites, because
+  `omarchy plugin update` is a fast-forward pull.
   It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
