@@ -1,40 +1,29 @@
 # Ghost — an omarchy-shell plugin
 
-An owner-local AI persona for Omarchy: a chat window with its own character,
-tools, and desktop reach, and a bar mark that lights up while it is working.
+Ghost's desktop surfaces as an omarchy-shell plugin, id `ferdousbhai.ghost`:
+a chat window with its own character, tools, and desktop reach, and a bar mark
+that lights up while it is working.
 
-![Ghost running as an omarchy-shell plugin](preview.png)
+## It arrives with the `ghost` package
 
-This repository is the HUD. It is published from
-[`ferdousbhai/ghost`](https://github.com/ferdousbhai/ghost), where the daemon,
-CLI, browser relay, and computer-use helper live, and where issues and pull
-requests belong.
-
-## Requires the `ghost` package
-
-The plugin is the desktop half. The daemon it talks to — `ghostd` on
-`127.0.0.1`, which owns sessions, models, and every ghost's home — ships in the
-`ghost` package. Without it the window opens and reports that ghostd is not
-answering.
+This directory is half of one product. The other half is `ghostd`, a loopback
+daemon that owns sessions, models, and every ghost's home, and the two must be
+the same version. So the package is the only way in: it installs these files
+to `/usr/share/ghost/plugin`, and the install script links and enables them.
 
 ```sh
 omarchy-pkg-add ghost          # or: Install → AI → Ghost
 systemctl --user enable --now ghostd.service
-```
-
-## Install
-
-```sh
-omarchy plugin add https://github.com/ferdousbhai/omarchy-ghost.git --enable
-```
-
-The `ghost` package also installs these files to `/usr/share/ghost/plugin`; if
-you have the package, link that instead of cloning, and the two stay in step:
-
-```sh
 ln -sfn /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
 omarchy-shell shell rescanPlugins && omarchy plugin enable ferdousbhai.ghost
 ```
+
+There is deliberately no `omarchy plugin add` git checkout of this: a second
+channel cannot keep the window and the daemon on the same version, and a
+checkout that shadows the packaged copy is a skew nobody would see.
+
+From a checkout, link `packages/shell/qml` instead and every save reloads the
+plugin in the running shell.
 
 ## Use
 
@@ -77,4 +66,4 @@ Your ghosts, settings, and daemon state are untouched.
 
 ## Licence
 
-Apache-2.0. See [LICENSE](LICENSE).
+Apache-2.0, with the repository's [LICENSE](../../../LICENSE).

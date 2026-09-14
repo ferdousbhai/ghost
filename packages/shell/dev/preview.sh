@@ -312,11 +312,6 @@ echo "  HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE"
 echo "  Hyprland pid=$hypr_pid; Quickshell pid=$quickshell_pid; mock port=$mock_port"
 
 if [[ -n ${GHOST_PREVIEW_SCREENSHOT:-} ]]; then
-  # Hyprland posts a standing "started without start-hyprland" notice in a
-  # nested session. It is true and irrelevant here, and it sits on top of what
-  # the screenshot is for.
-  hyprctl --instance "$nested_signature" dismissnotify >/dev/null 2>&1 || true
-  sleep 0.5
   grim "$GHOST_PREVIEW_SCREENSHOT"
   if [[ ! -s $GHOST_PREVIEW_SCREENSHOT ]]; then
     echo "preview: grim did not produce a screenshot" >&2

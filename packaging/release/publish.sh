@@ -110,8 +110,6 @@ gh release create "$tag" \
   "$out/omarchy-ghost-$version/PKGBUILD" \
   "$out/omarchy-ghost-$version/ghost.install"
 
-bash "$script_root/publish-plugin.sh" "$version"
-
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 printf 'next: "After publishing" in packaging/release/README.md; the rendered contribution is %s\n' \
   "$out/omarchy-ghost-$version"

@@ -1,5 +1,9 @@
-// GhostBarWidget — the ghost mascot and the active ghost's name, sized for
-// Omarchy's bar. This is the plugin's `bar-widget` entry point.
+// GhostBarWidget — the ghost mascot, sized for Omarchy's bar. This is the
+// plugin's `bar-widget` entry point.
+//
+// The mark alone, no name: bar space is shared with every other widget, and
+// the ghost's name is one hover away in the tooltip and always on screen in
+// the window itself. The mascot is what has to be recognisable at 14px.
 //
 // It runs in the same process as the panel, so it reads the same Ghostd
 // singleton the window does: the glyph reacts the instant a turn starts, with
@@ -10,23 +14,12 @@
 // carried by its tint and by the orb that glows behind it while a turn runs,
 // not by a separate indicator.
 import QtQuick
+import QtQuick.Controls
 import "services"
 import "components"
 
 Item {
     id: root
-
-    /**
-     * Injected by the host bar. Omarchy themes its bar as a whole, so its
-     * foreground and font win over our own tokens when the widget is hosted;
-     * the fallbacks keep it drawable outside a bar.
-     */
-    property var bar: null
-
-    readonly property color foregroundColor: root.bar && root.bar.foreground
-        ? root.bar.foreground : Theme.barForeground
-    readonly property string fontFamily: root.bar && root.bar.fontFamily
-        ? root.bar.fontFamily : Theme.fontFamily
 
     /**
      * Injected by the host, the same capability-scoped facade the panel and
@@ -37,8 +30,6 @@ Item {
     property var shell: null
 
     readonly property string selfId: "ferdousbhai.ghost"
-
-    property bool showName: true
 
     signal activated()
 
@@ -64,13 +55,14 @@ Item {
     implicitWidth: row.implicitWidth
     implicitHeight: Math.max(row.implicitHeight, 18)
 
-    Row {
+    Item {
         id: row
         anchors.centerIn: parent
-        spacing: 6
+        implicitWidth: 16
+        implicitHeight: 16
 
         Item {
-            anchors.verticalCenter: parent.verticalCenter
+            anchors.centerIn: parent
             width: 16
             height: 16
             // The orb's bloom reaches past the glyph's box on purpose.
@@ -104,21 +96,19 @@ Item {
                 }
             }
         }
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            visible: root.showName
-            text: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
-            color: root.foregroundColor
-            font.family: root.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-        }
     }
 
     MouseArea {
+        id: hover
         anchors.fill: parent
         cursorShape: Qt.PointingHandCursor
         acceptedButtons: Qt.LeftButton
+        hoverEnabled: true
         onClicked: root.toggleWindow()
+
+        // The name the bar no longer spends space on, on demand.
+        ToolTip.visible: hover.containsMouse
+        ToolTip.text: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
+            + " · " + root.status
     }
 }
