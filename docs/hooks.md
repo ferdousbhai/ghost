@@ -68,8 +68,7 @@ a trusted machine configuration
 surface, not portable ghost data.
 
 There is no second hook mechanism. A ghost home carries no executable
-extension code; everything a hook does is a command in `hooks.json`, and it
-runs the same way for both runtimes.
+extension code; everything a hook does is a command in `hooks.json`.
 
 Each machine command runs in an owned process group. Abort, timeout, or the
 bounded 1 MiB stdout/stderr limit terminates the whole descendant tree (TERM,

@@ -465,7 +465,7 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
 
 /**
  * Tools whose result is the work itself rather than an account of it: a file's
- * bytes, a page's text, a directory's entries. Both runtimes put that result on
+ * bytes, a page's text, a directory's entries. The runtime puts that result on
  * the wire as `summary`, and 180 characters of it says less than "Read
  * src/foo.ts" does. A failure is the exception — its text is the only thing
  * that explains what went wrong.

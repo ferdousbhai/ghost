@@ -83,8 +83,8 @@ export function requireConversationIdentity(id: string): ConversationIdentity {
 
 /**
  * How a shell command started by a ghost names its own conversation: the
- * variables the `ghost` CLI reads in place of `-g` and `-s`. Both runtimes
- * put them in their bash environment.
+ * variables the `ghost` CLI reads in place of `-g` and `-s`. pi puts them in
+ * its bash environment.
  */
 export function conversationEnvironment(
   ghostName: string,

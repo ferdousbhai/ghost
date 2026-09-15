@@ -383,9 +383,10 @@ export class LoginManager {
         id: provider.id,
         name: provider.name,
         // pi marks Anthropic's OAuth mechanism as subscription auth, but its
-        // pinned provider docs say third-party harness calls draw per-token
-        // "extra usage", not included Claude plan limits. Do not label that
-        // picker row as subscription; `claude-code/default` is the plan path.
+        // pinned provider docs say third-party calls draw per-token "extra
+        // usage", not included Claude plan limits. Do not label that picker row
+        // as subscription: since the Claude Code runtime was removed there is
+        // no path here that spends a Claude plan, only per-token billing.
         subscription: provider.id === "anthropic"
           ? false
           : provider.auth.oauth?.isSubscription ?? false,

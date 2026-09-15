@@ -1,8 +1,8 @@
 /**
  * A size ratchet over the stable system-prompt policy text (#64).
  *
- * Every section below is rendered into every session under both runtimes, so it
- * is what a per-ghost adapter has to absorb before the ghost has said anything.
+ * Every section below is rendered into every session, so it is what a per-ghost
+ * adapter has to absorb before the ghost has said anything.
  * The system prompt is a budget, not a place to put things: growth has to be a
  * deliberate decision rather than the accumulated residue of unrelated commits.
  *
