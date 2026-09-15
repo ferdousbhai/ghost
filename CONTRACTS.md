@@ -428,8 +428,12 @@ hosted-session, concurrency, or spend cap.
   `bar-widget` (the state dot) kinds. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
-  root. The package installs it to `/usr/share/ghost/plugin`; the per-user
-  symlink into `~/.config/omarchy/plugins/` belongs to the install script.
+  root. The bar widget claims a whole host slot — the injected `bar.barSize`
+  across the bar, the host's 27px icon slot along it — because the host arranges
+  modules in a Row, which sets `x` and leaves `y` alone: anything shorter rides
+  above its neighbours instead of on their centre line. The package installs it
+  to `/usr/share/ghost/plugin`; the per-user symlink into
+  `~/.config/omarchy/plugins/` belongs to the install script.
   The plugin is distributed only by the `ghost` package, never as a
   `omarchy plugin add` git checkout: the window and the daemon are one product
   and must be the same version, and a second channel cannot hold that lock.

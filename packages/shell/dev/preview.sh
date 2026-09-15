@@ -221,8 +221,10 @@ export OMARCHY_PATH=$omarchy_path
 # The plugin under test, and a shell.json that enables both of its visible
 # kinds. omarchy-shell reads $HOME/.config, not XDG_CONFIG_HOME, and takes a
 # user shell.json whole, so this carries a bar. Idle and lock are off: a
-# preview that blanks itself while you look at it is not a preview
-# layout too. The plugin directory is a symlink to the checkout, which is what
+# preview that blanks itself while you look at it is not a preview. The bar
+# widget is flanked by two of the host's own icon buttons: a bar module is
+# sized against its neighbours, and a lone widget has none to be wrong beside.
+# The plugin directory is a symlink to the checkout, which is what
 # makes an edit-and-rescan loop work against the tree you are editing.
 mkdir -p "$HOME/.config/omarchy/plugins"
 ln -sfn "$plugin_dir" "$HOME/.config/omarchy/plugins/$plugin_id"
@@ -236,7 +238,11 @@ cat > "$HOME/.config/omarchy/shell.json" <<JSON
     "layout": {
       "left": [{ "id": "omarchy.menu" }],
       "center": [{ "id": "omarchy.clock" }],
-      "right": [{ "id": "$plugin_id" }]
+      "right": [
+        { "id": "omarchy.network" },
+        { "id": "$plugin_id" },
+        { "id": "omarchy.power" }
+      ]
     }
   }
 }

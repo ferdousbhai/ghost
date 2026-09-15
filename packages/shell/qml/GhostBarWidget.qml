@@ -29,6 +29,14 @@ Item {
      */
     property var shell: null
 
+    /**
+     * The bar host, injected into any slot item that declares it. It carries
+     * the geometry every widget has to match: `barSize` is the thickness the
+     * host's own icon buttons take along the bar's cross axis, and `vertical`
+     * says which axis that is.
+     */
+    property var bar: null
+
     readonly property string selfId: "ferdousbhai.ghost"
 
     signal activated()
@@ -52,48 +60,53 @@ Item {
     Accessible.name: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
     Accessible.description: root.status
 
-    implicitWidth: row.implicitWidth
-    implicitHeight: Math.max(row.implicitHeight, 18)
+    // The bar lays its modules out in a plain Row, which positions x and
+    // leaves y alone: a slot shorter than its neighbours rides at the top of
+    // the bar instead of on their centre line. So the widget claims a full
+    // host slot — the bar's own thickness across, the icon slot along — and
+    // centres the mark inside it. Nothing here is ours to choose.
+    readonly property bool vertical: root.bar ? root.bar.vertical : false
+    readonly property real thickness: root.bar ? root.bar.barSize : 26
+    // Style.bar.iconSlot, the length the host's icon buttons reserve along the
+    // bar. Only qs.Commons has the token, and that import would bind this
+    // plugin to the host's internals for one number.
+    readonly property real slotLength: 27
+
+    implicitWidth: root.vertical ? root.thickness : root.slotLength
+    implicitHeight: root.vertical ? root.slotLength : root.thickness
 
     Item {
-        id: row
         anchors.centerIn: parent
-        implicitWidth: 16
-        implicitHeight: 16
+        width: 16
+        height: 16
+        // The orb's bloom reaches past the glyph's box on purpose.
+        clip: false
 
-        Item {
+        // Behind the mascot, and only while a turn runs: the same orb the
+        // HUD shows, seeded per ghost and per turn so two ghosts do not
+        // shimmer alike.
+        SpectralOrb {
+            visible: Ghostd.streaming && Ghostd.reachable
             anchors.centerIn: parent
-            width: 16
-            height: 16
-            // The orb's bloom reaches past the glyph's box on purpose.
-            clip: false
+            diameter: 14
+            running: visible
+            ghost: Ghostd.activeGhost
+            turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
+        }
 
-            // Behind the mascot, and only while a turn runs: the same orb the
-            // HUD shows, seeded per ghost and per turn so two ghosts do not
-            // shimmer alike.
-            SpectralOrb {
-                visible: Ghostd.streaming && Ghostd.reachable
-                anchors.centerIn: parent
-                diameter: 14
-                running: visible
-                ghost: Ghostd.activeGhost
-                turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
-            }
+        GhostGlyph {
+            anchors.centerIn: parent
+            size: 14
+            tint: root.markTint
+            // A hairline heavier than the HUD's: at 14px in a bar the
+            // stroke has to survive the panel's own contrast.
+            strokeWidth: 2.2
 
-            GhostGlyph {
-                anchors.centerIn: parent
-                size: 14
-                tint: root.markTint
-                // A hairline heavier than the HUD's: at 14px in a bar the
-                // stroke has to survive the panel's own contrast.
-                strokeWidth: 2.2
-
-                // Offline is a state to notice, not to shout about: the mascot
-                // dims rather than blinking.
-                opacity: Ghostd.reachable ? 1 : 0.72
-                Behavior on opacity {
-                    NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
-                }
+            // Offline is a state to notice, not to shout about: the mascot
+            // dims rather than blinking.
+            opacity: Ghostd.reachable ? 1 : 0.72
+            Behavior on opacity {
+                NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
             }
         }
     }

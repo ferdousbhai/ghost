@@ -31,11 +31,9 @@ esac
 
 echo "$QMLLINT ($version)"
 exec "$QMLLINT" -I .qmllint \
-  qml/shell.qml \
   qml/GhostHud.qml \
-  qml/TrayBridge.qml \
+  qml/Panel.qml \
+  qml/Service.qml \
   qml/GhostBarWidget.qml \
-  qml/GhostBarSurface.qml \
   qml/components/*.qml \
-  qml/services/*.qml \
-  contrib/omarchy/bar-modules/*.qml
+  qml/services/*.qml
