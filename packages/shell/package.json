@@ -15,7 +15,6 @@
   "scripts": {
     "lint": "bash dev/qmllint.sh",
     "dev": "node dev/mock-ghostd.mjs",
-    "shell": "quickshell -p qml/shell.qml",
     "build": "true",
     "typecheck": "true",
     "test": "bash dev/test.sh"

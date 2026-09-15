@@ -83,7 +83,10 @@ instead:
 
 ```sh
 mkdir -p ~/.config/omarchy/plugins
-ln -sfn ~/src/ghost/packages/shell/qml ~/.config/omarchy/plugins/ferdousbhai.ghost
+# -T, because plain `ln -sfn` onto an existing directory puts the link INSIDE
+# it (…/ferdousbhai.ghost/qml) and says nothing. If the packaged plugin is
+# already installed there as a real directory this refuses; remove it first.
+ln -sfnT ~/src/ghost/packages/shell/qml ~/.config/omarchy/plugins/ferdousbhai.ghost
 omarchy-shell shell rescanPlugins
 ```
 

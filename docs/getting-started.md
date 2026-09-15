@@ -67,8 +67,9 @@ omarchy-shell shell rescanPlugins && omarchy plugin enable ferdousbhai.ghost
 systemctl --user status ghostd.service --no-pager
 ```
 
-Both units are `PartOf=graphical-session.target`: they come up with your
-compositor and die with it. `ghostd` binds `127.0.0.1:7717`; `ghost-shell` runs
+`ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
+compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
+— it is a plugin inside your own `omarchy-shell`, summoned with
 `omarchy-shell shell toggle ferdousbhai.ghost`.
 
 Confirm the client can reach and authenticate to the daemon:
