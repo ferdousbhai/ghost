@@ -291,5 +291,8 @@ an older unit moves onto the graphical-session lifecycle:
 
 ```sh
 systemctl --user reenable --now ghostd.service
-omarchy-shell shell rescanPlugins
+omarchy-restart-shell
 ```
+
+A rescan discovers a plugin; it does not replace QML the running shell has
+already loaded, so an upgraded HUD needs the shell restart.

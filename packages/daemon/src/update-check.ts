@@ -52,7 +52,7 @@ export function compareVersions(left: string, right: string): number {
 export function updateCommand(sourceRoot: string | null): string {
   if (sourceRoot === null) return "omarchy-update";
   const root = JSON.stringify(sourceRoot);
-  return `git -C ${root} pull --ff-only && pnpm --dir ${root} install --frozen-lockfile && pnpm --dir ${root} build && systemctl --user restart ghostd.service && omarchy-shell shell rescanPlugins`;
+  return `git -C ${root} pull --ff-only && pnpm --dir ${root} install --frozen-lockfile && pnpm --dir ${root} build && systemctl --user restart ghostd.service && omarchy-restart-shell`;
 }
 
 /** The latest release's version, or null for any failure: offline, rate-limited, or an unexpected body. */

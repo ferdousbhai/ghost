@@ -87,10 +87,12 @@ ln -sfn ~/src/ghost/packages/shell/qml ~/.config/omarchy/plugins/ferdousbhai.gho
 omarchy-shell shell rescanPlugins
 ```
 
-Saving a file under `~/.config/omarchy/plugins/` reloads the plugin in the
-running shell, so an edit lands without restarting anything; `omarchy-shell
-shell rescanPlugins` forces it. A syntax error there lands in the owner's whole
-desktop shell, which is why previews go through `dev/preview.sh`.
+A rescan only discovers the plugin; it does not replace QML the shell has
+already loaded, and neither does saving a file under a symlinked plugin
+directory. An edit lands with `omarchy-restart-shell`, and
+`omarchy-shell shell debugBarGeometry` reports what the running shell actually
+has. A syntax error there lands in the owner's whole desktop shell, which is
+why previews go through `dev/preview.sh`.
 
 The ghost's prompt carries only what runs it and which clone is its checkout;
 the loop, the restart unit, and the undo list are `ghost help self`, read on
