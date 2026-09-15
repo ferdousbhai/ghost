@@ -14,13 +14,16 @@ owner's whole desktop shell down with it.
 private HOME, seeds this checkout's plugin into that HOME's
 `~/.config/omarchy/plugins/`, and summons it over shell IPC. The isolation
 stops at the runtime boundary, not the source tree: the plugin is symlinked in
-place, not copied. Independently, the owner's own
-`~/.config/omarchy/plugins/ferdousbhai.ghost` is a symlink to a checkout, so
-editing that checkout's QML during a verification run hot-reloads the owner's
-live HUD underneath it. Know that boundary before editing; prefer
-passing `preview.sh` a scratch copy when a change is experimental. Copying by
-default would make the preview stop following the source it is meant to verify
-without removing the separate hazard created by the owner's symlink.
+place, not copied, and the owner's own
+`~/.config/omarchy/plugins/ferdousbhai.ghost` is a symlink to a checkout too.
+Editing that checkout does **not** hot-reload the owner's live HUD — a running
+omarchy-shell keeps the QML it already loaded, and neither a save, a
+`rescanPlugins`, nor `omarchy plugin disable`+`enable` replaces it (see
+AGENTS.md). That cuts both ways: a bad edit will not take down the live shell,
+and a good one does not reach it either, so a change is only live after
+`omarchy-restart-shell`. Prefer passing `preview.sh` a scratch copy when a
+change is experimental; copying by default would make the preview stop
+following the source it is meant to verify.
 
 Start the mock on any non-7717 port, then give that already-running port to
 `preview.sh`:
@@ -136,23 +139,10 @@ misspelled properties.
 
 ### Expected warnings
 
-Three, all on `GhostBarSurface.qml` — the one remaining `PanelWindow` — and all
-artifacts of how Quickshell registers its types rather than problems in this
-code:
-
-```
-Type PanelWindow is not creatable.           [uncreatable-type]
-unknown grouped property scope margins.      [unqualified]
-Type margins is used but it is not resolved  [unresolved-type]
-```
-
-`PanelWindow` is registered `isCreatable: false` because Quickshell substitutes
-the platform backend (`WlrLayershell`) at runtime — its own docs say
-"`PanelWindow` in particular cannot be resolved". The `margins` value type is
-exported from `Quickshell` while `PanelWindowInterface` lives in
-`Quickshell._Window`, which does not depend on it; `anchors` on the same type
-resolves fine. `FloatingWindow` (the HUD) is a creatable type and raises none of
-these. Anything beyond these three is a real finding.
+One, an unused-import info on `Service.qml`. The three `PanelWindow` warnings
+documented here previously belonged to `GhostBarSurface.qml`, deleted when the
+HUD became an omarchy-shell plugin. Anything beyond the one info line is a real
+finding.
 
 ## What was verified live, and what was not
 
@@ -167,47 +157,17 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   activity, markdown render, terminal `done`, notification.
 - The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
   colours, focus grab, Esc.
-- `contrib/omarchy/scripts/ghost-bar-status` against a live and a dead shell.
 - **The "Connect a model" panel** (`ModelLogin.qml`) against the mock's login
   endpoints: the provider picker, the OAuth auth-URL + paste-code step, the
   `select` step, and the api-key step, each rendered live and captured under
   `dev/evidence/model-login*.png`. Driven by `ipc call ghost login` /
   `loginTo <id> <authType>`.
-- **The system-tray item** (`TrayBridge.qml` + `tray/ghost-tray.py`). Registered
-  against this machine's live `org.kde.StatusNotifierWatcher` (the one hosting
-  the Omarchy bar's tray). Verified by `gdbus`: the item appears in
-  `RegisteredStatusNotifierItems`; `org.kde.StatusNotifierItem` `GetAll` returns
-  `Id=ghost`, `Status=Active`, `ItemIsMenu=false`, `Menu=/MenuBar`, and a
-  status-tinted `IconPixmap`; `com.canonical.dbusmenu` `GetLayout` returns the
-  conditional ghost radio list / five recent conversations / New conversation /
-  Choose-a-model / Quit-ghost-shell tree; a synthesised
-  `Activate` emitted `{"action":"toggle"}` and, end to end, opened the ghost HUD
-  window (against the layer-shell HUD of the time; the seam is unchanged). The
-  three status glyphs the helper draws
-  are captured at `dev/evidence/tray-glyph-{idle,streaming,unreachable}.png` and
-  the live bar at `dev/evidence/tray-bar.png`. `Qt.quit()` was confirmed to
-  terminate a Quickshell process (the Quit menu entry's action).
+- **The bar widget in the owner's own bar**, after `omarchy-restart-shell`:
+  `omarchy-shell shell debugBarGeometry` reports it filling a 27x26 host slot
+  level with its neighbours.
 
 Not verified live:
 
-- **A full streamed turn against the real `ghostd`.** `ghostd` now exists and
-  runs as a systemd user service; the tray helper's shell connected to it and
-  read the roster live. But the streaming turn path here was exercised only
-  against the mock, which follows the runtime-neutral pi-messages-compatible
-  event union but cannot prove the daemon emits it. First integration risk:
-  whether the daemon owns
-  conversation history via `options.sessionId` (what this client assumes) or
-  expects the full `context` replayed (set `GHOST_HUD_REPLAY=1` if so).
-- **The tray icon rendered inline in Omarchy's bar.** The item registers and the
-  bar (its SNI host) accepts it, but omarchy-bar collapses tray items into an
-  expandable group, so a freshly-registered `Active` item lands behind the bar's
-  `<` overflow toggle rather than inline — same as several stock items. Which
-  items show inline is omarchy-bar's own config, not something the SNI item
-  controls.
-- **The Omarchy bar module in Omarchy's bar.** Installing it would mean editing
-  the developer's live `shell.json` and reloading their desktop shell. It is
-  written against the documented contract in
-  `/usr/share/omarchy/shell/plugins/bar/README.md` and lints clean standalone.
 - **Theme switching.** The `theme.name` watch is reasoned from
   `omarchy-theme-set`'s implementation (`rm -rf` + `mv`, then `echo >
   theme.name`), not observed — switching themes would have restyled the
