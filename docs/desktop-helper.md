@@ -12,8 +12,7 @@ MIT-licensed, in
 by Fabio Pauli. We **vendor its desktop modules** (attributed in
 THIRD_PARTY_NOTICES) behind our own thin JSON bridge, and drop its browser
 (we have our own browser relay). Our TS `ghost_desktop`/`ghost_screen`
-extensions shell to this sidecar — the same shape as `TrayBridge.qml` →
-`ghost-tray.py`.
+extensions shell to this sidecar.
 
 Vision is NOT in the helper. Once the helper fallback is needed, semantic
 (AT-SPI) access is preferred where it exists (GTK); Ghost's `inspect_image` —

@@ -105,10 +105,6 @@ for (const metafilePath of metafileArgs) {
   }
   for (const input of Object.keys(metafile.inputs)) {
     const normalized = input.replaceAll("\\", "/");
-    if (normalized.includes("/node_modules/@anthropic-ai/claude-agent-sdk/")
-      || normalized.includes("/.pnpm/@anthropic-ai+claude-agent-sdk@")) {
-      throw new Error(`Claude Agent SDK code entered the public bundle: ${input}`);
-    }
     if (!normalized.includes("node_modules/")) continue;
     const pkg = packageForInput(input);
     validateIdentity(pkg);

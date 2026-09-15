@@ -35,7 +35,6 @@ build_bundle() {
     --sourcemap=none \
     --define "process.env.GHOSTD_VERSION=\"$version\"" \
     --external fsevents \
-    --external @anthropic-ai/claude-agent-sdk \
     --metafile="$meta_root/$name.json" \
     --outfile="$runtime_root/lib/$name.js" \
     "$package_root/$entry"

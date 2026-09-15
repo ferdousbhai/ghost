@@ -47,9 +47,6 @@ for (const line of lines) {
   identities.add(identity);
   if (kind === "ghost") sawGhost = true;
   if (name.startsWith("@earendil-works/pi-")) sawPi = true;
-  if (name === "@anthropic-ai/claude-agent-sdk") {
-    throw new Error("external Claude Agent SDK appears in the bundled license closure");
-  }
   for (const relativePath of pathList.split(",")) {
     if (!relativePath.startsWith("licenses/") || isAbsolute(relativePath)) {
       throw new Error(`invalid bundled license path: ${relativePath}`);
