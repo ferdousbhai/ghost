@@ -202,6 +202,27 @@ async function defaultCreateRuntime(input: {
 }
 
 /**
+ * Aggregator routers that pick a model per request. pi's catalogue records
+ * their cost as 0, but upstream they are priced `-1` — "whatever the model it
+ * chose costs". Binding one at sign-in would bill an owner who came for the
+ * free tier, so zero-cost is necessary but not sufficient. Verified against
+ * https://openrouter.ai/api/v1/models on 2026-09-15; delete this set if pi
+ * starts reporting a dynamic price as something other than zero.
+ */
+const DYNAMIC_PRICE_MODEL_IDS: ReadonlySet<string> = new Set([
+  "auto",
+  "openrouter/auto",
+  "openrouter/fusion",
+]);
+
+/** Free to run for real: priced at zero and not a dynamically-priced router. */
+function isFreeToRun(model: { id: string; cost?: { input?: number; output?: number } }): boolean {
+  return model.cost?.input === 0
+    && model.cost?.output === 0
+    && !DYNAMIC_PRICE_MODEL_IDS.has(model.id);
+}
+
+/**
  * Bind `roles.chat_model` if the ghost has none, using the catalogue-default
  * rule over the provider's available (then known) models. Provider-agnostic;
  * returns null and writes nothing when a model is already bound or none can be
@@ -249,7 +270,16 @@ export async function bindDefaultChatModelIfUnset(
   if (candidatesOrAborted === null || !commitAllowed()) return null;
   let candidates = candidatesOrAborted;
   if (candidates.length === 0) candidates = runtime.getModels(providerId);
-  const model = resolveChatModel(null, candidates);
+  // A first sign-in must not hand the owner a bill they did not ask for. The
+  // catalogue default ranks by provider order and version, which knows nothing
+  // about price: on OpenRouter it lands on a paid model even though the whole
+  // point of that sign-in is the free tier. So when this provider offers a
+  // zero-cost model, the default comes from those; a provider with none (every
+  // subscription provider) is unaffected and falls through unchanged. The list
+  // is pi's live `getAvailable` answer, so "which models are free" is current
+  // at sign-in rather than a name recorded here.
+  const free = candidates.filter(isFreeToRun);
+  const model = resolveChatModel(null, free.length > 0 ? free : candidates);
   if (!model || !commitAllowed()) return null;
 
   const commitConfigDir = resolveConfigDir();

@@ -144,7 +144,24 @@ only an API key the button says **Paste API key**; where it offers both, a
 separate **API key** button sits beside the OAuth one.
 
 A successful login binds a usable chat model if the role is still unset, so you
-may already be done. To look and choose explicitly:
+may already be done.
+
+**Which model that is, and why you will not be billed by surprise.** The
+binding is chosen from the models pi reports as *available to your credential
+at that moment*, not from a list recorded in Ghost — so it reflects the
+provider's current roster rather than whatever was current when this was
+written. Among those, a zero-cost model wins: signing into OpenRouter for the
+free tier binds a free model, and a provider whose models all cost something
+(every subscription provider) is unaffected and keeps the ordinary ranking.
+Aggregator routers that charge per request are skipped even when the catalogue
+lists them at zero (`auth.ts`).
+
+If you have a subscription pi supports — Anthropic, GitHub Copilot, OpenAI
+Codex, xAI, Kimi and others in `ghost login --list` — sign into that instead
+and the ghost runs on it. `ghost login --list` marks which ones are
+subscriptions.
+
+To look and choose explicitly:
 
 ```sh
 ghost model                        # what is bound now

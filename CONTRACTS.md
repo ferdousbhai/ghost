@@ -393,7 +393,11 @@ optional ordered fallback chain. `chat_model` unset leaves the choice to the
 first declared provider's first model, else Pi's catalog default — Pi's live
 view of what this ghost's own credentials reach. Ghost keeps no model list, no
 catalog API, and no local-runner detection — a local endpoint is an ordinary
-provider entry in `models.json`. The one model name Ghost records is
+provider entry in `models.json`. A first sign-in binds the chat role from the
+models pi reports as available to that credential right then, preferring one
+that costs nothing so the zero-cost onboarding path cannot start billing;
+dynamically-priced aggregator routers are excluded because a catalogue may list
+them at zero (`bindDefaultChatModelIfUnset`). The one model name Ghost records is
 `OPENROUTER_DEFAULT_FREE_MODEL`, which seeds a first-run OpenRouter config and
 nothing branches on it; OpenRouter delists free models, so it is re-checked
 against the live roster rather than trusted (`models.ts` carries the query).

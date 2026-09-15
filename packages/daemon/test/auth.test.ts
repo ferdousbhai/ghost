@@ -438,6 +438,71 @@ describe("successful login refresh", () => {
 });
 
 describe("default model binding", () => {
+  it("binds a free model over a paid one so a first sign-in cannot start billing", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const agentDir = ghostPaths(dir).home;
+    // What OpenRouter actually answers: the catalogue default would rank the
+    // paid Mistral first (provider order, then version), and the owner who
+    // signed in for the free tier would start paying per token.
+    const available = [
+      fakePiModel({ provider: "openrouter", id: "mistralai/mistral-small-2603", cost: { input: 0.15, output: 0.6 } }),
+      fakePiModel({ provider: "openrouter", id: "thinkingmachines/inkling:free", cost: { input: 0, output: 0 } }),
+    ];
+
+    await expect(bindDefaultChatModelIfUnset(
+      agentDir,
+      { getAvailable: async () => available, getModels: () => available },
+      "openrouter",
+    )).resolves.toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
+    expect(readGhostModels(agentDir)?.roles?.chat_model)
+      .toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
+  });
+
+  it("refuses a router that pi prices at zero but upstream bills per request", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const agentDir = ghostPaths(dir).home;
+    // `auto` looks free in pi's catalogue and outranks everything on context
+    // and reasoning, but OpenRouter prices it `-1`: it bills whatever model it
+    // routed to. Picking it would be a worse surprise than the paid Mistral.
+    const available = [
+      fakePiModel({ provider: "openrouter", id: "auto", cost: { input: 0, output: 0 } }),
+      fakePiModel({ provider: "openrouter", id: "openrouter/fusion", cost: { input: 0, output: 0 } }),
+      fakePiModel({ provider: "openrouter", id: "thinkingmachines/inkling:free", cost: { input: 0, output: 0 } }),
+    ];
+
+    await expect(bindDefaultChatModelIfUnset(
+      agentDir,
+      { getAvailable: async () => available, getModels: () => available },
+      "openrouter",
+    )).resolves.toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
+  });
+
+  it("leaves a provider with no free tier on the catalogue default", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const agentDir = ghostPaths(dir).home;
+    // Every subscription provider looks like this: nothing costs zero, so the
+    // free-first rule is a no-op and the existing ranking still decides.
+    const available = [
+      fakePiModel({ provider: "anthropic", id: "claude-opus-5", cost: { input: 15, output: 75 } }),
+      fakePiModel({ provider: "anthropic", id: "claude-haiku-4-5", cost: { input: 0.8, output: 4 } }),
+    ];
+
+    const bound = await bindDefaultChatModelIfUnset(
+      agentDir,
+      { getAvailable: async () => available, getModels: () => available },
+      "anthropic",
+    );
+    expect(bound?.provider).toBe("anthropic");
+    expect(readGhostModels(agentDir)?.roles?.chat_model?.provider).toBe("anthropic");
+  });
+
+
   it("does not overwrite an explicit choice made while provider discovery is pending", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
