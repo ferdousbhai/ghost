@@ -397,7 +397,10 @@ provider entry in `models.json`. A first sign-in binds the chat role from the
 models pi reports as available to that credential right then, preferring one
 that costs nothing so the zero-cost onboarding path cannot start billing;
 dynamically-priced aggregator routers are excluded because a catalogue may list
-them at zero (`bindDefaultChatModelIfUnset`). The one model name Ghost records is
+them at zero (`bindDefaultChatModelIfUnset`). A role or fallback naming a provider Ghost no
+longer has is dropped when `models.json` is read, so a home written before a
+runtime was removed heals instead of failing every turn on a binding nothing
+can honour. The one model name Ghost records is
 `OPENROUTER_DEFAULT_FREE_MODEL`, which seeds a first-run OpenRouter config and
 nothing branches on it; OpenRouter delists free models, so it is re-checked
 against the live roster rather than trusted (`models.ts` carries the query).

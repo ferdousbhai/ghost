@@ -89,6 +89,14 @@ export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
  * — including every writer, which round-trips through it — ever sees it again.
  */
 const LEGACY_SMOL_MODEL_ROLE = "title_model";
+/**
+ * The Claude Code runtime was removed in 0.3.0. A home written before that can
+ * still name it in any role, and the provider no longer exists in any
+ * catalogue: `chat_model` would report a model that cannot run (turns quietly
+ * fall through to pi's default), and `smol_model`/`advisor_model` would fail
+ * every title, greeting, and hook completion with `unknown_model` forever.
+ */
+const REMOVED_PROVIDER_ID = "claude-code";
 
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
@@ -251,6 +259,37 @@ function migrateLegacySmolRole<T>(
   return migrated;
 }
 
+/**
+ * Drop any role or fallback naming a provider Ghost no longer has, in place.
+ *
+ * Read-time and idempotent, like the legacy-role fold above: a file read here
+ * and written back loses the dead entry, and an unbound role is a defined
+ * state — the chat role falls to pi's catalogue default and the background
+ * roles resolve themselves. Leaving the entry would be worse than forgetting
+ * it, because an explicit binding is honoured loudly rather than ignored.
+ */
+function dropRemovedProviderBindings<T extends { provider?: unknown }>(
+  bindings: Partial<Record<GhostModelRole, T | T[]>> | undefined,
+): Partial<Record<GhostModelRole, T | T[]>> | undefined {
+  if (!bindings) return bindings;
+  let changed = false;
+  const kept: Partial<Record<GhostModelRole, T | T[]>> = {};
+  for (const [role, value] of Object.entries(bindings) as [GhostModelRole, T | T[]][]) {
+    if (Array.isArray(value)) {
+      const entries = value.filter((entry) => entry?.provider !== REMOVED_PROVIDER_ID);
+      if (entries.length !== value.length) changed = true;
+      if (entries.length > 0) kept[role] = entries;
+      continue;
+    }
+    if (value?.provider === REMOVED_PROVIDER_ID) {
+      changed = true;
+      continue;
+    }
+    kept[role] = value;
+  }
+  return changed ? kept : bindings;
+}
+
 function _assertParses(path: string, value: string, parse: (input: string) => unknown): void {
   try {
     parse(value);
@@ -317,8 +356,12 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
   return {
     ...file,
     providers: providers as Record<string, GhostProviderConfig>,
-    roles: migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
-    fallbacks: migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
+    roles: dropRemovedProviderBindings(
+      migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
+    ) as GhostModelsFile["roles"],
+    fallbacks: dropRemovedProviderBindings(
+      migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
+    ) as GhostModelsFile["fallbacks"],
   };
 }
 

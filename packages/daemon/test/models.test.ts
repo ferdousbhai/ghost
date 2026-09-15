@@ -48,6 +48,48 @@ afterEach(() => {
   dir = null;
 });
 
+describe("a home written before the Claude Code runtime was removed", () => {
+  it("forgets every role and fallback naming the gone provider", () => {
+    const dir = makeAgentDir();
+    writeFileSync(ghostModelsPath(dir), JSON.stringify({
+      providers: {},
+      roles: {
+        chat_model: { provider: "claude-code", modelId: "default" },
+        smol_model: { provider: "claude-code", modelId: "sonnet" },
+        advisor_model: { provider: "openrouter", modelId: "keep/me" },
+      },
+      fallbacks: {
+        chat_model: [
+          { provider: "claude-code", modelId: "default" },
+          { provider: "openrouter", modelId: "keep/me-too" },
+        ],
+      },
+    }), { mode: 0o600 });
+
+    const models = readGhostModels(dir);
+    // The dead bindings are gone, so the chat role falls to pi's catalogue
+    // default and the background roles resolve themselves again instead of
+    // failing every title and greeting with unknown_model.
+    expect(models?.roles?.chat_model).toBeUndefined();
+    expect(models?.roles?.smol_model).toBeUndefined();
+    expect(resolveChatModelRef(models)).toBeNull();
+    expect(resolveSmolModelRef(models)).toBeNull();
+    // Everything that still exists is untouched.
+    expect(models?.roles?.advisor_model).toEqual({ provider: "openrouter", modelId: "keep/me" });
+    expect(models?.fallbacks?.chat_model).toEqual([{ provider: "openrouter", modelId: "keep/me-too" }]);
+  });
+
+  it("leaves a home that never named it byte-identical", () => {
+    const dir = makeAgentDir();
+    const file = {
+      providers: {},
+      roles: { chat_model: { provider: "openrouter", modelId: "a/b" } },
+    };
+    writeFileSync(ghostModelsPath(dir), JSON.stringify(file), { mode: 0o600 });
+    expect(readGhostModels(dir)?.roles).toEqual(file.roles);
+  });
+});
+
 describe("models.json round-trip", () => {
   it("returns null when the ghost has no models.json", () => {
     expect(readGhostModels(makeAgentDir())).toBeNull();

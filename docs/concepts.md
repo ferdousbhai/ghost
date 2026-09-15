@@ -125,6 +125,11 @@ nothing that delegation does not, and cost 4,000 lines of adapter, a parallel
 presentation-journal transcript store, a per-feature "not supported here" branch
 on most session routes, and 460MB of bundled platform binaries in the install.
 
+Upgrading across it needs nothing: a `models.json` that still names
+`claude-code` in any role has that entry dropped the next time it is read, so
+the chat role falls back to pi's catalogue default and the background roles
+resolve themselves. Set the model you want with `ghost model <provider>/<id>`.
+
 What that removal gives up, exactly: an owner can no longer spend a Claude
 subscription on the ghost's own conversational turns — those now go through a
 pi provider, billed per token or free. Delegated work still spends the
