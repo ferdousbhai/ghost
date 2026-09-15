@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, join } from "node:path";
+import { basename } from "node:path";
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   isValidConversationId,
@@ -12,8 +12,6 @@ import { visitLeadingEntries } from "./session-transcript.js";
 const HASHED_SESSION_PREFIX = "ghost~";
 const HASHED_SESSION_PATTERN = /^ghost~[0-9a-f]{64}\.jsonl$/u;
 const CONVERSATION_ID_ENTRY = "ghost_conversation_identity";
-const CLAUDE_SESSION_PREFIX = "claude-";
-const CLAUDE_SESSION_SUFFIX = ".json";
 /** How many leading entries may separate the header from the identity marker. */
 const IDENTITY_SCAN_LIMIT = 64;
 
@@ -30,15 +28,6 @@ export function sessionFileNameFor(conversationId: string): string {
   // `~` is outside the direct-filename alphabet above. Therefore the generated
   // stem can never itself be treated as an alias for this transcript.
   return `${HASHED_SESSION_PREFIX}${digest}.jsonl`;
-}
-
-export function claudeSessionMetadataPath(
-  sessionDir: string,
-  conversationId: string,
-): string {
-  requireRawConversationId(conversationId);
-  const digest = createHash("sha256").update(conversationId).digest("hex");
-  return join(sessionDir, `${CLAUDE_SESSION_PREFIX}${digest}${CLAUDE_SESSION_SUFFIX}`);
 }
 
 export function bindConversationId(

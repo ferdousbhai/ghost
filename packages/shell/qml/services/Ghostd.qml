@@ -472,8 +472,6 @@ Singleton {
     property var commands: []
     property bool commandsLoading: false
     property string commandsError: ""
-    /** Why there is no catalog to show, when that is not an error: pi-only on a Claude conversation. */
-    property string commandsNotice: ""
     property string commandsGhost: ""
     property string commandsSessionId: ""
 
@@ -1357,12 +1355,6 @@ Singleton {
             runtime: "pi",
             conversationId: id.slice(piPrefix.length)
         };
-        const claudePrefix = "claude-code:";
-        if (id.indexOf(claudePrefix) === 0 && id.length > claudePrefix.length) return {
-            id: id,
-            runtime: "claude-code",
-            conversationId: id.slice(claudePrefix.length)
-        };
         return null;
     }
 
@@ -1370,7 +1362,7 @@ Singleton {
         const row = root.sessions.find(function (session) {
             return session && session.id === id;
         });
-        if (row && (row.runtime === "pi" || row.runtime === "claude-code")
+        if (row && row.runtime === "pi"
                 && typeof row.conversationId === "string" && row.conversationId !== "")
             return { id: id, runtime: row.runtime, conversationId: row.conversationId };
         return root.parseConversationActionId(id);
@@ -1397,28 +1389,6 @@ Singleton {
     function cancelAllTranscriptLoads(): void {
         for (const key of Object.keys(root.turnStates))
             root.cancelTranscriptLoad(root.turnStates[key]);
-    }
-
-    function runtimeForNewConversation(): string {
-        return root.currentModel && root.currentModel.provider === "claude-code"
-            ? "claude-code" : "pi";
-    }
-
-    function adoptConversationRuntime(ghost: string, runtime: string): var {
-        if (ghost === "" || ghost !== root.activeGhost
-                || (runtime !== "pi" && runtime !== "claude-code")) return null;
-        const state = root.activeTurnState(false);
-        if (!state || state.runtime === runtime || state.streaming) return state;
-        root.captureActiveTurn(state);
-        root.cancelTranscriptLoad(state);
-        const id = root.conversationActionId(runtime, state.conversationId);
-        root.sessionIds[ghost] = id;
-        root.currentSessionId = id;
-        const target = root.ensureTurnState(ghost, id, state.conversationId, runtime);
-        root.showTurnState(ghost, id);
-        root.clearCommands();
-        root.clearSessionResources();
-        return target;
     }
 
     function isActiveTurn(state: var): bool {
@@ -1839,7 +1809,6 @@ Singleton {
         root.commands = [];
         root.commandsLoading = false;
         root.commandsError = "";
-        root.commandsNotice = "";
         root.commandsGhost = "";
         root.commandsSessionId = "";
     }
@@ -1885,7 +1854,7 @@ Singleton {
     function applySessionResources(body: var, ghost: string, sessionId: string): bool {
         const identity = root.conversationIdentity(sessionId);
         if (!body || typeof body !== "object" || Array.isArray(body)
-                || ["pi", "claude-code"].indexOf(body.runtime) < 0
+                || body.runtime !== "pi"
                 || !identity || body.runtime !== identity.runtime
                 || !Array.isArray(body.skills)
                 || !body.skills.every(function (row) {
@@ -1951,10 +1920,8 @@ Singleton {
                 }
             } else {
                 root.sessionResources = null;
-                root.sessionResourcesPending = root.errorCode(xhr) === "session_resources_unavailable";
-                root.sessionResourcesError = root.sessionResourcesPending
-                    ? "Send a message to start Claude Code, then refresh."
-                    : root.describeError(xhr, "GET session resources");
+                root.sessionResourcesPending = false;
+                root.sessionResourcesError = root.describeError(xhr, "GET session resources");
             }
         };
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
@@ -1978,21 +1945,6 @@ Singleton {
                 && root.commandsSessionId === sessionId) return;
         if (root.commandsRequest && root.commandsRequest.readyState !== 4)
             root.commandsRequest.abort();
-        // Slash commands are pi's; a Claude Code conversation has none to
-        // list, and the daemon would only say so with a 409.
-        const identity = root.parseConversationActionId(sessionId);
-        if (identity && identity.runtime === "claude-code") {
-            root.commandsRequest = null;
-            root.commands = [];
-            root.commandsLoading = false;
-            root.commandsError = "";
-            root.commandsNotice = "Slash commands are pi's. This conversation runs on Claude Code.";
-            root.commandsGhost = ghost;
-            root.commandsSessionId = sessionId;
-            return;
-        }
-        root.commandsNotice = "";
-
         const xhr = new XMLHttpRequest();
         root.commandsRequest = xhr;
         root.commands = [];
@@ -2261,7 +2213,7 @@ Singleton {
             try {
                 const event = JSON.parse(line.slice(5).trim());
                 if (event.type === "conversation-updated" && typeof event.id === "string"
-                        && (event.runtime === "pi" || event.runtime === "claude-code")
+                        && event.runtime === "pi"
                         && typeof event.conversationId === "string"
                         && event.id === root.conversationActionId(
                             event.runtime, event.conversationId)
@@ -2297,7 +2249,7 @@ Singleton {
     function validSessionRows(list: var): var {
         return list.filter(function (session) {
             return session && typeof session.id === "string"
-                && (session.runtime === "pi" || session.runtime === "claude-code")
+                && session.runtime === "pi"
                 && typeof session.conversationId === "string"
                 && session.conversationId !== ""
                 && session.id === root.conversationActionId(
@@ -2369,11 +2321,10 @@ Singleton {
         }
         const conversationId = "hud-" + Date.now().toString(36)
             + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-        const runtime = root.runtimeForNewConversation();
-        const id = root.conversationActionId(runtime, conversationId);
+        const id = root.conversationActionId("pi", conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
-        root.ensureTurnState(ghost, id, conversationId, runtime);
+        root.ensureTurnState(ghost, id, conversationId, "pi");
         root.showTurnState(ghost, id);
         root.clearCommands();
         root.clearSessionResources();
@@ -3040,13 +2991,8 @@ Singleton {
         const prompt = text.trim();
         if (prompt === "" || root.streaming || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        let sessionId = root.ensureSession(ghost);
-        let state = root.ensureTurnState(ghost, sessionId);
-        const desiredRuntime = root.runtimeForNewConversation();
-        if (state && state.runtime !== desiredRuntime) {
-            state = root.adoptConversationRuntime(ghost, desiredRuntime);
-            sessionId = state ? state.sessionId : "";
-        }
+        const sessionId = root.ensureSession(ghost);
+        const state = root.ensureTurnState(ghost, sessionId);
         if (!state || sessionId === "") return;
         root.ensureOptimisticSessionRow(ghost, sessionId);
         root.captureActiveTurn(state);
@@ -3232,9 +3178,8 @@ Singleton {
         if (!root.sessionIds[ghost]) {
             const conversationId = "hud-" + Date.now().toString(36)
                 + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-            const runtime = root.runtimeForNewConversation();
-            root.sessionIds[ghost] = root.conversationActionId(runtime, conversationId);
-            root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, runtime);
+            root.sessionIds[ghost] = root.conversationActionId("pi", conversationId);
+            root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, "pi");
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
         root.ensureTurnState(ghost, root.sessionIds[ghost]);
@@ -3470,9 +3415,9 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** "Claude Code weekly limit reached · resets Thu 20:00", from a limit_reached event. */
+    /** "pi weekly limit reached · resets Thu 20:00", from a limit_reached event. */
     function limitNoticeText(event: var): string {
-        const harness = event.harness === "claude-code" ? "Claude Code" : "pi";
+        const harness = String(event.harness || "pi");
         const kind = String(event.kind || "limit").replace("_", " ");
         const window = event.window ? " (" + String(event.window).replace(/_/g, " ") + ")" : "";
         let resets = "";
@@ -4038,24 +3983,12 @@ Singleton {
                 root.currentModel = body.current || null;
                 root.modelSource = body.source || "none";
                 root.modelError = "";
-                root.adoptConversationRuntime(ghost,
-                    body.current && body.current.provider === "claude-code"
-                        ? "claude-code" : "pi");
             } catch (error) {
                 root.modelError = "ghostd sent a malformed model selection";
             }
         } else {
             root.modelError = root.describeError(xhr, "GET model");
         }
-        return true;
-    }
-
-    function adoptSelectedModelRuntime(ghost: string, provider: string): bool {
-        if (ghost === "" || ghost !== root.activeGhost) return false;
-        root.modelGeneration += 1;
-        root.modelRequest = null;
-        root.adoptConversationRuntime(ghost,
-            provider === "claude-code" ? "claude-code" : "pi");
         return true;
     }
 

@@ -9,11 +9,11 @@ import {
 
 describe("runtime-qualified conversation identity", () => {
   it("round-trips an opaque raw resume id without folding it into the runtime", () => {
-    const identity = conversationIdentity("claude-code", "default/with:punctuation");
+    const identity = conversationIdentity("pi", "default/with:punctuation");
     expect(identity).toEqual({
-      id: "claude-code:default/with:punctuation",
+      id: "pi:default/with:punctuation",
       conversationId: "default/with:punctuation",
-      runtime: "claude-code",
+      runtime: "pi",
     });
     expect(parseConversationIdentity(identity.id)).toEqual(identity);
   });

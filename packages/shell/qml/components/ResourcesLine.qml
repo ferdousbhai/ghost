@@ -76,8 +76,7 @@ Item {
             if (Ghostd.activeGhost !== "") Ghostd.fetchSessionResources(false);
         }
 
-        // Claude Code starts on the first turn, so the snapshot exists only
-        // after one has finished; on pi this just re-reads a stable list.
+        // Re-read the (stable) admitted list once a turn has finished.
         function onTurnFinished(ghost: string, text: string): void {
             if (ghost === Ghostd.activeGhost) Ghostd.fetchSessionResources(true);
         }

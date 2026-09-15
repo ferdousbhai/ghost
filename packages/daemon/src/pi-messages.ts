@@ -138,7 +138,7 @@ export type PiMessagesEvent =
  */
 export interface LimitReachedEvent {
   type: "limit_reached";
-  harness: "pi" | "claude-code";
+  harness: "pi";
   kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
   window?: string;
   resetsAt?: string;

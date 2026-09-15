@@ -15,8 +15,7 @@ of — this page.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
 - **A model provider you can sign into** — an OpenRouter account is enough, and
-  its free models cost nothing — or an installed, authenticated Claude Code
-  ([claude-code-runtime.md](claude-code-runtime.md)).
+  its free models cost nothing.
 
 ## 1. Install the package
 
@@ -139,7 +138,7 @@ ghostd login sage --provider openrouter
 In the HUD, the same flow: click the model pill in the chat header (it reads
 **Choose a model** when nothing is set) → **Connect provider**. Each provider
 row's primary button is **Sign in**, or the provider's own label — Anthropic's
-reads *Sign in (extra usage)*, because third-party harness calls draw
+reads *Sign in (extra usage)*, because third-party calls draw
 per-token usage rather than an included Claude plan. Where a provider offers
 only an API key the button says **Paste API key**; where it offers both, a
 separate **API key** button sits beside the OAuth one.
@@ -166,11 +165,6 @@ to ask the ghost, which has the file and the schema. Then `ghost model
 <provider>/<model>` makes it the chat model. Keep a frontier model on
 `advisor_model` for the hard questions and for reading images when the local
 model cannot.
-
-To run the conversation on Claude Code instead, set
-`ghost model claude-code/default` — that path additionally needs an installed,
-authenticated `claude` and the exact SDK closure described in
-[claude-code-runtime.md](claude-code-runtime.md).
 
 ## 6. First conversation in the HUD
 
@@ -273,7 +267,6 @@ and any skill you installed untouched.
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
 | The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, link it into `~/.config/omarchy/plugins/` and `omarchy-shell shell rescanPlugins`. |
-| "Claude Code is not installed at \"claude\"" although `claude --version` works in your shell | The daemon's PATH is the unit's, not your shell's: `ghostd.service` names `~/.local/bin`, mise shims, and `~/.bun/bin`. A `claude` elsewhere needs `GHOST_CLAUDE_BINARY` in a drop-in (`systemctl --user edit ghostd.service`) |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
 
 After an upgrade, re-enable rather than restart, so an installation made with

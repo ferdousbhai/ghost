@@ -1,7 +1,5 @@
-import { DAEMON_VERSION } from "../src/version.js";
 import { describe, expect, it } from "vitest";
 import {
-  captureClaudeCodeEnvironment,
   captureNativeHarnessEnvironment,
   type NativeHarnessEnvironmentProfile,
 } from "../src/env-scrub.js";
@@ -55,11 +53,9 @@ describe("native harness environment capture", () => {
     };
     const original = { ...source };
     const native = captureNativeHarnessEnvironment("claude-native", source);
-    const principal = captureClaudeCodeEnvironment(source);
 
     expect(source).toEqual(original);
     expect(Object.isFrozen(native)).toBe(true);
-    expect(Object.isFrozen(principal)).toBe(true);
     expect(native).toMatchObject({
       HOME: "/home/owner",
       PATH: "/usr/bin",
@@ -68,13 +64,9 @@ describe("native harness environment capture", () => {
       ANTHROPIC_BASE_URL: "https://router.invalid",
       AWS_PROFILE: "owner-profile",
       VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-      CLAUDE_AGENT_SDK_CLIENT_APP: `ghostd/${DAEMON_VERSION}`,
     });
-    expect(native.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBeUndefined();
-    expect(principal.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBe("1");
     for (const name of excludedNames) {
       expect(native[name], name).toBeUndefined();
-      expect(principal[name], name).toBeUndefined();
     }
   });
 
@@ -121,14 +113,13 @@ describe("native harness environment capture", () => {
   });
 
   it("returns the same immutable snapshot only for the same profile", () => {
-    const principal = captureNativeHarnessEnvironment("claude-principal", {
+    const native = captureNativeHarnessEnvironment("claude-native", {
       HOME: "/home/owner",
       PATH: "/usr/bin",
     });
-    expect(captureNativeHarnessEnvironment("claude-principal", principal)).toBe(principal);
-    const native = captureNativeHarnessEnvironment("claude-native", principal);
-    expect(native).not.toBe(principal);
-    expect(native.CLAUDE_CODE_DISABLE_AUTO_MEMORY).toBeUndefined();
+    expect(captureNativeHarnessEnvironment("claude-native", native)).toBe(native);
+    const codex = captureNativeHarnessEnvironment("codex-native", native);
+    expect(codex).not.toBe(native);
     expect(() => {
       (native as NodeJS.ProcessEnv).OPENAI_API_KEY = "late-secret";
     }).toThrow();

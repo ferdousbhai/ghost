@@ -160,13 +160,13 @@ TestCase {
     function test_limitReachedNamesTheWindowInsteadOfAGenericFailure(): void {
         const turn = openTurn("limit", null);
         Ghostd.handleTurnEvent(turn.state, {
-            type: "limit_reached", harness: "claude-code", kind: "usage_limit",
+            type: "limit_reached", harness: "pi", kind: "usage_limit",
             window: "seven_day", resetsAt: "2026-09-17T17:00:00Z",
-            message: "Claude Code seven_day limit reached."
+            message: "pi seven_day limit reached."
         });
         compare(turn.state.activity, "limit reached");
-        Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "Claude Code ended with error_during_execution." });
-        verify(turn.state.lastError.indexOf("Claude Code usage limit (seven day) reached") === 0, turn.state.lastError);
+        Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "the provider ended the turn." });
+        verify(turn.state.lastError.indexOf("pi usage limit (seven day) reached") === 0, turn.state.lastError);
         verify(turn.state.lastError.indexOf("resets") > 0, turn.state.lastError);
         // The next turn starts without the stale notice.
         const next = openTurn("after-limit", null);

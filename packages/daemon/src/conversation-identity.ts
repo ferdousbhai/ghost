@@ -1,6 +1,11 @@
 import { GhostError } from "./ghosts.js";
 
-export type ConversationRuntime = "pi" | "claude-code";
+/**
+ * pi is the only runtime. The type and the `pi:` id prefix stay so conversation
+ * ids remain the stable, self-describing strings already written into ghost
+ * homes, shell state, and `$GHOST_SESSION`.
+ */
+export type ConversationRuntime = "pi";
 
 export interface ConversationIdentity {
   id: string;
@@ -8,10 +13,7 @@ export interface ConversationIdentity {
   runtime: ConversationRuntime;
 }
 
-const RUNTIME_PREFIXES: Readonly<Record<ConversationRuntime, string>> = {
-  pi: "pi:",
-  "claude-code": "claude-code:",
-};
+const RUNTIME_PREFIXES: Readonly<Record<ConversationRuntime, string>> = { pi: "pi:" };
 
 export const MAX_CONVERSATION_ID_SCALARS = 200;
 
@@ -60,7 +62,7 @@ export function conversationIdentity<Runtime extends ConversationRuntime>(
 }
 
 export function parseConversationIdentity(id: string): ConversationIdentity | null {
-  for (const runtime of ["pi", "claude-code"] as const) {
+  for (const runtime of ["pi"] as const) {
     const prefix = RUNTIME_PREFIXES[runtime];
     if (!id.startsWith(prefix)) continue;
     const conversationId = id.slice(prefix.length);

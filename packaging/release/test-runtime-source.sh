@@ -78,7 +78,6 @@ source_date_epoch=$epoch
 bun_build_version=$bun_build_version
 bun_runtime_min=$bun_runtime_min
 bundle_target=bun
-claude_agent_sdk=external@0.3.170
 bundled_license_manifest_sha256=$(sha256sum "$root/BUNDLED-LICENSES" | cut -d' ' -f1)
 payload_manifest_sha256=$(sha256sum "$root/PAYLOAD.SHA256" | cut -d' ' -f1)
 EOF
@@ -154,12 +153,5 @@ cp -a "$runtime_root" "$unlicensed"
 printf 'extra\n' > "$unlicensed/licenses/extra"
 refresh_payload "$unlicensed"
 assert_rejected "$unlicensed" 'does not exactly cover the licenses tree'
-
-sdk_bytes="$work/sdk-bytes"
-cp -a "$runtime_root" "$sdk_bytes"
-printf '%s\n' 'Want to see the unminified source? We are hiring!' \
-  >> "$sdk_bytes/lib/ghostd.js"
-refresh_payload "$sdk_bytes"
-assert_rejected "$sdk_bytes" 'Claude Agent SDK source bytes entered'
 
 printf 'Runtime source verifier regression passed\n'

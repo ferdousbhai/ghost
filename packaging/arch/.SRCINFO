@@ -34,8 +34,6 @@ pkgbase = ghost-dev
 	depends = ydotool>=1.0
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
 	optdepends = npm: npx-launched MCP servers and other owner-installed pi integrations
-	optdepends = claude-code>=2.1.251: owner-installed Claude Code harness runtime
-	optdepends = pnpm: install the optional owner-local Claude Agent SDK boundary
 	provides = ghost
 	conflicts = ghost
 	options = !debug

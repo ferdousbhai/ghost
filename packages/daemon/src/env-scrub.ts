@@ -23,17 +23,15 @@
  * ## What is removed
  *
  * Every provider-credential variable the pinned pi providers read, the ambient cloud
- * credentials that let a provider authenticate without an explicit key, and
- * Claude Code routing overrides that can redirect or change a request before
- * it reaches the configured provider. Listed explicitly so a reader can audit
+ * credentials that let a provider authenticate without an explicit key, and the
+ * routing overrides that can redirect or change a request before it reaches the
+ * configured provider. Listed explicitly so a reader can audit
  * the policy without grepping dependency source; the patterns below then catch
  * credential variables added by a future pi release.
  */
 
-import { DAEMON_VERSION } from "./version.js";
-
 export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
-  // Direct provider credentials read by pi-ai or the Claude Code HTTP agent.
+  // Direct provider credentials read by pi-ai.
   "AI_GATEWAY_API_KEY",
   "ANTHROPIC_API_KEY",
   "ANTHROPIC_AUTH_TOKEN",
@@ -51,7 +49,7 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   "ANTHROPIC_WORKSPACE_ID",
   // The pinned Claude CLI reads these mTLS values and alternate credential
   // selectors/channels. The global scrub also removes CLAUDE_CONFIG_DIR after
-  // the dedicated Claude environment has captured the owner's native login.
+  // the delegated-harness environment has captured the owner's native login.
   "CLAUDE_CODE_CLIENT_CERT",
   "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
@@ -113,12 +111,11 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
 ];
 
 /**
- * Claude Code endpoint, backend, header, region, and model overrides.
+ * Endpoint, backend, header, region, and model overrides.
  *
  * These are as security-sensitive as credentials: inheriting one can route a
- * Claude request through a third party or silently select a backend
- * or model other than the one chosen for that ghost. Keep this list aligned
- * with the bundled Claude Agent SDK/CLI environment surface.
+ * request through a third party or silently select a backend or model other
+ * than the one chosen for that ghost.
  */
 export const PROVIDER_ROUTING_ENV_VARS: readonly string[] = [
   "ANTHROPIC_AWS_BASE_URL",
@@ -333,7 +330,7 @@ export const CLAUDE_CODE_SAFE_ENV_VARS: readonly string[] = [
   "no_proxy",
 ] as const;
 
-/** Credential-bearing names that must never enter Ghost's Claude launch env. */
+/** Credential-bearing names that must never enter a delegated harness's launch env. */
 export const CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN =
   /(?:^|_)(?:API_KEY|AUTH_TOKEN|OAUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|SESSION_TOKEN|SESSION_ACCESS_TOKEN|BEARER_TOKEN|TOKEN|ACCESS_KEY_ID|SECRET_ACCESS_KEY|CLIENT_SECRET|PASSWORD|PASSPHRASE|SECRET|AUTHORIZATION|CUSTOM_HEADERS|EXTRA_BODY)$/u;
 
@@ -391,7 +388,6 @@ export const CODEX_NATIVE_SAFE_ENV_VARS = ["CODEX_HOME"] as const;
 export const PI_NATIVE_SAFE_ENV_VARS = ["PI_CODING_AGENT_DIR", "PI_PACKAGE_DIR"] as const;
 
 export type NativeHarnessEnvironmentProfile =
-  | "claude-principal"
   | "claude-native"
   | "codex-native"
   | "pi-native";
@@ -399,7 +395,6 @@ export type NativeHarnessEnvironmentProfile =
 const NATIVE_HARNESS_ENVIRONMENT_SNAPSHOTS: Readonly<
   Record<NativeHarnessEnvironmentProfile, symbol>
 > = {
-  "claude-principal": Symbol("ClaudePrincipalEnvironmentSnapshot"),
   "claude-native": Symbol("ClaudeNativeEnvironmentSnapshot"),
   "codex-native": Symbol("CodexNativeEnvironmentSnapshot"),
   "pi-native": Symbol("PiNativeEnvironmentSnapshot"),
@@ -441,21 +436,8 @@ export function captureNativeHarnessEnvironment(
     }
     if (source[name] !== undefined) environment[name] = source[name];
   }
-  if (profile.startsWith("claude-")) {
-    environment.CLAUDE_AGENT_SDK_CLIENT_APP = `ghostd/${DAEMON_VERSION}`;
-  }
-  if (profile === "claude-principal") {
-    environment.CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
-  }
   Object.defineProperty(environment, marker, { value: true });
   return Object.freeze(environment);
-}
-
-/** Preserve the principal Claude runtime's existing environment contract. */
-export function captureClaudeCodeEnvironment(
-  source: Readonly<NodeJS.ProcessEnv> = process.env,
-): Readonly<NodeJS.ProcessEnv> {
-  return captureNativeHarnessEnvironment("claude-principal", source);
 }
 
 /**
@@ -480,8 +462,8 @@ export interface ScrubResult {
 function isProviderEnvOverride(name: string): boolean {
   if (PROVIDER_CREDENTIAL_ENV_VARS.includes(name)) return true;
   if (PROVIDER_ROUTING_ENV_VARS.includes(name)) return true;
-  // The Claude snapshot is captured first. Pi and every ordinary daemon child
-  // then lose the complete Claude/cloud family, including variables added by
+  // The delegated-harness snapshot is captured first. Pi and every ordinary
+  // daemon child then lose the whole Claude/cloud family, including names added by
   // a future CLI release before Ghost's direct pass-through list is updated.
   if (isClaudeEnvironmentFamily(name)) return true;
   return PROVIDER_CREDENTIAL_ENV_PATTERNS.some((pattern) => pattern.test(name));

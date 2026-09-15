@@ -134,69 +134,58 @@ TestCase {
         compare(Ghostd.mergeSessionListing("casper", []).length, 0);
     }
 
-    function test_equalRawIdsAcrossRuntimesKeepDistinctSelectionAndResumeIds(): void {
+    function test_qualifiedIdsKeepDistinctSelectionAndResumeIds(): void {
         const parsed = Ghostd.parseConversationActionId("pi:inferred");
         verify(parsed !== null);
         compare(parsed.conversationId, "inferred");
         const inferred = Ghostd.ensureTurnState("casper", "pi:inferred");
         verify(inferred !== null);
         compare(inferred.conversationId, "inferred");
-        const pi = Ghostd.ensureTurnState(
-            "casper", "pi:default", "default", "pi");
-        const claude = Ghostd.ensureTurnState(
-            "casper", "claude-code:default", "default", "claude-code");
-        verify(pi !== claude);
-        verify(pi.key !== claude.key);
-        compare(pi.conversationId, "default");
-        compare(claude.conversationId, "default");
+        const first = Ghostd.ensureTurnState("casper", "pi:default", "default", "pi");
+        const second = Ghostd.ensureTurnState("casper", "pi:other", "other", "pi");
+        verify(first !== second);
+        verify(first.key !== second.key);
+        compare(first.conversationId, "default");
+        compare(second.conversationId, "other");
         compare(Ghostd.validSessionRows([
             { id: "pi:default", conversationId: "default", runtime: "pi" },
-            {
-                id: "claude-code:default", conversationId: "default",
-                runtime: "claude-code"
-            }
+            { id: "pi:other", conversationId: "other", runtime: "pi" }
         ]).length, 2);
+        // An id the daemon can no longer mint is not a session row.
+        compare(Ghostd.validSessionRows([
+            { id: "claude-code:default", conversationId: "default", runtime: "claude-code" }
+        ]).length, 0);
 
-        Ghostd.appendTurnRow(pi, {
-            role: "assistant", text: "Pi history", toolActivity: [],
-            error: "", pending: false, entryId: "pi-entry"
+        Ghostd.appendTurnRow(first, {
+            role: "assistant", text: "First history", toolActivity: [],
+            error: "", pending: false, entryId: "first-entry"
         });
-        Ghostd.appendTurnRow(claude, {
-            role: "assistant", text: "Claude history", toolActivity: [],
-            error: "", pending: false, entryId: "claude-entry"
+        Ghostd.appendTurnRow(second, {
+            role: "assistant", text: "Second history", toolActivity: [],
+            error: "", pending: false, entryId: "second-entry"
         });
 
-        Ghostd.adoptConversation("casper", pi.sessionId);
+        Ghostd.adoptConversation("casper", first.sessionId);
         compare(Ghostd.currentSessionId, "pi:default");
-        compare(Ghostd.transcript.get(0).text, "Pi history");
-        compare(Ghostd.buildBody("casper", "continue", pi).options.sessionId, "default");
+        compare(Ghostd.transcript.get(0).text, "First history");
+        compare(Ghostd.buildBody("casper", "continue", first).options.sessionId, "default");
 
-        Ghostd.adoptConversation("casper", claude.sessionId);
-        compare(Ghostd.currentSessionId, "claude-code:default");
-        compare(Ghostd.transcript.get(0).text, "Claude history");
-        compare(Ghostd.buildBody("casper", "continue", claude).options.sessionId, "default");
-
-        Ghostd.adoptConversationRuntime("casper", "pi");
-        compare(Ghostd.currentSessionId, "pi:default");
-        compare(Ghostd.transcript.get(0).text, "Pi history");
+        Ghostd.adoptConversation("casper", second.sessionId);
+        compare(Ghostd.currentSessionId, "pi:other");
+        compare(Ghostd.transcript.get(0).text, "Second history");
+        compare(Ghostd.buildBody("casper", "continue", second).options.sessionId, "other");
     }
 
-    function test_staleModelResponsesCannotUndoRuntimeOrCrossGhosts(): void {
+    function test_staleModelResponsesCannotOverwriteOrCrossGhosts(): void {
         Ghostd.sessions = [
-            { id: "pi:default", conversationId: "default", runtime: "pi" },
-            {
-                id: "claude-code:default", conversationId: "default",
-                runtime: "claude-code"
-            }
+            { id: "pi:default", conversationId: "default", runtime: "pi" }
         ];
         Ghostd.ensureTurnState("casper", "pi:default", "default", "pi");
-        Ghostd.ensureTurnState(
-            "casper", "claude-code:default", "default", "claude-code");
         Ghostd.adoptConversation("casper", "pi:default");
         Ghostd.currentModel = { provider: "openai-codex", id: "old" };
 
-        const beforePutGeneration = Ghostd.modelGeneration;
-        const beforePut = {
+        const staleGeneration = Ghostd.modelGeneration;
+        const stale = {
             readyState: 4,
             status: 200,
             responseText: JSON.stringify({
@@ -204,51 +193,28 @@ TestCase {
                 source: "role"
             })
         };
-        Ghostd.modelRequest = beforePut;
-        verify(Ghostd.adoptSelectedModelRuntime("casper", "claude-code"));
-        compare(Ghostd.currentSessionId, "claude-code:default");
-
-        // Even if the old request is delivered after the PUT callback, its
-        // captured generation cannot restore Pi or overwrite the model view.
-        Ghostd.modelRequest = beforePut;
-        verify(!Ghostd.applyCurrentModelResponse(
-            beforePut, "casper", beforePutGeneration));
-        compare(Ghostd.currentSessionId, "claude-code:default");
-        compare(Ghostd.currentModel.id, "old");
-
-        const afterPutGeneration = Ghostd.modelGeneration;
+        // A newer selection bumps the generation; the in-flight read cannot
+        // deliver its older view over it.
+        Ghostd.modelGeneration += 1;
+        const currentGeneration = Ghostd.modelGeneration;
         const fresh = {
             readyState: 4,
             status: 200,
             responseText: JSON.stringify({
-                current: { provider: "claude-code", id: "default" },
+                current: { provider: "openrouter", id: "free-tiny" },
                 source: "role"
             })
         };
-        const superseded = {
-            readyState: 4,
-            status: 200,
-            responseText: beforePut.responseText
-        };
         Ghostd.modelRequest = fresh;
-        verify(!Ghostd.applyCurrentModelResponse(
-            superseded, "casper", afterPutGeneration));
-        verify(Ghostd.applyCurrentModelResponse(
-            fresh, "casper", afterPutGeneration));
-        compare(Ghostd.currentModel.provider, "claude-code");
-        compare(Ghostd.currentSessionId, "claude-code:default");
+        verify(!Ghostd.applyCurrentModelResponse(stale, "casper", staleGeneration));
+        verify(Ghostd.applyCurrentModelResponse(fresh, "casper", currentGeneration));
+        compare(Ghostd.currentModel.provider, "openrouter");
 
-        const oldGhost = {
-            readyState: 4,
-            status: 200,
-            responseText: beforePut.responseText
-        };
+        // A response for the ghost that is no longer active is dropped.
         const oldGhostGeneration = Ghostd.modelGeneration;
-        Ghostd.modelRequest = oldGhost;
+        Ghostd.modelRequest = stale;
         Ghostd.activeGhost = "mina";
-        Ghostd.modelRequest = oldGhost;
-        verify(!Ghostd.applyCurrentModelResponse(
-            oldGhost, "casper", oldGhostGeneration));
-        compare(Ghostd.currentModel.provider, "claude-code");
+        verify(!Ghostd.applyCurrentModelResponse(stale, "casper", oldGhostGeneration));
+        compare(Ghostd.currentModel.provider, "openrouter");
     }
 }

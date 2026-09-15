@@ -152,7 +152,6 @@ source_date_epoch=$epoch
 bun_build_version=$bun_build_version
 bun_runtime_min=$bun_runtime_min
 bundle_target=bun
-claude_agent_sdk=external@0.3.170
 bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
 EOF
@@ -170,12 +169,6 @@ require_identical "$temporary/PAYLOAD.expected" "$runtime_root/PAYLOAD.SHA256" \
 (cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256)
 
 bun "$source_root/packages/daemon/scripts/verify-runtime-licenses.ts" "$runtime_root"
-if rg -l 'Use is subject to the Legal Agreements outlined here|Want to see the unminified source|// Version: 0[.]3[.]170' \
-  "$runtime_root/lib/ghostd.js" "$runtime_root/lib/ghost.js" | grep -q .; then
-  printf 'Claude Agent SDK source bytes entered the public runtime\n' >&2
-  exit 1
-fi
-
 bash "$source_root/packaging/release/smoke-binary-runtime.sh" \
   "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$version" "$temporary/smoke"
 printf 'Verified runtime source: %s (build Bun %s, runtime >= %s)\n' \

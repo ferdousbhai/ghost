@@ -12,13 +12,13 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 - **owner** — the one person this machine and its ghosts belong to. There is no other user role.
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
-- **runtime** — the agent harness a conversation runs on: pi or Claude Code.
+- **runtime** — the agent harness a conversation runs on. There is one: pi.
 - **daemon** (`ghostd`) — the HTTP API that owns sessions; **HUD** — the Quickshell desktop shell that talks to it.
 - **relay** — the opt-in Chromium extension; **helper** — the Python computer-use sidecar.
 
 ## Taste
 
-Find the real constraint, then the simplest design under which the correct behavior is obvious. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. The contract's first rule (`CONTRACTS.md`, "Product boundary") is that work here simplifies and never adds complexity: every change says what it deletes or why nothing could be, and an external component comes in only as a replacement for machinery of ours. The runtimes (pi, Claude Code) already ship retries, permission policy, hooks, and tool loops — when one of them can own a behavior, it owns it, because a ghostd copy of the same machinery ends up fighting the runtime's version: express project policy through the runtime's settings and hooks rather than building a parallel loop, read its source in `node_modules` before writing a workaround, and name any deliberate exception in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors plus the runtime's retry and fallback chains.
+Find the real constraint, then the simplest design under which the correct behavior is obvious. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. The contract's first rule (`CONTRACTS.md`, "Product boundary") is that work here simplifies and never adds complexity: every change says what it deletes or why nothing could be, an external component comes in only as a replacement for machinery of ours, and a dependency is weighed by what it adds to the install as well as by the code it saves. pi already ships retries, permission policy, hooks, and tool loops — when it can own a behavior, it owns it, because a ghostd copy of the same machinery ends up fighting the runtime's version: express project policy through the runtime's settings and hooks rather than building a parallel loop, read its source in `node_modules` before writing a workaround, and name any deliberate exception in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors plus the runtime's retry and fallback chains.
 
 If a rule here fights the task in front of you, say so loudly and get sign-off before breaking it.
 
@@ -33,24 +33,23 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Runtimes.** pi and Claude Code each adapt the daemon differently (`session-host.ts`, `pi-extension-bridge.ts`, `claude-code.ts`). Runtime-shaped features need a decision per runtime, even if it is "not supported here".
 - **Surfaces.** Daemon API, HUD (QML), relay extension, desktop helper. A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The self-maintenance, scheduled-work, and similar policy sections, and the `ghost help <topic>` recipes they point at (`help-topics.ts`), are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.
-- **Docs.** Protocol changes land in `docs/hooks.md`, `docs/claude-code-runtime.md`, or `docs/desktop-helper.md`.
+- **Docs.** Protocol changes land in `docs/hooks.md` or `docs/desktop-helper.md`.
 
 ## Code index
 
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
 - `packages/daemon/src/models.ts` and `packages/daemon/src/model-selection.ts` — model roles and the chat-model binding
-- `packages/daemon/src/hooks.ts` and `packages/daemon/src/claude-code.ts` — harness hooks and Claude Code runtime
+- `packages/daemon/src/hooks.ts` — harness hooks
 - `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
-- `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md`, `docs/claude-code-runtime.md`, and `docs/desktop-helper.md` — runtime protocols
+- `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` and `docs/desktop-helper.md` — sidecar protocols
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
 

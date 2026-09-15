@@ -176,7 +176,7 @@ describe("CLI output and addressing helpers", () => {
   });
 
   it("resolves exact and unique public/raw prefixes and refuses ambiguity", () => {
-    const rows = [session("alpha"), session("alpine", "claude-code")];
+    const rows = [session("alpha"), session("alpine")];
     expect(resolveSessionPrefix(rows, "pi:alpha").conversationId).toBe("alpha");
     expect(resolveSessionPrefix(rows, "alph").conversationId).toBe("alpha");
     expect(() => resolveSessionPrefix(rows, "al")).toThrow(ArgsError);

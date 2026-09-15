@@ -519,16 +519,21 @@ export function setChatModelRoleIfUnset(
 
 
 /**
- * OpenRouter's free roster rotates; this is a **changeable default**, not a
- * hardcode — nothing in the daemon branches on it, it only seeds a config
- * file the user can edit. Check the current free roster with:
+ * OpenRouter's free roster rotates, and entries leave it: the previous default
+ * here, `deepseek/deepseek-r1:free`, had been delisted entirely. This is a
+ * **changeable default**, not a hardcode — nothing in the daemon branches on
+ * it, it only seeds a config file the owner can edit or replace with
+ * `ghost model <provider>/<id>`. Re-check it whenever the seeded ghost fails
+ * its first turn, and pick a current entry that still advertises tool calling:
  *
  *   curl -s https://openrouter.ai/api/v1/models | jq -r '
- *     .data[] | select(.pricing.prompt=="0") | .id'
+ *     .data[] | select(.pricing.prompt=="0" and .pricing.completion=="0")
+ *     | select(.supported_parameters | index("tools"))
+ *     | "\(.id)\t\(.context_length)"'
  *
- * or https://openrouter.ai/models?max_price=0 .
+ * or https://openrouter.ai/models?max_price=0 . Last verified 2026-09-15.
  */
-export const OPENROUTER_DEFAULT_FREE_MODEL = "deepseek/deepseek-r1:free";
+export const OPENROUTER_DEFAULT_FREE_MODEL = "thinkingmachines/inkling:free";
 
 const OPENROUTER_PROVIDER_ID = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -563,7 +568,7 @@ export function openRouterPreset(
         id: modelId,
         name: options.modelName ?? modelId,
         input: ["text"],
-        contextWindow: options.contextWindow ?? 128_000,
+        contextWindow: options.contextWindow ?? 262_144,
         maxTokens: options.maxTokens ?? 8_192,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       },

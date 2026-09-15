@@ -115,20 +115,12 @@ TestCase {
         compare(Ghostd.sessionResources.runtime, "pi");
     }
 
-    function test_reportsMalformedAndColdClaudeResponses(): void {
+    function test_reportsAMalformedSnapshotInsteadOfShowingIt(): void {
         Ghostd.fetchSessionResources(false);
         const malformed = snapshot();
         malformed.skills = "nope";
         requests[0].complete(200, malformed);
         compare(Ghostd.sessionResources, null);
         compare(Ghostd.sessionResourcesError, "ghostd sent a malformed resource snapshot");
-
-        Ghostd.fetchSessionResources(true);
-        requests[1].complete(409, {
-            error: { code: "session_resources_unavailable", message: "cold" }
-        });
-        compare(Ghostd.sessionResources, null);
-        compare(Ghostd.sessionResourcesError,
-            "Send a message to start Claude Code, then refresh.");
     }
 }

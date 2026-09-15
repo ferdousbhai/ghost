@@ -2,7 +2,6 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { resolveClaudeCodeExecutable } from "../claude-code.js";
 import { freePort, waitUntilServing } from "../loopback.js";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { EXIT_CODE } from "./client.js";
@@ -140,12 +139,6 @@ export function smokeMemorySlugs(stdout: string): string[] {
   return slugs;
 }
 
-export function smokeClaudeBinarySelection(
-  environment: Readonly<NodeJS.ProcessEnv>,
-): string | undefined {
-  return environment.GHOST_CLAUDE_BINARY?.trim() || undefined;
-}
-
 export async function smokeCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
@@ -165,18 +158,6 @@ export async function smokeCommand(
     XDG_DATA_HOME: join(scratch, "data"),
     GHOSTD_OFFLINE: "1",
   };
-  // The scratch XDG dirs keep the daemon's own state out of the real ones, but
-  // they also hide a mise-managed `claude` from it, because mise installs live
-  // under the caller's real XDG_DATA_HOME. Resolve the launcher out here, where
-  // the caller's environment is still intact, and hand the child the executable
-  // through the documented override. A machine without Claude Code installed
-  // simply does not get the variable, and pi runtimes are unaffected.
-  try {
-    const configuredBinary = smokeClaudeBinarySelection(ctx.runtime.env);
-    env.GHOST_CLAUDE_BINARY = await resolveClaudeCodeExecutable(configuredBinary);
-  } catch {
-    // Not installed, or not resolvable: leave it to the daemon to report.
-  }
   const command = daemonCommand(ctx);
   const child = spawn(command[0] as string, [...command.slice(1), "--port", String(port)], {
     cwd: process.cwd(),

@@ -62,9 +62,8 @@ accepted only when empty, so an older `hooks.json` still parses.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
-awaited command hooks. They run for
-both principal pi and principal Claude Code conversations, above either model
-harness, and commands run with the daemon user's permissions. It is therefore
+awaited command hooks. They run for every principal conversation, above the
+model harness, and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.
 
@@ -110,9 +109,8 @@ same user-initiated model request, return:
 ```
 
 `before_prompt` cannot block and does not accept continuation decisions. Errors,
-timeouts, and malformed output fail open. Context is hidden from the chat UI. In
-the pi runtime it is a non-displayed custom context message; in the Claude Code
-runtime it is a synthetic, non-querying message paired with the real user prompt.
+timeouts, and malformed output fail open. Context is hidden from the chat UI: it
+is a non-displayed custom context message in the pi session.
 
 ## `session_stop` protocol
 
@@ -146,13 +144,11 @@ contains the same message directly:
 }
 ```
 
-`runtime` is `pi` or `claude-code`. Both runtimes expose only the current
-assistant pass in `messages`; conversation history remains owned by the runtime.
+`runtime` is `pi`. `messages` exposes only the current
+assistant pass; conversation history remains owned by the runtime.
 `owner_prompt` is required and immutable across hidden continuation passes.
-`transcript_path`, when present, is the runtime's native transcript on disk — the
-pi session file for pi conversations, the Claude Code SDK session file for Claude
-Code conversations — so a hook can review the whole owner turn, not just the
-current pass. It is omitted when no transcript exists yet, and is untrusted
+`transcript_path`, when present, is the pi session file on disk, so a hook can
+review the whole owner turn, not just the current pass. It is omitted when no transcript exists yet, and is untrusted
 content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a

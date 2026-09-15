@@ -6,11 +6,9 @@ import { fileURLToPath } from "node:url";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
-import { CLAUDE_CODE_BINARY_ENV, ClaudeCodeProbe } from "./claude-code.js";
-import { ClaudeAgentSdkLoader } from "./claude-agent-sdk-loader.js";
 import { loginCommand } from "./login-command.js";
 import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
-import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
+import { scrubProviderEnv } from "./env-scrub.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -342,11 +340,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Capture the reviewed Claude child profile before the process-global
-  // provider scrub.
-  const claudeCodeEnvironment = captureClaudeCodeEnvironment(process.env);
-  const claudeBinary = process.env[CLAUDE_CODE_BINARY_ENV];
-
   // Before pi, before any session. Idempotent, but this is the call that
   // matters: everything downstream inherits this environment.
   const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
@@ -388,8 +381,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
       logger,
       hooks,
       hooksPath,
-      claudeCodeEnvironment,
-      claudeBinary,
     );
   } finally {
     await homeReservation.close();
@@ -401,8 +392,6 @@ async function serveDaemon(
   logger: ReturnType<typeof createLogger>,
   hooks: GhostHookRunner,
   hooksPath: string,
-  claudeCodeEnvironment: Readonly<NodeJS.ProcessEnv>,
-  claudeBinary: string | undefined,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -437,20 +426,6 @@ async function serveDaemon(
   // then reports that none is reachable.
   const relay = createRelayHub({ logger });
   const homeOperations = new HomeOperationCoordinator(registry);
-  const claudeAgentSdk = new ClaudeAgentSdkLoader({ ownerHome });
-  const loadClaudeAgentSdk = () => claudeAgentSdk.load();
-  const claudeCodeProbe = new ClaudeCodeProbe({
-    environment: claudeCodeEnvironment,
-    binaryPath: claudeBinary ?? null,
-    loadSdk: loadClaudeAgentSdk,
-  });
-  // One validated SDK install, one executable probe, one reviewed child
-  // environment: the principal runtime and the review advisor share them.
-  const claudeCode = {
-    environment: claudeCodeEnvironment,
-    probe: claudeCodeProbe,
-    loadSdk: loadClaudeAgentSdk,
-  };
   const host = new SessionHost({
     registry,
     homeOperations,
@@ -466,7 +441,6 @@ async function serveDaemon(
     extensionOptions: {
       ...(relay ? { relayTransport: relay } : {}),
     },
-    claudeCode,
   });
   const login = new LoginManager({
     registry,

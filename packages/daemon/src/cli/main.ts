@@ -65,6 +65,7 @@ const CLI_ARGS: ArgsSpec = {
     "exit-on-first",
     "keep",
     "no-turn",
+    "none",
   ],
   value: ["ghost", "session", "message", "limit", "offset", "q", "model"],
 };
@@ -168,8 +169,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "model",
-    usage: "model [provider/id] [-g <name>] [--json] [-q]",
-    summary: "Show or set the chat model.",
+    usage: "model [provider/id|--none] [-g <name>] [--json] [-q]",
+    summary: "Show, set, or unset the chat model; --none hands the choice back to pi.",
     example: "ghost model openrouter/openai/gpt-5.5",
     positionals: [0, 1],
     run: modelCommand,

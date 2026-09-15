@@ -403,7 +403,7 @@ FloatingWindow {
                     spacing: Theme.pad
 
                     // Current-model indicator → opens the login pane. Shows the
-                    // model name (or id), Claude subscription when applicable,
+                    // model name (or id), a subscription badge when applicable,
                     // a vision badge, a "default" hint when the pick is only a
                     // fallback, and a CTA when nothing is set.
                     Rectangle {

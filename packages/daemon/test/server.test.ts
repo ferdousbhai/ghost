@@ -14,11 +14,9 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
-import { setGhostModelRole } from "../src/models.js";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import {
   startDaemonServer,
@@ -30,7 +28,6 @@ import {
   sessionFileNameFor,
   type SessionHostOptions,
 } from "../src/session-host.js";
-import { toolCwdsPath } from "../src/tool-cwds.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
@@ -146,8 +143,6 @@ const TURN_BODY = {
 
 const piId = (conversationId: string): string => `pi:${conversationId}`;
 const piSegment = (conversationId: string): string => encodeURIComponent(piId(conversationId));
-const claudeSegment = (conversationId: string): string =>
-  encodeURIComponent(`claude-code:${conversationId}`);
 
 function writeMcpRouteFixture(dir: string, fileName: string, toolName: string): string {
   const serverPath = join(dir, fileName);
@@ -173,25 +168,6 @@ lines.on("line", (line) => {
     "utf8",
   );
   return serverPath;
-}
-
-function seedClaudeSidecar(conversationId: string): void {
-  const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-  mkdirSync(sessionDir, { recursive: true });
-  const now = new Date().toISOString();
-  writeFileSync(
-    claudeSessionMetadataPath(sessionDir, conversationId),
-    `${JSON.stringify({
-      version: 1,
-      runtime: "claude-code",
-      conversationId,
-      sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-      created: now,
-      modified: now,
-      messageCount: 2,
-    })}\n`,
-    { encoding: "utf8", mode: 0o600 },
-  );
 }
 
 async function waitForAsk(base: string, sessionId: string): Promise<{
@@ -473,76 +449,6 @@ describe("POST /api/ghosts/:name/messages runtime admission", () => {
     options: { sessionId },
   });
 
-  it("returns typed 409 for direct Bash under Claude without creating Pi state", async () => {
-    const base = await serve([{ kind: "text", text: "must not run" }]);
-    const home = ghostPaths(join(temp!.root, "casper")).home;
-    const sessionDir = ghostPaths(home).sessionDir;
-    setGhostModelRole(home, "chat_model", "claude-code", "default");
-    const id = "http-claude-direct";
-
-    const result = await postTurn(base, body(id, "!!cd /"));
-
-    expect(result.status).toBe(409);
-    expect(JSON.parse(result.raw)).toMatchObject({
-      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
-    });
-    expect(result.headers.get("content-type")).toContain("application/json");
-    expect(provider!.requests).toHaveLength(0);
-    expect(host!.cachedSessionCount).toBe(0);
-    expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
-    expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
-  });
-
-  it("rejects invalid Claude resume timestamps before SSE or runtime admission", async () => {
-    const base = await serve([{ kind: "text", text: "must not run" }]);
-    const paths = ghostPaths(join(temp!.root, "casper"));
-    setGhostModelRole(paths.home, "chat_model", "claude-code", "default");
-    const conversationId = "http-invalid-claude-time";
-    const sidecar = claudeSessionMetadataPath(paths.sessionDir, conversationId);
-    mkdirSync(paths.sessionDir, { recursive: true });
-    const original = `${JSON.stringify({
-      version: 3,
-      runtime: "claude-code",
-      conversationId,
-      sessionId: "sdk-http-invalid-claude-time",
-      created: "2026-01-01T00:00:00Z",
-      modified: "not-a-timestamp",
-      messageCount: 2,
-      ownerTurnCount: 1,
-      cwd: temp!.ownerHome,
-      projectSnapshot: {
-        root: null,
-        declarative: {
-          instructions: [],
-          skills: [],
-          rules: [],
-          prompts: [],
-          commands: [],
-        },
-        mcpServers: {},
-        resourceWarnings: [],
-        mcpWarnings: [],
-      },
-    })}\n`;
-    writeFileSync(sidecar, original, { mode: 0o600 });
-    const claude = (host as unknown as {
-      claudeCode: { runTurn(...args: unknown[]): Promise<void> };
-    }).claudeCode;
-    const run = vi.spyOn(claude, "runTurn");
-
-    const result = await postTurn(base, body(conversationId, "must fail before Claude starts"));
-
-    expect(result.status).toBe(500);
-    expect(result.headers.get("content-type")).toContain("application/json");
-    expect(JSON.parse(result.raw)).toMatchObject({
-      error: { code: "claude_session_invalid" },
-    });
-    expect(result.events).toEqual([]);
-    expect(run).not.toHaveBeenCalled();
-    expect(provider!.requests).toHaveLength(0);
-    expect(readFileSync(sidecar, "utf8")).toBe(original);
-  });
-
   it("keeps admitted HTTP turns and MCP transitions mutually exclusive before SSE", async () => {
     const base = await serve([{ kind: "text", text: "lease stayed intact" }]);
     const admitted = Promise.withResolvers<void>();
@@ -664,12 +570,6 @@ describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
       `${base}/api/ghosts/missing/sessions/${piSegment("conv-commands")}/commands`,
     )).status).toBe(404);
 
-    setGhostModelRole(ghostPaths(join(temp!.root, "casper")).home, "chat_model", "claude-code", "default");
-    const claude = await fetch(url);
-    expect(claude.status).toBe(409);
-    expect(await claude.json()).toMatchObject({
-      error: { code: "not_supported", message: expect.stringContaining("Claude Code") },
-    });
   });
 
   it("streams standalone command output instead of an assistant message", async () => {
@@ -741,20 +641,6 @@ describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
     expect((await fetch(url, { method: "POST" })).status).toBe(405);
   });
 
-  it("reports a cold Claude query as unavailable instead of reconstructing it", async () => {
-    const base = await serve();
-    setGhostModelRole(ghostPaths(join(temp!.root, "casper")).home, "chat_model", "claude-code", "default");
-    const id = encodeURIComponent("claude-code:conv-resources");
-
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${id}/resources`,
-    );
-
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({
-      error: { code: "session_resources_unavailable" },
-    });
-  });
 });
 
 describe("session Connect routes", () => {
@@ -1418,93 +1304,6 @@ describe("GET /api/ghosts/:name/sessions", () => {
     expect(sessions[0]?.messageCount).toBeGreaterThan(0);
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect("title" in sessions[0]!).toBe(true);
-  });
-
-  it("keeps equal Pi and Claude resume ids distinct through actions and deletion", async () => {
-    const base = await serve();
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "default" } });
-    seedClaudeSidecar("default");
-
-    const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{
-        id: string;
-        conversationId: string;
-        runtime: "pi" | "claude-code";
-        pinned: boolean;
-        unread: boolean;
-      }>;
-    };
-    expect(listing.sessions.map(({ id, conversationId, runtime }) => ({
-      id,
-      conversationId,
-      runtime,
-    }))).toEqual(expect.arrayContaining([
-      { id: "pi:default", conversationId: "default", runtime: "pi" },
-      { id: "claude-code:default", conversationId: "default", runtime: "claude-code" },
-    ]));
-
-    const piTranscript = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("default")}/transcript`,
-    );
-    expect(piTranscript.status).toBe(200);
-    expect(await piTranscript.json()).toMatchObject({
-      id: "pi:default",
-      conversationId: "default",
-      runtime: "pi",
-    });
-    const claudeTranscript = await fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/transcript`,
-    );
-    expect(claudeTranscript.status).toBe(200);
-    // The sidecar predates presentation history: readable, empty, and honest
-    // about the missing prefix.
-    expect(await claudeTranscript.json()).toMatchObject({
-      id: "claude-code:default",
-      conversationId: "default",
-      runtime: "claude-code",
-      messages: [],
-      total: 0,
-      truncated: false,
-      historyTruncated: true,
-    });
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${claudeSegment("missing")}/transcript`,
-    )).status).toBe(404);
-
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}/pin`,
-      {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pinned: true }),
-      },
-    )).status).toBe(200);
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("default")}/read`,
-      { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" },
-    )).status).toBe(200);
-    const changed = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; pinned: boolean; unread: boolean }>;
-    };
-    expect(changed.sessions.find((row) => row.id === "pi:default"))
-      .toMatchObject({ pinned: false, unread: false });
-    expect(changed.sessions.find((row) => row.id === "claude-code:default"))
-      .toMatchObject({ pinned: true, unread: true });
-
-    const deleted = await fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent("claude-code:default")}`,
-      { method: "DELETE" },
-    );
-    expect(deleted.status).toBe(200);
-    expect(await deleted.json()).toMatchObject({
-      trash: [{ artifact: "claude-sidecar" }],
-    });
-    expect((await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string }>;
-    }).sessions.map((row) => row.id)).toEqual(["pi:default"]);
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("default")}/transcript`,
-    )).status).toBe(200);
   });
 
   it("round-trips an unsafe Pi resume id without accepting its filename as an alias", async () => {

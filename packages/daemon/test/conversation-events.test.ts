@@ -1,8 +1,5 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { claudeSessionMetadataPath } from "../src/claude-code.js";
-import { ghostPaths } from "../src/ghosts.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -73,7 +70,7 @@ async function nextEvent(
   type: string;
   id: string;
   conversationId: string;
-  runtime: "pi" | "claude-code";
+  runtime: "pi";
   updatedAt: string;
 }> {
   const decoder = new TextDecoder();
@@ -89,7 +86,7 @@ async function nextEvent(
           type: string;
           id: string;
           conversationId: string;
-          runtime: "pi" | "claude-code";
+          runtime: "pi";
           updatedAt: string;
         };
         continue;
@@ -197,52 +194,6 @@ describe("GET /api/ghosts/:name/events", () => {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(false);
-
-    controller.abort();
-    await expect(reader.closed).rejects.toBeDefined();
-  });
-
-  it("keeps equal raw Pi and Claude ids distinct on the invalidation stream", async () => {
-    const base = await setup();
-    await postTurn(base);
-    const sessionDir = ghostPaths(temp!.registry.get("casper").dir).sessionDir;
-    mkdirSync(sessionDir, { recursive: true });
-    const now = new Date().toISOString();
-    writeFileSync(
-      claudeSessionMetadataPath(sessionDir, "conv-1"),
-      JSON.stringify({
-        version: 1,
-        runtime: "claude-code",
-        conversationId: "conv-1",
-        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-        created: now,
-        modified: now,
-        messageCount: 2,
-      }),
-      { encoding: "utf8", mode: 0o600 },
-    );
-    const controller = new AbortController();
-    const response = await fetch(`${base}/api/ghosts/casper/events`, {
-      signal: controller.signal,
-    });
-    const reader = response.body!.getReader();
-
-    const markRead = (id: string) => fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(id)}/read`,
-      { method: "PUT", headers: { "content-type": "application/json" }, body: "{}" },
-    );
-    expect((await markRead("claude-code:conv-1")).status).toBe(200);
-    expect(await nextEvent(reader)).toMatchObject({
-      id: "claude-code:conv-1",
-      conversationId: "conv-1",
-      runtime: "claude-code",
-    });
-    expect((await markRead("pi:conv-1")).status).toBe(200);
-    expect(await nextEvent(reader)).toMatchObject({
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
-    });
 
     controller.abort();
     await expect(reader.closed).rejects.toBeDefined();

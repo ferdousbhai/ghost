@@ -11,8 +11,7 @@ desktop, MCP, skills, rules, and Markdown commands from its ghost home, model
 roles with fallback chains, scheduled work through systemd timers, and context
 windows in place of summarizing compaction. Its notes are Markdown in the
 owner's Documents directory, shared by every ghost and the owner; nothing there
-is indexed or injected. An installed Claude Code can drive a ghost instead of
-pi with the same character and policy. A ghost can also maintain the code it
+is indexed or injected. A ghost can also maintain the code it
 runs on ([docs/self-maintenance.md](docs/self-maintenance.md)), and the opt-in
 tailnet viewer reaches it from a phone or any other device over Tailscale Serve.
 

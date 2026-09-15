@@ -1,7 +1,7 @@
 import type { Context, Model } from "@earendil-works/pi-ai";
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
-import { captureClaudeCodeEnvironment, scrubProviderEnv } from "./env-scrub.js";
+import { scrubProviderEnv } from "./env-scrub.js";
 import { ghostPaths, isGhostHome } from "./ghosts.js";
 import {
   ghostAuthPath,
@@ -11,15 +11,8 @@ import {
   resolveModelRoleRef,
   resolveSmolModelRef,
 } from "./models.js";
-import {
-  completeHookClaude,
-  isClaudeCodeRoleRef,
-  type HookClaudeOptions,
-} from "./hook-claude-complete.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
-  CLAUDE_CODE_DRIVER_PROVIDER,
-  EMPTY_SMOL_CATALOG,
   type HookModelRole,
   SmolModelUnavailableError,
   type SmolRuntime,
@@ -49,8 +42,6 @@ export interface HookSmolOptions {
     allowModelNetwork: boolean;
   }) => Promise<HookSmolRuntime>;
   signal?: AbortSignal;
-  /** Plumbing for a role bound to the Claude Code harness instead of a model. */
-  claude?: HookClaudeOptions;
 }
 
 function hookContext(prompt: string): Context {
@@ -75,23 +66,6 @@ export async function completeHookSmol(
     ? resolveSmolModelRef(models)
     : resolveModelRoleRef(models, role);
   const chatProvider = resolveChatModelRef(models)?.provider ?? null;
-  // Claude Code is a harness, not a model in Pi's catalogue: an explicit
-  // claude-code binding, or an unset role on a Claude-driven ghost, answers
-  // through its own SDK with no Pi runtime in the picture.
-  const claudeRef = isClaudeCodeRoleRef(ref)
-    ? ref
-    : !ref && chatProvider === CLAUDE_CODE_DRIVER_PROVIDER
-      ? resolveSmolModel(EMPTY_SMOL_CATALOG, null, role, { chatProvider }).model
-      : null;
-  if (claudeRef) {
-    return completeHookClaude({
-      ref: { provider: claudeRef.provider, modelId: "modelId" in claudeRef ? claudeRef.modelId : claudeRef.id },
-      role,
-      prompt: input.prompt,
-      cwd: paths.sessionDir,
-      ...(options.signal ? { signal: options.signal } : {}),
-    }, options.claude ?? {});
-  }
 
   const runtimeFactory = options.runtimeFactory ?? createGhostPiRuntime;
   const runtime = await runtimeFactory({
@@ -179,16 +153,11 @@ export async function hookSmolCompleteCommand(argv: string[]): Promise<number> {
   }
   try {
     // This subcommand bypasses daemon boot, so it owns the same credential
-    // isolation before constructing a pi runtime — and, like the daemon, it
-    // captures Claude's reviewed child environment before that scrub.
-    const claudeEnvironment = captureClaudeCodeEnvironment(process.env);
+    // isolation before constructing a pi runtime.
     scrubProviderEnv(process.env, { offline: false });
     const input = parseInput(await readStdin());
     const signal = AbortSignal.timeout(HOOK_SMOL_TIMEOUT_MS);
-    const text = await completeHookSmol(input, {
-      signal,
-      claude: { environment: claudeEnvironment },
-    });
+    const text = await completeHookSmol(input, { signal });
     process.stdout.write(`${JSON.stringify({ text })}\n`);
     return 0;
   } catch (error) {

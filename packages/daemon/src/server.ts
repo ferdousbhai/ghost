@@ -656,7 +656,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       ghostName,
       conversation.conversationId,
       trimmed,
-      conversation.runtime,
     );
     jsonResponse(response, 200, { ok: true, title: stored });
   };
@@ -670,7 +669,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       commands: await options.host.availableCommands(
         ghostName,
         conversation.conversationId,
-        conversation.runtime,
       ),
     });
   };
@@ -686,7 +684,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       await options.host.admittedResources(
         ghostName,
         conversation.conversationId,
-        conversation.runtime,
       ),
     );
   };
@@ -934,7 +931,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       ghostName,
       conversation.conversationId,
       query,
-      conversation.runtime,
     ));
   };
 
@@ -1054,6 +1050,17 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, await options.models.setChatModel(ghostName, provider, id));
   };
 
+  const handleClearModel = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.models) {
+      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
+      return;
+    }
+    jsonResponse(response, 200, await options.models.clearChatModel(ghostName));
+  };
+
   const streamSessionEvents = async (
     request: IncomingMessage,
     response: ServerResponse,
@@ -1161,7 +1168,6 @@ export function createDaemonServer(options: ServerOptions): Server {
           ghostName,
           conversation.conversationId,
           entryId,
-          conversation.runtime,
         ),
       );
       return;
@@ -1209,7 +1215,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, { ask: options.host.pendingAsk(
         ghostName,
         conversation.conversationId,
-        conversation.runtime,
       ) });
       return;
     }
@@ -1228,7 +1233,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       conversation.conversationId,
       askId,
       answer,
-      conversation.runtime,
     );
     jsonResponse(response, 200, { accepted: true });
   };
@@ -1244,7 +1248,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, options.host.queuedMessages(
         ghostName,
         conversation.conversationId,
-        conversation.runtime,
       ));
       return;
     }
@@ -1270,7 +1273,6 @@ export function createDaemonServer(options: ServerOptions): Server {
         conversation.conversationId,
         mode,
         text.trim(),
-        conversation.runtime,
       ),
     );
   };
@@ -1698,6 +1700,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 4 && segments[3] === "model") {
           if (method === "GET") return await handleCurrentModel(ghostName, response);
           if (method === "PUT") return await handleSetModel(ghostName, request, response);
+          if (method === "DELETE") return await handleClearModel(ghostName, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }

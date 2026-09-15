@@ -114,7 +114,6 @@ source_date_epoch=$epoch
 bun_build_version=$bun_build_version
 bun_runtime_min=$bun_runtime_min
 bundle_target=$bundle_target
-claude_agent_sdk=external@0.3.170
 bundled_license_manifest_sha256=$(sha256sum "$runtime_root/BUNDLED-LICENSES" | cut -d' ' -f1)
 payload_manifest_sha256=$(sha256sum "$runtime_root/PAYLOAD.SHA256" | cut -d' ' -f1)
 EOF

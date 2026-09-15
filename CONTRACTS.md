@@ -15,7 +15,17 @@ the shell, Omarchy, or an installed CLI already provides is used, not
 rebuilt. An external component is adopted only when it replaces machinery of
 ours outright, never as a second backend beside it. New surface area (a tool,
 a route, a setting, a background loop) needs a constraint that nothing
-existing can meet, named in this file. When a rule here fights the task, the
+existing can meet, named in this file.
+
+Installed size is part of that budget. A dependency is weighed by what it
+adds to the install, not only by the code it saves, and a second
+implementation of something Ghost already has is paid for twice — once in
+branches, once in bytes. Ghost runs on one runtime, pi, for exactly this
+reason: the alternative harness cost 4,000 lines of adapter plus 460MB of
+bundled binaries to do what a ghost already delegates with `claude -p`
+(see [`docs/concepts.md`](docs/concepts.md)).
+
+When a rule here fights the task, the
 answer is to say so and get the owner's decision, not to add a special case.
 [`docs/concepts.md`](docs/concepts.md) lists what is deliberately absent and
 what would have to change for each absence to end. `ghostd` owns sessions and state transitions; the Quickshell HUD,
@@ -115,23 +125,12 @@ is just its cwd, and nothing is discovered from it. The scanner is
 
 ### Sessions and sidecars
 
-Conversation public ids are runtime-qualified (`pi:<raw>` or
-`claude-code:<raw>`). Raw ids remain the runtime resume identity. Pi transcripts
-are JSONL under `sessions/`; Claude transcripts remain in Claude Code's own
-storage and Ghost keeps only its resume metadata. Pins, read timestamps,
+Conversation public ids are runtime-qualified (`pi:<raw>`); pi is the only
+runtime, and the prefix stays so stored ids keep saying what they are. Raw ids
+remain the runtime resume identity. Transcripts
+are JSONL under `sessions/`. Pins, read timestamps,
 conversation cwd records, tool-call cwd records, and crash markers are
 bounded sidecars under `sessions/`.
-
-Each Claude conversation also gets a bounded presentation-journal sidecar
-(`*.claude-code.presentation.json`): per settled exchange, the owner prompt,
-the final assistant text, and — when the exchange used tools — its ordered
-prose and tool calls (`assistantParts`), so the HUD reopens the conversation
-with the same tool cards and interstitial text a pi transcript shows. It is display state,
-never runtime resume state — a journal alone never publishes a conversation id,
-a journal-write failure only logs and marks the missed prefix unavailable on
-the next write, and the sidecar moves to Trash with its conversation. Pi
-conversations write no journal; their JSONL is already the durable history.
-See [`presentation-history.ts`](packages/daemon/src/presentation-history.ts).
 
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
@@ -168,12 +167,11 @@ ghost home directory, which moves as one unit.
 | State | Daemon restart | Ghost rename | Ghost delete | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
 | --- | --- | --- | --- | --- | --- | --- |
 | `character.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
-| Conversations and sidecars under `sessions/` | survives; Pi JSONL is the durable history | moves with the home; Claude transcripts stay in Claude Code's own storage, only resume metadata moves | to Trash with the home | unchanged | unchanged | preserved |
+| Conversations and sidecars under `sessions/` | survives; the JSONL is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
-| Presentation-journal sidecars | survive | move with the home | to Trash with their conversation | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
@@ -195,7 +193,7 @@ backup: Trash and snapper are undo, not retention.
 
 ## Runtime contract
 
-Both runtimes receive the same Ghost character, first
+The session receives the Ghost character, first
 meeting policy, Omarchy computer-use policy, other-harnesses policy (the
 owner's agent CLIs run from Bash; their session and weekly windows are read
 from Omarchy's usage records; a limit ends in a handoff note in the owner's
@@ -207,8 +205,7 @@ when relevant, with the runtime's own file and search tools, never injected
 automatically at session start.
 
 The operational cwd defaults to `settings.yml` `cwd:`, else the owner home.
-A pi conversation's `!cd` moves it and records the new cwd in a sidecar; a
-Claude conversation keeps the cwd its resume metadata recorded. Ghost home
+A conversation's `!cd` moves it and records the new cwd in a sidecar. Ghost home
 remains a separately named private resource root.
 Prompt indexes are session-start snapshots; current data is read through the
 owning tool when needed.
@@ -234,10 +231,7 @@ is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
 line, `new_context` rolls over on demand with the ghost's own handoff, and
 `history` searches and reads the transcript across windows
 ([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
-pi-posthorse). Claude Code keeps its native compaction, and its `history`
-(`ghost_history`, [`claude-history.ts`](packages/daemon/src/claude-history.ts))
-searches and reads Claude Code's own transcripts — the current conversation, or
-every conversation of the ghost — with the same search-then-read interface. Ghost adds
+pi-posthorse). Ghost adds
 `ask`, browser,
 screen, desktop, and MCP tools. `inspect_image` is added only when the active
 chat model does not accept image input; vision-capable Pi models use their
@@ -245,75 +239,25 @@ native image understanding. The exact assembly is
 [`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
 [`pi-extension-bridge.ts`](packages/daemon/src/pi-extension-bridge.ts).
 
-### Claude Code
-
-`claude-code/default` uses the official Claude Agent SDK with the owner's
-installed, unmodified `claude` executable and native authentication. Ghost
-accepts any method for which `claude auth status --json` says `loggedIn: true`;
-it never receives or stores the credential. The SDK is loaded only from Ghost's
-versioned XDG data root with exact package/version/entry validation. Detailed
-installation and environment guarantees are in
-[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md). The query's
-environment carries the same `GHOST` and `GHOST_SESSION` as Pi's Bash.
-
-Both runtimes give a ghost the same capabilities. Claude does not get its
-`claude_code` preset; it gets the explicit native list
-`CLAUDE_CODE_NATIVE_TOOLS` in [`claude-code.ts`](packages/daemon/src/claude-code.ts):
-`Bash`, `Read`, `Write`, `Edit`, `Glob`, `Grep`, and `AskUserQuestion` — pi's
-built-in `bash`, `read`, `write`, `edit`, `find`, and `grep` under Claude's
-names, plus the owner question. Subagents, web tools, todos, planning,
-notebooks, worktrees, scheduling, and every other preset tool stay out, and a
-new native tool enters only by a deliberate change to that list. Ghost routes
-`AskUserQuestion` through the same daemon broker and HUD as Pi's `ask`.
-Ghost's browser/screen/desktop tools and the ghost's MCP servers are added on
-both paths. Where a listed native tool supplies a capability, it keeps Claude's
-name, schema, result, and semantics; Ghost integrates its callbacks and events
-with daemon/HUD surfaces instead of registering a substitute. Ghost disables
-Claude auto-memory; persistence is the owner's documents.
-
-Ghost-owned model capabilities have one cross-runtime contract even when the
-runtime supplies the implementation: owner questions, image understanding,
-and browser/screen/desktop control are available on both principal paths. Steering and follow-ups into a live turn work on both, and a reopened
-conversation shows its tool cards and interstitial text on both.
-Runtime mechanics remain native. Pi exposes its transcript, branches, and
-commands through daemon APIs; Claude serves a
-settled-turn presentation transcript and otherwise
-owns the corresponding session and background-task state inside its opaque
-warm query.
-
-MCP rows mean the same thing on both runtimes: `env`, `headers`, URL
-credentials, and per-server `cwd` (on Claude through a shell wrapper, since the
-SDK's stdio config has no cwd) all go through. Two shapes have no SDK
-equivalent and are skipped on Claude, reported as such in the session's
-resources: `${VAR}` expansion (it would resolve against Claude's scrubbed
-environment and silently differ from pi) and pi's `auth`/`oauth` blocks. The
-cost of the parity is named here: Claude Code keeps a copy of a session's MCP
-configuration, credentials included, in its own storage outside the ghost home,
-which Ghost's Trash-on-delete and rename do not reach.
-
-Claude Code can also serve the `advisor_model` role, independently of which
-runtime drives the ghost: both bind `roles.advisor_model` to
-`claude-code/default`. That query is not a principal session — no persona, no
-Ghost tools, no warm query, no resume metadata — and it is
-admitted through the same SDK loader, executable probe, and reviewed child
-environment as the principal path.
+An MCP row's `env`, `headers`, URL credentials, per-server `cwd`, `${VAR}`
+expansion, and `auth`/`oauth` blocks all reach pi as written; the ghost's
+`mcp.json` is the whole configuration and nothing is copied outside the ghost
+home.
 
 ### Ask, background work, and hooks
 
-`ask` is owner input, never tool approval. Pi's model-facing `ask` input and
-output match Claude Code's native `AskUserQuestion` contract: one to four
-questions, two to four described options per question, `multiSelect`, optional
-previews and metadata, answers keyed by question text, and optional per-question
-annotations. The internal wire name remains `ask` for both runtimes so the HUD
-has one predictable interaction. A pending question is pollable and the first
+`ask` is owner input, never tool approval. Its model-facing input and output are
+one to four questions, two to four described options per question,
+`multiSelect`, optional previews and metadata, answers keyed by question text,
+and optional per-question annotations. A pending question is pollable and the first
 valid response wins. The daemon-wide timeout is `DEFAULT_ASK_TIMEOUT_SECONDS`
 in [`config.ts`](packages/daemon/src/config.ts); zero waits forever. A model-facing timeout returns an empty answer map and never
 invents an owner selection.
 
-Background work is shell work on both runtimes: a ghost detaches a command
+Background work is shell work: a ghost detaches a command
 (`setsid -f`), logs to a file, and ends it with `ghost say --follow-up`, which
 queues into a live turn or, when the conversation is idle, starts its next
-turn. Both runtimes put `GHOST` and `GHOST_SESSION` in the Bash environment so
+turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
 table, no jobs API, no jobs strip, and cannot cancel what it did not start;
 the policy text is `BACKGROUND_WORK_POLICY` in
@@ -371,7 +315,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|PUT /api/ghosts/:name/model` | Read or set `roles.chat_model` as `provider/id`; no catalog, pi validates at turn time. |
+| `GET\|PUT\|DELETE /api/ghosts/:name/model` | Read, set, or unset `roles.chat_model` as `provider/id`; no catalog, pi validates at turn time. `DELETE` is the way out of a binding (`ghost model --none`). |
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
 | `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
@@ -380,12 +324,12 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries. |
-| `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. A Claude conversation's title lives on its resume sidecar. |
-| `GET /sessions/:id/commands` | Effective Pi slash-command catalog; Claude returns not supported. |
-| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. Pi may open an idle snapshot for inspection; Claude reports only a live warm query and otherwise returns 409. |
-| `GET /sessions/:id/transcript` | Paged renderable history. Pi projects its own JSONL; Claude serves the settled-turn presentation journal. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
+| `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
+| `GET /sessions/:id/commands` | Effective pi slash-command catalog. |
+| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be opened for inspection. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from pi's JSONL. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
-| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn, on either runtime. A steer reaches the model mid-turn (pi injects it; Claude Code receives it on its input channel); a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
+| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn. A steer reaches the model mid-turn; a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
 | `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
@@ -404,8 +348,7 @@ types. See [`pi-messages.ts`](packages/daemon/src/pi-messages.ts) and its
 conformance tests. A turn emits `start`, ordered text/thinking/tool/command/
 queue/branch events, and exactly one terminal `done` or `error`. A quota
 refusal is a typed `limit_reached` event (harness, kind, window, `resetsAt`
-when known) sent before that `error`, or on its own when Claude Code reports a
-rejected window mid-turn; the classifier is `classifyLimitMessage`. Tool execution
+when known) sent before that `error`; the classifier is `classifyLimitMessage`. Tool execution
 events include the call id, tool name, captured cwd, and safe summary; private
 reasoning is never restored through the transcript API. A standalone slash
 command emits `start`, `command_output`, then zero-usage `done` and is not
@@ -439,27 +382,27 @@ and posting the answer the owner types. There are no plan or todo commands.
 `models.json` owns provider policy, roles, and retry chains; pi's
 `.pi/auth.json` owns login credentials. Credential values never enter logs or
 API responses. Inherited provider/auth environment variables
-are scrubbed before Pi runtime construction. Claude Code receives a separate
-reviewed operational/selector environment captured before the global scrub; its
+are scrubbed before Pi runtime construction. A native harness a ghost delegates
+to from Bash (`claude -p`, `codex`, `pi`) receives a separate reviewed
+operational/selector environment captured before the global scrub; its
 credential-bearing values are excluded. The implementation allowlists and tests
-in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) and
-[`claude-code.ts`](packages/daemon/src/claude-code.ts) are normative.
+in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
 
 Roles are `chat_model`, `smol_model`, and `advisor_model`, each with an
-optional ordered fallback chain. `chat_model` unset leaves the choice to Pi's
-catalog default; Ghost keeps no model list, no catalog API, and no local-runner
-detection — a local endpoint is an ordinary provider entry in `models.json`.
+optional ordered fallback chain. `chat_model` unset leaves the choice to the
+first declared provider's first model, else Pi's catalog default — Pi's live
+view of what this ghost's own credentials reach. Ghost keeps no model list, no
+catalog API, and no local-runner detection — a local endpoint is an ordinary
+provider entry in `models.json`. The one model name Ghost records is
+`OPENROUTER_DEFAULT_FREE_MODEL`, which seeds a first-run OpenRouter config and
+nothing branches on it; OpenRouter delists free models, so it is re-checked
+against the live roster rather than trusted (`models.ts` carries the query).
 `smol_model` serves titles, greetings, and command-hook completions;
 `advisor_model` is the frontier teacher and reads images for a chat model that
-cannot. Unset, both follow the driver: on a `claude-code` chat model they are
-`claude-code/sonnet` and `claude-code/fable`; on a Pi provider the smol role is
-that provider's small tier, then the cheapest usable model anywhere, and the
+cannot. Unset, both follow the driver: the smol role is
+the chat provider's small tier, then the cheapest usable model anywhere, and the
 advisor role is Ghost's preference list. The rule is
-[`resolveSmolModel`](packages/daemon/src/smol.ts). The `claude-code` provider
-is the Claude Code harness, not a Pi provider: `default` as `chat_model` is
-whatever the installed `claude` defaults to, any other id on `smol_model` or
-`advisor_model` is handed to Claude Code as a model name, and it is never a
-role fallback. An explicit unusable binding fails loudly rather than silently
+[`resolveSmolModel`](packages/daemon/src/smol.ts). An explicit unusable binding fails loudly rather than silently
 switching models.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
@@ -517,8 +460,7 @@ hosted-session, concurrency, or spend cap.
   reads. The only install path for owners is Omarchy's package repository.
 
 Protocols implemented by a sidecar have one detailed document:
-[`docs/hooks.md`](docs/hooks.md),
-[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md), and
+[`docs/hooks.md`](docs/hooks.md) and
 [`docs/desktop-helper.md`](docs/desktop-helper.md).
 
 ## Harness and lifecycle invariants

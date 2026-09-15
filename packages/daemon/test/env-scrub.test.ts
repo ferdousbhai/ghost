@@ -1,10 +1,9 @@
-import { DAEMON_VERSION } from "../src/version.js";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  captureClaudeCodeEnvironment,
+  captureNativeHarnessEnvironment,
   CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN,
   CLAUDE_CODE_SAFE_ENV_VARS,
   findProviderCredentialEnv,
@@ -110,7 +109,7 @@ describe("scrubProviderEnv", () => {
     "VERTEX_REGION_CLAUDE_4_8_opus",
     "NOT_VERTEX_REGION_CLAUDE_4_8_OPUS",
   ])("rejects adversarial Vertex selector %s", (name) => {
-    const captured = captureClaudeCodeEnvironment({
+    const captured = captureNativeHarnessEnvironment("claude-native", {
       HOME: "/home/owner",
       PATH: "/usr/bin",
       [name]: "must-not-cross",
@@ -121,7 +120,7 @@ describe("scrubProviderEnv", () => {
     expect(captured.VERTEX_REGION_CLAUDE_4_8_OPUS).toBe("europe-west1");
   });
 
-  it("derives one Claude-only environment without mutating its source", () => {
+  it("derives one delegated-harness environment without mutating its source", () => {
     const source: NodeJS.ProcessEnv = {
       HOME: "/home/owner",
       PATH: "/usr/bin",
@@ -168,11 +167,11 @@ describe("scrubProviderEnv", () => {
     };
     const original = { ...source };
 
-    const captured = captureClaudeCodeEnvironment(source);
+    const captured = captureNativeHarnessEnvironment("claude-native", source);
 
     expect(source).toEqual(original);
     expect(Object.isFrozen(captured)).toBe(true);
-    expect(captureClaudeCodeEnvironment(captured)).toBe(captured);
+    expect(captureNativeHarnessEnvironment("claude-native", captured)).toBe(captured);
     expect(captured).toMatchObject({
       HOME: "/home/owner",
       PATH: "/usr/bin",
@@ -186,8 +185,6 @@ describe("scrubProviderEnv", () => {
       GOOGLE_APPLICATION_CREDENTIALS: "/home/owner/google.json",
       CLAUDE_CODE_CLIENT_CERT: "/home/owner/client.pem",
       VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
-      CLAUDE_AGENT_SDK_CLIENT_APP: `ghostd/${DAEMON_VERSION}`,
     });
     for (const name of [
       "OPENAI_API_KEY",

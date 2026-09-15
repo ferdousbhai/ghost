@@ -1,4 +1,4 @@
-import type { Api, AssistantMessage, Context, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import { preferredRoleModel } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
@@ -6,15 +6,6 @@ import type { GhostPiRuntime } from "./pi-runtime.js";
 export const SMOL_MODEL_ROLE = "smol_model";
 export const ADVISOR_MODEL_ROLE = "advisor_model";
 export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
-
-/**
- * Claude Code is a harness, not a catalogue entry, so its role defaults are
- * names Claude Code itself resolves: the driver is whatever `claude` defaults
- * to, the cheap work goes to Sonnet, and the teacher is Fable.
- */
-export const CLAUDE_CODE_DRIVER_PROVIDER = "claude-code";
-export const CLAUDE_CODE_SMOL_MODEL_ID = "sonnet";
-export const CLAUDE_CODE_ADVISOR_MODEL_ID = "fable";
 
 /** Model ids that read as a provider's small tier, whatever it charges. */
 const SMALL_TIER_HINT = /mini|nano|haiku|flash|lite|small|fast|turbo/i;
@@ -143,10 +134,9 @@ export function smallestWithinProvider(
 
 /**
  * Resolve a background-work model: an explicit ref is honoured or errors
- * loudly; otherwise the role follows the chat model's provider (Claude Code
- * names its own Sonnet and Fable; a pi provider offers its small tier); then
- * the advisor preference list or the cheapest usable model; a genuinely empty
- * catalogue is a loud error.
+ * loudly; otherwise the role follows the chat model's provider's small tier,
+ * then the advisor preference list or the cheapest usable model; a genuinely
+ * empty catalogue is a loud error.
  */
 export function resolveSmolModel(
   catalog: SmolModelCatalog,
@@ -173,16 +163,6 @@ export function resolveSmolModel(
       );
     }
     return { model: candidate.model, via: "role" };
-  }
-
-  if (options.chatProvider === CLAUDE_CODE_DRIVER_PROVIDER) {
-    return {
-      model: {
-        provider: CLAUDE_CODE_DRIVER_PROVIDER,
-        id: role === ADVISOR_MODEL_ROLE ? CLAUDE_CODE_ADVISOR_MODEL_ID : CLAUDE_CODE_SMOL_MODEL_ID,
-      },
-      via: "driver",
-    };
   }
 
   if (role === ADVISOR_MODEL_ROLE) {
@@ -248,34 +228,6 @@ function toCandidate(runtime: SmolRuntime, model: SmolModel): SmolCandidate {
  * usability the model switcher reports, computed synchronously so a background
  * title or greeting never blocks on an availability probe.
  */
-/** A catalogue with nothing in it, for a ghost whose background work never touches pi. */
-export const EMPTY_SMOL_CATALOG: SmolModelCatalog = {
-  usable: () => [],
-  find: () => undefined,
-  hasCredentials: () => false,
-};
-
-/** One Claude Code completion for a background role: the prompt text in, the reply text out. */
-export type ClaudeSmolCompleter = (
-  input: { modelId: string; role: HookModelRole; prompt: string; signal?: AbortSignal },
-) => Promise<string>;
-
-/** Flatten a pi completion context into the one user message a Claude Code query takes. */
-export function contextPrompt(context: Context): string {
-  const parts: string[] = [];
-  if (context.systemPrompt) parts.push(context.systemPrompt);
-  for (const message of context.messages) {
-    const content = typeof message.content === "string"
-      ? message.content
-      : message.content
-          .filter((part): part is { type: "text"; text: string } => part.type === "text")
-          .map((part) => part.text)
-          .join("");
-    parts.push(content);
-  }
-  return parts.join("\n\n");
-}
-
 export function smolCatalogFromRuntime(runtime: SmolRuntime): SmolModelCatalog {
   return {
     usable: () =>

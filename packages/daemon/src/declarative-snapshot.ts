@@ -1,9 +1,8 @@
-import {
-  parseFrontmatter,
-  type FileSlashCommand,
-  type PromptTemplate,
-  type Rule,
-  type Skill,
+import type {
+  FileSlashCommand,
+  PromptTemplate,
+  Rule,
+  Skill,
 } from "./declarative-types.js";
 import type { DeclarativeSnapshot } from "./declarative-resources.js";
 
@@ -89,49 +88,6 @@ export function mergeDeclarativePromptSnapshots(
     prompts: mergeNamed(snapshots.map((snapshot) => snapshot.prompts)),
     commands: mergeNamed(snapshots.map((snapshot) => snapshot.commands)),
   };
-}
-
-export function renderClaudeDeclarativePrompt(snapshot: DeclarativePromptSnapshot): string {
-  const skills = snapshot.skills.flatMap((skill) => {
-    try {
-      const { frontmatter } = parseFrontmatter(skill.content);
-      if (frontmatter["disable-model-invocation"] === true) return [];
-      const description = frontmatter.description;
-      return typeof description === "string" && description.trim()
-        ? [`- ${skill.name}: ${description} (${skill.path})`]
-        : [];
-    } catch {
-      return [];
-    }
-  });
-  const sections = [
-    ...snapshot.instructions.map((item) => ({
-      kind: "instruction",
-      label: `path=${JSON.stringify(item.path)}`,
-      content: item.content,
-    })),
-    ...snapshot.rules.filter((item) => item.alwaysApply === true).map((item) => ({
-      kind: "rule",
-      label: `name=${JSON.stringify(item.name)} path=${JSON.stringify(item.path)}`,
-      content: item.content,
-    })),
-  ];
-  const promptSections: string[] = [];
-  if (skills.length > 0) {
-    promptSections.push([
-      "## Skills",
-      "When a skill matches, read its listed `SKILL.md` before acting.",
-      ...skills,
-    ].join("\n"));
-  }
-  if (sections.length > 0) {
-    promptSections.push([
-      "## Instructions",
-      ...sections.map((item) =>
-        `<${item.kind} ${item.label}>\n${item.content}\n</${item.kind}>`),
-    ].join("\n"));
-  }
-  return promptSections.join("\n\n");
 }
 
 export interface PiDeclarativePromptOptions {

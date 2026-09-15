@@ -14,8 +14,8 @@ publishes them as a GitHub release on `ferdousbhai/ghost`:
 The v3 runtime archive is a package *source*, not an installed pacman package.
 Its payload contains `bin/ghostd`, `bin/ghost`, `lib/ghostd.js`, `lib/ghost.js`,
 required static assets, and the exact licenses for the bundled application
-closure. Ghost, pi, provider, and MCP support remain bundled for offline use;
-the optional owner-installed Claude Agent SDK is excluded. QML, the desktop
+closure. Ghost, pi, provider, and MCP support remain bundled for offline use.
+QML, the desktop
 helper, browser extension, services, launchers, licenses, and docs come from the
 same sanitized source snapshot, so a stable package cannot mix an old UI with a
 new daemon or client.

@@ -4,14 +4,23 @@
  * records which model (or the Claude Code runtime) drives the ghost and
  * rebinds open conversations when that changes.
  */
-import { CLAUDE_CODE_PROVIDER_ID } from "./claude-code.js";
+import type { ConversationRuntime } from "./conversation-identity.js";
 import { ghostPaths, GhostError, type GhostRegistry } from "./ghosts.js";
 import type { HomeOperationCoordinator } from "./home-operations.js";
-import { readGhostModels, resolveChatModelRef, setGhostModelRole } from "./models.js";
+import {
+  clearGhostModelRole,
+  readGhostModels,
+  resolveChatModelRef,
+  setGhostModelRole,
+} from "./models.js";
 
 export interface CurrentModel {
-  current: { provider: string; id: string; runtime: "pi" | "claude-code" } | null;
-  /** `explicit` when `models.json` binds the chat role; `none` leaves the choice to pi. */
+  current: { provider: string; id: string; runtime: ConversationRuntime } | null;
+  /**
+   * `explicit` when `models.json` binds the chat role. `none` means nothing is
+   * bound: `current` is then whatever would answer anyway — the first declared
+   * provider's model, or null when pi's own catalog default decides.
+   */
   source: "explicit" | "none";
 }
 
@@ -38,15 +47,15 @@ export class ModelSelection {
   async getCurrent(ghostName: string): Promise<CurrentModel> {
     const ghost = this.registry.get(ghostName);
     return this.homeOperations.withLease(ghostName, () => {
-      const ref = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
+      const models = readGhostModels(ghostPaths(ghost.dir).home);
+      const ref = resolveChatModelRef(models);
       if (!ref) return { current: null, source: "none" };
+      // `resolveChatModelRef` falls back to the first declared provider's
+      // first model, so a value here does not mean the role is bound.
+      const bound = models?.roles?.chat_model;
       return {
-        current: {
-          provider: ref.provider,
-          id: ref.modelId,
-          runtime: ref.provider === CLAUDE_CODE_PROVIDER_ID ? "claude-code" : "pi",
-        },
-        source: "explicit",
+        current: { provider: ref.provider, id: ref.modelId, runtime: "pi" },
+        source: bound?.provider && bound.modelId ? "explicit" : "none",
       };
     });
   }
@@ -55,12 +64,19 @@ export class ModelSelection {
     if (!SELECTOR.test(provider) || !SELECTOR.test(id)) {
       throw new GhostError("invalid_request", "A model is written as provider/id.", 400);
     }
-    if (provider === CLAUDE_CODE_PROVIDER_ID && id !== "default") {
-      throw new GhostError("invalid_request", `${provider}/${id} is not a model: the Claude Code runtime is selected as claude-code/default.`, 400);
-    }
     const ghost = this.registry.get(ghostName);
     await this.homeOperations.withLease(ghostName, () => {
       setGhostModelRole(ghostPaths(ghost.dir).home, "chat_model", provider, id);
+    });
+    await this.onModelRoutingChanged?.(ghostName);
+    return this.getCurrent(ghostName);
+  }
+
+  /** The way out of a binding: unset the role and hand the choice back to pi. */
+  async clearChatModel(ghostName: string): Promise<CurrentModel> {
+    const ghost = this.registry.get(ghostName);
+    await this.homeOperations.withLease(ghostName, () => {
+      clearGhostModelRole(ghostPaths(ghost.dir).home, "chat_model");
     });
     await this.onModelRoutingChanged?.(ghostName);
     return this.getCurrent(ghostName);

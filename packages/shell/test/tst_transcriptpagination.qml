@@ -162,7 +162,7 @@ TestCase {
     }
 
     function test_historyMarkerIsRequiredConsistentAndProjected(): void {
-        const state = activeState("legacy-claude");
+        const state = activeState("legacy-history");
         Ghostd.loadConversationTranscript(state, false);
         const missingMarker = page(state, [], 0, false, false);
         delete missingMarker.historyTruncated;
@@ -416,7 +416,7 @@ TestCase {
         compare(Ghostd.sessionsError, "");
     }
 
-    function test_newConversationAndRuntimeRekeyCancelAbandonedLoads(): void {
+    function test_newConversationCancelsAbandonedLoads(): void {
         const first = activeState("new-conversation");
         Ghostd.loadConversationTranscript(first, false);
         const abandonedNew = requests[0];
@@ -430,22 +430,6 @@ TestCase {
         compare(first.rows.length, 0);
         verify(!Ghostd.reachable);
         verify(Ghostd.currentSessionId !== first.sessionId);
-
-        requests = [];
-        const runtimeState = activeState("runtime-rekey");
-        Ghostd.loadConversationTranscript(runtimeState, false);
-        const abandonedRuntime = requests[0];
-        Ghostd.reachable = false;
-        const target = Ghostd.adoptConversationRuntime("casper", "claude-code");
-
-        verify(abandonedRuntime.aborted);
-        abandonedRuntime.complete(200,
-            page(runtimeState, messages(0, 1000), 1001, true));
-        compare(requests.length, 1);
-        compare(runtimeState.rows.length, 0);
-        compare(target.rows.length, 0);
-        compare(Ghostd.currentSessionId, "claude-code:runtime-rekey");
-        verify(!Ghostd.reachable);
     }
 
     function test_deleteAndDestructionRetireEveryTranscriptOwner(): void {

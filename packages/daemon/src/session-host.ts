@@ -29,14 +29,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
-  CLAUDE_CODE_DEFAULT_MODEL_ID,
-  CLAUDE_CODE_PROVIDER_ID,
-  ClaudeCodeRuntime,
-  claudeSessionMetadataPath,
-  claudeSessionResumeMarkerPaths,
-  type ClaudeCodeRuntimeOptions,
-} from "./claude-code.js";
-import {
   readDaemonControlFile,
   readDaemonControlLine,
 } from "./control-file.js";
@@ -94,12 +86,6 @@ import {
   renderOwnerContextPolicy,
 } from "./machine-skills.js";
 import {
-  PresentationHistoryStore,
-  presentationHistoryPath,
-  type PresentationHistoryV1,
-  type SettledTurn,
-} from "./presentation-history.js";
-import {
   homeOperationsFor,
   type HomeMoveParticipantReservation,
   type HomeOperationCoordinator,
@@ -128,8 +114,6 @@ import {
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
-import { completeHookClaude } from "./hook-claude-complete.js";
-import type { ClaudeSmolCompleter } from "./smol.js";
 import type { TrashPathResult } from "./trash.js";
 import {
   bindConversationId,
@@ -420,13 +404,10 @@ function passEntryMatches(
  * runs one completion on the cheapest usable model (see title.ts).
  */
 export type TitleGenerator = (input: {
-  /** The open pi session and its runtime; absent for a Claude Code conversation. */
-  session?: AgentSession;
-  runtime?: GhostPiRuntime;
+  session: AgentSession;
+  runtime: GhostPiRuntime;
   ghostName: string;
   configDir: string;
-  /** Where a Claude Code completion runs from; nothing there is read. */
-  sessionDir: string;
   firstPrompt: string;
   signal: AbortSignal;
 }) => Promise<string>;
@@ -445,17 +426,6 @@ export interface TitleConfig {
 
 const DEFAULT_TITLE_TIMEOUT_MS = 15_000;
 
-/** Background roles answered by Claude Code run one query from the session directory. */
-function claudeSmolCompleter(sessionDir: string): ClaudeSmolCompleter {
-  return ({ modelId, role, prompt, signal }) => completeHookClaude({
-    ref: { provider: CLAUDE_CODE_PROVIDER_ID, modelId },
-    role,
-    prompt,
-    cwd: sessionDir,
-    ...(signal ? { signal } : {}),
-  });
-}
-
 /** The smol binding and the chat provider it follows; a broken models.json means neither. */
 function backgroundRoleRefs(configDir: string): {
   ref: GhostModelRoleBinding | null;
@@ -473,17 +443,10 @@ function backgroundRoleRefs(configDir: string): {
 }
 
 const defaultTitleGenerator: TitleGenerator = async (
-  { runtime, configDir, sessionDir, firstPrompt, signal },
+  { runtime, configDir, firstPrompt, signal },
 ) => {
   const { ref, chatProvider } = backgroundRoleRefs(configDir);
-  return generateTitle({
-    ...(runtime ? { runtime } : {}),
-    firstPrompt,
-    ref,
-    chatProvider,
-    claude: claudeSmolCompleter(sessionDir),
-    signal,
-  });
+  return generateTitle({ runtime, firstPrompt, ref, chatProvider, signal });
 };
 
 function scheduleTitleTimeout(
@@ -630,25 +593,7 @@ export interface SessionHostOptions {
    * of the active model's context window.
    */
   compaction?: CompactionConfig;
-  /**
-   * Owner-local Claude Code harness. It is dormant unless
-   * `roles.chat_model.provider` is `claude-code`; options are chiefly the
-   * executable override and test seams.
-   */
-  claudeCode?: Omit<
-    ClaudeCodeRuntimeOptions,
-    | "logger"
-    | "extensionOptions"
-    | "hooks"
-    | "machineSkillPaths"
-    | "ownerHome"
-    | "scheduleUnitDir"
-    | "scheduleCliPath"
-    | "runningSource"
-    | "askTimeoutMs"
-  >;
   hooks?: GhostHookRunner;
-  presentationHistory?: PresentationHistoryStore;
   homeOperations?: HomeOperationCoordinator;
   retention?: SessionRetentionConfig;
 }
@@ -672,19 +617,6 @@ export interface TurnAdmission {
   run(options: AdmittedTurnOptions): Promise<void>;
   release(): void;
 }
-
-type ConfiguredTurnRuntime =
-  | { readonly runtime: "pi" }
-  | { readonly runtime: "claude-code"; readonly modelId: string };
-
-type SelectedTurnRuntime =
-  | { readonly runtime: "pi" }
-  | {
-      readonly runtime: "claude-code";
-      readonly modelId: string;
-      /** The working directory a new Claude conversation starts in. */
-      readonly cwd: string;
-    };
 
 export interface RunAskReanswerOptions {
   sessionId?: string | null;
@@ -717,8 +649,7 @@ export interface QueuedMessages {
 }
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
-  artifact: "omp-transcript" | "claude-sidecar" | "conversation-cwd"
-    | "tool-cwds" | "presentation-history";
+  artifact: "omp-transcript" | "conversation-cwd" | "tool-cwds";
   source: string;
 }
 
@@ -879,10 +810,8 @@ interface ForkTransactionRecord {
 
 const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"]>([
   "omp-transcript",
-  "claude-sidecar",
   "conversation-cwd",
   "tool-cwds",
-  "presentation-history",
 ]);
 
 interface DeleteMoveIntent extends TrashedConversationFileArtifact {}
@@ -1025,22 +954,12 @@ function exactDeleteStaticSource(
     case "omp-transcript":
       return runtime === "pi"
         && artifact.source === join(sessionDir, sessionFileNameFor(conversationId));
-    case "claude-sidecar": {
-      const sidecar = claudeSessionMetadataPath(sessionDir, conversationId);
-      const markers = claudeSessionResumeMarkerPaths(sessionDir, conversationId);
-      return runtime === "claude-code"
-        && (artifact.source === sidecar
-          || artifact.source === markers.started
-          || artifact.source === markers.settling);
-    }
     case "conversation-cwd":
       return runtime === "pi"
         && artifact.source === conversationCwdPath(sessionDir, conversationId);
     case "tool-cwds":
       return runtime === "pi"
         && artifact.source === toolCwdsPath(sessionDir, conversationId);
-    case "presentation-history":
-      return artifact.source === presentationHistoryPath(sessionDir, runtime, conversationId);
   }
 }
 
@@ -1102,16 +1021,6 @@ function expandLegacyReads(
     }
   }
   return expanded;
-}
-
-function assertPiConversation(runtime: ConversationRuntime, feature: string): void {
-  if (runtime !== "pi") {
-    throw new GhostError(
-      "not_supported",
-      `${feature}: pi only, not available for a Claude Code conversation.`,
-      409,
-    );
-  }
 }
 
 export interface SessionSummary {
@@ -1226,58 +1135,6 @@ function pageTranscript(
     messages,
     total,
     truncated: offset > 0 || offset + messages.length < total,
-  };
-}
-
-/** The daemon holds no Claude titles; listing rows and transcripts agree. */
-const CLAUDE_CONVERSATION_TITLE = "Claude Code";
-
-/**
- * Project a Claude conversation's presentation journal to the paged transcript
- * shape: two messages per settled turn, both stamped with the turn's settle
- * time. A conversation with no journal (it predates presentation history)
- * reads as empty with its earlier history marked unavailable, never as a
- * conversation that said nothing.
- */
-function transcriptFromPresentation(
-  id: string,
-  presentation: PresentationHistoryV1 | null,
-  options: { limit?: number; offset?: number } = {},
-  title: string = CLAUDE_CONVERSATION_TITLE,
-): Transcript {
-  const all = presentation?.turns.flatMap((turn): TranscriptMessage[] => {
-    const timestamp = Date.parse(turn.settledAt);
-    return [
-      {
-        role: "user",
-        content: [{ type: "text", text: turn.ownerText }],
-        timestamp,
-        entryId: `presentation:${turn.sequence}:owner`,
-        parentId: null,
-        ...(turn.ownerTextTruncated ? { contentTruncated: true as const } : {}),
-      },
-      {
-        role: "assistant",
-        // Parts carry the tool cards and the prose between them; a turn
-        // journalled before parts existed, or one with no tool call, has
-        // its final text alone.
-        content: turn.assistantParts?.length
-          ? turn.assistantParts.map((part) => (part.type === "toolCall"
-            ? { ...part, cwd: null }
-            : part))
-          : [{ type: "text", text: turn.assistantText }],
-        timestamp,
-        entryId: `presentation:${turn.sequence}:assistant`,
-        parentId: `presentation:${turn.sequence}:owner`,
-        ...(turn.assistantTextTruncated ? { contentTruncated: true as const } : {}),
-      },
-    ];
-  }) ?? [];
-  return {
-    ...conversationIdentity("claude-code", id),
-    title,
-    ...pageTranscript(all, options),
-    historyTruncated: presentation?.historyPrefixOmitted ?? true,
   };
 }
 
@@ -1461,9 +1318,7 @@ export class SessionHost {
   private readonly greetingReadRawCharacter: typeof readCharacterFile;
   private readonly greetingInputReaders: GhostHomeDigestReaders | undefined;
   private readonly createGreetingRuntime: typeof createGhostPiRuntime;
-  private readonly claudeCode: ClaudeCodeRuntime;
   private readonly hooks: GhostHookRunner;
-  private readonly presentationHistory: PresentationHistoryStore;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly sessions = new Map<string, HostedSession>();
   private readonly conversationListeners = new Map<string, Set<ConversationEventSubscription>>();
@@ -1554,7 +1409,6 @@ export class SessionHost {
     this.greetingInputReaders = options.greeting?.inputReaders;
     this.createGreetingRuntime = options.greeting?.createRuntime ?? createGhostPiRuntime;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
-    this.presentationHistory = options.presentationHistory ?? new PresentationHistoryStore();
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.unregisterHomeMoveParticipant = this.homeOperations.registerMoveParticipant({
       preclaim: (ghostName) => {
@@ -1581,18 +1435,6 @@ export class SessionHost {
           },
         };
       },
-    });
-    this.claudeCode = new ClaudeCodeRuntime({
-      ownerHome: this.ownerHome,
-      machineSkillPaths: this.machineSkills,
-      logger: this.logger,
-      extensionOptions: this.extensionOptions,
-      hooks: this.hooks,
-      ...(options.claudeCode ?? {}),
-      scheduleUnitDir: this.scheduleUnitDir,
-      scheduleCliPath: this.scheduleCliPath,
-      ...(this.runningSource ? { runningSource: this.runningSource } : {}),
-      askTimeoutMs: () => this.askTimeoutSeconds * 1000,
     });
     this.retentionIdleTtlMs = options.retention?.idleTtlMs
       ?? DEFAULT_SESSION_IDLE_TTL_MS;
@@ -1884,10 +1726,7 @@ export class SessionHost {
   async availableCommands(
     ghostName: string,
     sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
   ): Promise<GhostAvailableSlashCommand[]> {
-    assertPiConversation(runtime, "Slash commands");
-    this.assertPiRuntime(ghostName, "Slash commands");
     const hosted = await this.idleHostedSession(
       ghostName,
       sessionId,
@@ -1904,23 +1743,9 @@ export class SessionHost {
   async admittedResources(
     ghostName: string,
     sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
   ): Promise<SessionResourceView> {
     this.registry.get(ghostName);
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
-    if (runtime === "claude-code") {
-      const resources = this.claudeCode.sessionResources(ghostName, conversationId);
-      if (!resources) {
-        throw new GhostError(
-          "session_resources_unavailable",
-          "Claude Code resource admission is available only while this conversation has a live warm query.",
-          409,
-        );
-      }
-      return structuredClone(resources);
-    }
-    assertPiConversation(runtime, "Session resources");
-    this.assertPiRuntime(ghostName, "Session resources");
     const existing = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (existing) return structuredClone(existing.resources);
     const hosted = await this.idleHostedSession(
@@ -1934,24 +1759,6 @@ export class SessionHost {
     } finally {
       await this.releaseSessionClaim(hosted, ghostName);
     }
-  }
-
-  private assertPiRuntime(ghostName: string, feature: string): Ghost {
-    const ghost = this.registry.get(ghostName);
-    try {
-      const configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
-      if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
-        throw new GhostError(
-          "not_supported",
-          `${feature} is unavailable while this ghost uses the Claude Code runtime.`,
-          409,
-        );
-      }
-    } catch (error) {
-      if (error instanceof GhostError) throw error;
-      // Match runTurn: malformed routing falls through to the catalogue default.
-    }
-    return ghost;
   }
 
   /** The cwd a brand-new conversation starts in: `settings.yml cwd:` or the owner home. */
@@ -2292,15 +2099,8 @@ export class SessionHost {
   pendingAsk(
     ghostName: string,
     sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
   ): PendingAsk | null {
     this.registry.get(ghostName);
-    if (runtime === "claude-code") {
-      return this.claudeCode.pendingAsk(
-        ghostName,
-        requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY),
-      );
-    }
     return this.sessions.get(this.keyOf(ghostName, sessionId))?.ask.pending ?? null;
   }
 
@@ -2309,29 +2109,8 @@ export class SessionHost {
     sessionId: string | null | undefined,
     askId: string,
     answer: unknown,
-    runtime: ConversationRuntime = "pi",
   ): void {
     this.registry.get(ghostName);
-    if (runtime === "claude-code") {
-      try {
-        this.claudeCode.answerAsk(
-          ghostName,
-          requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY),
-          askId,
-          answer,
-        );
-      } catch (error) {
-        if (error instanceof AskBrokerError) {
-          throw new GhostError(
-            error.code,
-            error.message,
-            error.code === "invalid_ask_answer" ? 400 : 409,
-          );
-        }
-        throw error;
-      }
-      return;
-    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) {
       throw new GhostError("ask_not_pending", "This conversation is not waiting for an answer.", 409);
@@ -2353,12 +2132,8 @@ export class SessionHost {
   queuedMessages(
     ghostName: string,
     sessionId?: string | null,
-    runtime: ConversationRuntime = "pi",
   ): QueuedMessages {
     this.registry.get(ghostName);
-    if (runtime === "claude-code") {
-      return this.claudeCode.queuedMessages(ghostName, requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY));
-    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted) return { streaming: false, count: 0, steering: [], followUp: [] };
     return {
@@ -2374,12 +2149,8 @@ export class SessionHost {
     sessionId: string | null | undefined,
     mode: QueueMode,
     text: string,
-    runtime: ConversationRuntime = "pi",
   ): Promise<QueuedMessages> {
     this.registry.get(ghostName);
-    if (runtime === "claude-code") {
-      return this.claudeCode.queueMessage(ghostName, requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY), mode, text);
-    }
     const hosted = this.sessions.get(this.keyOf(ghostName, sessionId));
     if (!hosted?.session.isStreaming) {
       throw new GhostError(
@@ -2400,7 +2171,7 @@ export class SessionHost {
       hosted.pendingOwnerPasses = hosted.pendingOwnerPasses.filter((candidate) => candidate !== pass);
       throw error;
     }
-    return this.queuedMessages(ghostName, sessionId, runtime);
+    return this.queuedMessages(ghostName, sessionId);
   }
 
   /**
@@ -2418,11 +2189,7 @@ export class SessionHost {
    * it started on. It is flagged instead and rebound once that owner releases
    * the AgentSession.
    *
-   * Claude Code needs no eager rebinding: runTurn reads `roles.chat_model`
-   * fresh, compares it with the warm query's startup identity, and retires a
-   * mismatched query before the next prompt. A stale pi session for the same
-   * conversation is dropped by `closePi` on that next turn.
-  */
+   */
   async rebindModel(ghostName: string): Promise<void> {
     this.registry.get(ghostName);
     const opening = [...this.opening.entries()]
@@ -2444,7 +2211,6 @@ export class SessionHost {
   async refreshAuth(ghostName: string, signal?: AbortSignal): Promise<void> {
     signal?.throwIfAborted();
     this.registry.get(ghostName);
-    this.claudeCode.invalidateAuthProbe();
     const opening = [...this.opening.entries()]
       .filter(([key]) => sessionKeyParts(key)[0] === ghostName)
       .map(([, promise]) => promise);
@@ -2630,82 +2396,6 @@ export class SessionHost {
       || hosted.ownerPassSettlement !== undefined
       || hosted.session.isStreaming
       || hosted.session.isBashRunning;
-  }
-
-  /**
-   * Journal one settled Claude turn so the HUD can read the conversation. The
-   * write fails open: the turn is already durable in Claude's own storage, and
-   * the store's ordinal-gap detection marks a missed turn as an omitted prefix
-   * on the next successful write, so the journal self-heals into an honest gap
-   * instead of failing the turn.
-   */
-  private claudeSettledTurnRecorder(
-    ghostName: string,
-    conversationId: string,
-  ): (turn?: SettledTurn) => Promise<void> {
-    // Called once per settled exchange: a queued follow-up adds a second
-    // exchange to the same owner turn, and the journal keeps both.
-    return async (turn) => {
-      if (!turn) return;
-      // The first settled turn names the conversation, as pi's first turn does.
-      if (turn.sourceOrdinal === 1 && this.titleEnabled) {
-        this.startClaudeTitle(ghostName, conversationId, turn.ownerPrompt);
-      }
-      try {
-        const sessionDir = ghostPaths(this.registry.get(ghostName).dir).sessionDir;
-        await this.homeOperations.withLease(ghostName, () =>
-          this.presentationHistory.recordSettledTurn(
-            sessionDir,
-            { runtime: "claude-code", conversationId },
-            turn,
-          ));
-      } catch (error) {
-        this.logger
-          .child({ ghost: ghostName, conversation: conversationId })
-          .warn("conversation presentation history was not recorded", {
-            runtime: "claude-code",
-            error: error instanceof Error ? error.message : String(error),
-          });
-      }
-    };
-  }
-
-  /**
-   * Fire-and-forget titling for a Claude Code conversation: one smol
-   * completion, stored on the resume sidecar, announced so listings refresh.
-   */
-  private startClaudeTitle(ghostName: string, conversationId: string, firstPrompt: string): void {
-    const logger = this.logger.child({ ghost: ghostName, conversation: conversationId });
-    const controller = new AbortController();
-    const timer = this.titleTimeoutScheduler(() => controller.abort(), this.titleTimeoutMs);
-    timer.unref?.();
-    void Promise.resolve()
-      .then(async () => {
-        const ghost = this.registry.get(ghostName);
-        const paths = ghostPaths(ghost.dir);
-        const raw = await this.generateTitle({
-          ghostName,
-          configDir: paths.home,
-          sessionDir: paths.sessionDir,
-          firstPrompt,
-          signal: controller.signal,
-        });
-        const title = raw.trim();
-        if (!title) return;
-        const current = await this.claudeCode.readSession(ghost, conversationId);
-        if (!current || current.title) return;
-        await this.homeOperations.withLease(ghostName, () =>
-          this.claudeCode.setConversationTitle(ghost, conversationId, title));
-        logger.info("named ghost conversation", { runtime: "claude-code", title });
-        await this.announceConversationUpdated(ghostName, "claude-code", conversationId);
-      })
-      .catch((error: unknown) => {
-        logger.warn("conversation title generation failed", {
-          runtime: "claude-code",
-          error: error instanceof Error ? error.message : String(error),
-        });
-      })
-      .finally(() => timer.dispose());
   }
 
   private async preparePiOwnerPass(
@@ -3229,14 +2919,6 @@ export class SessionHost {
     options: RunTurnOptions,
   ): Promise<void> {
     const conversationId = options.sessionId ?? DEFAULT_SESSION_KEY;
-    if (this.claudeCode.isBusy(ghostName, conversationId)) {
-      throw new GhostError(
-        "session_busy",
-        "This ghost is already answering in this conversation.",
-        409,
-      );
-    }
-
     const hosted = await this.idleHostedSession(
       ghostName,
       options.sessionId,
@@ -3389,35 +3071,6 @@ export class SessionHost {
   }
 
   /**
-   * Resolve the selected chat runtime once, before any command dispatch or
-   * runtime state is opened. Malformed routing retains the default fallback.
-   */
-  private selectedTurnRuntime(ghostName: string): ConfiguredTurnRuntime {
-    const ghost = this.registry.get(ghostName);
-    let configured: ReturnType<typeof resolveChatModelRef>;
-    try {
-      configured = resolveChatModelRef(readGhostModels(ghostPaths(ghost.dir).home));
-    } catch (error) {
-      this.logger.error("models.json is unusable", {
-        ghost: ghostName,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return { runtime: "pi" };
-    }
-    if (configured?.provider === CLAUDE_CODE_PROVIDER_ID) {
-      if (configured.modelId !== CLAUDE_CODE_DEFAULT_MODEL_ID) {
-        throw new GhostError(
-          "unknown_model",
-          `Claude Code has no runtime entry ${JSON.stringify(configured.modelId)}.`,
-          409,
-        );
-      }
-      return { runtime: "claude-code", modelId: configured.modelId };
-    }
-    return { runtime: "pi" };
-  }
-
-  /**
    * Reserve and fully validate a turn before an HTTP caller publishes SSE
    * headers. The returned admission freezes runtime selection across the turn.
    */
@@ -3454,25 +3107,9 @@ export class SessionHost {
       this.turnAdmissions.delete(admissionKey);
     };
     try {
-      const configured = this.selectedTurnRuntime(ghostName);
       const bashCommand = parseUserBashCommand(options.prompt);
-      if (bashCommand && configured.runtime === "claude-code") {
-        throw new GhostError(
-          "not_supported",
-          "Direct ! and !! commands are unavailable while this ghost uses Claude Code.",
-          409,
-        );
-      }
       if (bashCommand && !bashCommand.command) {
         throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
-      }
-      let selected: SelectedTurnRuntime;
-      if (configured.runtime === "claude-code") {
-        const ghost = this.registry.get(ghostName);
-        await this.claudeCode.assertResumable(ghost, conversationId);
-        selected = { ...configured, cwd: this.defaultCwd(ghost) };
-      } else {
-        selected = configured;
       }
       return {
         run: async (streamOptions: AdmittedTurnOptions) => {
@@ -3485,7 +3122,7 @@ export class SessionHost {
               sessionId: conversationId,
               prompt: options.prompt,
               ...streamOptions,
-            }, selected);
+            });
           } finally {
             release();
           }
@@ -3522,15 +3159,6 @@ export class SessionHost {
   private async runAdmittedTurn(
     ghostName: string,
     options: RunTurnOptions,
-    selected: SelectedTurnRuntime,
-  ): Promise<void> {
-      await this.runAdmittedTurnWithPrincipalCapability(ghostName, options, selected);
-  }
-
-  private async runAdmittedTurnWithPrincipalCapability(
-    ghostName: string,
-    options: RunTurnOptions,
-    selected: SelectedTurnRuntime,
   ): Promise<void> {
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const ghost = this.registry.get(ghostName);
@@ -3552,46 +3180,6 @@ export class SessionHost {
       );
       return;
     }
-    if (selected.runtime === "claude-code") {
-      // A model switch must not leave a stale pi AgentSession owning this
-      // conversation. Claude owns a separate warm query whose startup identity
-      // is checked inside runTurn before it accepts the next prompt.
-      const piSession = this.sessions.get(key);
-      if (piSession && this.sessionOwned(piSession)) {
-        throw new GhostError(
-          "session_busy",
-          "This ghost is already answering in this conversation.",
-          409,
-        );
-      }
-      await this.closePi(ghostName, options.sessionId);
-      if (this.deleting.has(deletionKeyOf(ghostName, "claude-code", conversationId))) {
-        throw new GhostError(
-          "session_busy",
-          "Wait for this conversation to finish deleting before opening it.",
-          409,
-        );
-      }
-      await this.claudeCode.runTurn(
-        ghost,
-        conversationId,
-        selected.modelId,
-        options,
-        selected.cwd,
-        this.claudeSettledTurnRecorder(ghostName, conversationId),
-      );
-      await this.announceConversationUpdated(ghostName, "claude-code", conversationId);
-      return;
-    }
-
-    if (this.claudeCode.isBusy(ghostName, conversationId)) {
-      throw new GhostError(
-        "session_busy",
-        "This ghost is already answering in this conversation.",
-        409,
-      );
-    }
-
     const hosted = await this.idleHostedSession(
       ghostName,
       options.sessionId,
@@ -3753,7 +3341,6 @@ export class SessionHost {
       runtime: hosted.modelRuntime,
       ghostName,
       configDir,
-      sessionDir: ghostPaths(hosted.ghost.dir).sessionDir,
       firstPrompt,
       signal: controller.signal,
     }));
@@ -3875,12 +3462,8 @@ export class SessionHost {
   }): Promise<string | null> {
     const paths = ghostPaths(input.ghost.dir);
     const { ref, chatProvider } = backgroundRoleRefs(paths.home);
-    const claude = claudeSmolCompleter(paths.sessionDir);
-    if (chatProvider === CLAUDE_CODE_PROVIDER_ID && !ref) {
-      return generateGreeting({ context: input.context, ref, chatProvider, claude });
-    }
     return this.withGreetingRuntime(input.ghost, (runtime) =>
-      generateGreeting({ runtime, context: input.context, ref, chatProvider, claude }));
+      generateGreeting({ runtime, context: input.context, ref, chatProvider }));
   }
 
   /**
@@ -3916,8 +3499,7 @@ export class SessionHost {
 
   /**
    * The ghost's conversations, pinned first and newest-updated first within
-   * each group — pi transcripts plus Claude Code resume sidecars, in one
-   * shape.
+   * each group.
    *
    * Any in-flight title write for this ghost is awaited first, so a title
    * generated by the turn that just finished is already visible here.
@@ -4067,7 +3649,6 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     title: string,
-    runtime: ConversationRuntime = "pi",
   ): Promise<string> {
     if (!/\P{C}/u.test(title)) {
       throw new GhostError(
@@ -4075,14 +3656,6 @@ export class SessionHost {
         "A conversation title needs at least one printable character.",
         400,
       );
-    }
-    if (runtime === "claude-code") {
-      const id = requireRawConversationId(conversationId ?? DEFAULT_SESSION_KEY);
-      const ghost = this.registry.get(ghostName);
-      const stored = await this.homeOperations.withLease(ghostName, () =>
-        this.claudeCode.setConversationTitle(ghost, id, title));
-      await this.announceConversationUpdated(ghostName, "claude-code", id);
-      return stored;
     }
     return this.homeOperations.withLease(ghostName, () =>
       this.renameConversationLeased(ghostName, conversationId, title)
@@ -4557,10 +4130,7 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     mkdirSync(paths.sessionDir, { recursive: true });
     await this.recoverForkTransactions(paths.sessionDir, ghost.name);
-    const [sessions, claudeSessions] = await Promise.all([
-      SessionManager.listAll(paths.sessionDir),
-      this.claudeCode.listSessions(ghost),
-    ]);
+    const sessions = await SessionManager.listAll(paths.sessionDir);
     const scannedPiSessions = await Promise.all(sessions.map(async (info) => {
       let conversationId: string | null;
       try {
@@ -4582,16 +4152,7 @@ export class SessionHost {
     const piSessions = scannedPiSessions.filter(
       (row): row is Exclude<(typeof scannedPiSessions)[number], null> => row !== null,
     );
-    const rows: StoredSessionRow[] = [
-      ...piSessions,
-      ...claudeSessions.filter((info) => isValidConversationId(info.conversationId)).map((info) => ({
-        ...conversationIdentity("claude-code", info.conversationId),
-        title: info.title ?? CLAUDE_CONVERSATION_TITLE,
-        createdAt: info.created,
-        updatedAt: info.modified,
-        messageCount: info.messageCount,
-      })),
-    ];
+    const rows: StoredSessionRow[] = [...piSessions];
     const visibleRows = await Promise.all(rows.map(async (row) => {
       if (await this.transactionMarkerEntryExists(
         deleteTransactionPath(paths.sessionDir, row.runtime, row.conversationId),
@@ -4618,10 +4179,9 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     options: { limit?: number; offset?: number } = {},
-    runtime: ConversationRuntime = "pi",
   ): Promise<Transcript> {
     return this.homeOperations.withLease(ghostName, () =>
-      this.readTranscriptLeased(ghostName, conversationId, options, runtime)
+      this.readTranscriptLeased(ghostName, conversationId, options)
     );
   }
 
@@ -4629,28 +4189,10 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     options: { limit?: number; offset?: number },
-    runtime: ConversationRuntime,
   ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
     const id = conversationId ?? DEFAULT_SESSION_KEY;
-    if (runtime === "claude-code") {
-      // Only the resume sidecar publishes a Claude conversation id; a
-      // presentation journal on its own never makes an id readable.
-      const native = await this.claudeCode.readSession(ghost, id);
-      if (!native) {
-        throw new GhostError(
-          "not_found",
-          `This ghost has no conversation ${JSON.stringify(id)}.`,
-          404,
-        );
-      }
-      const presentation = await this.presentationHistory.read(
-        paths.sessionDir,
-        { runtime, conversationId: id },
-      );
-      return transcriptFromPresentation(id, presentation, options, native.title ?? CLAUDE_CONVERSATION_TITLE);
-    }
     const path = join(paths.sessionDir, sessionFileNameFor(id));
     await this.conversationFileProbe("transcript-read", path);
     if (!existsSync(path)) {
@@ -4756,7 +4298,6 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     entryId: string,
-    runtime: ConversationRuntime = "pi",
   ): Promise<{
     id: string;
     conversationId: string;
@@ -4766,7 +4307,6 @@ export class SessionHost {
     draft: string;
     transcript: Transcript;
   }> {
-    assertPiConversation(runtime, "Conversation branching");
     return this.homeOperations.withLease(ghostName, () =>
       this.forkConversationLeased(ghostName, conversationId, entryId)
     );
@@ -4857,8 +4397,8 @@ export class SessionHost {
         throw new GhostError("invalid_branch", "This conversation has no transcript to branch from.", 400);
       }
       // Names to avoid colliding with, straight from the session listing. The
-      // full `listSessions` would also read every Claude Code sidecar and the
-      // pins, and wait on unrelated titles, for one `(n)`.
+      // full `listSessions` would also read the pins and wait on unrelated
+      // titles, for one `(n)`.
       const title = forkConversationTitle(
         sourceManager.getSessionName() ?? null,
         (await SessionManager.listAll(paths.sessionDir)).map((info) => info.name ?? null),
@@ -5079,8 +4619,6 @@ export class SessionHost {
     ghostName: string,
     options: RunAskReanswerOptions,
   ): Promise<void> {
-    assertPiConversation(options.runtime ?? "pi", "Ask re-answering");
-    this.assertPiRuntime(ghostName, "Ask re-answering");
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const admissionKey = this.keyOf(ghostName, conversationId);
     if (this.ghostMoveReserved(ghostName)) {
@@ -5264,7 +4802,6 @@ export class SessionHost {
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
     const releaseAdmission = this.reserveLifecycleAdmission(ghostName, conversationId);
     try {
-      await this.closeClaude(ghostName, conversationId);
       await this.closePi(ghostName, conversationId);
     } finally {
       releaseAdmission();
@@ -5286,12 +4823,10 @@ export class SessionHost {
     if (this.ghostMoveReserved(ghostName)) {
       throw new GhostError("ghost_busy", "Wait for this ghost's filesystem move to finish.", 409);
     }
-    const hosted = runtime === "pi" ? this.sessions.get(piKey) : undefined;
-    const runtimeBusy = runtime === "pi"
-      ? this.opening.has(piKey)
-        || (hosted !== undefined
-          && (this.sessionOwned(hosted) || (hosted.mcpTransitions ?? 0) > 0))
-      : this.claudeCode.isBusy(ghostName, id);
+    const hosted = this.sessions.get(piKey);
+    const runtimeBusy = this.opening.has(piKey)
+      || (hosted !== undefined
+        && (this.sessionOwned(hosted) || (hosted.mcpTransitions ?? 0) > 0));
     const busy = this.mcpReloadGhosts.has(ghostName)
       || (this.lifecycleAdmissions.get(piKey) ?? 0) > 0
       || this.turnAdmissions.has(piKey)
@@ -5306,8 +4841,7 @@ export class SessionHost {
     let runtimeRetired = false;
     const retireRuntime = async (): Promise<void> => {
       if (runtimeRetired) return;
-      if (runtime === "pi") await this.closePi(ghostName, sessionId);
-      else await this.closeClaude(ghostName, id);
+      await this.closePi(ghostName, sessionId);
       runtimeRetired = true;
     };
     this.deleting.add(deleteKey);
@@ -5353,35 +4887,20 @@ export class SessionHost {
 
       await retireRuntime();
       const piPath = join(paths.sessionDir, sessionFileNameFor(id));
-      const claudePath = claudeSessionMetadataPath(paths.sessionDir, id);
-      const claudeResumeMarkers = Object.values(
-        claudeSessionResumeMarkerPaths(paths.sessionDir, id),
-      );
       const conversationCwd = conversationCwdPath(paths.sessionDir, id);
       const cwdPath = toolCwdsPath(paths.sessionDir, id);
-      const presentationPath = presentationHistoryPath(paths.sessionDir, runtime, id);
-      if (runtime === "pi" && await this.transactionEntryExists(piPath)) {
+      if (await this.transactionEntryExists(piPath)) {
         await requireSessionFileConversationId(piPath, id);
       }
       const rowsBefore = await this.collectSessions(ghost.name);
       const candidates: Array<{
         artifact: TrashedConversationFileArtifact["artifact"];
         path: string;
-      }> = runtime === "pi"
-        ? [
-            { artifact: "omp-transcript", path: piPath },
-            { artifact: "tool-cwds", path: cwdPath },
-            { artifact: "conversation-cwd", path: conversationCwd },
-            { artifact: "presentation-history", path: presentationPath },
-          ]
-        : [
-            { artifact: "claude-sidecar", path: claudePath },
-            ...claudeResumeMarkers.map((path) => ({
-              artifact: "claude-sidecar" as const,
-              path,
-            })),
-            { artifact: "presentation-history", path: presentationPath },
-          ];
+      }> = [
+        { artifact: "omp-transcript", path: piPath },
+        { artifact: "tool-cwds", path: cwdPath },
+        { artifact: "conversation-cwd", path: conversationCwd },
+      ];
       const artifacts = [...deleteRecord.artifacts];
       const recorded = new Set(artifacts.map((entry) =>
         JSON.stringify([entry.artifact, entry.source])
@@ -5644,7 +5163,6 @@ export class SessionHost {
     if (background.length > 0) await Promise.allSettled(background);
 
     for (const [key] of hosted) await this.closePi(ghostName, sessionKeyParts(key)[1]);
-    await this.claudeCode.closeGhost(ghostName);
     try {
       await this.browserSessionClose(ghost.dir);
     } catch {
@@ -5690,8 +5208,7 @@ export class SessionHost {
     for (const key of this.deleting) {
       if (deletionKeyGhost(key) === ghostName) return true;
     }
-    if (this.mcpReloadGhosts.has(ghostName)) return true;
-    return this.claudeCode.isGhostBusy(ghostName);
+    return this.mcpReloadGhosts.has(ghostName);
   }
 
   private ghostHasTurnAdmission(ghostName: string): boolean {
@@ -5704,10 +5221,6 @@ export class SessionHost {
   private async closePi(ghostName: string, sessionId?: string | null): Promise<void> {
     const key = this.keyOf(ghostName, sessionId);
     await this.closeHostedSession(key);
-  }
-
-  private closeClaude(ghostName: string, conversationId: string): Promise<void> {
-    return this.claudeCode.close(ghostName, conversationId);
   }
 
   private closeHostedSession(key: string): Promise<void> {
@@ -5895,9 +5408,7 @@ export class SessionHost {
     if (this.shutdownTasks) return;
     this.disposed = true;
     this.launchCleanupStep(undefined, "retention timer", () => this.retentionTimer.dispose());
-    this.shutdownTasks = [
-      Promise.resolve().then(() => this.claudeCode.disposeAll()),
-    ];
+    this.shutdownTasks = [];
     for (const hosted of this.sessions.values()) {
       this.launchCleanupStep(hosted, "abort bash", () => this.abortHostedBash(hosted));
       this.launchCleanupStep(hosted, "close ask", () => this.closeHostedAsk(hosted));

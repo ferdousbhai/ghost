@@ -40,17 +40,18 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
 import { createMCPToolName } from "../src/mcp-tool-names.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claudeSessionMetadataPath } from "../src/claude-code.js";
 import { ghostPaths } from "../src/ghosts.js";
 import {
   clearGhostModelRole,
   openAiCompatiblePreset,
+  readGhostModels,
   setGhostModelRole,
   writeGhostModels,
   type GhostModelDefinition,
   type GhostModelsFile,
 } from "../src/models.js";
 import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS } from "../src/hooks.js";
+import { ModelSelection } from "../src/model-selection.js";
 import {
   PI_NATIVE_TOOL_NAMES,
   SessionHost,
@@ -182,7 +183,6 @@ async function setup(
     | "browserSessionClose"
     | "homeOperations"
     | "askTimeoutSeconds"
-    | "claudeCode"
     | "compaction"
     | "title"
     | "retention"
@@ -439,14 +439,6 @@ describe("Ghost slash commands", () => {
       availability: "unsupported",
       unavailableReason: expect.stringContaining("interactive terminal UI"),
     }));
-  });
-
-  it("reports that an active Claude Code runtime has no Ghost command catalog", async () => {
-    const { dir } = await setup([{ kind: "text", text: "unused" }]);
-    setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
-
-    await expect(host!.availableCommands("casper", "conv-claude"))
-      .rejects.toMatchObject({ code: "not_supported", status: 409 });
   });
 
   it("runs admitted builtins without a model and rejects unsafe or TUI-only ones", async () => {
@@ -2613,42 +2605,6 @@ describe("SessionHost.runTurn", () => {
     expect(handle.session.getToolDefinition("ghost_browser")).toBeDefined();
   });
 
-  it("rejects direct Bash under Claude before creating Pi session or cwd state", async () => {
-    let claudeQueries = 0;
-    const { dir } = await setup([{ kind: "text", text: "must not run" }], {
-      title: { enabled: false },
-      claudeCode: {
-        binaryPath: process.execPath,
-        readAuthStatus: async () => ({ loggedIn: true, authMethod: "claude.ai" }),
-        createQuery: () => {
-          claudeQueries += 1;
-          throw new Error("Claude query must not start for direct Bash");
-        },
-      },
-    });
-    setGhostModelRole(ghostPaths(dir).home, "chat_model", "claude-code", "default");
-    const id = "claude-direct-command";
-    const sessionDir = ghostPaths(dir).sessionDir;
-    const events: PiMessagesEvent[] = [];
-
-    for (const prompt of ["!cd /", "!!cd /"]) {
-      await expect(host!.runTurn("casper", {
-        sessionId: id,
-        prompt,
-        emit: (event) => events.push(event),
-      })).rejects.toMatchObject({ code: "not_supported", status: 409 });
-    }
-
-    expect(events).toEqual([]);
-    expect(provider!.requests).toHaveLength(0);
-    expect(claudeQueries).toBe(0);
-    expect(host!.cachedSessionCount).toBe(0);
-    expect(existsSync(join(sessionDir, sessionFileNameFor(id)))).toBe(false);
-    expect(existsSync(toolCwdsPath(sessionDir, id))).toBe(false);
-    expect(existsSync(conversationCwdPath(sessionDir, id))).toBe(false);
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, id))).toBe(false);
-  });
-
   it("runs !command through Pi without asking the model", async () => {
     await setup([{ kind: "text", text: "the model must not run" }]);
     const events: PiMessagesEvent[] = [];
@@ -4078,104 +4034,23 @@ describe("session listing", () => {
     });
     expect(existsSync(legacyTrash)).toBe(true);
     expect(existsSync(marker)).toBe(false);
-
-    const claudeTarget = "delete-claude-allowlist-target";
-    const claudeVictim = "delete-claude-allowlist-victim";
-    const metadata = (conversationId: string) => `${JSON.stringify({
-      version: 1,
-      runtime: "claude-code",
-      conversationId,
-      sessionId: `sdk-${conversationId}`,
-      created: "2026-08-27T00:00:00.000Z",
-      modified: "2026-08-27T00:00:00.000Z",
-      messageCount: 2,
-      ownerTurnCount: 1,
-    })}\n`;
-    const claudeTargetPath = claudeSessionMetadataPath(paths.sessionDir, claudeTarget);
-    const claudeVictimPath = claudeSessionMetadataPath(paths.sessionDir, claudeVictim);
-    writeFileSync(claudeTargetPath, metadata(claudeTarget), { mode: 0o600 });
-    writeFileSync(claudeVictimPath, metadata(claudeVictim), { mode: 0o600 });
-    const claudeStem = sessionFileNameFor(claudeTarget).slice(0, -".jsonl".length);
-    const claudeMarker = join(
-      paths.sessionDir,
-      `.ghost-delete-${claudeStem}.claude-code.pending.json`,
-    );
-    const claudeTrashRoot = join(
-      dir,
-      ".trash",
-      ".conversation-33333333-3333-4333-8333-333333333333",
-    );
-    writeFileSync(claudeMarker, `${JSON.stringify({
-      version: 3,
-      kind: "delete",
-      runtime: "claude-code",
-      conversationId: claudeTarget,
-      artifacts: [],
-      trashRoot: claudeTrashRoot,
-      pending: {
-        artifact: "claude-sidecar",
-        source: claudeVictimPath,
-        trash: join(
-          claudeTrashRoot,
-          `001-44444444-4444-4444-8444-444444444444-${basename(claudeVictimPath)}`,
-        ),
-        kind: "fallback",
-      },
-    })}\n`, { mode: 0o600 });
-    await expect(host!.deleteSession("casper", claudeTarget, "claude-code"))
-      .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-    expect(readFileSync(claudeTargetPath, "utf8")).toBe(metadata(claudeTarget));
-    expect(readFileSync(claudeVictimPath, "utf8")).toBe(metadata(claudeVictim));
-    expect(existsSync(claudeMarker)).toBe(true);
-    rmSync(claudeMarker);
   });
 
-  it("filters exact malformed delete markers for both runtimes without trusting marker bytes", async () => {
+  it("filters exact malformed delete markers without trusting marker bytes", async () => {
     const logger = recordingLogger();
     const { dir } = await setup(undefined, {
       logger,
     });
     const piId = "pi-delete-marker-target";
-    const claudeId = "claude-delete-marker-target";
     await host!.runTurn("casper", { sessionId: piId, prompt: "persist me", emit: () => {} });
     const sessionDir = ghostPaths(dir).sessionDir;
     mkdirSync(sessionDir, { recursive: true });
-    writeFileSync(
-      claudeSessionMetadataPath(sessionDir, claudeId),
-      `${JSON.stringify({
-        version: 1,
-        runtime: "claude-code",
-        conversationId: claudeId,
-        sessionId: "sdk-claude-delete-marker-target",
-        created: "2026-08-27T00:00:00.000Z",
-        modified: "2026-08-27T00:00:00.000Z",
-        messageCount: 2,
-        ownerTurnCount: 1,
-      })}\n`,
-      { mode: 0o600 },
-    );
-
-    const unrelatedStem = sessionFileNameFor("unrelated-marker-name")
-      .slice(0, -".jsonl".length);
-    const unrelated = join(
-      sessionDir,
-      `.ghost-delete-${unrelatedStem}.claude-code.pending.json`,
-    );
-    writeFileSync(unrelated, JSON.stringify({
-      version: 1,
-      kind: "delete",
-      runtime: "claude-code",
-      conversationId: claudeId,
-    }), { mode: 0o600 });
-    expect((await host!.listSessions("casper")).map((row) => row.id).sort())
-      .toEqual([`claude-code:${claudeId}`, `pi:${piId}`].sort());
-
     const sentinel = "R5-DELETE-MARKER-BYTES-MUST-NOT-LEAK";
     const piStem = sessionFileNameFor(piId).slice(0, -".jsonl".length);
     const piMarker = join(sessionDir, `.ghost-delete-${piStem}.pi.pending.json`);
     writeFileSync(piMarker, `{ invalid ${sentinel}\n`, { mode: 0o600 });
     const piHidden = await host!.listSessions("casper");
-    expect(piHidden.map((row) => row.id)).toEqual([`claude-code:${claudeId}`]);
+    expect(piHidden).toEqual([]);
     await expect(host!.open("casper", piId))
       .rejects.toMatchObject({ code: "session_deleting", status: 409 });
     await expect(host!.conversationCwd("casper", piId))
@@ -4191,53 +4066,6 @@ describe("session listing", () => {
         expect.objectContaining({ artifact: "omp-transcript" }),
       ]),
     });
-
-    const claudeStem = sessionFileNameFor(claudeId).slice(0, -".jsonl".length);
-    const claudeMarker = join(
-      sessionDir,
-      `.ghost-delete-${claudeStem}.claude-code.pending.json`,
-    );
-    writeFileSync(claudeMarker, `{ invalid ${sentinel}\n`, { mode: 0o600 });
-    chmodSync(claudeMarker, 0o000);
-    expect(await host!.listSessions("casper")).toEqual([]);
-    expect(JSON.stringify(logger.records)).not.toContain(sentinel);
-    await expect(host!.deleteSession("casper", claudeId, "claude-code"))
-      .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-    expect(existsSync(claudeMarker)).toBe(true);
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, claudeId))).toBe(true);
-    chmodSync(claudeMarker, 0o600);
-    rmSync(claudeMarker);
-
-    symlinkSync(unrelated, claudeMarker);
-    await expect(host!.deleteSession("casper", claudeId, "claude-code"))
-      .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, claudeId))).toBe(true);
-    rmSync(claudeMarker);
-
-    execFileSync("mkfifo", [claudeMarker]);
-    const timeout = Symbol("timeout");
-    const fifo = await Promise.race([
-      host!.deleteSession("casper", claudeId, "claude-code")
-        .then(() => "resolved", () => "rejected"),
-      new Promise<symbol>((resolve) => setTimeout(() => resolve(timeout), 500)),
-    ]);
-    expect(fifo).toBe("rejected");
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, claudeId))).toBe(true);
-    rmSync(claudeMarker);
-
-    writeFileSync(claudeMarker, "x".repeat(1_048_577), { mode: 0o600 });
-    await expect(host!.deleteSession("casper", claudeId, "claude-code"))
-      .rejects.toMatchObject({ code: "delete_recovery_pending", status: 500 });
-    expect(existsSync(claudeSessionMetadataPath(sessionDir, claudeId))).toBe(true);
-    rmSync(claudeMarker);
-    await expect(host!.deleteSession("casper", claudeId, "claude-code"))
-      .resolves.toMatchObject({
-        artifacts: expect.arrayContaining([
-          expect.objectContaining({ artifact: "claude-sidecar" }),
-        ]),
-      });
-    expect(existsSync(unrelated)).toBe(true);
-    rmSync(unrelated);
   });
 
 });
@@ -4866,7 +4694,7 @@ describe("pinned conversations", () => {
 });
 
 describe("runtime-qualified conversation identity", () => {
-  it("expands legacy raw owner state across collisions and migrates it on mutation", async () => {
+  it("expands legacy raw owner state and migrates it on mutation", async () => {
     const { dir } = await setup();
     await host!.runTurn("casper", {
       sessionId: "default",
@@ -4874,20 +4702,6 @@ describe("runtime-qualified conversation identity", () => {
       emit: () => {},
     });
     const sessionDir = ghostPaths(dir).sessionDir;
-    const now = new Date().toISOString();
-    writeFileSync(
-      claudeSessionMetadataPath(sessionDir, "default"),
-      JSON.stringify({
-        version: 1,
-        runtime: "claude-code",
-        conversationId: "default",
-        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-        created: now,
-        modified: now,
-        messageCount: 2,
-      }),
-      { encoding: "utf8", mode: 0o600 },
-    );
     const readAt = "2099-01-01T00:00:00.000Z";
     writeFileSync(join(sessionDir, "pins.json"), JSON.stringify({ pinned: ["default"] }), "utf8");
     writeFileSync(
@@ -4897,23 +4711,19 @@ describe("runtime-qualified conversation identity", () => {
     );
 
     const legacy = await host!.listSessions("casper");
-    expect(legacy.map((row) => [row.id, row.pinned, row.unread])).toEqual(expect.arrayContaining([
+    expect(legacy.map((row) => [row.id, row.pinned, row.unread])).toEqual([
       ["pi:default", true, false],
-      ["claude-code:default", true, false],
-    ]));
+    ]);
 
     await host!.setPinned("casper", "default", false, "pi");
     expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
       version: 2,
-      pinned: ["claude-code:default"],
+      pinned: [],
     });
     await host!.markRead("casper", "default", new Date(readAt), "pi");
     expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
       version: 2,
-      reads: {
-        "pi:default": readAt,
-        "claude-code:default": readAt,
-      },
+      reads: { "pi:default": readAt },
     });
   });
 
@@ -4926,17 +4736,6 @@ describe("runtime-qualified conversation identity", () => {
       emit: () => {},
     });
     const sessionDir = ghostPaths(dir).sessionDir;
-    const now = new Date().toISOString();
-    const claudePath = claudeSessionMetadataPath(sessionDir, forkId);
-    writeFileSync(claudePath, JSON.stringify({
-      version: 1,
-      runtime: "claude-code",
-      conversationId: forkId,
-      sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-      created: now,
-      modified: now,
-      messageCount: 2,
-    }), { encoding: "utf8", mode: 0o600 });
     writeFileSync(join(sessionDir, "pins.json"), JSON.stringify({ pinned: [forkId] }), "utf8");
     writeFileSync(
       join(sessionDir, "reads.json"),
@@ -4949,14 +4748,13 @@ describe("runtime-qualified conversation identity", () => {
     }).discardFork("casper", forkId);
 
     expect(existsSync(join(sessionDir, sessionFileNameFor(forkId)))).toBe(false);
-    expect(existsSync(claudePath)).toBe(true);
     expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
       version: 2,
-      pinned: [`claude-code:${forkId}`],
+      pinned: [],
     });
     expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
       version: 2,
-      reads: { [`claude-code:${forkId}`]: "2099-01-01T00:00:00.000Z" },
+      reads: {},
     });
   });
 });
@@ -5143,35 +4941,6 @@ describe("renaming a conversation", () => {
     expect(await titleOf("conv-live")).toBe("Watching it work");
   });
 
-  it("names a Claude Code conversation on its resume sidecar and lists it", async () => {
-    const { dir } = await setup([{ kind: "text", text: "ok" }]);
-    const sessionDir = ghostPaths(dir).sessionDir;
-    mkdirSync(sessionDir, { recursive: true });
-    writeFileSync(
-      claudeSessionMetadataPath(sessionDir, "claude-conv"),
-      JSON.stringify({
-        version: 1,
-        runtime: "claude-code",
-        conversationId: "claude-conv",
-        sessionId: "8f0a1c1e-0000-4000-8000-000000000000",
-        created: new Date().toISOString(),
-        modified: new Date().toISOString(),
-        messageCount: 2,
-      }),
-      { encoding: "utf8", mode: 0o600 },
-    );
-    expect((await host!.listSessions("casper")).find((session) => session.id === "claude-code:claude-conv"))
-      .toMatchObject({ title: "Claude Code" });
-    await expect(host!.renameConversation("casper", "claude-conv", " Mine now ", "claude-code"))
-      .resolves.toBe("Mine now");
-    expect((await host!.listSessions("casper")).find((session) => session.id === "claude-code:claude-conv"))
-      .toMatchObject({ title: "Mine now" });
-    const stored = JSON.parse(readFileSync(claudeSessionMetadataPath(sessionDir, "claude-conv"), "utf8"));
-    expect(stored).toMatchObject({ version: 3, title: "Mine now", cwd: dir });
-    await expect(host!.renameConversation("casper", "missing-conv", "Nope", "claude-code"))
-      .rejects.toMatchObject({ code: "not_found", status: 404 });
-  });
-
   it("404s an unknown conversation and refuses a title with nothing in it", async () => {
     await setup([{ kind: "text", text: "ok" }]);
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hello", emit: () => {} });
@@ -5309,6 +5078,39 @@ describe("model switch reaches a live cached session", () => {
     clearGhostModelRole(paths.home, "chat_model");
     await host.rebindModel("casper");
 
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
+  });
+
+  it("clears the binding and hands the choice back to pi, reaching the live session", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    const models = twoModelFile(provider.url);
+    models.roles = { chat_model: { provider: "ghost-local", modelId: "model-b" } };
+    writeGhostModels(paths.home, models);
+    host = new SessionHost({ registry: temp.registry, offline: true });
+    const selection = new ModelSelection({
+      registry: temp.registry,
+      homeOperations: homeOperationsFor(temp.registry),
+      onModelRoutingChanged: (ghost) => host!.rebindModel(ghost),
+    });
+
+    const handle = await host.open("casper", "conv-clear-binding");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+    expect(await selection.getCurrent("casper")).toEqual({
+      current: { provider: "ghost-local", id: "model-b", runtime: "pi" },
+      source: "explicit",
+    });
+
+    // The way out of a binding: the role is gone from models.json, the report
+    // stops calling the choice explicit, and the open conversation has already
+    // moved to what would answer anyway — here the first declared model.
+    expect(await selection.clearChatModel("casper")).toEqual({
+      current: { provider: "ghost-local", id: "model-a", runtime: "pi" },
+      source: "none",
+    });
+    expect(readGhostModels(paths.home)?.roles?.chat_model).toBeUndefined();
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
   });
 

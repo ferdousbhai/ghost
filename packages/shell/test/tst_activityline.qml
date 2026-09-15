@@ -40,11 +40,11 @@ TestCase {
         Ghostd.activity = "thinking";
         compare(line.phrase, "Thinking");
 
-        Ghostd.toolActivities = [tool("Read", "running", { file_path: "docs/design.md" })];
+        Ghostd.toolActivities = [tool("read", "running", { path: "docs/design.md" })];
         compare(line.phrase, "Reading docs/design.md");
 
         // The call settles and there is nothing left to name.
-        Ghostd.toolActivities = [tool("Read", "complete", { file_path: "docs/design.md" })];
+        Ghostd.toolActivities = [tool("read", "complete", { path: "docs/design.md" })];
         Ghostd.activity = "";
         compare(line.phrase, "Working");
     }
@@ -56,14 +56,14 @@ TestCase {
         const line = createTemporaryObject(lineComponent, tc);
         verify(line !== null);
         Ghostd.streaming = true;
-        const args = { file_path: "notes.md" };
+        const args = { path: "notes.md" };
 
-        Ghostd.toolActivities = [tool("Write", "preparing", ({}))];
+        Ghostd.toolActivities = [tool("write", "preparing", ({}))];
         compare(line.phrase, "Writing a file");
-        Ghostd.toolActivities = [tool("Write", "queued", args)];
+        Ghostd.toolActivities = [tool("write", "queued", args)];
         Ghostd.activity = "";
         compare(line.phrase, "Writing notes.md");
-        Ghostd.toolActivities = [tool("Write", "running", args)];
+        Ghostd.toolActivities = [tool("write", "running", args)];
         compare(line.phrase, "Writing notes.md");
     }
 
@@ -73,8 +73,8 @@ TestCase {
         verify(line !== null);
         Ghostd.streaming = true;
         Ghostd.toolActivities = [
-            tool("Read", "complete", { file_path: "docs/design.md" }),
-            tool("Grep", "running", { pattern: "retry" })
+            tool("read", "complete", { path: "docs/design.md" }),
+            tool("grep", "running", { pattern: "retry" })
         ];
         compare(line.phrase, "Searching for “retry”");
     }

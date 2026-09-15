@@ -76,14 +76,6 @@ describe("resolveSmolModel", () => {
       .toMatchObject({ provider: "openrouter", id: "free-tiny" });
   });
 
-  it("names Claude Code's own Sonnet and Fable for a Claude-driven ghost", () => {
-    const empty = catalogOf([]);
-    expect(resolveSmolModel(empty, null, "smol_model", { chatProvider: "claude-code" }))
-      .toEqual({ model: { provider: "claude-code", id: "sonnet" }, via: "driver" });
-    expect(resolveSmolModel(empty, null, ADVISOR_MODEL_ROLE, { chatProvider: "claude-code" }))
-      .toEqual({ model: { provider: "claude-code", id: "fable" }, via: "driver" });
-  });
-
   it("honours an explicit roles.smol_model binding", () => {
     const catalog = catalogOf([
       { provider: "metered", id: "cheap", cost: cost(0.25) },

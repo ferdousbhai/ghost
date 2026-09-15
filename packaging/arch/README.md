@@ -21,14 +21,6 @@ Build the checkout package without installing it:
 makepkg --cleanbuild
 ```
 
-## Claude Code
-
-Ghost does not install Claude Code or the optional Claude Agent SDK graph.
-`GHOST_CLAUDE_BINARY` may select an explicit owner executable or wrapper in the
-daemon service environment; restart ghostd after changing that environment. A
-missing, malformed, logged-out, or SDK-incomplete Claude Code remains visibly
-unavailable instead of falling back.
-
 ## Owner-shared state
 
 Shared notes, knowledge, decisions, plans, and tasks live in the owner's XDG
@@ -46,12 +38,6 @@ Open a new pi session after installing skills. Ghost uses pi's native parser to
 snapshot every valid skill visible under `~/.agents/skills/` and
 `~/.pi/agent/skills/`, following symlinks in those standard machine roots.
 There is no hardcoded skill-name allowlist or integration-specific package path.
-
-The Claude Code path uses the owner's complete, unmodified Claude Code harness
-and any native authentication path its CLI reports logged in. The package does
-not ship the Claude Agent SDK; the minimum CLI version, the SDK pins, and the
-environment boundary are in
-[`docs/claude-code-runtime.md`](../../docs/claude-code-runtime.md).
 
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost` package uses the

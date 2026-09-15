@@ -1,10 +1,8 @@
 /**
- * The owner-question bridge shared by Pi's `ask` tool and Claude Code's native
- * `AskUserQuestion`. The model-facing shape follows Claude's SDK contract; the
- * broker shape remains the small, stable HTTP/HUD protocol.
+ * The owner-question bridge behind pi's `ask` tool. The broker shape is the
+ * small, stable HTTP/HUD protocol; the tool result is what the model reads back.
  */
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
-import type { AskUserQuestionOutput } from "@anthropic-ai/claude-agent-sdk/sdk-tools";
 import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 import type { AskBroker, AskOpenOptions, AskQuestion, AskResultItem } from "./ask-broker.js";
@@ -55,8 +53,18 @@ export function isAskToolInput(input: unknown): input is AskToolInput {
   return Check(askToolSchema, input);
 }
 
-/** Claude 2.1.251 adds this field ahead of the pinned SDK's generated type. */
-export type AskToolOutput = AskUserQuestionOutput & { autoAnsweredAfterMs?: number };
+/**
+ * What the model reads back from one `ask` call: the questions as asked, one
+ * answer string per answered question, per-question annotations, and — when
+ * the owner never answered — how long Ghost waited before settling it.
+ */
+export interface AskToolOutput {
+  questions: AskToolInput["questions"];
+  answers: Record<string, string>;
+  annotations?: Record<string, Static<typeof annotationSchema>>;
+  response?: string;
+  autoAnsweredAfterMs?: number;
+}
 
 /** What an ask tool call left in the transcript; legacy fields keep re-answering stable. */
 export interface AskToolDetails {
@@ -122,15 +130,13 @@ function assertAskable(questions: AskToolInput["questions"]): void {
   }
 }
 
-function questionOutput(input: AskToolInput["questions"]): AskUserQuestionOutput["questions"] {
-  // TypeBox expresses the SDK's 2-4 option tuple as a bounded array. The
-  // runtime checks that bound before execution, so this is the same value.
+function questionOutput(input: AskToolInput["questions"]): AskToolInput["questions"] {
   return input.map((question) => ({
     question: question.question,
     header: question.header,
     options: question.options.map((option) => ({ ...option })),
     multiSelect: question.multiSelect,
-  })) as AskUserQuestionOutput["questions"];
+  }));
 }
 
 function outputFor(
@@ -139,7 +145,7 @@ function outputFor(
   timeoutMs: number,
 ): AskToolOutput {
   const answers: Record<string, string> = {};
-  const annotations: NonNullable<AskUserQuestionOutput["annotations"]> = {};
+  const annotations: NonNullable<AskToolOutput["annotations"]> = {};
   results.forEach((result, index) => {
     if (result.customInput !== undefined) answers[result.question] = result.customInput;
     else if (result.selectedOptions.length > 0) {
@@ -165,9 +171,9 @@ function outputFor(
 }
 
 /**
- * Run the common owner interaction and return Claude's native output shape.
- * A chat redirect is a successful empty answer with an explanatory response;
- * cancelling the dialog aborts the tool call.
+ * Run the owner interaction and return the tool output. A chat redirect is a
+ * successful empty answer with an explanatory response; cancelling the dialog
+ * aborts the tool call.
  */
 export async function resolveAskUserQuestion(
   broker: AskBroker,

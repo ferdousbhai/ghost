@@ -96,40 +96,40 @@ owner cannot see is a browser they cannot supervise. The ghost therefore acts
 inside the owner's logged-in session; the extension's README states the risk
 that carries.
 
-## The two runtimes
+## The runtime
 
-A conversation runs on one of two agent harnesses. Conversation ids are
-runtime-qualified (`pi:<raw>`, `claude-code:<raw>`).
+Every conversation runs on pi. Conversation ids stay runtime-qualified
+(`pi:<raw>`) so a stored id keeps saying what it is.
 
-- **Pi** is the default. Ghost builds the session explicitly: its own model
-  runtime, credential store, settings, and resource snapshot, with pi's
-  inherited system prompt, ambient config/MCP, and automatic credential
-  discovery kept out. Pi's native file, search, Bash, steering, and branch
-  behavior is kept; Ghost adds `ask`, browser, screen, desktop, MCP, and
-  context windows (`new_context`, `history`) in place of summarizing
-  compaction. Background work is shell work: a detached command that ends
-  with `ghost say --follow-up`, on either runtime.
-- **Claude Code** is optional and native-first: `claude-code/default` runs the
-  official Claude Agent SDK against the owner's installed, unmodified `claude`,
-  authenticated by any method its own CLI reports as logged in. Ghost never
-  receives or stores that credential. Claude gets the same tool capabilities
-  as pi (an explicit native list, not its full preset) and Ghost adds the
-  same Ghost tools on both. Setup is in
-  [claude-code-runtime.md](claude-code-runtime.md).
+Ghost builds the session explicitly: its own model runtime, credential store,
+settings, and resource snapshot, with pi's inherited system prompt, ambient
+config/MCP, and automatic credential discovery kept out. Pi's native file,
+search, Bash, steering, and branch behavior is kept; Ghost adds `ask`, browser,
+screen, desktop, MCP, and context windows (`new_context`, `history`) in place of
+summarizing compaction. Background work is shell work: a detached command that
+ends with `ghost say --follow-up`.
 
-Both runtimes receive the same Ghost-owned context: character, first-meeting
+The session receives the Ghost-owned context: character, first-meeting
 policy, computer-use policy, other-harnesses policy (delegate from Bash,
 check Omarchy's usage windows first, hand off through documents on a limit),
 scheduled-work policy, self-maintenance policy, hooks policy, and
-owner-context policy. Owner questions, image understanding,
-and browser/screen/desktop control work on both. The runtime still owns its
-own mechanics, so the same ghost feels like itself on either while working the
-way that harness works.
+owner-context policy.
 
-MCP rows mean the same on both runtimes, credentials and cwd included; the
-two pi-only shapes (`${VAR}` expansion and `auth`/`oauth` blocks) are skipped
-on Claude and shown as skipped in the resources line at the top of the
-conversation.
+### Why one runtime
+
+Ghost ran on Claude Code as a second chat runtime until 2026-09-15. It was
+removed because a ghost delegates rather than does: it already runs `claude -p`
+from Bash, on the owner's own Claude install, settings, and subscription, with
+the harness's full tool set. Keeping Claude Code as a *chat* runtime bought
+nothing that delegation does not, and cost 4,000 lines of adapter, a parallel
+presentation-journal transcript store, a per-feature "not supported here" branch
+on most session routes, and 460MB of bundled platform binaries in the install.
+
+What that removal gives up, exactly: an owner can no longer spend a Claude
+subscription on the ghost's own conversational turns — those now go through a
+pi provider, billed per token or free. Delegated work still spends the
+subscription. Bringing a second runtime back would have to beat that trade,
+which is the same bar in `CONTRACTS.md` any second backend has to clear.
 
 ## Models and roles
 
@@ -142,8 +142,8 @@ responses.
 Roles are `chat_model` (the conversation), `smol_model` (titles, greetings,
 command-hook completions), and `advisor_model` (the frontier teacher and image
 reader), each with an optional fallback chain. The two background roles follow
-the driver when unset: a Claude Code ghost gets Sonnet and Fable through Claude
-Code, a pi ghost gets its provider's small tier and Ghost's advisor preference.
+the driver when unset: the chat provider's small tier for smol, Ghost's advisor
+preference for the teacher.
 `chat_model` unset leaves the choice to pi. There is no model catalog API and
 no local-runner detection: `ghost model <provider>/<id>` writes the binding,
 and a local endpoint is an ordinary provider in `models.json`.
@@ -184,9 +184,9 @@ none. The protocol is in [hooks.md](hooks.md).
 - **Files over an application database.** Personas and inspectable policy stay
   greppable and backup-friendly. Derived runtime state is isolated under
   `.pi/`, including pi's own 0600 credential file.
-- **Runtime-native behavior wins.** Ghost projects policy through Pi and Claude
-  Code's supported settings and hooks. It adds machinery only for product
-  boundaries the runtimes do not own: persona lifecycle, daemon sessions, the
+- **Runtime-native behavior wins.** Ghost projects policy through pi's
+  supported settings and hooks. It adds machinery only for product
+  boundaries the runtime does not own: persona lifecycle, daemon sessions, the
   HUD, browser relay, desktop sidecar, shared authentication policy, and
   recoverable moves.
 - **Self-maintenance through the machine's own facilities.** A ghost may edit,
@@ -222,9 +222,8 @@ If you expect one of these, it is missing on purpose:
   The board is the same idea: `board.md` there, rendered read-only by the HUD.
 - **No trusted projects.** A conversation has a cwd, not a bound project tree
   whose instructions, skills, and MCP are scanned in. Plugins, executable hooks
-  and tools beyond the ghost's own, LSP, and subagents stay disabled on both
-  runtimes; a ghost that wants a full harness runs it from Bash with the
-  owner's own settings.
+  and tools beyond the ghost's own, LSP, and subagents stay disabled; a ghost
+  that wants a full harness runs it from Bash with the owner's own settings.
 - **No delegation subsystem.** No task records, worker scopes, or `/tasks`
   API; a ghost runs `pi`, `codex`, or `claude -p` from Bash when it wants a
   specialist, and that harness owns its own discovery, tools, and auth.
@@ -264,8 +263,7 @@ If you expect one of these, it is missing on purpose:
 - [getting-started.md](getting-started.md) — install and first conversation.
 - [`CONTRACTS.md`](../CONTRACTS.md) — the normative wire, storage, and package
   boundaries.
-- [hooks.md](hooks.md), [claude-code-runtime.md](claude-code-runtime.md),
-  [desktop-helper.md](desktop-helper.md),
+- [hooks.md](hooks.md), [desktop-helper.md](desktop-helper.md),
   [injection-defense.md](injection-defense.md) — one document per protocol.
 - [self-maintenance.md](self-maintenance.md) — how a ghost edits and restarts
   itself; [`CONTRIBUTING.md`](../CONTRIBUTING.md) — how a ghost or a human

@@ -60,11 +60,6 @@ mkdir -p -- "$out" "$work"
 
 bash "$script_root/prepare-pnpm-engine.sh" "$source_root"
 pnpm fetch --frozen-lockfile
-# The optional Claude Agent SDK graph is not packaged, but its pins, the loader,
-# and the runtime doc must still agree at release time.
-pnpm fetch --dir "$script_root/fixtures/claude-agent-sdk" --frozen-lockfile
-GHOST_CLAUDE_SDK_BOUNDARY_TEST_ROOT="$script_root/work" \
-  bash "$script_root/test-claude-sdk-boundary.sh"
 SOURCE_DATE_EPOCH="$epoch" \
   bash "$script_root/build-runtime-source.sh" \
     "$source_root" "$out" "$version" any "$commit"

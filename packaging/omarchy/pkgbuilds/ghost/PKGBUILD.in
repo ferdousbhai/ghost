@@ -39,8 +39,6 @@ checkdepends=(
 optdepends=(
   'chromium: the browser the relay drives, and the browser-relay smoke test'
   'npm: npx-launched MCP servers and other owner-installed pi integrations'
-  'claude-code>=2.1.251: owner-installed Claude Code harness runtime'
-  'pnpm: install the optional owner-local Claude Agent SDK boundary'
 )
 conflicts=('ghost-dev')
 options=('!debug' '!strip')

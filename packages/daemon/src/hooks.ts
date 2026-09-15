@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
+import type { ConversationRuntime } from "./conversation-identity.js";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
@@ -17,9 +18,9 @@ interface GhostHookEventBase {
   ghost_name: string;
   ghost_home: string;
   cwd: string;
-  runtime: "pi" | "claude-code";
+  runtime: ConversationRuntime;
   conversation_id: string;
-  conversation_runtime: "pi" | "claude-code";
+  conversation_runtime: ConversationRuntime;
 }
 
 export interface GhostBeforePromptEvent extends GhostHookEventBase {
@@ -41,9 +42,8 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   last_assistant_message?: unknown;
   stop_hook_active: boolean;
   /**
-   * The runtime's native transcript when one exists on disk: the Pi session file
-   * for pi conversations, the Claude Code SDK session file for Claude Code
-   * conversations. `messages` still carries only the current pass.
+   * The runtime's native transcript on disk: the pi session file. `messages`
+   * still carries only the current pass.
    */
   transcript_path?: string;
 }
@@ -99,7 +99,7 @@ export interface GhostHookStatus {
 export interface GhostHookContext {
   ghostName: string;
   cwd: string;
-  runtime: "pi" | "claude-code";
+  runtime: ConversationRuntime;
   signal: AbortSignal;
 }
 

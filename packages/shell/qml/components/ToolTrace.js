@@ -28,37 +28,19 @@ function quoted(value) {
     return "“" + compact(value, 80) + "”";
 }
 
-/**
- * The file a call names, whichever harness asked for it. pi's native tools take
- * `path`, Claude Code's take `file_path`, and its notebook editor takes
- * `notebook_path`. Same file, same sentence.
- */
+/** The file a call names. pi's native tools take `path`. */
 function pathArgument(activity) {
-    return argument(activity, "path")
-        || argument(activity, "file_path")
-        || argument(activity, "notebook_path");
+    return argument(activity, "path");
 }
 
 /**
  * One name for one job.
  *
- * The two harnesses do the same work under different spellings — pi's `read`
- * is Claude Code's `Read`, its `find` is `Glob` — and the wire deliberately
- * carries whichever name actually ran, because a transcript is a record of
- * what happened and Claude's `Read` takes a `file_path` that pi's `read` would
- * not recognise. Presentation is where the two vocabularies meet, and this is
- * the one place in it that knows they are two: everything below reads the
- * canonical name, so a tool Claude renames is one line here rather than a
- * search through five switch statements.
+ * The wire carries whichever name actually ran, because a transcript is a
+ * record of what happened. This is the one place that knows a tool has been
+ * renamed; everything below reads the canonical name.
  */
 var CANONICAL = {
-    Read: "read",
-    Write: "write",
-    Edit: "edit",
-    NotebookEdit: "edit",
-    Bash: "bash",
-    Grep: "grep",
-    Glob: "find",
     // Ghost's own pre-OMP name for the work `inspect_image` does now; historical
     // transcripts still replay it.
     look_at_image: "inspect_image",
