@@ -1,8 +1,8 @@
 # `@ghost/daemon`
 
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
-conversation sessions, runtime adapters, models and credentials, MCP, hooks,
-background jobs, authenticated HTTP/SSE, and the `ghost` terminal client.
+conversation sessions, the pi runtime, models and credentials, MCP, hooks,
+authenticated HTTP/SSE, and the `ghost` terminal client.
 
 The stable storage and API contract is in
 [`CONTRACTS.md`](../../CONTRACTS.md). This README is only a code map and local
@@ -12,31 +12,29 @@ development guide.
 
 - [`main.ts`](src/main.ts) — daemon composition and process lifecycle
 - [`server.ts`](src/server.ts) — authentication, routes, and wire validation
-- [`session-host.ts`](src/session-host.ts) — Pi session lifecycle and runtime
+- [`session-host.ts`](src/session-host.ts) — pi session lifecycle and runtime
   orchestration
-- [`claude-code.ts`](src/claude-code.ts) — native Claude Code adapter
-- [`pi-extension-bridge.ts`](src/pi-extension-bridge.ts) — runtime-neutral
-  extension adapter
+- [`pi-extension-bridge.ts`](src/pi-extension-bridge.ts) — the extension
+  adapter
 - [`models.ts`](src/models.ts), [`model-selection.ts`](src/model-selection.ts) —
   roles and chat-model selection
 - [`mcp-manager.ts`](src/mcp-manager.ts) — the ghost's MCP servers
 - [`hooks.ts`](src/hooks.ts) — awaited harness hooks
-- [`jobs.ts`](src/jobs.ts) — foreground/background Bash lifecycle
 - [`context-windows.ts`](src/context-windows.ts) — pi context rollover and `history`
 - [`cli/main.ts`](src/cli/main.ts) — `ghost` HTTP client commands
 
 Detailed external protocols have one home:
 
-- [Claude Code runtime](../../docs/claude-code-runtime.md)
 - [hooks](../../docs/hooks.md)
+- [desktop helper](../../docs/desktop-helper.md)
 
 ## Persistent state
 
 The character and conversations live in the ghost home. Notes, knowledge,
-plans, and tasks live in the owner's XDG Documents directory, which both
-runtimes read and write with their native file tools. The daemon has no memory
-store, document index, notes API, plan mode, or todo store. Active background
-jobs remain conversation runtime state.
+plans, and tasks live in the owner's XDG Documents directory, which the runtime
+reads and writes with its native file tools. The daemon has no memory store,
+document index, notes API, plan mode, todo store, or job table — background work
+is a detached shell command that ends in `ghost say --follow-up`.
 
 ## Local development
 
@@ -63,12 +61,10 @@ ghost smoke --no-turn --json
 
 ## Runtime notes
 
-Pi uses Ghost's explicit transcript, model runtime, prompt, declarative
-snapshot, and MCP sources. Claude Code uses its installed native harness and
-authentication while receiving the same Ghost persona and policy append. The
-daemon scrubs ambient provider credentials before Pi construction; Claude's
-reviewed child environment is captured separately.
+pi uses Ghost's explicit transcript, model runtime, prompt, declarative
+snapshot, and MCP sources. The daemon scrubs ambient provider credentials before
+pi construction; a native harness the ghost delegates to from Bash (`claude -p`,
+`codex`, `pi`) gets its own reviewed environment, captured before that scrub.
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
-the authenticated HTTP API, and renders the same conversations and jobs as the
-HUD. Run `ghost help` or `ghost skill` for the current command catalog.
+the authenticated HTTP API, and renders the same conversations as the HUD. Run `ghost help` or `ghost skill` for the current command catalog.
