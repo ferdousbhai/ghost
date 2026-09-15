@@ -2,10 +2,12 @@
 
 ## T3 Code
 
-Portions of the Claude Code runtime and event adapter are adapted from T3 Code
-commit `2c4158f87a1b6a586d0aa5e0338f122cb7887c4f`. The exact source files and
-Ghost-specific changes are recorded in
-[`docs/claude-code-runtime.md`](docs/claude-code-runtime.md).
+Ghost's Claude Code runtime and event adapter were adapted from T3 Code commit
+`2c4158f87a1b6a586d0aa5e0338f122cb7887c4f`. That runtime was removed in 0.3.0
+and no code derived from T3 Code is distributed any more; the notice is kept
+because the licence covered releases that are still in owners' hands. The
+per-file record lived in `docs/claude-code-runtime.md`, deleted with the
+runtime — `git log -- docs/claude-code-runtime.md` has it.
 
 MIT License
 
