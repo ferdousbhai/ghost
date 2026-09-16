@@ -1880,7 +1880,6 @@ export class SessionHost {
       modelsPath: ghostModelsPath(paths.home),
       // Provider catalogs are fetched only when the daemon is not offline.
       allowModelNetwork: !this.offline,
-      offline: this.offline,
     });
 
     let mcp: HostedMCP | undefined;
@@ -3478,7 +3477,6 @@ export class SessionHost {
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
-      offline: this.offline,
     });
     try {
       return await use(runtime);

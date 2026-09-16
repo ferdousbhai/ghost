@@ -197,7 +197,6 @@ async function defaultCreateRuntime(input: {
     authPath: input.authPath,
     modelsPath: input.modelsPath,
     allowModelNetwork: false,
-    offline: input.offline,
   });
 }
 

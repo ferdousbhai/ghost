@@ -30,8 +30,6 @@ export interface GhostPiRuntimeInput {
   /** The ghost home holding `models.json`. */
   home: string;
   allowModelNetwork: boolean;
-  /** Offline skips the catalog refresh. */
-  offline?: boolean;
   /** pi's credential file; defaults to `auth.json` under `agentDir`. */
   authPath?: string;
 }
@@ -144,13 +142,11 @@ export function createGhostPiRuntime(input: {
   authPath: string;
   modelsPath: string;
   allowModelNetwork: boolean;
-  offline?: boolean;
 }): Promise<GhostPiRuntime> {
   return GhostPiRuntime.create({
     agentDir: dirname(input.authPath),
     home: dirname(input.modelsPath),
     authPath: input.authPath,
     allowModelNetwork: input.allowModelNetwork,
-    ...(input.offline === undefined ? {} : { offline: input.offline }),
   });
 }

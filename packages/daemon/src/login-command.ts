@@ -270,7 +270,6 @@ export async function loginCommand(
       authPath: ghostAuthPath(paths.agentDir),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !config.offline,
-      offline: config.offline,
     });
     const choice = await resolveProvider(rl, runtime, args);
 
