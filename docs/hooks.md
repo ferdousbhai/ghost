@@ -15,8 +15,9 @@ is awaited by Ghost rather than inferred from notification-only
 
 ## Configuration
 
-User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
-`~/.config/ghost/hooks.json`). Override the file with `GHOSTD_HOOKS`.
+User hooks live beside the daemon config, normally
+`~/.config/ghost/hooks.json`; `GHOSTD_CONFIG` moves both and `GHOSTD_HOOKS`
+names this file alone.
 
 ```json
 {
@@ -27,6 +28,7 @@ User hooks live in `$XDG_CONFIG_HOME/ghost/hooks.json` (normally
           {
             "type": "command",
             "command": "/absolute/path/to/advisory-context",
+            "name": "Advisory context",
             "timeout": 10
           }
         ]
@@ -52,7 +54,9 @@ replaces it; the shell's Hooks pane edits it through that route, and no
 restart is needed for those edits. An edit made to the file by hand still
 needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte, and a
-command's `timeout` (seconds) must be greater than 0 and at most 600.
+command's `timeout` (seconds, default 30) must be greater than 0 and at most
+600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
+event, and are what the Hooks pane shows.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 
@@ -75,7 +79,7 @@ then KILL after the grace period) and drains its pipes before the lifecycle
 boundary returns. A background grandchild therefore cannot outlive its hook or
 hold the daemon's hook promise open. Synchronous spawn failures, process-start
 errors, and unexpected command-runner rejection are generically logged and
-fail open for all three events; they never fail the owner turn or expose the
+fail open for both events; they never fail the owner turn or expose the
 command/error payload.
 
 ## `before_prompt` protocol
@@ -165,9 +169,8 @@ using stderr as the reason. Other exit codes, malformed output, thrown handlers,
 and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
-Ghost sets `stop_hook_active: true` on continuation passes. As with the native
-stop-hook conventions of Codex and Claude Code, the hook owns its continuation
-policy, and Ghost honors a blocking result up to `MAX_SESSION_STOP_CONTINUATIONS`
+Ghost sets `stop_hook_active: true` on continuation passes. The hook owns its
+continuation policy, and Ghost honors a blocking result up to `MAX_SESSION_STOP_CONTINUATIONS`
 times per owner turn (`hooks.ts`), then accepts the pass and logs it. Hook
 authors should still use `stop_hook_active` and normally stop after one
 revision. A continuation reason is in model
@@ -187,8 +190,8 @@ Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
 Event rows contain `{ event, count }`; hook rows contain
 `{ event, source, name, description }`, where `source` is `config` for a
 `hooks.json` command and `builtin` for an in-process registration made by a
-library embedder. Commands, source paths, arguments, prompts,
-injected context, errors, receipts, and scheduler state never cross that route.
+library embedder. Commands, source paths, arguments, prompts, injected context,
+and errors never cross that route.
 
 ## Editing
 

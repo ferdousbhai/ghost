@@ -182,14 +182,13 @@ describe("GhostHookRunner", () => {
     const runner = GhostHookRunner.fromConfig(config);
 
     await runner.register((api) => {
-      api.on("session_stop", () => {}, { name: "Review", settingsKey: "review" });
+      api.on("session_stop", () => {}, { name: "Review" });
     });
     expect(runner.status().hooks).toEqual([{
       event: "session_stop",
       source: "builtin",
       name: "Review",
       description: "Runs after the assistant pass and may continue it.",
-      settingsKey: "review",
     }]);
 
     for (const [document, message] of [
@@ -201,9 +200,6 @@ describe("GhostHookRunner", () => {
       await expect(runner.replaceConfig(document)).rejects.toThrow(message);
     }
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ hooks: {}, builtin: {} });
-    await expect(new GhostHookRunner().register((api) => {
-      api.on("before_prompt", () => {}, { settingsKey: "Nope" });
-    })).rejects.toThrow(/settingsKey must match/u);
   });
 
   it("has no configuration to replace when built without a file", async () => {

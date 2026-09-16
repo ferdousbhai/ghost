@@ -198,16 +198,15 @@ backup: Trash and snapper are undo, not retention.
 
 ## Runtime contract
 
-The session receives the Ghost character, first
-meeting policy, Omarchy computer-use policy, other-harnesses policy (the
-owner's agent CLIs run from Bash; their session and weekly windows are read
-from Omarchy's usage records; a limit ends in a handoff note in the owner's
-documents), scheduled-work policy, self-maintenance policy, and
-owner-context policy. The owner-context policy names the
-Documents directory in one sentence and nothing else about it. Owner
-documents are read only
-when relevant, with the runtime's own file and search tools, never injected
-automatically at session start.
+The session receives the Ghost character and the stable policy sections, whose
+authoritative list and per-section size ceilings are
+[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two of
+them carry contract the rest of this file relies on: the other-harnesses policy
+reads the owner's agent-CLI session and weekly windows from Omarchy's usage
+records and ends a limit in a handoff note in the owner's documents; the
+owner-context policy names the Documents directory in one sentence and nothing
+else about it. Owner documents are read only when relevant, with the runtime's
+own file and search tools, never injected automatically at session start.
 
 The operational cwd defaults to `settings.yml` `cwd:`, else the owner home.
 A conversation's `!cd` moves it and records the new cwd in its transcript. Ghost home

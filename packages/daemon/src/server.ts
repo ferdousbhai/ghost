@@ -156,12 +156,11 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, source, name, description, settingsKey }) => ({
+    hooks: status.hooks.map(({ event, source, name, description }) => ({
       event,
       source,
       name,
       description,
-      ...(source === "builtin" && settingsKey !== undefined ? { settingsKey } : {}),
     })),
   };
 }

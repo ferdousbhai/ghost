@@ -46,7 +46,9 @@ Response: `{ "id": <n>, "ok": true, "result": { ... } }`
 
 Client errors retain the requested `op`. An unavailable helper/pipe is
 `not_found`, a deadline or line-size ceiling is `limit_exceeded`, and a
-malformed handshake/response is `invalid_format`.
+malformed handshake/response is `invalid_format`. The TS client re-codes what
+the sidecar returns onto that same vocabulary: `capability` becomes
+`not_found`, everything else `invalid_format`.
 
 The sidecar's own `error.code` vocabulary, which the TS client and the model
 must both handle:
@@ -70,46 +72,57 @@ say why.
 
 ## Ops
 
-Windows / desktop state
-- `see` `{ name? }` → windows matching (address, title, class, workspace, geometry, focused).
-- `state` → condensed clients + workspaces + activewindow (the same shape `ghost_desktop` state returns, sourced here).
-- `layers` → wlr-layer-shell surfaces with logical geometry + scale.
-- `toplevels` → `ext-foreign-toplevel-list-v1` list (background-capturable).
+`protocol.py` is the argument list; it validates every field and is the only
+place the exact shapes are written down. What each group guarantees:
 
-Accessibility (AT-SPI)
-- `ax_query` `{ app?, role?, text?, attributes? }` → matching elements (role, name, text, bounds, actions, id/path). Unified GTK3/4 role vocabulary; refuse unknown roles and list valid ones.
-- `ax_roles` `{ app }` → available roles for an app.
-- `ax_perform` `{ ref, action }` → invoke a semantic action (press, click, expand, …). Returns honesty metadata.
-- `ax_set` `{ ref, attribute, value }` → set an attribute (e.g. text value).
-- `hit_test` `{ x, y, app? }` → resolve a screen coordinate to the AT-SPI element under it, minting a fresh `ref`. Closes the screenshot→coordinate→semantic-ref loop; refuses (rather than guesses) when no node offers trustworthy bounds.
+**Windows / desktop state** — `see`, `state`, `layers`, `toplevels`. Read-only
+views of Hyprland clients, workspaces, layer surfaces, and the
+`ext-foreign-toplevel-list-v1` list that says what is background-capturable.
 
-Input (layout-safe)
-- `key` `{ chord }` → keyboard chord. Prefer AT-SPI action / `hyprctl sendshortcut`; fall back to `ydotool` (flag layout-unsafe in warnings).
-- `type` `{ text, ref?, replace? }` → text via AT-SPI insert or `wtype` (layout-safe). `replace: true` overwrites the field instead of inserting.
-- `click` `{ x, y } | { ref }`, `{ button?, clicks? }` → pointer click (ref resolves via AT-SPI bounds). `button` is left/right/middle; `clicks` ≥ 2 is a multi-click.
-- `drag` `{ x1, y1, x2, y2, app?, button?, coordinate_space?, steps? }` → press at the start, move through interpolated waypoints (so canvas / drag-and-drop targets see the motion events), release at the end, inside one transaction.
-- `scroll` `{ delta_y, delta_x?, x?, y?, app?, coordinate_space? }` → wheel the focused window (positive `delta_y` scrolls up); optionally park the pointer over `{x, y}` first. Never background-safe — it moves on-screen content.
-- `mouse_move` `{ x, y, app?, coordinate_space? }` → park the pointer at a coordinate (a hover). Unlike click/drag the pointer is **left there**, not restored; it rides a no-cursor-restore transaction that keeps every other guardrail (lock, focus/workspace restore).
+**Accessibility (AT-SPI)** — `ax_query`, `ax_roles`, `ax_perform`, `ax_set`,
+`hit_test`. A unified GTK3/4 role vocabulary: an unknown role is refused with
+the valid ones listed, never guessed. `hit_test` resolves a screen coordinate
+to the element under it and mints a fresh `ref`, closing the
+screenshot -> coordinate -> semantic-ref loop; it refuses rather than guesses
+when no node offers trustworthy bounds.
 
-Capture (the ladder + honesty)
-- `capture` `{ target: "window", name?, address? }` → PNG bytes (base64) via the 3-tier window ladder: grim foreign-toplevel (background-safe) → headless-output → focused-region (visible, background_safe=false). Every capture result also carries `model_png_base64` with `model_width`/`model_height`/`model_scale` when the capture was scaled for the model (`model_image.py`): to the monitor's logical size (physical ÷ scale, so image coordinates are the desktop coordinates input ops take) and within a 1568 px long edge, where vision providers downsample anyway. `png_base64` is always the full capture, and the field is absent when nothing changed.
-- `capture` `{ target: "screen", output? }` and `{ target: "region", region }` deliberately bypass the window router: direct `grim -o` / `grim -g` reads already-composited pixels without selecting, focusing, or moving a window. Results identify `grim-output` / `grim-region`; region capture warns that occluded content is absent.
+**Input (layout-safe)** — `key`, `type`, `click`, `drag`, `scroll`,
+`mouse_move`. Semantic paths first (AT-SPI action, `hyprctl sendshortcut`,
+`wtype`), falling back to `ydotool` with a layout-unsafe warning. `drag`
+interpolates waypoints so canvas targets see the motion. `scroll` is never
+background-safe — it moves on-screen content. `mouse_move` leaves the pointer
+where it put it; every other pointer op restores it.
+
+**Capture** — `capture` over a window, a screen, or a region. A window goes
+through the 3-tier ladder: grim foreign-toplevel (background-safe) ->
+headless-output -> focused-region (visible, `background_safe=false`). Screen and
+region deliberately bypass the router, reading already-composited pixels with
+`grim -o` / `grim -g` without selecting, focusing, or moving anything; region
+capture warns that occluded content is absent. A result carries
+`model_png_base64` plus `model_width`/`model_height`/`model_scale` when the
+capture was scaled for the model (`model_image.py`) — to the monitor's logical
+size, so image coordinates *are* the desktop coordinates input ops take, and
+within a 1568 px long edge. `png_base64` is always the full capture.
+
+**Compositor control** — `focus`, `workspace`. Dispatcher-grammar correct: an
+`hl.dsp.no_op()` probe picks `legacy-string` (pre-0.56) or `lua-table` (0.56+),
+and `OMAHARNESS_DISPATCH_API` overrides it. There is deliberately no `exec`:
+the helper is desktop control, and the runtime owns shell execution.
 
 Every path reports full honesty metadata, refuses blank output, and bounds the
 producer PNG to 8 MiB through a size-verified stream before encoding.
 
-Compositor control (dispatcher-grammar correct — auto-detect 0.55 string vs 0.56+ `hl.dsp.*` Lua grammar via an `hl.dsp.no_op()` probe; env override `OMAHARNESS_DISPATCH_API`-style)
-- `focus` `{ address | name }` → focus a window.
-- `workspace` `{ id | name }` → switch workspace.
-- (No `exec` here — the helper stays scoped to desktop control, not arbitrary
-  process launch. The principal runtime owns shell execution: each runtime
-  keeps its own native Bash. The
-  helper's value is the GUI/Wayland/accessibility reach either shell lacks,
-  with honesty metadata and lock-safe routing.)
-
 Safety
-- Mutating ops (input, ax_perform/set, focus, workspace) refuse when the session is locked (check `hyprctl`/`logind`; fail closed if unknown).
-- `fcntl` transaction locking serializes snapshot/restore (focused-region capture) so concurrent calls can't interleave; report a focus-restore race rather than yanking the cursor.
+- Every mutating op (`key`, `type`, `click`, `drag`, `scroll`, `mouse_move`,
+  `ax_perform`, `ax_set`, `focus`, `workspace`) refuses when the session is
+  locked — and when neither Hyprland nor logind can say whether it is, so the
+  unknown case fails closed. `hit_test` is a read, like `ax_query`.
+- The one path that must temporarily change compositor state (focused-region
+  capture, injected input) takes a single-writer `fcntl` lock under
+  `$XDG_RUNTIME_DIR`, snapshots focus/workspace/cursor, works, restores, and
+  reports the interference. Concurrent calls cannot interleave their
+  snapshot/restore windows, and an owner who moved the pointer mid-flight gets
+  a reported race rather than a yanked cursor.
 
 ## TS integration
 

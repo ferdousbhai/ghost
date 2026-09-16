@@ -252,7 +252,6 @@ describe("GET /api/hooks", () => {
           source: "builtin",
           name: "Review",
           description: "Reviews the pass.",
-          settingsKey: "review",
         },
       ],
     };
@@ -294,7 +293,6 @@ describe("GET /api/hooks", () => {
           source: "builtin",
           name: "Review",
           description: "Reviews the pass.",
-          settingsKey: "review",
         },
       ],
     });

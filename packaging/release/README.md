@@ -85,8 +85,8 @@ Two things do not follow the tag on their own:
 - **A checkout install** (`~/.local/bin/ghostd` pointing at a clone, see
   [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md)) is
   updated by the command `ghost status` prints on its `update` line: a
-  fast-forward pull, `pnpm install --frozen-lockfile`, `pnpm build`, and a
-  restart of both user units. The daemon checks for releases at boot and daily,
+  fast-forward pull, `pnpm install --frozen-lockfile`, `pnpm build`, a daemon
+  restart, and `omarchy-restart-shell`. The daemon checks for releases at boot and daily,
   so the line appears within a day, or at once after a daemon restart.
 
 `ghost-dev` remains the checkout-only rolling recipe under

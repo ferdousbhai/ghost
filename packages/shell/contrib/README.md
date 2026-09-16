@@ -17,8 +17,8 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable ferdousbhai.ghost
 ```
 
-From a checkout, link `packages/shell/qml` instead of `/usr/share/ghost/plugin`
-and every save reloads the plugin in the running shell.
+From a checkout, link `packages/shell/qml` instead of `/usr/share/ghost/plugin`.
+A save does not reload it; `omarchy-restart-shell` does.
 
 `omarchy plugin list` shows it; `omarchy plugin disable ferdousbhai.ghost`
 turns it off without removing anything.

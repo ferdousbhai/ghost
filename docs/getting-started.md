@@ -42,9 +42,8 @@ sudo pacman -U ghost-dev-*.pkg.tar.zst
 
 `makepkg` builds from a fresh clone of the branch, runs the full test suite in
 `check()`, and stages the payload. Installing it puts `/usr/bin/ghostd` and
-`/usr/bin/ghost` on your PATH, the Quickshell config at
-`/usr/share/ghost/quickshell` (exposed as the system config `ghost`), the
-browser relay at `/usr/share/ghost/chromium-extension`, and the two user units
+`/usr/bin/ghost` on your PATH, the HUD plugin at `/usr/share/ghost/plugin`, the
+browser relay at `/usr/share/ghost/chromium-extension`, and `ghostd.service`
 under `/usr/lib/systemd/user/`. It creates nothing in your home directory.
 
 The post-install hook prints the relay path and the enable command. Details, dependency reasoning, and the uninstall path are in
@@ -103,8 +102,8 @@ ghost list
 HUD: in the left sidebar (`Ctrl+B` toggles it), click the `+` in the **Ghosts**
 header, type a name, press Enter.
 
-Either route posts to the same daemon route and writes exactly two things:
-`~/ghosts/sage/character.md` (a seed).
+Either route posts to the same daemon route, which creates `~/ghosts/sage/`
+with a seeded `character.md`.
 Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, and may not
 start with a dot. The directory name *is* the ghost's name.
 

@@ -79,8 +79,6 @@ export interface GhostHookStatusItem {
   source: GhostHookSource;
   name: string;
   description: string;
-  /** The `builtin.<key>` entry of `hooks.json` that tunes this built-in hook. */
-  settingsKey?: string;
 }
 
 /** The admitted `hooks.json` document and where it lives. */
@@ -121,8 +119,6 @@ export interface GhostHookRegistrationOptions {
   name?: string;
   description?: string;
   timeoutSeconds?: number;
-  /** Names the `builtin.<key>` entry of `hooks.json` that tunes this hook. */
-  settingsKey?: string;
 }
 
 export interface GhostHookAPI {
@@ -154,7 +150,6 @@ interface RegisteredHook {
   name: string;
   description: string;
   timeoutMs: number;
-  settingsKey?: string;
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
@@ -594,12 +589,6 @@ export class GhostHookRunner {
           ),
           timeoutMs: timeoutMs(options.timeoutSeconds, this.handlerTimeoutMs, `${event} timeoutSeconds`),
         };
-        if (options.settingsKey !== undefined) {
-          if (!SETTINGS_KEY.test(options.settingsKey)) {
-            throw new Error("settingsKey must match [a-z][a-z0-9_]*.");
-          }
-          registered.settingsKey = options.settingsKey;
-        }
         this.handlers[event].push(registered);
       },
     } as GhostHookAPI);
@@ -643,7 +632,6 @@ export class GhostHookRunner {
           source: "builtin",
           name: hook.name,
           description: hook.description,
-          ...(hook.settingsKey === undefined ? {} : { settingsKey: hook.settingsKey }),
         });
       }
       for (const hook of this.commands.filter((command) => command.eventName === event)) {

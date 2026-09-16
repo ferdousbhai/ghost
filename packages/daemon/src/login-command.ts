@@ -280,7 +280,7 @@ export async function loginCommand(
     const bound = await bindDefaultChatModelIfUnset(paths.home, runtime, choice.id);
     out(`\n✓ ${ghost.name} is signed in to ${choice.name}.`);
     if (bound) out(`  Chat model set to ${bound.provider}/${bound.modelId}.`);
-    else out("  Pick a model in the shell, or set roles.chat_model in models.json.");
+    else out("  Pick a model with `ghost model <provider>/<id>`, or set roles.chat_model in models.json.");
     return 0;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

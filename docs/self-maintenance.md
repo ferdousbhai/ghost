@@ -124,9 +124,8 @@ What the ghost does:
 The restart is one `systemd-run --user` command in its own transient unit, so
 the daemon stopping cannot take the restarter with it. The exact command,
 including the wait for the daemon to listen again and the `ghost say` wake back
-into the asking conversation, is the policy text the ghost is given: read
-`renderSelfMaintenancePolicy` in
-[`self-maintenance.ts`](../packages/daemon/src/self-maintenance.ts). The
+into the asking conversation, is what `ghost help self` prints:
+[`help-topics.ts`](../packages/daemon/src/help-topics.ts). The
 shutdown drain is in [`main.ts`](../packages/daemon/src/main.ts) and the unit's
 `TimeoutStopSec` in
 [`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the
@@ -199,7 +198,8 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 The daemon asks GitHub for the latest release once shortly after boot and
 then daily, and `GET /api/status` carries the answer as `update`. `ghost
 status` prints it as one line with the exact command for this install
-(`omarchy-update` for the package; a pull, build, and restart for a checkout),
+(`omarchy-update` for the package; a pull, build, daemon restart, and
+`omarchy-restart-shell` for a checkout),
 the HUD shows the same line above the conversation and copies the command on a
 click, and the ghost's policy tells it to say an update is available and to run
 that command only when the owner asks. `--offline` skips the check. Nothing

@@ -13,7 +13,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - **owner** — the one person this machine and its ghosts belong to. There is no other user role.
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **runtime** — the agent harness a conversation runs on. There is one: pi.
-- **daemon** (`ghostd`) — the HTTP API that owns sessions; **HUD** — the Quickshell desktop shell that talks to it.
+- **daemon** (`ghostd`) — the HTTP API that owns sessions; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
 - **relay** — the opt-in Chromium extension; **helper** — the Python computer-use sidecar.
 
 ## Taste
@@ -43,13 +43,13 @@ The common defect here is a change that works on the path you tested and is miss
 
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
-- `packages/daemon/src/models.ts` and `packages/daemon/src/model-selection.ts` — model roles and the chat-model binding
+- `packages/daemon/src/models.ts`, `model-selection.ts`, `model-routing.ts`, `smol.ts` — model roles, the chat-model binding, and which model a role resolves to
 - `packages/daemon/src/hooks.ts` — harness hooks
 - `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
-- `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` and `docs/desktop-helper.md` — sidecar protocols
+- `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` — the owner command-hook protocol; `docs/desktop-helper.md` — the sidecar protocol
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
 

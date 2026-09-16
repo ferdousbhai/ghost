@@ -6,7 +6,7 @@ that are not obvious from the code, and which absences are deliberate.
 its tests is the behavior; nothing here restates either. For the first install
 and first conversation, see [getting-started.md](getting-started.md).
 
-Status and unfinished work live in GitHub issues (#17 is the beta gate).
+Status and unfinished work live in GitHub issues.
 
 ## One owner, one machine
 
@@ -109,11 +109,11 @@ screen, desktop, MCP, and context windows (`new_context`, `history`) in place of
 summarizing compaction. Background work is shell work: a detached command that
 ends with `ghost say --follow-up`.
 
-The session receives the Ghost-owned context: character, first-meeting
-policy, computer-use policy, other-harnesses policy (delegate from Bash,
-check Omarchy's usage windows first, hand off through documents on a limit),
-scheduled-work policy, self-maintenance policy, hooks policy, and
-owner-context policy.
+The session receives the Ghost-owned context: the character and the stable
+policy sections, listed in `prompt-budget.test.ts`. The shape they share is
+that each one tells the ghost what it may do without asking — delegate from
+Bash after checking Omarchy's usage windows, hand off through documents on a
+limit, restart itself, read the owner's Documents when relevant.
 
 ### Why one runtime
 
@@ -176,7 +176,7 @@ none. The protocol is in [hooks.md](hooks.md).
   meant to be an open-source model: local on the owner's device, or hosted
   with one LoRA adapter per ghost. Frontier models are reached through the
   specialist CLIs the ghost runs from Bash (`claude -p`, `codex`, `pi`), not
-  through a model role of Ghost's own: a teacher role existed and was removed
+  through a model role of Ghost's own: `advisor_model` existed and was removed
   once nothing but image reading depended on it. Owner `session_stop` hooks are
   the training signal for any
   continual-learning loop an owner builds outside the core (#64); Ghost keeps

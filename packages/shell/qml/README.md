@@ -22,8 +22,9 @@ There is deliberately no `omarchy plugin add` git checkout of this: a second
 channel cannot keep the window and the daemon on the same version, and a
 checkout that shadows the packaged copy is a skew nobody would see.
 
-From a checkout, link `packages/shell/qml` instead and every save reloads the
-plugin in the running shell.
+From a checkout, link `packages/shell/qml` instead. A save does not reload it:
+the entry-point URL is unchanged, so the shell keeps the widget it loaded.
+Only `omarchy-restart-shell` replaces it.
 
 ## Use
 

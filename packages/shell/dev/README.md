@@ -59,7 +59,7 @@ omarchy-shell ghost section hooks
 omarchy-shell ghost ask "who lives here?"
 
 # Hyprland 0.56 requires Lua dispatcher expressions.
-hyprctl dispatch 'hl.dsp.focus({ window = "class:ghost" })'
+hyprctl dispatch 'hl.dsp.focus({ window = "title:^Ghost( — .*)?$" })'
 hyprctl dispatch 'hl.dsp.exec_cmd("notify-send preview")'
 ```
 
@@ -90,12 +90,12 @@ stop the mock separately.
 - **The component maps nothing until `open`.** The HUD is a `FloatingWindow`
   bound to `visible: false`; `preview.sh` calls the IPC `open` method after the
   isolated shell is ready.
-- On `open`: a 998×620 window (app-id `ghost`) that Hyprland tiles into the
+- On `open`: a 998×620 window that Hyprland tiles into the
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Character / Commands / Hooks / Resources /
-  MCP / Remote access rail at the right edge. `SUPER+CTRL+G` is
+  bottom, and the permanent Chat / Character / Commands / Hooks / MCP / Board /
+  Remote access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`.
   Commands shows the session's searchable Ghost catalog and stages a chosen slash
@@ -118,9 +118,10 @@ stop the mock separately.
 - With the HUD closed, a finished turn raises a `notify-send` notification
   instead.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
-  dismissed with Esc; use `SUPER+CTRL+G` or the tray).
-- `hyprctl clients -j` lists it as a real toplevel with `class: "ghost"` — it is
-  NOT in `hyprctl layers`. `SHIFT+SUPER+<n>` moves it between workspaces.
+  dismissed with Esc; use `SUPER+CTRL+G`).
+- `hyprctl clients -j` lists it as a real toplevel — it is NOT in
+  `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
+  on title (`^Ghost( — .*)?$`), not on class. `SHIFT+SUPER+<n>` moves it between workspaces.
 
 `dev/evidence/ghost-hud.png` is a capture of the HUD (from its earlier
 layer-shell incarnation; the card contents are unchanged).

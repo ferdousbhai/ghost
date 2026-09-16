@@ -30,91 +30,13 @@ semantic, fall back to a screenshot + vision.
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
 already has the harness's native Bash.
 
-## Transport
+## Protocol
 
-One process. One request object per line in, one response object per line out,
-correlated by `id`. Stderr is logs.
-
-```
-request:  {"id": <n>, "op": "<name>", "args": { ... }}
-response: {"id": <n>, "ok": true,  "result": { ... }}
-          {"id": <n>, "ok": false, "error": {"code": "...", "message": "...", "details": {}}}
-```
-
-On startup the helper emits an unsolicited `hello` line (also available as the
-`hello` op) reporting helper version, Hyprland version, the detected dispatcher
-grammar, and which backends are actually available:
-
-```json
-{"type":"hello","helper":"ghost-desktop-helper","version":"0.1.0","protocol":2,
- "ops":[...], "in_hyprland_session":true,
- "hyprland-version":{"tag":"v0.56.2", ...},
- "detected-dispatch-grammar":{"generation":"lua-table","detected_by":"probe",
-   "evidence":"hyprctl dispatch 'hl.dsp.no_op()' accepted", "dispatchers":{...}},
- "available-backends":{"hyprctl":{...},"grim":{...,"foreign_toplevel":true},
-   "wtype":{...},"ydotool":{...,"usable":false},"atspi":{"available":true,...},
-   "foreign_toplevel_protocol":{"supported":true}}}
-```
-
-Every **capture / input / perform** result carries honesty metadata:
-
-```json
-{"backend":"grim-foreign-toplevel","background_safe":true,
- "interference":[],"warnings":[]}
-```
-
-The helper **refuses rather than fakes**: a missing backend, a locked session,
-or an unreadable value is a structured error with remediation, never a blank
-screenshot or an empty tree dressed up as success.
-
-## Ops
-
-The op vocabulary, arguments, and error codes are the contract in
-[`docs/desktop-helper.md`](../../docs/desktop-helper.md); `hello` advertises
-the ops a running helper actually supports. The table below is a summary.
-
-| Op | Args | Result |
-|----|------|--------|
-| `see` | `{name?}` | windows matching (address, title, class, workspace, geometry, focused) |
-| `state` | — | condensed clients + workspaces + activeworkspace + activewindow + monitors |
-| `layers` | `{namespace?, output?}` | wlr-layer-shell surfaces with logical geometry |
-| `toplevels` | `{timeout?}` | `ext-foreign-toplevel-list-v1` list reconciled with hyprctl clients |
-| `ax_query` | `{app?, role?, text?, attributes?, limit?}` | matching AT-SPI elements (role, name, text, bounds, actions, `ref`) |
-| `ax_roles` | `{app?}` | role → count for an app's tree |
-| `ax_perform` | `{ref, action}` | invoke a semantic action; honesty metadata |
-| `ax_set` | `{ref, attribute, value}` | set `text` / `value` / `focused`; honesty metadata |
-| `hit_test` | `{x, y, app?}` | resolve a screen coordinate to the AT-SPI element under it, minting a fresh `ref`; refuses when no node has trustworthy bounds |
-| `key` | `{chord, app?, prefer_dispatch?}` | keyboard chord (sendshortcut, else ydotool); honesty metadata |
-| `type` | `{text, app?, ref?, replace?}` | text via AT-SPI insert or `wtype`; `replace` overwrites; honesty metadata |
-| `click` | `{x, y, coordinate_space?} \| {ref}`, `{button?, clicks?}` | pointer click (ref resolves via AT-SPI bounds); `button` left/right/middle, `clicks` for multi-click; honesty metadata |
-| `drag` | `{x1, y1, x2, y2, app?, button?, coordinate_space?, steps?}` | press → move through interpolated waypoints → release (canvas / drag-and-drop); honesty metadata |
-| `scroll` | `{delta_y, delta_x?, x?, y?, app?, coordinate_space?}` | wheel the focused window (positive `delta_y` up), optionally over `{x, y}`; never background-safe; honesty metadata |
-| `mouse_move` | `{x, y, app?, coordinate_space?}` | park the pointer at a coordinate (a hover); left there, not restored; honesty metadata |
-| `capture` | `{target:"window"\|"screen"\|"region", name?, address?, region?, output?}` | base64 PNG; window uses the 3-tier ladder, while screen/region directly read composited pixels with provenance; producer output is limited to 8 MiB |
-| `focus` | `{address \| name}` | focus a window; honesty metadata |
-| `workspace` | `{id \| name}` | switch workspace; honesty metadata |
-| `hello` | — | the complete diagnostic/handshake payload above; degraded backends include reasons |
-
-Roles use a unified GTK3/4 vocabulary (`push button` and `button` fold to one);
-`ax_query` refuses an unknown role and lists the ones actually present.
-
-Element `ref`s are opaque `"epoch:index"` strings minted by the most recent
-`ax_query` / `ax_roles` snapshot (the epoch bumps on every new snapshot, so a
-ref from an earlier one is detectably stale rather than silently redirected).
-Pass a ref back verbatim; take a fresh snapshot before reusing them.
-
-### Safety
-
-- **Session lock, fail closed.** Every mutating op (`key`, `type`, `click`,
-  `drag`, `scroll`, `mouse_move`, `ax_perform`, `ax_set`, `focus`, `workspace`)
-  refuses when the session is locked — or when neither Hyprland nor logind can
-  say whether it is. (`hit_test` is a read, like `ax_query`.)
-- **`fcntl` transaction locking.** The one path that must temporarily change
-  compositor state (focused-region capture, injected input) takes a
-  single-writer lock under `$XDG_RUNTIME_DIR`, snapshots focus/workspace/cursor,
-  does the work, restores, and reports the interference. Concurrent calls cannot
-  interleave their snapshot/restore windows; a user who moved the pointer
-  mid-flight gets a reported race, not a yanked cursor.
+The transport, the op set, the error vocabulary, and the safety rules are one
+contract, written once in
+[`docs/desktop-helper.md`](../../docs/desktop-helper.md) and validated in
+[`protocol.py`](src/ghost_desktop_helper/protocol.py). This package builds and
+runs the process that speaks it.
 
 ## Hyprland dispatcher grammar (the core fix)
 

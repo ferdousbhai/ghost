@@ -37,7 +37,7 @@ Ghost was upgraded. Re-enable and restart the user services so an older
 default.target link is replaced by the graphical-session.target lifecycle:
 
   systemctl --user reenable --now ghostd.service
-  omarchy-shell shell rescanPlugins
+  omarchy-restart-shell
 
 No files under ~/ghosts, ~/.config/ghost, or ~/.local/state/ghost were changed
 by the package upgrade.

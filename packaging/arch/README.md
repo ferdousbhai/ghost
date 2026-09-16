@@ -76,8 +76,11 @@ untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 
 An upgrade requires `systemctl --user reenable --now ghostd.service` and
-`omarchy-shell shell rescanPlugins`; re-enabling also moves an installation made with the old
+`omarchy-restart-shell`; re-enabling also moves an installation made with the old
 daemon unit away from `default.target` and into the graphical-session lifecycle.
+A rescan will not do here: the plugin's entry point is unchanged, so the shell
+keeps the widget it already loaded and the owner runs a new daemon behind an
+old HUD.
 A package rollback uses the normal pacman cache
 (`pacman -U /var/cache/pacman/pkg/<package>.pkg.tar.zst`) and likewise does not
 roll back or delete user data. Ghost-home format changes must remain

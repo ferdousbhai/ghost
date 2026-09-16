@@ -13,13 +13,15 @@ Detection is a defense-in-depth signal rather than proof that content is safe. T
 Install the optional runtime:
 
 ```sh
-pnpm add @huggingface/transformers
+pnpm --filter @ghost/extensions add @huggingface/transformers
 ```
 
-Set `GHOST_INJECTION_MODEL` to a Transformers.js-compatible Meta Prompt Guard 2 model or to `protectai/deberta-v3-base-prompt-injection-v2`. For example:
+The detector runs inside `ghostd`, so set `GHOST_INJECTION_MODEL` in the daemon's environment — a Transformers.js-compatible Meta Prompt Guard 2 model, or:
 
 ```sh
-GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2 ghost
+systemctl --user set-environment \
+  GHOST_INJECTION_MODEL=protectai/deberta-v3-base-prompt-injection-v2
+systemctl --user restart ghostd.service
 ```
 
 `GHOST_INJECTION_THRESHOLD` optionally sets the classifier flag threshold from 0 to 1; it defaults to `0.5`. If no model is configured, the classifier remains disabled and does not download a model.
