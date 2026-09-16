@@ -115,22 +115,21 @@ function startLogin(base: string): Promise<Response> {
 
 function deferredFilesystemRuntime(): {
   createRuntime: NonNullable<LoginManagerOptions["createRuntime"]>;
-  constructionStarted: Promise<{ authPath: string }>;
+  constructionStarted: Promise<{ modelsPath: string }>;
   finishConstruction: () => void;
   marker: string;
   calls: () => number;
 } {
-  const started = deferred<{ authPath: string }>();
+  const started = deferred<{ modelsPath: string }>();
   const finish = deferred();
   const marker = "runtime-opened";
   let calls = 0;
   return {
     createRuntime: async (input) => {
       calls += 1;
-      started.resolve({ authPath: input.authPath });
+      started.resolve({ modelsPath: input.modelsPath });
       await finish.promise;
-      mkdirSync(dirname(input.authPath), { recursive: true });
-      writeFileSync(join(dirname(input.authPath), marker), "ready", "utf8");
+      writeFileSync(join(dirname(input.modelsPath), marker), "ready", "utf8");
       return makeFakeRuntime({
         login: async (_providerId, _authType, interaction) => {
           await interaction.prompt({ type: "secret", message: "Paste the API key" });
@@ -323,7 +322,11 @@ describe("POST /api/ghosts/:name/login", () => {
     expect(done.modelBound).toEqual({ provider: "openrouter", modelId: "m-1" });
 
     const bob = ghostPaths(join(temp!.root, "bob"));
-    expect(readFileSync(join(bob.agentDir, "auth.json"), "utf8")).toContain("sk-after-rename");
+    // The credential is the owner's, so it lands in the user-level store and
+    // not inside the ghost that happened to sign in.
+    const userStore = join(process.env.PI_CODING_AGENT_DIR ?? "", "auth.json");
+    expect(readFileSync(userStore, "utf8")).toContain("sk-after-rename");
+    expect(existsSync(join(bob.agentDir, "auth.json"))).toBe(false);
     expect(readFileSync(join(bob.home, "models.json"), "utf8")).not.toContain("sk-after-rename");
     expect(readGhostModels(bob.home)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "m-1" });
@@ -368,7 +371,6 @@ describe("whole-home moves during login runtime construction", () => {
     const runtime = deferredFilesystemRuntime();
     const base = await serveWithRuntime(runtime.createRuntime);
     const starting = startLogin(base);
-    const { authPath } = await runtime.constructionStarted;
 
     const renaming = fetch(`${base}/api/ghosts/casper/name`, {
       method: "PUT",
@@ -391,8 +393,7 @@ describe("whole-home moves during login runtime construction", () => {
     expect((await fetch(`${base}/api/ghosts/bob/login/${loginId}`)).status).toBe(404);
 
     expect(existsSync(join(temp!.root, "casper"))).toBe(false);
-    expect(existsSync(join(temp!.root, "bob", ".pi", runtime.marker))).toBe(true);
-    expect(dirname(authPath)).toBe(join(temp!.root, "casper", ".pi"));
+    expect(existsSync(join(temp!.root, "bob", runtime.marker))).toBe(true);
     expect(login?.moveReservationCount).toBe(0);
   });
 
@@ -418,7 +419,7 @@ describe("whole-home moves during login runtime construction", () => {
     const { trash } = (await deleted.json()) as { trash: string };
 
     expect(existsSync(join(temp!.root, "casper"))).toBe(false);
-    expect(existsSync(join(trash, ".pi", runtime.marker))).toBe(true);
+    expect(existsSync(join(trash, runtime.marker))).toBe(true);
     expect(login?.size).toBe(0);
     expect(login?.moveReservationCount).toBe(0);
 

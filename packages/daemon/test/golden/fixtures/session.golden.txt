@@ -283,7 +283,7 @@ write          registry=yes  wire=yes  invokable=yes
 [ghost home after the conversation]
 ------------------------------------------------------------------------------
 --- .pi/ (contents not compared) ---
-auth.json, models-store.json, models.pi.json
+models-store.json, models.pi.json
 --- sessions/ (contents not compared) ---
 conv-golden.jsonl, conv-golden.pi.tool-cwds.json
 --- character.md ---

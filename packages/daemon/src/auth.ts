@@ -8,7 +8,7 @@ import {
 } from "./home-operations.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
-  ghostAuthPath,
+  userAuthPath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
@@ -382,7 +382,7 @@ export class LoginManager {
   private buildRuntime(ghostDir: string): Promise<LoginRuntime> {
     const paths = ghostPaths(ghostDir);
     return this.createRuntime({
-      authPath: ghostAuthPath(paths.agentDir),
+      authPath: userAuthPath(),
       modelsPath: ghostModelsPath(paths.home),
       offline: this.offline,
     });

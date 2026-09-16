@@ -126,8 +126,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
         createRuntime: async (input) => {
           entered.resolve();
           await resume.promise;
-          mkdirSync(dirname(input.authPath), { recursive: true });
-          writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
+                    writeFileSync(join(dirname(input.modelsPath), probeName), "leased\n");
           throw new Error("intentional greeting runtime failure");
         },
       },
@@ -159,7 +158,7 @@ describe("POST /api/ghosts/:name/greeting", () => {
     expect(deleted.status).toBe(200);
     const { trash } = await deleted.json() as { trash: string };
     expect(existsSync(oldHome)).toBe(false);
-    expect(existsSync(join(ghostPaths(trash).agentDir, probeName))).toBe(true);
+    expect(existsSync(join(trash, probeName))).toBe(true);
   });
 
   it("answers 200 with a null greeting when no model can write one", async () => {

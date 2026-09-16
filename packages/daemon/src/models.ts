@@ -6,6 +6,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   fsyncPath,
@@ -141,8 +142,18 @@ export function ghostModelsPath(configDir: string): string {
   return join(configDir, MODELS_FILENAME);
 }
 
-export function ghostAuthPath(agentDir: string): string {
-  return join(agentDir, AUTH_FILENAME);
+/**
+ * pi's user-level credential store, shared by every ghost.
+ *
+ * A credential belongs to the person, not to a persona: signing the same
+ * account in once per ghost is bookkeeping, not isolation, and a ghost that
+ * skipped it reads as broken rather than sandboxed — its `chat_model` names a
+ * provider it has no key for. pi already keeps one store here and honours
+ * `PI_CODING_AGENT_DIR` over it; pointing a ghost at its own file meant Ghost
+ * ignored credentials its owner had already signed in with.
+ */
+export function userAuthPath(): string {
+  return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), AUTH_FILENAME);
 }
 
 export function ghostModelsLockPath(configDir: string): string {

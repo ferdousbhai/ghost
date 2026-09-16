@@ -10,11 +10,11 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  ghostAuthPath,
+  userAuthPath,
   ghostModelsLockPath,
   ghostModelsPath,
   GhostModelsWriteConflictError,
@@ -428,7 +428,7 @@ describe("Pi runtime compatibility", () => {
       }),
     );
     const runtime = await createGhostPiRuntime({
-      authPath: ghostAuthPath(agentDir),
+      authPath: join(agentDir, "auth.json"),
       modelsPath: ghostModelsPath(agentDir),
       allowModelNetwork: false,
     });
@@ -439,9 +439,26 @@ describe("Pi runtime compatibility", () => {
     runtime.close();
   });
 
-  it("reads pi's auth.json as the ghost's credential store", async () => {
+  it("takes credentials from pi's user-level store, not from inside the ghost", () => {
+    // A credential belongs to the person. Every ghost resolving to the same
+    // store is what makes "sign in once" true; the per-ghost file is why a
+    // second ghost could name a provider it had no key for.
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    try {
+      process.env.PI_CODING_AGENT_DIR = "/tmp/pi-agent-fixture";
+      expect(userAuthPath()).toBe("/tmp/pi-agent-fixture/auth.json");
+      expect(userAuthPath()).not.toContain("ghosts");
+      delete process.env.PI_CODING_AGENT_DIR;
+      expect(userAuthPath()).toBe(join(homedir(), ".pi", "agent", "auth.json"));
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+    }
+  });
+
+  it("reads pi's auth.json as the credential store", async () => {
     const agentDir = makeAgentDir();
-    const authPath = ghostAuthPath(agentDir);
+    const authPath = join(agentDir, "auth.json");
     writeFileSync(authPath, JSON.stringify({
       openrouter: { type: "api_key", key: "stored-secret" },
     }), { encoding: "utf8", mode: 0o600 });

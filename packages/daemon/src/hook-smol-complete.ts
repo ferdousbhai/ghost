@@ -4,7 +4,7 @@ import { realpath } from "node:fs/promises";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { ghostPaths, isGhostHome } from "./ghosts.js";
 import {
-  ghostAuthPath,
+  userAuthPath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
@@ -66,7 +66,7 @@ export async function completeHookSmol(
 
   const runtimeFactory = options.runtimeFactory ?? createGhostPiRuntime;
   const runtime = await runtimeFactory({
-    authPath: ghostAuthPath(paths.agentDir),
+    authPath: userAuthPath(),
     modelsPath: ghostModelsPath(paths.home),
     allowModelNetwork: false,
   });

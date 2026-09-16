@@ -16,7 +16,7 @@ import {
   HomeReservationBusyError,
   type HomeReservation,
 } from "./home-reservation.js";
-import { ghostAuthPath, ghostModelsPath } from "./models.js";
+import { ghostModelsPath, userAuthPath } from "./models.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 
 const USAGE = `ghostd login — sign a ghost into a model provider
@@ -267,7 +267,7 @@ export async function loginCommand(
     const ghost = await resolveGhost(rl, registry, args.ghost);
     const paths = ghostPaths(ghost.dir);
     const runtime = await createGhostPiRuntime({
-      authPath: ghostAuthPath(paths.agentDir),
+      authPath: userAuthPath(),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !config.offline,
     });

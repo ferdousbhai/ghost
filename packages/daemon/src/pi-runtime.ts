@@ -8,6 +8,7 @@
  */
 import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { GHOST_AGENT_DIRNAME } from "./ghosts.js";
 import type {
   Api,
   AssistantMessage,
@@ -143,9 +144,14 @@ export function createGhostPiRuntime(input: {
   modelsPath: string;
   allowModelNetwork: boolean;
 }): Promise<GhostPiRuntime> {
+  // Credentials are the owner's and shared; pi's derived state is the ghost's
+  // and is not. Deriving agentDir from authPath would put two ghosts' model
+  // views, catalog caches and locks in one directory, which they contend over
+  // when they answer at the same time.
+  const home = dirname(input.modelsPath);
   return GhostPiRuntime.create({
-    agentDir: dirname(input.authPath),
-    home: dirname(input.modelsPath),
+    agentDir: join(home, GHOST_AGENT_DIRNAME),
+    home,
     authPath: input.authPath,
     allowModelNetwork: input.allowModelNetwork,
   });

@@ -142,8 +142,7 @@ describe("short-lived auth runtime home leases", () => {
       createRuntime: async (input) => {
         entered.resolve();
         await resume.promise;
-        mkdirSync(dirname(input.authPath), { recursive: true });
-        writeFileSync(join(dirname(input.authPath), probeName), "leased\n");
+                writeFileSync(join(dirname(input.modelsPath), probeName), "leased\n");
         return runtime;
       },
     });
@@ -171,7 +170,7 @@ describe("short-lived auth runtime home leases", () => {
     await using;
     await moving;
     expect(existsSync(oldHome)).toBe(false);
-    expect(existsSync(join(ghostPaths(movedHome).agentDir, probeName))).toBe(true);
+    expect(existsSync(join(movedHome, probeName))).toBe(true);
   });
 });
 
