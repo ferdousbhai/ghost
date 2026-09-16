@@ -1725,7 +1725,6 @@ export class SessionHost {
       ghostName,
       sessionId,
       "Wait for this conversation to finish before refreshing its commands.",
-      true,
     );
     try {
       return buildGhostAvailableSlashCommands(hosted.commands);
@@ -1746,7 +1745,6 @@ export class SessionHost {
       ghostName,
       conversationId,
       "Wait for this conversation to finish before inspecting its resources.",
-      true,
     );
     try {
       return structuredClone(hosted.resources);
@@ -2916,7 +2914,6 @@ export class SessionHost {
       ghostName,
       options.sessionId,
       "This ghost is already working in this conversation.",
-      true,
     );
     const id = `bash-${randomUUID()}`;
     const executionCwd = resolve(hosted.session.sessionManager.getCwd());
@@ -3173,7 +3170,6 @@ export class SessionHost {
       ghostName,
       options.sessionId,
       "This ghost is already answering in this conversation.",
-      true,
     );
 
     // Known builtins are commands even when Ghost cannot safely run them.
@@ -4239,7 +4235,6 @@ export class SessionHost {
     ghostName: string,
     conversationId: string | null | undefined,
     busyMessage: string,
-    claim = false,
     homeLeaseHeld = false,
   ): Promise<HostedSession> {
     const hosted = (await (homeLeaseHeld
@@ -4262,7 +4257,9 @@ export class SessionHost {
     }
     // An exclusive caller must claim before this async helper returns: doing
     // it in the caller leaves a microtask where another owner can pass both checks.
-    if (claim) hosted.busy = true;
+    // Every caller claims; opening one without claiming it would hand the same
+    // session to a second owner.
+    hosted.busy = true;
     return hosted;
   }
 
@@ -4343,7 +4340,6 @@ export class SessionHost {
       ghostName,
       conversationId,
       "Wait for this conversation to finish before changing branches.",
-      true,
       true,
     );
     const forkRecord: ForkTransactionRecord = {
@@ -4629,7 +4625,6 @@ export class SessionHost {
         ghostName,
         conversationId,
         "Wait for this conversation to finish before changing this answer.",
-        true,
       );
     } catch (error) {
       this.turnAdmissions.delete(admissionKey);

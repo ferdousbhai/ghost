@@ -358,8 +358,6 @@ export async function loadDeclarativeSnapshot(
   rootPath: string,
   options: {
     level: "user" | "native";
-    /** Read only these exact skill files and admit no other resource category. */
-    skillFiles?: readonly { name: string; relativePath: string }[];
     traceOpen?: (path: string) => void;
     /** Deterministic cooperative-clock seam used by boundary tests. */
     now?: () => number;
@@ -378,12 +376,11 @@ export async function loadDeclarativeSnapshot(
   };
   const root = await openPinnedRoot(rootPath, options.traceOpen);
   try {
-    const skillsOnly = options.skillFiles !== undefined;
-    const instructionFiles = skillsOnly ? [] : GHOST_INSTRUCTION_FILES;
+    const instructionFiles = GHOST_INSTRUCTION_FILES;
     const skillDirectories = ["skills"];
-    const ruleDirectories = skillsOnly ? [] : ["rules"];
-    const promptDirectories = skillsOnly ? [] : ["prompts"];
-    const commandDirectories = skillsOnly ? [] : ["commands"];
+    const ruleDirectories = ["rules"];
+    const promptDirectories = ["prompts"];
+    const commandDirectories = ["commands"];
 
     const contextFiles: Array<{ path: string; content: string }> = [];
     for (const path of instructionFiles) {
@@ -401,22 +398,9 @@ export async function loadDeclarativeSnapshot(
       }
       return files;
     };
-    const skillFiles: MarkdownFile[] = [];
     const expectedSkillNames = new Map<string, string>();
-    if (options.skillFiles) {
-      for (const expected of options.skillFiles) {
-        const file = await readRelativeFile(root, rootPath, expected.relativePath, budget);
-        if (file) {
-          skillFiles.push(file);
-          expectedSkillNames.set(file.absolutePath, expected.name);
-        }
-      }
-    } else {
-      skillFiles.push(
-        ...(await scanDirectories(skillDirectories))
-          .filter((file) => basename(file.relativePath).toLowerCase() === "skill.md"),
-      );
-    }
+    const skillFiles = (await scanDirectories(skillDirectories))
+      .filter((file) => basename(file.relativePath).toLowerCase() === "skill.md");
     const ruleFiles = await scanDirectories(ruleDirectories);
     const promptFiles = await scanDirectories(promptDirectories);
     const commandFiles = await scanDirectories(commandDirectories);
