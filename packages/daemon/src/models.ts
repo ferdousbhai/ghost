@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
+  readFileSync,
   mkdirSync,
   renameSync,
   rmSync,
@@ -146,6 +147,32 @@ export class GhostModelsLockError extends Error {
 
 export function ghostModelsPath(configDir: string): string {
   return join(configDir, MODELS_FILENAME);
+}
+
+/**
+ * Provider declarations the owner keeps for the machine, in pi's own file.
+ *
+ * A declaration says an endpoint exists and how to reach it — a base URL, an
+ * API shape, sometimes a device-local key. That is a fact about this machine,
+ * not a choice a persona made, and keeping it per ghost meant the same local
+ * server had to be described once per ghost, with a credential copied beside
+ * each description. A ghost's own providers still win, so one can still add or
+ * override an endpoint for itself.
+ */
+export function readUserProviders(): Record<string, GhostProviderConfig> {
+  const path = join(piAgentDir(), MODELS_FILENAME);
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const providers = (parsed as { providers?: unknown }).providers;
+    if (providers === null || typeof providers !== "object" || Array.isArray(providers)) return {};
+    assertProviderShape(path, providers as Record<string, unknown>);
+    return providers as Record<string, GhostProviderConfig>;
+  } catch {
+    // Absent, unreadable, not JSON, or not shaped like providers: the machine
+    // declares nothing, and a ghost's own file is still read.
+    return {};
+  }
 }
 
 /**

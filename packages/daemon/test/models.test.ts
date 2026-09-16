@@ -14,6 +14,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  readUserProviders,
   userAuthPath,
   ghostModelsLockPath,
   ghostModelsPath,
@@ -437,6 +438,34 @@ describe("Pi runtime compatibility", () => {
     const model = runtime.getModel("ghost-local", "mock-ghost-1");
     expect(model?.baseUrl).toBe("http://127.0.0.1:1/v1");
     runtime.close();
+  });
+
+  it("reads provider declarations the owner keeps for the machine", () => {
+    // An endpoint and how to reach it is a fact about this machine. Kept per
+    // ghost, the same local server had to be described once per ghost, with any
+    // device-local key copied beside each description.
+    const previous = process.env.PI_CODING_AGENT_DIR;
+    const agentDir = mkdtempSync(join(tmpdir(), "ghostd-user-providers-"));
+    try {
+      process.env.PI_CODING_AGENT_DIR = agentDir;
+      expect(readUserProviders()).toEqual({});
+
+      writeFileSync(join(agentDir, "models.json"), JSON.stringify({
+        providers: { "ghost-local": { baseUrl: "http://127.0.0.1:1/v1", api: "openai-completions" } },
+      }));
+      expect(readUserProviders()["ghost-local"]).toMatchObject({ baseUrl: "http://127.0.0.1:1/v1" });
+
+      // Unreadable or wrongly shaped means the machine declares nothing; a
+      // ghost's own file must still be read.
+      writeFileSync(join(agentDir, "models.json"), "{ not json");
+      expect(readUserProviders()).toEqual({});
+      writeFileSync(join(agentDir, "models.json"), JSON.stringify({ providers: { bad: "nope" } }));
+      expect(readUserProviders()).toEqual({});
+    } finally {
+      if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+      else process.env.PI_CODING_AGENT_DIR = previous;
+      rmSync(agentDir, { recursive: true, force: true });
+    }
   });
 
   it("takes credentials from pi's user-level store, not from inside the ghost", () => {

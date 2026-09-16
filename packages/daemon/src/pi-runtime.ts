@@ -20,7 +20,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { syncModelsView } from "./model-config-view.js";
-import { readGhostModels } from "./models.js";
+import { readGhostModels, readUserProviders } from "./models.js";
 
 const PI_MODELS_VIEW = "models.pi.json";
 const NETWORK_REFRESH_TIMEOUT_MS = 15_000;
@@ -55,7 +55,9 @@ export class GhostPiRuntime {
 
   static async create(input: GhostPiRuntimeInput): Promise<GhostPiRuntime> {
     mkdirSync(input.agentDir, { recursive: true });
-    const models = readGhostModels(input.home) ?? { providers: {} };
+    const own = readGhostModels(input.home) ?? { providers: {} };
+    // The machine says which endpoints exist; the ghost may add or override.
+    const models = { ...own, providers: { ...readUserProviders(), ...own.providers } };
     const runtime = await ModelRuntime.create({
       authPath: input.authPath ?? join(input.agentDir, "auth.json"),
       modelsPath: syncModelsView(models, input.agentDir, PI_MODELS_VIEW),
