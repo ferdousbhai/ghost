@@ -77,12 +77,6 @@ export type GhostModelRole =
   | "smol_model"
   | "advisor_model";
 
-export const GHOST_MODEL_ROLES: readonly GhostModelRole[] = [
-  "chat_model",
-  "smol_model",
-  "advisor_model",
-];
-
 /**
  * `smol_model` was called `title_model` before the role grew a second consumer.
  * `readGhostModels` normalises the old key away, so nothing downstream of a read
@@ -504,23 +498,6 @@ export function appendGhostModelFallback(
       current.push({ provider, modelId });
     }
     file.fallbacks = { ...(file.fallbacks ?? {}), [role]: current };
-  });
-}
-
-/**
- * Replace a role's complete retry chain in one serialized models.json write.
- * Ordering is significant. An empty list has the same durable shape as clear.
- */
-export function replaceGhostModelFallbacks(
-  configDir: string,
-  role: GhostModelRole,
-  bindings: readonly GhostModelRoleBinding[],
-): GhostModelsFile {
-  return mutateGhostModels(configDir, (file) => {
-    const fallbacks = { ...(file.fallbacks ?? {}) };
-    if (bindings.length === 0) delete fallbacks[role];
-    else fallbacks[role] = bindings.map((binding) => ({ ...binding }));
-    file.fallbacks = fallbacks;
   });
 }
 

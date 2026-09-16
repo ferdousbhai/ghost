@@ -32,13 +32,6 @@ function mergeNamed<T extends { name: string }>(
   return [...merged.values()];
 }
 
-function requiredContent(value: string | undefined, category: string): string {
-  if (typeof value !== "string") {
-    throw new TypeError(`Accepted ${category} snapshot is missing its admitted content.`);
-  }
-  return value;
-}
-
 export function mergeDeclarativeSnapshots(
   snapshots: readonly DeclarativeSnapshot[],
 ): EffectiveDeclarativeSnapshot {
@@ -48,45 +41,6 @@ export function mergeDeclarativeSnapshots(
     rules: mergeNamed(snapshots.map((snapshot) => snapshot.rules)),
     promptTemplates: mergeNamed(snapshots.map((snapshot) => snapshot.promptTemplates)),
     slashCommands: mergeNamed(snapshots.map((snapshot) => snapshot.slashCommands)),
-  };
-}
-
-export function declarativePromptSnapshot(
-  snapshot: EffectiveDeclarativeSnapshot,
-): DeclarativePromptSnapshot {
-  return {
-    instructions: snapshot.contextFiles.map((file) => ({ ...file })),
-    skills: snapshot.skills.map((skill) => ({
-      name: skill.name,
-      path: skill.filePath,
-      content: requiredContent(skill.snapshotContent, "skill"),
-    })),
-    rules: snapshot.rules.map((rule) => ({
-      name: rule.name,
-      path: rule.path,
-      content: requiredContent(rule.content, "rule"),
-      ...(rule.alwaysApply === true ? { alwaysApply: true } : {}),
-    })),
-    prompts: snapshot.promptTemplates.map((prompt) => ({
-      name: prompt.name,
-      content: prompt.content,
-    })),
-    commands: snapshot.slashCommands.map((command) => ({
-      name: command.name,
-      content: command.content,
-    })),
-  };
-}
-
-export function mergeDeclarativePromptSnapshots(
-  snapshots: readonly DeclarativePromptSnapshot[],
-): DeclarativePromptSnapshot {
-  return {
-    instructions: snapshots.flatMap((snapshot) => snapshot.instructions),
-    skills: mergeNamed(snapshots.map((snapshot) => snapshot.skills)),
-    rules: mergeNamed(snapshots.map((snapshot) => snapshot.rules)),
-    prompts: mergeNamed(snapshots.map((snapshot) => snapshot.prompts)),
-    commands: mergeNamed(snapshots.map((snapshot) => snapshot.commands)),
   };
 }
 

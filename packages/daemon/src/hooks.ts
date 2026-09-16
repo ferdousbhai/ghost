@@ -99,7 +99,6 @@ export interface GhostHookStatus {
 export interface GhostHookContext {
   ghostName: string;
   cwd: string;
-  runtime: ConversationRuntime;
   signal: AbortSignal;
 }
 
@@ -682,7 +681,6 @@ export class GhostHookRunner {
     const context: GhostHookContext = {
       ghostName: event.ghost_name,
       cwd: event.cwd,
-      runtime: event.runtime,
       signal: controller.signal,
     };
     let timer: NodeJS.Timeout | undefined;

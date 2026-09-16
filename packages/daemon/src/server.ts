@@ -107,7 +107,6 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
-export const MAX_MODEL_QUERY_LENGTH = 256;
 /**
  * A conversation name is a label in a sidebar, not a description. The cap is
  * generous for a sentence and short enough to stay a label.

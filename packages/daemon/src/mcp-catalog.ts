@@ -290,11 +290,6 @@ export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfi
   };
 }
 
-/** Revalidate one already-confined row before loading a durable snapshot. */
-export function mcpRowValidationErrors(name: string, value: unknown): string[] {
-  return mcpServerValidationErrors(name, value);
-}
-
 function validateMutation(name: string, value: unknown): asserts value is MCPServerConfig {
   const errors = mcpServerValidationErrors(name, value);
   if (errors.length > 0) {
@@ -385,12 +380,6 @@ function parseMcpInputs(
     effective: { claimedNames, disabled, servers, skipped },
     configured,
   };
-}
-
-export function parseEffectiveMcpInputs(
-  inputs: readonly EffectiveMcpInput[],
-): EffectiveMcpRead {
-  return parseMcpInputs(inputs).effective;
 }
 
 /** Read and parse the ghost's visible `mcp.json`. */

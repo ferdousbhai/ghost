@@ -185,12 +185,6 @@ export function renderPrivateJson(path: string, value: unknown): string {
   return rendered;
 }
 
-function samePrivateIdentity(stats: BigIntStats, identity: PrivateFileIdentity): boolean {
-  return validPrivateDescriptor(stats)
-    && stats.dev === identity.device
-    && stats.ino === identity.inode;
-}
-
 function restoreCasClaim(claim: string, path: string): void {
   try {
     lstatSync(path);
@@ -274,64 +268,6 @@ export function recoverPrivateJsonAtomicCas(path: string): void {
     fsyncPath(dirname(path));
   }
   recoverPrivateCasCandidate(path);
-}
-
-/** Publish private JSON only if the admitted source identity still owns `path`. */
-export function writePrivateJsonAtomicCas(
-  path: string,
-  value: unknown,
-  expected: PrivateFileIdentity | null,
-): void {
-  recoverPrivateJsonAtomicCas(path);
-  const rendered = renderPrivateJson(path, value);
-  const temporary = `${path}${PRIVATE_CAS_NEXT_SUFFIX}`;
-  const claim = `${path}${PRIVATE_CAS_CLAIM_SUFFIX}`;
-  try {
-    writeFileSync(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    chmodSync(temporary, 0o600);
-    fsyncPath(temporary);
-    if (expected === null) {
-      try {
-        linkSync(temporary, path);
-      } catch {
-        throw new PrivateWriteConflictError(path);
-      }
-      unlinkSync(temporary);
-      fsyncPath(dirname(path));
-      return;
-    }
-
-    try {
-      renameSync(path, claim);
-    } catch {
-      throw new PrivateWriteConflictError(path);
-    }
-    fsyncPath(dirname(path));
-    let claimed: BigIntStats;
-    try {
-      claimed = lstatSync(claim, { bigint: true });
-    } catch {
-      throw new PrivateWriteConflictError(path);
-    }
-    if (!samePrivateIdentity(claimed, expected)) {
-      restoreCasClaim(claim, path);
-      throw new PrivateWriteConflictError(path);
-    }
-    try {
-      linkSync(temporary, path);
-    } catch {
-      if (missingPrivatePath(path)) restoreCasClaim(claim, path);
-      else rmSync(claim, { force: true });
-      throw new PrivateWriteConflictError(path);
-    }
-    fsyncPath(dirname(path));
-    unlinkSync(temporary);
-    unlinkSync(claim);
-    fsyncPath(dirname(path));
-  } catch (error) {
-    rmSync(temporary, { force: true });
-    throw error;
-  }
 }
 
 function missingPrivatePath(path: string): boolean {

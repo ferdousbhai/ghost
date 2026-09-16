@@ -4021,17 +4021,6 @@ Singleton {
         }
     }
 
-    function errorCode(xhr: var): string {
-        try {
-            const body = JSON.parse(xhr.responseText);
-            const code = body && body.error && typeof body.error === "object"
-                ? body.error.code : body.code;
-            return typeof code === "string" ? code : "";
-        } catch (error) {
-            return "";
-        }
-    }
-
     function describeError(xhr: var, what: string): string {
         if (xhr.status === 0) return "ghostd is not answering on " + root.baseUrl;
         // dispatch() already re-read the file and retried once, so a 401 that

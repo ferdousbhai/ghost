@@ -10,7 +10,6 @@
  * checkpoint reminder lands shortly before the rollover line; `new_context`
  * rolls over on demand with the ghost's own handoff.
  *
- * pi-only: Claude Code keeps its native compaction.
  */
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";

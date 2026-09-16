@@ -161,16 +161,6 @@ function acquireMCPWriterLock(filePath: string): () => void {
   return () => releaseWriterLock(lease);
 }
 
-export function withMCPConfigWriteLock<T>(filePath: string, operation: () => T): T {
-  const release = acquireMCPWriterLock(filePath);
-  try {
-    recoverPrivateJsonAtomicCas(filePath);
-    return operation();
-  } finally {
-    release();
-  }
-}
-
 async function withAsyncMCPConfigWriteLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
   const release = acquireMCPWriterLock(filePath);
   try {

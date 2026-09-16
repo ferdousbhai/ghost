@@ -73,11 +73,6 @@ Singleton {
         return resolved !== "" && root.kindOf(resolved) !== "";
     }
 
-    function canOpenFrom(path: string, base: string): bool {
-        const resolved = root.absoluteFrom(path, base);
-        return resolved !== "" && root.kindOf(resolved) !== "";
-    }
-
     /**
      * `path` as an absolute, dot-free path, or "" when it cannot be made one.
      * Accepts a file:// URL and a leading `~` because both reach us from
