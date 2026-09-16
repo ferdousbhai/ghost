@@ -101,6 +101,12 @@ export interface GhostModelsFile {
 
 const MODELS_FILENAME = "models.json";
 const AUTH_FILENAME = "auth.json";
+const MODELS_STORE_FILENAME = "models-store.json";
+
+/** pi's own user-level agent directory, which it lets the owner relocate. */
+function piAgentDir(): string {
+  return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
+}
 const MODELS_LOCK_SUFFIX = ".lock";
 const MODELS_LOCK_WAIT_MS = 500;
 const MODELS_LOCK_POLL_MS = 10;
@@ -143,6 +149,23 @@ export function ghostModelsPath(configDir: string): string {
 }
 
 /**
+ * pi's user-level catalogue cache, shared by every ghost.
+ *
+ * "Which models does this provider offer" is an answer about the provider and
+ * the owner's credentials, not about a persona. A cache per ghost is the same
+ * answer fetched and stored N times, and the copies drift: two ghosts on one
+ * machine with identical credentials reported 432 and 380 models.
+ *
+ * Safe to share because pi serialises it — FileModelsStore.write is a
+ * read-modify-write under a lock, keyed per provider. The models *view* next to
+ * it is not shared: that one is derived from a ghost's own models.json, so two
+ * ghosts writing one path is a genuine conflict.
+ */
+export function userModelsStorePath(): string {
+  return join(piAgentDir(), MODELS_STORE_FILENAME);
+}
+
+/**
  * pi's user-level credential store, shared by every ghost.
  *
  * A credential belongs to the person, not to a persona: signing the same
@@ -153,7 +176,7 @@ export function ghostModelsPath(configDir: string): string {
  * ignored credentials its owner had already signed in with.
  */
 export function userAuthPath(): string {
-  return join(process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent"), AUTH_FILENAME);
+  return join(piAgentDir(), AUTH_FILENAME);
 }
 
 export function ghostModelsLockPath(configDir: string): string {

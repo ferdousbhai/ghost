@@ -33,6 +33,8 @@ export interface GhostPiRuntimeInput {
   allowModelNetwork: boolean;
   /** pi's credential file; defaults to `auth.json` under `agentDir`. */
   authPath?: string;
+  /** pi's catalogue cache; defaults to `models-store.json` under `agentDir`. */
+  modelsStorePath?: string;
 }
 
 export interface GhostProviderSummary {
@@ -57,7 +59,7 @@ export class GhostPiRuntime {
     const runtime = await ModelRuntime.create({
       authPath: input.authPath ?? join(input.agentDir, "auth.json"),
       modelsPath: syncModelsView(models, input.agentDir, PI_MODELS_VIEW),
-      modelsStorePath: join(input.agentDir, "models-store.json"),
+      modelsStorePath: input.modelsStorePath ?? join(input.agentDir, "models-store.json"),
       refreshOnCreate: false,
     });
     await runtime.refresh({
@@ -142,6 +144,7 @@ export class GhostPiRuntime {
 export function createGhostPiRuntime(input: {
   authPath: string;
   modelsPath: string;
+  modelsStorePath?: string;
   allowModelNetwork: boolean;
 }): Promise<GhostPiRuntime> {
   // Credentials are the owner's and shared; pi's derived state is the ghost's
@@ -153,6 +156,7 @@ export function createGhostPiRuntime(input: {
     agentDir: join(home, GHOST_AGENT_DIRNAME),
     home,
     authPath: input.authPath,
+    modelsStorePath: input.modelsStorePath,
     allowModelNetwork: input.allowModelNetwork,
   });
 }

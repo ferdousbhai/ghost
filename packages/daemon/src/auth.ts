@@ -9,6 +9,7 @@ import {
 import { silentLogger, type Logger } from "./log.js";
 import {
   userAuthPath,
+  userModelsStorePath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
@@ -173,7 +174,7 @@ export interface LoginManagerOptions {
   loginTtlMs?: number;
   retainSettledMs?: number;
   offline?: boolean;
-  createRuntime?: (input: { authPath: string; modelsPath: string; offline: boolean }) => Promise<LoginRuntime>;
+  createRuntime?: (input: { authPath: string; modelsPath: string; modelsStorePath: string; offline: boolean }) => Promise<LoginRuntime>;
   onLoginSucceeded?: (ghostName: string, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
@@ -187,6 +188,7 @@ export const ANTHROPIC_EXTRA_USAGE_NOTE = "extra usage billed per token; not Cla
 async function defaultCreateRuntime(input: {
   authPath: string;
   modelsPath: string;
+  modelsStorePath: string;
   offline: boolean;
 }): Promise<LoginRuntime> {
   // allowModelNetwork stays false: it gates only catalog refresh, not the
@@ -196,6 +198,7 @@ async function defaultCreateRuntime(input: {
   return createGhostPiRuntime({
     authPath: input.authPath,
     modelsPath: input.modelsPath,
+    modelsStorePath: input.modelsStorePath,
     allowModelNetwork: false,
   });
 }
@@ -356,6 +359,7 @@ export class LoginManager {
     const paths = ghostPaths(ghostDir);
     return this.createRuntime({
       authPath: userAuthPath(),
+      modelsStorePath: userModelsStorePath(),
       modelsPath: ghostModelsPath(paths.home),
       offline: this.offline,
     });

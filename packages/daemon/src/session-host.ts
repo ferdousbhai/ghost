@@ -93,6 +93,7 @@ import {
 } from "./home-operations.js";
 import {
   userAuthPath,
+  userModelsStorePath,
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
@@ -1865,6 +1866,7 @@ export class SessionHost {
 
     const modelRuntime = await createGhostPiRuntime({
       authPath: userAuthPath(),
+      modelsStorePath: userModelsStorePath(),
       modelsPath: ghostModelsPath(paths.home),
       // Provider catalogs are fetched only when the daemon is not offline.
       allowModelNetwork: !this.offline,
@@ -3459,6 +3461,7 @@ export class SessionHost {
     const paths = ghostPaths(ghost.dir);
     const runtime = await this.createGreetingRuntime({
       authPath: userAuthPath(),
+      modelsStorePath: userModelsStorePath(),
       modelsPath: ghostModelsPath(paths.home),
       allowModelNetwork: !this.offline,
     });
