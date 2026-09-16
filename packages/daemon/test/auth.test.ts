@@ -3,7 +3,7 @@
  * each auth callback path — URL, device code, paste, select, failure,
  * timeout — with no real provider and no network.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { AuthInteraction } from "../src/auth.js";

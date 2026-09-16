@@ -7,10 +7,9 @@
  * there. A generation failure must never reach the shell as a 5xx — it would
  * turn "no greeting today" into an error dialog over an empty chat window.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { ghostPaths } from "../src/ghosts.js";
 import { homeOperationsFor } from "../src/home-operations.js";
 import type { Logger } from "../src/log.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
