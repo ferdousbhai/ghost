@@ -84,10 +84,8 @@ mkdir -p "$runtime_root"
 
 (
   cd "$source_root"
-  # Populate dependencies only from the pre-seeded store and frozen lockfile.
-  # Lifecycle scripts stay disabled; in particular, onnxruntime-node must not
-  # download optional CUDA provider libraries while assembling a release.
-  export ONNXRUNTIME_NODE_INSTALL=skip
+  # Populate dependencies only from the pre-seeded store and frozen lockfile,
+  # with lifecycle scripts disabled so no dependency can fetch at release time.
   pnpm install --ignore-scripts --offline --frozen-lockfile
   pnpm build
   pnpm --filter @ghost/daemon build:runtime
