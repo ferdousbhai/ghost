@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import { preferredRoleModel } from "./model-routing.js";
+import { ADVISOR_MODEL_NEED, bestForNeed } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
@@ -192,9 +192,9 @@ export function resolveSmolModel(
   }
 
   if (role === ADVISOR_MODEL_ROLE) {
-    const preferred = preferredRoleModel(
-      "advisor",
+    const preferred = bestForNeed(
       catalog.usable().map((candidate) => candidate.model),
+      ADVISOR_MODEL_NEED,
     );
     if (!preferred) {
       throw new SmolModelUnavailableError(
