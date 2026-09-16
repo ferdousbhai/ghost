@@ -202,24 +202,41 @@ async function defaultCreateRuntime(input: {
 }
 
 /**
- * Aggregator routers that pick a model per request. pi's catalogue records
- * their cost as 0, but upstream they are priced `-1` — "whatever the model it
- * chose costs". Binding one at sign-in would bill an owner who came for the
- * free tier, so zero-cost is necessary but not sufficient. Verified against
- * https://openrouter.ai/api/v1/models on 2026-09-15; delete this set if pi
- * starts reporting a dynamic price as something other than zero.
+ * A zero-cost catalogue entry that is not a model.
+ *
+ * An aggregator sells routers beside its models — `auto`, `openrouter/free`,
+ * `openrouter/fusion` — which pick a model per request and bill whatever they
+ * picked. pi's catalogue prices some of them at 0, so "costs nothing" is
+ * necessary but not sufficient to call something safe to bind at sign-in.
+ *
+ * They are told apart by shape rather than by name: an aggregator namespaces a
+ * real model under its vendor (`nvidia/…`, `google/…`) and its own routers
+ * under itself or under no vendor at all. Reading that from the candidates in
+ * hand keeps the rule provider-relative — a provider whose ids never carry a
+ * vendor (`anthropic`'s `claude-opus-5`) has no vendor-namespaced sibling, so
+ * nothing there is mistaken for a router. Naming the routers instead would
+ * need re-checking against upstream prices on every roster change, and would
+ * still miss the next one.
  */
-const DYNAMIC_PRICE_MODEL_IDS: ReadonlySet<string> = new Set([
-  "auto",
-  "openrouter/auto",
-  "openrouter/fusion",
-]);
+function isAggregatorRouter(
+  id: string,
+  providerId: string,
+  candidates: readonly { id: string }[],
+): boolean {
+  const vendor = id.indexOf("/");
+  if (vendor < 0) return candidates.some((candidate) => candidate.id.includes("/"));
+  return id.slice(0, vendor) === providerId;
+}
 
-/** Free to run for real: priced at zero and not a dynamically-priced router. */
-function isFreeToRun(model: { id: string; cost?: { input?: number; output?: number } }): boolean {
+/** Free to run for real: priced at zero, and a model rather than a router. */
+function isFreeToRun(
+  model: { id: string; cost?: { input?: number; output?: number } },
+  providerId: string,
+  candidates: readonly { id: string }[],
+): boolean {
   return model.cost?.input === 0
     && model.cost?.output === 0
-    && !DYNAMIC_PRICE_MODEL_IDS.has(model.id);
+    && !isAggregatorRouter(model.id, providerId, candidates);
 }
 
 /**
@@ -278,7 +295,7 @@ export async function bindDefaultChatModelIfUnset(
   // subscription provider) is unaffected and falls through unchanged. The list
   // is pi's live `getAvailable` answer, so "which models are free" is current
   // at sign-in rather than a name recorded here.
-  const free = candidates.filter(isFreeToRun);
+  const free = candidates.filter((candidate) => isFreeToRun(candidate, providerId, candidates));
   const model = resolveChatModel(null, free.length > 0 ? free : candidates);
   if (!model || !commitAllowed()) return null;
 

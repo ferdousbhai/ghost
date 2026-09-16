@@ -134,7 +134,6 @@ describe("conversation unread state", () => {
       "casper",
       row.conversationId,
       new Date(Date.parse(row.updatedAt) + 1),
-      row.runtime,
     );
     row = (await host!.listSessions("casper"))[0]!;
     expect(row.unread).toBe(false);

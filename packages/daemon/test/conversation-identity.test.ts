@@ -9,7 +9,7 @@ import {
 
 describe("runtime-qualified conversation identity", () => {
   it("round-trips an opaque raw resume id without folding it into the runtime", () => {
-    const identity = conversationIdentity("pi", "default/with:punctuation");
+    const identity = conversationIdentity("default/with:punctuation");
     expect(identity).toEqual({
       id: "pi:default/with:punctuation",
       conversationId: "default/with:punctuation",

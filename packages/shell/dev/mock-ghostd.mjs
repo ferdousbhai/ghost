@@ -135,13 +135,9 @@ function conversationIdentity(runtime, conversationId) {
 }
 
 function parseConversationIdentity(id) {
-  for (const runtime of ["pi"]) {
-    const prefix = `${runtime}:`;
-    if (id.startsWith(prefix) && id.length > prefix.length) {
-      return { id, runtime, conversationId: id.slice(prefix.length) };
-    }
-  }
-  return null;
+  const prefix = "pi:";
+  if (!id.startsWith(prefix) || id.length === prefix.length) return null;
+  return { id, runtime: "pi", conversationId: id.slice(prefix.length) };
 }
 
 function routeConversation(parts) {

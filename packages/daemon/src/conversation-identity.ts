@@ -13,7 +13,7 @@ export interface ConversationIdentity {
   runtime: ConversationRuntime;
 }
 
-const RUNTIME_PREFIXES: Readonly<Record<ConversationRuntime, string>> = { pi: "pi:" };
+const RUNTIME_PREFIX = "pi:";
 
 export const MAX_CONVERSATION_ID_SCALARS = 200;
 
@@ -49,26 +49,15 @@ export function requireRawConversationId(conversationId: string): string {
 }
 
 /** Build the stable public identity for one runtime-owned conversation. */
-export function conversationIdentity<Runtime extends ConversationRuntime>(
-  runtime: Runtime,
-  conversationId: string,
-): ConversationIdentity & { runtime: Runtime } {
+export function conversationIdentity(conversationId: string): ConversationIdentity {
   requireRawConversationId(conversationId);
-  return {
-    id: `${RUNTIME_PREFIXES[runtime]}${conversationId}`,
-    conversationId,
-    runtime,
-  };
+  return { id: `${RUNTIME_PREFIX}${conversationId}`, conversationId, runtime: "pi" };
 }
 
 export function parseConversationIdentity(id: string): ConversationIdentity | null {
-  for (const runtime of ["pi"] as const) {
-    const prefix = RUNTIME_PREFIXES[runtime];
-    if (!id.startsWith(prefix)) continue;
-    const conversationId = id.slice(prefix.length);
-    return isValidConversationId(conversationId) ? { id, conversationId, runtime } : null;
-  }
-  return null;
+  if (!id.startsWith(RUNTIME_PREFIX)) return null;
+  const conversationId = id.slice(RUNTIME_PREFIX.length);
+  return isValidConversationId(conversationId) ? { id, conversationId, runtime: "pi" } : null;
 }
 
 export function requireConversationIdentity(id: string): ConversationIdentity {
@@ -89,7 +78,6 @@ export function requireConversationIdentity(id: string): ConversationIdentity {
 export function conversationEnvironment(
   ghostName: string,
   conversationId: string,
-  runtime: ConversationRuntime,
 ): { GHOST: string; GHOST_SESSION: string } {
-  return { GHOST: ghostName, GHOST_SESSION: conversationIdentity(runtime, conversationId).id };
+  return { GHOST: ghostName, GHOST_SESSION: conversationIdentity(conversationId).id };
 }

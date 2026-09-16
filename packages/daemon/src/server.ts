@@ -601,12 +601,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
       return;
     }
-    await options.host.setPinned(
-      ghostName,
-      conversation.conversationId,
-      pinned,
-      conversation.runtime,
-    );
+    await options.host.setPinned(ghostName, conversation.conversationId, pinned);
     jsonResponse(response, 200, { ok: true, pinned });
   };
 
@@ -617,12 +612,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     response: ServerResponse,
   ): Promise<void> => {
     await readJsonObjectBody(request, maxBodyBytes);
-    const readAt = await options.host.markRead(
-      ghostName,
-      conversation.conversationId,
-      undefined,
-      conversation.runtime,
-    );
+    const readAt = await options.host.markRead(ghostName, conversation.conversationId);
     jsonResponse(response, 200, { ok: true, readAt });
   };
 

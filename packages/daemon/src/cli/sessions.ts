@@ -5,7 +5,7 @@ import { emit, relativeTime, table, textContent, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
 
 function displaySessionId(session: SessionSummary): string {
-  return session.runtime === "pi" ? session.conversationId : session.id;
+  return session.conversationId;
 }
 
 export async function sessionsCommand(

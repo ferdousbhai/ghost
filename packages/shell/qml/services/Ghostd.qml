@@ -481,7 +481,6 @@ Singleton {
     property bool sessionResourcesLoading: false
     property string sessionResourcesError: ""
     /** True while the error only says the runtime has not started yet. */
-    property bool sessionResourcesPending: false
     property string sessionResourcesGhost: ""
     property string sessionResourcesSessionId: ""
 
@@ -595,6 +594,14 @@ Singleton {
     readonly property bool loginPolling: loginPoll.running
     property var modelRequest: null
     property int modelGeneration: 0
+
+    /**
+     * Nothing can answer yet: no model at all, as opposed to one that is simply
+     * unbound (`modelSource === "none"` still carries whatever would answer).
+     * The HUD's first-run surfaces all read this rather than repeating the
+     * comparison, which is how they drifted apart before.
+     */
+    readonly property bool noModel: root.currentModel === null
     property var availRequest: null
     property var setModelRequest: null
     property var sessionsRequest: null
@@ -1819,7 +1826,6 @@ Singleton {
         root.sessionResources = null;
         root.sessionResourcesLoading = false;
         root.sessionResourcesError = "";
-        root.sessionResourcesPending = false;
         root.sessionResourcesGhost = "";
         root.sessionResourcesSessionId = "";
         if (request && request.readyState !== 4) request.abort();
@@ -1899,7 +1905,6 @@ Singleton {
         root.sessionResources = null;
         root.sessionResourcesLoading = true;
         root.sessionResourcesError = "";
-        root.sessionResourcesPending = false;
         root.sessionResourcesGhost = ghost;
         root.sessionResourcesSessionId = sessionId;
         xhr.onreadystatechange = function () {
@@ -1912,7 +1917,6 @@ Singleton {
                     if (!root.applySessionResources(JSON.parse(xhr.responseText), ghost, sessionId))
                         throw new Error("invalid resource snapshot");
                     root.sessionResourcesError = "";
-        root.sessionResourcesPending = false;
                     root.reachable = true;
                 } catch (error) {
                     root.sessionResources = null;
@@ -1920,7 +1924,6 @@ Singleton {
                 }
             } else {
                 root.sessionResources = null;
-                root.sessionResourcesPending = false;
                 root.sessionResourcesError = root.describeError(xhr, "GET session resources");
             }
         };

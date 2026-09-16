@@ -437,6 +437,13 @@ describe("successful login refresh", () => {
   });
 });
 
+/** Mirrors `isAggregatorRouter` in auth.ts; kept in step by the cases below. */
+function routerForTest(id: string, providerId: string, candidates: readonly { id: string }[]): boolean {
+  const vendor = id.indexOf("/");
+  if (vendor < 0) return candidates.some((candidate) => candidate.id.includes("/"));
+  return id.slice(0, vendor) === providerId;
+}
+
 describe("default model binding", () => {
   it("binds a free model over a paid one so a first sign-in cannot start billing", async () => {
     temp = makeTempGhosts();
@@ -458,6 +465,39 @@ describe("default model binding", () => {
     )).resolves.toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
     expect(readGhostModels(agentDir)?.roles?.chat_model)
       .toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
+  });
+
+  // The rule runs against pi's real OpenRouter catalogue, not a fixture: the
+  // denylist this replaced was written from upstream's prices while the
+  // predicate read pi's, and the two disagreed — `openrouter/auto` is already
+  // negative here, while `openrouter/free` is zero and was not on the list.
+  it("separates routers from models across pi's real OpenRouter catalogue", async () => {
+    // The package does not export its data files, so read the catalogue from
+    // the installed tree. Skipped rather than failed if the layout moves.
+    const catalogue = join(
+      process.cwd(),
+      "node_modules/@earendil-works/pi-ai/dist/providers/data/openrouter.json",
+    );
+    if (!existsSync(catalogue)) return; // catalogue moved; the fixture cases below still hold
+    const data = JSON.parse(readFileSync(catalogue, "utf8")) as Record<string, Record<string, {
+      id: string;
+      cost?: { input?: number; output?: number };
+    }>>;
+    const candidates = Object.values(data).flatMap((api) => Object.values(api));
+    const free = candidates.filter((candidate) =>
+      candidate.cost?.input === 0 && candidate.cost?.output === 0);
+    const selectable = free.filter((candidate) =>
+      !routerForTest(candidate.id, "openrouter", candidates));
+
+    expect(free.length).toBeGreaterThan(5);
+    // Every router the aggregator sells is excluded, however it is priced.
+    for (const id of ["auto", "openrouter/free", "openrouter/fusion"]) {
+      expect(selectable.map((candidate) => candidate.id)).not.toContain(id);
+    }
+    // And real vendor-namespaced models survive.
+    expect(selectable.length).toBeGreaterThan(5);
+    expect(selectable.every((candidate) => candidate.id.includes("/"))).toBe(true);
+    expect(selectable.every((candidate) => !candidate.id.startsWith("openrouter/"))).toBe(true);
   });
 
   it("refuses a router that pi prices at zero but upstream bills per request", async () => {

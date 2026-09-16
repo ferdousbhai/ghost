@@ -1582,12 +1582,11 @@ export class SessionHost {
 
   private async announceConversationUpdated(
     ghostName: string,
-    runtime: ConversationRuntime,
     conversationId: string,
   ): Promise<void> {
     const listeners = this.conversationListeners.get(ghostName);
     if (!listeners || listeners.size === 0) return;
-    const identity = conversationIdentity(runtime, conversationId);
+    const identity = conversationIdentity(conversationId);
     const event: ConversationUpdatedEvent = {
       type: "conversation-updated",
       ...identity,
@@ -1987,7 +1986,7 @@ export class SessionHost {
         createBashTool(runtimeCwd, {
           spawnHook: (context) => ({
             ...context,
-            env: { ...context.env, ...conversationEnvironment(ghost.name, sessionKey, "pi") },
+            env: { ...context.env, ...conversationEnvironment(ghost.name, sessionKey) },
           }),
         }) as ToolDefinition,
         createInspectImageTool({
@@ -2085,7 +2084,7 @@ export class SessionHost {
       void (async () => {
         await this.flushToolCwds(hosted);
         await this.settlePiOwnerPasses(hosted);
-        await this.announceConversationUpdated(ghostName, "pi", conversationId);
+        await this.announceConversationUpdated(ghostName, conversationId);
         await this.settleDeferredSession(hosted);
       })().catch((error) => {
         hosted.logger.warn("deferred session update after external turn failed", {
@@ -2973,7 +2972,7 @@ export class SessionHost {
         if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
           await writeConversationCwd(ghostPaths(hosted.ghost.dir).sessionDir, conversationId, nextCwd);
           hosted.cwd = nextCwd;
-          await this.announceConversationUpdated(ghostName, "pi", conversationId);
+          await this.announceConversationUpdated(ghostName, conversationId);
         }
       }
 
@@ -3173,10 +3172,7 @@ export class SessionHost {
       if (moved && resolve(moved.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
         await this.closePi(ghostName, conversationId);
       }
-      await this.announceConversationUpdated(
-        ghostName,
-        "pi",
-        options.sessionId ?? DEFAULT_SESSION_KEY,
+      await this.announceConversationUpdated(ghostName, options.sessionId ?? DEFAULT_SESSION_KEY,
       );
       return;
     }
@@ -3207,7 +3203,7 @@ export class SessionHost {
       } finally {
         await this.releaseSessionClaim(hosted, ghostName);
       }
-      await this.announceConversationUpdated(ghostName, "pi", conversationId);
+      await this.announceConversationUpdated(ghostName, conversationId);
       return;
     }
 
@@ -3300,7 +3296,7 @@ export class SessionHost {
       if (shouldTitle) {
         this.startBackgroundTitle(hosted, ghostName, paths.home, options.prompt);
       }
-      await this.announceConversationUpdated(ghostName, "pi", conversationId);
+      await this.announceConversationUpdated(ghostName, conversationId);
     }
   }
 
@@ -3355,7 +3351,7 @@ export class SessionHost {
           title,
         });
         const [, conversationId] = sessionKeyParts(hosted.sessionKey);
-        await this.announceConversationUpdated(ghostName, "pi", conversationId);
+        await this.announceConversationUpdated(ghostName, conversationId);
       })
       .catch((error: unknown) => {
         if (controller.signal.aborted && !timedOut) return;
@@ -3555,10 +3551,9 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     pinned: boolean,
-    runtime: ConversationRuntime = "pi",
   ): Promise<void> {
     return this.homeOperations.withLease(ghostName, () =>
-      this.setPinnedLeased(ghostName, sessionId, pinned, runtime)
+      this.setPinnedLeased(ghostName, sessionId, pinned)
     );
   }
 
@@ -3566,11 +3561,10 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     pinned: boolean,
-    runtime: ConversationRuntime,
   ): Promise<void> {
     const ghost = this.registry.get(ghostName);
     const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
-    const identity = conversationIdentity(runtime, conversationId);
+    const identity = conversationIdentity(conversationId);
     const paths = ghostPaths(ghost.dir);
     const rows = await this.collectSessionsLeased(ghost);
     const existing = new Set(rows.map((row) => row.id));
@@ -3588,7 +3582,7 @@ export class SessionHost {
     stored.delete(identity.id);
     const kept = [...stored].filter((pin) => existing.has(pin));
     await this.pinWriter(paths.sessionDir, pinned ? [...kept, identity.id] : kept);
-    await this.announceConversationUpdated(ghostName, runtime, conversationId);
+    await this.announceConversationUpdated(ghostName, conversationId);
   }
 
   /**
@@ -3599,10 +3593,9 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     openedAt = new Date(),
-    runtime: ConversationRuntime = "pi",
   ): Promise<string> {
     return this.homeOperations.withLease(ghostName, () =>
-      this.markReadLeased(ghostName, sessionId, openedAt, runtime)
+      this.markReadLeased(ghostName, sessionId, openedAt)
     );
   }
 
@@ -3610,11 +3603,10 @@ export class SessionHost {
     ghostName: string,
     sessionId: string | null | undefined,
     openedAt: Date,
-    runtime: ConversationRuntime,
   ): Promise<string> {
     const ghost = this.registry.get(ghostName);
     const conversationId = sessionId ?? DEFAULT_SESSION_KEY;
-    const identity = conversationIdentity(runtime, conversationId);
+    const identity = conversationIdentity(conversationId);
     const paths = ghostPaths(ghost.dir);
     const rows = await this.collectSessionsLeased(ghost);
     const existing = new Set(rows.map((row) => row.id));
@@ -3634,7 +3626,7 @@ export class SessionHost {
     );
     const readAt = openedAt.toISOString();
     await this.readWriter(paths.sessionDir, { ...kept, [identity.id]: readAt });
-    await this.announceConversationUpdated(ghostName, runtime, conversationId);
+    await this.announceConversationUpdated(ghostName, conversationId);
     return readAt;
   }
 
@@ -3708,7 +3700,7 @@ export class SessionHost {
       session: id,
       title: stored,
     });
-    await this.announceConversationUpdated(ghostName, "pi", id);
+    await this.announceConversationUpdated(ghostName, id);
     return stored;
   }
 
@@ -4142,7 +4134,7 @@ export class SessionHost {
       }
       if (conversationId === null) return null;
       return {
-        ...conversationIdentity("pi", conversationId),
+        ...conversationIdentity(conversationId),
         title: info.name ?? null,
         createdAt: info.created.toISOString(),
         updatedAt: info.modified.toISOString(),
@@ -4244,7 +4236,7 @@ export class SessionHost {
       if (message) all.push(message);
     }
     return {
-      ...conversationIdentity("pi", id),
+      ...conversationIdentity(id),
       title: manager.getSessionName() ?? null,
       ...pageTranscript(all, options),
       // Pi's own JSONL is the complete durable history.
@@ -4504,9 +4496,9 @@ export class SessionHost {
     // had a hidden pending name. From here readers can see only that rewound
     // snapshot; an announcement failure still retracts the publication.
     try {
-      await this.announceConversationUpdated(ghostName, "pi", forkId);
+      await this.announceConversationUpdated(ghostName, forkId);
       return {
-        ...conversationIdentity("pi", forkId),
+        ...conversationIdentity(forkId),
         sessionId: forkId,
         ...stagedFork,
       };
@@ -4522,7 +4514,7 @@ export class SessionHost {
       const paths = ghostPaths(ghost.dir);
       await this.closePi(ghostName, forkId);
       const rowsBefore = await this.collectSessionsLeased(ghost);
-      const forkIdentity = conversationIdentity("pi", forkId);
+      const forkIdentity = conversationIdentity(forkId);
       const sessionFile = join(paths.sessionDir, sessionFileNameFor(forkId));
       try {
         if (existsSync(sessionFile)) {
@@ -4789,7 +4781,7 @@ export class SessionHost {
         unsubscribe?.();
         if (pendingTerminal) options.emit(pendingTerminal);
         await this.releaseSessionClaim(hosted, ghostName);
-        await this.announceConversationUpdated(ghostName, "pi", conversationId);
+        await this.announceConversationUpdated(ghostName, conversationId);
       } finally {
         unsubscribe?.();
         this.turnAdmissions.delete(admissionKey);
@@ -4816,7 +4808,7 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const id = sessionId ?? DEFAULT_SESSION_KEY;
     const paths = ghostPaths(ghost.dir);
-    const identity = conversationIdentity(runtime, id);
+    const identity = conversationIdentity(id);
     const piKey = this.keyOf(ghostName, sessionId);
     const deleteKey = deletionKeyOf(ghostName, runtime, id);
     const tombstone = deleteTransactionPath(paths.sessionDir, runtime, id);
@@ -4961,7 +4953,7 @@ export class SessionHost {
           ...artifacts.map((entry) => entry.artifact),
         ],
       });
-      await this.announceConversationUpdated(ghostName, runtime, id);
+      await this.announceConversationUpdated(ghostName, id);
       return { artifacts };
     } finally {
       this.deleting.delete(deleteKey);

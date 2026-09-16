@@ -409,13 +409,7 @@ FloatingWindow {
                     Rectangle {
                         id: modelIndicator
 
-                        // The daemon answers with two source values, not
-                        // three: `explicit` when a role is bound, `none` when
-                        // it is not — and `none` still carries the model that
-                        // would answer anyway. So nothing is set only when
-                        // there is no model at all; an unbound-but-working
-                        // model is the "Default" case below, not a warning.
-                        readonly property bool noneSet: Ghostd.currentModel === null
+                        readonly property bool noneSet: Ghostd.noModel
 
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.activeGhost !== ""
@@ -857,7 +851,7 @@ FloatingWindow {
                                     // and only thing there is to read. Spend it
                                     // on the one action that unblocks everything
                                     // rather than on a question they cannot ask.
-                                    readonly property string line: Ghostd.currentModel === null
+                                    readonly property string line: Ghostd.noModel
                                         // Short on purpose: this card is
                                         // centred in the transcript view with
                                         // no height of its own, so at a narrow
@@ -904,9 +898,10 @@ FloatingWindow {
                                     MouseArea {
                                         anchors.fill: parent
                                         // Only while it is the call to action;
-                                        // a greeting is not a button.
-                                        visible: Ghostd.currentModel === null
-                                        enabled: visible
+                                        // a greeting is not a button. An
+                                        // invisible Item takes no input, so
+                                        // visibility is the whole switch.
+                                        visible: Ghostd.noModel
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: hud.openLogin()
                                     }

@@ -1,8 +1,8 @@
 /**
  * The one model choice Ghost owns: `roles.chat_model` in the ghost's
  * `models.json`. pi owns providers, the catalog, and availability; Ghost only
- * records which model (or the Claude Code runtime) drives the ghost and
- * rebinds open conversations when that changes.
+ * records which model drives the ghost and rebinds open conversations when
+ * that changes.
  */
 import type { ConversationRuntime } from "./conversation-identity.js";
 import { ghostPaths, GhostError, type GhostRegistry } from "./ghosts.js";
@@ -11,6 +11,7 @@ import {
   clearGhostModelRole,
   readGhostModels,
   resolveChatModelRef,
+  resolveModelRoleRef,
   setGhostModelRole,
 } from "./models.js";
 
@@ -52,10 +53,11 @@ export class ModelSelection {
       if (!ref) return { current: null, source: "none" };
       // `resolveChatModelRef` falls back to the first declared provider's
       // first model, so a value here does not mean the role is bound.
-      const bound = models?.roles?.chat_model;
+      // `resolveModelRoleRef` answers only for an explicit binding, which is
+      // exactly the distinction this reports.
       return {
         current: { provider: ref.provider, id: ref.modelId, runtime: "pi" },
-        source: bound?.provider && bound.modelId ? "explicit" : "none",
+        source: resolveModelRoleRef(models, "chat_model") ? "explicit" : "none",
       };
     });
   }

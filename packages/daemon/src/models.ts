@@ -276,8 +276,14 @@ function dropRemovedProviderBindings<T extends { provider?: unknown }>(
   const kept: Partial<Record<GhostModelRole, T | T[]>> = {};
   for (const [role, value] of Object.entries(bindings) as [GhostModelRole, T | T[]][]) {
     if (Array.isArray(value)) {
+      // Only copy a chain that actually names the gone provider; every other
+      // read (the common one) keeps the array it was given.
+      if (!value.some((entry) => entry?.provider === REMOVED_PROVIDER_ID)) {
+        kept[role] = value;
+        continue;
+      }
+      changed = true;
       const entries = value.filter((entry) => entry?.provider !== REMOVED_PROVIDER_ID);
-      if (entries.length !== value.length) changed = true;
       if (entries.length > 0) kept[role] = entries;
       continue;
     }

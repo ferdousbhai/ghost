@@ -3,9 +3,6 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  captureNativeHarnessEnvironment,
-  CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN,
-  CLAUDE_CODE_SAFE_ENV_VARS,
   findProviderCredentialEnv,
   PI_NO_TITLE_ENV_VAR,
   PI_OFFLINE_ENV_VAR,
@@ -18,61 +15,6 @@ import {
 // names a noncredential setting, it must be reviewed and listed here rather
 // than weakening the coverage assertion.
 const INTENTIONALLY_NON_CREDENTIAL_CATALOG_ENV_VARS: readonly string[] = [];
-
-const CURRENT_CLAUDE_SAFE_ENV_BY_ROUTE = {
-  direct: [
-    "ANTHROPIC_BASE_URL",
-    "ANTHROPIC_MODEL",
-    "CLAUDE_CONFIG_DIR",
-  ],
-  profile: [
-    "ANTHROPIC_FEDERATION_RULE_ID",
-    "ANTHROPIC_IDENTITY_TOKEN_FILE",
-    "ANTHROPIC_ORGANIZATION_ID",
-    "ANTHROPIC_PROFILE",
-    "ANTHROPIC_WORKSPACE_ID",
-  ],
-  bedrock: [
-    "CLAUDE_CODE_USE_BEDROCK",
-    "AWS_PROFILE",
-    "AWS_CONFIG_FILE",
-    "AWS_SHARED_CREDENTIALS_FILE",
-    "AWS_WEB_IDENTITY_TOKEN_FILE",
-    "AWS_REGION",
-  ],
-  vertex: [
-    "CLAUDE_CODE_USE_VERTEX",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GOOGLE_CLOUD_PROJECT",
-    "CLOUD_ML_REGION",
-    "ANTHROPIC_VERTEX_BASE_URL",
-  ],
-  foundry: [
-    "CLAUDE_CODE_USE_FOUNDRY",
-    "ANTHROPIC_FOUNDRY_BASE_URL",
-    "ANTHROPIC_FOUNDRY_RESOURCE",
-    "AZURE_CLIENT_ID",
-    "AZURE_TENANT_ID",
-  ],
-  anthropicAws: [
-    "CLAUDE_CODE_USE_ANTHROPIC_AWS",
-    "ANTHROPIC_AWS_BASE_URL",
-    "ANTHROPIC_AWS_WORKSPACE_ID",
-  ],
-  gateway: [
-    "ANTHROPIC_BASE_URL",
-    "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY",
-    "CLAUDE_CODE_PROXY_RESOLVES_HOSTS",
-  ],
-  transport: [
-    "HTTP_PROXY",
-    "HTTPS_PROXY",
-    "NO_PROXY",
-    "NODE_EXTRA_CA_CERTS",
-    "CLAUDE_CODE_CLIENT_CERT",
-    "CLAUDE_CODE_CLIENT_KEY",
-  ],
-} as const;
 
 /**
  * Every credential variable pi's provider registry reads. pi keeps the table
@@ -87,144 +29,18 @@ function pinnedCatalogEnvVars(): string[] {
 }
 
 describe("scrubProviderEnv", () => {
-  it("keeps the reviewed official non-secret Claude selector inventory explicit", () => {
-    expect(new Set(CLAUDE_CODE_SAFE_ENV_VARS).size).toBe(CLAUDE_CODE_SAFE_ENV_VARS.length);
-    for (const name of CLAUDE_CODE_SAFE_ENV_VARS) {
-      expect(CLAUDE_CODE_CREDENTIAL_VALUE_ENV_PATTERN.test(name)).toBe(false);
-    }
-    for (const names of Object.values(CURRENT_CLAUDE_SAFE_ENV_BY_ROUTE)) {
-      for (const name of names) expect(CLAUDE_CODE_SAFE_ENV_VARS).toContain(name);
-    }
-  });
+  // One representative name per prefix the family rule covers, plus the three
+  // bare names and the Vertex shape it special-cases. Proxy settings are the
+  // documented exception: a scrubbed child still has to reach the network.
+  const CLAUDE_FAMILY_SAMPLE = [
+    "ANTHROPIC_BASE_URL", "AWS_PROFILE", "AZURE_CLIENT_ID", "CLAUDE_CONFIG_DIR",
+    "GCLOUD_PROJECT", "GOOGLE_APPLICATION_CREDENTIALS",
+    "CLAUDECODE", "CLOUD_ML_REGION", "USE_VERTEX",
+  ] as const;
 
-  it.each([
-    "VERTEX_REGION_CLAUDE_ACCESS_TOKEN_BACKUP",
-    "VERTEX_REGION_CLAUDE_4_8_OPUS_ACCESS_TOKEN",
-    "VERTEX_REGION_CLAUDE_4_8_OPUS_ACCESS_TOKEN_BACKUP",
-    "VERTEX_REGION_CLAUDE_SECRET_4_8_OPUS",
-    "VERTEX_REGION_CLAUDE_4_8_OPUS_SECRET_BACKUP",
-    "ACCESS_TOKEN_VERTEX_REGION_CLAUDE_4_8_OPUS",
-    "VERTEX_REGION_CLAUDE_4_8_OPUS_EXTRA",
-    "VERTEX_REGION_CLAUDE__4_8_OPUS",
-    "VERTEX_REGION_CLAUDE_4_8_opus",
-    "NOT_VERTEX_REGION_CLAUDE_4_8_OPUS",
-  ])("rejects adversarial Vertex selector %s", (name) => {
-    const captured = captureNativeHarnessEnvironment("claude-native", {
-      HOME: "/home/owner",
-      PATH: "/usr/bin",
-      [name]: "must-not-cross",
-      VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-    });
-
-    expect(captured[name]).toBeUndefined();
-    expect(captured.VERTEX_REGION_CLAUDE_4_8_OPUS).toBe("europe-west1");
-  });
-
-  it("derives one delegated-harness environment without mutating its source", () => {
-    const source: NodeJS.ProcessEnv = {
-      HOME: "/home/owner",
-      PATH: "/usr/bin",
-      LANG: "en_US.UTF-8",
-      LC_ALL: "C.UTF-8",
-      LC_CTYPE: "fi_FI.UTF-8",
-      LC_OWNER_SECRET: "locale-shaped-secret",
-      ANTHROPIC_API_KEY: "claude-secret",
-      ANTHROPIC_AUTH_TOKEN: "claude-auth-secret",
-      ANTHROPIC_BASE_URL: "https://router.invalid",
-      ANTHROPIC_CUSTOM_HEADERS: "authorization: secret",
-      ANTHROPIC_EXTRA_BODY: '{"credential":"secret"}',
-      CLAUDE_CODE_USE_FOUNDRY: "1",
-      CLAUDE_CODE_EXTRA_BODY: '{"secret":"value"}',
-      CLAUDE_CODE_ACCESS_TOKEN: "access-secret",
-      CLAUDE_CODE_REFRESH_TOKEN: "refresh-secret",
-      CLAUDE_CODE_SESSION_ACCESS_TOKEN: "session-secret",
-      AWS_PROFILE: "owner-profile",
-      AWS_CONFIG_FILE: "/home/owner/.aws/config",
-      AWS_CONTAINER_AUTHORIZATION_TOKEN: "container-secret",
-      GOOGLE_APPLICATION_CREDENTIALS: "/home/owner/google.json",
-      CLAUDE_CODE_CLIENT_CERT: "/home/owner/client.pem",
-      AZURE_CLIENT_SECRET: "azure-secret",
-      VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-      VERTEX_REGION_CLAUDE_OWNER_SECRET: "vertex-secret",
-      OPENAI_API_KEY: "pi-provider-secret",
-      GHOSTD_API_TOKEN: "ghost-secret",
-      OMP_PRIVATE_TOKEN: "omp-secret",
-      PI_CONFIG_FILES: "/tmp/pi-config",
-      CODEX_HOME: "/tmp/codex",
-      NODE_OPTIONS: "--require=/tmp/inject.cjs",
-      OTEL_EXPORTER_OTLP_HEADERS: "authorization=telemetry-secret",
-      TRACEPARENT: "00-daemon-trace",
-      GIT_CONFIG_KEY_0: "core.sshCommand",
-      GIT_CONFIG_VALUE_0: "/tmp/inject",
-      NPM_TOKEN: "npm-secret",
-      GITHUB_TOKEN: "github-secret",
-      DATABASE_URL: "postgres://owner:secret@localhost/ghost",
-      DOCKER_CONFIG: "/home/owner/.docker",
-      SERVICE_PASSWORD: "service-secret",
-      FUTURE_SECRET: "future-secret",
-      FUTURE_TOKEN: "future-token",
-      APP_THEME: "dark",
-    };
-    const original = { ...source };
-
-    const captured = captureNativeHarnessEnvironment("claude-native", source);
-
-    expect(source).toEqual(original);
-    expect(Object.isFrozen(captured)).toBe(true);
-    expect(captureNativeHarnessEnvironment("claude-native", captured)).toBe(captured);
-    expect(captured).toMatchObject({
-      HOME: "/home/owner",
-      PATH: "/usr/bin",
-      LANG: "en_US.UTF-8",
-      LC_ALL: "C.UTF-8",
-      LC_CTYPE: "fi_FI.UTF-8",
-      ANTHROPIC_BASE_URL: "https://router.invalid",
-      CLAUDE_CODE_USE_FOUNDRY: "1",
-      AWS_PROFILE: "owner-profile",
-      AWS_CONFIG_FILE: "/home/owner/.aws/config",
-      GOOGLE_APPLICATION_CREDENTIALS: "/home/owner/google.json",
-      CLAUDE_CODE_CLIENT_CERT: "/home/owner/client.pem",
-      VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
-    });
-    for (const name of [
-      "OPENAI_API_KEY",
-      "ANTHROPIC_API_KEY",
-      "ANTHROPIC_AUTH_TOKEN",
-      "ANTHROPIC_CUSTOM_HEADERS",
-      "ANTHROPIC_EXTRA_BODY",
-      "CLAUDE_CODE_EXTRA_BODY",
-      "CLAUDE_CODE_ACCESS_TOKEN",
-      "CLAUDE_CODE_REFRESH_TOKEN",
-      "CLAUDE_CODE_SESSION_ACCESS_TOKEN",
-      "AWS_CONTAINER_AUTHORIZATION_TOKEN",
-      "AZURE_CLIENT_SECRET",
-      "GHOSTD_API_TOKEN",
-      "OMP_PRIVATE_TOKEN",
-      "PI_CONFIG_FILES",
-      "CODEX_HOME",
-      "NODE_OPTIONS",
-      "OTEL_EXPORTER_OTLP_HEADERS",
-      "TRACEPARENT",
-      "GIT_CONFIG_KEY_0",
-      "GIT_CONFIG_VALUE_0",
-      "NPM_TOKEN",
-      "GITHUB_TOKEN",
-      "DATABASE_URL",
-      "DOCKER_CONFIG",
-      "SERVICE_PASSWORD",
-      "FUTURE_SECRET",
-      "FUTURE_TOKEN",
-      "APP_THEME",
-      "LC_OWNER_SECRET",
-      "VERTEX_REGION_CLAUDE_OWNER_SECRET",
-    ]) {
-      expect(captured[name]).toBeUndefined();
-    }
-  });
-
-  it("removes every Claude/cloud family from Pi after the private capture", () => {
+  it("removes the whole Claude/cloud family, including names nobody enumerated", () => {
     const env: NodeJS.ProcessEnv = {
-      ...Object.fromEntries(CLAUDE_CODE_SAFE_ENV_VARS.map((name) => [name, `native-${name}`])),
+      ...Object.fromEntries(CLAUDE_FAMILY_SAMPLE.map((name) => [name, `native-${name}`])),
       VERTEX_REGION_CLAUDE_4_8_OPUS: "europe-west1",
       ANTHROPIC_FUTURE_NATIVE_AUTH: "future-secret",
       CLAUDE_CODE_FUTURE_AUTH_MODE: "future",
@@ -234,11 +50,7 @@ describe("scrubProviderEnv", () => {
 
     scrubProviderEnv(env);
 
-    for (const name of CLAUDE_CODE_SAFE_ENV_VARS) {
-      if (["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS",
-        "http_proxy", "https_proxy", "no_proxy"].includes(name)) continue;
-      expect(env[name]).toBeUndefined();
-    }
+    for (const name of CLAUDE_FAMILY_SAMPLE) expect(env[name]).toBeUndefined();
     expect(env.VERTEX_REGION_CLAUDE_4_8_OPUS).toBeUndefined();
     expect(env.ANTHROPIC_FUTURE_NATIVE_AUTH).toBeUndefined();
     expect(env.CLAUDE_CODE_FUTURE_AUTH_MODE).toBeUndefined();

@@ -4715,12 +4715,12 @@ describe("runtime-qualified conversation identity", () => {
       ["pi:default", true, false],
     ]);
 
-    await host!.setPinned("casper", "default", false, "pi");
+    await host!.setPinned("casper", "default", false);
     expect(JSON.parse(readFileSync(join(sessionDir, "pins.json"), "utf8"))).toEqual({
       version: 2,
       pinned: [],
     });
-    await host!.markRead("casper", "default", new Date(readAt), "pi");
+    await host!.markRead("casper", "default", new Date(readAt));
     expect(JSON.parse(readFileSync(join(sessionDir, "reads.json"), "utf8"))).toEqual({
       version: 2,
       reads: { "pi:default": readAt },
