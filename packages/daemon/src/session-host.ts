@@ -105,8 +105,8 @@ import {
   type PiMessagesEvent,
   zeroUsage,
 } from "./pi-messages.js";
-import { readPinState, writePins } from "./pins.js";
-import { readReadState, writeReads } from "./reads.js";
+import { type ConversationPins, readPinState, writePins } from "./pins.js";
+import { type ConversationReadState, readReadState, writeReads } from "./reads.js";
 import {
   conversationEnvironment,
   conversationIdentity,
@@ -975,12 +975,17 @@ async function piSessionHeaderCwd(path: string): Promise<string | undefined> {
 
 type StoredSessionRow = Omit<SessionSummary, "pinned" | "unread">;
 
-function expandLegacyPins(
-  stored: readonly string[],
+/**
+ * The pinned row ids. A v1 file keyed pins by bare conversation id, so its
+ * entries are matched against the rows to recover the runtime-qualified id.
+ */
+function pinnedRowIds(
+  state: ConversationPins,
   rows: readonly StoredSessionRow[],
 ): Set<string> {
+  if (state.version !== 1) return new Set(state.pinned);
   const expanded = new Set<string>();
-  for (const conversationId of stored) {
+  for (const conversationId of state.pinned) {
     for (const row of rows) {
       if (row.conversationId === conversationId) expanded.add(row.id);
     }
@@ -988,12 +993,14 @@ function expandLegacyPins(
   return expanded;
 }
 
-function expandLegacyReads(
-  stored: Readonly<Record<string, string>>,
+/** Read timestamps by row id, expanding a v1 file the way `pinnedRowIds` does. */
+function readsByRowId(
+  state: ConversationReadState,
   rows: readonly StoredSessionRow[],
 ): Record<string, string> {
+  if (state.version !== 1) return { ...state.reads };
   const expanded: Record<string, string> = {};
-  for (const [conversationId, readAt] of Object.entries(stored)) {
+  for (const [conversationId, readAt] of Object.entries(state.reads)) {
     for (const row of rows) {
       if (row.conversationId === conversationId) expanded[row.id] = readAt;
     }
@@ -3488,12 +3495,8 @@ export class SessionHost {
     ]);
     // A pin whose conversation is gone is simply not seen here; the next write
     // prunes it.
-    const pinned = pinState.version === 1
-      ? expandLegacyPins(pinState.pinned, rows)
-      : new Set(pinState.pinned);
-    const reads = readState.version === 1
-      ? expandLegacyReads(readState.reads, rows)
-      : readState.reads;
+    const pinned = pinnedRowIds(pinState, rows);
+    const reads = readsByRowId(readState, rows);
     return rows
       .map((row) => {
         const readAt = reads[row.id];
@@ -3545,9 +3548,7 @@ export class SessionHost {
       );
     }
     const state = await readPinState(paths.sessionDir);
-    const stored = state.version === 1
-      ? expandLegacyPins(state.pinned, rows)
-      : new Set(state.pinned);
+    const stored = pinnedRowIds(state, rows);
     stored.delete(identity.id);
     const kept = [...stored].filter((pin) => existing.has(pin));
     await this.pinWriter(paths.sessionDir, pinned ? [...kept, identity.id] : kept);
@@ -3587,9 +3588,7 @@ export class SessionHost {
       );
     }
     const state = await readReadState(paths.sessionDir);
-    const reads = state.version === 1
-      ? expandLegacyReads(state.reads, rows)
-      : state.reads;
+    const reads = readsByRowId(state, rows);
     const kept = Object.fromEntries(
       Object.entries(reads).filter(([id]) => existing.has(id)),
     );
@@ -4500,15 +4499,11 @@ export class SessionHost {
         .filter((row) => row.id !== forkIdentity.id)
         .map((row) => row.id));
       const pinState = await readPinState(paths.sessionDir);
-      const pins = pinState.version === 1
-        ? expandLegacyPins(pinState.pinned, rowsBefore)
-        : new Set(pinState.pinned);
+      const pins = pinnedRowIds(pinState, rowsBefore);
       pins.delete(forkIdentity.id);
       await this.pinWriter(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
       const readState = await readReadState(paths.sessionDir);
-      const reads = readState.version === 1
-        ? expandLegacyReads(readState.reads, rowsBefore)
-        : { ...readState.reads };
+      const reads = readsByRowId(readState, rowsBefore);
       delete reads[forkIdentity.id];
       await this.readWriter(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([id]) => remainingIds.has(id)),
@@ -4899,15 +4894,11 @@ export class SessionHost {
         .filter((row) => row.id !== identity.id)
         .map((row) => row.id));
       const pinState = await readPinState(paths.sessionDir);
-      const pins = pinState.version === 1
-        ? expandLegacyPins(pinState.pinned, rowsBefore)
-        : new Set(pinState.pinned);
+      const pins = pinnedRowIds(pinState, rowsBefore);
       pins.delete(identity.id);
       await this.pinWriter(paths.sessionDir, [...pins].filter((pin) => remainingIds.has(pin)));
       const readState = await readReadState(paths.sessionDir);
-      const reads = readState.version === 1
-        ? expandLegacyReads(readState.reads, rowsBefore)
-        : { ...readState.reads };
+      const reads = readsByRowId(readState, rowsBefore);
       delete reads[identity.id];
       await this.readWriter(paths.sessionDir, Object.fromEntries(
         Object.entries(reads).filter(([key]) => remainingIds.has(key)),

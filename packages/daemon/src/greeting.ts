@@ -48,20 +48,6 @@ export interface GreetingContextInput {
   readonly onboarding: boolean;
 }
 
-function _budgetedLines(
-  lines: readonly string[],
-  budgetChars: number,
-): string[] {
-  const kept: string[] = [];
-  let chars = 0;
-  for (const line of lines) {
-    if (chars + line.length + 1 > budgetChars) break;
-    chars += line.length + 1;
-    kept.push(line);
-  }
-  return kept;
-}
-
 function greetingInstructions(input: GreetingContextInput): string[] {
   if (input.onboarding) {
     return [

@@ -10,7 +10,7 @@ import {
   unlink,
   type FileHandle,
 } from "node:fs/promises";
-import { constants, type BigIntStats } from "node:fs";
+import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { GhostError } from "./errors.js";
@@ -18,7 +18,6 @@ import {
   descriptorPath,
   openConfinedDirectory,
   openConfinedFile,
-  openDirectoryNoFollow,
   openRegularFileNoFollow,
   withDescriptorLock,
 } from "./linux-fs.js";
@@ -40,58 +39,15 @@ async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>):
   }
 }
 
-function _message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function _resolveWithin(base: string, relativePath: string, label: string): string {
-  const full = resolve(base, relativePath);
-  if (full !== base && !full.startsWith(base + sep)) {
-    throw new GhostError(
-      "invalid_path",
-      `${label} ${JSON.stringify(relativePath)} escapes the ghost home.`,
-      { path: relativePath },
-    );
-  }
-  return full;
-}
-
 async function readConfinedText(
   homeDir: string,
   path: string,
   label: string,
 ): Promise<string | null> {
-  const source = await readConfinedTextFile(homeDir, path, label);
-  return source?.text ?? null;
-}
-
-interface ReadTextFile {
-  readonly text: string;
-  readonly modified: Date;
-}
-
-function _sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
-  return left.isFile() && right.isFile()
-    && left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
-    && left.mode === right.mode
-    && left.nlink === right.nlink;
-}
-
-async function readConfinedTextFile(
-  homeDir: string,
-  path: string,
-  label: string,
-): Promise<ReadTextFile | null> {
   const file = await openConfinedFile(homeDir, path, label);
   if (!file) return null;
   try {
-    const text = await file.readFile("utf8");
-    const stats = await file.stat();
-    return { text, modified: stats.mtime };
+    return await file.readFile("utf8");
   } finally {
     await file.close();
   }
@@ -166,20 +122,6 @@ async function atomicWriteFile(
   } finally {
     await directory.close();
   }
-}
-
-async function _openOrCreateChildDirectory(
-  parent: FileHandle,
-  name: string,
-  label: string,
-): Promise<FileHandle> {
-  const child = descriptorPath(parent, name);
-  try {
-    await mkdir(child);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-  }
-  return openDirectoryNoFollow(child, label);
 }
 
 export class GhostHome {

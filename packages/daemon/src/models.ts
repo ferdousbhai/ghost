@@ -290,14 +290,6 @@ function dropRemovedProviderBindings<T extends { provider?: unknown }>(
   return changed ? kept : bindings;
 }
 
-function _assertParses(path: string, value: string, parse: (input: string) => unknown): void {
-  try {
-    parse(value);
-  } catch (error) {
-    throw new Error(`${path}: ${(error as Error).message}`);
-  }
-}
-
 function assertProviderShape(path: string, providers: Record<string, unknown>): void {
   for (const [provider, value] of Object.entries(providers)) {
     if (value === null || typeof value !== "object" || Array.isArray(value)) {
