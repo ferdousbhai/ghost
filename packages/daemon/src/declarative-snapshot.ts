@@ -14,14 +14,6 @@ export interface EffectiveDeclarativeSnapshot {
   slashCommands: FileSlashCommand[];
 }
 
-export interface DeclarativePromptSnapshot {
-  instructions: Array<{ path: string; content: string }>;
-  skills: Array<{ name: string; path: string; content: string }>;
-  rules: Array<{ name: string; path: string; content: string; alwaysApply?: boolean }>;
-  prompts: Array<{ name: string; content: string }>;
-  commands: Array<{ name: string; content: string }>;
-}
-
 function mergeNamed<T extends { name: string }>(
   groups: readonly (readonly T[])[],
 ): T[] {

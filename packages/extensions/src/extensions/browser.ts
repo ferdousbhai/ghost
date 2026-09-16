@@ -57,8 +57,6 @@ export const BROWSER_ACTIONS = [
   "batch",
 ] as const;
 
-export type BrowserAction = (typeof BROWSER_ACTIONS)[number];
-
 export interface BrowserExtensionOptions extends GhostExtensionOptions {
   /**
    * Which browser to drive: the relay into the owner's real signed-in Chromium.

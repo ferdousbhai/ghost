@@ -164,19 +164,6 @@ export interface AxHitTestResult {
 }
 
 
-/** The sidecar's own error vocabulary (protocol.py `_ERROR_CODES`). */
-export type SidecarErrorCode =
-  | "capability"
-  | "ambiguous_target"
-  | "state_restore"
-  | "unknown_ref"
-  | "harness"
-  | "invalid_args"
-  | "unknown_op"
-  | "invalid_json"
-  | "invalid_request"
-  | "internal";
-
 /**
  * Map a sidecar error code onto the ghost taxonomy. A missing backend is a
  * `not_found` (the same code the direct-binary tools used for "not installed"),

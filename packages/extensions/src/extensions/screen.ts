@@ -65,8 +65,6 @@ const MAX_WATCH_RUN_MS = 30_000;
 
 const SCREEN_MODES = ["capture", "watch"] as const;
 
-export type ScreenMode = (typeof SCREEN_MODES)[number];
-
 /** A sleep that a caller's abort signal cuts short. */
 function watchDelay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {

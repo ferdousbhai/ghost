@@ -27,25 +27,6 @@ export const GHOST_DESKTOP = "ghost_desktop";
 
 const NOTIFY_SEND_BINARY = "notify-send";
 
-export type DesktopAction =
-  | "state"
-  | "see"
-  | "layers"
-  | "focus"
-  | "workspace"
-  | "key"
-  | "type"
-  | "click"
-  | "drag"
-  | "scroll"
-  | "mouse_move"
-  | "ax_query"
-  | "ax_roles"
-  | "ax_perform"
-  | "ax_set"
-  | "hit_test"
-  | "notify";
-
 export const DESKTOP_ACTIONS = [
   "state",
   "see",

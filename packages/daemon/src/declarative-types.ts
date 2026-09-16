@@ -56,8 +56,6 @@ export interface FileSlashCommand {
   _source?: { providerName: string; level: "user" | "project" | "native" };
 }
 
-export type AgentSource = "bundled" | "user" | "project";
-
 /**
  * pi's frontmatter split (`{ frontmatter, body }` with the body trimmed),
  * plus Ghost's rule that a frontmatter block must be a mapping.

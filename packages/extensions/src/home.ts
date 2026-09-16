@@ -27,12 +27,6 @@ import type { CharacterFile } from "./types.js";
 export const CHARACTER_FILENAME = "character.md";
 export const MAX_CHARACTER_BODY_LENGTH = 20_000;
 
-export interface SkippedFile {
-  readonly path: string;
-  readonly reason: string;
-}
-
-
 const fileMutationQueues = new Map<string, Promise<unknown>>();
 
 async function withFileMutationQueue<T>(path: string, mutate: () => Promise<T>): Promise<T> {
