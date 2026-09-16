@@ -176,10 +176,8 @@ context; an informational notification alone is not.
 Trusted command hooks that need a fast classifier can invoke
 `ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",
 "prompt": "...", "role": "smol_model" }` from stdin and returns
-`{ "text": "..." }`. `role` may be `smol_model` or `advisor_model` and defaults
-to `smol_model`, preserving the cheapest-usable behavior for existing callers.
-An unbound advisor role follows Ghost's advisor preference list instead of the
-cheap-model fallback. The command performs one raw completion. It does not
+`{ "text": "..." }`. `role` is optional and must be `smol_model`, the only role
+it accepts; unset, it defaults there. The command performs one raw completion. It does not
 create a session, expose tools, name a concrete provider model, or override the
 model's default reasoning level.
 

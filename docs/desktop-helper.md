@@ -15,11 +15,9 @@ THIRD_PARTY_NOTICES) behind our own thin JSON bridge, and drop its browser
 extensions shell to this sidecar.
 
 Vision is NOT in the helper. Once the helper fallback is needed, semantic
-(AT-SPI) access is preferred where it exists (GTK); Ghost's `inspect_image` —
-which resolves the `advisor_model` role Ghost binds from `models.json` — is the
-universal fallback for
-canvas/Qt-without-a11y/web/games. The strongest path uses both: try semantic,
-fall back to a screenshot + vision.
+(AT-SPI) access is preferred where it exists (GTK); a screenshot read by the
+chat model is the universal fallback for canvas/Qt-without-a11y/web/games. The
+strongest path uses both: try semantic, fall back to a screenshot + vision.
 
 ## Transport
 
@@ -124,13 +122,13 @@ execFile arg arrays; no shell interpolation of model input.
 
 `ghost_screen`: uses `capture` (ladder + honesty), returns the image natively
 to a vision-capable model (the logical-size `model_png_base64` copy when the
-helper made one; the saved file keeps every pixel) — a text-only model reaches it through Ghost's
-`inspect_image`, which uses the bound `advisor_model` — and surfaces
+helper made one; the saved file keeps every pixel) — a text-only model is told
+the capture is not attached, which is what pi says, and gets the saved path —
+and surfaces
 `background_safe`/`warnings` to the model so it knows whether the shot
 disturbed the desktop. `mode: "watch"` loops the same `capture` op N times over
 an interval and returns the frames as an **image sequence** (multiple image
-blocks to a vision model; the saved paths + an `inspect_image` instruction to a
-text-only one) — the ghost's "video understanding", since models have no native
+blocks to a vision model; the saved paths to a text-only one) — the ghost's "video understanding", since models have no native
 video input. Zero new dependency; bounded by a frame cap and a wall-clock
 budget, and serialized against every other capture by the process-wide chain
 in `screen.ts`.

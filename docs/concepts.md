@@ -144,12 +144,10 @@ Provider logins live in pi's own file-backed store,
 never leaves the ghost home. Credential values never enter logs or API
 responses.
 
-Roles are `chat_model` (the conversation), `smol_model` (titles, greetings,
-command-hook completions), and `advisor_model` (the frontier teacher and image
-reader), one binding each; retry and model fallback belong to the runtime, not
-to `models.json`. The two background roles follow
-the driver when unset: the chat provider's small tier for smol, Ghost's advisor
-preference for the teacher.
+Roles are `chat_model` (the conversation) and `smol_model` (titles, greetings,
+command-hook completions), one binding each; retry and model fallback belong to
+the runtime, not to `models.json`. The background role follows the driver when
+unset: the chat provider's small tier, then the cheapest usable model anywhere.
 `chat_model` unset leaves the choice to pi. There is no model catalog API and
 no local-runner detection: `ghost model <provider>/<id>` writes the binding,
 and a local endpoint is an ordinary provider in `models.json`.
@@ -176,10 +174,11 @@ none. The protocol is in [hooks.md](hooks.md).
 
 - **Local-first driver.** The ghost's main model, the `chat_model` role, is
   meant to be an open-source model: local on the owner's device, or hosted
-  with one LoRA adapter per ghost. Frontier models bind to the teacher role,
-  `advisor_model`, reached through `ghostd hook-smol-complete --role advisor`
-  from an owner `session_stop` hook and through the specialist CLIs the ghost
-  runs from Bash. Those owner hooks are the training signal for any
+  with one LoRA adapter per ghost. Frontier models are reached through the
+  specialist CLIs the ghost runs from Bash (`claude -p`, `codex`, `pi`), not
+  through a model role of Ghost's own: a teacher role existed and was removed
+  once nothing but image reading depended on it. Owner `session_stop` hooks are
+  the training signal for any
   continual-learning loop an owner builds outside the core (#64); Ghost keeps
   no review pipeline or training journal of its own.
 - **Lean core, adaptive ghost.** The core ships sensible defaults and stops

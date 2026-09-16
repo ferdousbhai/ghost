@@ -183,9 +183,9 @@ Omarchy menu (Install → AI). A local runner is an ordinary provider entry in
 serves (the shape is `GhostProviderConfig` in
 [`models.ts`](../packages/daemon/src/models.ts)); the easiest way to add one is
 to ask the ghost, which has the file and the schema. Then `ghost model
-<provider>/<model>` makes it the chat model. Keep a frontier model on
-`advisor_model` for the hard questions and for reading images when the local
-model cannot.
+<provider>/<model>` makes it the chat model. For the hard questions, let the
+ghost delegate from Bash to a specialist CLI (`claude -p`, `codex`, `pi`);
+pick a chat model that accepts images if you want it to read screenshots.
 
 ## 6. First conversation in the HUD
 

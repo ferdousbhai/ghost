@@ -233,9 +233,9 @@ line, `new_context` rolls over on demand with the ghost's own handoff, and
 ([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
 pi-posthorse). Ghost adds
 `ask`, browser,
-screen, desktop, and MCP tools. `inspect_image` is added only when the active
-chat model does not accept image input; vision-capable Pi models use their
-native image understanding. The exact assembly is
+screen, desktop, and MCP tools. Images are pi's read tool: it attaches them
+resized, and tells a model that cannot take one that the image was omitted.
+Ghost adds no second model for pictures. The exact assembly is
 [`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
 [`pi-extension-bridge.ts`](packages/daemon/src/pi-extension-bridge.ts).
 
@@ -389,7 +389,7 @@ more, so a delegated harness reads its credentials from its own configuration
 exactly as it does when the owner runs it by hand. The implementation and its
 tests in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
 
-Roles are `chat_model`, `smol_model`, and `advisor_model`, one binding each.
+Roles are `chat_model` and `smol_model`, one binding each.
 Ghost keeps no fallback chain of its own: retry and model fallback are the
 runtime's, surfaced as `retry_fallback_applied`/`model_fallback` events.
 `chat_model` unset leaves the choice to the
@@ -405,11 +405,10 @@ longer has is dropped when `models.json` is read, so a home written before a
 runtime was removed heals instead of failing every turn on a binding nothing
 can honour. Ghost records no model name of its own: a free default is whatever
 pi reports as free at sign-in time, never a constant that can be delisted.
-`smol_model` serves titles, greetings, and command-hook completions;
-`advisor_model` is the frontier teacher and reads images for a chat model that
-cannot. Unset, both follow the driver: the smol role is
-the chat provider's small tier, then the cheapest usable model anywhere, and the
-advisor role is Ghost's preference list. The rule is
+`smol_model` serves titles, greetings, and command-hook completions. Unset, it
+follows the driver: the chat provider's small tier, then the cheapest usable
+model anywhere. A negative price is pi's dynamic-router sentinel, not a bargain,
+on every cost key. The rule is
 [`resolveSmolModel`](packages/daemon/src/smol.ts). An explicit unusable binding fails loudly rather than silently
 switching models.
 
