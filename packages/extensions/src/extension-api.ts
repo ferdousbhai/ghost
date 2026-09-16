@@ -33,8 +33,8 @@ export interface GhostToolModel {
 /**
  * What a tool execution or hook can see of its session. `cwd` is the session's
  * current working directory, which for a ghost session is the ghost home
- * unless the model has changed it; `model` is absent when the runtime has no
- * model instance (the Claude Code bridge).
+ * unless the model has changed it; `model` is absent when the runtime exposes
+ * no model instance for that call.
  */
 export interface GhostToolContext {
   readonly cwd: string;

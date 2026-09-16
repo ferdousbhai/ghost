@@ -55,8 +55,6 @@ export class GhostError extends Error {
 
 const EXTENSION_ERROR_STATUS: Record<string, number> = {
   not_found: 404,
-  document_too_large: 413,
-  cursor_stale: 409,
   conflict: 409,
 };
 

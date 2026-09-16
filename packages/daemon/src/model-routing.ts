@@ -38,6 +38,66 @@ export function defaultModel<T extends { provider: string; id: string; priority?
   return sortCatalogModels([...models])[0];
 }
 
+/**
+ * What a role needs from a model, in pi's own terms. pi declares `input`,
+ * `reasoning` and `contextWindow` on every model, so a binding can read the
+ * capability instead of guessing it from the id.
+ *
+ * `sortCatalogModels` answers a different question — the order the switcher
+ * lists a catalogue in — and its `versionNumber` reads the first number in an
+ * id, so a parameter count (`nemotron-nano-12b`) parses as version 12 and
+ * outranks a genuinely newer model. Ordering a list for a human to read can
+ * afford that; choosing what to bind cannot.
+ */
+export interface ModelNeed {
+  /** Hard requirement: every listed modality must be in the model's `input`. */
+  readonly modality?: readonly ("text" | "image")[];
+  /** Ranking preference, not a filter. */
+  readonly preferReasoning?: boolean;
+  /** Ranking preference, not a filter. */
+  readonly preferLargeContext?: boolean;
+}
+
+/** Whether a model can do the job at all. Preferences are not consulted. */
+export function meetsNeed(model: { input?: readonly string[] }, need: ModelNeed): boolean {
+  return (need.modality ?? []).every((modality) => model.input?.includes(modality) ?? false);
+}
+
+/**
+ * The models that can do the job, best first. Ties fall through to
+ * `sortCatalogModels`, so a catalogue whose models are equally capable keeps
+ * the order it has today.
+ */
+export function rankForNeed<T extends { provider: string; id: string; priority?: number; input?: readonly string[]; reasoning?: boolean; contextWindow?: number }>(
+  models: readonly T[],
+  need: ModelNeed,
+): T[] {
+  const capable = models.filter((model) => meetsNeed(model, need));
+  const order = new Map(sortCatalogModels([...capable]).map((model, index) => [model, index]));
+  return capable.sort((a, b) => {
+    if (need.preferReasoning && !!a.reasoning !== !!b.reasoning) return a.reasoning ? -1 : 1;
+    if (need.preferLargeContext && (a.contextWindow ?? 0) !== (b.contextWindow ?? 0)) {
+      return (b.contextWindow ?? 0) - (a.contextWindow ?? 0);
+    }
+    return (order.get(a) ?? 0) - (order.get(b) ?? 0);
+  });
+}
+
+/** The single best model for a need, or undefined when none can do the job. */
+export function bestForNeed<T extends { provider: string; id: string; priority?: number; input?: readonly string[]; reasoning?: boolean; contextWindow?: number }>(
+  models: readonly T[],
+  need: ModelNeed,
+): T | undefined {
+  return rankForNeed(models, need)[0];
+}
+
+/** A ghost's conversational model: text in, and as much room and reasoning as the tier offers. */
+export const CHAT_MODEL_NEED: ModelNeed = {
+  modality: ["text"],
+  preferReasoning: true,
+  preferLargeContext: true,
+};
+
 export type AutomaticModelRole = "advisor";
 
 interface ModelPreference {

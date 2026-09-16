@@ -234,7 +234,7 @@ export async function withScreenshotDirectory<T>(
   }
 }
 
-/** Compatibility seam for screen retention tests and direct callers. */
+/** The pathname form of `pruneScreenshotFiles`, used only by its tests. */
 export async function pruneScreenshotDirectoryPath(
   dir: string,
   retention: number,

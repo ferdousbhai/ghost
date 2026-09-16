@@ -243,7 +243,6 @@ export interface RequestOptions {
 
 export interface DesktopHelper {
   hello(): Promise<HelloPayload>;
-  capabilities(): Promise<AvailableBackends>;
   request<T = unknown>(
     op: string,
     args?: Record<string, unknown>,
@@ -384,11 +383,6 @@ export class DesktopHelperClient implements DesktopHelper {
 
   async hello(): Promise<HelloPayload> {
     return this.start();
-  }
-
-  async capabilities(): Promise<AvailableBackends> {
-    const hello = await this.start();
-    return hello["available-backends"] ?? {};
   }
 
   private start(): Promise<HelloPayload> {

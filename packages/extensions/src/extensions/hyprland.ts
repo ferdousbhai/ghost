@@ -47,9 +47,9 @@ export const DESKTOP_ACTIONS = [
   "notify",
 ] as const;
 
-export type NotifyUrgency = "low" | "normal" | "critical";
-
 export const NOTIFY_URGENCIES = ["low", "normal", "critical"] as const;
+
+export type NotifyUrgency = (typeof NOTIFY_URGENCIES)[number];
 
 export const MOUSE_BUTTONS = ["left", "right", "middle"] as const;
 
@@ -292,10 +292,6 @@ function clampAxQueryLimit(value: number): number {
 function clampClicks(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(Math.floor(value), MAX_CLICKS));
-}
-
-function boundedAxAction(value: unknown): string | null {
-  return boundedControlFreeString(value, MAX_AX_ACTION_LENGTH);
 }
 
 function workspaceName(client: Record<string, unknown>): string {
@@ -818,7 +814,7 @@ export function createHyprlandExtension(
           case "ax_perform": {
             requireAtspi(hello, "ax_perform");
             const ref = requireRef();
-            const axAction = boundedAxAction(params.ax_action ?? "click");
+            const axAction = boundedControlFreeString(params.ax_action ?? "click", MAX_AX_ACTION_LENGTH);
             if (axAction === null) {
               throw invalidFormat(
                 `action "ax_perform" needs a non-empty ax_action of at most `

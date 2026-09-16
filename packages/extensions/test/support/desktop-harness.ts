@@ -140,9 +140,6 @@ export function fakeHelper(options: FakeHelperOptions = {}): FakeHelper {
     async hello() {
       return hello;
     },
-    async capabilities() {
-      return backends;
-    },
     async request<T>(op: string, args: Record<string, unknown> = {}, _opts?: RequestOptions) {
       requests.push({ op, args });
       const result = options.handle ? options.handle(op, args) : undefined;

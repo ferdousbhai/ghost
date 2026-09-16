@@ -14,10 +14,6 @@ export type GhostErrorCode =
   | "invalid_format"
   | "forbidden"
   | "limit_exceeded"
-  | "document_too_large"
-  | "invalid_document_content"
-  | "invalid_cursor"
-  | "cursor_stale"
   | "conflict";
 
 export class GhostError extends Error {

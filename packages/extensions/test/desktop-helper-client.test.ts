@@ -105,7 +105,7 @@ function emitLifecycleEvent(proc: FakeProcess, event: "error" | "exit"): void {
 }
 
 describe("hello handshake", () => {
-  it("reads the unsolicited hello and exposes capabilities", async () => {
+  it("reads the unsolicited hello and the backends it advertises", async () => {
     const proc = new FakeProcess();
     const client = clientFor(proc);
     const pending = client.hello();
@@ -115,9 +115,8 @@ describe("hello handshake", () => {
     expect(hello.protocol).toBe(DESKTOP_HELPER_PROTOCOL_VERSION);
     expect(hello.version).toBe("0.1.0");
     expect(hello.in_hyprland_session).toBe(true);
-    const backends = await client.capabilities();
-    expect(backends.grim?.foreign_toplevel).toBe(true);
-    expect(backends.ydotool?.available).toBe(false);
+    expect(hello["available-backends"]?.grim?.foreign_toplevel).toBe(true);
+    expect(hello["available-backends"]?.ydotool?.available).toBe(false);
     await client.dispose();
   });
 

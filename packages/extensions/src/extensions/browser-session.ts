@@ -309,6 +309,13 @@ export class GhostBrowserSession {
     this.#idleTimer = undefined;
   }
 
+  /**
+   * Arm the idle close, if nothing is queued.
+   *
+   * Only `#serial` calls this: an `*Impl` body always runs with
+   * `#queuedActions >= 1`, so a call from inside one could never arm anything.
+   * Seventeen of them used to, and read as lifecycle bookkeeping.
+   */
   #touchIdleTimer(): void {
     this.#clearIdleTimer();
     if (this.#queuedActions > 0 || !this.backend.mayOwnTabs || this.#idleTimeoutMs <= 0) return;
@@ -449,7 +456,6 @@ export class GhostBrowserSession {
     this.#originUrl = page.url;
     this.#originHops = 0;
     this.#actingRemaining = this.#actingBudget;
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -467,7 +473,6 @@ export class GhostBrowserSession {
     const operation = this.#timeout(options);
     await this.#requirePage(operation);
     const result = await this.#validatePage(await this.backend.read(operation), operation);
-    this.#touchIdleTimer();
     return {
       url: result.url,
       title: result.title,
@@ -520,7 +525,6 @@ export class GhostBrowserSession {
       matches.push(match);
     }
     this.#refs = new Map(matches.map((match) => [match.ref, match]));
-    this.#touchIdleTimer();
     return {
       matches,
       total: backendMatches.length,
@@ -550,7 +554,6 @@ export class GhostBrowserSession {
       this.#invalidateRefs();
       this.#originHops += 1;
     }
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -586,7 +589,6 @@ export class GhostBrowserSession {
       this.#invalidateRefs();
       if (page.url !== before.url) this.#originHops += 1;
     }
-    this.#touchIdleTimer();
     return { ...page, submitted: submit };
   }
 
@@ -634,7 +636,6 @@ export class GhostBrowserSession {
         };
       },
     );
-    this.#touchIdleTimer();
     return result;
   }
 
@@ -650,7 +651,6 @@ export class GhostBrowserSession {
     // one. Observing only — no gate — but the hop count has to stay honest.
     if (page.moved && this.#originHops > 0) this.#originHops -= 1;
     this.#invalidateRefs();
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -666,7 +666,6 @@ export class GhostBrowserSession {
     // owner — had walked, so it re-adds a hop rather than undoing one.
     if (page.moved) this.#originHops += 1;
     this.#invalidateRefs();
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -712,7 +711,6 @@ export class GhostBrowserSession {
       ),
       operation,
     );
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -772,7 +770,6 @@ export class GhostBrowserSession {
       this.#invalidateRefs();
       this.#originHops += 1;
     }
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -814,7 +811,6 @@ export class GhostBrowserSession {
       this.#invalidateRefs();
       this.#originHops += 1;
     }
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -843,7 +839,6 @@ export class GhostBrowserSession {
     await this.#requirePage(operation);
     // Script can rewrite the page under our refs; the honest move is to drop them.
     this.#invalidateRefs();
-    this.#touchIdleTimer();
     return result;
   }
 
@@ -860,7 +855,6 @@ export class GhostBrowserSession {
       await this.backend.readConsole(operation),
     );
     await this.#requirePage(operation);
-    this.#touchIdleTimer();
     return entries;
   }
 
@@ -877,7 +871,6 @@ export class GhostBrowserSession {
       await this.backend.readNetwork(operation),
     );
     await this.#requirePage(operation);
-    this.#touchIdleTimer();
     return entries;
   }
 
@@ -907,7 +900,6 @@ export class GhostBrowserSession {
       ),
       operation,
     );
-    this.#touchIdleTimer();
     return page;
   }
 
@@ -939,7 +931,6 @@ export class GhostBrowserSession {
       ),
       operation,
     );
-    this.#touchIdleTimer();
     return result;
   }
 
@@ -979,7 +970,6 @@ export class GhostBrowserSession {
       this.#originHops = 0;
       this.#actingRemaining = this.#actingBudget;
     }
-    this.#touchIdleTimer();
     return result;
   }
 

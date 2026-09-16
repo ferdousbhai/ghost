@@ -19,7 +19,7 @@ export interface Usage {
   };
 }
 
-/** The message fields the wire projection reads, whichever runtime produced them. */
+/** The message fields the wire projection reads. */
 export interface RuntimeMessage {
   role: string;
   content?: unknown;
@@ -31,8 +31,8 @@ export interface RuntimeMessage {
 }
 
 /**
- * The session events the wire projection understands. Both agent runtimes
- * emit this structural shape; everything else they emit is ignored.
+ * The session events the wire projection understands. Everything else pi
+ * emits is ignored.
  */
 export type RuntimeSessionEvent =
   | { type: "agent_start" }
