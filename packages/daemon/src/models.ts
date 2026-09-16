@@ -55,9 +55,9 @@ export interface GhostModelRoleBinding {
 /**
  * The inference roles a ghost binds. Only `chat_model` is load-bearing for a
  * chat turn; the rest exist so a role added later does not need a file
- * migration. `vision_model` is the first to take that promise up — a plain
- * addition to this union, and every existing `models.json` keeps working,
- * because `roles` is optional and each role within it is optional.
+ * migration: a new role is a plain addition to this union, and every existing
+ * `models.json` keeps working, because `roles` is optional and each role within
+ * it is optional. (No role has taken that promise up yet.)
  *
  * - `chat_model` — answers the turn.
  * - `smol_model` — the cheap, fast lane for a ghost's throwaway completions:
