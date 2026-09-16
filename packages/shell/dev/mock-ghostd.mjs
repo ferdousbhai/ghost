@@ -1801,6 +1801,12 @@ const mockServer = createServer(async (req, res) => {
     roles.set(name, { provider, id });
     return json(res, 200, resolveCurrent(name));
   }
+  // The way out of a binding: `ghost model --none`. Unbinding leaves the role
+  // unset, which is the fresh-install state this mock already starts in.
+  if (parts[3] === "model" && parts.length === 4 && req.method === "DELETE") {
+    roles.delete(name);
+    return json(res, 200, resolveCurrent(name));
+  }
 
   if (parts[3] === "providers" && req.method === "GET") {
     return json(res, 200, { providers: PROVIDERS });

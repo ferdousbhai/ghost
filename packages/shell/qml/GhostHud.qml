@@ -409,8 +409,13 @@ FloatingWindow {
                     Rectangle {
                         id: modelIndicator
 
+                        // The daemon answers with two source values, not
+                        // three: `explicit` when a role is bound, `none` when
+                        // it is not — and `none` still carries the model that
+                        // would answer anyway. So nothing is set only when
+                        // there is no model at all; an unbound-but-working
+                        // model is the "Default" case below, not a warning.
                         readonly property bool noneSet: Ghostd.currentModel === null
-                            || Ghostd.modelSource === "none"
 
                         anchors.verticalCenter: parent.verticalCenter
                         visible: Ghostd.activeGhost !== ""
@@ -430,7 +435,10 @@ FloatingWindow {
                                 anchors.verticalCenter: parent.verticalCenter
                                 text: Ghostd.currentModel
                                     ? (Ghostd.currentModel.provider + "/" + Ghostd.currentModel.id)
-                                    : "No model: ghost model <provider>/<id>"
+                                    // A GUI button is a worse place for a CLI
+                                    // incantation than the CLI is: the click
+                                    // itself is the instruction.
+                                    : "Connect a model"
                                 color: modelIndicator.noneSet ? Theme.warn : Theme.foreground
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -442,7 +450,7 @@ FloatingWindow {
                             // Fallback hint: this model was not explicitly chosen.
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
-                                visible: Ghostd.currentModel && Ghostd.modelSource === "default"
+                                visible: Ghostd.currentModel && Ghostd.modelSource === "none"
                                 text: "· Default"
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
@@ -843,8 +851,23 @@ FloatingWindow {
                                 Text {
                                     id: invitation
 
-                                    readonly property string line: Ghostd.greeting !== ""
-                                        ? Ghostd.greeting : "What's on your mind?"
+                                    // A ghost with no model cannot answer, and
+                                    // its greeting is itself model-written, so
+                                    // on a fresh install this card is the first
+                                    // and only thing there is to read. Spend it
+                                    // on the one action that unblocks everything
+                                    // rather than on a question they cannot ask.
+                                    readonly property string line: Ghostd.currentModel === null
+                                        // Short on purpose: this card is
+                                        // centred in the transcript view with
+                                        // no height of its own, so at a narrow
+                                        // HUD its last line clips — and the one
+                                        // line a new owner cannot afford to
+                                        // lose is the instruction. The detail
+                                        // (which providers, what they cost)
+                                        // belongs in the pane this opens.
+                                        ? "Click here to connect a model — free options exist."
+                                        : (Ghostd.greeting !== "" ? Ghostd.greeting : "What's on your mind?")
 
                                     anchors.centerIn: parent
                                     width: parent.width - Theme.pad * 2
@@ -877,6 +900,16 @@ FloatingWindow {
                                     // A greeting that landed before this card
                                     // existed changed nothing to listen for.
                                     Component.onCompleted: invitation.text = invitation.line
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        // Only while it is the call to action;
+                                        // a greeting is not a button.
+                                        visible: Ghostd.currentModel === null
+                                        enabled: visible
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: hud.openLogin()
+                                    }
 
                                     SequentialAnimation {
                                         id: crossfade

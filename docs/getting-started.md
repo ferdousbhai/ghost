@@ -136,8 +136,11 @@ ghostd login                    # prompts for ghost and provider
 ghostd login sage --provider openrouter
 ```
 
-In the HUD, the same flow: click the model pill in the chat header (it reads
-**Choose a model** when nothing is set) → **Connect provider**. Each provider
+In the HUD, the same flow, and on a fresh install it is the first thing you
+see: an empty conversation says *Click here to connect a model — free options
+exist*, and the card itself opens the pane. The button in the chat header reads
+**Connect a model** until one is bound, then shows what is bound. Either opens
+**Connect provider**. Each provider
 row's primary button is **Sign in**, or the provider's own label — Anthropic's
 reads *Sign in (extra usage)*, because third-party calls draw
 per-token usage rather than an included Claude plan. Where a provider offers
