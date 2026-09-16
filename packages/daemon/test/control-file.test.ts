@@ -22,10 +22,10 @@ import {
   writeDaemonControlFile,
 } from "../src/control-file.js";
 import {
-  readToolCwds,
+  readLegacyToolCwds,
   TOOL_CWDS_MAX_BYTES,
   toolCwdsPath,
-} from "../src/tool-cwds.js";
+} from "../src/legacy-cwd-files.js";
 
 describe("daemon control-file reader", () => {
   let root = "";
@@ -148,23 +148,27 @@ describe("daemon control-file reader", () => {
     expect((error as Error).message).toContain("Daemon control file");
   });
 
+  // A hostile sidecar must never reach a transcript. The legacy reader is only
+  // ever used to adopt a pre-move home, so it yields nothing rather than
+  // throwing — refusing to open the conversation over a bad sidecar would be
+  // the worse failure — but it must still refuse to read the file at all.
   it("keeps hostile tool-cwd sidecars out of transcript restoration", async () => {
     const conversationId = "hostile-tool-cwds";
     const sidecar = toolCwdsPath(root, conversationId);
     const outside = join(root, "outside-tool-cwds.json");
     writeFileSync(outside, '{"version":1,"cwds":{"call":"/outside"}}\n', { mode: 0o600 });
     symlinkSync(outside, sidecar);
-    await expect(readToolCwds(root, conversationId))
-      .rejects.toMatchObject({ code: "tool_cwds_invalid", status: 500 });
+    await expect(readLegacyToolCwds(root, conversationId)).resolves.toEqual(new Map());
     rmSync(sidecar);
 
     execFileSync("mkfifo", [sidecar]);
     const timeout = Symbol("timeout");
     const fifo = await Promise.race([
-      readToolCwds(root, conversationId).then(() => "resolved", () => "rejected"),
+      readLegacyToolCwds(root, conversationId).then((value) => value, () => "rejected"),
       new Promise<symbol>((resolve) => setTimeout(() => resolve(timeout), 500)),
     ]);
-    expect(fifo).toBe("rejected");
+    // Anything but the timeout: a fifo must not block the read.
+    expect(fifo).not.toBe(timeout);
     rmSync(sidecar);
 
     const descriptor = openSync(sidecar, "w", 0o600);
@@ -173,7 +177,6 @@ describe("daemon control-file reader", () => {
     } finally {
       closeSync(descriptor);
     }
-    await expect(readToolCwds(root, conversationId))
-      .rejects.toMatchObject({ code: "tool_cwds_invalid", status: 500 });
+    await expect(readLegacyToolCwds(root, conversationId)).resolves.toEqual(new Map());
   });
 });

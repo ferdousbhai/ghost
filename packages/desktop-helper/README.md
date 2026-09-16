@@ -17,14 +17,15 @@ by Fabio Pauli:
   focused-region ladder, each rung honestly labelled.
 - **Layout-safe input** — `wtype` for text, `hyprctl sendshortcut` / `ydotool`
   for chords, closed-loop pointer moves.
-- **Hyprland dispatcher-grammar correctness** — auto-detected 0.55 string vs
-  0.56+ `hl.dsp.*` Lua grammar (see below).
+- **Hyprland dispatcher-grammar correctness** — the detected generation is
+  `legacy-string` (pre-0.56) or `lua-table` (0.56+ `hl.dsp.*`), overridable
+  with `OMAHARNESS_DISPATCH_API` (see below).
 
 Vision is **not** here: semantic (AT-SPI) access is preferred where it exists.
-A chat model that accepts images reads `ghost_screen`'s image block directly;
-a blind one hands the saved frame to Ghost's `inspect_image`, which resolves
-the `advisor_model` the ghost binds in `models.json`. The strongest path uses
-both — try semantic, fall back to a screenshot + vision.
+Images are pi's read tool. A chat model that accepts images reads
+`ghost_screen`'s image block directly; one that cannot is told the capture was
+not attached and gets the saved path. The strongest path uses both — try
+semantic, fall back to a screenshot + vision.
 
 There is deliberately **no `exec` op**: this is desktop control only. The ghost
 already has the harness's native Bash.

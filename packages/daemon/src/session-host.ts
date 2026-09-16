@@ -167,8 +167,18 @@ import {
   mergeDeclarativeSnapshots,
   renderPiDeclarativePrompt,
 } from "./declarative-snapshot.js";
-import { conversationCwdPath, readConversationCwd, writeConversationCwd } from "./conversation-cwd.js";
-import { readToolCwds, toolCwdsPath, writeToolCwds } from "./tool-cwds.js";
+import {
+  conversationCwdPath,
+  readLegacyConversationCwd,
+  readLegacyToolCwds,
+  toolCwdsPath,
+} from "./legacy-cwd-files.js";
+import {
+  readSessionCwds,
+  readSessionCwdsFromFile,
+  recordConversationCwd,
+  recordToolCwd as appendToolCwdEntry,
+} from "./session-cwds.js";
 
 /** pi's built-in coding tools a ghost session starts with. */
 export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
@@ -182,7 +192,7 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
 ];
 
 
-/** Keep the fallback vision tool out of a model's tool list when it can read images itself. */
+/** pi persists a forced `/skill` prompt as a custom message of this type. */
 const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 
 /** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
@@ -333,7 +343,6 @@ interface PersistedPiPassBoundary {
 type PersistedPiPassResult = PersistedPiPassBoundary | "superseded" | null;
 
 interface PiSettlementResult {
-  readonly toolCwdError?: unknown;
   readonly settlementError?: unknown;
 }
 
@@ -497,6 +506,7 @@ function scheduleSessionRetention(
 }
 
 export type SessionTransactionProbeStage =
+  | "fork-staged"
   | "fork-cleanup-unlink"
   | "fork-cleanup-verify"
   | "fork-cleanup-fsync"
@@ -533,7 +543,6 @@ export interface SessionHostOptions {
     runtime: GhostPiRuntime,
   ) => void | Promise<void>;
   /** Test seam for fault-injecting durable per-tool cwd publication. */
-  toolCwdWriter?: typeof writeToolCwds;
   /** Test seams for pausing owner sidebar-state publication. */
   pinWriter?: typeof writePins;
   readWriter?: typeof writeReads;
@@ -666,12 +675,8 @@ interface HostedSession extends GhostSessionHandle {
   resources: SessionResourceView;
   /** The session's working directory; `!cd` moves it and reopens the session. */
   cwd: string;
+  /** Mirrors the transcript's cwd entries so a render need not rescan it. */
   toolCwds: Map<string, string>;
-  toolCwdWrite?: Promise<void>;
-  /** Monotonic in-memory revision, retained across failed publications. */
-  toolCwdVersion: number;
-  /** Last revision known to be file-and-directory durable. */
-  toolCwdPersistedVersion: number;
   busy: boolean;
   lastUsedAt: number;
   unsubscribeOwnership?: () => void;
@@ -718,7 +723,6 @@ interface HostedSession extends GhostSessionHandle {
   abortCompleted?: boolean;
   askClosed?: boolean;
   ownershipDetached?: boolean;
-  toolCwdsFlushed?: boolean;
   titleAborted?: boolean;
   mcpReloadSettled?: boolean;
   mcpDisconnected?: boolean;
@@ -785,12 +789,13 @@ function deleteTransactionPath(
 }
 
 interface ForkTransactionRecord {
-  version: 3;
+  version: 4;
   kind: "fork";
   conversationId: string;
   tempTranscript: string;
-  tempConversationCwd: string;
-  tempToolCwds: string;
+  /** v3 staged two cwd sidecars beside the transcript; both now live in it. */
+  tempConversationCwd?: string;
+  tempToolCwds?: string;
 }
 
 const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"]>([
@@ -945,6 +950,8 @@ function persistentCdTarget(command: string, cwd: string, ownerHome: string): st
 }
 
 const PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
+/** A whole transcript, for the pre-open cwd scan. Bounded like any control file. */
+const PI_SESSION_MAX_BYTES = 64 * 1_048_576;
 
 /** The cwd pi recorded when it created the transcript, for conversations that never moved. */
 async function piSessionHeaderCwd(path: string): Promise<string | undefined> {
@@ -1269,7 +1276,6 @@ export class SessionHost {
   private readonly machineSkills: string[];
   private readonly browserSessionClose: (homeDir: string) => Promise<void>;
   private readonly sessionStartupProbe: NonNullable<SessionHostOptions["sessionStartupProbe"]>;
-  private readonly toolCwdWriter: typeof writeToolCwds;
   private readonly pinWriter: typeof writePins;
   private readonly readWriter: typeof writeReads;
   private readonly conversationFileProbe: NonNullable<SessionHostOptions["conversationFileProbe"]>;
@@ -1353,7 +1359,6 @@ export class SessionHost {
       : machineSkillPaths(this.ownerHome);
     this.browserSessionClose = options.browserSessionClose ?? closeBrowserSession;
     this.sessionStartupProbe = options.sessionStartupProbe ?? (() => {});
-    this.toolCwdWriter = options.toolCwdWriter ?? writeToolCwds;
     this.pinWriter = options.pinWriter ?? writePins;
     this.readWriter = options.readWriter ?? writeReads;
     this.conversationFileProbe = options.conversationFileProbe ?? (() => {});
@@ -1754,8 +1759,9 @@ export class SessionHost {
     )) {
       throw new GhostError("session_deleting", "This conversation has an unfinished deletion.", 409);
     }
-    return await readConversationCwd(paths.sessionDir, conversationId)
-      ?? await piSessionHeaderCwd(join(paths.sessionDir, sessionFileNameFor(conversationId)))
+    const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
+    return (await readSessionCwdsFromFile(sessionFile, PI_SESSION_MAX_BYTES)).cwd
+      ?? await piSessionHeaderCwd(sessionFile)
       ?? this.defaultCwd(ghost);
   }
 
@@ -1975,7 +1981,12 @@ export class SessionHost {
     }
 
     const toolNames = session.getActiveToolNames();
-    const toolCwds = await readToolCwds(paths.sessionDir, sessionKey);
+    const toolCwds = await this.adoptLegacyCwdSidecars(
+      session.sessionManager,
+      paths.sessionDir,
+      sessionKey,
+      logger,
+    );
     const initialModel = session.model;
     const model = initialModel
       ? { provider: initialModel.provider, id: initialModel.id }
@@ -1998,8 +2009,6 @@ export class SessionHost {
       modelRuntime,
       cwd: runtimeCwd,
       toolCwds,
-      toolCwdVersion: 0,
-      toolCwdPersistedVersion: 0,
       busy: false,
       lastUsedAt: this.retentionNow(),
       pendingOwnerPasses: [],
@@ -2048,7 +2057,6 @@ export class SessionHost {
       }
       if (event.type !== "agent_settled" || hosted.busy) return;
       void (async () => {
-        await this.flushToolCwds(hosted);
         await this.settlePiOwnerPasses(hosted);
         await this.announceConversationUpdated(ghostName, conversationId);
         await this.settleDeferredSession(hosted);
@@ -2590,13 +2598,7 @@ export class SessionHost {
   }
 
   private async settlePiNow(hosted: HostedSession): Promise<PiSettlementResult> {
-    let toolCwdError: unknown;
     let settlementError: unknown;
-    try {
-      await this.flushToolCwds(hosted);
-    } catch (error) {
-      toolCwdError = error;
-    }
     try {
       await this.settlePiOwnerPasses(hosted);
     } catch (error) {
@@ -2606,10 +2608,7 @@ export class SessionHost {
       });
       await this.abandonPiOwnerPasses(hosted);
     }
-    return {
-      ...(toolCwdError === undefined ? {} : { toolCwdError }),
-      ...(settlementError === undefined ? {} : { settlementError }),
-    };
+    return settlementError === undefined ? {} : { settlementError };
   }
 
   private async publishMcpCandidate<T>(
@@ -2719,57 +2718,63 @@ export class SessionHost {
     return tracked;
   }
 
+  /**
+   * Take over a home written before the cwd state moved into the transcript.
+   * The sidecars are copied in as entries once and then unlinked; a home that
+   * never had them, or has already been adopted, does no work and no writes.
+   */
+  private async adoptLegacyCwdSidecars(
+    manager: SessionManager,
+    sessionDir: string,
+    conversationId: string,
+    logger: Logger,
+  ): Promise<Map<string, string>> {
+    const current = readSessionCwds(manager);
+    const [legacyCwd, legacyToolCwds] = await Promise.all([
+      readLegacyConversationCwd(sessionDir, conversationId),
+      readLegacyToolCwds(sessionDir, conversationId),
+    ]);
+    if (legacyCwd === undefined && legacyToolCwds.size === 0) return current.toolCwds;
+    try {
+      if (legacyCwd !== undefined && current.cwd === undefined) {
+        recordConversationCwd(manager, legacyCwd);
+      }
+      for (const [toolCallId, cwd] of legacyToolCwds) {
+        if (current.toolCwds.has(toolCallId)) continue;
+        appendToolCwdEntry(manager, toolCallId, cwd);
+      }
+    } catch (error) {
+      // The conversation still opens; it just keeps its sidecars for next time.
+      logger.warn("could not adopt legacy cwd sidecars", {
+        session: conversationId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return new Map([...legacyToolCwds, ...current.toolCwds]);
+    }
+    await Promise.all([
+      unlink(conversationCwdPath(sessionDir, conversationId)).catch(() => {}),
+      unlink(toolCwdsPath(sessionDir, conversationId)).catch(() => {}),
+    ]);
+    logger.info("adopted legacy cwd sidecars", { session: conversationId });
+    return readSessionCwds(manager).toolCwds;
+  }
+
+  /**
+   * pi's session file is the store, so persisting is an append through the
+   * writer that already owns it — no debounce, no version watermark, and no
+   * flush before teardown, which is what a second file needed.
+   */
   private recordToolCwd(hosted: HostedSession, toolCallId: string, cwd: string): void {
     const absolute = resolve(cwd);
     hosted.toolCwds.delete(toolCallId);
     hosted.toolCwds.set(toolCallId, absolute);
-    hosted.toolCwdVersion += 1;
-    this.startToolCwdWrite(hosted, toolCallId);
-  }
-
-  private startToolCwdWrite(hosted: HostedSession, toolCallId: string): Promise<void> {
-    if (hosted.toolCwdWrite) return hosted.toolCwdWrite;
-    const sessionDir = ghostPaths(hosted.ghost.dir).sessionDir;
-    let write!: Promise<void>;
-    write = (async () => {
-      try {
-        while (hosted.toolCwdPersistedVersion < hosted.toolCwdVersion) {
-          const targetVersion = hosted.toolCwdVersion;
-          const snapshot = new Map(hosted.toolCwds);
-          const persisted = await this.toolCwdWriter(
-            sessionDir,
-            sessionKeyParts(hosted.sessionKey)[1],
-            snapshot,
-          );
-          hosted.toolCwdPersistedVersion = targetVersion;
-          if (hosted.toolCwdVersion === targetVersion) {
-            hosted.toolCwds = new Map(persisted);
-          }
-        }
-      } finally {
-        if (hosted.toolCwdWrite === write) hosted.toolCwdWrite = undefined;
-      }
-    })();
-    hosted.toolCwdWrite = write;
-    void write.catch((error) => {
+    try {
+      appendToolCwdEntry(hosted.session.sessionManager, toolCallId, absolute);
+    } catch (error) {
       hosted.logger.warn("could not persist a tool working directory", {
         toolCallId,
         error: error instanceof Error ? error.message : String(error),
       });
-    });
-    return write;
-  }
-
-  private async flushToolCwds(hosted: HostedSession): Promise<void> {
-    let failures = 0;
-    while (hosted.toolCwdPersistedVersion < hosted.toolCwdVersion) {
-      try {
-        await (hosted.toolCwdWrite ?? this.startToolCwdWrite(hosted, "flush"));
-        failures = 0;
-      } catch (error) {
-        failures += 1;
-        if (failures >= 3) throw error;
-      }
     }
   }
 
@@ -2934,7 +2939,7 @@ export class SessionHost {
         const target = persistentCdTarget(command.command, executionCwd, this.ownerHome);
         const nextCwd = target ? resolve(target) : null;
         if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
-          await writeConversationCwd(ghostPaths(hosted.ghost.dir).sessionDir, conversationId, nextCwd);
+          recordConversationCwd(hosted.session.sessionManager, nextCwd);
           hosted.cwd = nextCwd;
           await this.announceConversationUpdated(ghostName, conversationId);
         }
@@ -3178,11 +3183,13 @@ export class SessionHost {
       && !hosted.session.messages.some((message) => message.role === "assistant");
 
     let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
-    const emitAfterToolCwdDurability = (event: PiMessagesEvent) => {
+    // The terminal frame goes last, after the settlement events (branch and
+    // conversation updates) that a caller needs in order to read it correctly.
+    const emitAfterSettlement = (event: PiMessagesEvent) => {
       if (event.type === "done" || event.type === "error") pendingTerminal = event;
       else options.emit(event);
     };
-    const adapter = createPiMessagesAdapter(emitAfterToolCwdDurability, {
+    const adapter = createPiMessagesAdapter(emitAfterSettlement, {
       includeThinking: options.includeThinking,
       getCwd: () => hosted.session.sessionManager.getCwd(),
       // The shell rendered the POST's prompt before opening the stream. pi
@@ -3224,18 +3231,7 @@ export class SessionHost {
           ? await this.settlePiNow(hosted)
           : await settlementBarrier.settled
         : await this.settlePiNow(hosted);
-      if (settlement.toolCwdError !== undefined) {
-        pendingTerminal = {
-          type: "error",
-          reason: "error",
-          usage: adapter.totalUsage(),
-          errorMessage: `Could not durably save tool working directories: ${
-            settlement.toolCwdError instanceof Error
-              ? settlement.toolCwdError.message
-              : String(settlement.toolCwdError)
-          }`,
-        };
-      } else if (settlement.settlementError !== undefined) {
+      if (settlement.settlementError !== undefined) {
         pendingTerminal = {
           type: "error",
           reason: "error",
@@ -3984,39 +3980,49 @@ export class SessionHost {
           tempConversationCwd?: unknown;
           tempToolCwds?: unknown;
         };
-        if (value.version !== 3 || value.kind !== "fork"
+        // v4 stages one file. A v3 marker predates the cwd move and still
+        // names two sidecars, so its fork is finished the way it was started.
+        const legacy = value.version === 3;
+        if ((value.version !== 4 && !legacy) || value.kind !== "fork"
           || typeof value.conversationId !== "string" || !isValidConversationId(value.conversationId)
           || typeof value.tempTranscript !== "string" || !isAbsolute(value.tempTranscript)
           || !pathIsWithin(sessionDir, value.tempTranscript)
-          || typeof value.tempConversationCwd !== "string" || !isAbsolute(value.tempConversationCwd)
-          || !pathIsWithin(sessionDir, value.tempConversationCwd)
-          || typeof value.tempToolCwds !== "string" || !isAbsolute(value.tempToolCwds)
-          || !pathIsWithin(sessionDir, value.tempToolCwds)
+          || (legacy && (typeof value.tempConversationCwd !== "string"
+            || !isAbsolute(value.tempConversationCwd)
+            || !pathIsWithin(sessionDir, value.tempConversationCwd)
+            || typeof value.tempToolCwds !== "string" || !isAbsolute(value.tempToolCwds)
+            || !pathIsWithin(sessionDir, value.tempToolCwds)))
           || marker !== forkTransactionPath(sessionDir, value.conversationId)) {
           throw new Error("invalid fork transaction marker");
         }
         const record: ForkTransactionRecord = {
-          version: 3,
+          version: 4,
           kind: "fork",
           conversationId: value.conversationId,
           tempTranscript: value.tempTranscript,
-          tempConversationCwd: value.tempConversationCwd,
-          tempToolCwds: value.tempToolCwds,
+          ...(legacy
+            ? {
+              tempConversationCwd: value.tempConversationCwd as string,
+              tempToolCwds: value.tempToolCwds as string,
+            }
+            : {}),
         };
         const transcript = join(sessionDir, sessionFileNameFor(record.conversationId));
         const conversationCwd = conversationCwdPath(sessionDir, record.conversationId);
         const toolCwds = toolCwdsPath(sessionDir, record.conversationId);
-        const pairs = [
-          [record.tempConversationCwd, conversationCwd],
-          [record.tempToolCwds, toolCwds],
-          [record.tempTranscript, transcript],
-        ] as const;
+        const pairs = (legacy
+          ? [
+            [record.tempConversationCwd as string, conversationCwd],
+            [record.tempToolCwds as string, toolCwds],
+            [record.tempTranscript, transcript],
+          ]
+          : [[record.tempTranscript, transcript]]) as ReadonlyArray<readonly [string, string]>;
         if (!exactForkTemporaryPath(sessionDir, record.tempTranscript, transcript, true)
-          || !exactForkTemporaryPath(sessionDir, record.tempConversationCwd, conversationCwd, false)
-          || !exactForkTemporaryPath(sessionDir, record.tempToolCwds, toolCwds, false)
+          || (legacy && (
+            !exactForkTemporaryPath(sessionDir, record.tempConversationCwd as string, conversationCwd, false)
+            || !exactForkTemporaryPath(sessionDir, record.tempToolCwds as string, toolCwds, false)))
           || pairs.some(([temporary, final]) => temporary === final)
-          || new Set(pairs.flat()).size
-            !== pairs.length * 2) {
+          || new Set(pairs.flat()).size !== pairs.length * 2) {
           throw new Error("invalid fork transaction artifact paths");
         }
         markerValidated = true;
@@ -4044,12 +4050,7 @@ export class SessionHost {
           continue;
         }
         await this.rollbackForkTransaction(sessionDir, marker, record, [
-          record.tempTranscript,
-          record.tempConversationCwd,
-          record.tempToolCwds,
-          transcript,
-          conversationCwd,
-          toolCwds,
+          ...pairs.flat(),
         ]);
       } catch {
         const logger = this.logger.child({
@@ -4153,8 +4154,7 @@ export class SessionHost {
     const cwd = hosted?.cwd ?? await this.conversationCwd(ghostName, id);
 
     const manager = SessionManager.open(path, paths.sessionDir, cwd);
-    const toolCwds = await readToolCwds(paths.sessionDir, id);
-    return this.transcriptFromManager(id, manager, options, toolCwds);
+    return this.transcriptFromManager(id, manager, options, readSessionCwds(manager).toolCwds);
   }
 
   private transcriptFromManager(
@@ -4293,8 +4293,6 @@ export class SessionHost {
       paths.sessionDir,
       `.${sessionFileNameFor(forkId)}.${randomUUID()}.pending`,
     );
-    const temporaryConversationCwd = `${conversationCwdPath(paths.sessionDir, forkId)}.${randomUUID()}.pending`;
-    const temporaryToolCwds = `${toolCwdsPath(paths.sessionDir, forkId)}.${randomUUID()}.pending`;
     let stagedFork: {
       title: string | null;
       draft: string;
@@ -4307,21 +4305,12 @@ export class SessionHost {
       true,
     );
     const forkRecord: ForkTransactionRecord = {
-      version: 3,
+      version: 4,
       kind: "fork",
       conversationId: forkId,
       tempTranscript: temporaryForkFile,
-      tempConversationCwd: temporaryConversationCwd,
-      tempToolCwds: temporaryToolCwds,
     };
-    const forkArtifacts = [
-      temporaryForkFile,
-      temporaryConversationCwd,
-      temporaryToolCwds,
-      forkFile,
-      conversationCwdPath(paths.sessionDir, forkId),
-      toolCwdsPath(paths.sessionDir, forkId),
-    ];
+    const forkArtifacts = [temporaryForkFile, forkFile];
     this.activeForks.add(forkMarker);
     try {
       await this.transactionWriter(forkMarker, forkRecord);
@@ -4381,40 +4370,27 @@ export class SessionHost {
       stagedFork = {
         title: forked.getSessionName() ?? null,
         draft,
-        transcript: this.transcriptFromManager(forkId, forked, {}, source.toolCwds),
+        // The branch carries the source's cwd entries up to the fork point, so
+        // the copy rebuilds them from itself rather than inheriting the live map.
+        transcript: this.transcriptFromManager(forkId, forked, {}, readSessionCwds(forked).toolCwds),
       };
-      const sidecars = await Promise.allSettled([
-        writeConversationCwd(paths.sessionDir, forkId, source.cwd, temporaryConversationCwd),
-        this.toolCwdWriter(paths.sessionDir, forkId, source.toolCwds, temporaryToolCwds),
-      ]);
-      const sidecarFailures = sidecars.filter(
-        (result): result is PromiseRejectedResult => result.status === "rejected",
-      );
-      const singleSidecarFailure = sidecarFailures.length === 1 ? sidecarFailures[0] : undefined;
-      if (singleSidecarFailure) throw singleSidecarFailure.reason;
-      if (sidecarFailures.length > 1) {
-        throw new AggregateError(
-          sidecarFailures.map((result) => result.reason),
-          "Fork sidecars could not be staged.",
-        );
-      }
       const transcript = await openFile(temporaryForkFile, "r");
       try {
         await transcript.sync();
       } finally {
         await transcript.close();
       }
-      await rename(temporaryConversationCwd, conversationCwdPath(paths.sessionDir, forkId));
-      await rename(temporaryToolCwds, toolCwdsPath(paths.sessionDir, forkId));
-      // The transcript is the publication barrier: list/open cannot see the
-      // fork until both required sidecars already have their final names.
+      // The whole fork is staged and durable here, and nothing can see it yet.
+      await this.transactionProbe("fork-staged", temporaryForkFile);
+      // One file carries the whole fork, so publishing it is a single rename
+      // and there is no window where a reader can see a partial fork.
       await rename(temporaryForkFile, forkFile);
       await this.finishForkArtifactState(
         paths.sessionDir,
         forkMarker,
         forkRecord,
-        [temporaryForkFile, temporaryConversationCwd, temporaryToolCwds],
-        [forkFile, conversationCwdPath(paths.sessionDir, forkId), toolCwdsPath(paths.sessionDir, forkId)],
+        [temporaryForkFile],
+        [forkFile],
       );
     } catch (error) {
       let cleanupError: unknown;
@@ -4568,11 +4544,13 @@ export class SessionHost {
     }
     this.turnAdmissions.add(admissionKey);
     let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
-    const emitAfterToolCwdDurability = (event: PiMessagesEvent) => {
+    // The terminal frame goes last, after the settlement events (branch and
+    // conversation updates) that a caller needs in order to read it correctly.
+    const emitAfterSettlement = (event: PiMessagesEvent) => {
       if (event.type === "done" || event.type === "error") pendingTerminal = event;
       else options.emit(event);
     };
-    const adapter = createPiMessagesAdapter(emitAfterToolCwdDurability, {
+    const adapter = createPiMessagesAdapter(emitAfterSettlement, {
       includeThinking: options.includeThinking,
       deferAgentEnd: true,
       // The callback is rebound below after the session is claimed.
@@ -4701,18 +4679,7 @@ export class SessionHost {
             ? await this.settlePiNow(hosted)
             : await settlementBarrier.settled
           : await this.settlePiNow(hosted);
-        if (settlement.toolCwdError !== undefined) {
-          pendingTerminal = {
-            type: "error",
-            reason: "error",
-            usage: adapter.totalUsage(),
-            errorMessage: `Could not durably save tool working directories: ${
-              settlement.toolCwdError instanceof Error
-                ? settlement.toolCwdError.message
-                : String(settlement.toolCwdError)
-            }`,
-          };
-        } else if (settlement.settlementError !== undefined) {
+        if (settlement.settlementError !== undefined) {
           pendingTerminal = {
             type: "error",
             reason: "error",
@@ -5225,12 +5192,6 @@ export class SessionHost {
     hosted.ownershipDetached = true;
   }
 
-  private async flushHostedToolCwds(hosted: HostedSession): Promise<void> {
-    if (hosted.toolCwdsFlushed) return;
-    await this.flushToolCwds(hosted);
-    hosted.toolCwdsFlushed = true;
-  }
-
   private abortHostedTitle(hosted: HostedSession): void {
     if (hosted.titleAborted) return;
     hosted.titleAbort?.abort();
@@ -5319,7 +5280,6 @@ export class SessionHost {
   private async disposePiSession(hosted: HostedSession): Promise<void> {
     const failures: unknown[] = [];
     await this.collectCleanupFailure(failures, () => this.detachHostedOwnership(hosted));
-    await this.collectCleanupFailure(failures, () => this.flushHostedToolCwds(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedBash(hosted));
     await this.collectCleanupFailure(failures, () => this.abortHostedSession(hosted));
     await this.collectCleanupFailure(failures, () => this.abandonPiOwnerPasses(hosted));

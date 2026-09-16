@@ -41,9 +41,6 @@ function pathArgument(activity) {
  * renamed; everything below reads the canonical name.
  */
 var CANONICAL = {
-    // Ghost's own pre-OMP name for the work `inspect_image` does now; historical
-    // transcripts still replay it.
-    look_at_image: "inspect_image",
     // pi's memory tools under the names older sessions wrote them with.
     list_memory: "ghost_memory_list"
 };
@@ -419,8 +416,6 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
             : "Looking through remembered details";
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
-    case "inspect_image":
-        return completed ? "Looked closely at the image" : "Looking closely at the image";
     case "ghost_screen":
         return completed ? "Checked what’s on screen" : "Checking what’s on screen";
     case "ghost_browser": {

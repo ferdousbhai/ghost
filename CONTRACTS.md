@@ -128,14 +128,19 @@ is just its cwd, and nothing is discovered from it. The scanner is
 Conversation public ids are runtime-qualified (`pi:<raw>`); pi is the only
 runtime, and the prefix stays so stored ids keep saying what they are. Raw ids
 remain the runtime resume identity. Transcripts
-are JSONL under `sessions/`. Pins, read timestamps,
-conversation cwd records, tool-call cwd records, and crash markers are
-bounded sidecars under `sessions/`.
+are JSONL under `sessions/`. Pins, read timestamps, and crash markers are
+bounded sidecars under `sessions/`. A conversation's own cwd and its per-tool
+cwds are custom entries inside its transcript
+([`session-cwds.ts`](packages/daemon/src/session-cwds.ts)), which pi ignores
+when building context, so a conversation is one file.
 
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
-to recoverable Trash. Fork and delete use durable markers so an unpublished or
-partially moved artifact stays hidden until recovery completes. The file naming,
+to recoverable Trash. Both use durable markers so an unpublished or partially
+moved artifact stays hidden until recovery completes: a fork stages one
+transcript and publishes it with one rename, and a delete may still move
+several artifacts in a home written before the cwd records moved into the
+transcript. The file naming,
 allowlists, and recovery state machines live beside their focused tests in
 [`session-host.ts`](packages/daemon/src/session-host.ts) and
 [`session-files.ts`](packages/daemon/src/session-files.ts).
@@ -205,7 +210,7 @@ when relevant, with the runtime's own file and search tools, never injected
 automatically at session start.
 
 The operational cwd defaults to `settings.yml` `cwd:`, else the owner home.
-A conversation's `!cd` moves it and records the new cwd in a sidecar. Ghost home
+A conversation's `!cd` moves it and records the new cwd in its transcript. Ghost home
 remains a separately named private resource root.
 Prompt indexes are session-start snapshots; current data is read through the
 owning tool when needed.

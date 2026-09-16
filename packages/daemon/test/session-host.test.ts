@@ -21,6 +21,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { conversationCwdPath, toolCwdsPath } from "../src/legacy-cwd-files.js";
 import { execFileSync } from "node:child_process";
 import {
   createServer,
@@ -67,13 +69,7 @@ import {
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPinState, writePins } from "../src/pins.js";
 import { readReadState, writeReads } from "../src/reads.js";
-import { conversationCwdPath, writeConversationCwd } from "../src/conversation-cwd.js";
-import {
-  readToolCwds,
-  TOOL_CWDS_MAX_BYTES,
-  toolCwdsPath,
-  writeToolCwds,
-} from "../src/tool-cwds.js";
+
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -88,6 +84,32 @@ import { recordingLogger } from "./helpers/recording-logger.js";
 let temp: TempGhosts | null = null;
 let provider: MockProvider | null = null;
 let host: SessionHost | null = null;
+
+
+/**
+ * Write the sidecars a pre-move home carried. Nothing in `src/` writes these
+ * any more, so the fixtures that exercise adoption spell the old format out.
+ */
+async function seedLegacyCwdSidecars(
+  sessionDir: string,
+  conversationId: string,
+  options: { cwd?: string; toolCwds?: ReadonlyMap<string, string> } = {},
+): Promise<void> {
+  if (options.cwd !== undefined) {
+    await writeFile(
+      conversationCwdPath(sessionDir, conversationId),
+      `${JSON.stringify({ version: 1, cwd: options.cwd })}\n`,
+      { mode: 0o600 },
+    );
+  }
+  if (options.toolCwds !== undefined) {
+    await writeFile(
+      toolCwdsPath(sessionDir, conversationId),
+      `${JSON.stringify({ version: 2, cwds: [...options.toolCwds] })}\n`,
+      { mode: 0o600 },
+    );
+  }
+}
 
 afterEach(async () => {
   await closeAllBrowserSessions();
@@ -189,7 +211,6 @@ async function setup(
     | "title"
     | "retention"
     | "sessionStartupProbe"
-    | "toolCwdWriter"
     | "pinWriter"
     | "readWriter"
     | "conversationFileProbe"
@@ -1906,163 +1927,9 @@ lines.on("line", (line) => {
 });
 
 describe("SessionHost.runTurn", () => {
-  it("holds a terminal frame until the tool-cwd sidecar is durable", async () => {
-    const writerEntered = deferred();
-    const releaseWriter = deferred();
-    await setup(
-      [
-        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
-        { kind: "text", text: "Saved." },
-      ],
-      {
-        toolCwdWriter: async (...args) => {
-          writerEntered.resolve();
-          await releaseWriter.promise;
-          return writeToolCwds(...args);
-        },
-      },
-    );
-    const events: PiMessagesEvent[] = [];
-    const turn = host!.runTurn("casper", {
-      sessionId: "conv-tool-cwd-barrier",
-      prompt: "Read the character.",
-      emit: (event) => events.push(event),
-    });
-    await writerEntered.promise;
-    await waitFor(() => events.some((event) => event.type === "tool_execution_end") ? true : null);
-    expect(events.some((event) => event.type === "done" || event.type === "error")).toBe(false);
 
-    releaseWriter.resolve();
-    await turn;
-    expect(events.at(-1)?.type).toBe("done");
-    expect(existsSync(toolCwdsPath(
-      ghostPaths(temp!.registry.get("casper").dir).sessionDir,
-      "conv-tool-cwd-barrier",
-    ))).toBe(true);
-  });
 
-  it("retries transient tool-cwd publication before sending done", async () => {
-    let writes = 0;
-    await setup(
-      [
-        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
-        { kind: "text", text: "Saved." },
-      ],
-      {
-        toolCwdWriter: async (...args) => {
-          writes += 1;
-          if (writes < 3) throw new Error(`transient-${writes}`);
-          return writeToolCwds(...args);
-        },
-      },
-    );
-    const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-tool-cwd-retry",
-      prompt: "Read the character.",
-      emit: (event) => events.push(event),
-    });
-    expect(writes).toBe(3);
-    expect(events.at(-1)?.type).toBe("done");
-    const calls = (await host!.readTranscript("casper", "conv-tool-cwd-retry")).messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .filter((part) => (part as { type?: unknown }).type === "toolCall") as Array<{
-        cwd?: string | null;
-      }>;
-    expect(calls.map((call) => call.cwd)).toEqual([temp!.ownerHome]);
-  });
 
-  it("reports a durable tool-cwd failure, keeps it dirty, and recovers on close/restart", async () => {
-    let writes = 0;
-    await setup(
-      [
-        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
-        { kind: "text", text: "Saved." },
-      ],
-      {
-        toolCwdWriter: async (...args) => {
-          writes += 1;
-          if (writes <= 4) throw new Error("sidecar unavailable");
-          return writeToolCwds(...args);
-        },
-      },
-    );
-    const events: PiMessagesEvent[] = [];
-    await host!.runTurn("casper", {
-      sessionId: "conv-tool-cwd-restart",
-      prompt: "Read the character.",
-      emit: (event) => events.push(event),
-    });
-    expect(events.at(-1)).toMatchObject({
-      type: "error",
-      errorMessage: expect.stringContaining("sidecar unavailable"),
-    });
-    expect(writes).toBe(4);
-
-    await host!.close("casper", "conv-tool-cwd-restart");
-    expect(writes).toBe(5);
-    await host!.disposeAll();
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      offline: true,
-    });
-    const calls = (await host.readTranscript("casper", "conv-tool-cwd-restart")).messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .filter((part) => (part as { type?: unknown }).type === "toolCall") as Array<{
-        cwd?: string | null;
-      }>;
-    expect(calls.map((call) => call.cwd)).toEqual([temp!.ownerHome]);
-  });
-
-  it("restores an evicted old tool cwd as null after compaction and restart", async () => {
-    await setup(
-      [
-        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
-        { kind: "tool", name: "read", args: { path: join(process.cwd(), "package.json") } },
-        { kind: "text", text: "Read twice." },
-      ],
-      { title: { enabled: false } },
-    );
-    const conversationId = "conv-tool-cwd-compaction";
-    await host!.runTurn("casper", {
-      sessionId: conversationId,
-      prompt: "Read the character twice.",
-      emit: () => {},
-    });
-    const before = await host!.readTranscript("casper", conversationId);
-    const ids = before.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .filter((part) => (part as { type?: unknown }).type === "toolCall")
-      .map((part) => (part as { id: string }).id);
-    expect(ids).toHaveLength(2);
-
-    await host!.disposeAll();
-    const sessionDir = ghostPaths(temp!.registry.get("casper").dir).sessionDir;
-    const minimal = `{"version":2,"cwds":[${JSON.stringify([ids[0], "/"])}]}\n`;
-    const oversizedOldCwd = `/${"x".repeat(
-      TOOL_CWDS_MAX_BYTES - Buffer.byteLength(minimal),
-    )}`;
-    await writeToolCwds(sessionDir, conversationId, new Map([
-      [ids[0]!, oversizedOldCwd],
-      [ids[1]!, temp!.ownerHome],
-    ]));
-    await expect(readToolCwds(sessionDir, conversationId))
-      .resolves.toEqual(new Map([[ids[1]!, temp!.ownerHome]]));
-
-    host = new SessionHost({
-      registry: temp!.registry,
-      ownerHome: temp!.ownerHome,
-      offline: true,
-    });
-    const after = await host.readTranscript("casper", conversationId);
-    const calls = after.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .filter((part) => (part as { type?: unknown }).type === "toolCall") as Array<{
-        cwd?: string | null;
-      }>;
-    expect(calls.map((call) => call.cwd)).toEqual([null, temp!.ownerHome]);
-  });
 
   it("pauses Ghost's ask until the shell supplies a validated answer", async () => {
     await setup([
@@ -2112,9 +1979,6 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("re-opens a historical ask, commits a sibling answer, and resumes that branch", async () => {
-    const writerEntered = deferred();
-    const releaseWriter = deferred();
-    let blockWriter = false;
     const hooks = new GhostHookRunner();
     const beforeOwners: string[] = [];
     const stoppedOwners: string[] = [];
@@ -2155,13 +2019,6 @@ describe("SessionHost.runTurn", () => {
       {
         hooks,
         title: { enabled: false },
-        toolCwdWriter: async (...args) => {
-          if (blockWriter) {
-            writerEntered.resolve();
-            await releaseWriter.promise;
-          }
-          return writeToolCwds(...args);
-        },
       },
       { sequential: true },
     );
@@ -2187,7 +2044,6 @@ describe("SessionHost.runTurn", () => {
     const resultEntryId = askCall.ghostAsk?.resultEntryId;
     expect(resultEntryId).toBeTruthy();
 
-    blockWriter = true;
     const events: PiMessagesEvent[] = [];
     const reanswer = host!.runAskReanswer("casper", {
       sessionId: "conv-reanswer",
@@ -2199,13 +2055,16 @@ describe("SessionHost.runTurn", () => {
       kind: "submit",
       results: [{ id: "question-1", selectedOptions: ["Gloss"] }],
     });
-    await writerEntered.promise;
-    await waitFor(() => events.some((event) => event.type === "branch_changed") ? true : null);
-    expect(events.some((event) => event.type === "done" || event.type === "error")).toBe(false);
-    releaseWriter.resolve();
     await reanswer;
 
-    expect(events.some((event) => event.type === "branch_changed")).toBe(true);
+    // The terminal frame is held until settlement, so a caller always sees the
+    // branch change before the done that ends the turn.
+    const branchAt = events.findIndex((event) => event.type === "branch_changed");
+    const terminalAt = events.findIndex(
+      (event) => event.type === "done" || event.type === "error",
+    );
+    expect(branchAt).toBeGreaterThanOrEqual(0);
+    expect(terminalAt).toBeGreaterThan(branchAt);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(stoppedOwners).toEqual([
       beforeOwners[0],
@@ -2741,9 +2600,10 @@ describe("SessionHost.runTurn", () => {
     });
     await remoteTurn;
     const deleted = await host!.deleteSession("casper", "conv-remote-delete");
+    // A conversation is one file now, so the transcript is the only artifact a
+    // delete moves; a pre-move home additionally trashes its cwd sidecars.
     expect(deleted.artifacts).toEqual(expect.arrayContaining([
       expect.objectContaining({ artifact: "omp-transcript", kind: "fallback" }),
-      expect.objectContaining({ artifact: "tool-cwds", kind: "fallback" }),
     ]));
   });
 
@@ -2794,7 +2654,7 @@ describe("forkConversationTitle", () => {
 describe("conversation branching", () => {
   async function seedBranchable(
     title: string | null = "Weekend trip",
-    options: Pick<SessionHostOptions, "conversationFileProbe" | "transactionProbe" | "toolCwdWriter"> = {},
+    options: Pick<SessionHostOptions, "conversationFileProbe" | "transactionProbe"> = {},
   ) {
     temp = makeTempGhosts();
     provider = await startMockProvider({ script: [{ kind: "text", text: "A branch-aware answer." }] });
@@ -2998,17 +2858,17 @@ describe("conversation branching", () => {
     const releaseClone = Promise.withResolvers<void>();
     let failNextStaging = false;
     const { firstUser } = await seedBranchable("Weekend trip", {
-      // A fork stages its tool-cwd sidecar through the injectable writer; the
-      // fourth argument is only present for that staging write.
-      toolCwdWriter: async (...args) => {
-        if (args[3] === undefined) return writeToolCwds(...args);
+      // A fork now stages exactly one file, so the staging boundary is the
+      // whole of it: paused here, nothing is published; failed here, nothing
+      // is left behind.
+      transactionProbe: async (stage) => {
+        if (stage !== "fork-staged") return;
         if (failNextStaging) {
           failNextStaging = false;
-          throw new Error("injected sidecar failure");
+          throw new Error("injected staging failure");
         }
         cloneEntered.resolve();
         await releaseClone.promise;
-        return writeToolCwds(...args);
       },
     });
 
@@ -3037,7 +2897,7 @@ describe("conversation branching", () => {
 
     failNextStaging = true;
     await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
-      .rejects.toThrow("injected sidecar failure");
+      .rejects.toThrow("injected staging failure");
     expect((await host!.listSessions("casper")).map((row) => row.id).sort())
       .toEqual([published.id, "pi:conv-tree"].sort());
     expect(readdirSync(sessionDir).some((name) =>
@@ -3049,8 +2909,35 @@ describe("conversation branching", () => {
     const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
+    const temporaryTranscript = `${transcript}.crash.pending`;
+    renameSync(transcript, temporaryTranscript);
+    const stem = sessionFileNameFor(forked.sessionId).slice(0, -".jsonl".length);
+    writeFileSync(join(sessionDir, `.ghost-fork-${stem}.pending.json`), JSON.stringify({
+      version: 4,
+      kind: "fork",
+      conversationId: forked.sessionId,
+      tempTranscript: temporaryTranscript,
+    }), { mode: 0o600 });
+
+    expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
+    expect((await host!.readTranscript("casper", forked.sessionId)).messages).toEqual([]);
+    await host!.open("casper", forked.sessionId);
+    expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
+  });
+
+  // A home interrupted by a build that still staged sidecars must still finish.
+  it("finishes a v3 fork left staged by a pre-sidecar-move build", async () => {
+    const { firstUser } = await seedBranchable();
+    const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
+    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
+    const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
     const binding = conversationCwdPath(sessionDir, forked.sessionId);
     const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
+    // Recreate what that build left behind: the three staged artifacts.
+    await seedLegacyCwdSidecars(sessionDir, forked.sessionId, {
+      cwd: temp!.ownerHome,
+      toolCwds: new Map([["old-call", temp!.ownerHome]]),
+    });
     const temporaryTranscript = `${transcript}.crash.pending`;
     const temporaryBinding = `${binding}.crash.pending`;
     const temporaryToolCwds = `${toolCwds}.crash.pending`;
@@ -3068,7 +2955,6 @@ describe("conversation branching", () => {
     }), { mode: 0o600 });
 
     expect((await host!.listSessions("casper")).map((row) => row.id)).toContain(forked.id);
-    expect((await host!.readTranscript("casper", forked.sessionId)).messages).toEqual([]);
     await host!.open("casper", forked.sessionId);
     expect(readdirSync(sessionDir).some((name) => name.includes(".pending"))).toBe(false);
   });
@@ -3083,13 +2969,11 @@ describe("conversation branching", () => {
 
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     const victimTranscript = join(sessionDir, sessionFileNameFor("conv-tree"));
-    await writeConversationCwd(sessionDir, "conv-tree", temp!.ownerHome);
+    await seedLegacyCwdSidecars(sessionDir, "conv-tree", {
+      cwd: temp!.ownerHome,
+      toolCwds: new Map([["victim-call", temp!.ownerHome]]),
+    });
     const victimBinding = conversationCwdPath(sessionDir, "conv-tree");
-    await writeToolCwds(
-      sessionDir,
-      "conv-tree",
-      new Map([["victim-call", temp!.ownerHome]]),
-    );
     const victimToolCwds = toolCwdsPath(sessionDir, "conv-tree");
     const victimBytes = new Map([
       [victimTranscript, readFileSync(victimTranscript, "utf8")],
@@ -3168,40 +3052,27 @@ describe("conversation branching", () => {
       .toBe(false);
   }
 
+  // "active-transcript-cleanup" used to belong here: a fork published one
+  // artifact, then failed cleaning up another. Publication is a single rename
+  // over a single file now, so there is no such intermediate state to leave.
   it.each([
     "fork-cleanup-verify",
     "fork-cleanup-fsync",
     "fork-marker-unlink",
     "fork-marker-fsync",
-    "active-transcript-cleanup",
   ] as const)("retains the fork marker when %s fails", async (blockedStage) => {
-    const activePublication = blockedStage === "active-transcript-cleanup";
     let rejectStage = true;
-    let sidecarFailed = false;
     const { firstUser } = await seedBranchable(
       "Weekend trip",
       {
-        toolCwdWriter: async (...args) => {
-          if (activePublication && args[3] !== undefined && !sidecarFailed) {
-            sidecarFailed = true;
-            throw new Error("injected active sidecar publication failure");
-          }
-          return writeToolCwds(...args);
-        },
-        transactionProbe: (stage, path) => {
+        transactionProbe: (stage) => {
           if (!rejectStage) return;
-          const blocked = activePublication
-            ? stage === "fork-cleanup-unlink"
-              && path.includes(".jsonl.") && path.endsWith(".pending")
-            : stage === blockedStage;
-          if (blocked) throw new Error(`injected ${blockedStage} failure`);
+          if (stage === blockedStage) throw new Error(`injected ${blockedStage} failure`);
         },
       },
     );
-    const forking = expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId));
-    await (activePublication
-      ? forking.rejects.toThrow("transaction remains pending recovery")
-      : forking.rejects.toThrow());
+    await expect(host!.forkConversation("casper", "conv-tree", firstUser.entryId))
+      .rejects.toThrow();
     await expectForkRecovered(() => {
       rejectStage = false;
     });
@@ -3228,6 +3099,12 @@ describe("conversation branching", () => {
       writeFileSync(join(project, "AGENTS.md"), "PINNED-CLEANUP-SNAPSHOT");
       const forked = await host!.forkConversation("casper", "conv-tree", firstUser.entryId);
       const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
+      // The marker below is v3, so give it the sidecars such a marker names:
+      // this case is the legacy recovery path, not the one a fork takes today.
+      await seedLegacyCwdSidecars(sessionDir, forked.sessionId, {
+        cwd: temp!.ownerHome,
+        toolCwds: new Map([["legacy-call", temp!.ownerHome]]),
+      });
       const paths = {
         transcript: join(sessionDir, sessionFileNameFor(forked.sessionId)),
         "conversation-cwd": conversationCwdPath(sessionDir, forked.sessionId),
@@ -3386,6 +3263,11 @@ describe("conversation branching", () => {
     const transcript = join(sessionDir, sessionFileNameFor(forked.sessionId));
     const binding = conversationCwdPath(sessionDir, forked.sessionId);
     const toolCwds = toolCwdsPath(sessionDir, forked.sessionId);
+    // A v3 marker names two cwd sidecars, so this legacy case supplies them.
+    await seedLegacyCwdSidecars(sessionDir, forked.sessionId, {
+      cwd: temp!.ownerHome,
+      toolCwds: new Map([["legacy-call", temp!.ownerHome]]),
+    });
     const temporaryBinding = `${binding}.io-failure.pending`;
     const temporaryToolCwds = `${toolCwds}.io-failure.pending`;
     const temporaryTranscript = `${transcript}.io-failure.pending`;
@@ -3696,8 +3578,10 @@ describe("session listing", () => {
     const id = "delete-v2-recovery";
     await host!.runTurn("casper", { sessionId: id, prompt: "persist me", emit: () => {} });
     const sessionDir = ghostPaths(dir).sessionDir;
-    await writeToolCwds(sessionDir, id, new Map([["tool-call", temp!.ownerHome]]));
-    await writeConversationCwd(sessionDir, id, temp!.ownerHome);
+    await seedLegacyCwdSidecars(sessionDir, id, {
+      cwd: temp!.ownerHome,
+      toolCwds: new Map([["tool-call", temp!.ownerHome]]),
+    });
     const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
     const expectedKinds = ["omp-transcript", "tool-cwds", "conversation-cwd"];
