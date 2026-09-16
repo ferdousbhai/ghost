@@ -67,8 +67,9 @@ edits `~/.config/hypr` or `~/.config/omarchy`.
 
 ## Upgrades, rollback, and uninstall
 
-The package owns only files under `/usr`, plus the system Quickshell symlink at
-`/etc/xdg/quickshell/ghost`. It does not create or own `~/ghosts`,
+The package owns only files under `/usr`; the HUD is an omarchy-shell plugin
+whose per-user link the install script makes, and `smoke.sh` fails the build if
+a system Quickshell link reappears. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any

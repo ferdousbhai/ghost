@@ -96,7 +96,7 @@ import {
   ghostModelsPath,
   readGhostModels,
   resolveChatModelRef,
-  resolveSmolModelRef,
+  resolveModelRoleRef,
   type GhostModelRoleBinding,
 } from "./models.js";
 import {
@@ -433,7 +433,7 @@ function backgroundRoleRefs(configDir: string): {
   try {
     const models = readGhostModels(configDir);
     return {
-      ref: resolveSmolModelRef(models),
+      ref: resolveModelRoleRef(models, "smol_model"),
       chatProvider: resolveChatModelRef(models)?.provider ?? null,
     };
   } catch {

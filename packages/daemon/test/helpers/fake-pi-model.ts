@@ -7,6 +7,8 @@ export function fakePiModel(model: {
   name?: string;
   input?: string[];
   cost?: { input: number; output: number };
+  reasoning?: boolean;
+  contextWindow?: number;
 }): Model<Api> {
   return {
     id: model.id,
@@ -14,7 +16,7 @@ export function fakePiModel(model: {
     api: "google-generative-ai",
     provider: model.provider,
     baseUrl: "https://models.invalid",
-    reasoning: false,
+    reasoning: model.reasoning ?? false,
     input: [...(model.input ?? ["text"])],
     cost: {
       input: model.cost?.input ?? 0,
@@ -22,7 +24,7 @@ export function fakePiModel(model: {
       cacheRead: 0,
       cacheWrite: 0,
     },
-    contextWindow: 128_000,
+    contextWindow: model.contextWindow ?? 128_000,
     maxTokens: 8_192,
   } as Model<Api>;
 }

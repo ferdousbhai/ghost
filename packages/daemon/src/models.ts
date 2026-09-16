@@ -385,22 +385,14 @@ export function resolveChatModelRef(
 }
 
 /**
- * The explicit `roles.smol_model` binding, or null.
+ * The explicit binding for one Ghost model role, or null when it is automatic.
  *
  * Unlike `resolveChatModelRef`, there is NO fallback to the first declared
- * provider's model: an unbound smol role means "let the daemon pick the
- * cheapest usable model" (see `resolveSmolModel` in smol.ts), not "reuse the
- * chat model". Returning null here is exactly that signal.
+ * provider's model. An unbound background role means "let the daemon pick"
+ * — the cheapest usable model for smol (`resolveSmolModel` in smol.ts), the
+ * preference list for the advisor — not "reuse the chat model". Returning null
+ * here is exactly that signal.
  */
-export function resolveSmolModelRef(
-  file: GhostModelsFile | null,
-): GhostModelRoleBinding | null {
-  const bound = file?.roles?.smol_model;
-  if (bound?.provider && bound.modelId) return bound;
-  return null;
-}
-
-/** The explicit binding for one Ghost model role, or null when it is automatic. */
 export function resolveModelRoleRef(
   file: GhostModelsFile | null,
   role: GhostModelRole,

@@ -21,7 +21,7 @@ import {
   GhostModelsLockError,
   readGhostModels,
   resolveChatModelRef,
-  resolveSmolModelRef,
+  resolveModelRoleRef,
   setGhostModelRole,
   withSerializedModelsWrite,
   writeGhostModels,
@@ -67,7 +67,7 @@ describe("a home written before the Claude Code runtime was removed", () => {
     expect(models?.roles?.chat_model).toBeUndefined();
     expect(models?.roles?.smol_model).toBeUndefined();
     expect(resolveChatModelRef(models)).toBeNull();
-    expect(resolveSmolModelRef(models)).toBeNull();
+    expect(resolveModelRoleRef(models, "smol_model")).toBeNull();
     // Everything that still exists is untouched.
     expect(models?.roles?.advisor_model).toEqual({ provider: "openrouter", modelId: "keep/me" });
   });
@@ -364,7 +364,7 @@ describe("the legacy title_model role", () => {
     expect(file?.roles).toEqual({
       smol_model: { provider: "anthropic", modelId: "claude-haiku-4-5" },
     });
-    expect(resolveSmolModelRef(file)).toEqual({
+    expect(resolveModelRoleRef(file, "smol_model")).toEqual({
       provider: "anthropic",
       modelId: "claude-haiku-4-5",
     });

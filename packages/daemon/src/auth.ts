@@ -14,7 +14,7 @@ import {
   resolveChatModelRef,
   setChatModelRoleIfUnset,
 } from "./models.js";
-import { resolveChatModel } from "./model-routing.js";
+import { CHAT_MODEL_NEED, bestForNeed, resolveChatModel } from "./model-routing.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 
 export type AuthType = "oauth" | "api_key";
@@ -295,7 +295,13 @@ export async function bindDefaultChatModelIfUnset(
   // is pi's live `getAvailable` answer, so "which models are free" is current
   // at sign-in rather than a name recorded here.
   const free = candidates.filter((candidate) => isFreeToRun(candidate, providerId, candidates));
-  const model = resolveChatModel(null, free.length > 0 ? free : candidates);
+  // Within the tier, bind on what the models declare they can do. The catalogue
+  // order is a display order: its version parse reads the parameter count in
+  // `nemotron-nano-12b-v2` as version 12, which on OpenRouter's free tier binds
+  // a 128k nano over a 1M-context model sitting in the same list. Capability
+  // ties still fall through to that order, so a uniform catalogue is unaffected.
+  const pool = free.length > 0 ? free : candidates;
+  const model = bestForNeed(pool, CHAT_MODEL_NEED) ?? resolveChatModel(null, pool);
   if (!model || !commitAllowed()) return null;
 
   const commitConfigDir = resolveConfigDir();

@@ -9,7 +9,6 @@ import {
   readGhostModels,
   resolveChatModelRef,
   resolveModelRoleRef,
-  resolveSmolModelRef,
 } from "./models.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 import {
@@ -62,9 +61,7 @@ export async function completeHookSmol(
   const paths = ghostPaths(home);
   const models = readGhostModels(paths.home);
   const role = input.role ?? "smol_model";
-  const ref = role === "smol_model"
-    ? resolveSmolModelRef(models)
-    : resolveModelRoleRef(models, role);
+  const ref = resolveModelRoleRef(models, role);
   const chatProvider = resolveChatModelRef(models)?.provider ?? null;
 
   const runtimeFactory = options.runtimeFactory ?? createGhostPiRuntime;

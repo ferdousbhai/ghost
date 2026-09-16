@@ -467,6 +467,38 @@ describe("default model binding", () => {
       .toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
   });
 
+  it("binds the free model that can do the work, not the one whose id parses as a version", async () => {
+    temp = makeTempGhosts();
+    temp.registry.ensureRoot();
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const agentDir = ghostPaths(dir).home;
+    // Both are free, so the tier filter cannot separate them. The catalogue
+    // order ranks by `versionNumber`, which reads the `12b` parameter count as
+    // version 12 and puts the nano first — ahead of a model with eight times
+    // the context from the same free pool.
+    const available = [
+      fakePiModel({
+        provider: "openrouter",
+        id: "nvidia/nemotron-nano-12b-v2-vl:free",
+        cost: { input: 0, output: 0 },
+        contextWindow: 128_000,
+      }),
+      fakePiModel({
+        provider: "openrouter",
+        id: "thinkingmachines/inkling:free",
+        cost: { input: 0, output: 0 },
+        contextWindow: 1_048_576,
+        reasoning: true,
+      }),
+    ];
+
+    await expect(bindDefaultChatModelIfUnset(
+      agentDir,
+      { getAvailable: async () => available, getModels: () => available },
+      "openrouter",
+    )).resolves.toEqual({ provider: "openrouter", modelId: "thinkingmachines/inkling:free" });
+  });
+
   // The rule runs against pi's real OpenRouter catalogue, not a fixture: the
   // denylist this replaced was written from upstream's prices while the
   // predicate read pi's, and the two disagreed — `openrouter/auto` is already
