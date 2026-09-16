@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  rankSmolModels,
   resolveSmolModel,
   SMOL_MODEL_ROLE,
   smolCatalogFromRuntime,
@@ -180,6 +181,21 @@ describe("published price", () => {
       { provider: "b", id: "metered", cost: cost(5) },
     ]);
     expect(resolveSmolModel(catalog, null, SMOL_MODEL_ROLE).model.id).toBe("metered");
+  });
+
+  // Every sentinel reads as an unknown price, so a whole catalogue of them
+  // ties on both cost keys. Comparing those by subtraction yields NaN, which
+  // leaves the order up to the sort implementation; the label tiebreak has to
+  // decide it instead, or the chosen model changes between restarts.
+  it("orders a catalogue of unpriced models by label, not by chance", () => {
+    const sentinel = { input: -1_000_000, output: -1_000_000, cacheRead: 0, cacheWrite: 0 };
+    const catalog = catalogOf([
+      { provider: "z", id: "zeta", cost: sentinel },
+      { provider: "a", id: "alpha", cost: sentinel },
+      { provider: "m", id: "mid", cost: sentinel },
+    ]);
+    const ranked = rankSmolModels(catalog).map((candidate) => candidate.model.id);
+    expect(ranked).toEqual(["alpha", "mid", "zeta"]);
   });
 });
 

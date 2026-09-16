@@ -121,6 +121,16 @@ function outputCost(candidate: SmolCandidate): number {
 }
 
 /**
+ * Ascending order over costs that may be `Infinity` (an unknown or sentinel
+ * price). Subtracting two infinities gives `NaN`, which a comparator must
+ * never return, so compare rather than subtract.
+ */
+function cheaper(a: number, b: number): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
+/**
  * Every usable model, cheapest EFFECTIVE cost first. Ties break on output cost
  * and then `provider/id`, so the choice is stable across runs — a conversation
  * whose title model silently changed between restarts would be hard to reason
@@ -129,17 +139,12 @@ function outputCost(candidate: SmolCandidate): number {
 export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidate[] {
   return modelsIn(catalog)
     .slice()
-    .sort((a, b) => {
-      const byInput = effectiveInputCost(a) - effectiveInputCost(b);
-      if (byInput !== 0 && Number.isFinite(byInput)) return byInput < 0 ? -1 : 1;
-      if (effectiveInputCost(a) !== effectiveInputCost(b)) {
-        return effectiveInputCost(a) < effectiveInputCost(b) ? -1 : 1;
-      }
-      const byOutput = outputCost(a) - outputCost(b);
-      if (byOutput !== 0 && Number.isFinite(byOutput)) return byOutput < 0 ? -1 : 1;
-      if (outputCost(a) !== outputCost(b)) return outputCost(a) < outputCost(b) ? -1 : 1;
-      return smolModelLabel(a.model).localeCompare(smolModelLabel(b.model));
-    });
+    .sort(
+      (a, b) =>
+        cheaper(effectiveInputCost(a), effectiveInputCost(b))
+        || cheaper(outputCost(a), outputCost(b))
+        || smolModelLabel(a.model).localeCompare(smolModelLabel(b.model)),
+    );
 }
 
 function publishedCost(candidate: SmolCandidate, side: "input" | "output"): number {
@@ -154,16 +159,12 @@ export function smallestWithinProvider(
   catalog: SmolModelCatalog,
   provider: string,
 ): SmolCandidate | undefined {
-  return modelsIn(catalog, provider).slice().sort((a, b) => {
-    for (const side of ["input", "output"] as const) {
-      const byCost = publishedCost(a, side) - publishedCost(b, side);
-      if (byCost !== 0 && Number.isFinite(byCost)) return byCost < 0 ? -1 : 1;
-      if (publishedCost(a, side) !== publishedCost(b, side)) {
-        return publishedCost(a, side) < publishedCost(b, side) ? -1 : 1;
-      }
-    }
-    return smolModelLabel(a.model).localeCompare(smolModelLabel(b.model));
-  })[0];
+  return modelsIn(catalog, provider).slice().sort(
+    (a, b) =>
+      cheaper(publishedCost(a, "input"), publishedCost(b, "input"))
+      || cheaper(publishedCost(a, "output"), publishedCost(b, "output"))
+      || smolModelLabel(a.model).localeCompare(smolModelLabel(b.model)),
+  )[0];
 }
 
 /**
