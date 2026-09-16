@@ -140,7 +140,7 @@ In the HUD, the same flow, and on a fresh install it is the first thing you
 see: an empty conversation says *Click here to connect a model — free options
 exist*, and the card itself opens the pane. The button in the chat header reads
 **Connect a model** until one is bound, then shows what is bound. Either opens
-**Connect provider**. Each provider
+the **Connect a model** pane. Each provider
 row's primary button is **Sign in**, or the provider's own label — Anthropic's
 reads *Sign in (extra usage)*, because third-party calls draw
 per-token usage rather than an included Claude plan. Where a provider offers
@@ -207,11 +207,11 @@ Type, and:
 | `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 
-The 64-pixel rail on the right switches sections: **Chat**, **Character**,
-**Commands**, **Hooks**, **Resources**, **MCP**, and
-**Remote access**. Left-clicking the tray icon toggles the HUD; its menu carries
-a ghost switcher when you have more than one, five recent conversations, **New
-conversation**, **Choose a model**, and **Quit ghost shell**.
+The 64-pixel rail on the right switches sections: **Chat**, **Board**,
+**Character**, **Commands**, **Hooks**, **MCP**, and **Remote access**. (The
+admitted skills and MCP servers are not a rail section; they read as one line at
+the top of a conversation.) Clicking the ghost mark in the Omarchy bar toggles
+the HUD.
 
 ## 7. The same ghost from the terminal
 

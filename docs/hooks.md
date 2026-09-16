@@ -1,10 +1,9 @@
 # Ghost hooks
 
-Ghost owns an awaited lifecycle boundary above its two principal conversation
-harnesses. A hook has the same behavior whether the owner-facing conversation
-uses pi or the owner-local Claude Code runtime. A `pi`, `codex`, or `claude -p`
-child the ghost runs from Bash keeps its own native hook behavior; Ghost does
-not translate, duplicate, or await those hooks as principal events.
+Ghost owns an awaited lifecycle boundary above its principal conversation
+harness, pi. A `pi`, `codex`, or `claude -p` child the ghost runs from Bash
+keeps its own native hook behavior; Ghost does not translate, duplicate, or
+await those hooks as principal events.
 
 Ghost supports two events. `before_prompt` runs after the user submits a prompt
 but before the model request. It can add advisory context to that request without
