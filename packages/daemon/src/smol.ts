@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import { ADVISOR_MODEL_NEED, bestForNeed, isFreeCapabilityRouter } from "./model-routing.js";
+import { ADVISOR_MODEL_NEED, bestForNeed } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
@@ -39,7 +39,7 @@ export interface SmolModelCatalog {
 export interface ResolvedSmolModel {
   readonly model: SmolModel;
   /** `driver` means the choice followed the chat model's provider. */
-  readonly via: "role" | "cheapest" | "preferred" | "driver" | "router";
+  readonly via: "role" | "cheapest" | "preferred" | "driver";
 }
 
 export interface ResolveSmolOptions {
@@ -127,15 +127,6 @@ function publishedCost(candidate: SmolCandidate, side: "input" | "output"): numb
  * The provider's own small tier: its cheapest usable model, with a name that
  * reads as small winning over a subscription's flat zero cost.
  */
-/** The free router this catalogue offers, preferring the chat model's provider. */
-export function freeCapabilityRouter(
-  catalog: SmolModelCatalog,
-  chatProvider?: string | null,
-): SmolCandidate | undefined {
-  const routers = catalog.usable().filter((candidate) => isFreeCapabilityRouter(candidate.model.id));
-  return routers.find((candidate) => candidate.model.provider === chatProvider) ?? routers[0];
-}
-
 export function smallestWithinProvider(
   catalog: SmolModelCatalog,
   provider: string,
@@ -202,9 +193,6 @@ export function resolveSmolModel(
     }
     return { model: preferred, via: "preferred" };
   }
-
-  const router = freeCapabilityRouter(catalog, options.chatProvider);
-  if (router) return { model: router.model, via: "router" };
 
   const withinDriver = options.chatProvider
     ? smallestWithinProvider(catalog, options.chatProvider)

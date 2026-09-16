@@ -145,23 +145,6 @@ export function isAggregatorRouter(
   return id.slice(0, vendor) === providerId;
 }
 
-/**
- * The routers whose published contract is that neither the routing nor what it
- * routes to is billable. A strict subset of the above, and the reason both
- * predicates exist: pi's catalogue prices `openrouter/fusion` at 0 and it bills
- * anyway, so "costs nothing" cannot separate them and only a name can.
- *
- * The two callers want opposite things from the same fact. A chat binding
- * refuses every router, free or not, because a different model per request is
- * wrong for a conversation. A chore role wants exactly that spread, since free
- * models rate-limit one at a time.
- */
-const FREE_CAPABILITY_ROUTERS: readonly string[] = ["openrouter/free"];
-
-export function isFreeCapabilityRouter(id: string): boolean {
-  return FREE_CAPABILITY_ROUTERS.includes(id);
-}
-
 /** Ghost's own default for the advisor role: a strong reasoner, named by family. */
 export const ADVISOR_MODEL_NEED: ModelNeed = {
   families: [

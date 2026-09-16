@@ -28,7 +28,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
-import { isAggregatorRouter, isFreeCapabilityRouter } from "../src/model-routing.js";
+import { isAggregatorRouter } from "../src/model-routing.js";
 import { fakePiModel } from "./helpers/fake-pi-model.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
@@ -497,18 +497,6 @@ describe("default model binding", () => {
   // denylist this replaced was written from upstream's prices while the
   // predicate read pi's, and the two disagreed — `openrouter/auto` is already
   // negative here, while `openrouter/free` is zero and was not on the list.
-  it("treats every contractually free router as a router", () => {
-    // The two predicates answer different questions about one fact, and the
-    // free list is a strict subset. If a name were ever added that the shape
-    // rule does not recognise, a chat binding would stop refusing it.
-    const candidates = [{ id: "openrouter/free" }, { id: "nvidia/nemotron-nano-9b-v2:free" }];
-    for (const { id } of candidates.filter((c) => isFreeCapabilityRouter(c.id))) {
-      expect(isAggregatorRouter(id, "openrouter", candidates)).toBe(true);
-    }
-    expect(isFreeCapabilityRouter("openrouter/fusion")).toBe(false);
-    expect(isFreeCapabilityRouter("nvidia/nemotron-nano-9b-v2:free")).toBe(false);
-  });
-
   it("separates routers from models across pi's real OpenRouter catalogue", async () => {
     // The package does not export its data files, so read the catalogue from
     // the installed tree. Skipped rather than failed if the layout moves.
