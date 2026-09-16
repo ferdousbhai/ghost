@@ -30,6 +30,7 @@ import {
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   readDaemonControlFile,
+  writeDaemonControlFile,
   readDaemonControlLine,
 } from "./control-file.js";
 import {
@@ -404,9 +405,7 @@ function passEntryMatches(
  * runs one completion on the cheapest usable model (see title.ts).
  */
 export type TitleGenerator = (input: {
-  session: AgentSession;
   runtime: GhostPiRuntime;
-  ghostName: string;
   configDir: string;
   firstPrompt: string;
   signal: AbortSignal;
@@ -869,26 +868,14 @@ async function fsyncDirectory(path: string): Promise<void> {
   }
 }
 
+/**
+ * One conversation transaction marker, written the way every other daemon
+ * control file is: same temporary name, same `wx` + 0600, same
+ * write/sync/rename/fsync-parent, same cleanup on failure. It had its own copy
+ * of that sequence; the only difference was the wording of the size error.
+ */
 async function writeTransaction(path: string, value: unknown): Promise<void> {
-  const bytes = Buffer.from(`${JSON.stringify(value)}\n`, "utf8");
-  if (bytes.byteLength > TRANSACTION_MARKER_MAX_BYTES) {
-    throw new Error(`Conversation transaction exceeds its ${TRANSACTION_MARKER_MAX_BYTES}-byte limit.`);
-  }
-  const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
-  let file: Awaited<ReturnType<typeof openFile>> | undefined;
-  try {
-    file = await openFile(temporary, "wx", 0o600);
-    await file.writeFile(bytes);
-    await file.sync();
-    await file.close();
-    file = undefined;
-    await rename(temporary, path);
-    await fsyncDirectory(resolve(path, ".."));
-  } catch (error) {
-    await file?.close().catch(() => {});
-    await unlink(temporary).catch(() => {});
-    throw error;
-  }
+  await writeDaemonControlFile(path, `${JSON.stringify(value)}\n`, TRANSACTION_MARKER_MAX_BYTES);
 }
 
 function exactSessionChild(sessionDir: string, path: string): boolean {
@@ -3318,9 +3305,7 @@ export class SessionHost {
     controller.signal.addEventListener("abort", onAbort, { once: true });
 
     const generation = Promise.resolve().then(() => this.generateTitle({
-      session: hosted.session,
       runtime: hosted.modelRuntime,
-      ghostName,
       configDir,
       firstPrompt,
       signal: controller.signal,
