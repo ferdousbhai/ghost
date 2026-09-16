@@ -49,40 +49,18 @@ export function defaultModel<T extends { provider: string; id: string; priority?
  * outranks a genuinely newer model. Ordering a list for a human to read can
  * afford that; choosing what to bind cannot.
  */
-export interface ModelFamily {
-  readonly provider?: string;
-  readonly id: RegExp;
-}
-
 export interface ModelNeed {
   /** Hard requirement: every listed modality must be in the model's `input`. */
   readonly modality?: readonly ("text" | "image")[];
-  /**
-   * Hard requirement, in order: a model must be one of these families, and an
-   * earlier family beats a later one. A role names families when only certain
-   * known models will do — "a strong reasoner" is not a capability pi declares,
-   * so it can only be spelled as a list. Omit it to accept anything capable.
-   */
-  readonly families?: readonly ModelFamily[];
   /** Ranking preference, not a filter. */
   readonly preferReasoning?: boolean;
   /** Ranking preference, not a filter. */
   readonly preferLargeContext?: boolean;
 }
 
-/** The index of the first family a model belongs to, or -1 for none. */
-function familyRank(model: { provider: string; id: string }, families: readonly ModelFamily[]): number {
-  return families.findIndex((family) =>
-    (family.provider === undefined || model.provider === family.provider) && family.id.test(model.id));
-}
-
 /** Whether a model can do the job at all. Preferences are not consulted. */
-export function meetsNeed(
-  model: { provider: string; id: string; input?: readonly string[] },
-  need: ModelNeed,
-): boolean {
-  if (!(need.modality ?? []).every((modality) => model.input?.includes(modality) ?? false)) return false;
-  return need.families === undefined || familyRank(model, need.families) >= 0;
+export function meetsNeed(model: { input?: readonly string[] }, need: ModelNeed): boolean {
+  return (need.modality ?? []).every((modality) => model.input?.includes(modality) ?? false);
 }
 
 /**
@@ -97,10 +75,6 @@ export function rankForNeed<T extends { provider: string; id: string; priority?:
   const capable = models.filter((model) => meetsNeed(model, need));
   const order = new Map(sortCatalogModels([...capable]).map((model, index) => [model, index]));
   return capable.sort((a, b) => {
-    if (need.families !== undefined) {
-      const byFamily = familyRank(a, need.families) - familyRank(b, need.families);
-      if (byFamily !== 0) return byFamily;
-    }
     if (need.preferReasoning && !!a.reasoning !== !!b.reasoning) return a.reasoning ? -1 : 1;
     if (need.preferLargeContext && (a.contextWindow ?? 0) !== (b.contextWindow ?? 0)) {
       return (b.contextWindow ?? 0) - (a.contextWindow ?? 0);
@@ -144,17 +118,6 @@ export function isAggregatorRouter(
   if (vendor < 0) return candidates.some((candidate) => candidate.id.includes("/"));
   return id.slice(0, vendor) === providerId;
 }
-
-/** Ghost's own default for the advisor role: a strong reasoner, named by family. */
-export const ADVISOR_MODEL_NEED: ModelNeed = {
-  families: [
-    { provider: "openai-codex", id: /^gpt-5/i },
-    { provider: "openai", id: /^gpt-5/i },
-    { provider: "anthropic", id: /opus/i },
-    { provider: "anthropic", id: /sonnet/i },
-    { id: /gemini-.*-pro/i },
-  ],
-};
 
 function versionNumber(id: string): number {
   const dotted = /(?:^|[-_])(\d+\.\d+)/.exec(id);

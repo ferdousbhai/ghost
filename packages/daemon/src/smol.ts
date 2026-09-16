@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import { ADVISOR_MODEL_NEED, bestForNeed, isAggregatorRouter } from "./model-routing.js";
+import { isAggregatorRouter } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
@@ -64,7 +64,7 @@ export interface SmolModelCatalog {
 export interface ResolvedSmolModel {
   readonly model: SmolModel;
   /** `driver` means the choice followed the chat model's provider. */
-  readonly via: "role" | "cheapest" | "preferred" | "driver";
+  readonly via: "role" | "cheapest" | "driver";
 }
 
 export interface ResolveSmolOptions {
@@ -200,19 +200,16 @@ export function resolveSmolModel(
     return { model: candidate.model, via: "role" };
   }
 
+  // The advisor is whatever its owner bound, or nothing. There is no automatic
+  // choice: "a strong reasoner" is not a capability pi declares, so choosing one
+  // meant naming model families here and betting on those names — a bet that
+  // ages, and one the owner never placed.
   if (role === ADVISOR_MODEL_ROLE) {
-    const preferred = bestForNeed(
-      catalog.usable().map((candidate) => candidate.model),
-      ADVISOR_MODEL_NEED,
+    throw new SmolModelUnavailableError(
+      "This ghost has no advisor model. Set roles.advisor_model in models.json to "
+      + "a model from a provider it is signed in to.",
+      "none_available",
     );
-    if (!preferred) {
-      throw new SmolModelUnavailableError(
-        "This ghost has no usable preferred advisor model. Configure roles.advisor_model "
-        + "in models.json or authenticate a supported advisor provider.",
-        "none_available",
-      );
-    }
-    return { model: preferred, via: "preferred" };
   }
 
   const withinDriver = options.chatProvider

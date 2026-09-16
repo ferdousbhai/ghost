@@ -116,23 +116,16 @@ describe("resolveSmolModel", () => {
     }
   });
 
-  it("uses Ghost's advisor preference order for an unbound advisor role", () => {
+  // An advisor is whatever its owner bound. Choosing one automatically meant
+  // naming model families in the source and betting the names stayed current;
+  // settling for whatever happened to be cheapest would be worse still.
+  it("refuses an unbound advisor role rather than choosing one", () => {
     const catalog = catalogOf([
       { provider: "local", id: "cheap", cost: cost(0) },
-      { provider: "anthropic", id: "claude-sonnet-4", cost: cost(5) },
-      { provider: "openai", id: "gpt-5.4", cost: cost(8) },
+      { provider: "anthropic", id: "claude-opus-5", cost: cost(15) },
     ]);
-    const resolved = resolveSmolModel(catalog, null, ADVISOR_MODEL_ROLE);
-    expect(resolved).toMatchObject({
-      via: "preferred",
-      model: { provider: "openai", id: "gpt-5.4" },
-    });
-  });
-
-  it("does not silently use a cheap non-advisor model for an unbound advisor role", () => {
-    const catalog = catalogOf([{ provider: "local", id: "cheap", cost: cost(0) }]);
     expect(() => resolveSmolModel(catalog, null, ADVISOR_MODEL_ROLE))
-      .toThrow("no usable preferred advisor model");
+      .toThrow("no advisor model");
   });
 });
 
