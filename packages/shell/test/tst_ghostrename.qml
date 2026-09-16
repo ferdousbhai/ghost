@@ -20,10 +20,8 @@ TestCase {
             greetingGhost: "Casper",
             loginGhost: "Casper",
             commandsGhost: "Casper",
-            delegatedTasksGhost: "Casper",
             mcpGhost: "Casper",
             activeGhost: "Casper",
-            memoryGhost: "Casper",
             characterGhost: "Casper"
         };
     }
@@ -70,8 +68,8 @@ TestCase {
         compare(renamed.commandTurnKey, "Spooky\ncasper-chat");
         compare(renamed.ghosts[0].dir, "/tmp/ghosts/Spooky");
         for (const owner of [
-            "greetingGhost", "loginGhost", "commandsGhost", "delegatedTasksGhost", "mcpGhost",
-            "activeGhost", "memoryGhost", "characterGhost"
+            "greetingGhost", "loginGhost", "commandsGhost", "mcpGhost",
+            "activeGhost", "characterGhost"
         ]) compare(renamed[owner], "Spooky");
     }
 }

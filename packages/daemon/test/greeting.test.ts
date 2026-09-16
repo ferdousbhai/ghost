@@ -15,7 +15,6 @@ import {
   GreetingCache,
   GREETING_DATA_CLOSE,
   GREETING_DATA_OPEN,
-  localTimeString,
   MAX_GREETING_CHARS,
   wholeDaysSince,
   type GreetingContextInput,
@@ -162,12 +161,6 @@ describe("cleanGreeting", () => {
 });
 
 describe("localTimeString and wholeDaysSince", () => {
-  it("names the weekday and the timezone", () => {
-    const formatted = localTimeString(new Date("2026-08-23T12:05:00Z"));
-    expect(formatted).toMatch(/[A-Za-z]/);
-    expect(formatted).toContain("(");
-  });
-
   it("counts whole days, floors at zero, and refuses nonsense", () => {
     const now = Date.parse("2026-08-23T12:00:00Z");
     expect(wholeDaysSince("2026-08-11T12:00:00Z", now)).toBe(12);

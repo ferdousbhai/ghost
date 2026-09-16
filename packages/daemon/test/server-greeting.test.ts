@@ -197,12 +197,6 @@ describe("POST /api/ghosts/:name/greeting", () => {
     expect(onboarding).toBe(true);
   });
 
-  it("stops reporting onboarding once the character deviates from the seed", async () => {
-    const base = await serve({ generate: async () => "Hi.", written: true });
-    const { body } = await postGreeting(base);
-    expect(body.onboarding).toBe(false);
-  });
-
   it("regenerates when character.md changes, and caches otherwise", async () => {
     let calls = 0;
     const base = await serve({

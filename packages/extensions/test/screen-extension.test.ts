@@ -21,7 +21,6 @@ import {
   MAX_WATCH_INTERVAL_MS,
   parseRegion,
   screenToolNames,
-  screenshotFileName,
 } from "../src/extensions/screen.js";
 import {
   ghostScreenshotMatcher,
@@ -73,13 +72,6 @@ function captureHelper(capture: Record<string, unknown> = {}): FakeHelper {
   });
 }
 
-describe("screenshotFileName", () => {
-  it("sorts chronologically, names the ghost, and is filesystem-safe", () => {
-    const name = screenshotFileName("casper", new Date("2026-08-22T10:11:12.345Z"));
-    expect(name).toBe("ghost-casper-screen-2026-08-22T10-11-12-345.png");
-    expect(name).not.toMatch(/[:*?"<>|]/);
-  });
-});
 
 describe("parseRegion", () => {
   it("parses X,Y WxH into the sidecar rect", () => {

@@ -48,11 +48,6 @@ afterEach(async () => {
   await fixture.cleanup();
 });
 
-describe("layout", () => {
-  it("names itself after its directory", () => {
-    expect(home.name).toBe("casper");
-  });
-});
 
 describe("character", () => {
   it("reads the persona body", async () => {

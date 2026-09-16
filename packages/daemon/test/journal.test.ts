@@ -64,7 +64,12 @@ describe("journal records", () => {
       conversationId: "shadowed-alias",
     });
 
-    expect(encoded).not.toContain(expect.stringMatching(/^(?:GHOST|CONVERSATION)=/u));
+    // `toContain` on an array is strict equality, so an asymmetric matcher
+    // there can never match and the assertion can never fail. Assert over the
+    // array instead.
+    expect(encoded).not.toEqual(
+      expect.arrayContaining([expect.stringMatching(/^(?:GHOST|CONVERSATION)=/u)]),
+    );
   });
 
   it("lays out one pointer and byte length per encoded field", () => {

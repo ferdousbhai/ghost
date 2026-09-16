@@ -102,8 +102,6 @@ TestCase {
         Ghostd.sessionsError = "";
         Ghostd.modelError = "";
         Ghostd.apiToken = "test-token";
-        Ghostd.availableModels = [];
-        Ghostd.availableModelTotal = 0;
         requests = [];
         deleteRequests = [];
         branchRequests = [];
@@ -491,8 +489,5 @@ TestCase {
         verify(Ghostd.sessionsError.indexOf("503") >= 0
             || Ghostd.sessionsError.indexOf("try later") >= 0);
     }
-
-    // Lives here for the request-factory harness in init(); it is about page
-    // accounting, not transcripts.
 
 }

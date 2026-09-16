@@ -8,10 +8,8 @@ var ownerKeys = [
     "greetingGhost",
     "loginGhost",
     "commandsGhost",
-    "delegatedTasksGhost",
     "mcpGhost",
     "activeGhost",
-    "memoryGhost",
     "characterGhost"
 ];
 

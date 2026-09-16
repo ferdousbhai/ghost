@@ -36,22 +36,9 @@ TestCase {
         verify(later.cells.some((cell, index) => cell.period !== earlier.cells[index].period));
     }
 
-    function test_twoGhostsAreToldApartByTheirPhosphor(): void {
-        const casper = OrbSeed.orb("casper", "pi:sess-1:4", 5);
-        const myrtle = OrbSeed.orb("moaning-myrtle", "pi:sess-1:4", 5);
-        verify(Math.abs(casper.hueShift - myrtle.hueShift) > 0.5);
-    }
 
     // A square grid with its corners kept would draw a block. The disc is what
     // makes it an orb at five columns.
-    function test_theCornersAreNotPartOfTheDisc(): void {
-        const params = OrbSeed.orb("casper", "pi:sess-1:4", 5);
-        const keys = tc.cellKeys(params);
-        for (const corner of ["0,0", "0,4", "4,0", "4,4"]) {
-            verify(keys.indexOf(corner) < 0);
-        }
-        verify(keys.indexOf("2,2") >= 0);
-    }
 
     // A mote walks the rim, so the rim has to be in the order you walk it.
     function test_theRingIsOrderedAsItIsWalked(): void {

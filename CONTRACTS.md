@@ -382,11 +382,12 @@ and posting the answer the owner types. There are no plan or todo commands.
 `models.json` owns provider policy, roles, and retry chains; pi's
 `.pi/auth.json` owns login credentials. Credential values never enter logs or
 API responses. Inherited provider/auth environment variables
-are scrubbed before Pi runtime construction. A native harness a ghost delegates
-to from Bash (`claude -p`, `codex`, `pi`) receives a separate reviewed
-operational/selector environment captured before the global scrub; its
-credential-bearing values are excluded. The implementation allowlists and tests
-in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
+are scrubbed before Pi runtime construction, process-wide and once. A harness a
+ghost delegates to from Bash (`claude -p`, `codex`, `pi`) inherits that same
+scrubbed environment — Ghost captures no reviewed environment of its own any
+more, so a delegated harness reads its credentials from its own configuration
+exactly as it does when the owner runs it by hand. The implementation and its
+tests in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
 
 Roles are `chat_model`, `smol_model`, and `advisor_model`, each with an
 optional ordered fallback chain. `chat_model` unset leaves the choice to the

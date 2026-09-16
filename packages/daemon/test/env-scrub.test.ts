@@ -4,7 +4,6 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   findProviderCredentialEnv,
-  PI_NO_TITLE_ENV_VAR,
   PI_OFFLINE_ENV_VAR,
   PROVIDER_CREDENTIAL_ENV_VARS,
   PROVIDER_ROUTING_ENV_VARS,
@@ -190,9 +189,4 @@ describe("scrubProviderEnv", () => {
     expect(env[PI_OFFLINE_ENV_VAR]).toBe("1");
   });
 
-  it("retains the historical PI_NO_TITLE no-op without relying on it for titling", () => {
-    const env: NodeJS.ProcessEnv = {};
-    scrubProviderEnv(env);
-    expect(env[PI_NO_TITLE_ENV_VAR]).toBe("1");
-  });
 });

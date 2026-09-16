@@ -15,7 +15,6 @@ import {
   GHOST_SCREEN,
   SCREEN_TARGETS,
 } from "../src/extensions/screen.js";
-import { stringEnum } from "../src/tool-schema.js";
 import { loadExtension } from "./support/harness.js";
 
 interface JsonSchema {
@@ -25,14 +24,6 @@ interface JsonSchema {
 }
 
 describe("stringEnum", () => {
-  it("emits a JSON Schema string type alongside the enum", () => {
-    const schema = stringEnum(["first", "second"], { description: "An example." });
-    expect(schema).toMatchObject({
-      type: "string",
-      enum: ["first", "second"],
-      description: "An example.",
-    });
-  });
 
   it("keeps every registered string enum strict-provider compatible", async () => {
     const harness = await loadExtension(

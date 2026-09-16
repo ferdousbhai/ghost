@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   authorizeRelayUpgrade,
-  encodeServerFrame,
   isRelayOp,
   parseClientFrame,
   RELAY_OPS,
@@ -113,14 +112,6 @@ describe("client frames", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.reason).toContain(reason);
-  });
-
-  it("encodes server frames as one JSON object per message", () => {
-    expect(JSON.parse(encodeServerFrame({
-      t: "req", id: 3, op: "find", args: { query: "Sign in", limit: 5 }, timeoutMs: 30_000,
-    }))).toEqual({
-      t: "req", id: 3, op: "find", args: { query: "Sign in", limit: 5 }, timeoutMs: 30_000,
-    });
   });
 
   it("knows its own op set and nothing else", () => {

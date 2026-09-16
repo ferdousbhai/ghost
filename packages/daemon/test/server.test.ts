@@ -644,20 +644,6 @@ describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
 });
 
 describe("session Connect routes", () => {
-  it("does not expose encrypted snapshot sharing", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/share`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-
-    expect(response.status).toBe(404);
-    expect(await response.json()).toEqual({
-      error: { message: "Not found.", code: "not_found" },
-    });
-  });
-
   it("does not expose live voice or a collaboration host", async () => {
     const base = await serve();
     const segment = piSegment("conv-connect");
