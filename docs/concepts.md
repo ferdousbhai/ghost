@@ -138,15 +138,16 @@ which is the same bar in `CONTRACTS.md` any second backend has to clear.
 
 ## Models and roles
 
-`models.json` in the ghost home holds provider policy, role bindings, and
-fallback chains. Provider logins live in pi's own file-backed store,
+`models.json` in the ghost home holds provider policy and role bindings.
+Provider logins live in pi's own file-backed store,
 `.pi/auth.json` (mode 0600), so each ghost signs in on its own and a login
 never leaves the ghost home. Credential values never enter logs or API
 responses.
 
 Roles are `chat_model` (the conversation), `smol_model` (titles, greetings,
 command-hook completions), and `advisor_model` (the frontier teacher and image
-reader), each with an optional fallback chain. The two background roles follow
+reader), one binding each; retry and model fallback belong to the runtime, not
+to `models.json`. The two background roles follow
 the driver when unset: the chat provider's small tier for smol, Ghost's advisor
 preference for the teacher.
 `chat_model` unset leaves the choice to pi. There is no model catalog API and

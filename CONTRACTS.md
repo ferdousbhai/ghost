@@ -379,7 +379,7 @@ and posting the answer the owner types. There are no plan or todo commands.
 
 ## Models and credentials
 
-`models.json` owns provider policy, roles, and retry chains; pi's
+`models.json` owns provider policy and roles; pi's
 `.pi/auth.json` owns login credentials. Credential values never enter logs or
 API responses. Inherited provider/auth environment variables
 are scrubbed before Pi runtime construction, process-wide and once. A harness a
@@ -389,8 +389,10 @@ more, so a delegated harness reads its credentials from its own configuration
 exactly as it does when the owner runs it by hand. The implementation and its
 tests in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
 
-Roles are `chat_model`, `smol_model`, and `advisor_model`, each with an
-optional ordered fallback chain. `chat_model` unset leaves the choice to the
+Roles are `chat_model`, `smol_model`, and `advisor_model`, one binding each.
+Ghost keeps no fallback chain of its own: retry and model fallback are the
+runtime's, surfaced as `retry_fallback_applied`/`model_fallback` events.
+`chat_model` unset leaves the choice to the
 first declared provider's first model, else Pi's catalog default — Pi's live
 view of what this ghost's own credentials reach. Ghost keeps no model list, no
 catalog API, and no local-runner detection — a local endpoint is an ordinary
@@ -398,13 +400,11 @@ provider entry in `models.json`. A first sign-in binds the chat role from the
 models pi reports as available to that credential right then, preferring one
 that costs nothing so the zero-cost onboarding path cannot start billing;
 dynamically-priced aggregator routers are excluded because a catalogue may list
-them at zero (`bindDefaultChatModelIfUnset`). A role or fallback naming a provider Ghost no
+them at zero (`bindDefaultChatModelIfUnset`). A role naming a provider Ghost no
 longer has is dropped when `models.json` is read, so a home written before a
 runtime was removed heals instead of failing every turn on a binding nothing
-can honour. The one model name Ghost records is
-`OPENROUTER_DEFAULT_FREE_MODEL`, which seeds a first-run OpenRouter config and
-nothing branches on it; OpenRouter delists free models, so it is re-checked
-against the live roster rather than trusted (`models.ts` carries the query).
+can honour. Ghost records no model name of its own: a free default is whatever
+pi reports as free at sign-in time, never a constant that can be delisted.
 `smol_model` serves titles, greetings, and command-hook completions;
 `advisor_model` is the frontier teacher and reads images for a chat model that
 cannot. Unset, both follow the driver: the smol role is

@@ -1,8 +1,9 @@
 /**
  * Ghost's own model routing over official pi's catalog: which model a role
  * binding names, which model a session starts on, and the order the model
- * switcher lists a catalog in. Roles and fallback chains are Ghost policy from
- * `models.json`; pi supplies the models and their availability.
+ * switcher lists a catalog in. Role bindings are Ghost policy from
+ * `models.json`; pi supplies the models, their availability, and any fallback
+ * between them.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";

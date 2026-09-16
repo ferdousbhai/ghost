@@ -9,7 +9,7 @@ A ghost keeps pi's native file tools, Bash, steering, and branchable
 conversations, and adds owner questions (`ask`), a browser
 relay into the owner's own Chromium, a computer-use sidecar for the Omarchy
 desktop, MCP, skills, rules, and Markdown commands from its ghost home, model
-roles with fallback chains, scheduled work through systemd timers, and context
+roles, scheduled work through systemd timers, and context
 windows in place of summarizing compaction. Its notes are Markdown in the
 owner's Documents directory, shared by every ghost and the owner; nothing there
 is indexed or injected. A ghost can also maintain the code it

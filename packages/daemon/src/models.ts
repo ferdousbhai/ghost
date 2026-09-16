@@ -95,7 +95,6 @@ const REMOVED_PROVIDER_ID = "claude-code";
 export interface GhostModelsFile {
   providers: Record<string, GhostProviderConfig>;
   roles?: Partial<Record<GhostModelRole, GhostModelRoleBinding>>;
-  fallbacks?: Partial<Record<GhostModelRole, GhostModelRoleBinding[]>>;
   [key: string]: unknown;
 }
 
@@ -239,14 +238,14 @@ function persistGhostModels(path: string, file: GhostModelsFile): void {
  * keys is one an older Ghost wrote after a newer one had already migrated it:
  * the new key is the current truth and wins.
  */
-function migrateLegacySmolRole<T>(
-  bindings: Partial<Record<string, T>> | undefined,
-): Partial<Record<GhostModelRole, T>> | undefined {
+function migrateLegacySmolRole(
+  bindings: Partial<Record<string, GhostModelRoleBinding>> | undefined,
+): GhostModelsFile["roles"] {
   if (!bindings || !(LEGACY_SMOL_MODEL_ROLE in bindings)) {
-    return bindings as Partial<Record<GhostModelRole, T>> | undefined;
+    return bindings as GhostModelsFile["roles"];
   }
   const { [LEGACY_SMOL_MODEL_ROLE]: legacy, ...rest } = bindings;
-  const migrated = rest as Partial<Record<GhostModelRole, T>>;
+  const migrated = rest as NonNullable<GhostModelsFile["roles"]>;
   if (migrated.smol_model === undefined && legacy !== undefined) {
     migrated.smol_model = legacy;
   }
@@ -254,7 +253,7 @@ function migrateLegacySmolRole<T>(
 }
 
 /**
- * Drop any role or fallback naming a provider Ghost no longer has, in place.
+ * Drop any role naming a provider Ghost no longer has, in place.
  *
  * Read-time and idempotent, like the legacy-role fold above: a file read here
  * and written back loses the dead entry, and an unbound role is a defined
@@ -262,25 +261,13 @@ function migrateLegacySmolRole<T>(
  * roles resolve themselves. Leaving the entry would be worse than forgetting
  * it, because an explicit binding is honoured loudly rather than ignored.
  */
-function dropRemovedProviderBindings<T extends { provider?: unknown }>(
-  bindings: Partial<Record<GhostModelRole, T | T[]>> | undefined,
-): Partial<Record<GhostModelRole, T | T[]>> | undefined {
+function dropRemovedProviderBindings(
+  bindings: GhostModelsFile["roles"],
+): GhostModelsFile["roles"] {
   if (!bindings) return bindings;
   let changed = false;
-  const kept: Partial<Record<GhostModelRole, T | T[]>> = {};
-  for (const [role, value] of Object.entries(bindings) as [GhostModelRole, T | T[]][]) {
-    if (Array.isArray(value)) {
-      // Only copy a chain that actually names the gone provider; every other
-      // read (the common one) keeps the array it was given.
-      if (!value.some((entry) => entry?.provider === REMOVED_PROVIDER_ID)) {
-        kept[role] = value;
-        continue;
-      }
-      changed = true;
-      const entries = value.filter((entry) => entry?.provider !== REMOVED_PROVIDER_ID);
-      if (entries.length > 0) kept[role] = entries;
-      continue;
-    }
+  const kept: NonNullable<GhostModelsFile["roles"]> = {};
+  for (const [role, value] of Object.entries(bindings) as [GhostModelRole, GhostModelRoleBinding][]) {
     if (value?.provider === REMOVED_PROVIDER_ID) {
       changed = true;
       continue;
@@ -329,7 +316,6 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
   const file = parsed as Record<string, unknown> & {
     providers?: unknown;
     roles?: unknown;
-    fallbacks?: unknown;
   };
   if (file.providers !== undefined
     && (file.providers === null || typeof file.providers !== "object" || Array.isArray(file.providers))) {
@@ -339,10 +325,6 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
     && (file.roles === null || typeof file.roles !== "object" || Array.isArray(file.roles))) {
     throw new Error(`${path}: "roles" must be an object.`);
   }
-  if (file.fallbacks !== undefined
-    && (file.fallbacks === null || typeof file.fallbacks !== "object" || Array.isArray(file.fallbacks))) {
-    throw new Error(`${path}: "fallbacks" must be an object.`);
-  }
   const providers = (file.providers as Record<string, unknown>) ?? {};
   assertProviderShape(path, providers);
   return {
@@ -350,10 +332,7 @@ function parseGhostModels(path: string, text: string): GhostModelsFile {
     providers: providers as Record<string, GhostProviderConfig>,
     roles: dropRemovedProviderBindings(
       migrateLegacySmolRole(file.roles as GhostModelsFile["roles"]),
-    ) as GhostModelsFile["roles"],
-    fallbacks: dropRemovedProviderBindings(
-      migrateLegacySmolRole(file.fallbacks as GhostModelsFile["fallbacks"]),
-    ) as GhostModelsFile["fallbacks"],
+    ),
   };
 }
 
@@ -432,7 +411,7 @@ export function resolveModelRoleRef(
 
 /**
  * One serialized read-mutate-persist of the ghost's models.json, creating the
- * file when the ghost has none yet. Every role and fallback writer goes
+ * file when the ghost has none yet. Every role writer goes
  * through here; `mutate` edits the file in place and everything it does not
  * touch (providers, other roles) is preserved.
  */
@@ -475,32 +454,6 @@ export function clearGhostModelRole(
     const roles = { ...(file.roles ?? {}) };
     delete roles[role];
     file.roles = roles;
-  });
-}
-
-export function appendGhostModelFallback(
-  configDir: string,
-  role: GhostModelRole,
-  provider: string,
-  modelId: string,
-): GhostModelsFile {
-  return mutateGhostModels(configDir, (file) => {
-    const current = [...(file.fallbacks?.[role] ?? [])];
-    if (!current.some((binding) => binding.provider === provider && binding.modelId === modelId)) {
-      current.push({ provider, modelId });
-    }
-    file.fallbacks = { ...(file.fallbacks ?? {}), [role]: current };
-  });
-}
-
-export function clearGhostModelFallbacks(
-  configDir: string,
-  role: GhostModelRole,
-): GhostModelsFile {
-  return mutateGhostModels(configDir, (file) => {
-    const fallbacks = { ...(file.fallbacks ?? {}) };
-    delete fallbacks[role];
-    file.fallbacks = fallbacks;
   });
 }
 
