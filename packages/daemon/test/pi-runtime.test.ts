@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { openAiCompatiblePreset, writeGhostModels } from "../src/models.js";
+import { writeGhostModels } from "../src/models.js";
+import { openAiCompatiblePreset } from "./helpers/models-presets.js";
 import { GhostPiRuntime } from "../src/pi-runtime.js";
 import { makeTempGhosts, useCleanups } from "./helpers/fixtures.js";
 import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";

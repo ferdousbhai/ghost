@@ -14,7 +14,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  builtinProviderPreset,
   appendGhostModelFallback,
   clearGhostModelFallbacks,
   ghostAuthPath,
@@ -22,10 +21,6 @@ import {
   ghostModelsPath,
   GhostModelsWriteConflictError,
   GhostModelsLockError,
-  openAiCompatiblePreset,
-  openRouterPreset,
-  OPENROUTER_BASE_URL,
-  OPENROUTER_DEFAULT_FREE_MODEL,
   readGhostModels,
   resolveChatModelRef,
   resolveSmolModelRef,
@@ -33,6 +28,13 @@ import {
   withSerializedModelsWrite,
   writeGhostModels,
 } from "../src/models.js";
+import {
+  builtinProviderPreset,
+  openAiCompatiblePreset,
+  openRouterPreset,
+  OPENROUTER_BASE_URL,
+  OPENROUTER_DEFAULT_FREE_MODEL,
+} from "./helpers/models-presets.js";
 import { createGhostPiRuntime } from "../src/pi-runtime.js";
 import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 

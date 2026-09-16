@@ -43,13 +43,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
 import {
   clearGhostModelRole,
-  openAiCompatiblePreset,
   readGhostModels,
   setGhostModelRole,
   writeGhostModels,
   type GhostModelDefinition,
   type GhostModelsFile,
 } from "../src/models.js";
+import {
+  openAiCompatiblePreset,
+} from "./helpers/models-presets.js";
 import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS } from "../src/hooks.js";
 import { ModelSelection } from "../src/model-selection.js";
 import {
