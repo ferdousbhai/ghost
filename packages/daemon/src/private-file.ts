@@ -5,7 +5,8 @@
  * One implementation, because it is one rule: a private file is read through a
  * descriptor whose identity cannot change under the reader, capped, and decoded
  * fatally. Callers translate a refusal into their own typed error rather than
- * restating the rule.
+ * restating the rule, and the descriptor-identity half of it is
+ * `sameFileIdentity`, which the control and token files share.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
@@ -73,16 +74,28 @@ function validPrivateDescriptor(stats: BigIntStats, links = 1n): boolean {
   return stats.isFile() && stats.nlink === links && stats.size >= 0n;
 }
 
-function samePrivateFileState(left: BigIntStats, right: BigIntStats, links = 1n): boolean {
-  return validPrivateDescriptor(left, links)
-    && validPrivateDescriptor(right, links)
-    && left.dev === right.dev
+/**
+ * The stat fields that must all match for two descriptors to be the same file,
+ * unchanged, between an admission check and the read that trusts it.
+ *
+ * Three modules pin a descriptor this way and each had written the list out;
+ * they differ only in what else they demand of the file, so the shared half
+ * lives here and each caller keeps its own predicate.
+ */
+export function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
+  return left.dev === right.dev
     && left.ino === right.ino
     && left.size === right.size
     && left.mtimeNs === right.mtimeNs
     && left.ctimeNs === right.ctimeNs
     && left.nlink === right.nlink
     && left.mode === right.mode;
+}
+
+function samePrivateFileState(left: BigIntStats, right: BigIntStats, links = 1n): boolean {
+  return validPrivateDescriptor(left, links)
+    && validPrivateDescriptor(right, links)
+    && sameFileIdentity(left, right);
 }
 
 /** Read one stable private pathname while retaining its admitted descriptor. */

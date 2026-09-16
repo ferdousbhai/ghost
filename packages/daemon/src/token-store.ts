@@ -176,6 +176,12 @@ function openToken(path: string): number | undefined {
   }
 }
 
+/**
+ * The same descriptor-identity rule as `sameFileIdentity` in `private-file.ts`,
+ * spelled out rather than imported: the concurrency tests load this module raw
+ * in Node (`node --eval` + `import "…/token-store.ts"`), which cannot resolve a
+ * sibling `.js` specifier, so this file imports nothing but `node:` builtins.
+ */
 function sameTokenFileState(left: BigIntStats, right: BigIntStats): boolean {
   return right.isFile()
     && !right.isSymbolicLink()

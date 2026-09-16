@@ -101,44 +101,6 @@ function readSession(stdout: string, id: string): SmokeSession {
   return found;
 }
 
-export function smokeMemorySlugs(stdout: string): string[] {
-  const parsed = JSON.parse(stdout) as unknown;
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("ghost memory --json returned an unrecognised body");
-  }
-  const body = parsed as { memory?: unknown; skipped?: unknown };
-  if (!Array.isArray(body.memory) || !Array.isArray(body.skipped)) {
-    throw new Error("ghost memory --json returned an unrecognised body");
-  }
-  const slugs = body.memory.map((row) => {
-    if (row === null || typeof row !== "object" || Array.isArray(row)) {
-      throw new Error("ghost memory --json returned an unrecognised memory row");
-    }
-    const slug = (row as { slug?: unknown }).slug;
-    if (typeof slug !== "string" || !slug) {
-      throw new Error("ghost memory --json returned a memory row without a slug");
-    }
-    return slug;
-  });
-  const skipped = body.skipped.map((row) => {
-    if (row === null || typeof row !== "object" || Array.isArray(row)) {
-      throw new Error("ghost memory --json returned an unrecognised skipped row");
-    }
-    const { path, reason } = row as { path?: unknown; reason?: unknown };
-    if (typeof path !== "string" || typeof reason !== "string") {
-      throw new Error("ghost memory --json returned an unrecognised skipped row");
-    }
-    return { path, reason };
-  });
-  if (skipped.length > 0) {
-    throw new Error(
-      `unreadable memory file: ${skipped.map((row) => `${row.path} (${row.reason})`).join("; ")}`,
-    );
-  }
-  if (slugs.length === 0) throw new Error("memory turn wrote no readable memory");
-  return slugs;
-}
-
 export async function smokeCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,

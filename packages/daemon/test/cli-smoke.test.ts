@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { smokeMemorySlugs } from "../src/cli/smoke.js";
 import { runCli } from "./helpers/cli.js";
 import { DaemonClient } from "../src/cli/client.js";
 import type { CliRuntime } from "../src/cli/types.js";
@@ -29,11 +28,6 @@ describe("ghost smoke", () => {
       { step: "turn", ok: true, detail: "skipped (--no-turn)" },
     ]);
   }, 20_000);
-
-  it("rejects a memory turn that wrote no readable memory slug", () => {
-    expect(() => smokeMemorySlugs(JSON.stringify({ memory: [], skipped: [] })))
-      .toThrow("memory turn wrote no readable memory");
-  });
 });
 
 describe("DaemonClient request budgets", () => {

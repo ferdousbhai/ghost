@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { lstat, open, rename, unlink } from "node:fs/promises";
 import type { BigIntStats } from "node:fs";
 import { dirname } from "node:path";
+import { sameFileIdentity } from "./private-file.js";
 import { openRegularFileNoFollow } from "@ghost/extensions";
 
 const CONTROL_MODE = 0o600n;
@@ -20,14 +21,7 @@ function validateDescriptor(path: string, stats: BigIntStats): void {
 }
 
 function sameIdentity(left: BigIntStats, right: BigIntStats): boolean {
-  return left.isFile() && right.isFile()
-    && left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
-    && left.nlink === right.nlink
-    && left.mode === right.mode;
+  return left.isFile() && right.isFile() && sameFileIdentity(left, right);
 }
 
 function checkedLimit(maxBytes: number): number {

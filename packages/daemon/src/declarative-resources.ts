@@ -37,7 +37,6 @@ interface ScanBudget {
   readonly now: () => number;
   entries: number;
   bytes: number;
-  denied: number;
   truncated: boolean;
   warnings: string[];
   traceOpen?: (path: string) => void;
@@ -62,7 +61,6 @@ function sourceFor(path: string, level: "user" | "native"): SourceMeta {
 
 function checkBudget(budget: ScanBudget): boolean {
   if (budget.entries >= SCAN_MAX_ENTRIES) {
-    budget.denied += 1;
     budget.truncated = true;
     if (!budget.warnings.includes("Resource scan stopped at its entry limit.")) {
       budget.warnings.push("Resource scan stopped at its entry limit.");
@@ -75,7 +73,6 @@ function checkBudget(budget: ScanBudget): boolean {
 
 function checkTimeBudget(budget: ScanBudget): boolean {
   if (budget.now() - budget.started >= SCAN_TIMEOUT_MS) {
-    budget.denied += 1;
     budget.truncated = true;
     if (!budget.warnings.includes("Resource scan stopped at its time limit.")) {
       budget.warnings.push("Resource scan stopped at its time limit.");
@@ -369,7 +366,6 @@ export async function loadDeclarativeSnapshot(
     now,
     entries: 0,
     bytes: 0,
-    denied: 0,
     truncated: false,
     warnings: [],
     ...(options.traceOpen ? { traceOpen: options.traceOpen } : {}),
@@ -377,10 +373,6 @@ export async function loadDeclarativeSnapshot(
   const root = await openPinnedRoot(rootPath, options.traceOpen);
   try {
     const instructionFiles = GHOST_INSTRUCTION_FILES;
-    const skillDirectories = ["skills"];
-    const ruleDirectories = ["rules"];
-    const promptDirectories = ["prompts"];
-    const commandDirectories = ["commands"];
 
     const contextFiles: Array<{ path: string; content: string }> = [];
     for (const path of instructionFiles) {
@@ -391,19 +383,11 @@ export async function loadDeclarativeSnapshot(
       }
     }
 
-    const scanDirectories = async (directories: readonly string[]): Promise<MarkdownFile[]> => {
-      const files: MarkdownFile[] = [];
-      for (const directory of directories) {
-        files.push(...await scanMarkdownDirectory(root, rootPath, directory, budget));
-      }
-      return files;
-    };
-    const expectedSkillNames = new Map<string, string>();
-    const skillFiles = (await scanDirectories(skillDirectories))
+    const skillFiles = (await scanMarkdownDirectory(root, rootPath, "skills", budget))
       .filter((file) => basename(file.relativePath).toLowerCase() === "skill.md");
-    const ruleFiles = await scanDirectories(ruleDirectories);
-    const promptFiles = await scanDirectories(promptDirectories);
-    const commandFiles = await scanDirectories(commandDirectories);
+    const ruleFiles = await scanMarkdownDirectory(root, rootPath, "rules", budget);
+    const promptFiles = await scanMarkdownDirectory(root, rootPath, "prompts", budget);
+    const commandFiles = await scanMarkdownDirectory(root, rootPath, "commands", budget);
     const skillEntries = new Map<string, Skill>();
     for (const file of skillFiles) {
       let parsed: ReturnType<typeof parseFrontmatter>;
@@ -420,11 +404,6 @@ export async function loadDeclarativeSnapshot(
         : "";
       if (!name || !detail) {
         budget.warnings.push(`${file.relativePath} was ignored because its skill name or description is missing.`);
-        continue;
-      }
-      const expectedName = expectedSkillNames.get(file.absolutePath);
-      if (expectedName && name !== expectedName) {
-        budget.warnings.push(`${file.relativePath} was ignored because its skill name is not ${expectedName}.`);
         continue;
       }
       skillEntries.set(name, {
