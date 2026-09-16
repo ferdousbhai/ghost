@@ -620,7 +620,6 @@ export interface TurnAdmission {
 
 export interface RunAskReanswerOptions {
   sessionId?: string | null;
-  runtime?: ConversationRuntime;
   entryId: string;
   emit: (event: PiMessagesEvent) => void;
   signal?: AbortSignal;
@@ -945,21 +944,17 @@ function exactDeleteTrashChild(
 
 function exactDeleteStaticSource(
   ghostDir: string,
-  runtime: ConversationRuntime,
   conversationId: string,
   artifact: TrashedConversationFileArtifact,
 ): boolean {
   const sessionDir = ghostPaths(ghostDir).sessionDir;
   switch (artifact.artifact) {
     case "omp-transcript":
-      return runtime === "pi"
-        && artifact.source === join(sessionDir, sessionFileNameFor(conversationId));
+      return artifact.source === join(sessionDir, sessionFileNameFor(conversationId));
     case "conversation-cwd":
-      return runtime === "pi"
-        && artifact.source === conversationCwdPath(sessionDir, conversationId);
+      return artifact.source === conversationCwdPath(sessionDir, conversationId);
     case "tool-cwds":
-      return runtime === "pi"
-        && artifact.source === toolCwdsPath(sessionDir, conversationId);
+      return artifact.source === toolCwdsPath(sessionDir, conversationId);
   }
 }
 
@@ -3172,8 +3167,7 @@ export class SessionHost {
       if (moved && resolve(moved.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
         await this.closePi(ghostName, conversationId);
       }
-      await this.announceConversationUpdated(ghostName, options.sessionId ?? DEFAULT_SESSION_KEY,
-      );
+      await this.announceConversationUpdated(ghostName, options.sessionId ?? DEFAULT_SESSION_KEY);
       return;
     }
     const hosted = await this.idleHostedSession(
@@ -3821,7 +3815,7 @@ export class SessionHost {
         throw invalidMarker();
       }
       for (const artifact of allArtifacts) {
-        if (!exactDeleteStaticSource(ghostDir, runtime, conversationId, artifact)) {
+        if (!exactDeleteStaticSource(ghostDir, conversationId, artifact)) {
           throw invalidMarker();
         }
       }
@@ -4141,15 +4135,14 @@ export class SessionHost {
         messageCount: info.messageCount,
       };
     }));
-    const piSessions = scannedPiSessions.filter(
+    const rows: StoredSessionRow[] = scannedPiSessions.filter(
       (row): row is Exclude<(typeof scannedPiSessions)[number], null> => row !== null,
     );
-    const rows: StoredSessionRow[] = [...piSessions];
     const visibleRows = await Promise.all(rows.map(async (row) => {
       if (await this.transactionMarkerEntryExists(
         deleteTransactionPath(paths.sessionDir, row.runtime, row.conversationId),
       )) return null;
-      if (row.runtime === "pi" && await this.transactionMarkerEntryExists(
+      if (await this.transactionMarkerEntryExists(
         forkTransactionPath(paths.sessionDir, row.conversationId),
       )) return null;
       return row;

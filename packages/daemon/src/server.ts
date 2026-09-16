@@ -1186,7 +1186,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     await streamSessionEvents(request, response, (emit, signal) =>
       options.host.runAskReanswer(ghostName, {
         sessionId: conversation.conversationId,
-        runtime: conversation.runtime,
         entryId,
         emit,
         signal,

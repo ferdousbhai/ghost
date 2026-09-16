@@ -63,8 +63,9 @@ ghost smoke --no-turn --json
 
 pi uses Ghost's explicit transcript, model runtime, prompt, declarative
 snapshot, and MCP sources. The daemon scrubs ambient provider credentials before
-pi construction; a native harness the ghost delegates to from Bash (`claude -p`,
-`codex`, `pi`) gets its own reviewed environment, captured before that scrub.
+pi construction, once and process-wide; a harness the ghost delegates to from
+Bash (`claude -p`, `codex`, `pi`) inherits that same scrubbed environment and
+reads its credentials from its own configuration, as it does by hand.
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
 the authenticated HTTP API, and renders the same conversations as the HUD. Run `ghost help` or `ghost skill` for the current command catalog.

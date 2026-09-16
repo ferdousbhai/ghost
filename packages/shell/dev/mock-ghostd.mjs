@@ -130,8 +130,8 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
 
 const conversationEventClients = new Map();
 
-function conversationIdentity(runtime, conversationId) {
-  return { id: `${runtime}:${conversationId}`, runtime, conversationId };
+function conversationIdentity(conversationId) {
+  return { id: `pi:${conversationId}`, runtime: "pi", conversationId };
 }
 
 function parseConversationIdentity(id) {
@@ -148,11 +148,11 @@ function routeConversation(parts) {
   }
 }
 
-function publishConversationUpdated(name, runtime, conversationId,
+function publishConversationUpdated(name, conversationId,
     updatedAt = new Date().toISOString()) {
   const event = `data: ${JSON.stringify({
     type: "conversation-updated",
-    ...conversationIdentity(runtime, conversationId),
+    ...conversationIdentity(conversationId),
     updatedAt,
   })}\n\n`;
   for (const response of conversationEventClients.get(name) ?? []) {
@@ -465,7 +465,7 @@ function ghostSessions(name) {
       ghostAsk: { resultEntryId: notesResult, settled: "timedOut" },
     };
     const titled = {
-      ...conversationIdentity("pi", `sess-${name}-1`),
+      ...conversationIdentity(`sess-${name}-1`),
       title: "first contact",
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
@@ -504,7 +504,7 @@ function ghostSessions(name) {
       ]),
     };
     const untitled = {
-      ...conversationIdentity("pi", `sess-${name}-2`),
+      ...conversationIdentity(`sess-${name}-2`),
       title: null, // background titling hasn't run — exercises the fallback label
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
@@ -576,7 +576,7 @@ function forkSession(name, source, entryId) {
   if (at < 0 || source.messages[at].role !== "user") return null;
   const now = Date.now();
   const fork = {
-    ...conversationIdentity("pi", `sess-${name}-fork-${++forkSeq}`),
+    ...conversationIdentity(`sess-${name}-fork-${++forkSeq}`),
     title: forkTitle(store, source.title),
     createdAt: new Date(now).toISOString(),
     updatedAt: new Date(now).toISOString(),
@@ -585,7 +585,7 @@ function forkSession(name, source, entryId) {
   };
   store.set(fork.id, fork);
   return {
-    ...conversationIdentity("pi", fork.conversationId),
+    ...conversationIdentity(fork.conversationId),
     sessionId: fork.conversationId,
     title: fork.title,
     draft: source.messages[at].content,
@@ -614,7 +614,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   if (!sessionId) return;
   const store = ghostSessions(name);
   const now = Date.now();
-  const identity = conversationIdentity("pi", sessionId);
+  const identity = conversationIdentity(sessionId);
   let s = store.get(identity.id);
   if (!s) {
     // A brand-new conversation the HUD minted: the daemon creates it lazily here.
@@ -635,7 +635,7 @@ function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) 
   s.updatedAt = new Date(now).toISOString();
   // Background titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
-  publishConversationUpdated(name, runtime, sessionId, s.updatedAt);
+  publishConversationUpdated(name, sessionId, s.updatedAt);
 }
 
 // The empty-chat opening line. Both branches of the contract are demoable:
@@ -1614,7 +1614,7 @@ const mockServer = createServer(async (req, res) => {
     }
     const deleted = ghostSessions(name).delete(conversation.id);
     if (deleted) {
-      publishConversationUpdated(name, conversation.runtime, conversation.conversationId);
+      publishConversationUpdated(name, conversation.conversationId);
     }
     return deleted
       ? json(res, 200, { ok: true })
@@ -1627,7 +1627,7 @@ const mockServer = createServer(async (req, res) => {
     const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     s.readAt = new Date().toISOString();
-    publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
+    publishConversationUpdated(name, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
@@ -1712,7 +1712,7 @@ const mockServer = createServer(async (req, res) => {
     const s = ghostSessions(name).get(conversation.id);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     s.title = title;
-    publishConversationUpdated(name, s.runtime, s.conversationId, s.updatedAt);
+    publishConversationUpdated(name, s.conversationId, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {

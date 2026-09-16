@@ -480,7 +480,6 @@ Singleton {
     property var sessionResources: null
     property bool sessionResourcesLoading: false
     property string sessionResourcesError: ""
-    /** True while the error only says the runtime has not started yet. */
     property string sessionResourcesGhost: ""
     property string sessionResourcesSessionId: ""
 
@@ -1351,8 +1350,9 @@ Singleton {
         return JSON.stringify([ghost, sessionId]);
     }
 
-    function conversationActionId(runtime: string, conversationId: string): string {
-        return runtime + ":" + conversationId;
+    // The one runtime's prefix, beside the parse that already hardcodes it.
+    function conversationActionId(conversationId: string): string {
+        return "pi:" + conversationId;
     }
 
     function parseConversationActionId(id: string): var {
@@ -1476,7 +1476,7 @@ Singleton {
                 ? { id: sessionId, conversationId: conversationId, runtime: runtime || "pi" }
                 : root.conversationIdentity(sessionId);
             if (!identity || identity.id !== root.conversationActionId(
-                    identity.runtime, identity.conversationId)) return null;
+                    identity.conversationId)) return null;
             state = root.newTurnState(ghost, sessionId,
                 identity.conversationId, identity.runtime);
             const next = Object.assign({}, root.turnStates);
@@ -1861,7 +1861,7 @@ Singleton {
         const identity = root.conversationIdentity(sessionId);
         if (!body || typeof body !== "object" || Array.isArray(body)
                 || body.runtime !== "pi"
-                || !identity || body.runtime !== identity.runtime
+                || !identity
                 || !Array.isArray(body.skills)
                 || !body.skills.every(function (row) {
                     return root.validSessionResourceRow(row, false);
@@ -2219,7 +2219,7 @@ Singleton {
                         && event.runtime === "pi"
                         && typeof event.conversationId === "string"
                         && event.id === root.conversationActionId(
-                            event.runtime, event.conversationId)
+                            event.conversationId)
                         && ghost === root.activeGhost) {
                     root.fetchSessions(ghost);
                 }
@@ -2256,7 +2256,7 @@ Singleton {
                 && typeof session.conversationId === "string"
                 && session.conversationId !== ""
                 && session.id === root.conversationActionId(
-                    session.runtime, session.conversationId);
+                    session.conversationId);
         });
     }
 
@@ -2324,7 +2324,7 @@ Singleton {
         }
         const conversationId = "hud-" + Date.now().toString(36)
             + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-        const id = root.conversationActionId("pi", conversationId);
+        const id = root.conversationActionId(conversationId);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.ensureTurnState(ghost, id, conversationId, "pi");
@@ -2929,7 +2929,7 @@ Singleton {
                             || typeof body.conversationId !== "string"
                             || body.conversationId === ""
                             || branched !== root.conversationActionId(
-                                body.runtime, body.conversationId)
+                                body.conversationId)
                             || body.sessionId !== body.conversationId
                             || !body.transcript
                             || body.transcript.id !== branched
@@ -3181,7 +3181,7 @@ Singleton {
         if (!root.sessionIds[ghost]) {
             const conversationId = "hud-" + Date.now().toString(36)
                 + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-            root.sessionIds[ghost] = root.conversationActionId("pi", conversationId);
+            root.sessionIds[ghost] = root.conversationActionId(conversationId);
             root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, "pi");
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];

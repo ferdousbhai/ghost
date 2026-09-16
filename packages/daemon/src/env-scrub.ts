@@ -48,8 +48,8 @@ export const PROVIDER_CREDENTIAL_ENV_VARS: readonly string[] = [
   "ANTHROPIC_SERVICE_ACCOUNT_ID",
   "ANTHROPIC_WORKSPACE_ID",
   // The pinned Claude CLI reads these mTLS values and alternate credential
-  // selectors/channels. The global scrub also removes CLAUDE_CONFIG_DIR after
-  // the delegated-harness environment has captured the owner's native login.
+  // selectors/channels. CLAUDE_CONFIG_DIR goes with them: a delegated
+  // `claude -p` finds the owner's login through its own default config path.
   "CLAUDE_CODE_CLIENT_CERT",
   "CLAUDE_CODE_CLIENT_KEY",
   "CLAUDE_CODE_CLIENT_KEY_PASSPHRASE",
@@ -223,9 +223,8 @@ export interface ScrubResult {
 function isProviderEnvOverride(name: string): boolean {
   if (PROVIDER_CREDENTIAL_ENV_VARS.includes(name)) return true;
   if (PROVIDER_ROUTING_ENV_VARS.includes(name)) return true;
-  // The delegated-harness snapshot is captured first. Pi and every ordinary
-  // daemon child then lose the whole Claude/cloud family, including names added by
-  // a future CLI release before Ghost's direct pass-through list is updated.
+  // Pi and every daemon child lose the whole Claude/cloud family, including
+  // names a future CLI release adds before this file's explicit lists are.
   if (isClaudeEnvironmentFamily(name)) return true;
   return PROVIDER_CREDENTIAL_ENV_PATTERNS.some((pattern) => pattern.test(name));
 }
