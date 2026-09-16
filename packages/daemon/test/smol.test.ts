@@ -154,6 +154,29 @@ describe("smolCatalogFromRuntime", () => {
   });
 });
 
+describe("routers are not models", () => {
+  // An aggregator prices some of its routers at zero — openrouter/fusion costs
+  // nothing to route and bills whatever it routed to — so cheapest-first walks
+  // straight into one unless a role that wants a model is given only models.
+  it("does not hand a chore role a zero-priced router", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "openrouter/fusion", cost: cost(0) },
+      { provider: "openrouter", id: "deepseek/deepseek-v4", cost: cost(5) },
+    ]);
+    const resolved = resolveSmolModel(catalog, null, SMOL_MODEL_ROLE, { chatProvider: "openrouter" });
+    expect(resolved.model.id).toBe("deepseek/deepseek-v4");
+  });
+
+  // The cheapest-overall lane has the same hole.
+  it("does not fall back onto a router either", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "openrouter/auto", cost: cost(0) },
+      { provider: "anthropic", id: "claude-haiku-4-5", cost: cost(1) },
+    ]);
+    expect(resolveSmolModel(catalog, null, SMOL_MODEL_ROLE).model.id).toBe("claude-haiku-4-5");
+  });
+});
+
 describe("published price", () => {
   // pi prices openrouter/auto at -1000000, meaning "bills whatever it picked".
   // Read as a number it is the cheapest thing in the catalogue, so a cheapest-

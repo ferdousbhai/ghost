@@ -1,14 +1,39 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import { ADVISOR_MODEL_NEED, bestForNeed } from "./model-routing.js";
+import { ADVISOR_MODEL_NEED, bestForNeed, isAggregatorRouter } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
 export const ADVISOR_MODEL_ROLE = "advisor_model";
 export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
 
-/** Model ids that read as a provider's small tier, whatever it charges. */
-const SMALL_TIER_HINT = /mini|nano|haiku|flash|lite|small|fast|turbo/i;
+/**
+ * The models a role can be given, which is every usable candidate that is a
+ * model. An aggregator sells routers beside its models and prices some of them
+ * at zero, so a cheapest-first rule reaches for one of those before it reaches
+ * a real model — `auto` costs nothing to route and bills whatever it routed to.
+ * auth.ts keeps them out of a chat binding for the same reason.
+ */
+function modelsIn(catalog: SmolModelCatalog, provider?: string): readonly SmolCandidate[] {
+  const usable = catalog.usable()
+    .filter((candidate) => provider === undefined || candidate.model.provider === provider);
+  // The rule is provider-relative: it reads "is this namespaced under its own
+  // provider rather than under a vendor", which only means anything against
+  // that provider's own ids. Judged across a mixed catalogue, a provider whose
+  // ids carry no vendor at all (anthropic's `claude-opus-5`) would be called a
+  // router because some other provider's id happens to contain a slash.
+  const siblings = new Map<string, { id: string }[]>();
+  for (const candidate of usable) {
+    const list = siblings.get(candidate.model.provider) ?? [];
+    list.push({ id: candidate.model.id });
+    siblings.set(candidate.model.provider, list);
+  }
+  return usable.filter((candidate) => !isAggregatorRouter(
+    candidate.model.id,
+    candidate.model.provider,
+    siblings.get(candidate.model.provider) ?? [],
+  ));
+}
 
 
 
@@ -103,8 +128,7 @@ function outputCost(candidate: SmolCandidate): number {
  * about.
  */
 export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidate[] {
-  return catalog
-    .usable()
+  return modelsIn(catalog)
     .slice()
     .sort((a, b) => {
       const byInput = effectiveInputCost(a) - effectiveInputCost(b);
@@ -131,10 +155,7 @@ export function smallestWithinProvider(
   catalog: SmolModelCatalog,
   provider: string,
 ): SmolCandidate | undefined {
-  const within = catalog.usable().filter((candidate) => candidate.model.provider === provider);
-  return within.slice().sort((a, b) => {
-    const hint = Number(!SMALL_TIER_HINT.test(a.model.id)) - Number(!SMALL_TIER_HINT.test(b.model.id));
-    if (hint !== 0) return hint;
+  return modelsIn(catalog, provider).slice().sort((a, b) => {
     for (const side of ["input", "output"] as const) {
       const byCost = publishedCost(a, side) - publishedCost(b, side);
       if (byCost !== 0 && Number.isFinite(byCost)) return byCost < 0 ? -1 : 1;
