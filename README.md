@@ -1,9 +1,9 @@
 # Ghost
 
-Your ghost, on your machine. An orchestration layer for all your AI agents, with
-full access to your browser, terminal and apps. It has its own character, reads the
-owner's documents, and runs locally as an [Omarchy](https://omarchy.org)-native
-desktop app on the [pi](https://github.com/earendil-works/pi) coding agent.
+Your ghost, on your machine. An orchestration layer for all your AI agents. It
+has its own character, reads the owner's documents, and runs locally as an
+[Omarchy](https://omarchy.org)-native desktop app on the
+[pi](https://github.com/earendil-works/pi) coding agent.
 
 A ghost keeps pi's native file tools, Bash, steering, and branchable
 conversations, and adds owner questions (`ask`), a browser
