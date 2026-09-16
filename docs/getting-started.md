@@ -20,8 +20,8 @@ of — this page.
 ## 1. Install the package
 
 Open the Omarchy menu, then **Install → AI → Ghost**. That installs the `ghost`
-package from Omarchy's repository, enables the two user services for this
-login, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
+package from Omarchy's repository, enables the `ghostd` user service, links the
+HUD plugin into your shell, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
 afterwards; sections 2 and 3 describe what it did. Until the package is in
 Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
 the same package is built from the latest release, which carries its
