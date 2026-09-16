@@ -115,9 +115,8 @@ export function effectiveInputCost(candidate: SmolCandidate): number {
   return knownCost(candidate.model.cost?.input);
 }
 
-function outputCost(candidate: SmolCandidate): number {
-  const cost = candidate.model.cost?.output;
-  return typeof cost === "number" && Number.isFinite(cost) ? cost : Number.POSITIVE_INFINITY;
+function publishedCost(candidate: SmolCandidate, side: "input" | "output"): number {
+  return knownCost(candidate.model.cost?.[side]);
 }
 
 /**
@@ -142,13 +141,9 @@ export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidat
     .sort(
       (a, b) =>
         cheaper(effectiveInputCost(a), effectiveInputCost(b))
-        || cheaper(outputCost(a), outputCost(b))
+        || cheaper(publishedCost(a, "output"), publishedCost(b, "output"))
         || smolModelLabel(a.model).localeCompare(smolModelLabel(b.model)),
     );
-}
-
-function publishedCost(candidate: SmolCandidate, side: "input" | "output"): number {
-  return knownCost(candidate.model.cost?.[side]);
 }
 
 /**

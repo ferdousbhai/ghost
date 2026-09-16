@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   rankSmolModels,
   resolveSmolModel,
+  smallestWithinProvider,
   SMOL_MODEL_ROLE,
   smolCatalogFromRuntime,
   SmolModelUnavailableError,
@@ -181,6 +182,23 @@ describe("published price", () => {
       { provider: "b", id: "metered", cost: cost(5) },
     ]);
     expect(resolveSmolModel(catalog, null, SMOL_MODEL_ROLE).model.id).toBe("metered");
+  });
+
+  // The sentinel guard has to hold on the output key too, not just the input
+  // one. Both models here tie at an unknown input price, so output decides —
+  // and the ids are chosen so label order would place the sentinel LAST. If
+  // -1000000 is read as a real price it wins on cost, and the chore lane picks
+  // the one router guaranteed to charge.
+  it("does not let a negative sentinel win the output tiebreak", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "zzz-auto", cost: { input: -1_000_000, output: -1_000_000, cacheRead: 0, cacheWrite: 0 } },
+      { provider: "openrouter", id: "aaa-unpriced", cost: undefined },
+    ]);
+    const ranked = rankSmolModels(catalog).map((candidate) => candidate.model.id);
+    expect(ranked).toEqual(["aaa-unpriced", "zzz-auto"]);
+    // The same catalogue through the per-provider lane, which already guarded
+    // the sentinel. The two lanes now agree.
+    expect(smallestWithinProvider(catalog, "openrouter")?.model.id).toBe("aaa-unpriced");
   });
 
   // Every sentinel reads as an unknown price, so a whole catalogue of them
