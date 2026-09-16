@@ -6,7 +6,7 @@ owner's documents, and runs locally as an [Omarchy](https://omarchy.org)-native
 desktop app on the [pi](https://github.com/earendil-works/pi) coding agent.
 
 A ghost keeps pi's native file tools, Bash, steering, and branchable
-conversations, and adds owner questions (`ask`), background jobs, a browser
+conversations, and adds owner questions (`ask`), a browser
 relay into the owner's own Chromium, a computer-use sidecar for the Omarchy
 desktop, MCP, skills, rules, and Markdown commands from its ghost home, model
 roles with fallback chains, scheduled work through systemd timers, and context

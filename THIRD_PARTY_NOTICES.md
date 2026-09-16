@@ -1,36 +1,5 @@
 # Third-party notices
 
-## T3 Code
-
-Ghost's Claude Code runtime and event adapter were adapted from T3 Code commit
-`2c4158f87a1b6a586d0aa5e0338f122cb7887c4f`. That runtime was removed in 0.3.0
-and no code derived from T3 Code is distributed any more; the notice is kept
-because the licence covered releases that are still in owners' hands. The
-per-file record lived in `docs/claude-code-runtime.md`, deleted with the
-runtime — `git log -- docs/claude-code-runtime.md` has it.
-
-MIT License
-
-Copyright (c) 2026 T3 Tools Inc.
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
 ## Lucide
 
 The shell mascot and Chromium extension icon assets use Lucide's `ghost` glyph.
@@ -59,47 +28,15 @@ from it under the MIT license: the shape of the `ask` tool
 (`packages/daemon/src/mcp-config.ts`), taken from Oh My Pi commit
 `160ed439ac0df594347e7d7018b813a7ffdb5e81`.
 
-Portions of `packages/daemon/src/advisor-*.ts`, `watchdog-files.ts`, and
-`advisor-prompt.ts` are adapted from oh-my-pi
+`packages/daemon/src/advisor-notes.ts`, `advisor-quarantine.ts`,
+`advisor-severity.ts`, and `advisor-emission-guard.ts` are adapted from oh-my-pi
 ([github.com/can1357/oh-my-pi](https://github.com/can1357/oh-my-pi)),
-© Stencil Labs, Inc., MIT.
+© Stencil Labs, Inc., MIT. Each carries its own provenance header.
 
 MIT License
 
 Copyright (c) 2025 Mario Zechner
 Copyright (c) 2025-2026 Can Bölük
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-
-## slop-detector
-
-The daemon's built-in prose lint pack
-(`packages/daemon/src/lint-rules.ts`) is a TypeScript port of the rule engine
-from [slop-detector](https://github.com/ferdousbhai/slop-detector)
-(`extension/engine.js`, commit
-`6e2733726bae8e22d46fbe87a7f28e0e40969e5a`), which credits
-dmmulroy/anti-slop (architecture), the cursor/plugins unslop skill, and
-petergyang/no-ai-slop (pattern lists) as its pattern sources.
-
-MIT License
-
-Copyright (c) 2026 Ferdous Bhai
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

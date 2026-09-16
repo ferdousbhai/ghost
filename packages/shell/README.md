@@ -24,8 +24,8 @@ qml/manifest.json         plugin manifest: kinds and entry points
 qml/Service.qml           service kind: daemon connection, toasts, IPC
 qml/Panel.qml             panel kind: the host's open/close contract
 qml/GhostHud.qml          chat window
-qml/GhostBarWidget.qml    bar-widget kind: the state dot
-qml/components/           chat, ask, jobs, queue, tools, routing, orb
+qml/GhostBarWidget.qml    bar-widget kind: the mark in a host bar slot
+qml/components/           chat, ask, queue, tools, routing, board, orb
 qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
 contrib/                  Omarchy integration
 dev/                      isolated preview, mock daemon, checks
