@@ -124,6 +124,44 @@ export const CHAT_MODEL_NEED: ModelNeed = {
   preferLargeContext: true,
 };
 
+/**
+ * Routers an aggregator sells beside its models — `auto`, `openrouter/free`,
+ * `openrouter/fusion` — which pick a model per request rather than being one.
+ *
+ * Told apart by shape rather than by name: an aggregator namespaces a real
+ * model under its vendor (`nvidia/…`, `google/…`) and its own routers under
+ * itself or under no vendor at all. Reading that from the candidates in hand
+ * keeps the rule provider-relative — a provider whose ids never carry a vendor
+ * (`anthropic`'s `claude-opus-5`) has no vendor-namespaced sibling, so nothing
+ * there is mistaken for a router.
+ */
+export function isAggregatorRouter(
+  id: string,
+  providerId: string,
+  candidates: readonly { id: string }[],
+): boolean {
+  const vendor = id.indexOf("/");
+  if (vendor < 0) return candidates.some((candidate) => candidate.id.includes("/"));
+  return id.slice(0, vendor) === providerId;
+}
+
+/**
+ * The routers whose published contract is that neither the routing nor what it
+ * routes to is billable. A strict subset of the above, and the reason both
+ * predicates exist: pi's catalogue prices `openrouter/fusion` at 0 and it bills
+ * anyway, so "costs nothing" cannot separate them and only a name can.
+ *
+ * The two callers want opposite things from the same fact. A chat binding
+ * refuses every router, free or not, because a different model per request is
+ * wrong for a conversation. A chore role wants exactly that spread, since free
+ * models rate-limit one at a time.
+ */
+const FREE_CAPABILITY_ROUTERS: readonly string[] = ["openrouter/free"];
+
+export function isFreeCapabilityRouter(id: string): boolean {
+  return FREE_CAPABILITY_ROUTERS.includes(id);
+}
+
 /** Ghost's own default for the advisor role: a strong reasoner, named by family. */
 export const ADVISOR_MODEL_NEED: ModelNeed = {
   families: [

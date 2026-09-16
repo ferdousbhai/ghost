@@ -1,6 +1,6 @@
 import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import { ADVISOR_MODEL_NEED, bestForNeed } from "./model-routing.js";
+import { ADVISOR_MODEL_NEED, bestForNeed, isFreeCapabilityRouter } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
@@ -10,22 +10,6 @@ export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
 /** Model ids that read as a provider's small tier, whatever it charges. */
 const SMALL_TIER_HINT = /mini|nano|haiku|flash|lite|small|fast|turbo/i;
 
-/**
- * Routers that pick a free model per request and publish that neither the
- * routing nor what it routes to is billable. OpenRouter's reads the request's
- * required capabilities, serves a free model that has them, and spreads load
- * across the pool — which is what this role wants, since free models rate-limit
- * one at a time. `SMALL_TIER_HINT` only guesses at the same thing from an id.
- *
- * Named, not detected. A router is billable or not by contract, and pi's
- * catalogue cannot tell them apart: `openrouter/fusion` is priced at 0 here and
- * bills anyway, which is why `isFreeToRun` in auth.ts refuses routers by shape.
- * Refusing by shape is right for a chat binding, where a different model per
- * request is wrong regardless. Listing the free ones is the safe direction of
- * that trade: a denylist of billable routers fails open on the one it misses,
- * an allowlist of a contractually free router fails closed.
- */
-const FREE_CAPABILITY_ROUTERS: readonly string[] = ["openrouter/free"];
 
 
 export type SmolModel = Pick<Model<Api>, "provider" | "id">
@@ -135,7 +119,7 @@ export function freeCapabilityRouter(
   catalog: SmolModelCatalog,
   chatProvider?: string | null,
 ): SmolCandidate | undefined {
-  const routers = catalog.usable().filter((candidate) => FREE_CAPABILITY_ROUTERS.includes(candidate.model.id));
+  const routers = catalog.usable().filter((candidate) => isFreeCapabilityRouter(candidate.model.id));
   return routers.find((candidate) => candidate.model.provider === chatProvider) ?? routers[0];
 }
 

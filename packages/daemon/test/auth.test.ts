@@ -28,6 +28,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
+import { isAggregatorRouter, isFreeCapabilityRouter } from "../src/model-routing.js";
 import { fakePiModel } from "./helpers/fake-pi-model.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
@@ -142,7 +143,7 @@ describe("short-lived auth runtime home leases", () => {
       createRuntime: async (input) => {
         entered.resolve();
         await resume.promise;
-                writeFileSync(join(dirname(input.modelsPath), probeName), "leased\n");
+        writeFileSync(join(dirname(input.modelsPath), probeName), "leased\n");
         return runtime;
       },
     });
@@ -437,12 +438,6 @@ describe("successful login refresh", () => {
 });
 
 /** Mirrors `isAggregatorRouter` in auth.ts; kept in step by the cases below. */
-function routerForTest(id: string, providerId: string, candidates: readonly { id: string }[]): boolean {
-  const vendor = id.indexOf("/");
-  if (vendor < 0) return candidates.some((candidate) => candidate.id.includes("/"));
-  return id.slice(0, vendor) === providerId;
-}
-
 describe("default model binding", () => {
   it("binds a free model over a paid one so a first sign-in cannot start billing", async () => {
     temp = makeTempGhosts();
@@ -502,6 +497,18 @@ describe("default model binding", () => {
   // denylist this replaced was written from upstream's prices while the
   // predicate read pi's, and the two disagreed — `openrouter/auto` is already
   // negative here, while `openrouter/free` is zero and was not on the list.
+  it("treats every contractually free router as a router", () => {
+    // The two predicates answer different questions about one fact, and the
+    // free list is a strict subset. If a name were ever added that the shape
+    // rule does not recognise, a chat binding would stop refusing it.
+    const candidates = [{ id: "openrouter/free" }, { id: "nvidia/nemotron-nano-9b-v2:free" }];
+    for (const { id } of candidates.filter((c) => isFreeCapabilityRouter(c.id))) {
+      expect(isAggregatorRouter(id, "openrouter", candidates)).toBe(true);
+    }
+    expect(isFreeCapabilityRouter("openrouter/fusion")).toBe(false);
+    expect(isFreeCapabilityRouter("nvidia/nemotron-nano-9b-v2:free")).toBe(false);
+  });
+
   it("separates routers from models across pi's real OpenRouter catalogue", async () => {
     // The package does not export its data files, so read the catalogue from
     // the installed tree. Skipped rather than failed if the layout moves.
@@ -518,7 +525,7 @@ describe("default model binding", () => {
     const free = candidates.filter((candidate) =>
       candidate.cost?.input === 0 && candidate.cost?.output === 0);
     const selectable = free.filter((candidate) =>
-      !routerForTest(candidate.id, "openrouter", candidates));
+      !isAggregatorRouter(candidate.id, "openrouter", candidates));
 
     expect(free.length).toBeGreaterThan(5);
     // Every router the aggregator sells is excluded, however it is priced.
