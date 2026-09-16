@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../qml/components"
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 // character.md editing goes through the daemon (GET|PUT /character), never a
 // direct disk write. The daemon owns the size cap: the shell renders the
@@ -26,51 +27,13 @@ TestCase {
         }
     }
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            body: null,
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (payload) {
-                this.body = payload === undefined ? null : payload;
-            },
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                this.status = 0;
-                if (typeof this.onreadystatechange === "function") this.onreadystatechange();
-            },
-            complete: function (status, responseBody) {
-                this.status = status;
-                this.responseText = typeof responseBody === "string"
-                    ? responseBody : JSON.stringify(responseBody);
-                this.readyState = 4;
-                if (typeof this.onreadystatechange === "function") this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function init(): void {
         Ghostd.clearCharacter();
         Ghostd.activeGhost = "casper";
         Ghostd.apiToken = "test-token";
         requests = [];
         writeSpy.clear();
-        Ghostd.characterRequestFactory = function () { return tc.fakeRequest(); };
+        Ghostd.characterRequestFactory = function () { return FakeXhr.make(tc.requests); };
     }
 
     function cleanup(): void {

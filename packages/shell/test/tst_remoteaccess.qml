@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../qml/components"
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 TestCase {
     id: tc
@@ -30,41 +31,6 @@ TestCase {
         }
     }
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            body: null,
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (body) { this.body = body; },
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onreadystatechange) this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function status(overrides: var): var {
         return Object.assign({
             enabled: false,
@@ -88,7 +54,7 @@ TestCase {
     function init(): void {
         Ghostd.clearRemote();
         requests = [];
-        Ghostd.remoteRequestFactory = function () { return tc.fakeRequest(); };
+        Ghostd.remoteRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.apiToken = "test-token";
     }
 

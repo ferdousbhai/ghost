@@ -2,45 +2,13 @@ import Quickshell
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 TestCase {
     id: tc
     name: "SessionResourcesLifecycle"
 
     property var requests: []
-
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function () {},
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        requests.push(xhr);
-        return xhr;
-    }
 
     function snapshot(): var {
         return {
@@ -75,7 +43,7 @@ TestCase {
         Ghostd.currentSessionId = "pi:resource-thread";
         Ghostd.sessionIds = ({ casper: "pi:resource-thread" });
         Ghostd.apiToken = "test-token";
-        Ghostd.sessionResourcesRequestFactory = function () { return tc.fakeRequest(); };
+        Ghostd.sessionResourcesRequestFactory = function () { return FakeXhr.make(tc.requests); };
     }
 
     function cleanup(): void {

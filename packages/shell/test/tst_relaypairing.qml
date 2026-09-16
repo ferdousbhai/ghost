@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 // The browser-relay pairing prompt: what the HUD service makes of the daemon's
 // relay status, and how Allow/Deny reach `/api/relay/pair`.
@@ -10,44 +11,9 @@ TestCase {
 
     property var requests: []
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            body: null,
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (body) { this.body = body; },
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onreadystatechange) this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function init(): void {
         tc.requests = [];
-        Ghostd.relayRequestFactory = tc.fakeRequest;
+        Ghostd.relayRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.relayPairing = null;
         Ghostd.relayResolving = false;
         Ghostd.relayError = "";

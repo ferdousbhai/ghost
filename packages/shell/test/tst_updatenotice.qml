@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 // The daemon's release check reaches the HUD through /api/status. This pins
 // what Ghostd keeps from that row: a valid update, or nothing.
@@ -10,30 +11,11 @@ TestCase {
 
     property var requests: []
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0, status: 0, responseText: "", method: "", url: "",
-            headers: ({}), onreadystatechange: null,
-            open: function (method, url) { this.method = method; this.url = url; this.readyState = 1; },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function () {},
-            abort: function () { this.readyState = 4; this.status = 0; if (this.onreadystatechange) this.onreadystatechange(); },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function init(): void {
         tc.requests = [];
         Ghostd.updateAvailable = null;
         Ghostd.statusRequest = null;
-        Ghostd.statusRequestFactory = function () { return tc.fakeRequest(); };
+        Ghostd.statusRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.apiToken = "test-token";
     }
 

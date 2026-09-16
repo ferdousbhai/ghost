@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 TestCase {
     id: tc
@@ -17,41 +18,6 @@ TestCase {
             if (Ghostd.deletingSessionId === "")
                 tc.deleteSettlementError = Ghostd.sessionsError;
         }
-    }
-
-    function fakeRequest(bucket: var): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            sent: false,
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function () { this.sent = true; },
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                this.status = 0;
-                if (typeof this.onreadystatechange === "function") this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (typeof this.onreadystatechange === "function") this.onreadystatechange();
-            }
-        };
-        bucket.push(xhr);
-        return xhr;
     }
 
     function messages(first: int, count: int): var {
@@ -107,13 +73,13 @@ TestCase {
         branchRequests = [];
         deleteSettlementError = "";
         Ghostd.transcriptRequestFactory = function () {
-            return fakeRequest(requests);
+            return FakeXhr.make(requests);
         };
         Ghostd.deleteSessionRequestFactory = function () {
-            return fakeRequest(deleteRequests);
+            return FakeXhr.make(deleteRequests);
         };
         Ghostd.branchRequestFactory = function () {
-            return fakeRequest(branchRequests);
+            return FakeXhr.make(branchRequests);
         };
     }
 

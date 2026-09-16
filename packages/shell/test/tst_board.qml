@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 // The board pane's service side: what the HUD makes of GET /api/board.
 TestCase {
@@ -9,28 +10,9 @@ TestCase {
 
     property var requests: []
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0, status: 0, responseText: "", method: "", url: "", body: null,
-            headers: ({}), onreadystatechange: null,
-            open: function (method, url) { this.method = method; this.url = url; this.readyState = 1; },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (body) { this.body = body; },
-            abort: function () { this.readyState = 4; this.status = 0; if (this.onreadystatechange) this.onreadystatechange(); },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function init(): void {
         tc.requests = [];
-        Ghostd.boardRequestFactory = tc.fakeRequest;
+        Ghostd.boardRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.board = null;
         Ghostd.boardError = "";
         Ghostd.boardRequest = null;

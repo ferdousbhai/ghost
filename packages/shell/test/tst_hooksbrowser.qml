@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../qml/services"
 import "../qml/components" as Components
+import "FakeXhr.js" as FakeXhr
 
 TestCase {
     id: tc
@@ -36,39 +37,6 @@ TestCase {
 
     property var requests: []
 
-    function fakeRequest(): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            body: null,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (body) { this.body = body; },
-            abort: function () {
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onreadystatechange) this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        tc.requests.push(xhr);
-        return xhr;
-    }
-
     function configDocument(): var {
         return {
             hooks: {
@@ -80,7 +48,7 @@ TestCase {
     function init(): void {
         Ghostd.retireHooksRequest();
         tc.requests = [];
-        Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(); };
+        Ghostd.hooksRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.hookConfig = null;
         Ghostd.hookConfigPath = "";
         Ghostd.hookConfigLoaded = true;

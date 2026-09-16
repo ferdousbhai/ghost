@@ -2,47 +2,13 @@ import Quickshell
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 TestCase {
     id: tc
     name: "HooksLifecycle"
 
     property var requests: []
-
-    function fakeRequest(bucket: var): var {
-        const xhr = {
-            readyState: 0,
-            status: 0,
-            responseText: "",
-            method: "",
-            url: "",
-            body: null,
-            aborted: false,
-            headers: ({}),
-            onreadystatechange: null,
-            open: function (method, url) {
-                this.method = method;
-                this.url = url;
-                this.readyState = 1;
-            },
-            setRequestHeader: function (name, value) { this.headers[name] = value; },
-            send: function (body) { this.body = body; },
-            abort: function () {
-                this.aborted = true;
-                this.readyState = 4;
-                this.status = 0;
-                if (this.onreadystatechange) this.onreadystatechange();
-            },
-            complete: function (status, body) {
-                this.status = status;
-                this.responseText = typeof body === "string" ? body : JSON.stringify(body);
-                this.readyState = 4;
-                if (this.onreadystatechange) this.onreadystatechange();
-            }
-        };
-        bucket.push(xhr);
-        return xhr;
-    }
 
     function status(name: string): var {
         return {
@@ -66,7 +32,7 @@ TestCase {
 
     function init(): void {
         requests = [];
-        Ghostd.hooksRequestFactory = function () { return tc.fakeRequest(tc.requests); };
+        Ghostd.hooksRequestFactory = function () { return FakeXhr.make(tc.requests); };
         Ghostd.beginHooksConnectionEpoch();
         // The catalog is the only daemon connection this file asserts on, but
         // every connection on the shared singleton drives one `reachable` latch,
