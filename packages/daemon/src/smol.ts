@@ -71,10 +71,24 @@ export function smolModelLabel(model: SmolModel): string {
  * published `cost.input` (infinite when unknown, so a priced model always beats
  * a costless-unknown one).
  */
+/**
+ * A published price, or Infinity when there is not one to read.
+ *
+ * Negative is not a price. pi's catalogue prices `openrouter/auto` at -1000000,
+ * a sentinel for "this bills whatever it picked", and a plain finite check
+ * reads that as the cheapest model on offer — so ranking by cost alone would
+ * choose the one router guaranteed to charge. Unknown sorts last, which is what
+ * a sentinel deserves.
+ */
+function knownCost(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : Number.POSITIVE_INFINITY;
+}
+
 export function effectiveInputCost(candidate: SmolCandidate): number {
   if (candidate.subscription) return 0;
-  const cost = candidate.model.cost?.input;
-  return typeof cost === "number" && Number.isFinite(cost) ? cost : Number.POSITIVE_INFINITY;
+  return knownCost(candidate.model.cost?.input);
 }
 
 function outputCost(candidate: SmolCandidate): number {
@@ -106,8 +120,7 @@ export function rankSmolModels(catalog: SmolModelCatalog): readonly SmolCandidat
 }
 
 function publishedCost(candidate: SmolCandidate, side: "input" | "output"): number {
-  const cost = candidate.model.cost?.[side];
-  return typeof cost === "number" && Number.isFinite(cost) ? cost : Number.POSITIVE_INFINITY;
+  return knownCost(candidate.model.cost?.[side]);
 }
 
 /**

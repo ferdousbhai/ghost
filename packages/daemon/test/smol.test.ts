@@ -154,6 +154,31 @@ describe("smolCatalogFromRuntime", () => {
   });
 });
 
+describe("published price", () => {
+  // pi prices openrouter/auto at -1000000, meaning "bills whatever it picked".
+  // Read as a number it is the cheapest thing in the catalogue, so a cheapest-
+  // first rule reaches for the one router guaranteed to charge. Neither id
+  // carries a small-tier word, so price is what decides between them here.
+  it("does not read a negative sentinel as the cheapest model", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "openrouter/auto", cost: { input: -1_000_000, output: -1_000_000, cacheRead: 0, cacheWrite: 0 } },
+      { provider: "openrouter", id: "deepseek/deepseek-v4", cost: cost(0) },
+    ]);
+    const resolved = resolveSmolModel(catalog, null, SMOL_MODEL_ROLE, { chatProvider: "openrouter" });
+    expect(resolved.model.id).toBe("deepseek/deepseek-v4");
+  });
+
+  // Same through the cheapest-overall lane, where a metered catalogue makes
+  // effectiveInputCost the ranking key rather than a tiebreak.
+  it("sorts an unpriced sentinel last when ranking by cost", () => {
+    const catalog = catalogOf([
+      { provider: "a", id: "auto", cost: { input: -1_000_000, output: -1_000_000, cacheRead: 0, cacheWrite: 0 } },
+      { provider: "b", id: "metered", cost: cost(5) },
+    ]);
+    expect(resolveSmolModel(catalog, null, SMOL_MODEL_ROLE).model.id).toBe("metered");
+  });
+});
+
 describe("free capability router", () => {
   // The name hint is a guess at a provider's small tier from its id; on an
   // aggregator it reads across unrelated vendors, which is how a code model
