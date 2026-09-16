@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   ADVISOR_MODEL_ROLE,
   resolveSmolModel,
+  SMOL_MODEL_ROLE,
   smolCatalogFromRuntime,
   SmolModelUnavailableError,
   type SmolModel,
@@ -150,5 +151,42 @@ describe("smolCatalogFromRuntime", () => {
     } as unknown as SmolRuntime;
     // The OAuth provider is free, so it wins over the cheaper metered model.
     expect(resolveSmolModel(smolCatalogFromRuntime(runtime)).model.provider).toBe("oauthed");
+  });
+});
+
+describe("free capability router", () => {
+  // The name hint is a guess at a provider's small tier from its id; on an
+  // aggregator it reads across unrelated vendors, which is how a code model
+  // wins the role. A router that publishes "free, and filtered to the
+  // capabilities the request needs" states the same intent as a contract.
+  it("is preferred over the model whose id merely reads as small", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "cohere/north-mini-code:free", cost: cost(0) },
+      { provider: "openrouter", id: "openrouter/free", cost: cost(0) },
+    ]);
+    expect(resolveSmolModel(catalog, null, SMOL_MODEL_ROLE, { chatProvider: "openrouter" }))
+      .toEqual({ model: expect.objectContaining({ id: "openrouter/free" }), via: "router" });
+  });
+
+  it("stays out of the way of an explicit role binding", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "openrouter/free", cost: cost(0) },
+      { provider: "openrouter", id: "thinkingmachines/inkling-small:free", cost: cost(0) },
+    ]);
+    const ref = { provider: "openrouter", modelId: "thinkingmachines/inkling-small:free" };
+    expect(resolveSmolModel(catalog, ref, SMOL_MODEL_ROLE, { chatProvider: "openrouter" }).via)
+      .toBe("role");
+  });
+
+  // `openrouter/fusion` is priced at 0 in pi's catalogue and bills anyway, so
+  // the list names what is free rather than detecting it.
+  it("does not treat every zero-priced router as free", () => {
+    const catalog = catalogOf([
+      { provider: "openrouter", id: "openrouter/fusion", cost: cost(0) },
+      { provider: "openrouter", id: "nvidia/nemotron-nano-9b-v2:free", cost: cost(0) },
+    ]);
+    const resolved = resolveSmolModel(catalog, null, SMOL_MODEL_ROLE, { chatProvider: "openrouter" });
+    expect(resolved.model.id).not.toBe("openrouter/fusion");
+    expect(resolved.via).toBe("driver");
   });
 });
