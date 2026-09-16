@@ -645,7 +645,7 @@ export interface QueuedMessages {
 }
 
 export interface TrashedConversationFileArtifact extends TrashPathResult {
-  artifact: "omp-transcript" | "conversation-cwd" | "tool-cwds";
+  artifact: "transcript" | "conversation-cwd" | "tool-cwds";
   source: string;
 }
 
@@ -799,10 +799,23 @@ interface ForkTransactionRecord {
 }
 
 const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"]>([
-  "omp-transcript",
+  "transcript",
   "conversation-cwd",
   "tool-cwds",
 ]);
+
+/**
+ * The kind a stored delete receipt names, or null when it names nothing Ghost
+ * writes. `omp-transcript` is the transcript under the name a build that still
+ * had a second runtime wrote; a marker left by one has to finish.
+ */
+function deleteArtifactKind(value: unknown): TrashedConversationFileArtifact["artifact"] | null {
+  if (typeof value !== "string") return null;
+  const kind = value === "omp-transcript" ? "transcript" : value;
+  return DELETE_ARTIFACT_KINDS.has(kind as TrashedConversationFileArtifact["artifact"])
+    ? kind as TrashedConversationFileArtifact["artifact"]
+    : null;
+}
 
 interface DeleteTransactionRecord {
   version: 1 | 2 | 3 | 4;
@@ -926,7 +939,7 @@ function exactDeleteStaticSource(
 ): boolean {
   const sessionDir = ghostPaths(ghostDir).sessionDir;
   switch (artifact.artifact) {
-    case "omp-transcript":
+    case "transcript":
       return artifact.source === join(sessionDir, sessionFileNameFor(conversationId));
     case "conversation-cwd":
       return artifact.source === conversationCwdPath(sessionDir, conversationId);
@@ -3722,15 +3735,15 @@ export class SessionHost {
         const source = (row as Record<string, unknown>).source;
         const trash = (row as Record<string, unknown>).trash;
         const kind = (row as Record<string, unknown>).kind;
-        if (typeof artifact !== "string"
-          || !DELETE_ARTIFACT_KINDS.has(artifact as TrashedConversationFileArtifact["artifact"])
+        const artifactKind = deleteArtifactKind(artifact);
+        if (artifactKind === null
           || typeof source !== "string" || !isAbsolute(source)
           || typeof trash !== "string" || !isAbsolute(trash)
           || (kind !== "freedesktop" && kind !== "fallback")) {
           return null;
         }
         return {
-          artifact: artifact as TrashedConversationFileArtifact["artifact"],
+          artifact: artifactKind,
           source,
           trash,
           kind,
@@ -4802,7 +4815,7 @@ export class SessionHost {
         artifact: TrashedConversationFileArtifact["artifact"];
         path: string;
       }> = [
-        { artifact: "omp-transcript", path: piPath },
+        { artifact: "transcript", path: piPath },
         { artifact: "tool-cwds", path: cwdPath },
         { artifact: "conversation-cwd", path: conversationCwd },
       ];

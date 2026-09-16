@@ -2559,7 +2559,7 @@ describe("SessionHost.runTurn", () => {
     });
     await turn;
     await expect(host!.deleteSession("casper", "conv-busy-delete")).resolves.toMatchObject({
-      artifacts: [{ artifact: "omp-transcript", kind: "fallback" }],
+      artifacts: [{ artifact: "transcript", kind: "fallback" }],
     });
   });
 
@@ -2603,7 +2603,7 @@ describe("SessionHost.runTurn", () => {
     // A conversation is one file now, so the transcript is the only artifact a
     // delete moves; a pre-move home additionally trashes its cwd sidecars.
     expect(deleted.artifacts).toEqual(expect.arrayContaining([
-      expect.objectContaining({ artifact: "omp-transcript", kind: "fallback" }),
+      expect.objectContaining({ artifact: "transcript", kind: "fallback" }),
     ]));
   });
 
@@ -3461,7 +3461,7 @@ describe("session listing", () => {
     const trashed = await host!.deleteSession("casper", "conv-delete");
     expect(existsSync(path)).toBe(false);
     expect(trashed.artifacts).toMatchObject([
-      { artifact: "omp-transcript", source: path, kind: "fallback" },
+      { artifact: "transcript", source: path, kind: "fallback" },
     ]);
     expect(existsSync(trashed.artifacts[0]!.trash)).toBe(true);
     expect(await host!.listSessions("casper")).toEqual([]);
@@ -3526,7 +3526,7 @@ describe("session listing", () => {
     await expect(reopening).resolves.toBe(original);
     await expect(host!.deleteSession("casper", id, "pi")).resolves.toMatchObject({
       artifacts: expect.arrayContaining([
-        expect.objectContaining({ artifact: "omp-transcript", source: transcript }),
+        expect.objectContaining({ artifact: "transcript", source: transcript }),
       ]),
     });
     expect(((original as { sessionDisposed?: boolean }).sessionDisposed === true)).toBe(true);
@@ -3558,7 +3558,7 @@ describe("session listing", () => {
     await expect(host!.deleteSession("casper", "delete-recovery"))
       .resolves.toMatchObject({
         artifacts: expect.arrayContaining([
-          expect.objectContaining({ artifact: "omp-transcript" }),
+          expect.objectContaining({ artifact: "transcript" }),
         ]),
       });
     expect(existsSync(tombstone)).toBe(false);
@@ -3584,7 +3584,7 @@ describe("session listing", () => {
     });
     const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
     const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
-    const expectedKinds = ["omp-transcript", "tool-cwds", "conversation-cwd"];
+    const expectedKinds = ["transcript", "tool-cwds", "conversation-cwd"];
 
     for (let moved = 1; moved <= expectedKinds.length; moved += 1) {
       failAfterNextRecord = true;
@@ -3617,6 +3617,39 @@ describe("session listing", () => {
       .rejects.toMatchObject({ code: "not_found", status: 404 });
   });
 
+  // A build with a second runtime spelled the transcript "omp-transcript" in
+  // the receipt it left behind. That name is gone, but a marker carrying it
+  // still has to finish rather than read as an unknown artifact and stall.
+  it("finishes a delete receipt that names the transcript by its old runtime", async () => {
+    let failAfterNextRecord = true;
+    const { dir } = await setup(undefined, {
+      transactionProbe: (stage) => {
+        if (stage === "delete-artifact-recorded" && failAfterNextRecord) {
+          failAfterNextRecord = false;
+          throw new Error("injected crash after durable delete record");
+        }
+      },
+    });
+    const id = "delete-legacy-kind";
+    await host!.runTurn("casper", { sessionId: id, prompt: "persist me", emit: () => {} });
+    const sessionDir = ghostPaths(dir).sessionDir;
+    const stem = sessionFileNameFor(id).slice(0, -".jsonl".length);
+    const tombstone = join(sessionDir, `.ghost-delete-${stem}.pi.pending.json`);
+
+    // Crash once so the daemon writes a real marker, then age it: the only
+    // difference from what an older build left is what it calls the transcript.
+    await expect(host!.deleteSession("casper", id, "pi"))
+      .rejects.toThrow("injected crash after durable delete record");
+    const aged = readFileSync(tombstone, "utf8").replace('"transcript"', '"omp-transcript"');
+    expect(aged).toContain("omp-transcript");
+    writeFileSync(tombstone, aged, { mode: 0o600 });
+
+    const resumed = await host!.deleteSession("casper", id, "pi");
+    // Read back under the name Ghost writes now, not the one on disk.
+    expect(resumed.artifacts.map((entry) => entry.artifact)).toEqual(["transcript"]);
+    expect(existsSync(tombstone)).toBe(false);
+  });
+
   it.each([
     "delete-intent-recorded",
     "delete-artifact-fsync",
@@ -3647,7 +3680,7 @@ describe("session listing", () => {
     };
     expect(pending.version).toBe(4);
     expect(pending.pending).toMatchObject({
-      artifact: "omp-transcript",
+      artifact: "transcript",
       source: transcript,
       kind: "fallback",
     });
@@ -3667,7 +3700,7 @@ describe("session listing", () => {
     const resumed = await host!.deleteSession("casper", id, "pi");
     expect(resumed.artifacts).toEqual([
       expect.objectContaining({
-        artifact: "omp-transcript",
+        artifact: "transcript",
         source: transcript,
         trash: pending.pending.trash,
         kind: "fallback",
@@ -3760,20 +3793,20 @@ describe("session listing", () => {
       artifacts?: TrashedConversation["artifacts"];
       pending: TrashedConversation["artifacts"][number];
     }]> = [
-      ["character", { pending: pending("omp-transcript", character) }],
+      ["character", { pending: pending("transcript", character) }],
       ["credential store", { pending: pending("conversation-cwd", agentDb) }],
-      ["other transcript", { pending: pending("omp-transcript", victimTranscript) }],
+      ["other transcript", { pending: pending("transcript", victimTranscript) }],
       ["wrong label", { pending: pending("conversation-cwd", targetTranscript) }],
       ["aliased destination", {
         pending: pending(
-          "omp-transcript",
+          "transcript",
           targetTranscript,
           `${trashRoot}${sep}nested${sep}..${sep}${basename(trashFor(targetTranscript))}`,
         ),
       }],
       ["duplicate source", {
-        artifacts: [pending("omp-transcript", targetTranscript)],
-        pending: pending("omp-transcript", targetTranscript, trashFor(targetTranscript, 2)),
+        artifacts: [pending("transcript", targetTranscript)],
+        pending: pending("transcript", targetTranscript, trashFor(targetTranscript, 2)),
       }],
     ];
 
@@ -3805,7 +3838,7 @@ describe("session listing", () => {
       runtime: "pi",
       conversationId: target,
       artifacts: [{
-        artifact: "omp-transcript",
+        artifact: "transcript",
         source: victimTranscript,
         trash: join(temp!.root, "legacy-victim-trash"),
         kind: "freedesktop",
@@ -3821,20 +3854,20 @@ describe("session listing", () => {
     const legacyExactTrash = join(temp!.root, "legacy-exact-trash");
     const legacyInvalidCases: Array<[string, TrashedConversation["artifacts"]]> = [
       ["missing completed pair", [{
-        artifact: "omp-transcript",
+        artifact: "transcript",
         source: targetTranscript,
         trash: legacyExactTrash,
         kind: "freedesktop",
       }]],
       ["duplicate completed source", [
         {
-          artifact: "omp-transcript",
+          artifact: "transcript",
           source: targetTranscript,
           trash: join(temp!.root, "legacy-duplicate-source-one"),
           kind: "freedesktop",
         },
         {
-          artifact: "omp-transcript",
+          artifact: "transcript",
           source: targetTranscript,
           trash: join(temp!.root, "legacy-duplicate-source-two"),
           kind: "freedesktop",
@@ -3842,7 +3875,7 @@ describe("session listing", () => {
       ]],
       ["duplicate completed destination", [
         {
-          artifact: "omp-transcript",
+          artifact: "transcript",
           source: targetTranscript,
           trash: legacyExactTrash,
           kind: "freedesktop",
@@ -3881,7 +3914,7 @@ describe("session listing", () => {
       runtime: "pi",
       conversationId: target,
       artifacts: [{
-        artifact: "omp-transcript",
+        artifact: "transcript",
         source: targetTranscript,
         trash: legacyTrash,
         kind: "freedesktop",
@@ -3923,7 +3956,7 @@ describe("session listing", () => {
     rmSync(piMarker);
     await expect(host!.deleteSession("casper", piId, "pi")).resolves.toMatchObject({
       artifacts: expect.arrayContaining([
-        expect.objectContaining({ artifact: "omp-transcript" }),
+        expect.objectContaining({ artifact: "transcript" }),
       ]),
     });
   });
