@@ -652,10 +652,8 @@ export interface TrashedConversationFileArtifact extends TrashPathResult {
   source: string;
 }
 
-export type TrashedConversationArtifact = TrashedConversationFileArtifact;
-
 export interface TrashedConversation {
-  artifacts: TrashedConversationArtifact[];
+  artifacts: TrashedConversationFileArtifact[];
 }
 
 export type QueueMode = "steer" | "followUp";
@@ -813,8 +811,6 @@ const DELETE_ARTIFACT_KINDS = new Set<TrashedConversationFileArtifact["artifact"
   "tool-cwds",
 ]);
 
-interface DeleteMoveIntent extends TrashedConversationFileArtifact {}
-
 interface DeleteTransactionRecord {
   version: 1 | 2 | 3 | 4;
   kind: "delete";
@@ -822,7 +818,7 @@ interface DeleteTransactionRecord {
   conversationId: string;
   artifacts: TrashedConversationFileArtifact[];
   trashRoot: string | null;
-  pending: DeleteMoveIntent | null;
+  pending: TrashedConversationFileArtifact | null;
 }
 
 const TRANSACTION_MARKER_MAX_BYTES = 1_048_576;
@@ -931,7 +927,7 @@ function exactDeleteTrashRoot(ghostDir: string, path: string): boolean {
 
 function exactDeleteTrashChild(
   trashRoot: string,
-  artifact: TrashedConversationArtifact,
+  artifact: TrashedConversationFileArtifact,
   index: number,
 ): boolean {
   const name = basename(artifact.trash);

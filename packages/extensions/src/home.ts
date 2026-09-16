@@ -125,10 +125,9 @@ async function atomicWriteFile(
   homeDir: string,
   path: string,
   content: string | Uint8Array,
-  lockedDirectory?: FileHandle,
 ): Promise<void> {
-  const ownedDirectory = lockedDirectory === undefined;
-  const directory = lockedDirectory ?? await openConfinedDirectory(
+  // This opens the directory itself, so it also locks and closes it.
+  const directory = await openConfinedDirectory(
     homeDir,
     dirname(path),
     { create: true, label: "Write path" },
@@ -163,10 +162,9 @@ async function atomicWriteFile(
     }
   };
   try {
-    if (ownedDirectory) await withDescriptorLock(directory, publish);
-    else await publish();
+    await withDescriptorLock(directory, publish);
   } finally {
-    if (ownedDirectory) await directory.close();
+    await directory.close();
   }
 }
 
