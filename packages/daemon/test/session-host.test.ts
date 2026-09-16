@@ -639,7 +639,9 @@ describe("SessionHost.open", () => {
       "write",
     ]);
     expect(names).toEqual(expect.arrayContaining([...PI_NATIVE_TOOL_NAMES, "ask"]));
-    expect(names).toContain("inspect_image");
+    // Images are pi's `read`: it attaches them, and tells a model that cannot
+    // see them so, rather than handing the job to a second model.
+    expect(names).not.toContain("inspect_image");
     expect(names).not.toContain("web_search");
     expect(names).not.toContain("web_fetch");
     expect(names).not.toContain("task");
@@ -647,23 +649,6 @@ describe("SessionHost.open", () => {
     for (const name of ["ghost_browser", "ghost_desktop", "ghost_screen"]) {
       expect(handle.session.getToolDefinition(name), `${name} must be available`).toBeDefined();
     }
-  });
-
-  it("does not offer inspect_image to a chat model with native vision", async () => {
-    const { dir } = await setup();
-    const paths = ghostPaths(dir);
-    const models = openAiCompatiblePreset({
-      providerId: "ghost-local",
-      baseUrl: provider!.url,
-      modelId: provider!.modelId,
-      apiKey: "not-needed",
-    });
-    models.providers["ghost-local"]!.models![0]!.input = ["text", "image"];
-    writeGhostModels(paths.home, models);
-
-    const handle = await host!.open("casper", "vision-tools");
-    expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
-    expect(handle.session.getToolDefinition("inspect_image")).toBeDefined();
   });
 
   it("reuses one session per conversation id and separates different ids", async () => {
@@ -5029,28 +5014,6 @@ describe("model switch reaches a live cached session", () => {
     // The SAME cached conversation now answers on model-b.
     await host.runTurn("casper", { sessionId: "conv-1", prompt: "two", emit: () => {} });
     expect(provider.requests.at(-1)?.model).toBe("model-b");
-  });
-
-  it("tracks inspect_image availability across live model rebinds", async () => {
-    temp = makeTempGhosts();
-    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
-    const dir = seedGhost(temp.root, { name: "casper" });
-    const paths = ghostPaths(dir);
-    const models = twoModelFile(provider.url);
-    models.providers["ghost-local"]!.models![1]!.input = ["text", "image"];
-    writeGhostModels(paths.home, models);
-    host = new SessionHost({ registry: temp.registry, offline: true });
-
-    const handle = await host.open("casper", "vision-rebind");
-    expect(handle.session.getActiveToolNames()).toContain("inspect_image");
-
-    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
-    await host.rebindModel("casper");
-    expect(handle.session.getActiveToolNames()).not.toContain("inspect_image");
-
-    setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-a");
-    await host.rebindModel("casper");
-    expect(handle.session.getActiveToolNames()).toContain("inspect_image");
   });
 
   it("rebinds a cleared chat role through the same Ghost catalogue-default resolver", async () => {

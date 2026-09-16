@@ -6,7 +6,7 @@
  * the op + args the tool sends for each target, that the PNG the sidecar returns
  * is saved under the ghost home with retention, that a vision-capable chat model
  * gets the pixels while a text-only model gets text that names the saved file
- * and tells it to call `inspect_image` (a tool-result image block would be
+ * and says the capture is not attached (a tool-result image block would be
  * silently dropped for such a model), and that the capture's honesty metadata
  * (which backend, background-safe or not, warnings) reaches the model.
  */
@@ -424,7 +424,7 @@ describe("ghost_screen tool", () => {
     expect(result.details.injectionReasons).toContain("imperative-ai-instruction");
   });
 
-  it("gives a text-only model the file and an inspect_image instruction", async () => {
+  it("gives a text-only model the file and says the capture is not attached", async () => {
     const { harness } = await harnessFor(TEXT_ONLY);
     const result = await harness.call(GHOST_SCREEN, {
       prompt: "Why is the Save button disabled?",
@@ -443,8 +443,8 @@ describe("ghost_screen tool", () => {
     expect(text).toContain('window "firefox"');
     expect(text).toContain("image/png");
     expect(text).toContain(`${result.details.bytes} bytes`);
-    expect(text).toContain(`call inspect_image with path="${saved}"`);
-    expect(text).toContain("Why is the Save button disabled?");
+    expect(text).toContain("cannot see images");
+    expect(text).not.toContain("inspect_image");
     expect(text).toContain("untrusted");
     expect(result.details.routedThroughVisionModel).toBeUndefined();
   });
@@ -549,7 +549,7 @@ describe("ghost_screen tool", () => {
     }
   });
 
-  it("watch gives a text-only model the paths and an inspect_image instruction", async () => {
+  it("watch gives a text-only model the paths and says the frames are not attached", async () => {
     const { harness } = await harnessFor(TEXT_ONLY);
     const result = await harness.call(GHOST_SCREEN, {
       prompt: "What changed?",
@@ -559,8 +559,8 @@ describe("ghost_screen tool", () => {
     });
     expect(resultImages(result)).toHaveLength(0);
     const text = resultText(result);
-    expect(text).toContain("inspect_image");
-    expect(text).toContain("What changed?");
+    expect(text).toContain("not attached");
+    expect(text).not.toContain("inspect_image");
     expect(text).toContain("untrusted");
     for (const saved of result.details.savedTo as string[]) {
       expect(text).toContain(saved);

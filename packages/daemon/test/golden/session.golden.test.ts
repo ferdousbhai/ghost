@@ -56,7 +56,7 @@ You are casper, a letterpress printer. You answer in short sentences.
  * not contract for these. `task` is included specifically to pin the deliberate
  * phase-1 subtraction while the fixture records the rest of the harness.
  */
-const OTHER_AUDITED_PI_TOOLS = ["ask", "eval", "inspect_image", "task"] as const;
+const OTHER_AUDITED_PI_TOOLS = ["ask", "eval", "task"] as const;
 
 describe("golden: session", () => {
   it("writes a memory mid-conversation and holds the session's system prompt fixed", async () => {

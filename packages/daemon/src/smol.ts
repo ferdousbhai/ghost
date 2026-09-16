@@ -4,8 +4,7 @@ import { isAggregatorRouter } from "./model-routing.js";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 
 export const SMOL_MODEL_ROLE = "smol_model";
-export const ADVISOR_MODEL_ROLE = "advisor_model";
-export type HookModelRole = typeof SMOL_MODEL_ROLE | typeof ADVISOR_MODEL_ROLE;
+export type HookModelRole = typeof SMOL_MODEL_ROLE;
 
 /**
  * The models a role can be given, which is every usable candidate that is a
@@ -169,9 +168,9 @@ export function smallestWithinProvider(
 
 /**
  * Resolve a background-work model: an explicit ref is honoured or errors
- * loudly; otherwise the role follows the chat model's provider's small tier,
- * then the advisor preference list or the cheapest usable model; a genuinely
- * empty catalogue is a loud error.
+ * loudly; otherwise the role takes the cheapest model from the chat model's
+ * provider, then the cheapest usable model anywhere; a genuinely empty
+ * catalogue is a loud error.
  */
 export function resolveSmolModel(
   catalog: SmolModelCatalog,
@@ -198,18 +197,6 @@ export function resolveSmolModel(
       );
     }
     return { model: candidate.model, via: "role" };
-  }
-
-  // The advisor is whatever its owner bound, or nothing. There is no automatic
-  // choice: "a strong reasoner" is not a capability pi declares, so choosing one
-  // meant naming model families here and betting on those names — a bet that
-  // ages, and one the owner never placed.
-  if (role === ADVISOR_MODEL_ROLE) {
-    throw new SmolModelUnavailableError(
-      "This ghost has no advisor model. Set roles.advisor_model in models.json to "
-      + "a model from a provider it is signed in to.",
-      "none_available",
-    );
   }
 
   const withinDriver = options.chatProvider

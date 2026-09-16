@@ -56,8 +56,7 @@ describe("a home written before the Claude Code runtime was removed", () => {
       providers: {},
       roles: {
         chat_model: { provider: "claude-code", modelId: "default" },
-        smol_model: { provider: "claude-code", modelId: "sonnet" },
-        advisor_model: { provider: "openrouter", modelId: "keep/me" },
+        smol_model: { provider: "openrouter", modelId: "keep/me" },
       },
     }), { mode: 0o600 });
 
@@ -66,11 +65,9 @@ describe("a home written before the Claude Code runtime was removed", () => {
     // default and the background roles resolve themselves again instead of
     // failing every title and greeting with unknown_model.
     expect(models?.roles?.chat_model).toBeUndefined();
-    expect(models?.roles?.smol_model).toBeUndefined();
     expect(resolveChatModelRef(models)).toBeNull();
-    expect(resolveModelRoleRef(models, "smol_model")).toBeNull();
-    // Everything that still exists is untouched.
-    expect(models?.roles?.advisor_model).toEqual({ provider: "openrouter", modelId: "keep/me" });
+    // A binding on a provider that still exists is untouched.
+    expect(models?.roles?.smol_model).toEqual({ provider: "openrouter", modelId: "keep/me" });
   });
 
   it("leaves a home that never named it byte-identical", () => {
@@ -107,10 +104,10 @@ describe("models.json round-trip", () => {
       providers: {},
       futureSetting: { enabled: true },
     })}\n`, "utf8");
-    setGhostModelRole(agentDir, "advisor_model", "openai-codex", "gpt-5.6");
+    setGhostModelRole(agentDir, "smol_model", "openai-codex", "gpt-5.6");
     expect(readGhostModels(agentDir)).toMatchObject({
       futureSetting: { enabled: true },
-      roles: { advisor_model: { provider: "openai-codex", modelId: "gpt-5.6" } },
+      roles: { smol_model: { provider: "openai-codex", modelId: "gpt-5.6" } },
     });
   });
 

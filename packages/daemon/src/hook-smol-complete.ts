@@ -135,8 +135,8 @@ function parseInput(raw: string): HookSmolInput {
   if (typeof input.ghost_home !== "string" || typeof input.prompt !== "string") {
     throw new Error("stdin must contain string ghost_home and prompt fields.");
   }
-  if (input.role !== undefined && input.role !== "smol_model" && input.role !== "advisor_model") {
-    throw new Error("stdin role must be smol_model or advisor_model.");
+  if (input.role !== undefined && input.role !== "smol_model") {
+    throw new Error("stdin role must be smol_model.");
   }
   return {
     ghost_home: input.ghost_home,

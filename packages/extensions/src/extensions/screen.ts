@@ -462,7 +462,7 @@ function watchDetails(
  * as an image sequence (one block each, in order — motion is what a sequence
  * carries that a single still cannot); a text-only model, whose provider would
  * silently drop tool-result image blocks, is handed the saved paths and told to
- * inspect each with `inspect_image`, exactly like the single-capture branch.
+ * told where they were saved, exactly like the single-capture branch.
  * Frames over the inline byte budget keep their saved path but not their pixels.
  */
 async function buildWatchResult(
@@ -505,10 +505,7 @@ async function buildWatchResult(
     + paths.map((p, i) => `  ${i + 1}. ${p}`).join("\n")
     + `\n\n${note}\n\n`
     + "Your model cannot see images, so the frames are not attached to this "
-    + "result. Analyze each with inspect_image (path=<one of the paths above>) "
-    + `and a question describing what to inspect — for example: `
-    + `${JSON.stringify(params.prompt)}. Compare the frames in order to read the `
-    + "motion between them.";
+    + "result. The files are on disk for a model that can see them.";
   return untrustedTextResult(text, details, "screen");
 }
 
@@ -612,15 +609,13 @@ export function createScreenExtension(
         // The model cannot see. An image block in a *tool result* is not covered
         // by the provider adapter's describe-for-text-models fallback — it would
         // quietly swap the image for a placeholder — so return text and point at
-        // the file, the way Pi's `read` tool does. `inspect_image` reads it
-        // through the vision role.
+        // the file, the way pi's `read` tool does when it is handed an image a
+        // model cannot take.
         return untrustedTextResult(
           `Screenshot of ${targetLabel(params)} saved to ${capture.path} `
             + `(${CAPTURE_MIME_TYPE}, ${capture.bytes} bytes). ${note}\n\n`
             + "Your model cannot see images, so the capture is not attached "
-            + "to this result. To analyze it, call inspect_image with "
-            + `path=${JSON.stringify(capture.path)} and a question describing `
-            + `what to inspect — for example: ${JSON.stringify(params.prompt)}.`,
+            + "to this result. The file is on disk for a model that can see it.",
           captureDetails(home, capture),
           "screen",
         );

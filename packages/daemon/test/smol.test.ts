@@ -9,7 +9,6 @@
  */
 import { describe, expect, it } from "vitest";
 import {
-  ADVISOR_MODEL_ROLE,
   resolveSmolModel,
   SMOL_MODEL_ROLE,
   smolCatalogFromRuntime,
@@ -116,17 +115,6 @@ describe("resolveSmolModel", () => {
     }
   });
 
-  // An advisor is whatever its owner bound. Choosing one automatically meant
-  // naming model families in the source and betting the names stayed current;
-  // settling for whatever happened to be cheapest would be worse still.
-  it("refuses an unbound advisor role rather than choosing one", () => {
-    const catalog = catalogOf([
-      { provider: "local", id: "cheap", cost: cost(0) },
-      { provider: "anthropic", id: "claude-opus-5", cost: cost(15) },
-    ]);
-    expect(() => resolveSmolModel(catalog, null, ADVISOR_MODEL_ROLE))
-      .toThrow("no advisor model");
-  });
 });
 
 describe("smolCatalogFromRuntime", () => {

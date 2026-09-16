@@ -136,7 +136,6 @@ import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
-import { createInspectImageTool } from "./inspect-image.js";
 import { CONTEXT_WINDOW_POLICY, ghostContextWindowsExtension } from "./context-windows.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
@@ -182,19 +181,8 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
   "write",
 ];
 
-const INSPECT_IMAGE_TOOL_NAME = "inspect_image";
 
 /** Keep the fallback vision tool out of a model's tool list when it can read images itself. */
-function syncInspectImageTool(session: AgentSession): void {
-  const active = session.getActiveToolNames();
-  const hasActive = active.includes(INSPECT_IMAGE_TOOL_NAME);
-  const needsFallback = session.model?.input.includes("image") !== true;
-  if (needsFallback === hasActive) return;
-  session.setActiveToolsByName(needsFallback
-    ? [...active, INSPECT_IMAGE_TOOL_NAME]
-    : active.filter((name) => name !== INSPECT_IMAGE_TOOL_NAME));
-}
-
 const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 
 /** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
@@ -1973,16 +1961,10 @@ export class SessionHost {
             env: { ...context.env, ...conversationEnvironment(ghost.name, sessionKey) },
           }),
         }) as ToolDefinition,
-        createInspectImageTool({
-          runtime: modelRuntime,
-          cwd: runtimeCwd,
-          imageModel: () => readGhostModels(paths.home)?.roles?.advisor_model,
-        }) as ToolDefinition,
       ],
     });
     const { session, extensionsResult } = created;
     createdSession = session;
-    syncInspectImageTool(session);
     await this.sessionStartupProbe("agent-session", modelRuntime);
 
     for (const error of extensionsResult.errors ?? []) {
@@ -2846,7 +2828,6 @@ export class SessionHost {
         configDir,
         ghostName,
       );
-      syncInspectImageTool(hosted.session);
     } catch (error) {
       hosted.logger.warn("model rebind failed", {
         error: (error as Error).message,

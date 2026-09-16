@@ -70,14 +70,10 @@ export interface GhostModelRoleBinding {
  *   subscription (OAuth / included plan → zero marginal cost) is preferred over
  *   a cheaper metered model. Every use is a single, fire-and-forget completion;
  *   a failure never affects the conversation.
- * - `advisor_model` — the frontier teacher: `hook-smol-complete --role advisor`
- *   and image inspection for a chat model that cannot see. Unbound, Ghost's
- *   preference list picks a strong reasoner (`model-routing.ts`).
  */
 export type GhostModelRole =
   | "chat_model"
-  | "smol_model"
-  | "advisor_model";
+  | "smol_model";
 
 /**
  * `smol_model` was called `title_model` before the role grew a second consumer.
@@ -89,8 +85,8 @@ const LEGACY_SMOL_MODEL_ROLE = "title_model";
  * The Claude Code runtime was removed in 0.3.0. A home written before that can
  * still name it in any role, and the provider no longer exists in any
  * catalogue: `chat_model` would report a model that cannot run (turns quietly
- * fall through to pi's default), and `smol_model`/`advisor_model` would fail
- * every title, greeting, and hook completion with `unknown_model` forever.
+ * fall through to pi's default), and `smol_model` would fail every title,
+ * greeting, and hook completion with `unknown_model` forever.
  */
 const REMOVED_PROVIDER_ID = "claude-code";
 
@@ -450,9 +446,8 @@ export function resolveChatModelRef(
  *
  * Unlike `resolveChatModelRef`, there is NO fallback to the first declared
  * provider's model. An unbound background role means "let the daemon pick"
- * — the cheapest usable model for smol (`resolveSmolModel` in smol.ts), the
- * preference list for the advisor — not "reuse the chat model". Returning null
- * here is exactly that signal.
+ * — the cheapest usable model for smol (`resolveSmolModel` in smol.ts) — not
+ * "reuse the chat model". Returning null here is exactly that signal.
  */
 export function resolveModelRoleRef(
   file: GhostModelsFile | null,
