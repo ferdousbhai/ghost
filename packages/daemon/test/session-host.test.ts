@@ -220,17 +220,6 @@ async function setup(
   return { dir, host, provider, temp };
 }
 
-async function _modelSystemPrompt(
-  sessionId: string,
-  prompt = "Show that this conversation is ready.",
-): Promise<string> {
-  const before = provider?.requests.length ?? 0;
-  await host!.runTurn("casper", { sessionId, prompt, emit: () => {} });
-  const request = provider?.requests[before];
-  if (!request) throw new Error("Expected the turn to reach the mock provider.");
-  return request.system;
-}
-
 async function waitFor<T>(read: () => T | null, timeoutMs = 2_000): Promise<T> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

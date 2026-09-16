@@ -514,7 +514,6 @@ Singleton {
     // this if and when it arrives, so a slow, absent, or failed greeting costs
     // the owner nothing. Every failure path therefore leaves it "".
     property string greeting: ""
-    property bool greetingOnboarding: false
     property string greetingGhost: ""
 
     property alias transcript: transcriptModel
@@ -559,12 +558,9 @@ Singleton {
 
     property var currentModel: null
     property string modelSource: "none"
-    property int availableModelTotal: 0
     /** Non-empty when a model fetch or switch failed. */
     property string modelError: ""
-    property string modelWarning: ""
 
-    signal modelRouteCompleted(string role, string target)
 
     // The XHR must be held by a property. A request whose only reference is the
     // closure it installed on itself is eligible for collection mid-flight.
@@ -601,8 +597,6 @@ Singleton {
      * comparison, which is how they drifted apart before.
      */
     readonly property bool noModel: root.currentModel === null
-    property var availRequest: null
-    property var setModelRequest: null
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -1685,14 +1679,11 @@ Singleton {
     function clearModelState(): void {
         root.currentModel = null;
         root.modelSource = "none";
-        root.availableModelTotal = 0;
-        root.modelWarning = "";
     }
 
 
     function clearGreeting(): void {
         root.greeting = "";
-        root.greetingOnboarding = false;
         root.greetingGhost = "";
     }
 
@@ -2149,10 +2140,8 @@ Singleton {
             try {
                 const body = JSON.parse(xhr.responseText);
                 root.greeting = typeof body.greeting === "string" ? body.greeting.trim() : "";
-                root.greetingOnboarding = root.greeting !== "" && body.onboarding === true;
             } catch (error) {
                 root.greeting = "";
-                root.greetingOnboarding = false;
             }
         };
         root.dispatch(xhr, "POST",
@@ -3753,7 +3742,6 @@ Singleton {
     function refreshAfterLoginSuccess(): void {
         root.refresh();
         root.fetchCurrentModel();
-        root.fetchAvailableModels();
     }
 
     function applyLoginStartResponse(xhr: var, generation: int,

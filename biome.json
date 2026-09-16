@@ -11,8 +11,7 @@
       "**",
       "!.agents",
       "!packages/shell/qml/**/*.js",
-      "!skills-lock.json",
-      "!vendor",
+      "!packages/shell/test/**/*.js",
       "!.claude"
     ]
   },

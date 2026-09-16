@@ -1,9 +1,4 @@
-import type { ChildProcess } from "node:child_process";
-import { once } from "node:events";
-import {
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type GhostHome,
@@ -14,30 +9,6 @@ import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
 
 let fixture: GhostFixture;
 let home: GhostHome;
-
-async function _waitForPath(path: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
-  for (;;) {
-    try {
-      await stat(path);
-      return;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    if (Date.now() >= deadline) throw new Error(`Timed out waiting for ${path}.`);
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, 10));
-  }
-}
-
-async function _childResult(child: ChildProcess): Promise<{ code: number | null; stderr: string }> {
-  let stderr = "";
-  child.stderr?.setEncoding("utf8");
-  child.stderr?.on("data", (chunk: string) => {
-    stderr += chunk;
-  });
-  const [code] = await once(child, "exit");
-  return { code: code as number | null, stderr };
-}
 
 beforeEach(async () => {
   fixture = await createGhostFixture();
