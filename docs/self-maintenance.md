@@ -112,36 +112,24 @@ never enter a session.
 
 ## The loop
 
-What the ghost does:
+`ghost help self` is the procedure, and the ghost reads it from
+[`help-topics.ts`](../packages/daemon/src/help-topics.ts) — fetch, branch,
+edit, test, commit, build, restart. What that text has no room to explain:
 
-1. Read the clone's `CLAUDE.md` and `CONTRACTS.md` first. They are its self map.
-2. `git fetch`, branch from `origin/master`, edit, run the touched package
-   tests and `typecheck`.
-3. Commit with the reason in the message.
-4. `pnpm build`.
-5. Tell you it is going down, finish the turn, then schedule the restart.
+**The restart is a transient `systemd-run --user` unit** rather than a plain
+`systemctl restart`, because a ghost restarting itself is killing its own
+parent. A child of the daemon dies with it and never runs the second half;
+a transient unit is not the daemon's child, so it survives to bring it back
+and to wake the conversation that asked. The daemon drains for 5 seconds
+([`main.ts`](../packages/daemon/src/main.ts)) and `TimeoutStopSec` in
+[`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the outer
+bound behind that.
 
-The restart is one `systemd-run --user` command in its own transient unit, so
-the daemon stopping cannot take the restarter with it. The exact command,
-including the wait for the daemon to listen again and the `ghost say` wake back
-into the asking conversation, is what `ghost help self` prints:
-[`help-topics.ts`](../packages/daemon/src/help-topics.ts). The
-shutdown drain is in [`main.ts`](../packages/daemon/src/main.ts) and the unit's
-`TimeoutStopSec` in
-[`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the
-outer bound behind it.
-
-## Send it upstream
-
-The ghost home is one owner's. `packages/`, `CONTRACTS.md`, and `docs/` are
-every ghost's, so when a ghost's work there would help every owner, a bug
-fixed, a real efficiency gain, a policy line that proved wrong in use, the
-policy nudges it to offer the change upstream. It is encouragement, not a
-rule: the ghost decides, and you decide at the push. The recipe is
-[`CONTRIBUTING.md`](../CONTRIBUTING.md) in the clone:
-you set up `gh auth` and a fork remote once, the ghost branches from fetched
-`origin/master` before it edits, and it shows you the branch and asks before
-it pushes, because the push and the PR go out under your GitHub account.
+**The upstream nudge is encouragement, not a rule.** A ghost home is one
+owner's; `packages/`, `CONTRACTS.md`, and `docs/` are every ghost's. The ghost
+decides whether a fix generalises, and you decide at the push — the PR goes out
+under your GitHub account, so `CONTRIBUTING.md` has it show you the branch and
+ask first. You set up `gh auth` and a fork remote once.
 
 ## Verify
 

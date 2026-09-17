@@ -19,35 +19,28 @@ of — this page.
 
 ## 1. Install the package
 
-Open the Omarchy menu, then **Install → AI → Ghost**. That installs the `ghost`
-package from Omarchy's repository, enables the `ghostd` user service, links the
-HUD plugin into your shell, and tells you the summon key. Skip to [section 4](#4-create-a-ghost)
-afterwards; sections 2 and 3 describe what it did. Until the package is in
+Open the Omarchy menu, then **Install → AI → Ghost**. Until the package is in
 Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
-the same package is built from the latest release, which carries its
-`PKGBUILD`; one line does the whole thing on Omarchy:
+one line builds the same package from the latest release, which carries its own
+`PKGBUILD`:
 
 ```sh
 curl -fsSL https://summonghost.com/install | bash
 ```
 
-To work on Ghost itself, build the rolling checkout package instead:
+To work on Ghost itself, build the rolling checkout package instead — see
+[`packaging/arch/README.md`](../packaging/arch/README.md) for what it installs,
+why each dependency is there, and the upgrade and uninstall paths:
 
 ```sh
 git clone https://github.com/ferdousbhai/ghost.git
-cd ghost/packaging/arch
-makepkg --cleanbuild
+cd ghost/packaging/arch && makepkg --cleanbuild
 sudo pacman -U ghost-dev-*.pkg.tar.zst
 ```
 
-`makepkg` builds from a fresh clone of the branch, runs the full test suite in
-`check()`, and stages the payload. Installing it puts `/usr/bin/ghostd` and
-`/usr/bin/ghost` on your PATH, the HUD plugin at `/usr/share/ghost/plugin`, the
-browser relay at `/usr/share/ghost/chromium-extension`, and `ghostd.service`
-under `/usr/lib/systemd/user/`. It creates nothing in your home directory.
-
-The post-install hook prints the relay path and the enable command. Details, dependency reasoning, and the uninstall path are in
-[`packaging/arch/README.md`](../packaging/arch/README.md).
+Either way the package only puts files in place; it creates nothing in your
+home and edits no configuration of yours. The post-install hook prints the
+commands that finish the job, which are section 3 — do not skip it.
 
 ## 2. Where shared notes go
 
