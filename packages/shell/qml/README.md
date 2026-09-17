@@ -2,14 +2,16 @@
 
 Ghost's desktop surfaces as an omarchy-shell plugin, id `ferdousbhai.ghost`:
 a chat window with its own character, tools, and desktop reach, and a bar mark
-that lights up while it is working.
+that lights up while it is working. The Hyprland keybind samples and the
+desktop entry are in [`../contrib/`](../contrib/README.md).
 
 ## It arrives with the `ghost` package
 
 This directory is half of one product. The other half is `ghostd`, a loopback
 daemon that owns sessions, models, and every ghost's home, and the two must be
 the same version. So the package is the only way in: it installs these files
-to `/usr/share/ghost/plugin`, and the install script links and enables them.
+to `/usr/share/ghost/plugin` and prints the rest for you to run — a package may
+not write into your home, so the link and the enable are yours.
 
 ```sh
 omarchy-pkg-add ghost          # or: Install → AI → Ghost
@@ -45,7 +47,13 @@ The window is an ordinary toplevel, so Hyprland tiles, moves, and resizes it
 like any app. A window rule must match its **title** (`^Ghost( — .*)?$`), not
 an app-id: a plugin's window carries the host shell's app-id.
 
-Add the bar dot from _Setup → Plugins_, or `omarchy bar move ferdousbhai.ghost right`.
+Add the bar dot from _Setup → Plugins_, or `omarchy bar move ferdousbhai.ghost
+right`. It lives in the same process as the panel and reads the same live
+daemon connection, so it lights the instant a turn starts — no polling, no
+second connection.
+
+`omarchy plugin list` shows the plugin; `omarchy plugin disable
+ferdousbhai.ghost` turns it off without removing anything.
 
 ## What it does to your system
 
