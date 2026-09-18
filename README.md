@@ -34,3 +34,7 @@ Status: beta release candidate, held until
 [#17](https://github.com/ferdousbhai/ghost/issues/17) closes.
 
 License: Apache-2.0
+
+An app can also bring its own UI: install `ghost-runtime` for the daemon/API,
+CLI, and desktop/browser automation without the Ghost HUD. Setup is documented
+in `packaging/arch/README.md` (`/usr/share/doc/ghost/ARCH.md` after installation).

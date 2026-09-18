@@ -51,8 +51,8 @@ export function compareVersions(left: string, right: string): number {
  */
 export function updateCommand(sourceRoot: string | null): string {
   if (sourceRoot === null) return "omarchy-update";
-  const root = JSON.stringify(sourceRoot);
-  return `git -C ${root} pull --ff-only && pnpm --dir ${root} install --frozen-lockfile && pnpm --dir ${root} build && systemctl --user restart ghostd.service && omarchy-restart-shell`;
+  const root = `'${sourceRoot.replaceAll("'", "'\"'\"'")}'`;
+  return `git -C ${root} pull --ff-only && pnpm --dir ${root} install --frozen-lockfile && pnpm --dir ${root} build && systemctl --user restart ghostd.service && if [ -e "\${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/plugins/ferdousbhai.ghost/manifest.json" ]; then omarchy-restart-shell; fi`;
 }
 
 /** The latest release's version, or null for any failure: offline, rate-limited, or an unexpected body. */

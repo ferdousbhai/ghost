@@ -76,6 +76,9 @@ reach the running daemon only after `pnpm build` and a restart.
 
 ### The shell
 
+This section applies when the optional `ghost` UI package or checkout plugin is installed.
+Runtime-only updates restart `ghostd.service` without restarting the shell.
+
 The HUD is an omarchy-shell plugin, not a unit of Ghost's. The package
 installs it at `/usr/share/ghost/plugin`, and omarchy-shell loads whatever
 `~/.config/omarchy/plugins/ferdousbhai.ghost` points at. Point it at the clone

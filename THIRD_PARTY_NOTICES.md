@@ -1,5 +1,12 @@
 # Third-party notices
 
+## Pi
+
+Ghost patches `@earendil-works/pi-coding-agent` to reject file-loaded executable
+extensions and remove their loader/cache; inline factories retain Pi's native
+implementation. The patch is in `patches/`; the bundled license manifest includes
+Pi's MIT license under `licenses/npm/@earendil-works/pi-coding-agent/`.
+
 ## Lucide
 
 The shell mascot and Chromium extension icon assets use Lucide's `ghost`,

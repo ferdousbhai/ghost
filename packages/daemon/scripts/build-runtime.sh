@@ -33,6 +33,8 @@ build_bundle() {
     --target=bun \
     --format=esm \
     --sourcemap=none \
+    --minify \
+    --keep-names \
     --define "process.env.GHOSTD_VERSION=\"$version\"" \
     --external fsevents \
     --metafile="$meta_root/$name.json" \

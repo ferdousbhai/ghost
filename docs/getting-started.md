@@ -50,6 +50,14 @@ it with its runtime's native file tools, its own notes included. Ghost does
 not index the directory or read any of it until a request
 calls for it.
 
+### Bring your own UI
+
+For a remote desktop with an app-provided UI, install `ghost-runtime` instead of
+`ghost`. It includes the daemon/API, CLI, desktop helper, and browser relay,
+without Ghost's HUD, launcher, icons, or Quickshell dependency. Start only
+`ghostd.service`; the graphical-session and authentication requirements below
+still apply. See [runtime install and UI removal](../packaging/arch/README.md#runtime-with-your-own-ui).
+
 ## 3. Start the services
 
 ```sh

@@ -103,7 +103,7 @@ gh release create "$tag" \
   "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
   "$out/SHA256SUMS" \
   "$out/omarchy-ghost-$version/PKGBUILD" \
-  "$out/omarchy-ghost-$version/ghost.install"
+  "$out/omarchy-ghost-$version/"*.install
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 printf 'next: "After publishing" in packaging/release/README.md; the rendered contribution is %s\n' \

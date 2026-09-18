@@ -34,7 +34,8 @@ diff -ru "$work/022/ghost-$version" "$work/077/ghost-$version"
 for path in \
   "$work/077/ghost-$version/PKGBUILD" \
   "$work/077/ghost-$version/.SRCINFO" \
-  "$work/077/ghost-$version/ghost.install"; do
+  "$work/077/ghost-$version/ghost.install" \
+  "$work/077/ghost-$version/ghost-runtime.install"; do
   [[ "$(stat -c '%a' "$path")" == 644 ]]
 done
 [[ "$(stat -c '%a' "$work/077/ghost-$version")" == 755 ]]

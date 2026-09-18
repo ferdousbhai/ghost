@@ -79,8 +79,8 @@ python -c 'import yaml' >/dev/null 2>&1 || {
 }
 
 for install_script in \
-  "$script_dir/ghost-dev.install" \
-  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"; do
+  "$script_dir/ghost-runtime-dev.install" \
+  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost-runtime.install"; do
   require_install_hook_activation "$install_script" post_install \
     'systemctl --user enable --now ghostd.service'
   require_install_hook_activation "$install_script" post_upgrade \
@@ -88,6 +88,7 @@ for install_script in \
 done
 
 bash "$script_dir/test-ci-dependencies.sh"
+bash "$script_dir/test-split-payload.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-runtime-source.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
@@ -144,9 +145,9 @@ require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
 require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
 require_srcinfo_dependency systemd "$work/ghost/.SRCINFO"
 sed -n 's/^	depends = //p' "$work/ghost-dev.SRCINFO" \
-  | LC_ALL=C sort > "$work/development-depends"
+  | sed '/^ghost-runtime/d' | LC_ALL=C sort > "$work/development-depends"
 sed -n 's/^	depends = //p' "$work/ghost/.SRCINFO" \
-  | LC_ALL=C sort > "$work/stable-depends"
+  | sed '/^ghost-runtime/d' | LC_ALL=C sort > "$work/stable-depends"
 if ! cmp "$work/development-depends" "$work/stable-depends"; then
   printf 'stable and development runtime dependencies differ\n' >&2
   exit 1

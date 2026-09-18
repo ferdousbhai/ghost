@@ -58,7 +58,7 @@ if (!wasmState.isFile() || wasmState.isSymbolicLink() || wasmState.size <= 0
   throw new Error(`Photon WASM is not a bounded regular file: ${wasmSource}`);
 }
 
-const embeddedDirectory = `var __dirname = ${JSON.stringify(photonRoot)};`;
+const embeddedDirectory = JSON.stringify(photonRoot);
 const bundle = readFileSync(daemonBundle, "utf8");
 const parts = bundle.split(embeddedDirectory);
 if (parts.length !== 2) {
@@ -66,7 +66,7 @@ if (parts.length !== 2) {
     `expected one build-root Photon directory in ghostd.js, found ${parts.length - 1}`,
   );
 }
-const rebased = parts.join("var __dirname = import.meta.dir;");
+const rebased = parts.join("import.meta.dir");
 if (rebased.includes(sourceRoot)) {
   throw new Error("ghostd.js retains an absolute source-root path after asset rebasing");
 }

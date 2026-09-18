@@ -1,0 +1,333 @@
+diff --git a/dist/core/extensions/loader.d.ts b/dist/core/extensions/loader.d.ts
+index 25507342e438fa87ef5b497a6376aaacad52c2c5..22b642b84ec9f542617416526e11e780d01ab406 100644
+--- a/dist/core/extensions/loader.d.ts
++++ b/dist/core/extensions/loader.d.ts
+@@ -1,10 +1,9 @@
+ /**
+- * Extension loader - loads TypeScript extension modules using jiti.
++ * Ghost admits inline extension factories only.
+  *
+  */
+ import { type EventBus } from "../event-bus.ts";
+ import type { Extension, ExtensionFactory, ExtensionRuntime, LoadExtensionsResult } from "./types.ts";
+-export declare function clearExtensionCache(): void;
+ /**
+  * Create a runtime with throwing stubs for action methods.
+  * Runner.bindCore() replaces these with real implementations.
+@@ -15,9 +14,7 @@ export declare function createExtensionRuntime(): ExtensionRuntime;
+  */
+ export declare function loadExtensionFromFactory(factory: ExtensionFactory, cwd: string, eventBus: EventBus, runtime: ExtensionRuntime, extensionPath?: string): Promise<Extension>;
+ export declare function loadExtensions(paths: string[], cwd: string, eventBus?: EventBus, runtime?: ExtensionRuntime): Promise<LoadExtensionsResult>;
+-export declare function loadExtensionsCached(paths: string[], cwd: string, eventBus?: EventBus, runtime?: ExtensionRuntime): Promise<LoadExtensionsResult>;
+ /**
+  * Discover and load extensions from standard locations.
+  */
+ export declare function discoverAndLoadExtensions(configuredPaths: string[], cwd: string, agentDir?: string, eventBus?: EventBus): Promise<LoadExtensionsResult>;
+\ No newline at end of file
+-//# sourceMappingURL=loader.d.ts.map
+\ No newline at end of file
+diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
+index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b14643422 100644
+--- a/dist/core/extensions/loader.js
++++ b/dist/core/extensions/loader.js
+@@ -1,134 +1,12 @@
+-/**
+- * Extension loader - loads TypeScript extension modules using jiti.
+- *
+- */
++/** Ghost admits inline extension factories only. */
+ import * as fs from "node:fs";
+-import { createRequire } from "node:module";
+ import * as path from "node:path";
+-import { fileURLToPath } from "node:url";
+-import * as _bundledPiAgentCore from "@earendil-works/pi-agent-core";
+-import * as _bundledPiAiCompat from "@earendil-works/pi-ai/compat";
+-import * as _bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
+-import * as _bundledPiAiProviders from "@earendil-works/pi-ai/providers/all";
+-import * as _bundledPiTui from "@earendil-works/pi-tui";
+-import { createJiti } from "jiti/static";
+-// Static imports of packages that extensions may use.
+-// These MUST be static so Bun bundles them into the compiled binary.
+-// The virtualModules option then makes them available to extensions.
+-import * as _bundledTypebox from "typebox";
+-import * as _bundledTypeboxCompile from "typebox/compile";
+-import * as _bundledTypeboxValue from "typebox/value";
+-import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.js";
+-// NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
+-// avoiding a circular dependency. Extensions can import from @earendil-works/pi-coding-agent.
+-import * as _bundledPiCodingAgent from "../../index.js";
++import { CONFIG_DIR_NAME, getAgentDir } from "../../config.js";
+ import { resolvePath } from "../../utils/paths.js";
+-import { createEventBus } from "../event-bus.js";
+ import { execCommand } from "../exec.js";
+ import { readPiManifest } from "../pi-manifest.js";
+ import { createSyntheticSourceInfo } from "../source-info.js";
+ import { time } from "../timings.js";
+-/** Modules available to extensions via virtualModules (for compiled binaries) */
+-const VIRTUAL_MODULES = {
+-    typebox: _bundledTypebox,
+-    "typebox/compile": _bundledTypeboxCompile,
+-    "typebox/value": _bundledTypeboxValue,
+-    "@sinclair/typebox": _bundledTypebox,
+-    "@sinclair/typebox/compile": _bundledTypeboxCompile,
+-    "@sinclair/typebox/value": _bundledTypeboxValue,
+-    "@earendil-works/pi-agent-core": _bundledPiAgentCore,
+-    "@earendil-works/pi-tui": _bundledPiTui,
+-    // Extensions resolve the pi-ai root to the compat entrypoint (a strict
+-    // superset of the core entrypoint): existing extensions using the old
+-    // global API keep working at runtime until compat is removed.
+-    "@earendil-works/pi-ai": _bundledPiAiCompat,
+-    "@earendil-works/pi-ai/compat": _bundledPiAiCompat,
+-    "@earendil-works/pi-ai/oauth": _bundledPiAiOauth,
+-    "@earendil-works/pi-ai/providers/all": _bundledPiAiProviders,
+-    "@earendil-works/pi-coding-agent": _bundledPiCodingAgent,
+-    "@mariozechner/pi-agent-core": _bundledPiAgentCore,
+-    "@mariozechner/pi-tui": _bundledPiTui,
+-    "@mariozechner/pi-ai": _bundledPiAiCompat,
+-    "@mariozechner/pi-ai/compat": _bundledPiAiCompat,
+-    "@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
+-    "@mariozechner/pi-ai/providers/all": _bundledPiAiProviders,
+-    "@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
+-};
+-const require = createRequire(import.meta.url);
+-const isNodeSeaBinary = ("sea" in process.features && process.features.sea === true) ||
+-    process.getBuiltinModule("node:sea")?.isSea() === true;
+-const isBundledNode = typeof PI_BUNDLED_NODE !== "undefined" && PI_BUNDLED_NODE;
+-const isTypeScriptSourceRuntime = !isBunBinary && path.extname(fileURLToPath(import.meta.url)) === ".ts";
+-/**
+- * Get aliases for jiti (used in built Node.js mode).
+- * In compiled binary mode, virtualModules is used instead.
+- */
+-let _aliases = null;
+-function getAliases() {
+-    if (_aliases)
+-        return _aliases;
+-    const __dirname = path.dirname(fileURLToPath(import.meta.url));
+-    const packageIndex = path.resolve(__dirname, "../..", "index.js");
+-    const typeboxEntry = require.resolve("typebox");
+-    const typeboxCompileEntry = require.resolve("typebox/compile");
+-    const typeboxValueEntry = require.resolve("typebox/value");
+-    const packagesRoot = path.resolve(__dirname, "../../../../");
+-    const resolveWorkspaceOrImport = (workspaceRelativePath, specifier) => {
+-        const workspacePath = path.join(packagesRoot, workspaceRelativePath);
+-        if (fs.existsSync(workspacePath)) {
+-            return workspacePath;
+-        }
+-        return fileURLToPath(import.meta.resolve(specifier));
+-    };
+-    const piCodingAgentEntry = packageIndex;
+-    const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@earendil-works/pi-agent-core");
+-    const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@earendil-works/pi-tui");
+-    // Extensions resolve the pi-ai root to the compat entrypoint (a strict
+-    // superset of the core entrypoint): existing extensions using the old
+-    // global API keep working at runtime until compat is removed.
+-    const piAiCompatEntry = resolveWorkspaceOrImport("ai/dist/compat.js", "@earendil-works/pi-ai/compat");
+-    const piAiOauthEntry = resolveWorkspaceOrImport("ai/dist/oauth.js", "@earendil-works/pi-ai/oauth");
+-    const piAiProvidersEntry = resolveWorkspaceOrImport("ai/dist/providers/all.js", "@earendil-works/pi-ai/providers/all");
+-    _aliases = {
+-        "@earendil-works/pi-coding-agent": piCodingAgentEntry,
+-        "@earendil-works/pi-agent-core": piAgentCoreEntry,
+-        "@earendil-works/pi-tui": piTuiEntry,
+-        "@earendil-works/pi-ai/providers/all": piAiProvidersEntry,
+-        "@earendil-works/pi-ai/compat": piAiCompatEntry,
+-        "@earendil-works/pi-ai/oauth": piAiOauthEntry,
+-        "@earendil-works/pi-ai": piAiCompatEntry,
+-        "@mariozechner/pi-coding-agent": piCodingAgentEntry,
+-        "@mariozechner/pi-agent-core": piAgentCoreEntry,
+-        "@mariozechner/pi-tui": piTuiEntry,
+-        "@mariozechner/pi-ai/providers/all": piAiProvidersEntry,
+-        "@mariozechner/pi-ai/compat": piAiCompatEntry,
+-        "@mariozechner/pi-ai/oauth": piAiOauthEntry,
+-        "@mariozechner/pi-ai": piAiCompatEntry,
+-        typebox: typeboxEntry,
+-        "typebox/compile": typeboxCompileEntry,
+-        "typebox/value": typeboxValueEntry,
+-        "@sinclair/typebox": typeboxEntry,
+-        "@sinclair/typebox/compile": typeboxCompileEntry,
+-        "@sinclair/typebox/value": typeboxValueEntry,
+-    };
+-    return _aliases;
+-}
+-let extensionCacheCwd;
+-let extensionCacheGeneration = 0;
+-const extensionCache = new Map();
+-export function clearExtensionCache() {
+-    extensionCache.clear();
+-    extensionCacheCwd = undefined;
+-    extensionCacheGeneration++;
+-}
+-function useExtensionCacheCwd(cwd) {
+-    const resolvedCwd = resolvePath(cwd);
+-    if (extensionCacheCwd !== undefined && extensionCacheCwd !== resolvedCwd) {
+-        clearExtensionCache();
+-    }
+-    extensionCacheCwd = resolvedCwd;
+-    return { cwd: resolvedCwd, generation: extensionCacheGeneration };
+-}
+ /**
+  * Create a runtime with throwing stubs for action methods.
+  * Runner.bindCore() replaces these with real implementations.
+@@ -402,39 +280,6 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+         },
+     };
+ }
+-function isCurrentCacheToken(cacheToken) {
+-    return (cacheToken !== undefined &&
+-        extensionCacheCwd === cacheToken.cwd &&
+-        extensionCacheGeneration === cacheToken.generation);
+-}
+-async function loadExtensionModule(extensionPath, cacheToken) {
+-    if (isCurrentCacheToken(cacheToken)) {
+-        const cachedFactory = extensionCache.get(extensionPath);
+-        if (cachedFactory) {
+-            return cachedFactory;
+-        }
+-    }
+-    const jiti = createJiti(import.meta.url, {
+-        moduleCache: false,
+-        // Compiled binaries and the bundled Node distribution use embedded modules.
+-        // Source TypeScript reuses host modules and root tsconfig paths. Unbundled
+-        // Node builds use dist aliases.
+-        ...(isBunBinary || isNodeSeaBinary || isBundledNode
+-            ? { virtualModules: VIRTUAL_MODULES, tryNative: false }
+-            : isTypeScriptSourceRuntime
+-                ? { virtualModules: VIRTUAL_MODULES, tsconfigPaths: true }
+-                : { alias: getAliases() }),
+-    });
+-    const module = await jiti.import(extensionPath, { default: true });
+-    const factory = module;
+-    if (typeof factory !== "function") {
+-        return undefined;
+-    }
+-    if (isCurrentCacheToken(cacheToken)) {
+-        extensionCache.set(extensionPath, factory);
+-    }
+-    return factory;
+-}
+ /**
+  * Create an Extension object with empty collections.
+  */
+@@ -470,22 +315,6 @@ async function initializeExtension(factory, extensionPath, resolvedPath, cwd, ev
+     time(`${extensionPath} factory`, "extensions");
+     return extension;
+ }
+-async function loadExtension(extensionPath, cwd, eventBus, runtime, cacheToken) {
+-    const resolvedPath = resolvePath(extensionPath, cwd, { normalizeUnicodeSpaces: true });
+-    try {
+-        const factory = await loadExtensionModule(resolvedPath, cacheToken);
+-        time(`${extensionPath} module import`, "extensions");
+-        if (!factory) {
+-            return { extension: null, error: `Extension does not export a valid factory function: ${extensionPath}` };
+-        }
+-        const extension = await initializeExtension(factory, extensionPath, resolvedPath, cwd, eventBus, runtime);
+-        return { extension, error: null };
+-    }
+-    catch (err) {
+-        const message = err instanceof Error ? err.message : String(err);
+-        return { extension: null, error: `Failed to load extension: ${message}` };
+-    }
+-}
+ /**
+  * Create an Extension from an inline factory function.
+  */
+@@ -496,35 +325,13 @@ export async function loadExtensionFromFactory(factory, cwd, eventBus, runtime,
+ /**
+  * Load extensions from paths.
+  */
+-async function loadExtensionsInternal(paths, cwd, eventBus, runtime, useCache = false) {
+-    const extensions = [];
+-    const errors = [];
+-    const cacheToken = useCache ? useExtensionCacheCwd(cwd) : undefined;
+-    const resolvedCwd = cacheToken?.cwd ?? resolvePath(cwd);
+-    const resolvedEventBus = eventBus ?? createEventBus();
+-    const resolvedRuntime = runtime ?? createExtensionRuntime();
+-    for (const extPath of paths) {
+-        const { extension, error } = await loadExtension(extPath, resolvedCwd, resolvedEventBus, resolvedRuntime, cacheToken);
+-        if (error) {
+-            errors.push({ path: extPath, error });
+-            continue;
+-        }
+-        if (extension) {
+-            extensions.push(extension);
+-        }
+-    }
++export async function loadExtensions(paths, cwd, eventBus, runtime) {
+     return {
+-        extensions,
+-        errors,
+-        runtime: resolvedRuntime,
++        extensions: [],
++        errors: paths.map(path => ({ path, error: "Ghost does not load executable extensions from files." })),
++        runtime: runtime ?? createExtensionRuntime(),
+     };
+ }
+-export async function loadExtensions(paths, cwd, eventBus, runtime) {
+-    return loadExtensionsInternal(paths, cwd, eventBus, runtime);
+-}
+-export async function loadExtensionsCached(paths, cwd, eventBus, runtime) {
+-    return loadExtensionsInternal(paths, cwd, eventBus, runtime, true);
+-}
+ function isExtensionFile(name) {
+     return name.endsWith(".ts") || name.endsWith(".js");
+ }
+@@ -645,4 +452,3 @@ export async function discoverAndLoadExtensions(configuredPaths, cwd, agentDir =
+     }
+     return loadExtensions(allPaths, resolvedCwd, eventBus);
+ }
+-//# sourceMappingURL=loader.js.map
+\ No newline at end of file
+diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
+index c5ed4d72cd596fe384af4c7b9526247e86e4d91b..9ff7a91e1bb7dfa0c6cf8daf241a720cfc17efc2 100644
+--- a/dist/core/resource-loader.js
++++ b/dist/core/resource-loader.js
+@@ -6,7 +6,7 @@ import { loadThemeFromPath } from "../modes/interactive/theme/theme.js";
+ import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.js";
+ import { stripBom } from "../utils/text.js";
+ import { createEventBus } from "./event-bus.js";
+-import { clearExtensionCache, createExtensionRuntime, loadExtensionFromFactory, loadExtensionsCached, } from "./extensions/loader.js";
++import { createExtensionRuntime, loadExtensionFromFactory, loadExtensions, } from "./extensions/loader.js";
+ import { findGitPaths } from "./footer-data-provider.js";
+ import { DefaultPackageManager } from "./package-manager.js";
+ import { loadPromptTemplates } from "./prompt-templates.js";
+@@ -262,9 +262,6 @@ export class DefaultResourceLoader {
+     }
+     async reload(options) {
+         resetTimings("extensions");
+-        if (this.loaded) {
+-            clearExtensionCache();
+-        }
+         let preTrustExtensions;
+         if (options?.resolveProjectTrust) {
+             preTrustExtensions = await this.loadProjectTrustExtensions();
+@@ -409,7 +406,7 @@ export class DefaultResourceLoader {
+         const extensionPaths = this.noExtensions
+             ? cliEnabledExtensions
+             : this.mergePaths(cliEnabledExtensions, enabledExtensions);
+-        const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
++        const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
+         if (!options.includeInlineFactories) {
+             return extensionsResult;
+         }
+@@ -423,7 +420,7 @@ export class DefaultResourceLoader {
+     }
+     async loadFinalExtensionSet(extensionPaths, preTrustExtensions) {
+         if (!preTrustExtensions) {
+-            const extensionsResult = await loadExtensionsCached(extensionPaths, this.cwd, this.eventBus);
++            const extensionsResult = await loadExtensions(extensionPaths, this.cwd, this.eventBus);
+             const inlineExtensions = await this.loadExtensionFactories(extensionsResult.runtime);
+             extensionsResult.extensions.push(...inlineExtensions.extensions);
+             extensionsResult.errors.push(...inlineExtensions.errors);
+@@ -438,7 +435,7 @@ export class DefaultResourceLoader {
+             const resolvedPath = this.resolveExtensionLoadPath(path);
+             return !preloadedByPath.has(resolvedPath) && !failedPreloadPaths.has(resolvedPath);
+         });
+-        const remainingExtensions = await loadExtensionsCached(remainingPaths, this.cwd, this.eventBus, preTrustExtensions.runtime);
++        const remainingExtensions = await loadExtensions(remainingPaths, this.cwd, this.eventBus, preTrustExtensions.runtime);
+         const loadedByPath = new Map(preloadedByPath);
+         for (const extension of remainingExtensions.extensions) {
+             loadedByPath.set(extension.resolvedPath, extension);
+@@ -872,4 +869,3 @@ export class DefaultResourceLoader {
+         return conflicts;
+     }
+ }
+-//# sourceMappingURL=resource-loader.js.map

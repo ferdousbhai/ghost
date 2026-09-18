@@ -5,6 +5,11 @@ settings:
   excludeLinksFromLockfile: false
   injectWorkspacePackages: true
 
+patchedDependencies:
+  '@earendil-works/pi-coding-agent@0.84.3':
+    hash: 3383db084964ff84e0880df753fa93057e32c86480df3c98a780404cb013f7a9
+    path: patches/@earendil-works__pi-coding-agent@0.84.3.patch
+
 importers:
 
   .:
@@ -25,7 +30,7 @@ importers:
         version: 0.84.3(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-coding-agent':
         specifier: 0.84.3
-        version: 0.84.3(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
+        version: 0.84.3(patch_hash=3383db084964ff84e0880df753fa93057e32c86480df3c98a780404cb013f7a9)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
       '@ghost/extensions':
         specifier: workspace:*
         version: link:../extensions
@@ -1941,7 +1946,7 @@ snapshots:
     dependencies:
       '@earendil-works/pi-protocol': 0.84.3
 
-  '@earendil-works/pi-coding-agent@0.84.3(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.84.3(patch_hash=3383db084964ff84e0880df753fa93057e32c86480df3c98a780404cb013f7a9)(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)':
     dependencies:
       '@earendil-works/pi-agent-core': 0.84.3(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)
       '@earendil-works/pi-ai': 0.84.3(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(ws@8.21.3)(zod@4.4.3)

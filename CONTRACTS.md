@@ -220,6 +220,12 @@ owning tool when needed.
 
 ### Pi
 
+The pinned pi dependency has one Ghost patch: file-loaded executable extensions
+return an error, while inline factories keep pi's native implementation. This
+enforces the resource boundary above and removes Jiti/Babel and its retained
+terminal entry points from the bundle. Revalidate the patch when upgrading pi;
+it does not change the owner's separately installed `pi` CLI.
+
 Pi sessions use `createAgentSession`, an explicit transcript, Ghost's model
 runtime and credential store, an in-memory settings manager, and an explicit
 resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
@@ -435,6 +441,17 @@ seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
 relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
+
+The Arch install has two packages built from the same release: `ghost-runtime`
+owns the daemon, CLI, relay, desktop helper, user unit, and runtime docs/licenses;
+`ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
+that exact runtime version. The checkout variants are `ghost-runtime-dev` and
+`ghost-dev`. Installing only the runtime keeps desktop/browser automation in the
+existing graphical session without requiring Quickshell or installing Ghost UI.
+An app supplies its own UI over the same authenticated HTTP/SSE API. Adding or
+removing the UI neither stops the runtime nor changes ghost homes; removing the
+runtime preserves owner data. This replaces the inseparable desktop package,
+not the daemon, protocols, or graphical-session lifecycle.
 
 - [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
   ghost-home parsing, prompt construction, pure tools, browser/desktop clients,

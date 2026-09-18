@@ -3,7 +3,6 @@ pkgbase = ghost-dev
 	pkgver = 0.0.1.r100.g0c04ce7
 	pkgrel = 1
 	url = https://github.com/ferdousbhai/ghost
-	install = ghost-dev.install
 	arch = any
 	license = Apache-2.0
 	checkdepends = jq
@@ -27,18 +26,45 @@ pkgbase = ghost-dev
 	depends = qrencode
 	depends = ripgrep
 	depends = systemd
+	depends = wtype>=0.4
+	depends = ydotool>=1.0
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
-	depends = wtype>=0.4
 	depends = xdg-utils>=1.2
-	depends = ydotool>=1.0
-	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
-	optdepends = npm: npx-launched MCP servers and other owner-installed pi integrations
-	provides = ghost
-	conflicts = ghost
 	options = !debug
 	options = !strip
 	source = ghost::git+https://github.com/ferdousbhai/ghost.git#branch=master
 	sha256sums = SKIP
 
+pkgname = ghost-runtime-dev
+	pkgdesc = Ghost daemon, API, CLI, and desktop/browser automation without the HUD
+	install = ghost-runtime-dev.install
+	depends = at-spi2-core>=2.58
+	depends = bun>=1.3.14
+	depends = fd
+	depends = grim>=1.5
+	depends = hyprland>=0.56
+	depends = libnotify>=0.8
+	depends = python>=3.11
+	depends = python-dbus>=1.4
+	depends = python-gobject>=3.50
+	depends = python-pillow>=10
+	depends = qrencode
+	depends = ripgrep
+	depends = systemd
+	depends = wtype>=0.4
+	depends = ydotool>=1.0
+	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
+	optdepends = npm: npx-launched MCP servers and other owner-installed pi integrations
+	provides = ghost-runtime=0.0.1.r100.g0c04ce7-1
+	conflicts = ghost-runtime
+
 pkgname = ghost-dev
+	pkgdesc = Ghost HUD and desktop integration for Omarchy
+	install = ghost-dev.install
+	depends = ghost-runtime-dev=0.0.1.r100.g0c04ce7-1
+	depends = qt6-5compat>=6.8
+	depends = quickshell>=0.3
+	depends = xdg-utils>=1.2
+	provides = ghost=0.0.1.r100.g0c04ce7-1
+	conflicts = ghost

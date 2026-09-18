@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   compareVersions,
@@ -28,12 +32,36 @@ describe("release versions", () => {
 });
 
 describe("the update command", () => {
+  it.each([false, true])("restarts the shell only with an installed HUD (%s)", (hudInstalled) => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-update-command-"));
+    try {
+      const config = join(root, "config");
+      if (hudInstalled) {
+        const plugin = join(config, "omarchy/plugins/ferdousbhai.ghost");
+        mkdirSync(plugin, { recursive: true });
+        writeFileSync(join(plugin, "manifest.json"), "{}");
+      }
+      const script = `git() { :; }; pnpm() { :; };
+systemctl() { echo daemon; }; omarchy-restart-shell() { echo shell; };
+${updateCommand("/checkout")}`;
+      const output = execFileSync("bash", ["-c", script], {
+        env: { ...process.env, HOME: root, XDG_CONFIG_HOME: config },
+        encoding: "utf8",
+      });
+      expect(output).toBe(hudInstalled ? "daemon\nshell\n" : "daemon\n");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("is Omarchy's for the package and a pull, build, and restart for a checkout", () => {
     expect(updateCommand(null)).toBe("omarchy-update");
-    expect(updateCommand("/home/owner/src/ghost")).toBe(
-      'git -C "/home/owner/src/ghost" pull --ff-only && pnpm --dir "/home/owner/src/ghost" install --frozen-lockfile'
-        + ' && pnpm --dir "/home/owner/src/ghost" build && systemctl --user restart ghostd.service && omarchy-restart-shell',
-    );
+    const root = "/home/owner's ghost/$(echo unexpected)`echo expansion`";
+    const output = execFileSync("bash", ["-c", `
+git() { printf '%s\\n' "$2"; }; pnpm() { printf '%s\\n' "$2"; };
+systemctl() { :; }; omarchy-restart-shell() { :; };
+${updateCommand(root)}`], { encoding: "utf8" });
+    expect(output.trimEnd().split("\n")).toEqual([root, root, root]);
   });
 });
 

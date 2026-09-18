@@ -1934,9 +1934,6 @@ export class SessionHost {
       agentDir: paths.agentDir,
       settingsManager,
       extensionFactories,
-      // Executable discovery is empty. Trusted visible Ghost hooks were
-      // already descriptor-pinned and imported as inline factories above;
-      // cwd-discovered extensions and Ghost custom-code tools stay disabled.
       noExtensions: true,
       noSkills: false,
       additionalSkillPaths: this.machineSkills,

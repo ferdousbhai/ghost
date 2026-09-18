@@ -39,12 +39,19 @@ done
 constraints="$({
   awk -F ' = ' '
     BEGIN { count = 0; failed = 0 }
+    NR == FNR {
+      if ($1 == "pkgname") built[$2] = 1
+      next
+    }
     /^\t(depends|makedepends|checkdepends)(_x86_64)? = / {
       if (NF != 2 || $2 !~ /^[a-z0-9@_+][a-z0-9@._+-]*((=|>=|<=|>|<)[A-Za-z0-9_.+~:-]+)?$/) {
         printf "invalid dependency entry: %s\n", $0 > "/dev/stderr"
         failed = 1
         next
       }
+      name = $2
+      sub(/[<>=].*$/, "", name)
+      if (name in built) next
       print $2
       count += 1
       next
@@ -60,7 +67,7 @@ constraints="$({
       }
       exit failed
     }
-  ' "$srcinfo"
+  ' "$srcinfo" "$srcinfo"
 } | LC_ALL=C sort -u)"
 
 if [[ "$mode" == constraints ]]; then

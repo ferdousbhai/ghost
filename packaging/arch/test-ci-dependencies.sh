@@ -40,6 +40,15 @@ bash "$parser" --srcinfo "$work/valid.SRCINFO" --names \
 printf '%s\n' alpha beta delta epsilon gamma zeta > "$work/names.expected"
 cmp "$work/names.expected" "$work/names.actual"
 
+# Dependencies produced by this split build must not be installed from pacman.
+cat >> "$work/valid.SRCINFO" <<'EOF'
+pkgname = fixture-runtime
+pkgname = fixture-ui
+	depends = fixture-runtime=1.2-3
+EOF
+bash "$parser" --srcinfo "$work/valid.SRCINFO" --constraints > "$work/split.actual"
+cmp "$work/constraints.expected" "$work/split.actual"
+
 for invalid in \
   $'\tcheckdepends = --config=/outside' \
   $'\tcheckdepends = .hidden' \

@@ -1,7 +1,9 @@
 # Checkout package recipe
 
-`PKGBUILD` builds `ghost-dev`, the rolling checkout package. It provides and
-conflicts with stable `ghost`, so the variants cannot be installed together.
+`PKGBUILD` builds two rolling packages: `ghost-runtime-dev` (daemon, CLI,
+relay, and desktop automation) and `ghost-dev` (the Omarchy UI). They provide
+and conflict with stable `ghost-runtime` and `ghost`, respectively. The UI
+requires the exact matching runtime version.
 `/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
@@ -20,6 +22,42 @@ Build the checkout package without installing it:
 ```sh
 makepkg --cleanbuild
 ```
+
+## Runtime with your own UI
+
+Install `ghost-runtime` from the Omarchy package repository for a remote desktop
+where an app supplies the UI. Install `ghost` to add the version-matched HUD:
+
+```sh
+sudo pacman -Syu ghost-runtime
+systemctl --user enable --now ghostd.service
+ghost status
+# Optional Ghost UI:
+sudo pacman -S ghost
+```
+
+The runtime package has no Ghost QML, desktop entry, icons, or Quickshell
+requirement. It retains screen/desktop tools and the opt-in browser relay, so
+it still requires the supported Hyprland graphical environment. This is an
+install without the Ghost HUD, not a replacement desktop-automation backend.
+The daemon remains bound to the graphical session and loopback. An app uses the
+existing bearer-authenticated HTTP/SSE API; it must render and answer pending
+`ask` questions and handle browser pairing through the API or `ghost` CLI.
+Use an SSH tunnel or the existing Tailscale boundary for access from another
+machine; installing only the runtime does not expose the API publicly.
+
+To remove the UI while retaining an app's backend:
+
+```sh
+sudo pacman -D --asexplicit ghost-runtime
+omarchy plugin remove ferdousbhai.ghost --yes
+sudo pacman -R ghost
+omarchy-restart-shell
+```
+
+The Omarchy **Remove → AI → Ghost UI** action also preserves the runtime.
+For checkout builds use the `-dev` package names. Building produces both
+archives; install just the `ghost-runtime-dev` archive when supplying your own UI.
 
 ## Owner-shared state
 
@@ -75,8 +113,8 @@ leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 
-An upgrade requires `systemctl --user reenable --now ghostd.service` and
-`omarchy-restart-shell`; re-enabling also moves an installation made with the old
+A runtime upgrade requires `systemctl --user reenable --now ghostd.service`;
+an installed HUD also needs `omarchy-restart-shell`. Re-enabling moves an installation made with the old
 daemon unit away from `default.target` and into the graphical-session lifecycle.
 A rescan will not do here: the plugin's entry point is unchanged, so the shell
 keeps the widget it already loaded and the owner runs a new daemon behind an
@@ -87,18 +125,19 @@ roll back or delete user data. Ghost-home format changes must remain
 forward/restart-safe under `CONTRACTS.md`; packaging does not invent a second
 migration path.
 
-Before uninstalling `ghost-dev`, stop and disable the user unit:
+To remove the complete checkout installation, stop and disable the user unit:
 
 ```sh
 systemctl --user disable --now ghostd.service
-sudo pacman -Rns ghost-dev
+sudo pacman -Rns ghost-dev ghost-runtime-dev
 ```
 
-For stable `ghost`, the final command is `sudo pacman -Rns ghost`.
+For the complete stable installation, use `sudo pacman -Rns ghost ghost-runtime`.
+If only the runtime is installed, name only `ghost-runtime`.
 
 That removes package-owned files only.
 
-`smoke.sh` validates a staged package tree, including daemon startup metadata,
+`smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
 the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive, and the Arch workflow builds the package in a clean container on

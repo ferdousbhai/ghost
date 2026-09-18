@@ -54,7 +54,7 @@ sed \
   -e "s|@@RELEASE_REPOSITORY@@|$release_repository|g" \
   "$template_root/PKGBUILD.in" > "$output/PKGBUILD"
 chmod 644 "$output/PKGBUILD"
-install -m644 "$template_root/ghost.install" "$output/ghost.install"
+install -m644 "$template_root/"*.install "$output/"
 
 if grep -En '@@[A-Z0-9_]+@@' "$output/PKGBUILD"; then
   printf 'unrendered PKGBUILD token remains\n' >&2
