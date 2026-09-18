@@ -8,7 +8,7 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "typecheck": "pnpm -r typecheck",
-    "lint": "biome check . --diagnostic-level=warn --error-on-warnings && pnpm -r --if-present lint",
+    "lint": "bash scripts/check-core-boundary.sh && biome check . --diagnostic-level=warn --error-on-warnings && pnpm -r --if-present lint",
     "verify": "bash .githooks/verify",
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },

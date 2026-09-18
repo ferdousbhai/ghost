@@ -129,7 +129,7 @@ layer-shell incarnation; the card contents are unchanged).
 ## Validation
 
 ```sh
-pnpm --filter @ghost/shell lint     # qmllint over every QML file
+pnpm --filter @ghost/omarchy lint     # qmllint over every QML file
 ```
 
 `qmllint` needs the `qs.*` modules Quickshell synthesises at runtime resolved

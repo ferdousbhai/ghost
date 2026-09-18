@@ -49,6 +49,7 @@ The common defect here is a change that works on the path you tested and is miss
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/chromium-extension/extension/` — opt-in browser relay
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
+- ghost-core is `packages/{daemon,extensions,chromium-extension}`; ghost-omarchy is `packages/{shell,desktop-helper}` — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
 - `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` — the owner command-hook protocol; `docs/desktop-helper.md` — the sidecar protocol
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.

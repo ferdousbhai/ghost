@@ -422,6 +422,16 @@ hosted-session, concurrency, or spend cap.
 
 ## Package boundaries
 
+Ghost is two sides of one product. **ghost-core** is everything a second
+interface could reuse: `packages/daemon`, `packages/extensions`, and
+`packages/chromium-extension`. **ghost-omarchy** is the Omarchy-only surface:
+`packages/shell` (published as `@ghost/omarchy`; the directory name is
+historical) and `packages/desktop-helper`. The sides meet only at named
+seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
+relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
+spawn — and core never imports the Omarchy side:
+`scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
+
 - [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
   ghost-home parsing, prompt construction, pure tools, browser/desktop clients,
   and the `extension-api.ts` seam. It imports no daemon or UI.
@@ -429,8 +439,9 @@ hosted-session, concurrency, or spend cap.
   authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
   HTTP, and the `ghost`
   CLI. Bun is the production runtime.
-- [`packages/shell`](packages/shell/qml/manifest.json) is an omarchy-shell
-  plugin, id `ferdousbhai.ghost`, declaring `service` (the daemon connection and
+- [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
+  package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring `service`
+  (the daemon connection and
   the notifications a shut window would swallow), `panel` (the chat window), and
   `bar-widget` (the state dot) kinds. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML

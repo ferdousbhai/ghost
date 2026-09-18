@@ -1,4 +1,4 @@
-# `@ghost/shell`
+# `@ghost/omarchy`
 
 Ghost's Omarchy desktop surfaces, as an omarchy-shell plugin
 (`ferdousbhai.ghost`): chat HUD, bar dot, settings and context panes, and
@@ -115,8 +115,8 @@ packages/shell/dev/preview.sh
 Run lint and the QML suite with:
 
 ```sh
-pnpm --filter @ghost/shell lint
-pnpm --filter @ghost/shell test
+pnpm --filter @ghost/omarchy lint
+pnpm --filter @ghost/omarchy test
 ```
 
 The test harness maps daemon traffic to destination port 0 and uses private

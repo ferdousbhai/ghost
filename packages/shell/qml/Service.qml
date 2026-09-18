@@ -6,7 +6,6 @@
 // bar dot live and a finished turn reach the owner while the window is shut.
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import "services"
 
 Item {
