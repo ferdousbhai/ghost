@@ -78,7 +78,7 @@ snapshot every valid skill visible under `~/.agents/skills/` and
 There is no hardcoded skill-name allowlist or integration-specific package path.
 
 This remains the rolling, checkout-only development package: `pnpm install`
-may populate its store during `build()`. The stable `ghost` package uses the
+may populate its store during `build()`. The stable `ghost-runtime` package uses the
 [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
 and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
 source and runtime inputs as a GitHub release (`../release/publish.sh`) and

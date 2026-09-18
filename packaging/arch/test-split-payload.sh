@@ -47,7 +47,9 @@ fi
 verify_recipe() (
   local recipe="$1" suffix="$2"
   source "$recipe"
-  srcdir="$source_root/.."
+  srcdir="$work/recipe-source$suffix"
+  mkdir -p "$srcdir"
+  ln -s "$source_root" "$srcdir/ghost"
   mkdir -p "$work/recipe"
   pkgdir="$work/recipe"
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
