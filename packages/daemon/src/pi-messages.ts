@@ -58,6 +58,10 @@ export type PiMessagesEvent =
       text: string;
     }
   | {
+      type: "session_stop_continued";
+      reason: string;
+    }
+  | {
       type: "command_output";
       command: string;
       output: string;

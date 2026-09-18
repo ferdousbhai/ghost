@@ -213,6 +213,17 @@ TestCase {
         verify(rows[1].contentTruncated);
     }
 
+    function test_stopHookNoticeSplitsAssistantPasses(): void {
+        const rows = TurnBlocks.rows([
+            { role: "user", content: [{ type: "text", text: "Reply exactly." }], entryId: "u1" },
+            { role: "assistant", content: [{ type: "text", text: "Ready." }], entryId: "a1" },
+            { role: "hook", content: [{ type: "text", text: "Keep going." }], entryId: "h1" },
+            { role: "assistant", content: [{ type: "text", text: "Ready." }], entryId: "a2" }
+        ]);
+        compare(rows.map(row => row.role).join(","), "user,assistant,hook,assistant");
+        compare(rows[2].text, "Keep going.");
+    }
+
     function test_unknownRolesAreSkippedWithoutBreakingTheGrouping(): void {
         const rows = TurnBlocks.rows([
             { role: "assistant", content: [{ type: "text", text: "Reading." }], entryId: "a1" },

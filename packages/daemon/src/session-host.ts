@@ -39,7 +39,7 @@ import {
   type CompactionConfig,
 } from "./compaction.js";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS, ghostSessionStopContinuation } from "./hooks.js";
+import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
 import {
   closeBrowserSession,
   piToolCapabilities,
@@ -685,6 +685,8 @@ interface HostedSession extends GhostSessionHandle {
   pendingOwnerPasses: PendingPiOwnerPass[];
   /** Serial durability and hook drain shared by every owner-action path. */
   ownerPassSettlement?: Promise<void>;
+  /** Live SSE emit for the exclusive owner turn, if one is in flight. */
+  streamEmit?: (event: PiMessagesEvent) => void;
   /** Reconstructed from the persisted branch and reserved synchronously per owner action. */
   nextOwnerTurnId: number;
   settlingDeferred?: Promise<void>;
@@ -1045,8 +1047,10 @@ interface ConversationEventSubscription {
   close: () => void;
 }
 
+export const SESSION_STOP_CONTINUATION_TYPE = "session-stop-continuation";
+
 export interface TranscriptMessage {
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "hook";
   content: unknown;
   timestamp?: number;
   entryId: string;
@@ -2482,7 +2486,6 @@ export class SessionHost {
     const [ghostName, conversationId] = sessionKeyParts(hosted.sessionKey);
     const ghost = this.registry.get(ghostName);
     let stopHookActive = false;
-    let continuations = 0;
     let latestAssistantEntry = assistantEntry;
     while (!pass.signal.aborted) {
       const assistant = latestAssistantEntry.message;
@@ -2507,17 +2510,12 @@ export class SessionHost {
       });
       const additionalContext = ghostSessionStopContinuation(result);
       if (!additionalContext) return;
-      if (continuations >= MAX_SESSION_STOP_CONTINUATIONS) {
-        hosted.logger.warn("session_stop kept asking for a continuation; accepting the pass", {
-          continuations,
-          code: "stop_hook_bounded",
-        });
-        return;
-      }
-      continuations += 1;
+      // Codex: the hook owns the loop. Ghost sets stop_hook_active so a hook
+      // that wants to stop looping can, and does not impose a host bound.
       stopHookActive = true;
+      hosted.streamEmit?.({ type: "session_stop_continued", reason: additionalContext });
       await hosted.session.sendCustomMessage({
-        customType: "session-stop-continuation",
+        customType: SESSION_STOP_CONTINUATION_TYPE,
         content: additionalContext,
         display: false,
       }, { triggerTurn: true });
@@ -3199,6 +3197,7 @@ export class SessionHost {
       if (event.type === "done" || event.type === "error") pendingTerminal = event;
       else options.emit(event);
     };
+    hosted.streamEmit = emitAfterSettlement;
     const adapter = createPiMessagesAdapter(emitAfterSettlement, {
       includeThinking: options.includeThinking,
       getCwd: () => hosted.session.sessionManager.getCwd(),
@@ -3254,6 +3253,7 @@ export class SessionHost {
         adapter.finishDone();
       }
       unsubscribe();
+      hosted.streamEmit = undefined;
       if (pendingTerminal) options.emit(pendingTerminal);
       // A model switch that arrived mid-turn was deferred rather than applied to
       // the running prompt; apply it now the turn has settled, before the next
@@ -4192,6 +4192,18 @@ export class SessionHost {
 
     const all: TranscriptMessage[] = [];
     for (const entry of active) {
+      if (entry.type === "custom_message" && entry.customType === SESSION_STOP_CONTINUATION_TYPE) {
+        const text = entryText(entry.content);
+        if (text) {
+          all.push({
+            role: "hook",
+            content: [{ type: "text", text }],
+            entryId: entry.id,
+            parentId: entry.parentId,
+          });
+        }
+        continue;
+      }
       if (entry.type !== "message") continue;
       const message = projectTranscriptMessage(entry, askBranches, failedToolCalls, toolCwds);
       if (message) all.push(message);
@@ -4574,6 +4586,7 @@ export class SessionHost {
         conversationId,
         "Wait for this conversation to finish before changing this answer.",
       );
+      hosted.streamEmit = emitAfterSettlement;
     } catch (error) {
       this.turnAdmissions.delete(admissionKey);
       throw error;
@@ -4702,6 +4715,7 @@ export class SessionHost {
           adapter.finishDone();
         }
         unsubscribe?.();
+        hosted.streamEmit = undefined;
         if (pendingTerminal) options.emit(pendingTerminal);
         await this.releaseSessionClaim(hosted, ghostName);
         await this.announceConversationUpdated(ghostName, conversationId);

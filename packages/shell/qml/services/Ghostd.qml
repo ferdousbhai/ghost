@@ -3237,6 +3237,9 @@ Singleton {
         case "owner_message":
             root.receiveOwnerMessageFor(state, event.text || "");
             break;
+        case "session_stop_continued":
+            root.receiveSessionStopContinuedFor(state, event.reason || "");
+            break;
         case "thinking_start":
             state.activity = "thinking";
             break;
@@ -3525,6 +3528,39 @@ Singleton {
 
         root.appendTurnRow(state, {
             role: "user", text: message, toolActivity: [], error: "", pending: false,
+            entryId: ""
+        });
+        root.appendTurnRow(state, {
+            role: "assistant", text: "", toolActivity: [], error: "", pending: true,
+            entryId: ""
+        });
+        state.assistantRow = state.rows.length - 1;
+        root.resetAssistantSegmentFor(state);
+        root.projectTurnFields(state);
+    }
+
+    function receiveSessionStopContinuedFor(state: var, reason: string): void {
+        const notice = String(reason || "").trim();
+        if (!state.streaming || notice === "") return;
+        const hasAssistant = state.assistantRow >= 0
+            && state.assistantRow < state.rows.length;
+        const emptyPlaceholder = hasAssistant
+            && state.assistantRow === state.rows.length - 1
+            && state.rows[state.assistantRow].text === ""
+            && state.toolActivities.length === 0
+            && Object.keys(state.blocks).length === 0;
+        if (emptyPlaceholder) {
+            root.removeTurnRow(state, state.assistantRow);
+            state.assistantRow = -1;
+        } else {
+            root.settleToolActivityFor(state, false);
+            root.flushTurn(state, true);
+            if (hasAssistant)
+                root.setTurnRow(state, state.assistantRow, "pending", false);
+        }
+        state.activity = "";
+        root.appendTurnRow(state, {
+            role: "hook", text: notice, toolActivity: [], error: "", pending: false,
             entryId: ""
         });
         root.appendTurnRow(state, {

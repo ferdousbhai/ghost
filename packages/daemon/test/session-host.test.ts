@@ -54,7 +54,7 @@ import {
 import {
   openAiCompatiblePreset,
 } from "./helpers/models-presets.js";
-import { GhostHookRunner, MAX_SESSION_STOP_CONTINUATIONS } from "../src/hooks.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import { ModelSelection } from "../src/model-selection.js";
 import {
   PI_NATIVE_TOOL_NAMES,
@@ -2283,11 +2283,9 @@ describe("SessionHost.runTurn", () => {
         }
       });
     });
-    // The hook keeps asking for twelve; Ghost honors MAX_SESSION_STOP_CONTINUATIONS
-    // of them and then accepts the pass, so the hook sees one more pass than
-    // that. This test owns the retry via Ghost's session_stop hook and must
-    // observe every pass itself.
-    const passCount = MAX_SESSION_STOP_CONTINUATIONS + 1;
+    // The hook asks for twelve continuations and then accepts. Ghost honors
+    // every blocking result, like Codex Stop hooks: no host bound.
+    const passCount = hookContinuationPasses + 1;
     const passTexts = [
       "The first answer circles around the point.",
       "Here is the direct answer.",
@@ -2322,6 +2320,12 @@ describe("SessionHost.runTurn", () => {
     expect(JSON.stringify(passes)).not.toContain("Answer me.");
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "session_stop_continued")).toEqual(
+      Array(hookContinuationPasses).fill({
+        type: "session_stop_continued",
+        reason: "Rewrite the answer without canned phrasing.",
+      }),
+    );
     const streamedText = events
       .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
         event.type === "text_delta"

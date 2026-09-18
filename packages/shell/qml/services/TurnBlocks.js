@@ -142,6 +142,20 @@ function rows(messages) {
             if (message.contentTruncated === true) contentTruncated = true;
             continue;
         }
+        if (message.role === "hook") {
+            commit();
+            var hookParts = partsOf(message);
+            var notice = fromParts(hookParts);
+            if (notice === "") continue;
+            out.push({
+                role: "hook",
+                text: notice,
+                parts: hookParts,
+                entryId: typeof message.entryId === "string" ? message.entryId : "",
+                contentTruncated: message.contentTruncated === true
+            });
+            continue;
+        }
         if (message.role !== "user") continue;
         commit();
         var userParts = partsOf(message);

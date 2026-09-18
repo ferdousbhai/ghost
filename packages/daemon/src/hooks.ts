@@ -66,14 +66,6 @@ export interface GhostHookEventStatus {
 /** `builtin` is an in-process registration; `config` comes from `hooks.json`. */
 export type GhostHookSource = "builtin" | "config";
 
-/**
- * How many hidden continuations one owner turn may take from `session_stop`
- * handlers before Ghost accepts the pass regardless. The hook owns its
- * continuation policy, but a hook that never accepts would otherwise run the
- * model until the provider cut it off; three revisions is the bound.
- */
-export const MAX_SESSION_STOP_CONTINUATIONS = 3;
-
 export interface GhostHookStatusItem {
   event: GhostHookEvent["type"];
   source: GhostHookSource;

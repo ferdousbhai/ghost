@@ -114,6 +114,23 @@ TestCase {
         compare(Ghostd.transcript.get(2).text, "Use the shorter version.");
     }
 
+    function test_sessionStopContinuedInsertsHookRowBetweenPasses(): void {
+        const turn = openTurn("stop-hook", null);
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "text_end", contentIndex: 0, content: "Ghost 0.4.0 ready." });
+        Ghostd.handleTurnEvent(turn.state,
+            { type: "session_stop_continued", reason: "Keep going." });
+
+        compare(turn.state.rows.length, 4);
+        compare(turn.state.rows[1].text, "Ghost 0.4.0 ready.");
+        verify(!turn.state.rows[1].pending);
+        compare(turn.state.rows[2].role, "hook");
+        compare(turn.state.rows[2].text, "Keep going.");
+        compare(turn.state.rows[3].role, "assistant");
+        verify(turn.state.rows[3].pending);
+        compare(Ghostd.transcript.get(2).role, "hook");
+    }
+
     function test_consecutiveSteersDoNotCreateEmptyAssistantRows(): void {
         const turn = openTurn("steer-batch", null);
 

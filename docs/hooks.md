@@ -170,11 +170,13 @@ and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
 Ghost sets `stop_hook_active: true` on continuation passes. The hook owns its
-continuation policy, and Ghost honors a blocking result up to `MAX_SESSION_STOP_CONTINUATIONS`
-times per owner turn (`hooks.ts`), then accepts the pass and logs it. Hook
-authors should still use `stop_hook_active` and normally stop after one
-revision. A continuation reason is in model
-context; an informational notification alone is not.
+continuation policy, the same way Codex Stop hooks do: Ghost will keep honoring
+a blocking result until the hook accepts, the client aborts, or the hook fails
+open. Use `stop_hook_active` to avoid a loop that will never resolve. A
+continuation reason is in model context, and Ghost also shows it in the
+transcript as a dim "Stop hook" row so a second reply is visibly a
+continuation, not a second owner prompt. An informational notification
+alone is not.
 
 Trusted command hooks that need a fast classifier can invoke
 `ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",

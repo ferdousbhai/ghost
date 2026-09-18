@@ -30,9 +30,21 @@ Item {
 
     readonly property bool mine: root.speaker === "user"
     readonly property bool commandOutput: root.speaker === "command"
+    readonly property bool hookNotice: root.speaker === "hook"
+    readonly property string displayBody: {
+        const raw = root.hookNotice
+            ? (root.body !== "" ? "Stop hook · " + root.body : "Stop hook continued")
+            : root.body;
+        // A trailing newline is a POSIX terminator, not a blank line. Qt's
+        // PlainText path paints it as one, which is the empty band under a
+        // prompt (CodeView already strips the same thing for the gutter).
+        return root.plainBody
+            ? String(raw).replace(/\r\n/gu, "\n").replace(/\n$/u, "")
+            : raw;
+    }
     // A prompt and a command's output render verbatim: a prompt carrying
     // backticks or underscores has to survive as it was typed.
-    readonly property bool plainBody: root.mine || root.commandOutput
+    readonly property bool plainBody: root.mine || root.commandOutput || root.hookNotice
     readonly property int contentInset: root.mine ? 12 : 0
 
     /**
@@ -52,12 +64,12 @@ Item {
             // Verbatim text arrives whole and has no blocks to settle.
             root.blockScan = MarkdownSegments.begin();
             bodyBlocks.clear();
-            root.liveTail = root.body;
+            root.liveTail = root.displayBody;
             return;
         }
         // A settled row will not grow, and saying so lets the answer's last
         // block close instead of riding in the tail with the one before it.
-        const step = MarkdownSegments.advance(root.body, root.blockScan, !root.busy);
+        const step = MarkdownSegments.advance(root.displayBody, root.blockScan, !root.busy);
         // A row the list reused for another message, or a turn re-split once it
         // settled, is not a continuation of what is on screen.
         if (step.reset) bodyBlocks.clear();
@@ -66,6 +78,7 @@ Item {
     }
 
     onBodyChanged: root.renderBody()
+    onDisplayBodyChanged: root.renderBody()
     onPlainBodyChanged: root.renderBody()
     onBusyChanged: root.renderBody()
 
@@ -81,13 +94,14 @@ Item {
         id: blockText
 
         textFormat: root.plainBody ? Text.PlainText : Text.MarkdownText
-        color: root.mine ? Theme.foregroundBright : Theme.foreground
+        color: root.hookNotice ? Theme.foregroundDim
+            : (root.mine ? Theme.foregroundBright : Theme.foreground)
         // Links wear the ghost's own amber, never Theme.accent — the inherited
         // Omarchy accent is blue in most themes, and reading copy is not a web
         // page.
         linkColor: Theme.ghostAmber
         font.family: root.commandOutput ? Theme.fontFamilyMono : Theme.fontFamily
-        font.pixelSize: Theme.fontSize
+        font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
         lineHeight: Theme.lineHeight
         wrapMode: Text.Wrap
         onLinkActivated: link => ExternalLinks.openModelUrl(link)
@@ -142,10 +156,14 @@ Item {
      * change. A row appended empty and filled a moment later — which is every
      * streaming reply — would never open again.
      */
-    readonly property bool hasBody: root.body !== ""
-    readonly property bool hasActions: !root.busy && (root.mine
+    readonly property bool hasBody: root.displayBody !== ""
+    readonly property bool hasActions: !root.busy && !root.hookNotice && (root.mine
         ? (root.hasBody && root.sourceEntryId !== "")
         : (root.hasBody || root.quietToolCount > 0))
+    // The user's capsule is the one a blank line would paint inside. Plain
+    // text has no markdown layout of its own, so the edit pencil can sit on
+    // the last line instead of claiming a row beneath.
+    readonly property bool actionsBeside: root.mine && root.hasBody && root.hasActions
 
     implicitHeight: card.implicitHeight
 
@@ -212,11 +230,13 @@ Item {
         // bubble; what it does not claim is a 130-column line on a maximised
         // HUD. The measure only bites past that width.
         width: root.mine
-            // The actions are a row under the prompt now, so the capsule has
-            // to be wide enough to hold them rather than to sit beside them.
+            // Beside the prompt they add a strip of width, not a blank line
+            // of height — the empty band the capsule used to paint under the
+            // words.
             ? Math.min(parent.width * 0.82,
-                Math.max(Math.max(tailText.implicitWidth,
-                    root.hasActions ? messageActions.implicitWidth : 0)
+                Math.max(tailText.implicitWidth
+                    + (root.actionsBeside
+                        ? messageActions.implicitWidth + Theme.gap : 0)
                     + root.contentInset * 2, 72))
             : Math.min(parent.width, Theme.readingMeasure)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
@@ -245,6 +265,11 @@ Item {
             spacing: Theme.gap / 2
 
             Repeater {
+                id: activityCards
+                // A zero-item Repeater is still a Column child of height 0,
+                // and Column still puts spacing around it — a phantom gap
+                // above every prompt that has no tool cards.
+                visible: activityCards.count > 0
                 model: root.shownActivities
                 delegate: ToolCard {
                     required property var modelData
@@ -260,16 +285,17 @@ Item {
                 width: parent.width
                 height: implicitHeight
                 visible: root.hasBody || root.hasActions
-                // The actions row sits below the text, so it is the bottom
-                // whenever it is there at all — plus the overhang each control
-                // gives its own hit area (the negative margins further down).
-                // This Item is what `messageHover` watches, so anything the
-                // pointer can touch has to be inside it: a hit area reaching
-                // past the bottom edge would make the control fade out just as
-                // the pointer arrived on it from below.
-                implicitHeight: root.hasActions
-                    ? messageActions.y + messageActions.height + Theme.gap / 2
-                    : (root.hasBody ? bodyView.implicitHeight : 0)
+                // This Item is what `messageHover` watches, so it has to cover
+                // the text and the action hit areas (each overhangs by
+                // Theme.gap / 2). A hit area reaching past the bottom edge
+                // would fade the control out just as the pointer arrived on
+                // it from below.
+                implicitHeight: {
+                    const bodyH = root.hasBody ? bodyView.implicitHeight : 0;
+                    if (!root.hasActions) return bodyH;
+                    return Math.max(bodyH,
+                        messageActions.y + messageActions.height + Theme.gap / 2);
+                }
 
                 HoverHandler {
                     id: messageHover
@@ -283,11 +309,14 @@ Item {
                 Column {
                     id: bodyView
 
-                    width: parent.width
+                    width: parent.width - (root.actionsBeside
+                        ? messageActions.implicitWidth + Theme.gap : 0)
                     visible: root.hasBody
                     spacing: Theme.markdownBlockGap
 
                     Repeater {
+                        id: settledBlocks
+                        visible: settledBlocks.count > 0
                         model: bodyBlocks
                         // Named so a test can watch that a block already on
                         // screen is the same object, with the same text, after
@@ -309,13 +338,12 @@ Item {
                     }
                 }
 
-                // The actions sit under the text, never in it. Placing them
-                // on the final text line meant positioning them from a hidden
-                // TextEdit's end cursor and trusting it to agree with what a
-                // Text actually painted — which it cannot for a markdown block
-                // that owns its own layout (a code fence, a table, a list), so
-                // the controls landed on top of the words. A row of its own
-                // costs one line and is right by construction.
+                // Markdown owns its own layout — a code fence, a table, a list
+                // — so a cursor taken from a hidden TextEdit cannot say where
+                // the last line ends, and overlaying the controls landed on
+                // the words. A row beneath is right for that. Plain text has
+                // no such layout, and a row beneath is the blank line inside
+                // the user's capsule; those sit on the last line instead.
                 Row {
                     id: messageActions
                     objectName: "messageActions"
@@ -325,7 +353,12 @@ Item {
                     x: root.mine
                         ? message.width - width - Theme.gap / 2
                         : Theme.gap / 2
-                    y: root.hasBody ? bodyView.implicitHeight + Theme.gap / 2 : 0
+                    y: {
+                        if (!root.hasBody) return 0;
+                        if (root.actionsBeside)
+                            return Math.max(0, (bodyView.implicitHeight - height) / 2);
+                        return bodyView.implicitHeight + Theme.gap / 2;
+                    }
 
                     Item {
                         id: copyAction

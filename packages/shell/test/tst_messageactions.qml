@@ -50,6 +50,19 @@ TestCase {
         rowIndex: 0
     }
 
+    Bubble {
+        id: prompt
+
+        width: 420
+        speaker: "user"
+        body: "why did you reply 4 times"
+        activities: []
+        failure: ""
+        busy: false
+        sourceEntryId: "e1"
+        rowIndex: 1
+    }
+
     // Every painted text block, not the binding the row is positioned by:
     // a change back toward computed placement has to fail this.
     function bodyRects(): var {
@@ -139,5 +152,62 @@ TestCase {
         compare(trail.opacity, 1);
         compare(trail.text, "hide");
         reply.toolsOpen = false;
+    }
+
+    function test_aUserPromptDoesNotReserveABlankLineForHoverActions(): void {
+        // The edit pencil is hover-only. A row of its own inside the capsule
+        // is the empty band under a one-line prompt.
+        prompt.body = "why did you reply 4 times";
+        wait(120);
+        waitForRendering(prompt);
+        const tail = findChild(prompt, "replyTail");
+        verify(tail !== null);
+        const extra = prompt.implicitHeight
+            - (tail.implicitHeight + prompt.contentInset * 2);
+        verify(extra < Theme.fontSize,
+            "user capsule reserved a blank line: extra=" + extra);
+        verify(extra >= -1, "user capsule clipped the prompt: extra=" + extra);
+        const at = prompt.mapFromItem(tail, 0, 0);
+        fuzzyCompare(at.y, prompt.contentInset, 1);
+    }
+
+    function test_aTrailingNewlineDoesNotAddAPhantomLineToAPrompt(): void {
+        // POSIX text ends in a newline. Qt PlainText paints that as a blank
+        // line, the same phantom CodeView already strips for the gutter.
+        prompt.body = "why did you reply 4 times";
+        wait(120);
+        waitForRendering(prompt);
+        const without = prompt.implicitHeight;
+        const tail = findChild(prompt, "replyTail");
+        compare(tail.text, "why did you reply 4 times");
+        prompt.body = "why did you reply 4 times\n";
+        wait(120);
+        waitForRendering(prompt);
+        compare(tail.text, "why did you reply 4 times");
+        fuzzyCompare(prompt.implicitHeight, without, 1);
+        prompt.body = "why did you reply 4 times\r\n";
+        wait(120);
+        compare(tail.text, "why did you reply 4 times");
+        prompt.body = "why did you reply 4 times";
+    }
+
+    function test_userActionsStillClearThePrompt(): void {
+        prompt.body = "why did you reply 4 times";
+        wait(120);
+        waitForRendering(prompt);
+        const row = findChild(prompt, "messageActions");
+        const tail = findChild(prompt, "replyTail");
+        verify(row !== null && tail !== null);
+        const at = prompt.mapFromItem(row, 0, 0);
+        const rect = { top: at.y, bottom: at.y + row.height,
+            left: at.x, right: at.x + row.width };
+        const textAt = prompt.mapFromItem(tail, 0, 0);
+        const block = { top: textAt.y, bottom: textAt.y + tail.height,
+            left: textAt.x, right: textAt.x + tail.width };
+        const overlaps = rect.top < block.bottom && rect.bottom > block.top
+            && rect.left < block.right && rect.right > block.left;
+        verify(!overlaps, "user actions overlap the prompt: row "
+            + rect.left + "-" + rect.right + " vs text "
+            + block.left + "-" + block.right);
     }
 }
