@@ -87,14 +87,16 @@ Computer use is CLI-first: the ghost is told to discover a route with
 `omarchy commands --json` and run `omarchy <group> <action>` through Bash, and
 to reach for `ghost_desktop` / `ghost_screen` only when Omarchy has no route,
 a route failed, or the work is inside an arbitrary application's window.
-`ghost_browser` drives pages. The helper is the fallback, not the first move.
+`ghost_browser` drives pages. The helper is the fallback, not the first move. If background computer use arrives from Omarchy or a third party, the fallback ops go with it.
 
 There is one browser. Until the owner pairs the relay with their own Chromium,
 browser calls fail and say so. There is no second backend and no dedicated
 ghost profile, because the tab is the useful isolation unit and a browser the
 owner cannot see is a browser they cannot supervise. The ghost therefore acts
 inside the owner's logged-in session; the extension's README states the risk
-that carries.
+that carries. If WebMCP is widely adopted, the relay goes with it: pages
+would carry the standard surface and the extension becomes machinery nothing
+needs.
 
 ## The runtime
 

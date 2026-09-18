@@ -15,7 +15,11 @@ the shell, Omarchy, or an installed CLI already provides is used, not
 rebuilt. An external component is adopted only when it replaces machinery of
 ours outright, never as a second backend beside it. New surface area (a tool,
 a route, a setting, a background loop) needs a constraint that nothing
-existing can meet, named in this file.
+existing can meet, named in this file. The first existing thing is always an
+installed CLI plus a skill: Bash and pi's skill discovery already reach every
+CLI on the machine, so a new built-in tool, route, or sidecar op has to beat
+that pair at something neither can do. What Omarchy ships is free to depend
+on; the install budget below is for everything else.
 
 Installed size is part of that budget. A dependency is weighed by what it
 adds to the install, not only by the code it saves, and a second
