@@ -50,7 +50,7 @@ channel, pacman repository, or package-signing key.
 
 The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into
-`~/.config/omarchy/plugins/` and enabling it is the install script's step.
+`~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
 The browser relay is installed at `/usr/share/ghost/chromium-extension`; load
 that directory with Chromium's **Load unpacked** flow. The computer-use helper
 is installed in a private Python import directory and exposed through
@@ -67,8 +67,8 @@ edits `~/.config/hypr` or `~/.config/omarchy`.
 
 ## Upgrades, rollback, and uninstall
 
-The package owns only files under `/usr`; the HUD is an omarchy-shell plugin
-whose per-user link the install script makes, and `smoke.sh` fails the build if
+The package owns only files under `/usr`; the HUD's per-user link is the
+owner's, and `smoke.sh` fails the build if
 a system Quickshell link reappears. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, documents, sessions, provider credentials, and API tokens
@@ -96,8 +96,7 @@ sudo pacman -Rns ghost-dev
 
 For stable `ghost`, the final command is `sudo pacman -Rns ghost`.
 
-That removes package-owned files only. It deliberately leaves `~/ghosts`,
-provider credentials, and API/relay tokens untouched.
+That removes package-owned files only.
 
 `smoke.sh` validates a staged package tree, including daemon startup metadata,
 the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
