@@ -11,6 +11,9 @@ TestCase {
         signalName: "turnFinished"
     }
 
+    SignalSpy { id: failedSpy; target: Ghostd; signalName: "turnFailed" }
+    SignalSpy { id: askSpy; target: Ghostd; signalName: "askWaiting" }
+
     function init(): void {
         Ghostd.cancel();
         Ghostd.turnStates = ({});
@@ -22,6 +25,9 @@ TestCase {
         Ghostd.reachable = true;
         Ghostd.hudVisible = false;
         finishedSpy.clear();
+        failedSpy.clear();
+        askSpy.clear();
+        Ghostd.sessions = [];
     }
 
     function cleanup(): void {
@@ -216,5 +222,46 @@ TestCase {
         Ghostd.activeGhost = "mina";
         verify(!Ghostd.applyCurrentModelResponse(stale, "casper", oldGhostGeneration));
         compare(Ghostd.currentModel.provider, "openrouter");
+    }
+
+    function test_backgroundCompletionCarriesConversationAndTitle(): void {
+        const first = openTurn("one", "Fix login", { count: 0 });
+        Ghostd.sessions = [{ id: "pi:one", title: "Login redirect" }];
+        openTurn("two", "Other work", { count: 0 });
+        push(first, { type: "text_end", contentIndex: 0, content: "Fixed. Tests pass." });
+        push(first, { type: "done", reason: "stop" });
+        compare(Array.from(finishedSpy.signalArguments[0]), ["casper", "Fixed. Tests pass.", "pi:one", "Login redirect"]);
+    }
+
+    function test_remoteCancellationDoesNotAnnounceSuccessOrFailure(): void {
+        const turn = openTurn("cancel", "Cancel me", { count: 0 });
+        push(turn, { type: "error", reason: "aborted", errorMessage: "Aborted" });
+        verify(!turn.state.streaming);
+        compare(finishedSpy.count, 0);
+        compare(failedSpy.count, 0);
+    }
+
+    function test_backgroundAskNotifiesOnceAcrossPollingAndNavigation(): void {
+        const first = openTurn("one", "First prompt", { count: 0 });
+        openTurn("two", "Second prompt", { count: 0 });
+        const ask = { id: "ask-one", questions: [{ question: "Keep sessions?" }] };
+        Ghostd.receivePendingAskFor(first.state, ask);
+        Ghostd.receivePendingAskFor(first.state, ask);
+        compare(askSpy.count, 1);
+        compare(Array.from(askSpy.signalArguments[0]), ["casper", ask, "pi:one", "First prompt"]);
+        Ghostd.adoptConversation("casper", "pi:one");
+        Ghostd.receivePendingAskFor(first.state, ask);
+        compare(askSpy.count, 1);
+        Ghostd.receivePendingAskFor(first.state, null);
+        Ghostd.receivePendingAskFor(first.state, { id: "ask-two" });
+        compare(askSpy.count, 2);
+    }
+
+    function test_emptyConversationDoesNotCachePlaceholderTitle(): void {
+        Ghostd.adoptConversation("casper", "pi:new");
+        const state = Ghostd.ensureTurnState("casper", "pi:new", "new", "pi");
+        Ghostd.captureActiveTurn(state);
+        state.rows.push({ role: "user", text: "Fix login redirect" });
+        compare(Ghostd.notificationTitle(state), "Fix login redirect");
     }
 }

@@ -1,15 +1,8 @@
 pragma Singleton
 
-// Notifier — desktop notifications for turns that finish while the HUD is shut.
-//
-// Quickshell.Services.Notifications is a *server* API: it receives
-// notifications and every field on `Notification` is readonly. There is no
-// send/post/create anywhere in it. So v1 shells out to notify-send, which is
-// what Omarchy's own scripts do and costs nothing when nobody is listening.
-//
-// execDetached rather than a Process object: fire-and-forget, no lifecycle to
-// leak if a burst of turns finish at once.
+// Desktop toasts use notify-send; Quickshell's notification API is server-only.
 import Quickshell
+import Quickshell.Io
 import QtQuick
 import "NotificationText.js" as NotificationText
 
@@ -18,44 +11,48 @@ Singleton {
 
     property bool enabled: true
 
-    readonly property int excerptLength: 180
+    property var notificationIds: ({})
+    property var pending: []
+    property string sendingKey: ""
 
-    function excerpt(text: string): string {
-        const flat = text.replace(/\s+/gu, " ").trim();
-        return flat.length > root.excerptLength
-            ? flat.slice(0, root.excerptLength - 1) + "…"
-            : flat;
+    Process {
+        id: sender
+        objectName: "notificationSender"
+        stdout: SplitParser {
+            onRead: data => {
+                const id = Number(data.trim());
+                if (Number.isInteger(id) && id > 0) root.notificationIds[root.sendingKey] = id;
+            }
+        }
+        onRunningChanged: if (!running) Qt.callLater(root.drain)
     }
 
-    /**
-     * `urgency` is one of "low", "normal", "critical".
-     * Notifications are replaced in place per ghost via the synchronous hint,
-     * so a chatty ghost cannot bury the rest of the user's notification stack.
-     */
-    function send(ghost: string, body: string, urgency: string): void {
+    /** Wait for the server ID before sending a replacement for the same conversation. */
+    function drain(): void {
+        if (sender.running || root.pending.length === 0) return;
+        const next = root.pending.shift();
+        root.sendingKey = JSON.stringify([next.ghost, next.sessionId]);
+        sender.command = NotificationText.command(next.ghost, next.sessionId, next.title,
+            next.body, next.urgency, root.notificationIds[root.sendingKey]);
+        sender.running = true;
+    }
+
+    function send(ghost: string, sessionId: string, title: string, body: string, urgency: string): void {
         if (!root.enabled) return;
-        Quickshell.execDetached([
-            "notify-send",
-            "--app-name=ghost",
-            "--urgency=" + urgency,
-            // Omarchy persists this hint with the toast and runs it on click.
-            // Other notification servers ignore unknown freedesktop hints.
-            "--hint=string:omarchy-exec:omarchy-shell shell summon ferdousbhai.ghost {}",
-            "--hint=string:x-canonical-private-synchronous:ghost-" + ghost,
-            ghost,
-            root.excerpt(body)
-        ]);
+        root.pending = root.pending.filter(item => item.ghost !== ghost || item.sessionId !== sessionId);
+        root.pending.push({ ghost: ghost, sessionId: sessionId, title: title, body: body, urgency: urgency });
+        root.drain();
     }
 
-    function askWaiting(ghost: string, ask: var): void {
-        root.send(ghost, NotificationText.askBody(ask), "normal");
+    function askWaiting(ghost: string, sessionId: string, title: string, ask: var): void {
+        root.send(ghost, sessionId, title, NotificationText.askBody(ask), "normal");
     }
 
-    function turnFinished(ghost: string, text: string): void {
-        root.send(ghost, text === "" ? "finished its turn" : text, "normal");
+    function turnFinished(ghost: string, sessionId: string, title: string, text: string): void {
+        root.send(ghost, sessionId, title, text.trim() === "" ? "Finished its turn" : text, "normal");
     }
 
-    function turnFailed(ghost: string, message: string): void {
-        root.send(ghost, message, "critical");
+    function turnFailed(ghost: string, sessionId: string, title: string, message: string): void {
+        root.send(ghost, sessionId, title, message, "critical");
     }
 }

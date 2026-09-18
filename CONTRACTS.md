@@ -455,6 +455,14 @@ spawn — and core never imports the Omarchy side:
   The plugin is distributed only by the `ghost` package, never as a
   `omarchy plugin add` git checkout: the window and the daemon are one product
   and must be the same version, and a second channel cannot hold that lock.
+  Desktop toasts belong to the shell service, not stop hooks. Completed turns,
+  terminal failures, and pending questions notify unless their conversation is
+  being viewed in the focused chat panel. Cancellation is quiet. Toasts use
+  the conversation title and a reply/error/question excerpt, replace live toasts
+  per ghost and conversation using the notification server’s IDs, and open that
+  conversation through a summon payload
+  `{ "ghost": "name", "sessionId": "pi:id", "section": "chat" }`, carried in
+  Omarchy’s `omarchy-exec-argv` notification hint.
   It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the

@@ -32,7 +32,7 @@ Item {
      * Summon the window. The payload is the shell's, and carries the same
      * verbs the CLI and the tray used to send: `{"section":"board"}` opens on
      * a section, `{"ghost":"casper"}` selects one first, `{"login":true}`
-     * opens the provider login.
+     * opens the provider login. `sessionId` with `ghost` opens that conversation.
      */
     function open(payloadJson: string): void {
         let payload = ({});
@@ -41,7 +41,9 @@ Item {
         } catch (error) {
             // A malformed payload is still a summon; the window is the point.
         }
-        if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
+        if (payload.ghost && payload.sessionId)
+            Ghostd.openConversationForGhost(String(payload.ghost), String(payload.sessionId));
+        else if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
         hud.open();
         if (payload.section) hud.showSection(String(payload.section));
         if (payload.login) hud.openLogin();

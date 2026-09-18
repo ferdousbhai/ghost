@@ -115,8 +115,9 @@ stop the mock separately.
   then the reply arriving word by word with `**bold**` rendered as bold. The
   narration never reaches the transcript, and the tool call settles behind the
   row's quiet "1 step" toggle rather than into a card of its own.
-- With the HUD closed, a finished turn raises a `notify-send` notification
-  instead.
+- A finished turn, failure, or pending question raises a desktop toast unless
+  its conversation is being viewed in the focused chat panel. Clicking the toast
+  opens that conversation; subsequent toasts replace it while it remains live.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
   dismissed with Esc; use `SUPER+CTRL+G`).
 - `hyprctl clients -j` lists it as a real toplevel — it is NOT in
@@ -140,10 +141,8 @@ misspelled properties.
 
 ### Expected warnings
 
-One, an unused-import info on `Service.qml`. The three `PanelWindow` warnings
-documented here previously belonged to `GhostBarSurface.qml`, deleted when the
-HUD became an omarchy-shell plugin. Anything beyond the one info line is a real
-finding.
+None. Treat QML import and signal warnings as findings; a missing service import
+can prevent notifications from loading even when the panel itself opens.
 
 ## What was verified live, and what was not
 
@@ -177,4 +176,7 @@ Not verified live:
   Hyprland on the focused workspace, and `focuswindow class:ghost` (the "focus"
   half of launch-or-focus) pulls an already-open window across outputs — neither
   path was exercised against a second monitor.
-- `notify-send` output was raised but its rendering was not inspected.
+
+Notification follow-up (isolated preview, 2026-09-18): inspected the toast,
+verified server-ID replacement, and invoked its click action from another
+ghost’s Board view to return to the originating conversation.

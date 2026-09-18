@@ -508,6 +508,7 @@ Singleton {
         from a message, half a window away from it. */
     property string branchError: ""
     property bool hudVisible: false
+    property bool hudChatFocused: false
 
     // The ghost's opening line for an empty chat. Pure upside: the HUD paints
     // its own static invitation the instant the card appears and only swaps to
@@ -534,8 +535,9 @@ Singleton {
     property bool queueSubmitting: false
     property string queueError: ""
 
-    signal turnFinished(string ghost, string text)
-    signal turnFailed(string ghost, string message)
+    signal turnFinished(string ghost, string text, string sessionId, string title)
+    signal turnFailed(string ghost, string message, string sessionId, string title)
+    signal askWaiting(string ghost, var ask, string sessionId, string title)
     signal queueMessageRejected(string text)
     signal branchDraftReady(string text)
     signal mcpMutationFinished(string action, string server, bool ok)
@@ -1424,6 +1426,7 @@ Singleton {
             conversationId: conversationId,
             runtime: runtime,
             published: false,
+            title: "",
             rows: [],
             hydratedRowCount: 0,
             historyTruncated: false,
@@ -1490,6 +1493,8 @@ Singleton {
     /** Tests and QML controls still write the active projection directly. */
     function captureActiveTurn(state: var): void {
         if (!root.isActiveTurn(state)) return;
+        const listed = root.sessions.find(session => session.id === state.sessionId);
+        if (listed) state.title = listed.title || "";
         root.captureTurnProjection(state);
     }
 
@@ -2270,7 +2275,10 @@ Singleton {
                     const valid = root.validSessionRows(list);
                     for (const session of valid) {
                         const state = root.turnStates[root.conversationKey(g, session.id)];
-                        if (state) state.published = true;
+                        if (state) {
+                            state.published = true;
+                            state.title = session.title || "";
+                        }
                     }
                     root.sessions = root.mergeSessionListing(g, valid);
                     root.sessionsError = "";
@@ -3329,6 +3337,10 @@ Singleton {
             root.endTurnState(state, "");
             break;
         case "error":
+            if (event.reason === "aborted") {
+                root.cancelTurn(state);
+                break;
+            }
             root.endTurnState(state,
                 state.limitNotice || event.errorMessage || ("the ghost stopped: " + event.reason));
             break;
@@ -3421,6 +3433,15 @@ Singleton {
         return harness + " " + kind + window + " reached" + resets;
     }
 
+    function notificationTitle(state: var): string {
+        const listed = state.ghost === root.activeGhost
+            ? root.sessions.find(session => session.id === state.sessionId) : null;
+        const title = (listed && listed.title) || state.title;
+        if (title) return String(title);
+        const first = state.rows.find(row => row.role === "user" && row.text);
+        return first ? String(first.text) : "Conversation";
+    }
+
     function endTurnState(state: var, errorMessage: string): void {
         // The terminal event, EOF fallback, watchdog and abort can race. Only
         // the first one owns settlement and emits a terminal shell signal.
@@ -3442,7 +3463,7 @@ Singleton {
         root.updateLiveConversationKeys();
         if (errorMessage !== "") {
             state.lastError = errorMessage;
-            root.turnFailed(state.ghost, errorMessage);
+            root.turnFailed(state.ghost, errorMessage, state.sessionId, root.notificationTitle(state));
             if (state.ghost === root.activeGhost) Qt.callLater(function () {
                 root.fetchSessions(state.ghost);
             });
@@ -3450,7 +3471,7 @@ Singleton {
             // A turn that completed is proof the daemon answered; drop any stale
             // error banner so it does not linger under a good reply.
             state.lastError = "";
-            root.turnFinished(state.ghost, text);
+            root.turnFinished(state.ghost, text, state.sessionId, root.notificationTitle(state));
         }
         root.projectTurnFields(state);
         Qt.callLater(function () {
@@ -3515,6 +3536,12 @@ Singleton {
         root.projectTurnFields(state);
     }
 
+    function receivePendingAskFor(state: var, ask: var): void {
+        const previousId = state.pendingAsk ? state.pendingAsk.id : "";
+        state.pendingAsk = ask;
+        if (ask && ask.id && ask.id !== previousId)
+            root.askWaiting(state.ghost, ask, state.sessionId, root.notificationTitle(state));
+    }
 
     function fetchPendingAskFor(state: var): void {
         if (!state.streaming || state.activity !== "ask") return;
@@ -3526,7 +3553,7 @@ Singleton {
             if (xhr.status === 200) {
                 try {
                     const body = JSON.parse(xhr.responseText);
-                    state.pendingAsk = body.ask || null;
+                    root.receivePendingAskFor(state, body.ask || null);
                     state.askError = "";
                 } catch (error) {
                     state.askError = "ghostd sent a malformed ask interaction";

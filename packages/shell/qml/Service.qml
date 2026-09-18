@@ -5,7 +5,7 @@
 // mounted. The panel is loaded only when summoned, so this is what makes the
 // bar dot live and a finished turn reach the owner while the window is shut.
 import QtQuick
-import Quickshell
+import Quickshell.Io
 import "services"
 
 Item {
@@ -15,10 +15,6 @@ Item {
 
     /** Injected by the host; used to summon and hide this plugin's own panel. */
     property var shell: null
-
-    // An ask is polled while its provider turn remains open. Remember the id
-    // so a reconnect or repeated property assignment cannot raise two toasts.
-    property string announcedAskId: ""
 
     /**
      * Whether the window is up, asked of the host at the moment it matters.
@@ -85,29 +81,24 @@ Item {
         }
     }
 
-    // Only when the window is shut. If the owner is looking at the stream, a
-    // toast saying what they just watched arrive is noise.
+    function viewing(ghost: string, sessionId: string): bool {
+        return Ghostd.hudChatFocused && Ghostd.activeGhost === ghost
+            && Ghostd.currentSessionId === sessionId;
+    }
+
     Connections {
         target: Ghostd
 
-        function onTurnFinished(ghost: string, text: string): void {
-            if (!root.panelShown()) Notifier.turnFinished(ghost, text);
+        function onTurnFinished(ghost: string, text: string, sessionId: string, title: string): void {
+            if (!root.viewing(ghost, sessionId)) Notifier.turnFinished(ghost, sessionId, title, text);
         }
 
-        function onTurnFailed(ghost: string, message: string): void {
-            if (!root.panelShown()) Notifier.turnFailed(ghost, message);
+        function onTurnFailed(ghost: string, message: string, sessionId: string, title: string): void {
+            if (!root.viewing(ghost, sessionId)) Notifier.turnFailed(ghost, sessionId, title, message);
         }
 
-        function onPendingAskChanged(): void {
-            const ask = Ghostd.pendingAsk;
-            if (!ask) {
-                root.announcedAskId = "";
-                return;
-            }
-            const askId = String(ask.id || "");
-            if (askId !== "" && askId === root.announcedAskId) return;
-            root.announcedAskId = askId;
-            if (!root.panelShown()) Notifier.askWaiting(Ghostd.activeGhost, ask);
+        function onAskWaiting(ghost: string, ask: var, sessionId: string, title: string): void {
+            if (!root.viewing(ghost, sessionId)) Notifier.askWaiting(ghost, sessionId, title, ask);
         }
     }
 

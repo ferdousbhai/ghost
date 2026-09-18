@@ -212,6 +212,12 @@ FloatingWindow {
         return title === "Ghost" || title.startsWith("Ghost — ");
     }
 
+    Binding {
+        target: Ghostd
+        property: "hudChatFocused"
+        value: hud.shown && hud.focused() && hud.currentSection === "chat" && !hud.loginOpen
+    }
+
     // Materialize on summon: the content takes a breath of scale and opacity
     // instead of cutting in. Content-level, because the compositor owns the
     // surface itself; Hyprland's own open animation composes with it.
