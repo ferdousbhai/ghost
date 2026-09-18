@@ -3429,6 +3429,25 @@ describe("multi-ghost", () => {
 });
 
 describe("session listing", () => {
+  it("does not list idle inspections, so empty drafts cannot pile up", async () => {
+    const { dir } = await setup();
+    const sessionDir = ghostPaths(dir).sessionDir;
+    await host!.admittedResources("casper", "empty-a");
+    await host!.availableCommands("casper", "empty-b");
+    expect(existsSync(join(sessionDir, sessionFileNameFor("empty-a")))).toBe(false);
+    expect(existsSync(join(sessionDir, sessionFileNameFor("empty-b")))).toBe(false);
+
+    await host!.open("casper", "empty-c");
+    expect(existsSync(join(sessionDir, sessionFileNameFor("empty-c")))).toBe(true);
+    expect(await host!.listSessions("casper")).toEqual([]);
+    expect(existsSync(join(sessionDir, sessionFileNameFor("empty-c")))).toBe(false);
+
+    await host!.runTurn("casper", { sessionId: "empty-a", prompt: "hi", emit: () => {} });
+    const sessions = await host!.listSessions("casper");
+    expect(sessions.map((row) => row.id)).toEqual(["pi:empty-a"]);
+    expect(sessions[0]?.messageCount).toBeGreaterThan(0);
+  });
+
   it("lists the ghost's own conversations in the sidebar shape", async () => {
     await setup();
     await host!.runTurn("casper", { sessionId: "conv-1", prompt: "hi", emit: () => {} });
@@ -3440,6 +3459,7 @@ describe("session listing", () => {
       runtime: "pi",
     });
     expect(sessions[0]?.messageCount).toBeGreaterThan(0);
+    expect(sessions[0]?.preview).toBe("hi");
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     expect(sessions[0]?.updatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
     // `title` is present (may be null) — no legacy `path` field leaks.
@@ -4732,6 +4752,7 @@ describe("conversation titles", () => {
     expect(events.at(-1)?.type).toBe("done");
     const sessions = await host.listSessions("casper");
     expect(sessions[0]?.title).toBeNull();
+    expect(sessions[0]?.preview).toBe("hi");
   });
 
   it("names a conversation from a real single completion on the cheapest usable model", async () => {

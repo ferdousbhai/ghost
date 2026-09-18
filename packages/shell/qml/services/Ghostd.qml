@@ -1888,7 +1888,15 @@ Singleton {
             root.clearSessionResources();
             return;
         }
-        const sessionId = root.ensureSession(ghost);
+        // Do not mint a conversation just to inspect skills/MCP. That used to
+        // persist a header-only transcript on every ghost select and HUD open.
+        const sessionId = root.currentSessionId !== ""
+            ? root.currentSessionId
+            : (root.sessionIds[ghost] || "");
+        if (sessionId === "") {
+            root.clearSessionResources();
+            return;
+        }
         if (!force && root.sessionResourcesGhost === ghost
                 && root.sessionResourcesSessionId === sessionId) return;
         const previous = root.sessionResourcesRequest;
@@ -1929,9 +1937,8 @@ Singleton {
 
     /**
      * Discover Ghost's effective slash commands for the active conversation.
-     * `ensureSession` may mint the id for a blank chat, but the daemon still
-     * creates its transcript lazily: browsing commands does not add a row to
-     * the conversation list.
+     * A blank composer still needs the catalog; that inspect uses a throwaway
+     * id and must not mint the current conversation.
      */
     function fetchCommands(force: bool): void {
         const ghost = root.activeGhost;
@@ -1939,7 +1946,11 @@ Singleton {
             root.clearCommands();
             return;
         }
-        const sessionId = root.ensureSession(ghost);
+        const liveId = root.currentSessionId !== ""
+            ? root.currentSessionId
+            : (root.sessionIds[ghost] || "");
+        const inspecting = liveId === "";
+        const sessionId = inspecting ? root.conversationActionId("inspect") : liveId;
         if (!force && root.commandsGhost === ghost
                 && root.commandsSessionId === sessionId) return;
         if (root.commandsRequest && root.commandsRequest.readyState !== 4)
@@ -1953,7 +1964,12 @@ Singleton {
         root.commandsSessionId = sessionId;
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.commandsRequest) return;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
+            if (ghost !== root.activeGhost) return;
+            if (inspecting && root.currentSessionId !== "") {
+                root.commandsLoading = false;
+                return;
+            }
+            if (!inspecting && sessionId !== root.currentSessionId) return;
             root.commandsLoading = false;
             if (xhr.status === 200) {
                 try {
@@ -2238,7 +2254,9 @@ Singleton {
         const ids = new Set(list.map(function (session) { return session.id; }));
         const localLive = root.sessions.filter(function (session) {
             return session && session.localOnly === true && !ids.has(session.id)
-                && root.isConversationStreaming(ghost, session.id);
+                && (root.isConversationStreaming(ghost, session.id)
+                    || (session.id === root.currentSessionId
+                        && session.messageCount === 0));
         });
         return root.orderSessions(list.concat(localLive));
     }
@@ -2301,19 +2319,52 @@ Singleton {
     }
 
     /**
-     * Start a fresh conversation for the active ghost: mint a session id, clear
-     * the transcript view, and re-list. The daemon creates the session lazily on
-     * the first turn and titles it in the background afterwards, so no listing
-     * row exists yet — the composer is simply ready for a new thread.
+     * Start a fresh conversation for the active ghost. An already-blank draft
+     * is reused — there is only ever one unstarted "New conversation". The
+     * daemon creates the transcript lazily on the first turn and titles it
+     * afterwards; until then the row is local to the HUD.
      */
     function newConversation(): void {
         if (root.activeGhost === "") return;
         root.performNavigation(({ kind: "newConversation" }));
     }
 
+    function isUnstartedSession(session: var): bool {
+        return !!session && session.messageCount === 0
+            && (session.title === null || session.title === ""
+                || session.title === undefined);
+    }
+
+    function conversationHasOwnerText(id: string): bool {
+        const listed = root.sessions.find(function (session) {
+            return session && session.id === id;
+        });
+        if (listed && typeof listed.messageCount === "number"
+                && listed.messageCount > 0)
+            return true;
+        const state = root.turnStates[root.conversationKey(root.activeGhost, id)];
+        if (state && state.transcriptLoad) return true;
+        if (state && state.hydratedRowCount > 0) return true;
+        if (state && Array.isArray(state.rows) && state.rows.some(function (row) {
+            return row && row.role === "user"
+                && typeof row.text === "string" && row.text !== "";
+        })) return true;
+        return false;
+    }
+
+    function isCurrentConversationUnstarted(): bool {
+        const id = root.currentSessionId;
+        if (id === "") return false;
+        return !root.conversationHasOwnerText(id);
+    }
+
     function finishNewConversation(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
+        if (root.isCurrentConversationUnstarted()) {
+            root.ensureDraftSessionRow(ghost, root.currentSessionId);
+            return;
+        }
         const previous = root.activeTurnState(false);
         if (previous) {
             root.captureActiveTurn(previous);
@@ -2331,6 +2382,7 @@ Singleton {
         // A blank chat is back on screen, so it earns a fresh opening line.
         root.clearGreeting();
         root.fetchGreeting();
+        root.ensureDraftSessionRow(ghost, id);
     }
 
     function ensureOptimisticSessionRow(ghost: string, id: string): void {
@@ -2347,9 +2399,39 @@ Singleton {
             conversationId: identity.conversationId,
             runtime: identity.runtime,
             title: null,
+            preview: null,
             createdAt: now,
             updatedAt: now,
             messageCount: 1,
+            pinned: false,
+            unread: false,
+            localOnly: true
+        }]));
+    }
+
+    function ensureDraftSessionRow(ghost: string, id: string): void {
+        const state = root.turnStates[root.conversationKey(ghost, id)];
+        if (state) state.published = true;
+        if (ghost !== root.activeGhost || id === "") return;
+        const existing = root.sessions.find(function (session) {
+            return session && session.id === id;
+        });
+        if (existing) {
+            root.sessions = root.orderSessions(root.sessions);
+            return;
+        }
+        const identity = root.conversationIdentity(id);
+        if (!identity) return;
+        const now = new Date().toISOString();
+        root.sessions = root.orderSessions(root.sessions.concat([{
+            id: id,
+            conversationId: identity.conversationId,
+            runtime: identity.runtime,
+            title: null,
+            preview: null,
+            createdAt: now,
+            updatedAt: now,
+            messageCount: 0,
             pinned: false,
             unread: false,
             localOnly: true
@@ -2424,6 +2506,10 @@ Singleton {
                 ? Object.assign({}, session, { pinned: pinned })
                 : session;
         }));
+        const local = root.sessions.find(function (session) {
+            return session && session.id === id;
+        });
+        if (local && local.localOnly === true) return;
         const xhr = new XMLHttpRequest();
         root.pinSessionRequest = xhr;
         xhr.onreadystatechange = function () {
@@ -2501,8 +2587,32 @@ Singleton {
         });
     }
 
+    function collapseUnstartedSessions(list: var): var {
+        let draft = null;
+        const kept = [];
+        for (let index = 0; index < list.length; index++) {
+            const session = list[index];
+            if (!session) continue;
+            // Only HUD drafts collapse. A fork rewound to empty is a real
+            // listed conversation and must not disappear when a draft exists.
+            if (!(session.localOnly === true && root.isUnstartedSession(session))) {
+                kept.push(session);
+                continue;
+            }
+            if (draft === null || session.id === root.currentSessionId)
+                draft = session;
+            else if (draft.id !== root.currentSessionId) {
+                const whenA = Date.parse(draft.updatedAt || draft.createdAt || "") || 0;
+                const whenB = Date.parse(session.updatedAt || session.createdAt || "") || 0;
+                if (whenB > whenA) draft = session;
+            }
+        }
+        if (draft) kept.push(draft);
+        return kept;
+    }
+
     function orderSessions(list: var): var {
-        return list.slice().sort(function (a, b) {
+        return root.collapseUnstartedSessions(list).sort(function (a, b) {
             const pinnedA = a.pinned === true ? 1 : 0;
             const pinnedB = b.pinned === true ? 1 : 0;
             if (pinnedA !== pinnedB) return pinnedB - pinnedA;
@@ -3172,14 +3282,19 @@ Singleton {
     /**
      * The active session id for a ghost, minting one on first use. A conversation
      * is created lazily by the daemon on the first turn; until then it lives only
-     * as this id, which `options.sessionId` carries into the POST.
+     * as this id, which `options.sessionId` carries into the POST. Reuses the
+     * current unstarted draft so New and Send cannot mint a second blank chat.
      */
     function ensureSession(ghost: string): string {
         if (!root.sessionIds[ghost]) {
-            const conversationId = "hud-" + Date.now().toString(36)
-                + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-            root.sessionIds[ghost] = root.conversationActionId(conversationId);
-            root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, "pi");
+            if (ghost === root.activeGhost && root.isCurrentConversationUnstarted()) {
+                root.sessionIds[ghost] = root.currentSessionId;
+            } else {
+                const conversationId = "hud-" + Date.now().toString(36)
+                    + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
+                root.sessionIds[ghost] = root.conversationActionId(conversationId);
+                root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, "pi");
+            }
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
         root.ensureTurnState(ghost, root.sessionIds[ghost]);

@@ -190,6 +190,7 @@ write          registry=yes  wire=yes  invokable=yes
     "id": "pi:conv-golden",
     "messageCount": 6,
     "pinned": false,
+    "preview": "Remember that I want short answers.",
     "runtime": "pi",
     "title": "Remembering how you like answers",
     "unread": true,

@@ -76,7 +76,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     select.textContent = "";
     for (const s of sessions) {
       const o = document.createElement("option");
-      o.value = s.id; o.textContent = s.title || s.conversationId;
+      o.value = s.id; o.textContent = s.title || s.preview || s.conversationId;
       select.append(o);
     }
     if (!sessions.some((s) => s.id === session)) session = sessions[0]?.id || null;

@@ -137,6 +137,13 @@ bounded sidecars under `sessions/`. A conversation's own cwd and its per-tool
 cwds are custom entries inside its transcript
 ([`session-cwds.ts`](packages/daemon/src/session-cwds.ts)), which pi ignores
 when building context, so a conversation is one file.
+Inspecting commands or resources of a new id does not create a transcript.
+`GET /sessions` omits header-only leftovers and moves idle ones to Trash,
+closing an unhosted leftover first when the daemon still holds it.
+A file is a conversation once a user or assistant message lands, the owner
+names it, or it is a fork (a branch is listed even when rewound to empty).
+Each row carries `preview`, the first user text, so an untitled conversation
+still has a name in the sidebar. The HUD keeps at most one unstarted draft.
 
 Forking copies a Pi conversation before one persisted user entry; it never
 rewinds the source. Deletion moves every Ghost-owned artifact for that public id
@@ -338,10 +345,10 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `POST /api/ghosts/:name/greeting` | `{ greeting: string|null, onboarding }`; generation failure is a null greeting, not a 5xx. |
 | `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries. |
+| `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries with `preview`. Omits header-only leftovers and trashes idle ones. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/commands` | Effective pi slash-command catalog. |
-| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be opened for inspection. |
+| `GET /sessions/:id/commands` | Effective pi slash-command catalog. A missing transcript returns the ghost-level catalog without creating one. |
+| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be inspected without creating a transcript. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from pi's JSONL. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn. A steer reaches the model mid-turn; a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |

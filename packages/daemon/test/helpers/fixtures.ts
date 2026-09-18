@@ -155,7 +155,13 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     GHOSTD_API_TOKEN_FILE: tokenFile,
     XDG_CONFIG_HOME: join(temp.root, ".config"),
   };
-  if (options.openSession) await host.open(ghost, options.openSession);
+  if (options.openSession) {
+    await host.runTurn(ghost, {
+      sessionId: options.openSession,
+      prompt: "hi",
+      emit: () => {},
+    });
+  }
   return { apiToken, env, host, listening, provider, temp, tokenFile };
 }
 

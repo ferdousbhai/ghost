@@ -140,6 +140,62 @@ TestCase {
         compare(Ghostd.mergeSessionListing("casper", []).length, 0);
     }
 
+    function test_newConversationReusesTheEmptyDraft(): void {
+        Ghostd.newConversation();
+        const first = Ghostd.currentSessionId;
+        verify(first !== "");
+        compare(Ghostd.sessions.length, 1);
+        compare(Ghostd.sessions[0].id, first);
+        compare(Ghostd.sessions[0].messageCount, 0);
+        verify(Ghostd.sessions[0].localOnly);
+
+        Ghostd.newConversation();
+        compare(Ghostd.currentSessionId, first);
+        compare(Ghostd.sessions.length, 1);
+        compare(Ghostd.sessions[0].id, first);
+    }
+
+    function test_unstartedDraftSurvivesRefetch(): void {
+        Ghostd.newConversation();
+        const id = Ghostd.currentSessionId;
+        const merged = Ghostd.mergeSessionListing("casper", []);
+        compare(merged.length, 1);
+        compare(merged[0].id, id);
+        compare(merged[0].messageCount, 0);
+    }
+
+    function test_listingCollapsesExtraUnstartedRows(): void {
+        const now = new Date().toISOString();
+        Ghostd.currentSessionId = "pi:keep";
+        const visible = Ghostd.orderSessions([
+            {
+                id: "pi:old", conversationId: "old", runtime: "pi",
+                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                pinned: false, localOnly: true
+            },
+            {
+                id: "pi:keep", conversationId: "keep", runtime: "pi",
+                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                pinned: false, localOnly: true
+            },
+            {
+                id: "pi:fork", conversationId: "fork", runtime: "pi",
+                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                pinned: false
+            },
+            {
+                id: "pi:named", conversationId: "named", runtime: "pi",
+                title: "Weekend", messageCount: 2, updatedAt: now, createdAt: now,
+                pinned: false
+            }
+        ]);
+        compare(visible.length, 3);
+        compare(visible.filter(function (session) { return session.id === "pi:keep"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "pi:named"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "pi:fork"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "pi:old"; }).length, 0);
+    }
+
     function test_qualifiedIdsKeepDistinctSelectionAndResumeIds(): void {
         const parsed = Ghostd.parseConversationActionId("pi:inferred");
         verify(parsed !== null);

@@ -116,7 +116,7 @@ import {
   type ConversationRuntime,
 } from "./conversation-identity.js";
 import { generateTitle } from "./title.js";
-import type { TrashPathResult } from "./trash.js";
+import { trashPath, type TrashPathResult } from "./trash.js";
 import {
   bindConversationId,
   conversationIdFromSessionFile,
@@ -1025,11 +1025,24 @@ export interface SessionSummary {
   conversationId: string;
   runtime: ConversationRuntime;
   title: string | null;
+  /** First user text when the conversation has messages; display-only. */
+  preview: string | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
   pinned: boolean;
   unread: boolean;
+}
+
+const LISTING_PREVIEW_MAX = 120;
+const PI_EMPTY_FIRST_MESSAGE = "(no messages)";
+
+function listingPreview(firstMessage: string, messageCount: number): string | null {
+  if (messageCount <= 0) return null;
+  const text = firstMessage === PI_EMPTY_FIRST_MESSAGE ? "" : firstMessage;
+  const line = text.split("\n").map((part) => part.trim()).find((part) => part.length > 0);
+  if (!line) return null;
+  return line.length > LISTING_PREVIEW_MAX ? line.slice(0, LISTING_PREVIEW_MAX).trimEnd() : line;
 }
 
 export interface ConversationUpdatedEvent {
@@ -1486,6 +1499,17 @@ export class SessionHost {
     hosted.lastUsedAt = this.retentionNow();
   }
 
+  private idleLeftoverBusy(ghostName: string, conversationId: string): boolean {
+    const key = this.keyOf(ghostName, conversationId);
+    if (this.opening.has(key) || this.closing.has(key) || this.cleanupRetries.has(key)) {
+      return true;
+    }
+    if ((this.lifecycleAdmissions.get(key) ?? 0) > 0) return true;
+    if (this.turnAdmissions.has(key)) return true;
+    const hosted = this.sessions.get(key);
+    return hosted !== undefined && this.sessionProtectedFromRetention(hosted);
+  }
+
   private sessionProtectedFromRetention(hosted: HostedSession): boolean {
     const [, conversationId] = sessionKeyParts(hosted.sessionKey);
     return this.sessionOwned(hosted)
@@ -1722,6 +1746,12 @@ export class SessionHost {
     ghostName: string,
     sessionId?: string | null,
   ): Promise<GhostAvailableSlashCommand[]> {
+    const ghost = this.registry.get(ghostName);
+    const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
+    const existing = this.sessions.get(this.keyOf(ghostName, conversationId));
+    if (existing) return buildGhostAvailableSlashCommands(existing.commands);
+    const sessionFile = join(ghostPaths(ghost.dir).sessionDir, sessionFileNameFor(conversationId));
+    if (!existsSync(sessionFile)) return this.previewAvailableCommands(ghost);
     const hosted = await this.idleHostedSession(
       ghostName,
       sessionId,
@@ -1738,10 +1768,12 @@ export class SessionHost {
     ghostName: string,
     sessionId?: string | null,
   ): Promise<SessionResourceView> {
-    this.registry.get(ghostName);
+    const ghost = this.registry.get(ghostName);
     const conversationId = requireRawConversationId(sessionId ?? DEFAULT_SESSION_KEY);
     const existing = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (existing) return structuredClone(existing.resources);
+    const sessionFile = join(ghostPaths(ghost.dir).sessionDir, sessionFileNameFor(conversationId));
+    if (!existsSync(sessionFile)) return this.previewAdmittedResources(ghost);
     const hosted = await this.idleHostedSession(
       ghostName,
       conversationId,
@@ -1751,6 +1783,56 @@ export class SessionHost {
       return structuredClone(hosted.resources);
     } finally {
       await this.releaseSessionClaim(hosted, ghostName);
+    }
+  }
+
+  private async previewAvailableCommands(ghost: Ghost): Promise<GhostAvailableSlashCommand[]> {
+    const paths = ghostPaths(ghost.dir);
+    const [machineSkills, ghostSnapshot] = await Promise.all([
+      loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
+      loadDeclarativeSnapshot(paths.home, { level: "user" }),
+    ]);
+    const effective = mergeDeclarativeSnapshots([
+      ...(machineSkills ? [machineSkills] : []),
+      ghostSnapshot,
+    ]);
+    return buildGhostAvailableSlashCommands([
+      ...effective.slashCommands,
+      ...effective.promptTemplates,
+    ]);
+  }
+
+  private async previewAdmittedResources(ghost: Ghost): Promise<SessionResourceView> {
+    const paths = ghostPaths(ghost.dir);
+    const [machineSkills, ghostSnapshot] = await Promise.all([
+      loadMachineSkills(this.ownerHome, { paths: this.machineSkills }),
+      loadDeclarativeSnapshot(paths.home, { level: "user" }),
+    ]);
+    const skillGroups: SessionSkillGroup[] = [
+      ...(machineSkills
+        ? [sessionSkillGroup(
+            "machine",
+            0,
+            machineSkills,
+            machineSkills.skillDiagnostics.map((diagnostic) => ({
+              source: "machine" as const,
+              ...diagnostic,
+            })),
+          )]
+        : []),
+      sessionSkillGroup("ghost", 1, ghostSnapshot),
+    ];
+    const logger = this.logger.child({ ghost: ghost.name });
+    const manager = new GhostMcpManager({ cwd: this.defaultCwd(ghost), logger });
+    try {
+      const mcpResult = await connectGhostMcp(manager, paths.home, logger);
+      return buildSessionResourceView({
+        runtime: "pi",
+        skillGroups,
+        mcpGroups: mcpResult.admission,
+      });
+    } finally {
+      await manager.disconnectAll();
     }
   }
 
@@ -4096,9 +4178,25 @@ export class SessionHost {
         return null;
       }
       if (conversationId === null) return null;
+      // Header-only leftovers from idle inspection are not conversations.
+      // A fork rewound to empty still is: the owner asked for that copy.
+      if (info.messageCount === 0
+        && !info.name?.trim()
+        && !info.parentSessionPath) {
+        if (!this.idleLeftoverBusy(ghost.name, conversationId)) {
+          try {
+            await this.closePi(ghost.name, conversationId);
+            trashPath(info.path, { home: this.ownerHome });
+          } catch {
+            // Still omit it; a later list retries the cleanup.
+          }
+        }
+        return null;
+      }
       return {
         ...conversationIdentity(conversationId),
         title: info.name ?? null,
+        preview: listingPreview(info.firstMessage, info.messageCount),
         createdAt: info.created.toISOString(),
         updatedAt: info.modified.toISOString(),
         messageCount: info.messageCount,

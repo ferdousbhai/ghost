@@ -3,8 +3,9 @@ pragma ComponentBehavior: Bound
 // The conversation list for the selected ghost: every stored thread, which one
 // is open, and a way to start a fresh one. Mirrors Roster.qml's shape and
 // interaction, one rung down the left panel. Rows come from
-// GET /api/ghosts/:name/sessions; opening one loads its transcript (#26), the
-// sidebar footer below mints a new session id like "+ new ghost" mints a ghost.
+// GET /api/ghosts/:name/sessions plus at most one unstarted HUD draft; opening
+// one loads its transcript (#26), the sidebar footer below starts a blank
+// thread like "+ new ghost" mints a ghost.
 //
 // The list is shaped like Apple Notes' sidebar: its section heading and search
 // field sit on top, then the rows. Starred (pinned) state lives on the daemon
@@ -76,12 +77,14 @@ Item {
     onQueryChanged: root.syncRows()
     Component.onCompleted: root.syncRows()
 
-    // A row's display title: the daemon-generated title, or a graceful fallback
-    // (an unstarted/just-created thread is "New conversation").
+    // A row's display title: the stored name, else the first user message, else
+    // "New conversation" for an unstarted draft.
     function titleOf(session: var): string {
-        return (session && typeof session.title === "string" && session.title !== "")
-            ? session.title
-            : "New conversation";
+        if (session && typeof session.title === "string" && session.title !== "")
+            return session.title;
+        if (session && typeof session.preview === "string" && session.preview !== "")
+            return session.preview;
+        return "New conversation";
     }
 
     // Case-insensitive substring match against what the row actually shows, so

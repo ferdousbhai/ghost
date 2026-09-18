@@ -91,4 +91,23 @@ TestCase {
         compare(Ghostd.sessionResources, null);
         compare(Ghostd.sessionResourcesError, "ghostd sent a malformed resource snapshot");
     }
+
+    function test_doesNotMintAConversationJustToInspectResources(): void {
+        Ghostd.currentSessionId = "";
+        Ghostd.sessionIds = ({ casper: "" });
+        Ghostd.fetchSessionResources(false);
+        compare(requests.length, 0);
+        compare(Ghostd.currentSessionId, "");
+        compare(Ghostd.sessionIds.casper, "");
+        compare(Ghostd.sessionResources, null);
+    }
+
+    function test_doesNotMintAConversationJustToBrowseCommands(): void {
+        Ghostd.currentSessionId = "";
+        Ghostd.sessionIds = ({ casper: "" });
+        Ghostd.fetchCommands(false);
+        compare(Ghostd.currentSessionId, "");
+        compare(Ghostd.sessionIds.casper, "");
+        compare(Ghostd.commandsSessionId, "pi:inspect");
+    }
 }

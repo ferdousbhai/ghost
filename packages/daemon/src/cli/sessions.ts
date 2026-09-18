@@ -17,7 +17,7 @@ export async function sessionsCommand(
   emit(ctx, { sessions }, () => {
     const rows = sessions.map((session) => [
       displaySessionId(session),
-      truncate(session.title ?? "—", 42),
+      truncate(session.title ?? session.preview ?? "—", 42),
       relativeTime(session.updatedAt),
       String(session.messageCount),
       [session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
