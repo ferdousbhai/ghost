@@ -180,3 +180,10 @@ Not verified live:
 Notification follow-up (isolated preview, 2026-09-18): inspected the toast,
 verified server-ID replacement, and invoked its click action from another
 ghost’s Board view to return to the originating conversation.
+
+Bar tooltip follow-up (isolated preview, 2026-09-18): hovered the mascot and
+confirmed `casper · idle` fits the host-themed tooltip. The focused bar-widget
+tests ran on the nested Wayland display and covered host tooltip delegation,
+click dismissal, pointer exit, and hiding the widget.
+The click follow-up also exercises `triggerPress` through `bar.shell`; actual
+pointer clicks in the nested bar closed and reopened the panel.

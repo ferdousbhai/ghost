@@ -14,20 +14,11 @@
 // carried by its tint and by the orb that glows behind it while a turn runs,
 // not by a separate indicator.
 import QtQuick
-import QtQuick.Controls
 import "services"
 import "components"
 
 Item {
     id: root
-
-    /**
-     * Injected by the host, the same capability-scoped facade the panel and
-     * service get. Clicking the mascot toggles this plugin's own window
-     * through it; the signal stays for a caller that wants to do something
-     * else with the click.
-     */
-    property var shell: null
 
     /**
      * The bar host, injected into any slot item that declares it. It carries
@@ -39,16 +30,29 @@ Item {
 
     readonly property string selfId: "ferdousbhai.ghost"
 
-    signal activated()
-
-    function toggleWindow(): void {
-        if (root.shell && root.shell.toggle) root.shell.toggle(root.selfId, "{}");
-        root.activated();
+    function triggerPress(button: int): void {
+        if (button !== Qt.LeftButton || !root.bar) return;
+        root.bar.hideTooltip(root);
+        if (root.bar.shell) root.bar.shell.toggle(root.selfId, "{}");
     }
 
     readonly property string status: !Ghostd.reachable
         ? "offline"
         : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity : "thinking") : "idle")
+
+    readonly property string tooltipText: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
+        + " · " + root.status
+    readonly property bool tooltipHovered: visible && enabled && hover.containsMouse
+
+    onTooltipTextChanged: {
+        if (root.bar && root.tooltipHovered) root.bar.showTooltip(root, root.tooltipText);
+    }
+    onTooltipHoveredChanged: {
+        if (!root.bar) return;
+        if (root.tooltipHovered) root.bar.showTooltip(root, root.tooltipText);
+        else root.bar.hideTooltip(root);
+    }
+    Component.onDestruction: if (root.bar) root.bar.hideTooltip(root)
 
     // Unreachable is the one state worth a colour of its own. Otherwise the
     // ghost wears its own amber, brightened while it is working.
@@ -117,11 +121,6 @@ Item {
         cursorShape: Qt.PointingHandCursor
         acceptedButtons: Qt.LeftButton
         hoverEnabled: true
-        onClicked: root.toggleWindow()
-
-        // The name the bar no longer spends space on, on demand.
-        ToolTip.visible: hover.containsMouse
-        ToolTip.text: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
-            + " · " + root.status
+        onClicked: mouse => root.triggerPress(mouse.button)
     }
 }

@@ -470,7 +470,11 @@ not the daemon, protocols, or graphical-session lifecycle.
   root. The bar widget claims a whole host slot — the injected `bar.barSize`
   across the bar, the host's 27px icon slot along it — because the host arranges
   modules in a Row, which sets `x` and leaves `y` alone: anything shorter rides
-  above its neighbours instead of on their centre line. The package installs it
+  above its neighbours instead of on their centre line. Hover text uses the
+  host's `bar.showTooltip`/`hideTooltip` API and `tooltipHovered` lifecycle;
+  Omarchy owns its theme, sizing, and placement. The widget exposes
+  `triggerPress(button)` so the host's drag-aware click forwarding toggles the
+  panel on left click through the injected `bar.shell` facade. The package installs it
   to `/usr/share/ghost/plugin`; the per-user symlink into
   `~/.config/omarchy/plugins/` belongs to the install script.
   The plugin is distributed only by the `ghost` package, never as a

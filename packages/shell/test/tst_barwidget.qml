@@ -14,18 +14,32 @@ TestCase {
     height: 60
     visible: true
 
-    // What the host injects: Bar exposes exactly these two geometry members to
-    // a third-party widget.
+    // The host's geometry and tooltip facade.
     QtObject {
         id: horizontalBar
         readonly property bool vertical: false
         readonly property int barSize: 26
+        property var shell: null
+        property var target: null
+        property string text: ""
+        function showTooltip(item, label): void {
+            if (!item.tooltipHovered) return;
+            target = item;
+            text = label;
+        }
+        function hideTooltip(item): void {
+            if (target !== item) return;
+            target = null;
+            text = "";
+        }
     }
 
     QtObject {
         id: verticalBar
         readonly property bool vertical: true
         readonly property int barSize: 28
+        property var shell: null
+        function hideTooltip(item): void {}
     }
 
     Component {
@@ -35,6 +49,44 @@ TestCase {
 
     // Style.bar.iconSlot: the length a host icon button reserves along the bar.
     readonly property real iconSlot: 27
+
+    function test_hostForwardedPressTogglesPanel(): void {
+        const calls = [];
+        const widget = createTemporaryObject(widgetComponent, tc, {
+            bar: { vertical: false, barSize: 26, hideTooltip: function(item) {},
+                shell: { toggle: function(id, payload) { calls.push([id, payload]); } } }
+        });
+        widget.triggerPress(Qt.RightButton);
+        compare(calls.length, 0);
+        widget.triggerPress(Qt.LeftButton);
+        compare(calls.length, 1);
+        compare(calls[0][0], "ferdousbhai.ghost");
+        compare(calls[0][1], "{}");
+        widget.triggerPress(Qt.LeftButton);
+        compare(calls.length, 2);
+    }
+
+    function test_hostOwnsTooltipLifecycle(): void {
+        const widget = createTemporaryObject(widgetComponent, tc, { bar: horizontalBar });
+        mouseMove(tc, 150, 50);
+        mouseMove(widget, 13, 13);
+        tryCompare(widget, "tooltipHovered", true);
+        compare(horizontalBar.target, widget);
+        compare(horizontalBar.text, widget.tooltipText);
+
+        mouseClick(widget, 13, 13);
+        compare(horizontalBar.target, null);
+        mouseMove(tc, 150, 50);
+        mouseMove(widget, 13, 13);
+        tryCompare(horizontalBar, "target", widget);
+        mouseMove(tc, 150, 50);
+        tryCompare(horizontalBar, "target", null);
+
+        mouseMove(widget, 13, 13);
+        tryCompare(horizontalBar, "target", widget);
+        widget.visible = false;
+        tryCompare(horizontalBar, "target", null);
+    }
 
     function test_theSlotIsAsTallAsTheBarItself(): void {
         const widget = createTemporaryObject(widgetComponent, tc, { bar: horizontalBar });
