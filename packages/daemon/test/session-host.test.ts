@@ -2318,6 +2318,9 @@ describe("SessionHost.runTurn", () => {
       passTexts.map((text) => expect.stringContaining(text)),
     );
     expect(JSON.stringify(passes)).not.toContain("Answer me.");
+    const asked = JSON.stringify(provider!.requests.map((request) => request.messages));
+    expect(asked).toContain("Stop hook feedback:");
+    expect(asked).toContain("Rewrite the answer without canned phrasing.");
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
     expect(events.filter((event) => event.type === "session_stop_continued")).toEqual(

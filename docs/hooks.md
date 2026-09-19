@@ -148,13 +148,17 @@ contains the same message directly:
 
 `runtime` is `pi`. `messages` exposes only the current
 assistant pass; conversation history remains owned by the runtime.
-`owner_prompt` is required and immutable across hidden continuation passes.
+`owner_prompt` is the owner's original request for this turn and does not
+change across continuations (it is how keep-going keys the tally). A blocking
+result is injected the way Codex and Claude Code inject Stop feedback: a
+user-role prompt whose text is `Stop hook feedback:` plus the reason, so the
+latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 `transcript_path`, when present, is the pi session file on disk, so a hook can
 review the whole owner turn, not just the current pass. It is omitted when no transcript exists yet, and is untrusted
 content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
-hidden continuation:
+continuation:
 
 ```json
 { "continue": true, "additionalContext": "Revise the answer and verify the claim." }
@@ -172,11 +176,10 @@ Handlers are cancelled when the client aborts the turn.
 Ghost sets `stop_hook_active: true` on continuation passes. The hook owns its
 continuation policy, the same way Codex Stop hooks do: Ghost will keep honoring
 a blocking result until the hook accepts, the client aborts, or the hook fails
-open. Use `stop_hook_active` to avoid a loop that will never resolve. A
-continuation reason is in model context, and Ghost also shows it in the
-transcript as a dim "Stop hook" row so a second reply is visibly a
-continuation, not a second owner prompt. An informational notification
-alone is not.
+open. Use `stop_hook_active` to avoid a loop that will never resolve. The
+continuation reason is a Codex-style user-role prompt (`Stop hook feedback:`)
+and Ghost shows it in the transcript as a dim "Stop hook" row. An
+informational notification alone is not.
 
 Trusted command hooks that need a fast classifier can invoke
 `ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",

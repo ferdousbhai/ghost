@@ -1061,6 +1061,15 @@ interface ConversationEventSubscription {
 }
 
 export const SESSION_STOP_CONTINUATION_TYPE = "session-stop-continuation";
+/** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
+export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
+
+export function stopHookContinuationReason(content: unknown): string {
+  const text = typeof content === "string" ? content : entryText(content);
+  return text.startsWith(STOP_HOOK_FEEDBACK_PREFIX)
+    ? text.slice(STOP_HOOK_FEEDBACK_PREFIX.length)
+    : text;
+}
 
 export interface TranscriptMessage {
   role: "user" | "assistant" | "hook";
@@ -2596,10 +2605,12 @@ export class SessionHost {
       // that wants to stop looping can, and does not impose a host bound.
       stopHookActive = true;
       hosted.streamEmit?.({ type: "session_stop_continued", reason: additionalContext });
+      // Codex/Claude: the reason is a new user-role prompt, not hidden context
+      // beside the original owner instruction. pi maps custom → user for the LLM.
       await hosted.session.sendCustomMessage({
         customType: SESSION_STOP_CONTINUATION_TYPE,
-        content: additionalContext,
-        display: false,
+        content: `${STOP_HOOK_FEEDBACK_PREFIX}${additionalContext}`,
+        display: true,
       }, { triggerTurn: true });
       const nextAssistant = hosted.session.sessionManager.getBranch().findLast((entry) =>
         entry.type === "message" && entry.message.role === "assistant"
@@ -4291,7 +4302,7 @@ export class SessionHost {
     const all: TranscriptMessage[] = [];
     for (const entry of active) {
       if (entry.type === "custom_message" && entry.customType === SESSION_STOP_CONTINUATION_TYPE) {
-        const text = entryText(entry.content);
+        const text = stopHookContinuationReason(entry.content);
         if (text) {
           all.push({
             role: "hook",

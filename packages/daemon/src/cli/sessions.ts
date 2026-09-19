@@ -34,7 +34,7 @@ interface TranscriptBody {
   id: string;
   conversationId: string;
   title: string | null;
-  messages: Array<{ role: "user" | "assistant"; content: unknown }>;
+  messages: Array<{ role: "user" | "assistant" | "hook"; content: unknown }>;
   total: number;
   truncated: boolean;
 }
@@ -48,7 +48,9 @@ function toolLine(part: Record<string, unknown>): string | undefined {
 
 function transcriptMarkdown(body: TranscriptBody, ghost: string): string {
   return body.messages.map((message) => {
-    const heading = message.role === "user" ? "you" : ghost;
+    const heading = message.role === "user" ? "you"
+      : message.role === "hook" ? "Stop hook"
+      : ghost;
     const lines: string[] = [];
     if (Array.isArray(message.content)) {
       for (const part of message.content) {
