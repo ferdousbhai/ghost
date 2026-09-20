@@ -8,7 +8,7 @@ trap cleanup EXIT
 
 runtime="$work/runtime"
 mkdir -p "$runtime/bin" "$runtime/lib" "$runtime/licenses/ghost" \
-  "$runtime/licenses/npm/@earendil-works/pi-ai/0.84.3"
+  "$runtime/licenses/npm/@earendil-works/pi-ai/0.86.0"
 cp "$source_root/packages/daemon/scripts/launchers/ghost" "$runtime/bin/ghost"
 cp "$source_root/packages/daemon/scripts/launchers/ghostd" "$runtime/bin/ghostd"
 printf 'console.log("0.3.0");\n' > "$runtime/lib/ghostd.js"
@@ -17,7 +17,7 @@ printf '\0asm\1\0\0\0' > "$runtime/lib/photon_rs_bg.wasm"
 cp "$source_root/LICENSE" "$runtime/licenses/ghost/LICENSE"
 cp "$source_root/THIRD_PARTY_NOTICES.md" "$runtime/licenses/ghost/THIRD_PARTY_NOTICES.md"
 cp "$source_root/packages/daemon/scripts/runtime-licenses/earendil-pi.LICENSE" \
-  "$runtime/licenses/npm/@earendil-works/pi-ai/0.84.3/LICENSE"
+  "$runtime/licenses/npm/@earendil-works/pi-ai/0.86.0/LICENSE"
 printf 'fixture\n' > "$runtime/BUNDLED-LICENSES"
 
 for component in runtime ui; do

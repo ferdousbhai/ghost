@@ -1,5 +1,40 @@
+diff --git a/dist/core/agent-session.js b/dist/core/agent-session.js
+index 638646dacdbcb9c00bbc0de14f28abb700c8dc3f..b264eaef6bc9317e324af0abaf6c660d1170abed 100644
+--- a/dist/core/agent-session.js
++++ b/dist/core/agent-session.js
+@@ -1230,7 +1230,22 @@ export class AgentSession {
+             }
+         }
+         else if (options?.triggerTurn) {
+-            await this._runAgentPrompt(appMessage);
++            // Ghost: a custom message that starts a run from idle carries the same
++            // prompt and tool loadout `prompt()` records. Without it a transcript
++            // that holds no system message yet sends the provider no prompt at all.
++            const runOptions = this._runSystemPromptOptions ?? this._baseSystemPromptOptions;
++            const loadout = normalizeBuildSystemPromptOptions({
++                ...runOptions,
++                selectedTools: this.getActiveToolNames(),
++                toolSnippets: { ...this._baseSystemPromptOptions.toolSnippets, ...runOptions.toolSnippets },
++                toolGuidelines: { ...this._baseSystemPromptOptions.toolGuidelines, ...runOptions.toolGuidelines },
++            });
++            const messages = [appMessage];
++            const updateMessage = this._preparePromptAndToolLoadout(loadout);
++            this._runSystemPromptOptions = loadout;
++            if (updateMessage)
++                messages.unshift(updateMessage);
++            await this._runAgentPrompt(messages);
+         }
+         else if (this.isStreaming) {
+             // Appending now would put the message between an assistant tool call and its
+@@ -2966,4 +2981,3 @@ export class AgentSession {
+         return this._extensionRunner;
+     }
+ }
+\ No newline at end of file
+-//# sourceMappingURL=agent-session.js.map
+\ No newline at end of file
 diff --git a/dist/core/extensions/loader.d.ts b/dist/core/extensions/loader.d.ts
-index 25507342e438fa87ef5b497a6376aaacad52c2c5..22b642b84ec9f542617416526e11e780d01ab406 100644
+index 25507342e438fa87ef5b497a6376aaacad52c2c5..8862af08fd44dcd81a52eeaf10bab54240051a12 100644
 --- a/dist/core/extensions/loader.d.ts
 +++ b/dist/core/extensions/loader.d.ts
 @@ -1,10 +1,9 @@
@@ -23,14 +58,13 @@ index 25507342e438fa87ef5b497a6376aaacad52c2c5..22b642b84ec9f542617416526e11e780
   * Discover and load extensions from standard locations.
   */
  export declare function discoverAndLoadExtensions(configuredPaths: string[], cwd: string, agentDir?: string, eventBus?: EventBus): Promise<LoadExtensionsResult>;
-\ No newline at end of file
 -//# sourceMappingURL=loader.d.ts.map
 \ No newline at end of file
 diff --git a/dist/core/extensions/loader.js b/dist/core/extensions/loader.js
-index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b14643422 100644
+index be748bf45bea69461ef4f2a9a4dfc99bb3cbb1b1..ca59a3cdf7bf393fd1c9e945fd806143518e2753 100644
 --- a/dist/core/extensions/loader.js
 +++ b/dist/core/extensions/loader.js
-@@ -1,134 +1,12 @@
+@@ -1,103 +1,12 @@
 -/**
 - * Extension loader - loads TypeScript extension modules using jiti.
 - *
@@ -40,22 +74,7 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
 -import { createRequire } from "node:module";
  import * as path from "node:path";
 -import { fileURLToPath } from "node:url";
--import * as _bundledPiAgentCore from "@earendil-works/pi-agent-core";
--import * as _bundledPiAiCompat from "@earendil-works/pi-ai/compat";
--import * as _bundledPiAiOauth from "@earendil-works/pi-ai/oauth";
--import * as _bundledPiAiProviders from "@earendil-works/pi-ai/providers/all";
--import * as _bundledPiTui from "@earendil-works/pi-tui";
--import { createJiti } from "jiti/static";
--// Static imports of packages that extensions may use.
--// These MUST be static so Bun bundles them into the compiled binary.
--// The virtualModules option then makes them available to extensions.
--import * as _bundledTypebox from "typebox";
--import * as _bundledTypeboxCompile from "typebox/compile";
--import * as _bundledTypeboxValue from "typebox/value";
--import { CONFIG_DIR_NAME, getAgentDir, isBunBinary } from "../../config.js";
--// NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
--// avoiding a circular dependency. Extensions can import from @earendil-works/pi-coding-agent.
--import * as _bundledPiCodingAgent from "../../index.js";
+-import { CONFIG_DIR_NAME, getAgentDir, isBunBinary, isBundledNode } from "../../config.js";
 +import { CONFIG_DIR_NAME, getAgentDir } from "../../config.js";
  import { resolvePath } from "../../utils/paths.js";
 -import { createEventBus } from "../event-bus.js";
@@ -63,37 +82,21 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
  import { readPiManifest } from "../pi-manifest.js";
  import { createSyntheticSourceInfo } from "../source-info.js";
  import { time } from "../timings.js";
--/** Modules available to extensions via virtualModules (for compiled binaries) */
--const VIRTUAL_MODULES = {
--    typebox: _bundledTypebox,
--    "typebox/compile": _bundledTypeboxCompile,
--    "typebox/value": _bundledTypeboxValue,
--    "@sinclair/typebox": _bundledTypebox,
--    "@sinclair/typebox/compile": _bundledTypeboxCompile,
--    "@sinclair/typebox/value": _bundledTypeboxValue,
--    "@earendil-works/pi-agent-core": _bundledPiAgentCore,
--    "@earendil-works/pi-tui": _bundledPiTui,
--    // Extensions resolve the pi-ai root to the compat entrypoint (a strict
--    // superset of the core entrypoint): existing extensions using the old
--    // global API keep working at runtime until compat is removed.
--    "@earendil-works/pi-ai": _bundledPiAiCompat,
--    "@earendil-works/pi-ai/compat": _bundledPiAiCompat,
--    "@earendil-works/pi-ai/oauth": _bundledPiAiOauth,
--    "@earendil-works/pi-ai/providers/all": _bundledPiAiProviders,
--    "@earendil-works/pi-coding-agent": _bundledPiCodingAgent,
--    "@mariozechner/pi-agent-core": _bundledPiAgentCore,
--    "@mariozechner/pi-tui": _bundledPiTui,
--    "@mariozechner/pi-ai": _bundledPiAiCompat,
--    "@mariozechner/pi-ai/compat": _bundledPiAiCompat,
--    "@mariozechner/pi-ai/oauth": _bundledPiAiOauth,
--    "@mariozechner/pi-ai/providers/all": _bundledPiAiProviders,
--    "@mariozechner/pi-coding-agent": _bundledPiCodingAgent,
--};
 -const require = createRequire(import.meta.url);
 -const isNodeSeaBinary = ("sea" in process.features && process.features.sea === true) ||
 -    process.getBuiltinModule("node:sea")?.isSea() === true;
--const isBundledNode = typeof PI_BUNDLED_NODE !== "undefined" && PI_BUNDLED_NODE;
 -const isTypeScriptSourceRuntime = !isBunBinary && path.extname(fileURLToPath(import.meta.url)) === ".ts";
+-const usesEmbeddedModules = isBunBinary || isNodeSeaBinary || isBundledNode;
+-let createJitiPromise;
+-function getCreateJiti() {
+-    createJitiPromise ??= (usesEmbeddedModules ? import("./jiti-static-loader.js") : import("./jiti-loader.js")).then((module) => module.createJiti);
+-    return createJitiPromise;
+-}
+-let virtualModulesPromise;
+-function getVirtualModules() {
+-    virtualModulesPromise ??= import("./virtual-modules.js").then((module) => module.VIRTUAL_MODULES);
+-    return virtualModulesPromise;
+-}
 -/**
 - * Get aliases for jiti (used in built Node.js mode).
 - * In compiled binary mode, virtualModules is used instead.
@@ -167,7 +170,7 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
  /**
   * Create a runtime with throwing stubs for action methods.
   * Runner.bindCore() replaces these with real implementations.
-@@ -402,39 +280,6 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
+@@ -386,41 +295,6 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
          },
      };
  }
@@ -183,16 +186,18 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
 -            return cachedFactory;
 -        }
 -    }
--    const jiti = createJiti(import.meta.url, {
+-    const createJitiImpl = await getCreateJiti();
+-    // Compiled binaries and the bundled Node distribution use embedded modules.
+-    // Source TypeScript reuses host modules and root tsconfig paths. Unbundled
+-    // Node builds use dist aliases and do not need the bundled virtual modules.
+-    const resolutionOptions = usesEmbeddedModules
+-        ? { virtualModules: await getVirtualModules(), tryNative: false }
+-        : isTypeScriptSourceRuntime
+-            ? { virtualModules: await getVirtualModules(), tsconfigPaths: true }
+-            : { alias: getAliases() };
+-    const jiti = createJitiImpl(import.meta.url, {
 -        moduleCache: false,
--        // Compiled binaries and the bundled Node distribution use embedded modules.
--        // Source TypeScript reuses host modules and root tsconfig paths. Unbundled
--        // Node builds use dist aliases.
--        ...(isBunBinary || isNodeSeaBinary || isBundledNode
--            ? { virtualModules: VIRTUAL_MODULES, tryNative: false }
--            : isTypeScriptSourceRuntime
--                ? { virtualModules: VIRTUAL_MODULES, tsconfigPaths: true }
--                : { alias: getAliases() }),
+-        ...resolutionOptions,
 -    });
 -    const module = await jiti.import(extensionPath, { default: true });
 -    const factory = module;
@@ -207,7 +212,7 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
  /**
   * Create an Extension object with empty collections.
   */
-@@ -470,22 +315,6 @@ async function initializeExtension(factory, extensionPath, resolvedPath, cwd, ev
+@@ -456,22 +330,6 @@ async function initializeExtension(factory, extensionPath, resolvedPath, cwd, ev
      time(`${extensionPath} factory`, "extensions");
      return extension;
  }
@@ -230,7 +235,7 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
  /**
   * Create an Extension from an inline factory function.
   */
-@@ -496,35 +325,13 @@ export async function loadExtensionFromFactory(factory, cwd, eventBus, runtime,
+@@ -482,35 +340,13 @@ export async function loadExtensionFromFactory(factory, cwd, eventBus, runtime,
  /**
   * Load extensions from paths.
   */
@@ -270,14 +275,8 @@ index bb022d43f66ca443fb2ba21bf998ded56a0ebf79..377da8470d8ab2c6f8237cc778db612b
  function isExtensionFile(name) {
      return name.endsWith(".ts") || name.endsWith(".js");
  }
-@@ -645,4 +452,3 @@ export async function discoverAndLoadExtensions(configuredPaths, cwd, agentDir =
-     }
-     return loadExtensions(allPaths, resolvedCwd, eventBus);
- }
--//# sourceMappingURL=loader.js.map
-\ No newline at end of file
 diff --git a/dist/core/resource-loader.js b/dist/core/resource-loader.js
-index c5ed4d72cd596fe384af4c7b9526247e86e4d91b..9ff7a91e1bb7dfa0c6cf8daf241a720cfc17efc2 100644
+index c5ed4d72cd596fe384af4c7b9526247e86e4d91b..8e78784766a7defa843bd1d8bba9cc9dbce10ce6 100644
 --- a/dist/core/resource-loader.js
 +++ b/dist/core/resource-loader.js
 @@ -6,7 +6,7 @@ import { loadThemeFromPath } from "../modes/interactive/theme/theme.js";
@@ -326,8 +325,3 @@ index c5ed4d72cd596fe384af4c7b9526247e86e4d91b..9ff7a91e1bb7dfa0c6cf8daf241a720c
          const loadedByPath = new Map(preloadedByPath);
          for (const extension of remainingExtensions.extensions) {
              loadedByPath.set(extension.resolvedPath, extension);
-@@ -872,4 +869,3 @@ export class DefaultResourceLoader {
-         return conflicts;
-     }
- }
--//# sourceMappingURL=resource-loader.js.map

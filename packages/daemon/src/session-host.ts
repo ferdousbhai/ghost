@@ -132,6 +132,7 @@ import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
+import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
 import type { AskResultItem } from "./ask-broker.js";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
@@ -4690,13 +4691,16 @@ export class SessionHost {
       const manager = hosted.session.sessionManager;
       manager.branch(reopen.assistantEntryId);
       const previous = reopen.resultMessage;
-      manager.appendMessage({
+      // pi admits only JSON-shaped details on a transcript tool result; the
+      // ask tool's details are, and naming the type here keeps that checked.
+      const revised: ToolResultMessage<AskToolDetails> = {
         ...previous,
         content: result.content,
         details: result.details,
         isError: false,
         timestamp: Date.now(),
-      });
+      };
+      manager.appendMessage(revised);
       hosted.session.agent.state.messages = manager.buildSessionContext().messages;
       options.emit({
         type: "branch_changed",

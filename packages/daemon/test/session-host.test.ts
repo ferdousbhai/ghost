@@ -3502,7 +3502,7 @@ describe("session listing", () => {
     });
 
     await host!.runTurn("casper", { sessionId: "conv-delete", prompt: "fresh", emit: () => {} });
-    expect((await host!.listSessions("casper"))[0]?.messageCount).toBe(2);
+    expect((await host!.listSessions("casper"))[0]?.messageCount).toBe(3);
   });
 
   it("rejects delete before an admitted Pi open publishes its opening promise", async () => {

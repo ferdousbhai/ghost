@@ -230,11 +230,17 @@ owning tool when needed.
 
 ### Pi
 
-The pinned pi dependency has one Ghost patch: file-loaded executable extensions
-return an error, while inline factories keep pi's native implementation. This
-enforces the resource boundary above and removes Jiti/Babel and its retained
-terminal entry points from the bundle. Revalidate the patch when upgrading pi;
-it does not change the owner's separately installed `pi` CLI.
+The pinned pi dependency has one Ghost patch with two hunks. Extension loading:
+file-loaded executable extensions return an error, while inline factories keep
+pi's native implementation; this enforces the resource boundary above and
+removes Jiti/Babel and its retained terminal entry points from the bundle.
+Custom-message turns: a custom message that starts a run from idle records the
+same prompt and tool loadout `prompt()` does, because pi 0.86 keeps the system
+prompt in the transcript and its own idle `triggerTurn` path never writes one,
+so a fresh conversation opened by `/skill:name` or a stop-hook continuation
+reached the provider with no system prompt. Drop that hunk once upstream fixes
+it. Revalidate the patch when upgrading pi; it does not change the owner's
+separately installed `pi` CLI.
 
 Pi sessions use `createAgentSession`, an explicit transcript, Ghost's model
 runtime and credential store, an in-memory settings manager, and an explicit

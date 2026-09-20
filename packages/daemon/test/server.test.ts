@@ -1316,7 +1316,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       expect.objectContaining({
         id: piId(conversationId),
         conversationId,
-        messageCount: 4,
+        messageCount: 5,
       }),
     ]);
 
