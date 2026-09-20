@@ -37,6 +37,10 @@ class FakeElement {
     this.children = [];
   }
 
+  replaceChildren(...children) {
+    this.children = [...children];
+  }
+
   addEventListener(event, listener) {
     this.listeners.set(event, listener);
   }
@@ -53,7 +57,7 @@ class FakeElement {
 function popupDocument() {
   const ids = [
     "dot", "statusText", "detail", "tab", "token", "port", "save", "saved", "toggle",
-    "enabledLabel", "pair", "pairCode", "retry",
+    "enabledLabel", "pair", "pairCode", "retry", "chat",
   ];
   const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement(id)]));
   elements.tab.hidden = true;

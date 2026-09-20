@@ -104,8 +104,9 @@ export const RELAY_PATH = "/relay";
 
 /**
  * Every operation the relay understands — a closed enum, kept in lockstep with the
- * extension's `OPS` (`chromium-extension/extension/protocol.js`) and its handlers
- * (`ops.js`) by `packages/daemon/test/relay-extension.test.ts`.
+ * extension product's `OPS` (`extension/protocol.js`) and its handlers (`ops.js`)
+ * by the relay conformance test (`packages/daemon/test/relay-extension.test.ts`,
+ * see `packages/chromium-extension/PROTOCOL.md`).
  *
  * The set includes `javascript`, which runs page script through CDP
  * `Runtime.evaluate`. That is a real capability, granted to the owner's ghost

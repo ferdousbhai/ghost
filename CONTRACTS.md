@@ -443,9 +443,9 @@ hosted-session, concurrency, or spend cap.
 
 ## Package boundaries
 
-Ghost is two sides of one product. **ghost-core** is everything a second
-interface could reuse: `packages/daemon`, `packages/extensions`, and
-`packages/chromium-extension`. **ghost-omarchy** is the Omarchy-only surface:
+Ghost is two sides of one product plus one separate product. **ghost-core**
+is everything a second interface could reuse: `packages/daemon` and
+`packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
 `packages/shell` (published as `@ghost/omarchy`; the directory name is
 historical) and `packages/desktop-helper`. The sides meet only at named
 seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
@@ -453,8 +453,18 @@ relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
 
+The **browser relay** (`packages/chromium-extension`) is a separate product:
+its own package, versioning, and repository — the directory is self-contained
+and extracts verbatim. It meets the daemon only at the relay WebSocket
+protocol ([`PROTOCOL.md`](packages/chromium-extension/PROTOCOL.md)): neither
+side imports the other's source, the daemon's relay conformance test reads
+the installed extension copy, and only `PROTOCOL_VERSION` ties an extension
+release to a Ghost release. The runtime bundles a pinned extension release;
+while the sources travel in this tree, the pin is the tree.
+
 The Arch install has two packages built from the same release: `ghost-runtime`
-owns the daemon, CLI, relay, desktop helper, user unit, and runtime docs/licenses;
+owns the daemon, CLI, desktop helper, user unit, and runtime docs/licenses,
+and bundles a pinned release of the separately-versioned relay extension;
 `ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
 that exact runtime version. The checkout variants are `ghost-runtime-dev` and
 `ghost-dev`. Installing only the runtime keeps desktop/browser automation in the
@@ -506,7 +516,15 @@ not the daemon, protocols, or graphical-session lifecycle.
   `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
   ships no speech stack of its own.
 - [`packages/chromium-extension`](packages/chromium-extension/extension) is the
-  opt-in MV3 relay into the owner's Chromium. An unpaired extension dials
+  opt-in MV3 relay into the owner's Chromium, versioned and released as its
+  own product (seam: [`PROTOCOL.md`](packages/chromium-extension/PROTOCOL.md)).
+  It also drives those tabs for its own side-panel chat, on the owner's
+  OpenRouter account, with no ghost installed; that mode is off the wire, but
+  two of its rules are visible to a ghost. A workspace id beginning `local:` is
+  the panel's, so a request naming the other side's tab is refused
+  `invalid_input` by name (ghost-to-ghost stays `no_page`), and a ghostd
+  incarnation change retires only ghost-owned claims.
+  An unpaired extension dials
   `/relay` with a six-digit code (`RELAY_PAIR_SUBPROTOCOL_PREFIX`) instead of a
   token; the owner allows that code in the HUD or with `ghost browser allow`,
   and the daemon answers with a `paired` frame carrying the token (`pairing`

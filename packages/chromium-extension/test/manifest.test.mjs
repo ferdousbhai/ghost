@@ -6,9 +6,19 @@ const extensionUrl = new URL("../extension/", import.meta.url);
 
 test("manifest uses only the required standing grants and ships every icon size", async () => {
   const manifest = JSON.parse(await readFile(new URL("manifest.json", extensionUrl), "utf8"));
-  assert.deepEqual(manifest.permissions, ["debugger", "storage", "alarms"]);
+  // Each of these is here because something the extension does needs it, and
+  // nothing here grants reach over a page: `debugger` is branded by Chrome when
+  // it attaches, `sidePanel` and `identity` show no warning at all, and the
+  // chat's only network peer answers extension origins under ordinary CORS,
+  // which is why there is no host grant for it either.
+  assert.deepEqual(manifest.permissions, [
+    "debugger", "storage", "alarms", "sidePanel", "identity",
+  ]);
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(manifest.optional_permissions, undefined);
+  assert.equal(manifest.content_scripts, undefined);
+  assert.equal(manifest.web_accessible_resources, undefined);
+  assert.equal(manifest.side_panel.default_path, "sidepanel.html");
 
   const expected = { 16: "icons/ghost-16.png", 32: "icons/ghost-32.png", 48: "icons/ghost-48.png", 128: "icons/ghost-128.png" };
   assert.deepEqual(manifest.icons, expected);

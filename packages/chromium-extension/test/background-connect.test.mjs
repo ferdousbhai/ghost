@@ -624,11 +624,14 @@ test("the popup reports a nonempty list of tabs owned by the relay", async () =>
     (value) => { status = value; },
   );
   for (let attempt = 0; attempt < 20 && status === undefined; attempt += 1) await settle();
+  // The popup's list is the machine owner's, so it also says which side opened
+  // each tab; this one is a ghost's.
   assert.deepEqual(status.tabs, [{
     id: "73",
     active: false,
     url: tab.url,
     title: tab.title,
+    local: false,
   }]);
 
   socket.onmessage({
@@ -1350,7 +1353,14 @@ test("a restarted worker keeps showing the code it stored", async () => {
   await settle();
   assert.equal(sockets.length, 1);
   assert.equal(sockets[0].protocols[1], `${PAIR_SUBPROTOCOL_PREFIX}246810`);
-  assert.deepEqual(sessionWrites, [], "a restored code is not rewritten");
+  // Ownership is restored (and its snapshot republished) before the dial even
+  // for an unpaired worker — the side panel's tabs depend on that — so only the
+  // pairing code itself must stay unwritten.
+  assert.deepEqual(
+    sessionWrites.filter((write) => Object.hasOwn(write, "ghostPairingCode")),
+    [],
+    "a restored code is not rewritten",
+  );
 });
 
 test("a denied pairing stops redialing until the popup asks again", async () => {

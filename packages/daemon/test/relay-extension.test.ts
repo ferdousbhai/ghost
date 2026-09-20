@@ -1,9 +1,12 @@
 /**
  * The extension half is plain JavaScript with no build step, which is what makes
  * it editable-and-reloadable but also means its copy of the protocol is not
- * typechecked against the TypeScript one. This file is the seam between them:
- * `extension/protocol.js` has no `chrome` API in it, so it imports cleanly into
- * Node and can simply be compared, constant for constant.
+ * typechecked against the TypeScript one. This file is the conformance check
+ * across the product seam (`packages/chromium-extension/PROTOCOL.md`): the
+ * extension is a separate product and neither side imports the other's source,
+ * so this test reads the installed copy instead. `extension/protocol.js` has
+ * no `chrome` API in it, so it imports cleanly into Node and can simply be
+ * compared, constant for constant.
  *
  * The manifest assertions are the other half of the point. The relay's whole
  * security claim rests on the extension having no host grants, content scripts,
@@ -26,10 +29,13 @@ import {
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
 
-const EXTENSION_DIR = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..", "..", "chromium-extension", "extension",
-);
+// The installed extension copy: an explicit install location wins, and the
+// sibling checkout is the fallback while the sources travel together.
+const EXTENSION_DIR = process.env.GHOST_CHROMIUM_EXTENSION_DIR
+  ?? join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..", "..", "chromium-extension", "extension",
+  );
 
 const source = (name: string) => readFile(join(EXTENSION_DIR, name), "utf8");
 
@@ -93,9 +99,17 @@ describe("the extension's permission surface is the security model", () => {
     };
     expect(manifest.manifest_version).toBe(3);
     // `debugger` exposes target metadata, but content and DOM/input need its branded attachment.
-    expect(manifest.permissions.sort()).toEqual(["alarms", "debugger", "storage"]);
-    expect(manifest.permissions).not.toContain("scripting");
-    expect(manifest.permissions).not.toContain("<all_urls>");
+    expect(manifest.permissions).toEqual(expect.arrayContaining(["alarms", "debugger", "storage"]));
+    // The extension versions its own permission surface (its `manifest.test.mjs`
+    // pins the exact list). What Ghost depends on is narrower and does not move:
+    // nothing here may reach a page's content without that branded attachment.
+    for (const forbidden of [
+      "scripting", "tabs", "activeTab", "webRequest", "webRequestBlocking", "webNavigation",
+      "cookies", "declarativeNetRequest", "proxy", "downloads", "management",
+      "nativeMessaging", "<all_urls>",
+    ]) {
+      expect(manifest.permissions).not.toContain(forbidden);
+    }
     expect(manifest.host_permissions).toBeUndefined();
     expect(manifest.content_scripts).toBeUndefined();
     expect(manifest.web_accessible_resources).toBeUndefined();

@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ghost chat</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --fg: #1c1c1e;
+        --muted: #6b6b70;
+        --bg: #ffffff;
+        --sunk: #f4f4f6;
+        --line: #e2e2e6;
+        --on: #1a7f37;
+        --warn: #9a6700;
+        --bad: #b42318;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --fg: #f2f2f4;
+          --muted: #a0a0a8;
+          --bg: #1b1b1f;
+          --sunk: #232329;
+          --line: #34343a;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        font: 13px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        color: var(--fg);
+        background: var(--bg);
+      }
+      header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--line);
+      }
+      header h1 {
+        margin: 0;
+        font-size: 13px;
+        font-weight: 600;
+        flex: none;
+      }
+      select, button, textarea, input[type="text"] {
+        font: inherit;
+        color: var(--fg);
+        background: transparent;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 5px 8px;
+      }
+      select { flex: 1; min-width: 0; font-size: 12px; }
+      button { cursor: pointer; }
+      button.primary { border-color: transparent; background: var(--fg); color: var(--bg); }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .banner {
+        padding: 8px 12px;
+        font-size: 12px;
+        border-bottom: 1px solid var(--line);
+        background: var(--sunk);
+        color: var(--muted);
+      }
+      .banner.warn { color: var(--warn); }
+      /* `:not([hidden])` rather than an !important override: these two are the
+         only flex containers the panel hides, and a display rule that ignores
+         `hidden` is what would make one necessary. */
+      #log:not([hidden]) {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .turn { display: flex; flex-direction: column; gap: 4px; }
+      .who { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+      .body { white-space: pre-wrap; word-break: break-word; }
+      .turn.user .body {
+        background: var(--sunk);
+        border-radius: 8px;
+        padding: 7px 9px;
+      }
+      .tool {
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        color: var(--muted);
+        border-left: 2px solid var(--line);
+        padding-left: 8px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .tool.bad { color: var(--bad); border-left-color: var(--bad); }
+      .usage { font-size: 11px; color: var(--muted); }
+      .error { color: var(--bad); font-size: 12px; }
+      .confirm {
+        border: 1px solid var(--warn);
+        border-radius: 8px;
+        padding: 9px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .confirm pre {
+        margin: 0;
+        max-height: 140px;
+        overflow: auto;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 11.5px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+      .confirm .row { display: flex; gap: 8px; }
+      footer { border-top: 1px solid var(--line); padding: 8px 12px; }
+      .composer { display: flex; gap: 8px; align-items: flex-end; }
+      textarea { flex: 1; resize: none; min-height: 34px; max-height: 140px; }
+      #connect:not([hidden]) { padding: 16px 12px; display: flex; flex-direction: column; gap: 10px; }
+      #connect p { margin: 0; color: var(--muted); font-size: 12px; }
+      #connect .row { display: flex; gap: 8px; }
+      #connect input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      details summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+      details > div { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Chat</h1>
+      <select id="model" title="Model"></select>
+      <button id="newChat" type="button" title="Close this chat's tabs and start over">New</button>
+      <button id="disconnect" type="button" title="Forget the OpenRouter key stored in this browser" hidden>Disconnect</button>
+    </header>
+
+    <div class="banner warn" id="paused" hidden>
+      Browsing is paused in the relay popup. Resume it to let this chat act.
+    </div>
+    <div class="banner" id="notice" hidden></div>
+
+    <section id="connect" hidden>
+      <p>
+        Chat with an agent that reads, clicks, types in, and screenshots tabs it opens here.
+        It runs on your own OpenRouter account; the default model costs nothing.
+      </p>
+      <button class="primary" id="oauth" type="button">Connect OpenRouter</button>
+      <details id="manualDetails">
+        <summary>Connect manually instead</summary>
+        <div>
+          <p>
+            Open the authorization page, then paste the code it shows — or paste an
+            OpenRouter API key you already have.
+          </p>
+          <div class="row">
+            <button id="openAuth" type="button">Open authorization page</button>
+          </div>
+          <div class="row">
+            <input type="text" id="manual" spellcheck="false" autocomplete="off"
+                   placeholder="Paste the code, or an sk-or-… key" />
+            <button id="manualSave" type="button">Use</button>
+          </div>
+        </div>
+      </details>
+      <p class="error" id="connectError" hidden></p>
+    </section>
+
+    <div id="log" hidden></div>
+
+    <footer id="composerBar" hidden>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Ask it to do something in a tab…"></textarea>
+        <button class="primary" id="send" type="button">Send</button>
+        <button id="stop" type="button" hidden>Stop</button>
+      </div>
+      <p class="usage" id="usage"></p>
+    </footer>
+
+    <script src="sidepanel.js" type="module"></script>
+  </body>
+</html>

@@ -17,6 +17,7 @@ const saveButton = document.getElementById("save");
 const savedFlag = document.getElementById("saved");
 const toggleButton = document.getElementById("toggle");
 const enabledLabel = document.getElementById("enabledLabel");
+const chatButton = document.getElementById("chat");
 const pairBox = document.getElementById("pair");
 const pairCode = document.getElementById("pairCode");
 const retryButton = document.getElementById("retry");
@@ -75,20 +76,30 @@ function render(status) {
     retryButton.hidden = status.pairingDenied !== true;
   }
 
-  // One browser workspace per ghost, which may hold several tabs at once.
+  // Every workspace this browser holds: one per ghost, plus the side panel's.
+  // This list is the machine owner's, so it names which side opened each tab.
   const tabs = Array.isArray(status.tabs) ? status.tabs : [];
   if (tabs.length > 0) {
     tabBox.hidden = false;
-    tabBox.innerHTML = "";
-    const label = document.createElement("strong");
-    label.textContent = tabs.length === 1 ? "Ghost's tab: " : `Ghost's tabs (${tabs.length}): `;
-    const named = tabs
-      .map((tab) => tab.title || tab.url
-        || (tab.id !== undefined && tab.id !== null && tab.id !== ""
-          ? `Tab ${tab.id}`
-          : "Untitled tab"))
-      .join(", ");
-    tabBox.append(label, document.createTextNode(named));
+    tabBox.replaceChildren();
+    for (const side of [false, true]) {
+      const mine = tabs.filter((tab) => (tab.local === true) === side);
+      if (mine.length === 0) continue;
+      const line = document.createElement("div");
+      const label = document.createElement("strong");
+      const whose = side ? "This chat" : "Ghost";
+      label.textContent = mine.length === 1
+        ? `${whose}'s tab: `
+        : `${whose}'s tabs (${mine.length}): `;
+      const named = mine
+        .map((tab) => tab.title || tab.url
+          || (tab.id !== undefined && tab.id !== null && tab.id !== ""
+            ? `Tab ${tab.id}`
+            : "Untitled tab"))
+        .join(", ");
+      line.append(label, document.createTextNode(named));
+      tabBox.append(line);
+    }
   } else {
     tabBox.hidden = true;
   }
@@ -204,6 +215,18 @@ retryButton.addEventListener("click", () => void mutateSettings(async () => {
     "The relay worker did not start pairing in time.",
   );
 }));
+
+// `sidePanel.open()` needs the click that is happening right now, so it cannot
+// be deferred behind the status refresh the other buttons wait for.
+chatButton.addEventListener("click", () => {
+  void (async () => {
+    const window_ = await chrome.windows.getCurrent();
+    await chrome.sidePanel.open({ windowId: window_.id });
+    self.close();
+  })().catch((error) => {
+    render(fallbackStatus(`Could not open the chat panel: ${error?.message ?? error}`));
+  });
+});
 
 toggleButton.addEventListener("click", () => void mutateSettings(async () => {
   await updateSettings({ enabled: !settingsSnapshot.enabled });

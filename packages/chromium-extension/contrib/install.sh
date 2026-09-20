@@ -67,9 +67,15 @@ Next, in the browser you actually use:
   2. Turn on "Developer mode" (top right)
   3. "Load unpacked" -> $TARGET_DIR
   4. Pin "Ghost browser relay" and click it
-  5. Run  ghostd relay-token  in a terminal, paste the token, "Save & connect"
 
-The badge reads "on" once it is paired and ghostd is running.
+Then either:
+
+  * "Open chat" -> "Connect OpenRouter", and chat in the side panel; or
+  * let it pair with ghostd -- the popup shows a six-digit code, and
+    "ghost browser allow <code>" (or Allow in the HUD) hands it the token.
+
+The badge reads "on" once it is paired and ghostd is running; the side panel
+works whether or not it ever pairs.
 
 EOF
 

@@ -12,13 +12,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# The relay extension versions independently (PROTOCOL_VERSION is the pin),
+# so its manifests are not in this lockstep list.
 manifests=(
   package.json
   packages/daemon/package.json
   packages/extensions/package.json
   packages/shell/package.json
-  packages/chromium-extension/package.json
-  packages/chromium-extension/extension/manifest.json
   packages/shell/qml/manifest.json
 )
 

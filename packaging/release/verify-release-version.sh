@@ -8,13 +8,14 @@ bun -e '
 import { join } from "node:path";
 
 const sourceRoot = process.argv[1];
+// The relay extension is a separate product with its own versioning; only
+// PROTOCOL_VERSION ties it to a Ghost release, so its manifests are
+// deliberately absent here.
 const manifests = [
   "package.json",
   "packages/daemon/package.json",
   "packages/extensions/package.json",
   "packages/shell/package.json",
-  "packages/chromium-extension/package.json",
-  "packages/chromium-extension/extension/manifest.json",
   "packages/shell/qml/manifest.json",
 ];
 

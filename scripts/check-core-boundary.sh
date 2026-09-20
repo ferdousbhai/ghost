@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # The ghost-core / ghost-omarchy split, proved on every lint run.
 #
-# ghost-core (daemon, extensions, chromium-extension) is everything a second
-# interface could reuse. It meets the Omarchy side (@ghost/omarchy, the
-# desktop helper) only at the seams CONTRACTS.md names — the daemon HTTP/SSE
-# API, the relay WebSocket protocol, and the helper JSON-lines protocol with
-# its PATH spawn — so core must never depend on or import Omarchy-side code,
-# and the Omarchy side must never import core sources (it consumes the API
-# and protocols instead). String references to the helper binary are the
-# spawn seam, not imports, and do not count.
+# ghost-core (daemon, extensions) is everything a second interface could
+# reuse. The relay extension is a separate product that meets core only at
+# the relay WebSocket protocol (see packages/chromium-extension/PROTOCOL.md);
+# while its sources travel in this tree the checks below still cover them.
+# Core meets the Omarchy side (@ghost/omarchy, the desktop helper) only at
+# the seams CONTRACTS.md names — the daemon HTTP/SSE API, the relay WebSocket
+# protocol, and the helper JSON-lines protocol with its PATH spawn — so core
+# must never depend on or import Omarchy-side code, and the Omarchy side must
+# never import core sources (it consumes the API and protocols instead).
+# String references to the helper binary are the spawn seam, not imports,
+# and do not count.
 set -euo pipefail
 cd -- "$(git rev-parse --show-toplevel)"
 
