@@ -594,8 +594,9 @@ async function localSmoke(binary) {
   throwIfSignalRequested();
   record("side panel document found", true, panel.url);
 
+  const conversation = crypto.randomUUID();
   const op = (name, args) => evaluateIn(panel, `chrome.runtime.sendMessage(${JSON.stringify({
-    type: "ghost-relay-local-op", op: name, args, timeoutMs: 30_000,
+    type: "ghost-relay-local-op", conversation, op: name, args, timeoutMs: 30_000,
   })})`, `local ${name}`, { timeoutMs: 35_000 });
 
   // 1. A side-panel document is an accepted sender: this answers at all only if
@@ -661,7 +662,7 @@ async function localSmoke(binary) {
   const outcome = await evaluateIn(fresh, `(async () => {
     const deadline = Date.now() + 120_000;
     while (Date.now() < deadline) {
-      const usage = document.getElementById("usage").textContent;
+      const usage = [...document.querySelectorAll("#log .usage")].at(-1)?.textContent ?? "";
       const error = [...document.querySelectorAll("#log .error")].map((n) => n.textContent).join(" | ");
       if (usage !== "" || error !== "") return { usage, error };
       await new Promise((resolve) => setTimeout(resolve, 250));

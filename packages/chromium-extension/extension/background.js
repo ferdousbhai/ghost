@@ -33,7 +33,7 @@ import {
   TOKEN_SUBPROTOCOL_PREFIX,
   toErrorFrame,
 } from "./protocol.js";
-import { newLocalSession } from "./local-session.js";
+import { isLocalSession, newLocalSession } from "./local-session.js";
 import {
   allTabInfos,
   installOpsListeners,
@@ -866,51 +866,84 @@ function isPanelSender(sender) {
 }
 
 /**
- * The side panel's workspace.
+ * The side panel's workspaces: one per conversation.
  *
- * It is minted here, not in the panel, for the same reason the socket's owner id
- * comes off the wire and not out of a tool argument: a caller that could name
- * its own workspace could name somebody else's. The id survives a worker restart
- * in `chrome.storage.local`, so the panel's tabs come back with it; "New chat"
- * retires it and mints another, exactly as ghostd does after a protocol close.
+ * The panel names a conversation (an id it minted for its own history list);
+ * the worker mints the workspace behind it. That split is the same reason the
+ * socket's owner id comes off the wire and not out of a tool argument: a caller
+ * that could name its own workspace could name somebody else's. A conversation
+ * id can only ever resolve to a `local:` workspace, so the panel cannot reach a
+ * ghost's tabs however it labels its conversations. The map survives a worker
+ * restart in `chrome.storage.local`, so each conversation's tabs come back with
+ * it; deleting a conversation retires its workspace, as ghostd does after a
+ * protocol close.
  */
-const LOCAL_SESSION_KEY = "ghostLocalSession";
-let localSession = null;
-let localSessionInFlight = null;
+const LOCAL_SESSIONS_KEY = "ghostLocalSessions";
+const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+let localSessions = null;
+let localSessionsInFlight = null;
+let localSessionsTail = Promise.resolve();
 
-function currentLocalSession() {
-  if (localSession !== null) return Promise.resolve(localSession);
-  if (localSessionInFlight !== null) return localSessionInFlight;
+function loadLocalSessions() {
+  if (localSessions !== null) return Promise.resolve(localSessions);
+  if (localSessionsInFlight !== null) return localSessionsInFlight;
   const attempt = (async () => {
     let stored = null;
     try {
-      const saved = await settingsStorage.get({ [LOCAL_SESSION_KEY]: null });
-      stored = saved?.[LOCAL_SESSION_KEY];
+      stored = (await settingsStorage.get({ [LOCAL_SESSIONS_KEY]: null }))?.[LOCAL_SESSIONS_KEY];
     } catch {
-      // A storage failure means a fresh workspace, not a failed chat.
+      // A storage failure means fresh workspaces, not a failed chat.
     }
-    const session = typeof stored === "string" && stored !== "" ? stored : newLocalSession();
-    if (session !== stored) {
-      await settingsStorage.set({ [LOCAL_SESSION_KEY]: session }).catch(() => {});
+    const map = new Map();
+    if (stored && typeof stored === "object" && !Array.isArray(stored)) {
+      for (const [conversation, session] of Object.entries(stored)) {
+        if (CONVERSATION_ID.test(conversation) && isLocalSession(session)) map.set(conversation, session);
+      }
     }
-    localSession = session;
-    return session;
+    localSessions = map;
+    return map;
   })();
-  localSessionInFlight = attempt;
+  localSessionsInFlight = attempt;
   const clear = () => {
-    if (localSessionInFlight === attempt) localSessionInFlight = null;
+    if (localSessionsInFlight === attempt) localSessionsInFlight = null;
   };
   void attempt.then(clear, clear);
   return attempt;
 }
 
-/** Retire this chat's workspace — closing its tabs — and mint the next one. */
-async function resetLocalSession() {
-  const session = await currentLocalSession();
+function persistLocalSessions(map) {
+  const write = () => settingsStorage.set({ [LOCAL_SESSIONS_KEY]: Object.fromEntries(map) }).catch(() => {});
+  localSessionsTail = localSessionsTail.then(write, write);
+  return localSessionsTail;
+}
+
+function requireConversation(conversation) {
+  if (typeof conversation !== "string" || !CONVERSATION_ID.test(conversation)) {
+    throw new Error("The side panel named no conversation. Reopen the panel.");
+  }
+  return conversation;
+}
+
+async function localSessionFor(conversation) {
+  const map = await loadLocalSessions();
+  let session = map.get(requireConversation(conversation));
+  if (session === undefined) {
+    session = newLocalSession();
+    map.set(conversation, session);
+    await persistLocalSessions(map);
+  }
+  return session;
+}
+
+/** Retire a conversation's workspace — closing its tabs — and forget it. */
+async function closeLocalConversation(conversation) {
+  const map = await loadLocalSessions();
+  const session = map.get(requireConversation(conversation));
+  if (session === undefined) return;
+  await ensureOwnershipRestored();
   await runOp("close", { session }, 30_000);
-  localSession = newLocalSession();
-  await settingsStorage.set({ [LOCAL_SESSION_KEY]: localSession }).catch(() => {});
-  return localSession;
+  map.delete(conversation);
+  await persistLocalSessions(map);
 }
 
 /**
@@ -919,7 +952,7 @@ async function resetLocalSession() {
  * only reading of one switch labelled "pause" that is not a lie. This refusal
  * is the pause check — the panel does not probe first, it just gets told.
  */
-async function runLocalOp(op, args, timeoutMs) {
+async function runLocalOp(conversation, op, args, timeoutMs) {
   const settings = await loadSettings();
   if (settings.unavailable !== null) {
     throw new Error(`Chromium could not verify the relay settings: ${settings.unavailable}`);
@@ -928,7 +961,7 @@ async function runLocalOp(op, args, timeoutMs) {
     throw new Error("Browsing is paused. Resume it from the relay popup to let this chat act again.");
   }
   await ensureOwnershipRestored();
-  const session = await currentLocalSession();
+  const session = await localSessionFor(conversation);
   return runOp(op, { ...args, session }, timeoutMs);
 }
 
@@ -936,6 +969,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   if (isPanelSender(sender)) {
     if (message?.type === "ghost-relay-local-op") {
       void runLocalOp(
+        message.conversation,
         message.op,
         message.args ?? {},
         Number.isSafeInteger(message.timeoutMs) ? message.timeoutMs : 30_000,
@@ -945,9 +979,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       );
       return true;
     }
-    if (message?.type === "ghost-relay-local-reset") {
-      void resetLocalSession().then(
-        (session) => respond({ ok: true, session }),
+    if (message?.type === "ghost-relay-local-close") {
+      void closeLocalConversation(message.conversation).then(
+        () => respond({ ok: true }),
         (error) => respond({ ok: false, error: error?.message ?? String(error) }),
       );
       return true;

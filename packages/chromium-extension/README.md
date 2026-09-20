@@ -58,16 +58,20 @@ for flat `chrome.debugger` sessions.
 
 ## Chat here
 
-Click the toolbar icon, then **Open chat**. **Connect OpenRouter** authorizes
-this browser against your own OpenRouter account with OAuth PKCE; the secret half
-of the exchange never leaves the browser, and the key it mints is kept in
-`chrome.storage.local` and sent to `openrouter.ai` and nowhere else.
+Click the toolbar icon, then **Open chat**. The side panel is laid out the way
+Chrome's own assistant panels are: Chrome draws the title bar, the extension
+draws a toolbar (past conversations, new conversation, a menu), an empty state,
+and a composer with the model as a quiet label. Each conversation has its own
+tab workspace; deleting one from the menu closes the tabs it opened.
 
-If the one-click path cannot complete — a callback URL an authorization server
-will not accept is a real possibility, and this one is not ours to fix — the
-manual path always works: **Open authorization page** shows a code on
-OpenRouter's own page, and pasting it here finishes the same exchange. Pasting an
-`sk-or-…` key you already have works too.
+**Connect OpenRouter** is OAuth and only OAuth: PKCE through `chrome.identity`,
+one click, and OpenRouter ends the flow by minting a key for this browser. That
+key is what gets stored, in `chrome.storage.local`, sent to `openrouter.ai` and
+nowhere else; the owner never sees or types it. If the redirect cannot complete
+— a callback URL an authorization server will not accept is a real possibility,
+and this one is not ours to fix — **Connect with a code instead** is the same
+OAuth in OpenRouter's headless mode: their page shows the code, you paste it
+here. There is no box for a raw API key.
 
 The default model is `openrouter/free`, OpenRouter's free router: it picks a free
 model that can call tools and reports which one answered. The picker lists every
@@ -76,8 +80,10 @@ OpenRouter balance covers it and says so, in OpenRouter's own words, when it doe
 not. Each turn ends with the model that actually answered and what it cost.
 
 The agent acts only in tabs it opened, and finds them again after Chrome reaps
-and restarts the extension's worker, whether or not a ghost ever pairs. **New**
-closes them and starts a fresh workspace; **Disconnect** forgets the key.
+and restarts the extension's worker, whether or not a ghost ever pairs. **New
+conversation** starts a fresh workspace and leaves the old one's tabs where they
+are; **Delete this conversation** closes them; **Disconnect OpenRouter** forgets
+the key.
 **Pause** in the popup stops a turn mid-flight and refuses everything until you
 resume — the same switch that refuses the ghost. **Stop** ends a turn at its next
 step; the relay has no cancel for a page action Chromium has already been
@@ -329,5 +335,5 @@ rather than the semantic verbs used here.
 | Worked, then stopped after a while | You dismissed the debugger banner. It recovers when the tab navigates. |
 | "belongs to a ghost's browser workspace" | You pointed the chat at a tab a ghost opened, or the reverse. Each side drives only its own tabs. |
 | Chat says OpenRouter has insufficient credits | That model is not free and the account's balance does not cover it. Fund it at openrouter.ai, or pick a free model. |
-| "OpenRouter did not return a code" | The one-click callback did not complete. Use **Connect manually instead** — it is the same exchange. |
+| "OpenRouter did not send a code back" | The one-click callback did not complete. Use **Connect with a code instead** — it is the same OAuth exchange. |
 | The turn stopped when the panel closed | The loop lives in the panel. Reopen it; the conversation is still there. |

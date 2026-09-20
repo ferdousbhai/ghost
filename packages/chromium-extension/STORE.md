@@ -42,8 +42,9 @@ Ghost browser relay
 > matching a six-digit code, and the connection is a loopback socket that never
 > leaves your machine.
 >
-> No account with us. No servers of ours. No telemetry. Your OpenRouter key and
-> your conversation stay in this browser's local storage.
+> No account with us. No servers of ours. No telemetry. Sign in to OpenRouter
+> once; the credential it issues and your conversations stay in this browser's
+> local storage.
 
 ## Category
 
@@ -59,7 +60,7 @@ Copy these into the store's "Why do you need this permission?" fields verbatim.
 | `storage` | Stores, in the user's own profile: the OpenRouter key they connected, the model they picked, the side-panel conversation, the relay token for a paired local Ghost daemon, and (in session storage) which tabs the extension opened so it can find and close them after the extension restarts. |
 | `alarms` | A Manifest V3 service worker is terminated after about thirty seconds idle. A periodic alarm wakes it to re-establish the loopback connection to a local Ghost daemon and to finish cleaning up tabs it opened. |
 | `sidePanel` | The chat surface is a side panel, so the conversation stays visible beside the page the agent is working in. |
-| `identity` | One-click sign-in to the user's own OpenRouter account with OAuth PKCE (`launchWebAuthFlow`). Used for nothing else; a manual paste-the-code path is always available instead. |
+| `identity` | Sign-in to the user's own OpenRouter account with OAuth PKCE (`launchWebAuthFlow`). This is the only way to connect; used for nothing else. OpenRouter's headless OAuth mode (paste the code it shows) is the fallback if the redirect cannot complete. |
 | Remote code | None. The extension is plain ES modules loaded from the package. It fetches no script, evaluates no downloaded code, and has no `web_accessible_resources`. The one operation that runs JavaScript in a page runs code the user has read and approved in that moment. |
 | Host permissions | None requested. The extension has no host permissions and no content scripts. It reaches `openrouter.ai` under ordinary CORS from its own extension pages, and a local Ghost daemon over a loopback WebSocket. |
 
@@ -87,7 +88,8 @@ Copy these into the store's "Why do you need this permission?" fields verbatim.
 ## Reviewer notes
 
 > To try the default path: install, click the toolbar icon, choose **Open
-> chat**, click **Connect OpenRouter** and authorize. The default model
+> chat**, click **Connect OpenRouter** and authorize (OAuth; there is no API key
+> to paste). The default model
 > (`openrouter/free`) costs nothing and needs no balance. Then ask it something
 > like "open example.com and tell me what the page says". It will open a new tab
 > — Chrome's debugger banner appears there — read it, and answer.

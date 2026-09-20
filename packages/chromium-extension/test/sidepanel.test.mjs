@@ -35,6 +35,8 @@ class FakeNode {
     this.children = [];
     this.parent = null;
     this.listeners = new Map();
+    this.style = {};
+    this.scrollHeight = 0;
   }
 
   addEventListener(event, listener) {
@@ -86,9 +88,10 @@ class FakeNode {
 }
 
 const PANEL_IDS = [
-  "model", "newChat", "disconnect", "paused", "notice", "connect", "oauth", "openAuth",
-  "manual", "manualDetails", "manualSave", "connectError", "log", "composerBar", "input",
-  "send", "stop", "usage",
+  "toolbar", "history", "newChat", "more", "menu", "deleteChat", "disconnect", "paused",
+  "notice", "connect", "oauth", "showCode", "codePath", "openAuth", "manual", "manualSave",
+  "connectError", "empty", "log", "historyList", "composerBar", "input", "model", "send",
+  "stop",
 ];
 
 function panelDocument() {
@@ -146,7 +149,7 @@ function setUp({ key = "sk-or-test", ops = async () => ({ ok: true, result: {} }
     runtime: {
       sendMessage: async (message) => {
         sent.push(message);
-        if (message.type === "ghost-relay-local-reset") return { ok: true, session: "local:next" };
+        if (message.type === "ghost-relay-local-close") return { ok: true };
         return ops(message);
       },
     },
@@ -177,7 +180,9 @@ test("an unconnected panel offers a way to connect and no way to chat", async ()
   assert.equal(document.elements.connect.hidden, false);
   assert.equal(document.elements.composerBar.hidden, true);
   assert.equal(document.elements.log.hidden, true);
-  assert.equal(document.elements.disconnect.hidden, true);
+  assert.equal(document.elements.toolbar.hidden, true);
+  // Only OAuth: one click, or OAuth's own paste-the-code mode. No key box.
+  assert.equal(document.elements.manual.placeholder ?? "Paste the code", "Paste the code");
 });
 
 test("a turn shows the tool calls it made, and what the answer cost", async () => {
@@ -224,10 +229,12 @@ test("a turn shows the tool calls it made, and what the answer cost", async () =
   assert.ok(shown.some((line) => line.includes("Opened it.")), "the answer is visible");
   assert.ok(shown.some((line) => line.includes("some/free-model") && line.includes("free")),
     "the model that answered and its cost are visible");
-  assert.equal(document.elements.usage.textContent, "some/free-model · 20 tokens · free");
-  // The panel never names a workspace; the worker stamps its own.
+  assert.equal(document.elements.log.children.at(-1).text, "some/free-model · 20 tokens · free");
+  // The panel names its conversation, never a workspace; the worker maps one
+  // to the other and stamps it.
   for (const message of sent.filter((entry) => entry.type === "ghost-relay-local-op")) {
     assert.equal(message.args.session, undefined);
+    assert.match(message.conversation, /^[0-9a-f-]{36}$/);
   }
 });
 
@@ -375,8 +382,58 @@ test("a one-click failure reveals the manual path instead of pointing at a close
   document.elements.oauth.listeners.get("click")();
   await settle(10);
   assert.equal(document.elements.connectError.hidden, false);
-  assert.equal(document.elements.manualDetails.open, true);
+  assert.equal(document.elements.codePath.hidden, false);
   assert.equal(document.elements.oauth.disabled, true, "the failed button is not offered again");
+});
+
+test("conversations are separate: new chat, history, delete closes that chat's tabs", async () => {
+  const { document, sent, local } = setUp();
+  globalThis.fetch = async (url) => {
+    if (String(url).includes("/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    return {
+      ok: true,
+      status: 200,
+      body: sseBody(['data: {"choices":[{"delta":{"content":"hi"}}]}', 'data: {"usage":{"total_tokens":1,"cost":0}}', "data: [DONE]"]),
+      json: async () => ({}),
+    };
+  };
+  await load("conversations");
+  await settle();
+
+  document.elements.input.value = "first";
+  document.elements.send.listeners.get("click")();
+  await settle(30);
+  const first = local.store.get("localChats");
+  assert.equal(first.chats.length, 1);
+  assert.equal(first.chats[0].title, "first");
+
+  document.elements.newChat.listeners.get("click")();
+  await settle();
+  assert.equal(document.elements.empty.hidden, false, "a new conversation starts empty");
+  document.elements.input.value = "second";
+  document.elements.send.listeners.get("click")();
+  await settle(30);
+  const both = local.store.get("localChats");
+  assert.deepEqual(both.chats.map((chat) => chat.title), ["second", "first"]);
+
+  document.elements.history.listeners.get("click")();
+  await settle();
+  assert.equal(document.elements.historyList.hidden, false);
+  const rows = document.elements.historyList.children.filter((node) => node.tag === "button");
+  assert.deepEqual(rows.map((row) => row.text), ["secondnow", "firstnow"]);
+  rows[1].click();
+  await settle();
+  assert.equal(document.elements.historyList.hidden, true);
+  assert.ok(document.elements.log.children.some((node) => node.text.includes("first")));
+
+  document.elements.deleteChat.listeners.get("click")();
+  await settle(10);
+  const closes = sent.filter((message) => message.type === "ghost-relay-local-close");
+  assert.equal(closes.length, 1);
+  assert.equal(closes[0].conversation, both.chats[1].id, "the deleted conversation's workspace is retired");
+  assert.deepEqual(local.store.get("localChats").chats.map((chat) => chat.title), ["second"]);
 });
 
 test("disconnect forgets the key and puts the connect panel back", async () => {

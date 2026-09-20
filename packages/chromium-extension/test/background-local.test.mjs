@@ -154,7 +154,10 @@ async function loadWorker(label) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-const localOp = (op, args = {}) => askWorker({ type: "ghost-relay-local-op", op, args });
+const CONVERSATION = "4d3c2b1a-0000-4000-8000-000000000001";
+const OTHER_CONVERSATION = "4d3c2b1a-0000-4000-8000-000000000002";
+const localOp = (op, args = {}, conversation = CONVERSATION) =>
+  askWorker({ type: "ghost-relay-local-op", conversation, op, args });
 
 test("the worker stamps the chat's workspace; the panel never names one", async () => {
   globalThis.chrome = chromeMock();
@@ -169,20 +172,30 @@ test("the worker stamps the chat's workspace; the panel never names one", async 
   assert.deepEqual(listed.result.tabs.map((tab) => tab.url), ["https://example.com/"]);
 });
 
-test("New chat retires this workspace's tabs and mints the next id", async () => {
+test("each conversation has its own workspace, and deleting one closes only its tabs", async () => {
   const removed = [];
-  globalThis.chrome = chromeMock({ removed });
-  await loadWorker("local-reset");
+  const mock = chromeMock({ removed });
+  globalThis.chrome = mock;
+  await loadWorker("local-conversations");
 
-  const opened = await localOp("open", { url: "https://example.com/" });
-  const reset = await askWorker({ type: "ghost-relay-local-reset" });
-  assert.equal(reset.ok, true);
-  assert.ok(reset.session.startsWith(LOCAL_SESSION_PREFIX));
-  assert.deepEqual(removed, [Number(opened.result.id)]);
-  assert.deepEqual((await localOp("tabs", { op: "list" })).result.tabs, []);
+  const first = await localOp("open", { url: "https://example.com/one" });
+  const second = await localOp("open", { url: "https://example.com/two" }, OTHER_CONVERSATION);
+  assert.deepEqual((await localOp("tabs", { op: "list" })).result.tabs.map((tab) => tab.url), ["https://example.com/one"]);
+  assert.deepEqual((await localOp("tabs", { op: "list" }, OTHER_CONVERSATION)).result.tabs.map((tab) => tab.url), ["https://example.com/two"]);
+  const sessions = mock.localStore.get("ghostLocalSessions");
+  assert.ok(sessions[CONVERSATION].startsWith(LOCAL_SESSION_PREFIX));
+  assert.notEqual(sessions[CONVERSATION], sessions[OTHER_CONVERSATION]);
 
-  const again = await askWorker({ type: "ghost-relay-local-reset" });
-  assert.notEqual(again.session, reset.session, "every New is a fresh workspace id");
+  const closed = await askWorker({ type: "ghost-relay-local-close", conversation: CONVERSATION });
+  assert.equal(closed.ok, true);
+  assert.deepEqual(removed, [Number(first.result.id)]);
+  assert.deepEqual((await localOp("tabs", { op: "list" }, OTHER_CONVERSATION)).result.tabs.map((tab) => tab.id), [second.result.id]);
+  assert.equal(mock.localStore.get("ghostLocalSessions")[CONVERSATION], undefined);
+
+  // A conversation id that is not one of the panel's is refused before any op.
+  const bogus = await localOp("open", { url: "https://example.com/" }, "not-a-conversation");
+  assert.equal(bogus.ok, false);
+  assert.match(bogus.error, /named no conversation/);
 });
 
 test("a fresh worker finds the chat's tabs again before it answers a local op", async () => {

@@ -13,16 +13,17 @@ in the extension's own storage:
 
 | Stored | Where | Why |
 | --- | --- | --- |
-| Your OpenRouter API key | `chrome.storage.local` | To call OpenRouter as you, if you connect side-panel chat. |
+| The OpenRouter key its OAuth sign-in minted for this browser | `chrome.storage.local` | To call OpenRouter as you, if you connect side-panel chat. You never see or type it. |
 | The model you picked | `chrome.storage.local` | So the next chat starts where you left off. |
-| Your chat history and the agent's steps | `chrome.storage.local` | So the side panel still shows the conversation when you reopen it. Screenshots are not stored. |
+| Your conversations and the agent's steps in each | `chrome.storage.local` | So the side panel's history still shows them when you reopen it. Screenshots are not stored. |
 | The relay token and port | `chrome.storage.local` | To reconnect to a ghost on this machine, if you pair with one. |
 | Which tabs the extension opened | `chrome.storage.session` (cleared when the browser exits) | So it can find them again after the extension restarts, and close them when you ask. |
 | A pending pairing code, or a pending sign-in secret | `chrome.storage.session` | So a code or sign-in you started survives the extension restarting mid-way. |
 
 Nothing is stored anywhere else. Clearing the extension's data, or removing the
-extension, removes all of it. **Disconnect** in the side panel deletes the
-OpenRouter key; **New** clears the conversation and closes the tabs it opened.
+extension, removes all of it. **Disconnect OpenRouter** in the side panel's menu
+deletes the key; **Delete this conversation** removes it and closes the tabs it
+opened.
 
 ## What leaves your browser
 

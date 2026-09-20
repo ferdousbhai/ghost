@@ -1,6 +1,6 @@
 /**
- * The side panel: the chat surface, and the only place the owner's OpenRouter
- * key is ever read.
+ * The side panel: conversations with Ghost, and the only place the owner's
+ * OpenRouter credential is ever read.
  *
  * The turn loop runs *here*, not in the service worker, because a panel document
  * lives as long as the owner keeps it open while an MV3 worker is reaped after
@@ -8,8 +8,12 @@
  * honest one: closing the panel ends the turn, the same as pressing Stop. What
  * already happened is persisted, so reopening shows the conversation.
  *
- * The worker still owns the tabs. Every page operation goes back through it, so
+ * Each conversation has its own tab workspace. The panel mints the conversation
+ * id; the worker mints the workspace behind it and stamps it on every op, so
  * the panel never names a workspace and never touches `chrome.debugger`.
+ *
+ * Chrome draws the panel's title bar itself, so this document starts at the
+ * toolbar: history, new conversation, and a menu.
  */
 import { runTurn, SYSTEM_PROMPT, TurnStopped } from "./agent.js";
 import {
@@ -24,29 +28,35 @@ import { toolDefinitions } from "./tools.js";
 
 const KEY_STORE = "openRouterKey";
 const MODEL_STORE = "openRouterModel";
-const CHAT_STORE = "localChat";
-/** Enough to keep a working conversation, small enough to always fit storage. */
-const MAX_PERSISTED_ENTRIES = 400;
-const MAX_PERSISTED_BYTES = 1_500_000;
+const CHATS_STORE = "localChats";
+/** The PKCE verifier outlives this document while the owner fetches a code. */
+const VERIFIER_STORE = "openRouterVerifier";
+/** Enough to keep a working history, small enough to always fit storage. */
+const MAX_CHATS = 30;
+const MAX_ENTRIES_PER_CHAT = 400;
+const MAX_STORE_BYTES = 3_000_000;
 const OP_TIMEOUT_MS = 60_000;
 
 const ui = Object.fromEntries([
-  "model", "newChat", "disconnect", "paused", "notice", "connect", "oauth", "openAuth",
-  "manual", "manualDetails", "manualSave", "connectError", "log", "composerBar", "input",
-  "send", "stop", "usage",
+  "toolbar", "history", "newChat", "more", "menu", "deleteChat", "disconnect", "paused",
+  "notice", "connect", "oauth", "showCode", "codePath", "openAuth", "manual", "manualSave",
+  "connectError", "empty", "log", "historyList", "composerBar", "input", "model", "send",
+  "stop",
 ].map((id) => [id, document.getElementById(id)]));
 
 const tools = toolDefinitions();
 
 let key = null;
 let model = DEFAULT_MODEL;
-/** What the model sees. */
-let messages = [];
-/** What the owner sees. Separate because the two diverge: images and clipping. */
-let record = [];
+/** Newest first. Each: { id, title, updatedAt, messages, record }. */
+let chats = [];
+let activeId = null;
+/** "chat" or "history". */
+let view = "chat";
+/** The turn in flight, if any: { chat, controller }. */
 let turn = null;
-let controller = null;
 let paused = false;
+let pendingConfirm = null;
 
 // ---------------------------------------------------------------- persistence
 
@@ -76,40 +86,93 @@ export function trimTurns(entries, isTurnStart, fits) {
 const startsTurn = (message) => message.role === "user" && typeof message.content === "string";
 const startsRecord = (entry) => entry.kind === "user";
 
-async function persist() {
-  const payload = {
-    messages: trimTurns(storable(messages), startsTurn,
-      (kept) => kept.length <= MAX_PERSISTED_ENTRIES),
-    record: trimTurns(record, startsRecord, (kept) => kept.length <= MAX_PERSISTED_ENTRIES),
-    model,
+function storableChat(chat) {
+  return {
+    id: chat.id,
+    title: chat.title,
+    updatedAt: chat.updatedAt,
+    messages: trimTurns(storable(chat.messages), startsTurn,
+      (kept) => kept.length <= MAX_ENTRIES_PER_CHAT),
+    record: trimTurns(chat.record, startsRecord, (kept) => kept.length <= MAX_ENTRIES_PER_CHAT),
   };
-  while (JSON.stringify(payload).length > MAX_PERSISTED_BYTES && payload.messages.length > 1) {
-    payload.messages = trimTurns(payload.messages, startsTurn,
-      (kept) => kept.length < payload.messages.length);
-    payload.record = trimTurns(payload.record, startsRecord,
-      (kept) => kept.length < payload.record.length);
+}
+
+async function persist() {
+  const payload = { active: activeId, chats: chats.map(storableChat) };
+  // Over the byte cap, the oldest conversations go first; their workspaces are
+  // released by `dropChat`, not here, so a size-only trim never closes a tab.
+  while (JSON.stringify(payload).length > MAX_STORE_BYTES && payload.chats.length > 1) {
+    payload.chats.pop();
   }
-  await chrome.storage.local.set({ [CHAT_STORE]: payload }).catch(() => {});
+  await chrome.storage.local.set({ [CHATS_STORE]: payload }).catch(() => {});
+}
+
+function validChat(value) {
+  return typeof value?.id === "string" && Array.isArray(value.messages) && Array.isArray(value.record);
 }
 
 async function restore() {
   const stored = await chrome.storage.local
-    .get({ [KEY_STORE]: null, [MODEL_STORE]: null, [CHAT_STORE]: null })
-    .catch(() => ({}));
+    .get({ [KEY_STORE]: null, [MODEL_STORE]: null, [CHATS_STORE]: null, enabled: true })
+    .catch(() => ({ enabled: true }));
   key = typeof stored?.[KEY_STORE] === "string" && stored[KEY_STORE] !== ""
     ? stored[KEY_STORE]
     : null;
   model = typeof stored?.[MODEL_STORE] === "string" && stored[MODEL_STORE] !== ""
     ? stored[MODEL_STORE]
     : DEFAULT_MODEL;
-  const chat = stored?.[CHAT_STORE];
-  messages = Array.isArray(chat?.messages) ? chat.messages : [];
-  record = Array.isArray(chat?.record) ? chat.record : [];
+  const saved = stored?.[CHATS_STORE];
+  chats = Array.isArray(saved?.chats) ? saved.chats.filter(validChat) : [];
+  activeId = chats.some((chat) => chat.id === saved?.active) ? saved.active : (chats[0]?.id ?? null);
   // The pause switch is the popup's `enabled`; `storage.onChanged` below keeps
   // it current, and the worker refuses a paused op regardless of what this
   // document believes.
-  const settings = await chrome.storage.local.get({ enabled: true }).catch(() => ({ enabled: true }));
-  paused = settings.enabled === false;
+  paused = stored?.enabled === false;
+}
+
+// ------------------------------------------------------------- conversations
+
+function activeChat() {
+  return chats.find((chat) => chat.id === activeId) ?? null;
+}
+
+function newChat() {
+  const current = activeChat();
+  // An empty conversation is already new; do not stack them.
+  if (current !== null && current.record.length === 0) {
+    view = "chat";
+    render();
+    return current;
+  }
+  const chat = { id: crypto.randomUUID(), title: "", updatedAt: Date.now(), messages: [], record: [] };
+  chats.unshift(chat);
+  activeId = chat.id;
+  view = "chat";
+  while (chats.length > MAX_CHATS) void dropChat(chats.at(-1).id);
+  render();
+  void persist();
+  return chat;
+}
+
+/** Forget a conversation and retire its workspace, closing the tabs it opened. */
+async function dropChat(id) {
+  if (turn?.chat.id === id) stop();
+  chats = chats.filter((chat) => chat.id !== id);
+  if (activeId === id) activeId = chats[0]?.id ?? null;
+  render();
+  await persist();
+  const closed = await chrome.runtime
+    .sendMessage({ type: "ghost-relay-local-close", conversation: id })
+    .catch((error) => ({ ok: false, error: error?.message ?? String(error) }));
+  if (closed?.ok !== true) {
+    ui.notice.textContent = `The conversation is gone, but its tabs may not be: ${closed?.error ?? "the relay worker did not answer"}`;
+    ui.notice.hidden = false;
+  }
+}
+
+function touch(chat) {
+  chat.updatedAt = Date.now();
+  chats.sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
 // -------------------------------------------------------------------- the UI
@@ -124,51 +187,84 @@ function el(tag, className, text) {
 function renderEntry(entry) {
   if (entry.kind === "user" || entry.kind === "assistant") {
     const turnNode = el("div", `turn ${entry.kind}`);
-    turnNode.append(el("div", "who", entry.kind === "user" ? "you" : "agent"));
     turnNode.append(el("div", "body", entry.text));
     return turnNode;
   }
-  if (entry.kind === "tool") {
-    return el("div", `tool${entry.failed ? " bad" : ""}`, entry.text);
-  }
+  if (entry.kind === "tool") return el("div", `tool${entry.failed ? " bad" : ""}`, entry.text);
   if (entry.kind === "usage") return el("div", "usage", entry.text);
   return el("div", "error", entry.text);
 }
 
-function render() {
-  ui.connect.hidden = key !== null;
-  ui.log.hidden = key === null;
-  ui.composerBar.hidden = key === null;
-  ui.model.hidden = key === null;
-  ui.disconnect.hidden = key === null;
-  ui.model.disabled = turn !== null;
-  ui.newChat.disabled = turn !== null;
-  ui.send.hidden = turn !== null;
-  ui.stop.hidden = turn === null;
-  // The wire has no cancel: a page op already handed to Chromium finishes. Stop
-  // ends the turn at the next step and says so rather than looking ignored.
-  ui.stop.disabled = controller?.signal.aborted === true;
-  ui.stop.textContent = controller?.signal.aborted === true ? "Stopping…" : "Stop";
-  ui.paused.hidden = !paused;
-
-  ui.log.replaceChildren(...record.map(renderEntry));
-  if (pendingConfirm !== null) ui.log.append(pendingConfirm.node);
-  ui.log.scrollTop = ui.log.scrollHeight;
+function whenLabel(at) {
+  const minutes = Math.round((Date.now() - at) / 60_000);
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.round(hours / 24)}d`;
 }
 
-function say(entry) {
-  record.push(entry);
+function renderHistory() {
+  ui.historyList.replaceChildren(el("h2", null, "Conversations"));
+  for (const chat of chats) {
+    const row = el("button", chat.id === activeId ? "active" : "");
+    row.type = "button";
+    row.append(el("span", "title", chat.title || "New conversation"), el("span", "when", whenLabel(chat.updatedAt)));
+    row.addEventListener("click", () => {
+      activeId = chat.id;
+      view = "chat";
+      render();
+      void persist();
+    });
+    ui.historyList.append(row);
+  }
+}
+
+function render() {
+  const connected = key !== null;
+  const chat = activeChat();
+  const busy = turn !== null && turn.chat.id === chat?.id;
+  const showLog = connected && view === "chat" && chat !== null && (chat.record.length > 0 || pendingConfirm !== null);
+
+  ui.toolbar.hidden = !connected;
+  ui.connect.hidden = connected;
+  ui.composerBar.hidden = !connected || view !== "chat";
+  ui.historyList.hidden = !(connected && view === "history");
+  ui.log.hidden = !showLog;
+  ui.empty.hidden = !(connected && view === "chat" && !showLog);
+  ui.paused.hidden = !paused;
+  ui.model.disabled = turn !== null;
+  ui.send.hidden = busy;
+  ui.stop.hidden = !busy;
+  // The wire has no cancel: a page op already handed to Chromium finishes. Stop
+  // ends the turn at the next step and says so rather than looking ignored.
+  const stopping = busy && turn.controller.signal.aborted;
+  ui.stop.disabled = stopping;
+  ui.stop.textContent = stopping ? "Stopping…" : "Stop";
+  ui.deleteChat.disabled = chat === null;
+
+  if (view === "history") renderHistory();
+  if (showLog) {
+    ui.log.replaceChildren(...chat.record.map(renderEntry));
+    if (pendingConfirm !== null && pendingConfirm.chat.id === chat.id) ui.log.append(pendingConfirm.node);
+    ui.log.scrollTop = ui.log.scrollHeight;
+  }
+}
+
+function say(chat, entry) {
+  chat.record.push(entry);
   render();
 }
 
 /** Grow the last assistant entry as tokens arrive, without a full re-render. */
-function streamInto(text) {
-  const last = record.at(-1);
+function streamInto(chat, text) {
+  const last = chat.record.at(-1);
   if (last?.kind !== "assistant") {
-    say({ kind: "assistant", text });
+    say(chat, { kind: "assistant", text });
     return;
   }
   last.text += text;
+  if (chat.id !== activeId || view !== "chat") return;
   const node = ui.log.lastElementChild?.querySelector(".body");
   if (node) {
     node.textContent = last.text;
@@ -190,35 +286,29 @@ function summarize(name, args) {
 
 // ------------------------------------------------------------- the worker hop
 
-async function ask(message) {
-  const response = await chrome.runtime.sendMessage(message);
-  if (response === null || response === undefined) {
-    throw new Error("The relay worker did not answer. Reopen this panel.");
-  }
-  return response;
-}
-
-async function runTool(name, args) {
-  const response = await ask({
+async function runTool(chat, name, args) {
+  const response = await chrome.runtime.sendMessage({
     type: "ghost-relay-local-op",
+    conversation: chat.id,
     op: name,
     args,
     timeoutMs: OP_TIMEOUT_MS,
   });
+  if (response === null || response === undefined) {
+    throw new Error("The relay worker did not answer. Reopen this panel.");
+  }
   if (response.ok !== true) throw new Error(response.error);
   return response.result;
 }
 
 // --------------------------------------------------------- the script consent
 
-let pendingConfirm = null;
-
 /**
  * The one operation that runs page JavaScript asks, every time. It is not a
  * remembered preference: the code is different each time, and the whole point
  * of showing it is that the owner reads *this* code.
  */
-function confirmScript({ name, args }) {
+function confirmScript(chat, { name, args }) {
   return new Promise((resolve) => {
     const node = el("div", "confirm");
     node.append(el("div", "who", `${name} — run this in the page?`));
@@ -235,7 +325,7 @@ function confirmScript({ name, args }) {
     };
     allow.addEventListener("click", () => answer(true));
     deny.addEventListener("click", () => answer(false));
-    pendingConfirm = { node, answer };
+    pendingConfirm = { chat, node, answer };
     render();
     allow.focus();
   });
@@ -243,10 +333,10 @@ function confirmScript({ name, args }) {
 
 // ------------------------------------------------------------------ the turn
 
-function usageLine(model, usage) {
+function usageLine(answered, usage) {
   const tokens = usage?.total_tokens ?? null;
   const cost = typeof usage?.cost === "number" ? usage.cost : null;
-  const parts = [model];
+  const parts = [answered];
   if (tokens !== null) parts.push(`${tokens} tokens`);
   parts.push(cost === null ? "cost unreported" : cost === 0 ? "free" : `$${cost.toFixed(6)}`);
   return parts.join(" · ");
@@ -255,62 +345,63 @@ function usageLine(model, usage) {
 async function send() {
   const text = ui.input.value.trim();
   if (text === "" || turn !== null || key === null) return;
+  const chat = activeChat() ?? newChat();
   ui.input.value = "";
+  ui.input.style.height = "auto";
   ui.notice.hidden = true;
 
-  if (messages.length === 0) messages.push({ role: "system", content: SYSTEM_PROMPT });
-  messages.push({ role: "user", content: text });
-  say({ kind: "user", text });
+  if (chat.messages.length === 0) chat.messages.push({ role: "system", content: SYSTEM_PROMPT });
+  chat.messages.push({ role: "user", content: text });
+  if (chat.title === "") chat.title = text.slice(0, 60);
+  touch(chat);
+  say(chat, { kind: "user", text });
 
-  controller = new AbortController();
-  turn = (async () => {
-    try {
-      const outcome = await runTurn({
-        messages,
-        model,
-        tools,
-        chat: (request) => streamChat({ key, ...request }),
-        runTool,
-        confirm: confirmScript,
-        signal: controller.signal,
-        // A step's text arrives token by token, so `assistant` itself needs no
-        // entry — `delta` already wrote one, and a tool-only step says nothing.
-        onEvent: (event) => {
-          if (event.type === "delta") streamInto(event.text);
-          else if (event.type === "tool") {
-            say({ kind: "tool", text: `→ ${summarize(event.name, event.args)}` });
-          } else if (event.type === "tool_result") {
-            const failed = typeof event.result?.error === "string";
-            say({
-              kind: "tool",
-              failed,
-              text: failed ? `← ${event.result.error}` : `← ${event.name} ok`,
-            });
-          }
-        },
-      });
-      const line = usageLine(outcome.model, outcome.usage);
-      say({ kind: "usage", text: line });
-      ui.usage.textContent = line;
-    } catch (error) {
-      if (error instanceof TurnStopped || error?.name === "AbortError") {
-        say({ kind: "usage", text: error instanceof TurnStopped ? error.message : "Stopped." });
-      } else {
-        say({ kind: "error", text: error?.message ?? String(error) });
-      }
-    } finally {
-      pendingConfirm?.answer(false);
-      controller = null;
-      turn = null;
-      render();
-      await persist();
-    }
-  })();
+  const controller = new AbortController();
+  turn = { chat, controller };
   render();
+  try {
+    const outcome = await runTurn({
+      messages: chat.messages,
+      model,
+      tools,
+      chat: (request) => streamChat({ key, ...request }),
+      runTool: (name, args) => runTool(chat, name, args),
+      confirm: (call) => confirmScript(chat, call),
+      signal: controller.signal,
+      // A step's text arrives token by token, so `assistant` itself needs no
+      // entry — `delta` already wrote one, and a tool-only step says nothing.
+      onEvent: (event) => {
+        if (event.type === "delta") streamInto(chat, event.text);
+        else if (event.type === "tool") {
+          say(chat, { kind: "tool", text: `→ ${summarize(event.name, event.args)}` });
+        } else if (event.type === "tool_result") {
+          const failed = typeof event.result?.error === "string";
+          say(chat, {
+            kind: "tool",
+            failed,
+            text: failed ? `← ${event.result.error}` : `← ${event.name} ok`,
+          });
+        }
+      },
+    });
+    say(chat, { kind: "usage", text: usageLine(outcome.model, outcome.usage) });
+  } catch (error) {
+    if (error instanceof TurnStopped || error?.name === "AbortError") {
+      say(chat, { kind: "usage", text: error instanceof TurnStopped ? error.message : "Stopped." });
+    } else {
+      say(chat, { kind: "error", text: error?.message ?? String(error) });
+    }
+  } finally {
+    if (pendingConfirm?.chat.id === chat.id) pendingConfirm.answer(false);
+    turn = null;
+    touch(chat);
+    render();
+    await persist();
+  }
 }
 
 function stop() {
-  controller?.abort();
+  turn?.controller.abort();
   pendingConfirm?.answer(false);
   render();
 }
@@ -322,6 +413,7 @@ async function saveKey(value) {
   await chrome.storage.local.set({ [KEY_STORE]: value });
   ui.connectError.hidden = true;
   ui.notice.hidden = true;
+  if (activeChat() === null) newChat();
   await loadModels();
   render();
 }
@@ -329,11 +421,16 @@ async function saveKey(value) {
 function connectFailed(error) {
   ui.connectError.textContent = error?.message ?? String(error);
   ui.connectError.hidden = false;
-  // The manual path lives under a closed <details>; an error that points at it
-  // must also reveal it.
-  ui.manualDetails.open = true;
+  // The code path is the fallback; an error that points at it must reveal it.
+  ui.codePath.hidden = false;
 }
 
+/**
+ * OAuth, one click: PKCE through `chrome.identity`, which intercepts the
+ * redirect to this extension's own `chromiumapp.org` URL. OpenRouter ends the
+ * flow by minting a key for this browser; that key is what is stored, and the
+ * owner never sees or handles it.
+ */
 async function oauthConnect() {
   ui.oauth.disabled = true;
   try {
@@ -342,27 +439,22 @@ async function oauthConnect() {
     const answered = await chrome.identity.launchWebAuthFlow({ url, interactive: true });
     const code = codeFromCallback(answered ?? "");
     if (code === null) {
-      throw new Error("OpenRouter did not return a code. Use the manual path below.");
+      throw new Error("OpenRouter did not send a code back. Connect with a code instead.");
     }
     await saveKey(await exchangeCode({ code, verifier }));
     ui.oauth.disabled = false;
   } catch (error) {
-    // One-click failed once in this document; the fallback is the path now.
+    // One-click failed once in this document; the code path is the path now.
     // The button comes back with the next panel open.
     connectFailed(error);
   }
 }
 
 /**
- * The fallback that works whatever a callback URL is allowed to be.
- *
- * The verifier outlives this document in `chrome.storage.session`: the owner
- * leaves for another tab to read the code, and Chrome may reload the panel while
- * they are gone. It is session storage, so it never reaches disk and is gone
- * when the browser closes.
+ * The same OAuth without the redirect: OpenRouter's headless mode shows the
+ * code on its own page for the owner to paste. It works whatever a callback
+ * URL is allowed to be.
  */
-const VERIFIER_STORE = "openRouterVerifier";
-
 async function openManualAuth() {
   try {
     const { url, verifier } = await beginAuth();
@@ -373,23 +465,17 @@ async function openManualAuth() {
   }
 }
 
-async function useManual() {
-  const value = ui.manual.value.trim();
-  if (value === "") return;
+async function useCode() {
+  const code = ui.manual.value.trim();
+  if (code === "") return;
   ui.manualSave.disabled = true;
   try {
-    if (value.startsWith("sk-")) {
-      await saveKey(value);
-    } else {
-      const stored = await chrome.storage.session
-        .get({ [VERIFIER_STORE]: null })
-        .catch(() => ({}));
-      const verifier = stored?.[VERIFIER_STORE] ?? null;
-      if (verifier === null) {
-        throw new Error("Open the authorization page first, so the code can be matched to this browser.");
-      }
-      await saveKey(await exchangeCode({ code: value, verifier }));
+    const stored = await chrome.storage.session.get({ [VERIFIER_STORE]: null }).catch(() => ({}));
+    const verifier = stored?.[VERIFIER_STORE] ?? null;
+    if (verifier === null) {
+      throw new Error("Open the authorization page first, so the code can be matched to this browser.");
     }
+    await saveKey(await exchangeCode({ code, verifier }));
     ui.manual.value = "";
     await chrome.storage.session.remove(VERIFIER_STORE).catch(() => {});
   } catch (error) {
@@ -403,12 +489,13 @@ async function useManual() {
 async function disconnect() {
   stop();
   key = null;
+  ui.menu.hidden = true;
   await chrome.storage.local.remove(KEY_STORE).catch(() => {});
   render();
 }
 
 async function loadModels() {
-  const fallback = [{ id: DEFAULT_MODEL, name: "Free Models Router", free: true }];
+  const fallback = [{ id: DEFAULT_MODEL, name: "Free router", free: true }];
   let models = fallback;
   try {
     const listed = await listModels();
@@ -425,41 +512,59 @@ async function loadModels() {
   ui.model.replaceChildren(...models.map((entry) => {
     const option = document.createElement("option");
     option.value = entry.id;
-    option.textContent = entry.free ? `${entry.name} — free` : entry.name;
+    option.textContent = entry.id === DEFAULT_MODEL ? "Free router" : entry.free ? `${entry.name} · free` : entry.name;
     option.selected = entry.id === model;
     return option;
   }));
-}
-
-async function newChat() {
-  stop();
-  const response = await ask({ type: "ghost-relay-local-reset" });
-  messages = [];
-  record = [];
-  ui.usage.textContent = "";
-  if (response.ok !== true) say({ kind: "error", text: response.error });
-  await persist();
-  render();
 }
 
 // ------------------------------------------------------------------- wiring
 
 ui.send.addEventListener("click", () => void send());
 ui.stop.addEventListener("click", stop);
-ui.newChat.addEventListener("click", () => void newChat());
-ui.oauth.addEventListener("click", () => void oauthConnect());
-ui.openAuth.addEventListener("click", () => void openManualAuth());
-ui.manualSave.addEventListener("click", () => void useManual());
+ui.newChat.addEventListener("click", () => {
+  ui.menu.hidden = true;
+  newChat();
+});
+ui.history.addEventListener("click", () => {
+  ui.menu.hidden = true;
+  view = view === "history" ? "chat" : "history";
+  render();
+});
+ui.more.addEventListener("click", () => {
+  ui.menu.hidden = !ui.menu.hidden;
+});
+ui.deleteChat.addEventListener("click", () => {
+  ui.menu.hidden = true;
+  const chat = activeChat();
+  if (chat !== null) void dropChat(chat.id);
+});
 ui.disconnect.addEventListener("click", () => void disconnect());
+ui.oauth.addEventListener("click", () => void oauthConnect());
+ui.showCode.addEventListener("click", () => {
+  ui.codePath.hidden = !ui.codePath.hidden;
+});
+ui.openAuth.addEventListener("click", () => void openManualAuth());
+ui.manualSave.addEventListener("click", () => void useCode());
 ui.input.addEventListener("keydown", (event) => {
   if (event.key === "Enter" && !event.shiftKey) {
     event.preventDefault();
     void send();
   }
 });
+ui.input.addEventListener("input", () => {
+  ui.input.style.height = "auto";
+  ui.input.style.height = `${Math.min(ui.input.scrollHeight, 160)}px`;
+});
 ui.model.addEventListener("change", () => {
   model = ui.model.value;
   void chrome.storage.local.set({ [MODEL_STORE]: model }).catch(() => {});
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!ui.menu.hidden) ui.menu.hidden = true;
+    else if (turn !== null) stop();
+  }
 });
 
 // Pause is one switch for both sides: the popup flips it, and a turn in flight
@@ -468,7 +573,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.enabled) return;
   paused = changes.enabled.newValue === false;
   if (paused && turn !== null) {
-    say({ kind: "usage", text: "Paused from the relay popup. Resume there to continue." });
+    say(turn.chat, { kind: "usage", text: "Paused from the relay popup. Resume there to continue." });
     stop();
   }
   render();
@@ -478,12 +583,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 // lose it, and Chrome may reload a panel whenever it likes.
 window.addEventListener("pagehide", () => void persist());
 
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && turn !== null) stop();
-});
-
 void (async () => {
   await restore();
-  if (key !== null) await loadModels();
+  if (key !== null) {
+    if (activeChat() === null) newChat();
+    await loadModels();
+  }
   render();
 })();
