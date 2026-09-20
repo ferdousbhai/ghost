@@ -491,7 +491,7 @@ describe("Ghost slash commands", () => {
 });
 
 describe("SessionHost.open", () => {
-  it("resumes a legacy Pi transcript at its historical cwd", async () => {
+  it("opens a legacy Pi transcript pinned to the owner home", async () => {
     const { dir } = await setup();
     const paths = ghostPaths(dir);
     mkdirSync(paths.sessionDir, { recursive: true });
@@ -508,11 +508,11 @@ describe("SessionHost.open", () => {
     );
 
     const handle = await host!.open("casper", "legacy-cwd");
-    expect(handle.session.sessionManager.getCwd()).toBe(dir);
-    expect(await host!.conversationCwd("casper", "legacy-cwd")).toBe(dir);
+    expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
+    expect(await host!.conversationCwd("casper", "legacy-cwd")).toBe(temp!.ownerHome);
   });
 
-  it("accepts only a line-one native Pi cwd header and rejects unsafe transcript shapes", async () => {
+  it("ignores Pi cwd headers and pins every conversation to the owner home", async () => {
     const { dir } = await setup();
     const paths = ghostPaths(dir);
     mkdirSync(paths.sessionDir, { recursive: true });
@@ -552,7 +552,7 @@ describe("SessionHost.open", () => {
     const sparse = writeTranscript("sparse-legacy", [header("sparse-legacy")]);
     truncateSync(sparse, 384 * 1024 * 1024);
     await expect(host!.conversationCwd("casper", "sparse-legacy"))
-      .resolves.toBe(dir);
+      .resolves.toBe(temp!.ownerHome);
 
     const titleFirst = writeTranscript("title-first-legacy", [
       { type: "title", title: "Legacy title", source: "auto" },
@@ -592,14 +592,14 @@ describe("SessionHost.open", () => {
     expect(readFileSync(outside, "utf8")).toContain('"cwd"');
   });
 
-  it("starts a new conversation in the settings.yml cwd when one is named", async () => {
+  it("ignores a settings.yml cwd and starts in the owner home", async () => {
     const { dir } = await setup();
     const workspace = join(temp!.ownerHome, "workspace");
     mkdirSync(workspace, { recursive: true });
     writeFileSync(ghostPaths(dir).settingsFile, `cwd: ${workspace}\n`);
 
     const handle = await host!.open("casper", "conv-settings-cwd");
-    expect(handle.session.sessionManager.getCwd()).toBe(workspace);
+    expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
   });
 
   it("ignores a settings.yml cwd outside the owner home", async () => {
@@ -2478,7 +2478,7 @@ describe("SessionHost.runTurn", () => {
     });
   });
 
-  it("lets !cd move Pi's cwd without moving or forgetting the ghost home", async () => {
+  it("keeps !cd from moving Pi's cwd or the ghost home", async () => {
     const { dir } = await setup([{ kind: "text", text: "still Casper" }]);
     const ownerDocs = join(temp!.ownerHome, "docs");
     mkdirSync(ownerDocs, { recursive: true });
@@ -2489,7 +2489,7 @@ describe("SessionHost.runTurn", () => {
       emit: () => {},
     });
     const handle = await host!.open("casper", "conv-cd");
-    expect(handle.session.sessionManager.getCwd()).toBe(ownerDocs);
+    expect(handle.session.sessionManager.getCwd()).toBe(temp!.ownerHome);
     expect(handle.session.systemPrompt).not.toContain("MUST-NOT-REDISCOVER-AFTER-CD");
     expect(handle.sessionFile?.startsWith(ghostPaths(dir).sessionDir + sep)).toBe(true);
 

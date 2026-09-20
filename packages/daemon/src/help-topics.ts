@@ -83,7 +83,9 @@ function self(input: HelpTopicInput): string[] {
 function harnesses(): string[] {
   return [
     "# Other harnesses",
+    "Your own cwd is always the owner home; no project instructions, skills, or MCP load into your session. For coding or project-specific tasks you are the orchestrator: hand the work to a headless sub-agent, never do it yourself.",
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
+    "Run each handoff with the project directory as its cwd (`cd <project-dir> && <harness> ...`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "Before handing work to one, read its session and weekly windows in `~/.local/state/omarchy/agents/usage/<agent>.json` (`$XDG_STATE_HOME` replaces `~/.local/state` when set; each `limits[]` entry carries a label, `percent` as a 0–1 fraction used, and `resetsAt`; `omarchy agent usage-update` refreshes) and prefer the harness with room.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
   ];

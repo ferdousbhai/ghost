@@ -342,6 +342,6 @@ export const FIRST_MEETING_SECTION = [
   "",
   "Help with the owner's request first. In quiet moments learn about them, one question at a "
   + "time, and let them shape your voice; save useful facts and preferences as notes in their "
-  + "documents. When ready, show a character draft and, after approval, write it to "
+  + "documents. When ready, show a character draft and write it to "
   + "`character.md`. Drop the subject if they are uninterested.",
 ].join("\n");

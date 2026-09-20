@@ -165,8 +165,10 @@ Markdown commands and prompts, and MCP servers in the ghost home. Machine skills
 `~/.agents/skills/` and `~/.pi/agent/skills/` enter at lowest precedence, then
 ghost-home resources. There is no skill-name allowlist, and the admitted set is
 an immutable per-session snapshot the owner can inspect through the session
-resources API. The directory a conversation works in is only its cwd: nothing
-is discovered from it, and `!cd` moves a pi conversation there durably.
+resources API. A conversation's cwd is always the owner home: nothing
+is discovered from any other tree, and `!cd` affects only that shell
+invocation. Project settings belong to a delegated harness run with the
+project directory as its own cwd.
 
 Machine-level command hooks (`before_prompt`, `session_stop`) are the owner's
 `hooks.json`, editable by the ghost itself through `ghost hooks`; Ghost ships
@@ -177,7 +179,8 @@ none. The protocol is in [hooks.md](hooks.md).
 - **Local-first driver.** The ghost's main model, the `chat_model` role, is
   meant to be an open-source model: local on the owner's device, or hosted
   with one LoRA adapter per ghost. Frontier models are reached through the
-  specialist CLIs the ghost runs from Bash (`claude -p`, `codex`, `pi`), not
+  specialist CLIs the ghost runs from Bash (`claude -p`, `codex`, `pi`), each
+  with the project directory as its cwd, not
   through a model role of Ghost's own: `advisor_model` existed and was removed
   once nothing but image reading depended on it. Owner `session_stop` hooks are
   the training signal for any

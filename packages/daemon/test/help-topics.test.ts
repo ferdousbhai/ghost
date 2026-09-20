@@ -48,6 +48,10 @@ describe("ghost help topics", () => {
 
   it("harnesses: the usage file, its fields, and the handoff note", () => {
     const text = renderHelpTopic("harnesses", INPUT);
+    expect(text).toContain("Your own cwd is always the owner home");
+    expect(text).toContain("you are the orchestrator");
+    expect(text).toContain("cd <project-dir> && <harness>");
+    expect(text).toContain("respects that project's settings");
     expect(text).toContain("~/.local/state/omarchy/agents/usage/<agent>.json");
     expect(text).toContain("`percent` as a 0–1 fraction used");
     expect(text).toContain("omarchy agent usage-update");

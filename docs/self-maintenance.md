@@ -108,9 +108,9 @@ the turn that needs them.
 
 There is nothing to configure. When ghostd runs from a clone, that clone is
 the checkout of every ghost on the machine, and the policy says so; when it
-runs from the package, no ghost has one. `cwd:` in a ghost's `settings.yml`
-can start its conversations inside the clone, or `!cd` into it from a
-conversation. Nothing is discovered from the clone; its skills, rules, and MCP
+runs from the package, no ghost has one. A ghost works from the owner home,
+so it reaches the checkout per command (`cd <checkout> && ...`) or by absolute
+path. Nothing is discovered from the clone; its skills, rules, and MCP
 never enter a session.
 
 ## The loop

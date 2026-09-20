@@ -99,8 +99,7 @@ The checkout a ghost may edit is the clone the daemon was built from
 machine: one daemon powers them all, so a self-edit powers all of them after a
 build and restart. A packaged install has no checkout. No per-ghost setting
 names one; the checkout's own skills, rules, and MCP never enter a session.
-`settings.yml` may name `cwd:`, the directory a new conversation starts in, as
-an absolute path under the owner home; any other value reads as unset.
+`settings.yml` names no cwd: every conversation starts in the owner home.
 
 ### Character and notes
 
@@ -123,8 +122,10 @@ MCP form an immutable session snapshot. A ghost home carries no executable
 extension code; the only hooks are the owner's `hooks.json` commands. Hidden compatibility roots inside a ghost home are not aliases.
 Machine skills under `~/.agents/skills/` and `~/.pi/agent/skills/` enter at
 lowest precedence, then ghost resources. There is no skill-name allowlist and
-no third, per-directory resource root: whatever tree a conversation works in
-is just its cwd, and nothing is discovered from it. The scanner is
+no third, per-directory resource root: a conversation's cwd is always the
+owner home, and no project instructions, skills, or MCP are discovered from
+any other tree. A delegated harness run with a project directory as its own
+cwd respects that project's settings. The scanner is
 [`declarative-resources.ts`](packages/daemon/src/declarative-resources.ts).
 
 ### Sessions and sidecars
@@ -213,14 +214,16 @@ The session receives the Ghost character and the stable policy sections, whose
 authoritative list and per-section size ceilings are
 [`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two of
 them carry contract the rest of this file relies on: the other-harnesses policy
-reads the owner's agent-CLI session and weekly windows from Omarchy's usage
+pins the ghost to the owner home, runs each handoff with the project directory
+as the harness's own cwd so the headless harness respects that project's
+settings, reads the owner's agent-CLI session and weekly windows from Omarchy's usage
 records and ends a limit in a handoff note in the owner's documents; the
 owner-context policy names the Documents directory in one sentence and nothing
 else about it. Owner documents are read only when relevant, with the runtime's
 own file and search tools, never injected automatically at session start.
 
-The operational cwd defaults to `settings.yml` `cwd:`, else the owner home.
-A conversation's `!cd` moves it and records the new cwd in its transcript. Ghost home
+The operational cwd is always the owner home. A `!cd` affects only that
+shell invocation and never moves the conversation. Ghost home
 remains a separately named private resource root.
 Prompt indexes are session-start snapshots; current data is read through the
 owning tool when needed.

@@ -31,7 +31,6 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
   readDaemonControlFile,
   writeDaemonControlFile,
-  readDaemonControlLine,
 } from "./control-file.js";
 import {
   DEFAULT_COMPACTION_CONFIG,
@@ -129,7 +128,7 @@ export {
 };
 import { pathIsWithin } from "./path-within.js";
 import type { RunningSource } from "./running-source.js";
-import { renderSelfMaintenancePolicy, resolveSettingsCwd } from "./self-maintenance.js";
+import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
@@ -175,8 +174,6 @@ import {
 } from "./legacy-cwd-files.js";
 import {
   readSessionCwds,
-  readSessionCwdsFromFile,
-  recordConversationCwd,
   recordToolCwd as appendToolCwdEntry,
 } from "./session-cwds.js";
 
@@ -194,11 +191,6 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
 
 /** pi persists a forced `/skill` prompt as a custom message of this type. */
 const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
-
-/** `cd ...` typed at the `!` prompt moves the conversation's working directory. */
-function isPersistentShellCdCommand(command: string): boolean {
-  return /^cd(?:\s|$)/.test(command.trim());
-}
 
 type BashResult = Awaited<ReturnType<AgentSession["executeBash"]>>;
 
@@ -673,9 +665,7 @@ interface HostedMCP {
 interface HostedSession extends GhostSessionHandle {
   logger: Logger;
   resources: SessionResourceView;
-  /** The session's working directory; `!cd` moves it and reopens the session. */
-  cwd: string;
-  /** Mirrors the transcript's cwd entries so a render need not rescan it. */
+  /** Mirrors the transcript's tool-cwd entries so a render need not rescan it. */
   toolCwds: Map<string, string>;
   busy: boolean;
   lastUsedAt: number;
@@ -947,40 +937,6 @@ function exactDeleteStaticSource(
       return artifact.source === conversationCwdPath(sessionDir, conversationId);
     case "tool-cwds":
       return artifact.source === toolCwdsPath(sessionDir, conversationId);
-  }
-}
-
-function persistentCdTarget(command: string, cwd: string, ownerHome: string): string | null {
-  if (!isPersistentShellCdCommand(command)) return null;
-  let rest = command.trim().slice(2).trim();
-  if (rest === "" || rest === "--") return ownerHome;
-  if (rest.startsWith("-- ")) rest = rest.slice(3).trimStart();
-  const quote = rest[0];
-  if ((quote === '"' || quote === "'") && rest.endsWith(quote)) rest = rest.slice(1, -1);
-  if (rest === "~") return ownerHome;
-  if (rest.startsWith("~/")) return resolve(ownerHome, rest.slice(2));
-  // `cd -` depends on mutable shell history and cannot be authorized before it mutates.
-  if (rest === "-") return null;
-  return isAbsolute(rest) ? resolve(rest) : resolve(cwd, rest);
-}
-
-const PI_SESSION_HEADER_MAX_BYTES = 64 * 1024;
-/** A whole transcript, for the pre-open cwd scan. Bounded like any control file. */
-const PI_SESSION_MAX_BYTES = 64 * 1_048_576;
-
-/** The cwd pi recorded when it created the transcript, for conversations that never moved. */
-async function piSessionHeaderCwd(path: string): Promise<string | undefined> {
-  try {
-    const first = await readDaemonControlLine(path, PI_SESSION_HEADER_MAX_BYTES);
-    const header = JSON.parse(first) as { type?: unknown; cwd?: unknown };
-    return header.type === "session"
-      && typeof header.cwd === "string"
-      && !header.cwd.includes("\0")
-      && isAbsolute(header.cwd)
-      ? resolve(header.cwd)
-      : undefined;
-  } catch {
-    return undefined;
   }
 }
 
@@ -1832,7 +1788,7 @@ export class SessionHost {
       sessionSkillGroup("ghost", 1, ghostSnapshot),
     ];
     const logger = this.logger.child({ ghost: ghost.name });
-    const manager = new GhostMcpManager({ cwd: this.defaultCwd(ghost), logger });
+    const manager = new GhostMcpManager({ cwd: this.ownerHome, logger });
     try {
       const mcpResult = await connectGhostMcp(manager, paths.home, logger);
       return buildSessionResourceView({
@@ -1845,14 +1801,11 @@ export class SessionHost {
     }
   }
 
-  /** The cwd a brand-new conversation starts in: `settings.yml cwd:` or the owner home. */
-  private defaultCwd(ghost: Ghost): string {
-    return resolveSettingsCwd(loadGhostSettings(ghost.dir), this.ownerHome) ?? this.ownerHome;
-  }
-
   /**
-   * Where a pi conversation runs: the `!cd` sidecar, else the cwd pi recorded
-   * when it created the transcript, else the ghost's default. Refuses a
+   * Where a pi conversation runs: always the owner home. Stored `!cd`
+   * sidecars and pi transcript headers are ignored so a conversation can
+   * never drift into a project tree; project work belongs to a delegated
+   * harness run with that project as its own cwd. Still refuses a
    * conversation whose fork or deletion is still being published.
    */
   async conversationCwd(ghostName: string, conversationId: string): Promise<string> {
@@ -1867,10 +1820,7 @@ export class SessionHost {
     )) {
       throw new GhostError("session_deleting", "This conversation has an unfinished deletion.", 409);
     }
-    const sessionFile = join(paths.sessionDir, sessionFileNameFor(conversationId));
-    return (await readSessionCwdsFromFile(sessionFile, PI_SESSION_MAX_BYTES)).cwd
-      ?? await piSessionHeaderCwd(sessionFile)
-      ?? this.defaultCwd(ghost);
+    return this.ownerHome;
   }
 
   private reserveLifecycleAdmission(ghostName: string, conversationId: string): () => void {
@@ -2112,7 +2062,6 @@ export class SessionHost {
       sessionFile: session.sessionFile,
       model,
       modelRuntime,
-      cwd: runtimeCwd,
       toolCwds,
       busy: false,
       lastUsedAt: this.retentionNow(),
@@ -2821,8 +2770,10 @@ export class SessionHost {
 
   /**
    * Take over a home written before the cwd state moved into the transcript.
-   * The sidecars are copied in as entries once and then unlinked; a home that
-   * never had them, or has already been adopted, does no work and no writes.
+   * Only per-tool display cwds are adopted; a legacy conversation cwd is
+   * dropped because conversations are pinned to the owner home. The sidecar
+   * files are unlinked either way; a home that never had them, or has
+   * already been adopted, does no work and no writes.
    */
   private async adoptLegacyCwdSidecars(
     manager: SessionManager,
@@ -2831,17 +2782,12 @@ export class SessionHost {
     logger: Logger,
   ): Promise<Map<string, string>> {
     const current = readSessionCwds(manager);
-    const [legacyCwd, legacyToolCwds] = await Promise.all([
-      readLegacyConversationCwd(sessionDir, conversationId),
-      readLegacyToolCwds(sessionDir, conversationId),
-    ]);
-    if (legacyCwd === undefined && legacyToolCwds.size === 0) return current.toolCwds;
+    const legacyToolCwds = await readLegacyToolCwds(sessionDir, conversationId);
+    const legacyCwdExists = (await readLegacyConversationCwd(sessionDir, conversationId)) !== undefined;
+    if (!legacyCwdExists && legacyToolCwds.size === 0) return current;
     try {
-      if (legacyCwd !== undefined && current.cwd === undefined) {
-        recordConversationCwd(manager, legacyCwd);
-      }
       for (const [toolCallId, cwd] of legacyToolCwds) {
-        if (current.toolCwds.has(toolCallId)) continue;
+        if (current.has(toolCallId)) continue;
         appendToolCwdEntry(manager, toolCallId, cwd);
       }
     } catch (error) {
@@ -2850,14 +2796,14 @@ export class SessionHost {
         session: conversationId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return new Map([...legacyToolCwds, ...current.toolCwds]);
+      return new Map([...legacyToolCwds, ...current]);
     }
     await Promise.all([
       unlink(conversationCwdPath(sessionDir, conversationId)).catch(() => {}),
       unlink(toolCwdsPath(sessionDir, conversationId)).catch(() => {}),
     ]);
     logger.info("adopted legacy cwd sidecars", { session: conversationId });
-    return readSessionCwds(manager).toolCwds;
+    return readSessionCwds(manager);
   }
 
   /**
@@ -2988,7 +2934,6 @@ export class SessionHost {
     command: UserBashCommand,
     options: RunTurnOptions,
   ): Promise<void> {
-    const conversationId = options.sessionId ?? DEFAULT_SESSION_KEY;
     const hosted = await this.idleHostedSession(
       ghostName,
       options.sessionId,
@@ -3032,19 +2977,9 @@ export class SessionHost {
         { excludeFromContext: command.excludeFromContext },
       );
 
-      if (
-        isPersistentShellCdCommand(command.command)
-        && !result.cancelled
-        && result.exitCode === 0
-      ) {
-        const target = persistentCdTarget(command.command, executionCwd, this.ownerHome);
-        const nextCwd = target ? resolve(target) : null;
-        if (nextCwd && nextCwd !== resolve(hosted.session.sessionManager.getCwd())) {
-          recordConversationCwd(hosted.session.sessionManager, nextCwd);
-          hosted.cwd = nextCwd;
-          await this.announceConversationUpdated(ghostName, conversationId);
-        }
-      }
+      // A `!cd` runs like any other shell command: it affects that
+      // invocation's shell only and never moves the conversation, which
+      // stays pinned to the owner home.
 
       const isError = result.cancelled
         || (result.exitCode !== undefined && result.exitCode !== 0);
@@ -3232,16 +3167,9 @@ export class SessionHost {
     const conversationId = requireRawConversationId(options.sessionId ?? DEFAULT_SESSION_KEY);
     const ghost = this.registry.get(ghostName);
     const paths = ghostPaths(ghost.dir);
-    const key = this.keyOf(ghostName, conversationId);
     const bashCommand = parseUserBashCommand(options.prompt);
     if (bashCommand) {
       await this.runUserBash(ghostName, bashCommand, options);
-      // pi binds a session's cwd when it opens; a `!cd` takes effect by
-      // reopening the conversation at its new operational cwd.
-      const moved = this.sessions.get(key);
-      if (moved && resolve(moved.cwd) !== resolve(moved.session.sessionManager.getCwd())) {
-        await this.closePi(ghostName, conversationId);
-      }
       await this.announceConversationUpdated(ghostName, options.sessionId ?? DEFAULT_SESSION_KEY);
       return;
     }
@@ -3737,7 +3665,7 @@ export class SessionHost {
     if (opening) await opening.catch(() => {});
 
     const hosted = this.sessions.get(key);
-    const cwd = hosted?.cwd ?? await this.conversationCwd(ghostName, id);
+    const cwd = await this.conversationCwd(ghostName, id);
     // A manager opened for this write alone is simply dropped afterwards; the
     // live session keeps its own, and the next turn re-opens an idle
     // conversation.
@@ -4270,10 +4198,10 @@ export class SessionHost {
     // right after the first turn carries the freshly generated title.
     const hosted = this.sessions.get(this.keyOf(ghostName, conversationId));
     if (hosted?.title) await hosted.title.catch(() => {});
-    const cwd = hosted?.cwd ?? await this.conversationCwd(ghostName, id);
+    const cwd = await this.conversationCwd(ghostName, id);
 
     const manager = SessionManager.open(path, paths.sessionDir, cwd);
-    return this.transcriptFromManager(id, manager, options, readSessionCwds(manager).toolCwds);
+    return this.transcriptFromManager(id, manager, options, readSessionCwds(manager));
   }
 
   private transcriptFromManager(
@@ -4503,7 +4431,7 @@ export class SessionHost {
         draft,
         // The branch carries the source's cwd entries up to the fork point, so
         // the copy rebuilds them from itself rather than inheriting the live map.
-        transcript: this.transcriptFromManager(forkId, forked, {}, readSessionCwds(forked).toolCwds),
+        transcript: this.transcriptFromManager(forkId, forked, {}, readSessionCwds(forked)),
       };
       const transcript = await openFile(temporaryForkFile, "r");
       try {

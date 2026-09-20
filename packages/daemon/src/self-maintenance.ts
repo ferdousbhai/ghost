@@ -4,26 +4,10 @@
  * checkout, shared by every ghost on the machine, so a change there powers all
  * of them after a build and restart. A packaged install has no checkout.
  */
-import { isAbsolute, resolve } from "node:path";
-import type { GhostSettings } from "./ghost-settings.js";
-import { pathIsWithin } from "./path-within.js";
 import type { RunningSource } from "./running-source.js";
 
 const GHOST_SOURCE_URL = "https://github.com/ferdousbhai/ghost";
 const PACKAGED_ROOT = "/usr/lib/ghost/runtime";
-
-/**
- * `cwd` names where a new conversation starts, the owner home when unset. It
- * is only usable as an absolute path under the owner home; anything else is
- * unwritable under the daemon's sandbox, so it reads as unset, not an error.
- */
-export function resolveSettingsCwd(settings: GhostSettings, ownerHome: string): string | null {
-  const trimmed = settings.getString("cwd")?.trim();
-  if (!trimmed || !isAbsolute(trimmed)) return null;
-  const path = resolve(trimmed);
-  if (path === resolve(ownerHome) || !pathIsWithin(ownerHome, path)) return null;
-  return path;
-}
 
 export interface SelfMaintenanceInput {
   readonly ghostName: string;
