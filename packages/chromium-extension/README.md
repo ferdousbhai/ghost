@@ -1,4 +1,8 @@
-# Ghost browser relay (Chromium extension)
+# Ghost (Chromium extension)
+
+The extension is named **Ghost** — that is what Chrome shows in the side
+panel's title bar and the toolbar. "Relay" is what this package and its
+protocol are called, not what the owner sees.
 
 An agent works **tabs it created in the browser you are already signed into**.
 That is the whole product. There are two ways to instruct it, and they share one

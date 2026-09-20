@@ -1,6 +1,6 @@
 # Privacy policy
 
-**Ghost browser relay**. Last updated 2026-09-20.
+**Ghost** (the Chromium extension). Last updated 2026-09-20.
 
 This extension has no servers. There is no account to create, nothing is synced,
 and its publisher receives no data from it — no telemetry, no analytics, no

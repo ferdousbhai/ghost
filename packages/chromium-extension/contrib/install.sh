@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the Ghost browser relay extension for Chromium on Omarchy/Arch.
+# Install the Ghost extension for Chromium on Omarchy/Arch.
 #
 # There is nothing to build: the extension is plain ES modules and a manifest.
 # "Installing" means putting the directory somewhere stable that survives a
@@ -66,7 +66,7 @@ Next, in the browser you actually use:
   1. Open  chrome://extensions
   2. Turn on "Developer mode" (top right)
   3. "Load unpacked" -> $TARGET_DIR
-  4. Pin "Ghost browser relay" and click it
+  4. Pin "Ghost" and click it
 
 Then either:
 

@@ -10,7 +10,7 @@ else, with no build step, so the bytes reviewed are the bytes that run.
 
 ## Name
 
-Ghost browser relay
+Ghost
 
 ## Short description (132 characters max)
 
@@ -19,7 +19,7 @@ Ghost browser relay
 
 ## Detailed description
 
-> Ghost browser relay puts an agent in the browser you already use — the one
+> Ghost puts an agent in the browser you already use — the one
 > with your logins, your sessions, and your open tabs.
 >
 > Chat with it in the side panel. Ask it to open a page, read it, fill a form,

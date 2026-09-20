@@ -29,7 +29,7 @@ export const DEFAULT_MODEL = "openrouter/free";
 /** Attribution headers OpenRouter documents; neither carries owner data. */
 const ATTRIBUTION = {
   "HTTP-Referer": "https://github.com/ferdousbhai/ghost-chromium-extension",
-  "X-Title": "Ghost browser relay",
+  "X-Title": "Ghost",
 };
 
 function base64url(bytes) {
@@ -53,7 +53,7 @@ export async function beginAuth({ callbackUrl = null } = {}) {
   const url = new URL(AUTH_URL);
   url.searchParams.set("code_challenge", base64url(new Uint8Array(digest)));
   url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("key_label", "Ghost browser relay");
+  url.searchParams.set("key_label", "Ghost");
   if (callbackUrl !== null) url.searchParams.set("callback_url", callbackUrl);
   return { url: url.toString(), verifier };
 }
