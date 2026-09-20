@@ -230,7 +230,7 @@ test("pause refuses the local agent too, and says where to undo it", async () =>
   });
   assert.equal(refused.ok, false);
   assert.match(refused.error, /paused/i);
-  assert.match(refused.error, /popup/);
+  assert.match(refused.error, /menu/);
 
   // Status still answers, exactly as it does for the ghost over the socket.
   const status = await localOp("status");
@@ -253,8 +253,10 @@ test("a page cannot reach the local agent, even one of our own pages in a tab", 
   );
   assert.equal(fromWeb, undefined);
 
-  // And the panel cannot reach the pairing and settings controls, which are the
-  // popup's alone.
-  const pairing = await askWorker({ type: "ghost-relay-pair" });
+  // Nor the pairing and settings controls, which are the panel's alone too.
+  const pairing = await askWorker(
+    { type: "ghost-relay-pair" },
+    { ...panelSender(), tab: { id: 4 } },
+  );
   assert.equal(pairing, undefined);
 });

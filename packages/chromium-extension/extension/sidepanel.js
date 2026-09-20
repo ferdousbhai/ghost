@@ -38,10 +38,11 @@ const MAX_STORE_BYTES = 3_000_000;
 const OP_TIMEOUT_MS = 60_000;
 
 const ui = Object.fromEntries([
-  "toolbar", "history", "newChat", "more", "menu", "deleteChat", "disconnect", "paused",
-  "notice", "connect", "oauth", "showCode", "codePath", "openAuth", "manual", "manualSave",
-  "connectError", "empty", "log", "historyList", "composerBar", "input", "model", "send",
-  "stop",
+  "toolbar", "history", "newChat", "more", "menu", "pauseToggle", "ghostMachine", "deleteChat",
+  "disconnect", "paused", "notice", "connect", "oauth", "showCode", "codePath", "openAuth",
+  "manual", "manualSave", "connectError", "ghostView", "ghostBack", "dot", "statusText",
+  "detail", "ghostTabs", "pair", "pairCode", "retry", "token", "port", "save", "saved",
+  "empty", "log", "historyList", "composerBar", "input", "model", "send", "stop",
 ].map((id) => [id, document.getElementById(id)]));
 
 const tools = toolDefinitions();
@@ -51,7 +52,7 @@ let model = DEFAULT_MODEL;
 /** Newest first. Each: { id, title, updatedAt, messages, record }. */
 let chats = [];
 let activeId = null;
-/** "chat" or "history". */
+/** "chat", "history", or "ghost" (the pairing screen for a ghost on this machine). */
 let view = "chat";
 /** The turn in flight, if any: { chat, controller }. */
 let turn = null;
@@ -230,9 +231,11 @@ function render() {
   ui.connect.hidden = connected;
   ui.composerBar.hidden = !connected || view !== "chat";
   ui.historyList.hidden = !(connected && view === "history");
+  ui.ghostView.hidden = !(connected && view === "ghost");
   ui.log.hidden = !showLog;
   ui.empty.hidden = !(connected && view === "chat" && !showLog);
   ui.paused.hidden = !paused;
+  ui.pauseToggle.textContent = paused ? "Resume Ghost" : "Pause Ghost";
   ui.model.disabled = turn !== null;
   ui.send.hidden = busy;
   ui.stop.hidden = !busy;
@@ -282,6 +285,92 @@ function summarize(name, args) {
       .map(([field, value]) => `${field}=${JSON.stringify(value)}`)
       .join(" ");
   return `${name} ${detail}`.trim().slice(0, 400);
+}
+
+// ------------------------------------------------------ a ghost on this machine
+
+/**
+ * The pairing screen. The worker owns the settings and the live status; this
+ * view only asks, every two seconds while it is open, and renders the answer.
+ * The six-digit code shown here is the one the HUD shows for Allow.
+ */
+const GHOST_POLL_MS = 2_000;
+let ghostPoll = null;
+let ghostSettings = { port: 7717, token: "", enabled: true };
+
+function renderGhost(status) {
+  const connected = status?.connected === true;
+  const enabled = status?.enabled !== false;
+  const paired = status?.paired === true;
+  ui.dot.className = `dot ${connected ? (enabled ? "on" : "paused") : ""}`;
+  ui.statusText.textContent = connected
+    ? (enabled ? "Connected to ghostd" : "Connected, paused")
+    : (paired ? "Not connected" : "Not paired");
+  ui.detail.textContent = status === null
+    ? "The relay worker did not answer."
+    : connected
+      ? (enabled
+        ? "A ghost can open a tab here and read, click, and type in it."
+        : "Paused: every request from the ghost is refused until you resume.")
+      : (status.lastError || (paired ? "Retrying. Is ghostd running?" : "Waiting for ghostd. Is it running?"));
+  const pairing = status !== null && !connected && !paired;
+  ui.pair.hidden = !pairing;
+  if (pairing) {
+    const code = typeof status.pairingCode === "string" ? status.pairingCode : "";
+    ui.pairCode.textContent = status.pairingDenied
+      ? "Denied"
+      : (code === "" ? "…" : `${code.slice(0, 3)} ${code.slice(3)}`);
+    ui.retry.hidden = status.pairingDenied !== true;
+  }
+  const tabs = Array.isArray(status?.tabs) ? status.tabs.filter((tab) => tab.local !== true) : [];
+  ui.ghostTabs.hidden = tabs.length === 0;
+  ui.ghostTabs.textContent = tabs.length === 0
+    ? ""
+    : `Ghost's ${tabs.length === 1 ? "tab" : `tabs (${tabs.length})`}: ${tabs.map((tab) => tab.title || tab.url || `Tab ${tab.id}`).join(", ")}`;
+}
+
+async function refreshGhost() {
+  const status = await chrome.runtime.sendMessage({ type: "ghost-relay-status" }).catch(() => null);
+  if (status && typeof status === "object") {
+    ghostSettings = {
+      port: Number(status.port) || 7717,
+      token: typeof status.token === "string" ? status.token : "",
+      enabled: status.enabled !== false,
+    };
+    if (document.activeElement !== ui.token) ui.token.value = ghostSettings.token;
+    if (document.activeElement !== ui.port) ui.port.value = ghostSettings.port;
+  }
+  renderGhost(status && typeof status === "object" ? status : null);
+}
+
+function openGhostView() {
+  view = "ghost";
+  render();
+  void refreshGhost();
+  if (ghostPoll === null) ghostPoll = setInterval(() => void refreshGhost(), GHOST_POLL_MS);
+}
+
+function leaveGhostView() {
+  if (ghostPoll !== null) clearInterval(ghostPoll);
+  ghostPoll = null;
+  view = "chat";
+  render();
+}
+
+async function updateRelaySettings(settings) {
+  const response = await chrome.runtime.sendMessage({ type: "ghost-relay-settings-update", settings });
+  if (response?.ok !== true) throw new Error(response?.error || "The relay worker refused the settings update.");
+  return response.settings;
+}
+
+async function togglePause() {
+  ui.menu.hidden = true;
+  try {
+    await updateRelaySettings({ enabled: paused });
+  } catch (error) {
+    ui.notice.textContent = error?.message ?? String(error);
+    ui.notice.hidden = false;
+  }
 }
 
 // ------------------------------------------------------------- the worker hop
@@ -524,10 +613,12 @@ ui.send.addEventListener("click", () => void send());
 ui.stop.addEventListener("click", stop);
 ui.newChat.addEventListener("click", () => {
   ui.menu.hidden = true;
+  if (view === "ghost") leaveGhostView();
   newChat();
 });
 ui.history.addEventListener("click", () => {
   ui.menu.hidden = true;
+  if (view === "ghost") leaveGhostView();
   view = view === "history" ? "chat" : "history";
   render();
 });
@@ -540,6 +631,30 @@ ui.deleteChat.addEventListener("click", () => {
   if (chat !== null) void dropChat(chat.id);
 });
 ui.disconnect.addEventListener("click", () => void disconnect());
+ui.pauseToggle.addEventListener("click", () => void togglePause());
+ui.ghostMachine.addEventListener("click", () => {
+  ui.menu.hidden = true;
+  openGhostView();
+});
+ui.ghostBack.addEventListener("click", leaveGhostView);
+ui.retry.addEventListener("click", () => {
+  void chrome.runtime.sendMessage({ type: "ghost-relay-pair" }).catch(() => {}).then(() => refreshGhost());
+});
+ui.save.addEventListener("click", () => {
+  void (async () => {
+    try {
+      await updateRelaySettings({
+        token: ui.token.value.trim(),
+        port: Number(ui.port.value) || ghostSettings.port,
+      });
+      ui.saved.hidden = false;
+      setTimeout(() => { ui.saved.hidden = true; }, 1_500);
+    } catch (error) {
+      ui.detail.textContent = `Could not update relay settings: ${error?.message ?? error}`;
+    }
+    await refreshGhost();
+  })();
+});
 ui.oauth.addEventListener("click", () => void oauthConnect());
 ui.showCode.addEventListener("click", () => {
   ui.codePath.hidden = !ui.codePath.hidden;
@@ -573,7 +688,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local" || !changes.enabled) return;
   paused = changes.enabled.newValue === false;
   if (paused && turn !== null) {
-    say(turn.chat, { kind: "usage", text: "Paused from the relay popup. Resume there to continue." });
+    say(turn.chat, { kind: "usage", text: "Paused. Resume Ghost from the menu to continue." });
     stop();
   }
   render();

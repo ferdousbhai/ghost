@@ -32,7 +32,7 @@ Ghost
 > chat agent at all. It never touches the tabs you opened,
 > and Chrome shows its own "is being debugged" banner in any tab it is working
 > in — dismiss the banner and it is locked out until that tab navigates. One
-> switch in the popup pauses everything, instantly.
+> switch in the panel's menu pauses everything, instantly.
 >
 > The one operation that runs JavaScript inside a page asks you first, every
 > single time, and shows you the code.
@@ -87,9 +87,9 @@ Copy these into the store's "Why do you need this permission?" fields verbatim.
 
 ## Reviewer notes
 
-> To try the default path: install, click the toolbar icon, choose **Open
-> chat**, click **Connect OpenRouter** and authorize (OAuth; there is no API key
-> to paste). The default model
+> To try the default path: install, click the toolbar icon (the side panel
+> opens), click **Connect OpenRouter** and authorize (OAuth; there is no API
+> key to paste). The default model
 > (`openrouter/free`) costs nothing and needs no balance. Then ask it something
 > like "open example.com and tell me what the page says". It will open a new tab
 > — Chrome's debugger banner appears there — read it, and answer.
@@ -98,7 +98,7 @@ Copy these into the store's "Why do you need this permission?" fields verbatim.
 > panel shows the exact code with **Run it** / **Don't**, and nothing runs until
 > you choose.
 >
-> To see the pause: click the toolbar icon and press **Pause** mid-turn. The
+> To see the pause: open the ⋮ menu and press **Pause Ghost** mid-turn. The
 > current turn stops and every further action is refused until you resume.
 >
 > The pairing code and the "ghostd" screens are the optional local-daemon path.
@@ -113,5 +113,5 @@ Copy these into the store's "Why do you need this permission?" fields verbatim.
 - [ ] `contrib/package.sh` lists exactly the files in `extension/`.
 - [ ] `extension/manifest.json` version bumped.
 - [ ] `PRIVACY.md` is published at a URL and linked in the listing.
-- [ ] Screenshots: the side panel mid-turn, the script confirmation, the popup
-      with pause, all at 1280×800.
+- [ ] Screenshots: the side panel mid-turn, the script confirmation, the menu
+      with Pause, all at 1280×800.

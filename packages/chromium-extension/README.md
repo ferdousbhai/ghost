@@ -62,11 +62,14 @@ for flat `chrome.debugger` sessions.
 
 ## Chat here
 
-Click the toolbar icon, then **Open chat**. The side panel is laid out the way
-Chrome's own assistant panels are: Chrome draws the title bar, the extension
-draws a toolbar (past conversations, new conversation, a menu), an empty state,
-and a composer with the model as a quiet label. Each conversation has its own
-tab workspace; deleting one from the menu closes the tabs it opened.
+Click the toolbar icon and the side panel opens; there is no popup. The panel
+is laid out the way Chrome's own assistant panels are: Chrome draws the title
+bar, the extension draws a toolbar (past conversations, new conversation, a
+menu), an empty state, and a composer with the model as a quiet label. Each
+conversation has its own tab workspace; deleting one from the menu closes the
+tabs it opened. The menu is also where **Pause Ghost** lives, and **Ghost on
+this machine…**, the screen for pairing with a ghost in `ghostd` — which most
+owners will never open.
 
 **Connect OpenRouter** is OAuth and only OAuth: PKCE through `chrome.identity`,
 one click, and OpenRouter ends the flow by minting a key for this browser. That
@@ -88,8 +91,8 @@ and restarts the extension's worker, whether or not a ghost ever pairs. **New
 conversation** starts a fresh workspace and leaves the old one's tabs where they
 are; **Delete this conversation** closes them; **Disconnect OpenRouter** forgets
 the key.
-**Pause** in the popup stops a turn mid-flight and refuses everything until you
-resume — the same switch that refuses the ghost. **Stop** ends a turn at its next
+**Pause Ghost** in the menu stops a turn mid-flight and refuses everything until
+you resume — the same switch that refuses the ghost. **Stop** ends a turn at its next
 step; the relay has no cancel for a page action Chromium has already been
 handed, and the button says "Stopping…" while that finishes.
 
@@ -133,7 +136,7 @@ privacy policy is [`PRIVACY.md`](PRIVACY.md).
 ## Pair
 
 Nothing to copy. An unpaired extension asks ghostd to pair and shows a
-six-digit code in its popup (click the icon, or press `Alt+Shift+G`). Open the
+six-digit code under **Ghost on this machine…** in the side panel's menu. Open the
 HUD (`Super+Ctrl+G`): it shows the same code with **Allow** and **Deny**. Allow
 only when the two match. ghostd then hands the extension its token over the
 socket, the badge turns `on`, and the token is kept in `chrome.storage.local`,
@@ -145,13 +148,13 @@ ghost browser allow 482913
 ghost browser deny 482913
 ```
 
-A denied browser stops asking until you press **Try again** in its popup. A
+A denied browser stops asking until you press **Try again** on that screen. A
 request nobody answers expires after ten minutes and the extension asks again
-with a new code. The manual path is still there under **Advanced** in the popup:
+with a new code. The manual path is still there under **Advanced** on that screen:
 `ghostd relay-token` prints the token (`--rotate` mints a new one and unpairs
 every browser), and pasting it pairs without the prompt. The worker answers only
-the real toolbar popup: `popup.html` opened as a tab shows "not paired" and
-cannot save or pair, which is what keeps a page from pairing on your behalf.
+the real side panel: `sidepanel.html` opened as a tab is refused relay state
+and cannot save or pair, which is what keeps a page from pairing on your behalf.
 
 On Omarchy the browser already reads `~/.config/chromium-flags.conf`, and its
 own extensions load from a `--load-extension=` line there; append this
@@ -160,9 +163,9 @@ directory to that line and the relay loads on the next Chromium start with no
 only after a compatible ghostd has answered the protocol handshake, `||` when
 that authenticated connection is paused, and `off` otherwise.
 
-The popup is disposable UI: the background worker serializes settings changes
+The panel is disposable UI: the background worker serializes settings changes
 and stores a revisioned recovery copy before acknowledging them. A timed-out old
-Chromium write therefore cannot overwrite a newer choice after the popup closes.
+Chromium write therefore cannot overwrite a newer choice after the panel closes.
 Badge updates are cosmetic and never block connection or alarm retries.
 
 The current relay protocol is 4. An older daemon or extension is refused
@@ -216,8 +219,8 @@ And on the extension side:
   tab in it, leaving other ghosts' tabs and the browser itself open.
 - **Only your workspace.** The side panel's workspace id is stamped by the
   service worker, never chosen by the caller, and only the extension's own
-  chrome-owned popup and panel documents can ask for one. A page — including one
-  of these documents opened as an ordinary tab — is ignored.
+  chrome-owned side panel document can ask for one. A page — including that
+  document opened as an ordinary tab — is ignored.
 - **The page-script op asks, every time.** In side-panel chat `javascript` shows
   the exact code with **Run it** / **Don't** before anything runs. There is no
   remembered answer; the code is different each time, and reading *this* code is
@@ -228,15 +231,15 @@ And on the extension side:
   already has your shell, so for it the op is nothing new; for the chat it would
   be the extension's only reach into the filesystem, and no confirmation card
   makes a path safe to vet.
-- **Pause** in the popup refuses every request instantly, without unpairing, on
-  both sides.
+- **Pause Ghost** in the menu refuses every request instantly, without
+  unpairing, on both sides.
 - The extension re-checks the URL scheme itself: it does not have to trust the
   daemon in order to be safe to install.
 
 What this does *not* protect against:
 
 - The ghost is genuinely acting as you, in your session, with your cookies. That
-  is the feature. Pause in the popup, or close the tab, for anything you would
+  is the feature. Pause from the menu, or close the tab, for anything you would
   not do yourself.
 - **DNS rebinding.** Ghost resolves a hostname and checks the answers before it
   navigates, but the browser resolves it again independently. A short-TTL name
@@ -270,7 +273,7 @@ removes itself; uncertain removals remain owned and are retried by the keepalive
 alarm even after ghostd has rotated to a fresh browser owner id. Tombstones are
 discarded only once no late create handler can still produce a tab. Chrome
 settings and ownership storage calls are bounded as well, so one silent API call
-cannot pin the reconnect loop or extension popup indefinitely.
+cannot pin the reconnect loop or the panel indefinitely.
 
 Settings, uncertain-tab recovery, and daemon identity are revisioned in two
 independent local slots. A late write from a reaped MV3 worker can regress at
@@ -329,7 +332,7 @@ rather than the semantic verbs used here.
 
 | Symptom | Cause |
 | --- | --- |
-| Badge stays `off` | ghostd is not running, or the port is wrong. The popup says which. |
+| Badge stays `off` | ghostd is not running, or the port is wrong. **Ghost on this machine…** says which. |
 | "That pairing token is not this daemon's" | Token rotated, or `$XDG_STATE_HOME` differs between the shell and the daemon. Clear the token under **Advanced** and pair again. |
 | Popup shows a code but the HUD shows nothing | The HUD polls only while open; open it, or run `ghost browser`. The relay may also be off (`GHOSTD_RELAY`). |
 | "Ghost denied this browser" | You pressed Deny. **Try again** asks with a new code. |

@@ -351,7 +351,7 @@ async function ghostSmoke(binary) {
   const port = server.address().port;
   record("relay listening", true, `ws://127.0.0.1:${port}/relay`);
 
-  // 2. Pre-seed the extension's settings so no human has to click the popup:
+  // 2. Pre-seed the extension's settings so no human has to click the panel:
   //    chrome.storage.local is a LevelDB the browser owns, so instead pass the
   //    pairing through the profile's Local Extension Settings via the extension's
   //    own first run — simplest reliable path is a preferences-free approach:
@@ -523,12 +523,12 @@ async function ghostSmoke(binary) {
   await closeBrowserSession(ghostHome);
   record("close the ghost-wide workspace", true, "the browser itself stayed open");
 
-  // 6. Opening popup.html as an ordinary extension tab is not the browser-action
-  //    popup: sender.tab is present, so production correctly withholds settings
+  // 6. Opening the panel document as an ordinary extension tab is not the side
+  //    panel: sender.tab is present, so production correctly withholds settings
   //    and live status. It can still prove the page and script render their
   //    unauthorized fallback without weakening that boundary.
-  const popup = await checkPopup(base, extensionId);
-  record("ordinary popup page renders without exposing relay settings", popup.ok, popup.detail);
+  const asTab = await checkTabDocument(base, extensionId);
+  record("the panel document opened as a tab is refused relay state", asTab.ok, asTab.detail);
 }
 /**
  * The ghostless product. No relay hub exists; the extension's port is pointed
@@ -562,22 +562,22 @@ async function localSmoke(binary) {
   );
   record("extension pointed at a dead port, no token", seeded === "stored", `port ${deadPort}`);
 
-  // The popup's Open chat button, without the popup. `sidePanel.open()` wants
-  // a user gesture, and CDP can only grant one to a page frame, not to the
-  // worker — so an extension page opened as a tab does the clicking. That page
-  // is popup.html rendered as an ordinary tab, which the worker rightly ignores;
-  // it is only borrowed for its origin.
+  // The toolbar click, without a toolbar. `sidePanel.open()` wants a user
+  // gesture, and CDP can only grant one to a page frame, not to the worker — so
+  // an extension page opened as a tab does the clicking. That page is the panel
+  // document itself under a query string (so it is not mistaken for the real
+  // panel below), which the worker rightly ignores; it is borrowed for its origin.
   await untilValue(
     () => workerTarget(base, 5_000).then((worker) => evaluateIn(worker, `(async () => {
       if (typeof globalThis.chrome?.tabs?.create !== "function") return "not-ready";
-      await chrome.tabs.create({ url: chrome.runtime.getURL("popup.html") });
+      await chrome.tabs.create({ url: chrome.runtime.getURL("sidepanel.html?gesture") });
       return "opened";
     })()`, "open an extension page")),
     (value) => value === "opened",
     20_000,
     "an extension page to open",
   );
-  const page = await pageTarget(base, "/popup.html", 20_000);
+  const page = await pageTarget(base, "/sidepanel.html?gesture", 20_000);
   const windowId = await untilValue(
     () => evaluateIn(page, `(async () => {
       const window_ = await chrome.windows.getCurrent();
@@ -771,7 +771,7 @@ process.exit(failed.length === 0 ? 0 : 1);
 /**
  * Type the token into the extension for the owner, over the browser's own
  * debugging port. This is the smoke test standing in for four clicks in the
- * popup; nothing in the shipped path uses it.
+ * panel; nothing in the shipped path uses it.
  */
 async function pairViaCdp(base, relayPort) {
   let lastDetail = "the extension's service worker has not appeared";
@@ -826,116 +826,37 @@ async function pairViaCdp(base, relayPort) {
 }
 
 /**
- * Open popup.html as an ordinary extension tab and read its unauthorized
- * fallback. This deliberately cannot exercise live action-popup state: the
- * background rejects any status/settings sender with `sender.tab` present.
+ * Open the panel's document as an ordinary extension tab and ask it for live
+ * relay state. It must get nothing: the worker answers only the real side
+ * panel, where `sender.tab` is absent, which is what keeps a page from pairing
+ * or pausing on the owner's behalf.
  */
-async function checkPopup(base, extensionId) {
+async function checkTabDocument(base, extensionId) {
   throwIfSignalRequested();
   if (!extensionId) return { ok: false, detail: "no extension id" };
-  const url = `chrome-extension://${extensionId}/popup.html`;
-  const deadline = Date.now() + 10_000;
-  const created = await fetch(`${base}/json/new?${encodeURIComponent("about:blank")}`, {
+  const url = `chrome-extension://${extensionId}/sidepanel.html?as-a-tab`;
+  const created = await fetch(`${base}/json/new?${encodeURIComponent(url)}`, {
     method: "PUT",
-    signal: AbortSignal.timeout(remainingCdpBudget(deadline)),
-  })
-    .then((response) => response.json())
-    .catch((error) => ({ error: error.message }));
+    signal: AbortSignal.timeout(5_000),
+  }).then((response) => response.json()).catch((error) => ({ error: error.message }));
   if (!created?.webSocketDebuggerUrl) {
-    return { ok: false, detail: `could not open the popup: ${JSON.stringify(created)}` };
+    return { ok: false, detail: `could not open the tab: ${JSON.stringify(created)}` };
   }
-  let socket;
   try {
-    socket = await openCdpSocket(
-      created.webSocketDebuggerUrl,
-      "attach to the popup",
-      remainingCdpBudget(deadline),
+    const answer = await untilValue(
+      () => evaluateIn(created, `chrome.runtime.sendMessage({ type: "ghost-relay-status" })
+        .then((value) => ({ answered: value !== undefined && value !== null }), () => ({ answered: false, refused: true }))`,
+        "ask for relay status from a tab"),
+      (value) => value && typeof value.answered === "boolean",
+      10_000,
+      "the tab document to answer",
     );
-    const diagnostics = { exceptions: [], observationErrors: [] };
-    socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data);
-      if (message.method !== "Runtime.exceptionThrown") return;
-      const exception = message.params?.exceptionDetails;
-      if (diagnostics.exceptions.length < 20) {
-        diagnostics.exceptions.push(
-          exception?.exception?.description ?? exception?.text ?? "popup exception",
-        );
-      }
-    });
-    await cdpRequest(
-      socket,
-      1,
-      "Runtime.enable",
-      {},
-      "enable popup diagnostics",
-      remainingCdpBudget(deadline),
-    );
-    const navigation = await cdpRequest(
-      socket,
-      2,
-      "Page.navigate",
-      { url },
-      "navigate to the popup",
-      remainingCdpBudget(deadline),
-    );
-    const navigationError = navigation?.result?.errorText;
-    if (navigationError) throw new Error(`popup navigation failed: ${navigationError}`);
-
-    let rendered = null;
-    let lastObservation = null;
-    for (let id = 3; Date.now() <= deadline; id += 1) {
-      throwIfSignalRequested();
-      try {
-        const answer = await cdpRequest(socket, id, "Runtime.evaluate", {
-          returnByValue: true,
-          expression: `JSON.stringify({
-            url: location.href,
-            ready: document.readyState,
-            status: document.getElementById("statusText")?.textContent ?? null,
-            detail: document.getElementById("detail")?.textContent ?? null,
-            token: document.getElementById("token")?.value.length ?? null,
-            toggle: document.getElementById("toggle")?.textContent ?? null,
-          })`,
-        }, "read popup state", remainingCdpBudget(deadline));
-        const raw = answer?.result?.result?.value;
-        lastObservation = typeof raw === "string" ? JSON.parse(raw) : answer?.result;
-        if (lastObservation?.url === url
-            && lastObservation.ready === "complete"
-            && lastObservation.status !== null
-            && lastObservation.status !== "Checking…") {
-          rendered = lastObservation;
-          break;
-        }
-      } catch (error) {
-        if (diagnostics.observationErrors.length < 20) {
-          diagnostics.observationErrors.push(error?.message ?? String(error));
-        }
-      }
-      const pause = Math.min(100, deadline - Date.now());
-      if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
-    }
-    if (rendered === null) {
-      return {
-        ok: false,
-        detail: `popup did not settle: ${JSON.stringify({ lastObservation, diagnostics })}`,
-      };
-    }
-    const ok = diagnostics.exceptions.length === 0
-      && rendered.status === "Not paired"
-      && typeof rendered.detail === "string" && rendered.detail !== ""
-      && rendered.token === 0
-      && rendered.toggle === "Pause";
     return {
-      ok,
-      detail:
-        `unauthorized fallback ${JSON.stringify(rendered.status)}, token ${rendered.token} chars; `
-        + `diagnostics ${JSON.stringify(diagnostics)}`,
+      ok: answer.answered === false,
+      detail: answer.answered ? "a tab document was handed relay status" : "refused, as a tab must be",
     };
-  } finally {
-    socket?.close();
-    await fetch(`${base}/json/close/${created.id}`, {
-      signal: AbortSignal.timeout(2_000),
-    }).catch(() => {});
+  } catch (error) {
+    return { ok: false, detail: error?.message ?? String(error) };
   }
 }
 

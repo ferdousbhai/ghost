@@ -20,8 +20,9 @@
  * would stay dead. Both are ported from oh-my-pi's `browser-relay` extension, which
  * is where these were learned the expensive way.
  *
- * **Pairing is a token, typed once.** The popup asks for the string
- * `ghostd relay-token` prints; this worker keeps it in `chrome.storage.local`
+ * **Pairing is a token, delivered once.** The daemon hands it over the socket
+ * when the owner allows this browser's code (or the owner pastes it under
+ * Advanced in the side panel); this worker keeps it in `chrome.storage.local`
  * and sends it in the one field a browser `WebSocket` lets you set: the
  * subprotocol list.
  */
@@ -91,12 +92,12 @@ let welcomedSocket = null;
 let lastError = "";
 // Pairing: the six-digit code this unpaired browser is showing, the socket it is
 // waiting on, and whether the owner said no (which stops redialing until the
-// popup asks again).
+// panel asks again).
 let pairingCode = null;
 let pairingSocket = null;
 let pairingDenied = false;
 // The code survives a worker restart (chrome.storage.session), so the number
-// on the HUD stays the number in the popup even if Chromium reaps the worker.
+// on the HUD stays the number in the panel even if Chromium reaps the worker.
 const PAIRING_CODE_KEY = "ghostPairingCode";
 const PAIRING_DENIED_MESSAGE = "Ghost denied this browser. Try again to ask once more.";
 const PAIRING_WAITING_MESSAGE = "Open Ghost (Super+Ctrl+G) and choose Allow for this code.";
@@ -589,7 +590,7 @@ async function answerRequest(socket, frame) {
         failure: "browser_unavailable",
         message:
           "The Ghost relay is paused. The owner can resume it from the "
-          + "extension's popup in Chromium.",
+          + "Ghost side panel's menu in Chromium.",
       },
     });
     return false;
@@ -636,7 +637,7 @@ function newPairingCode() {
  * Ask the daemon to pair. The socket carries a code instead of a token; the
  * only frame it will ever receive is `paired`, and the only close that means
  * "no" is the daemon's denied code. The code stays put across redials so what
- * the popup shows and what the HUD shows are the same number.
+ * the panel shows and what the HUD shows are the same number.
  */
 async function dialForPairing(port) {
   if (pairingCode === null) pairingCode = await restorePairingCode();
@@ -731,7 +732,7 @@ async function acceptPairing(socket, token) {
   void connect();
 }
 
-/** The popup's "Try again" after a denial: forget the no and dial afresh. */
+/** The panel's "Try again" after a denial: forget the no and dial afresh. */
 function retryPairing() {
   pairingDenied = false;
   forgetPairingCode();
@@ -847,22 +848,14 @@ chrome.runtime.onInstalled.addListener(() => {
 });
 chrome.runtime.onStartup.addListener(() => void connect());
 
-// Restrict live relay state to this extension's own chrome-owned surfaces. A
-// `sender.tab` means the document is a page in a tab — including one of ours
-// opened as a tab — and a page must not pair, pause, or drive tabs on the
-// owner's behalf.
-function isOwnSurface(sender, page) {
-  return sender?.id === chrome.runtime.id
-    && sender?.url === chrome.runtime.getURL(page)
-    && sender.tab === undefined;
-}
-
-function isPopupSender(sender) {
-  return isOwnSurface(sender, "popup.html");
-}
-
+// Restrict live relay state to this extension's one chrome-owned surface, the
+// side panel. A `sender.tab` means the document is a page in a tab — including
+// the panel's own document opened as a tab — and a page must not pair, pause,
+// or drive tabs on the owner's behalf.
 function isPanelSender(sender) {
-  return isOwnSurface(sender, "sidepanel.html");
+  return sender?.id === chrome.runtime.id
+    && sender?.url === chrome.runtime.getURL("sidepanel.html")
+    && sender.tab === undefined;
 }
 
 /**
@@ -958,7 +951,7 @@ async function runLocalOp(conversation, op, args, timeoutMs) {
     throw new Error(`Chromium could not verify the relay settings: ${settings.unavailable}`);
   }
   if (!settings.enabled && op !== "status") {
-    throw new Error("Browsing is paused. Resume it from the relay popup to let this chat act again.");
+    throw new Error("Ghost is paused. Resume it from the menu to let this chat act again.");
   }
   await ensureOwnershipRestored();
   const session = await localSessionFor(conversation);
@@ -986,9 +979,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       );
       return true;
     }
+  } else {
     return undefined;
   }
-  if (!isPopupSender(sender)) return undefined;
   if (message?.type === "ghost-relay-settings-update") {
     void updateRelaySettings(message.settings).then(
       (settings) => respond({ ok: true, settings }),
@@ -1008,7 +1001,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
     const settings = await loadSettings();
     let tabs = [];
     try {
-      // The popup is the machine owner's surface, so it lists every ghost's
+      // The panel is the machine owner's surface, so it lists every ghost's
       // tabs — through the in-process view, never the owner-scoped wire op.
       tabs = await allTabInfos();
     } catch {
@@ -1026,7 +1019,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
       tabs,
     });
   })().catch(() => {
-    // respond itself can throw once the popup's channel is gone; the popup's
+    // respond itself can throw once the panel's channel is gone; the panel's
     // own deadline already covers a missing reply.
     try {
       respond(null);
@@ -1034,5 +1027,9 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   });
   return true;
 });
+
+// The toolbar icon opens the side panel; there is no popup. Absent in the test
+// harness, hence the guard.
+void chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: true })?.catch?.(() => {});
 
 void connect();

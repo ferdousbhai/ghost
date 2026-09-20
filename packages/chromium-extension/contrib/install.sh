@@ -66,13 +66,14 @@ Next, in the browser you actually use:
   1. Open  chrome://extensions
   2. Turn on "Developer mode" (top right)
   3. "Load unpacked" -> $TARGET_DIR
-  4. Pin "Ghost" and click it
+  4. Pin "Ghost" and click it: the side panel opens
 
 Then either:
 
-  * "Open chat" -> "Connect OpenRouter", and chat in the side panel; or
-  * let it pair with ghostd -- the popup shows a six-digit code, and
-    "ghost browser allow <code>" (or Allow in the HUD) hands it the token.
+  * "Connect OpenRouter", and chat; or
+  * menu -> "Ghost on this machine..." to pair with ghostd: it shows a
+    six-digit code, and "ghost browser allow <code>" (or Allow in the HUD)
+    hands it the token.
 
 The badge reads "on" once it is paired and ghostd is running; the side panel
 works whether or not it ever pairs.

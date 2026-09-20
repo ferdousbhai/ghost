@@ -50,7 +50,7 @@ content scripts and no permission over the pages you visit. Dismissing Chrome's
 banner detaches it immediately.
 
 It does act as you, in your signed-in session, in the tabs it opened: that is
-the point of the product, and the reason for the pause switch in its popup,
+the point of the product, and the reason for the pause switch in its menu,
 which refuses everything instantly without disconnecting anything.
 
 ## Page JavaScript

@@ -88,10 +88,11 @@ class FakeNode {
 }
 
 const PANEL_IDS = [
-  "toolbar", "history", "newChat", "more", "menu", "deleteChat", "disconnect", "paused",
-  "notice", "connect", "oauth", "showCode", "codePath", "openAuth", "manual", "manualSave",
-  "connectError", "empty", "log", "historyList", "composerBar", "input", "model", "send",
-  "stop",
+  "toolbar", "history", "newChat", "more", "menu", "pauseToggle", "ghostMachine", "deleteChat",
+  "disconnect", "paused", "notice", "connect", "oauth", "showCode", "codePath", "openAuth",
+  "manual", "manualSave", "connectError", "ghostView", "ghostBack", "dot", "statusText",
+  "detail", "ghostTabs", "pair", "pairCode", "retry", "token", "port", "save", "saved",
+  "empty", "log", "historyList", "composerBar", "input", "model", "send", "stop",
 ];
 
 function panelDocument() {
@@ -150,6 +151,14 @@ function setUp({ key = "sk-or-test", ops = async () => ({ ok: true, result: {} }
       sendMessage: async (message) => {
         sent.push(message);
         if (message.type === "ghost-relay-local-close") return { ok: true };
+        if (message.type === "ghost-relay-status") {
+          return { connected: false, paired: false, pairingCode: "246810", pairingDenied: false,
+            token: "", enabled, port: 7717, lastError: "", tabs: [] };
+        }
+        if (message.type === "ghost-relay-settings-update") {
+          local.store.set("enabled", message.settings.enabled ?? enabled);
+          return { ok: true, settings: { port: 7717, token: "", ...message.settings } };
+        }
         return ops(message);
       },
     },
@@ -308,7 +317,7 @@ function hangingFetch() {
   return { fetch, count: () => aborted };
 }
 
-test("pause arriving from the popup stops the turn in flight", async () => {
+test("pause arriving from the menu switch stops the turn in flight", async () => {
   const { document, storageListeners } = setUp();
   const hanging = hangingFetch();
   globalThis.fetch = hanging.fetch;
@@ -327,7 +336,7 @@ test("pause arriving from the popup stops the turn in flight", async () => {
   assert.equal(hanging.count(), 1, "the in-flight request was aborted by the pause");
   assert.equal(document.elements.paused.hidden, false);
   assert.equal(document.elements.stop.hidden, true, "the turn ended");
-  assert.ok(document.elements.log.children.some((node) => node.text.includes("Paused from the relay popup")));
+  assert.ok(document.elements.log.children.some((node) => node.text.includes("Resume Ghost from the menu")));
 });
 
 test("Stop aborts the request and says it is stopping until the turn ends", async () => {
@@ -449,4 +458,30 @@ test("disconnect forgets the key and puts the connect panel back", async () => {
   assert.equal(local.store.has("openRouterKey"), false);
   assert.equal(document.elements.connect.hidden, false);
   assert.equal(document.elements.composerBar.hidden, true);
+});
+
+test("the menu pauses Ghost, and the pairing screen shows the code the HUD shows", async () => {
+  const { document, sent } = setUp();
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({ data: [] }) });
+  await load("menu");
+  await settle();
+
+  assert.equal(document.elements.pauseToggle.textContent, "Pause Ghost");
+  document.elements.pauseToggle.listeners.get("click")();
+  await settle();
+  const update = sent.find((message) => message.type === "ghost-relay-settings-update");
+  assert.deepEqual(update.settings, { enabled: false }, "pause is the same switch the ghost obeys");
+
+  document.elements.ghostMachine.listeners.get("click")();
+  await settle();
+  assert.equal(document.elements.ghostView.hidden, false);
+  assert.equal(document.elements.composerBar.hidden, true);
+  assert.equal(document.elements.statusText.textContent, "Not paired");
+  assert.equal(document.elements.pairCode.textContent, "246 810");
+  assert.equal(document.elements.pair.hidden, false);
+
+  document.elements.ghostBack.listeners.get("click")();
+  await settle();
+  assert.equal(document.elements.ghostView.hidden, true);
+  assert.equal(document.elements.composerBar.hidden, false);
 });
