@@ -87,7 +87,6 @@ for install_script in \
     'systemctl --user reenable --now ghostd.service'
 done
 
-bash "$script_dir/test-ci-dependencies.sh"
 bash "$script_dir/test-split-payload.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-runtime-source.sh"
@@ -149,15 +148,5 @@ if ! cmp "$work/development-depends" "$work/stable-depends"; then
   printf 'stable and development runtime dependencies differ\n' >&2
   exit 1
 fi
-
-ci_dependencies_file="$work/ci-dependencies"
-bash "$script_dir/ci-dependencies.sh" --names > "$ci_dependencies_file"
-mapfile -t ci_dependencies < "$ci_dependencies_file"
-for package in bun fd jq nodejs python-yaml ripgrep; do
-  if [[ ! " ${ci_dependencies[*]} " =~ [[:space:]]${package}[[:space:]] ]]; then
-    printf 'CI dependency set does not contain %s\n' "$package" >&2
-    exit 1
-  fi
-done
 
 printf 'Arch package check dependency coverage passed\n'

@@ -24,7 +24,7 @@ exec > >(tee "$gitdir/ghost-verify-last.log") 2>&1
 pnpm typecheck
 pnpm lint
 pnpm test
-# What the Arch workflow checks beyond the workspace: the packaging scripts
+# What the gate checks beyond the workspace: the packaging scripts
 # (they diff packaging/arch/.SRCINFO against a fresh makepkg render) and the
 # Python sidecar's lint and types.
 bash packaging/arch/test-check-dependencies.sh

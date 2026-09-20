@@ -32,9 +32,9 @@ import {
 
 // The extension lives in its own repository (github.com/ferdousbhai/
 // ghost-chromium-extension). This test reads a checkout of it: an explicit
-// location wins, else a sibling clone of this repository. CI checks the pinned
-// tag out (RELAY_EXTENSION_REF in .github/workflows/arch-package.yml); a
-// developer without a clone gets a skipped suite that says so, not a false pass.
+// location wins, else a sibling clone of this repository at the release
+// CONTRACTS.md names. Without one the suite skips and says so — not a false
+// pass, and not a gate that can be satisfied without the extension present.
 const EXTENSION_DIR = process.env.GHOST_CHROMIUM_EXTENSION_DIR
   ?? join(
     dirname(fileURLToPath(import.meta.url)),

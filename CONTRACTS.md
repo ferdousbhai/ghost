@@ -468,9 +468,10 @@ imports the other's source, Ghost does not bundle or install it, and only
 `PROTOCOL_VERSION` ties an extension release to a Ghost release. The daemon's
 conformance test ([`relay-extension.test.ts`](packages/daemon/test/relay-extension.test.ts))
 reads a checkout of the extension — `GHOST_CHROMIUM_EXTENSION_DIR`, else a
-sibling clone — and CI checks out the tag named by `RELAY_EXTENSION_REF` in
-the Arch workflow; bump that ref with every extension release Ghost must
-agree with.
+sibling clone `../ghost-chromium-extension` — and skips loudly without one,
+so the gate is only complete with that clone beside this repository. The
+extension release this Ghost agrees with is **v0.5.0** (relay protocol 4);
+update this line with every extension release Ghost must agree with.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, desktop helper, user unit, and runtime docs/licenses;

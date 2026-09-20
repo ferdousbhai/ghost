@@ -141,8 +141,9 @@ That removes package-owned files only.
 `smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
 the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
-archive, and the Arch workflow builds the package in a clean container on
-every push, which is the whole of CI: releases are cut locally.
+archive. There is no hosted CI: `pnpm verify` is the whole gate, the pre-push
+hook refuses a master push until it has passed on that exact tree, and
+releases are cut locally.
 
 For a real service-context check on a graphical Arch login, run:
 
