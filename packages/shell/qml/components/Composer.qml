@@ -104,7 +104,7 @@ Item {
         height: Ghostd.commandsLoading && root.slashMatches.length === 0
             ? Theme.controlHeight + Theme.pad
             : slashOptions.implicitHeight + Theme.gap
-        radius: Theme.radiusLarge
+        radius: Theme.bubbleRadius
         color: Theme.surface
         border.width: 1
         border.color: Theme.border
@@ -138,7 +138,7 @@ Item {
                     required property int index
                     width: slashOptions.width
                     height: Theme.controlHeight
-                    radius: Theme.radius
+                    radius: Theme.bubbleRadiusSmall
                     color: slashOption.index === root.slashIndex
                         ? Theme.amber(0.12)
                         : (slashArea.containsMouse ? Theme.film(0.06) : "transparent")
@@ -196,7 +196,7 @@ Item {
         id: surface
 
         anchors.fill: parent
-        radius: Theme.radiusLarge
+        radius: Theme.bubbleRadius
         color: field.activeFocus ? Theme.film(0.07) : Theme.film(0.05)
         border.width: 1
         border.color: field.activeFocus ? Theme.film(0.20) : Theme.film(0.10)

@@ -69,7 +69,7 @@ Rectangle {
 
     visible: root.trace !== "" || root.askBranch !== null
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
-    radius: 12
+    radius: Theme.bubbleRadiusSmall
     color: cardHover.containsMouse ? Theme.amber(0.08) : Theme.amber(0.05)
     border.width: 1
     border.color: root.cool ? Theme.rose(0.35) : Theme.amber(0.10)
@@ -218,7 +218,7 @@ Rectangle {
             x: 16 + Theme.gap / 2
             width: Math.min(parent.width - x, chipLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? chipLabel.implicitHeight + 6 : 0
-            radius: Theme.radius / 2
+            radius: Theme.bubbleRadiusSmall
             color: fileChip.current || chipArea.containsMouse
                 ? Theme.amber(0.16) : Theme.amber(0.08)
             border.width: 1
@@ -309,7 +309,7 @@ Rectangle {
             x: 16 + Theme.gap / 2
             width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? askLabel.implicitHeight + 6 : 0
-            radius: Theme.radius / 2
+            radius: Theme.bubbleRadiusSmall
             color: askArea.containsMouse ? Theme.amber(0.16) : Theme.amber(0.08)
             border.width: 1
             border.color: askArea.containsMouse ? Theme.amber(0.35) : Theme.amber(0.18)

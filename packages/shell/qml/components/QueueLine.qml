@@ -35,7 +35,7 @@ ColumnLayout {
                 required property string modelData
                 implicitWidth: Math.min(steerText.implicitWidth + Theme.gap, root.width * 0.72)
                 implicitHeight: 22
-                radius: Theme.radius
+                radius: Theme.bubbleRadiusSmall
                 color: Theme.amber(0.12)
                 border.width: 1
                 border.color: Theme.amber(0.20)
@@ -73,7 +73,7 @@ ColumnLayout {
                 required property string modelData
                 implicitWidth: Math.min(followText.implicitWidth + Theme.gap, root.width * 0.72)
                 implicitHeight: 22
-                radius: Theme.radius
+                radius: Theme.bubbleRadiusSmall
                 color: Theme.film(0.05)
                 border.width: 1
                 border.color: Theme.film(0.10)

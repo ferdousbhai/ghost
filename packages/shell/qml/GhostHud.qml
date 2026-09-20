@@ -571,7 +571,7 @@ FloatingWindow {
                             anchors.verticalCenter: parent.verticalCenter
                             width: Theme.controlHeight
                             height: Theme.controlHeight
-                            radius: Theme.radius
+                            radius: width / 2
                             color: composeArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10)
                             border.width: 1
                             border.color: composeArea.containsMouse
@@ -795,7 +795,7 @@ FloatingWindow {
 
                                     Rectangle {
                                         anchors.fill: parent
-                                        radius: Theme.radiusLarge
+                                        radius: Theme.bubbleRadius
                                         color: Theme.film(0.04)
                                         border.width: 1
                                         border.color: Theme.film(0.10)
@@ -835,7 +835,7 @@ FloatingWindow {
                                 // follows the *wrapped* height of a Text with a
                                 // fixed width, and glides rather than snapping.
                                 height: invitation.implicitHeight + Theme.pad * 2
-                                radius: Theme.radiusLarge
+                                radius: Theme.bubbleRadius
                                 color: Theme.amber(0.06)
                                 border.width: 1
                                 border.color: Theme.amber(0.15)
@@ -939,7 +939,7 @@ FloatingWindow {
                                 visible: !Ghostd.reachable
                                 width: parent.width
                                 height: unreachable.implicitHeight + Theme.pad * 2
-                                radius: Theme.radiusLarge
+                                radius: Theme.bubbleRadius
                                 color: Theme.rose(0.08)
                                 border.width: 1
                                 border.color: Theme.rose(0.20)
@@ -965,7 +965,7 @@ FloatingWindow {
                         Layout.fillWidth: true
                         visible: Ghostd.reachable && Ghostd.updateAvailable !== null
                         implicitHeight: visible ? updateLine.implicitHeight + Theme.pad * 2 : 0
-                        radius: Theme.radiusLarge
+                        radius: Theme.bubbleRadius
                         color: Theme.amber(0.08)
                         border.width: 1
                         border.color: Theme.amber(0.20)

@@ -92,4 +92,11 @@ TestCase {
         compare(Math.round(border.g * 255), 136);
         compare(Math.round(border.b * 255), 0);
     }
+
+    function test_chromeStaysSquareAndChatSurfacesRound(): void {
+        compare(Theme.radius, 0);
+        compare(Theme.bubbleRadius, 16);
+        compare(Theme.bubbleRadiusSmall, 12);
+        compare(Theme.bubbleTailRadius, 4);
+    }
 }

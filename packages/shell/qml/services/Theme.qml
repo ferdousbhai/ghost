@@ -295,11 +295,13 @@ Singleton {
     readonly property string synFunction: "#d9c98a"
 
     // Omarchy publishes no radius in shell.toml and rounds nothing in
-    // looknfeel.lua. Square is the shape; the tokens stay so a future Omarchy
-    // radius has one place to land.
+    // looknfeel.lua. Square is the chrome; `radius` stays so a future Omarchy
+    // radius has one place to land. Chat surfaces are Ghost's own: 16px for
+    // capsules and the composer, 12px for chips, 4px for the speaker tail.
     readonly property int radius: 0
-    readonly property int radiusLarge: 0
-    readonly property int radiusTail: 0
+    readonly property int bubbleRadius: 16
+    readonly property int bubbleRadiusSmall: 12
+    readonly property int bubbleTailRadius: 4
 
     // The names the HUD already uses, pointed at their published equivalents.
     readonly property int pad: root.panelPadding

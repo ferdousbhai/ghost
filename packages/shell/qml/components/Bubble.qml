@@ -8,7 +8,7 @@ pragma ComponentBehavior: Bound
 // prompt containing backticks or underscores survives verbatim.
 //
 // Only the user's prompt gets a surface: the warm capsule, 16px round with one
-// 2px tail corner. A ghost's reply stays unboxed and full width — the reading
+// 4px tail corner. A ghost's reply stays unboxed and full width — the reading
 // column is the ghost's, not a bubble in it.
 import QtQuick
 import Quickshell
@@ -247,8 +247,8 @@ Item {
         Rectangle {
             anchors.fill: parent
             visible: root.mine
-            radius: Theme.radiusLarge
-            bottomRightRadius: Theme.radiusTail
+            radius: Theme.bubbleRadius
+            bottomRightRadius: Theme.bubbleTailRadius
             border.width: 1
             border.color: Theme.film(0.10)
             gradient: Gradient {
@@ -483,7 +483,7 @@ Item {
                 visible: root.failure !== ""
                 width: parent.width
                 height: failureText.height + Theme.pad
-                radius: Theme.radiusLarge
+                radius: Theme.bubbleRadius
                 color: Theme.rose(0.10)
                 border.width: 1
                 border.color: Theme.rose(0.20)
