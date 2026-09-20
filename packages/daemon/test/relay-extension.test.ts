@@ -35,16 +35,17 @@ import {
 // location wins, else a sibling clone of this repository at the release
 // CONTRACTS.md names. Without one the suite skips and says so — not a false
 // pass, and not a gate that can be satisfied without the extension present.
+// The extension repository's root is the extension (manifest.json sits there).
 const EXTENSION_DIR = process.env.GHOST_CHROMIUM_EXTENSION_DIR
   ?? join(
     dirname(fileURLToPath(import.meta.url)),
-    "..", "..", "..", "..", "ghost-chromium-extension", "extension",
+    "..", "..", "..", "..", "ghost-chromium-extension",
   );
 const extensionPresent = existsSync(join(EXTENSION_DIR, "protocol.js"));
 if (!extensionPresent) {
   console.warn(
     `relay-extension: no extension checkout at ${EXTENSION_DIR}; set GHOST_CHROMIUM_EXTENSION_DIR `
-    + "or clone github.com/ferdousbhai/ghost-chromium-extension beside this repository.",
+    + "to the extension repository's root, or clone github.com/ferdousbhai/ghost-chromium-extension beside this repository.",
   );
 }
 
