@@ -56,8 +56,8 @@ push (the `pre-push` hook runs the whole gate), then publish:
 
 ```sh
 old=0.1.0; new=0.1.1
-# The relay extension versions separately (PROTOCOL_VERSION is the pin), so its
-# two manifests are deliberately left out of this sweep.
+# The browser extension lives in its own repository; PROTOCOL_VERSION is the
+# only pin between it and a Ghost release.
 sed -i "s/\"version\": \"$old\"/\"version\": \"$new\"/" package.json \
   packages/{daemon,extensions,shell}/package.json packages/shell/qml/manifest.json
 packaging/release/verify-release-version.sh .    # prints the one version they all say

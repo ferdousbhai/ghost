@@ -8,9 +8,8 @@ bun -e '
 import { join } from "node:path";
 
 const sourceRoot = process.argv[1];
-// The relay extension is a separate product with its own versioning; only
-// PROTOCOL_VERSION ties it to a Ghost release, so its manifests are
-// deliberately absent here.
+// The browser extension lives in its own repository and versions on its
+// own; PROTOCOL_VERSION is the only pin between it and a Ghost release.
 const manifests = [
   "package.json",
   "packages/daemon/package.json",

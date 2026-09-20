@@ -117,7 +117,6 @@ mkdir -p -- \
   "$source_root/packaging/arch" \
   "$source_root/packaging/release" \
   "$source_root/packages/shell/contrib" \
-  "$source_root/packages/chromium-extension/extension" \
   "$runtime_root"
 write_manifest() {
   printf '%s\n' "$@" > "$manifest"
@@ -203,8 +202,6 @@ Type=Application
 Name=Ghost
 Exec=ghost
 EOF
-printf '{}\n' \
-  > "$source_root/packages/chromium-extension/extension/manifest.json"
 write_runtime_manifest() {
   local commit="$1"
   printf '%s\n' \

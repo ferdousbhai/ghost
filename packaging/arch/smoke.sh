@@ -51,7 +51,6 @@ if [[ "$component" == runtime ]]; then
   data_files=(
     /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
     /usr/lib/ghost/desktop-helper/ghost_desktop_helper/_vendor/omaharness/LICENSE
-    /usr/share/ghost/chromium-extension/manifest.json
     /usr/lib/systemd/user/ghostd.service
     /usr/lib/ghost/runtime/ghostd.js
     /usr/lib/ghost/runtime/ghost.js
@@ -71,8 +70,7 @@ else
     /usr/share/icons/hicolor/scalable/apps/ghost.svg
     /usr/share/icons/hicolor/128x128/apps/ghost.png
   )
-  absent=(/usr/bin /usr/lib/ghost /usr/lib/systemd /usr/share/ghost/chromium-extension
-    /usr/share/doc/ghost/README.md)
+  absent=(/usr/bin /usr/lib/ghost /usr/lib/systemd /usr/share/doc/ghost/README.md)
 fi
 for path in "${absent[@]}"; do
   if [[ -e "$root$path" || -L "$root$path" ]]; then
@@ -106,7 +104,6 @@ if [[ "$component" == ui ]]; then
   desktop-file-validate "$root/usr/share/applications/ghost.desktop"
   python -m json.tool "$root/usr/share/ghost/plugin/manifest.json" >/dev/null
 else
-  python -m json.tool "$root/usr/share/ghost/chromium-extension/manifest.json" >/dev/null
   PYTHONDONTWRITEBYTECODE=1 \
   PYTHONPATH="$root/usr/lib/ghost/desktop-helper" \
     python -c 'import PIL; import ghost_desktop_helper._vendor.omaharness'

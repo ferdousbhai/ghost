@@ -266,12 +266,12 @@ and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
 
-- **Lend the ghost your browser.** It has none until you pair the relay: load
-  `/usr/share/ghost/chromium-extension` unpacked in your own Chromium, then
-  open the HUD and press Allow when it shows the same code as the extension's
-  popup. Read
-  [`packages/chromium-extension/README.md`](../packages/chromium-extension/README.md)
-  first — the ghost acts in the session you are signed into.
+- **Lend the ghost your browser.** It has none until you pair the
+  [Ghost extension](https://github.com/ferdousbhai/ghost-chromium-extension)
+  (Chrome Web Store, or the release zip loaded unpacked). In its side panel's
+  menu choose **Ghost on this machine…**, then open the HUD and press Allow
+  when it shows the same code. Read the extension's README first — the ghost
+  acts in the session you are signed into.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
   Install → AI → Dictation, which sets up Voxtype). With the composer focused,
   hold `F9` and speak, or click the dot at the right of the composer; the

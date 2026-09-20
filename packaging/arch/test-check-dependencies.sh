@@ -111,9 +111,6 @@ done < <(find "$source_root/packaging" \
 
 rg -q 'rg[[:space:]]+-l' \
   "$source_root/packages/shell/dev/test.sh"
-rg -q '"test"[[:space:]]*:[[:space:]]*"node --test' \
-  "$source_root/packages/chromium-extension/package.json"
-
 (
   CDPATH= cd -- "$script_dir"
   env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo

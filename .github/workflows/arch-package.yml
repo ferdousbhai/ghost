@@ -8,6 +8,11 @@ on:
 permissions:
   contents: read
 
+env:
+  # The extension release this Ghost agrees with on the relay protocol. The
+  # daemon's conformance test reads this checkout; bump it with the extension.
+  RELAY_EXTENSION_REF: v0.5.0
+
 jobs:
   package:
     runs-on: ubuntu-latest
@@ -19,6 +24,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ferdousbhai/ghost-chromium-extension
+          ref: ${{ env.RELAY_EXTENSION_REF }}
+          path: .relay-extension
 
       - name: Install declared package dependencies
         shell: bash
@@ -59,5 +70,6 @@ jobs:
             HOME=/home/builder PATH=/usr/bin TMPDIR=/home/builder \
             GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
             GITHUB_SHA="$GITHUB_SHA" \
+            GHOST_CHROMIUM_EXTENSION_DIR="$GITHUB_WORKSPACE/.relay-extension/extension" \
             /usr/bin/bash \
               "$GITHUB_WORKSPACE/packaging/arch/ci-build-development.sh"

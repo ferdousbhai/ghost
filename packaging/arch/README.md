@@ -89,8 +89,9 @@ channel, pacman repository, or package-signing key.
 The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into
 `~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
-The browser relay is installed at `/usr/share/ghost/chromium-extension`; load
-that directory with Chromium's **Load unpacked** flow. The computer-use helper
+The browser extension is its own product and is not in this package: install
+Ghost for Chromium from the Chrome Web Store or from
+<https://github.com/ferdousbhai/ghost-chromium-extension>. The computer-use helper
 is installed in a private Python import directory and exposed through
 `ghost-desktop-helper`, preventing its vendored `omaharness` modules from
 colliding with a system Python package.

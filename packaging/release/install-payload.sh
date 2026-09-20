@@ -54,9 +54,6 @@ if [[ "$component" == runtime ]]; then
   done < <(find "$source_root/packages/desktop-helper/src" -type f \
     \( -name '*.py' -o -name LICENSE \) -print0)
 
-  install_tree "$source_root/packages/chromium-extension/extension" \
-    "$sharedir/chromium-extension"
-
   install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
     "$pkgdir/usr/lib/systemd/user/ghostd.service"
   install -Dm755 "$source_root/packaging/arch/service-browser-smoke.sh" \

@@ -13,3 +13,5 @@ packages/shell/qml/.qmlls.ini
 # Python bytecode (tray helper)
 __pycache__/
 *.pyc
+# CI checkout of the browser extension, for the relay conformance test
+.relay-extension/

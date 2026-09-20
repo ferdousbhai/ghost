@@ -74,7 +74,7 @@ tools when a request may depend on it.
 | `ghostd` daemon | sessions, state transitions, models, credentials, MCP, hooks, the HTTP API | [`server.ts`](../packages/daemon/src/server.ts), [`session-host.ts`](../packages/daemon/src/session-host.ts) |
 | `ghost` CLI | a terminal client over that API, with a named verb for every daemon capability | [`cli/main.ts`](../packages/daemon/src/cli/main.ts) |
 | Ghost shell plugin | the Omarchy desktop surfaces: chat, roster, panes, bar dot | [`packages/shell/qml/`](../packages/shell/qml) |
-| Chromium relay | the opt-in MV3 extension that lends the ghost the browser the owner already uses — its own product and repo ([ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension)), vendored here while the pin is the tree | [`packages/chromium-extension/`](../packages/chromium-extension/extension) |
+| Chromium extension | the opt-in MV3 extension that lends the ghost the browser the owner already uses — its own product, in its own repo | [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension) |
 | Desktop helper | the Python JSON-lines computer-use sidecar (AT-SPI, capture, input) | [`docs/desktop-helper.md`](desktop-helper.md) |
 
 The daemon is the only session owner: one process owns a session, and every

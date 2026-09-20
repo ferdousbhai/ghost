@@ -123,9 +123,6 @@ check() {
       "$source_date_epoch" || return 1
   desktop-file-validate \
     "$source_root/packages/shell/contrib/ghost.desktop" || return 1
-  python -m json.tool \
-    "$source_root/packages/chromium-extension/extension/manifest.json" \
-    >/dev/null || return 1
 }
 
 package_ghost-runtime() {

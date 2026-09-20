@@ -2,9 +2,9 @@
  * The extension half is plain JavaScript with no build step, which is what makes
  * it editable-and-reloadable but also means its copy of the protocol is not
  * typechecked against the TypeScript one. This file is the conformance check
- * across the product seam (`packages/chromium-extension/PROTOCOL.md`): the
+ * across the product seam (PROTOCOL.md in the extension's repository): the
  * extension is a separate product and neither side imports the other's source,
- * so this test reads the installed copy instead. `extension/protocol.js` has
+ * so this test reads a checkout of it instead. `extension/protocol.js` has
  * no `chrome` API in it, so it imports cleanly into Node and can simply be
  * compared, constant for constant.
  *
@@ -16,6 +16,7 @@
  * That boundary is a property a future convenience commit could quietly delete,
  * so it is pinned here rather than only in a README.
  */
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,13 +30,23 @@ import {
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
 
-// The installed extension copy: an explicit install location wins, and the
-// sibling checkout is the fallback while the sources travel together.
+// The extension lives in its own repository (github.com/ferdousbhai/
+// ghost-chromium-extension). This test reads a checkout of it: an explicit
+// location wins, else a sibling clone of this repository. CI checks the pinned
+// tag out (RELAY_EXTENSION_REF in .github/workflows/arch-package.yml); a
+// developer without a clone gets a skipped suite that says so, not a false pass.
 const EXTENSION_DIR = process.env.GHOST_CHROMIUM_EXTENSION_DIR
   ?? join(
     dirname(fileURLToPath(import.meta.url)),
-    "..", "..", "chromium-extension", "extension",
+    "..", "..", "..", "..", "ghost-chromium-extension", "extension",
   );
+const extensionPresent = existsSync(join(EXTENSION_DIR, "protocol.js"));
+if (!extensionPresent) {
+  console.warn(
+    `relay-extension: no extension checkout at ${EXTENSION_DIR}; set GHOST_CHROMIUM_EXTENSION_DIR `
+    + "or clone github.com/ferdousbhai/ghost-chromium-extension beside this repository.",
+  );
+}
 
 const source = (name: string) => readFile(join(EXTENSION_DIR, name), "utf8");
 
@@ -56,7 +67,7 @@ async function loadExtensionProtocol(): Promise<ExtensionProtocol> {
   return (await import(/* @vite-ignore */ specifier)) as ExtensionProtocol;
 }
 
-describe("the extension agrees with the daemon about the protocol", () => {
+describe.skipIf(!extensionPresent)("the extension agrees with the daemon about the protocol", () => {
   it("speaks the same version, path, and subprotocol", async () => {
     const extension = await loadExtensionProtocol();
     expect(extension.PROTOCOL_VERSION).toBe(RELAY_PROTOCOL_VERSION);
@@ -88,7 +99,7 @@ describe("the extension agrees with the daemon about the protocol", () => {
   });
 });
 
-describe("the extension's permission surface is the security model", () => {
+describe.skipIf(!extensionPresent)("the extension's permission surface is the security model", () => {
   it("keeps page content and DOM/input actions behind visible debugger attachment", async () => {
     const manifest = JSON.parse(await source("manifest.json")) as {
       manifest_version: number;
