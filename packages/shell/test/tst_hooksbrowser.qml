@@ -49,13 +49,16 @@ TestCase {
         Ghostd.retireHooksRequest();
         tc.requests = [];
         Ghostd.hooksRequestFactory = function () { return FakeXhr.make(tc.requests); };
-        Ghostd.hookConfig = null;
-        Ghostd.hookConfigPath = "";
+        Ghostd.hookConfig = {
+            hooks: {
+                session_stop: [{ hooks: [{ type: "command", command: "/bin/hostile" }] }]
+            }
+        };
+        Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
         Ghostd.hookConfigLoaded = true;
         Ghostd.hookConfigError = "";
         Ghostd.activeHooks = [{
             event: "session_stop",
-            source: "builtin",
             name: hostileName,
             description: hostileDescription
         }];
@@ -106,7 +109,7 @@ TestCase {
 
     function editableBrowser(): var {
         Ghostd.activeHooks = [
-            { event: "session_stop", source: "config", name: "Review", description: "Reviews the pass." }
+            { event: "session_stop", name: "Review", description: "Reviews the pass." }
         ];
         Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
         Ghostd.activeHookCount = 1;
@@ -123,7 +126,6 @@ TestCase {
         const card = findChild(browser, "hookCard");
         compare(findChild(card, "hookName").text, "Review");
         compare(findChild(card, "hookCommand").text, "/bin/review");
-        compare(findChild(card, "hookSource").text, "hooks.json");
         verify(findChild(browser, "hookField-command") === null);
 
         mouseClick(card);
@@ -194,26 +196,6 @@ TestCase {
         }
         collect(browser);
         return cards;
-    }
-
-    function test_builtinHookIsReadOnly(): void {
-        Ghostd.activeHooks = [
-            { event: "session_stop", source: "builtin", name: "Review",
-              description: "Reviews the pass.", settingsKey: "review" }
-        ];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
-        Ghostd.activeHookCount = 1;
-        Ghostd.hookConfig = { hooks: {} };
-        Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
-        const browser = createTemporaryObject(browserComponent, tc);
-        tryVerify(function () { return hookCards(browser).length === 1; });
-        const card = hookCards(browser)[0];
-        compare(findChild(card, "hookSource").text, "built in");
-        verify(!findChild(card, "hookDeleteButton").visible);
-        compare(findChild(card, "hookTrigger").text, "After each assistant pass");
-        mouseClick(card);
-        verify(!browser.editing);
-        compare(tc.requests.length, 0);
     }
 
     function test_navigationContainsKeyboardActivatableHooksDestination(): void {

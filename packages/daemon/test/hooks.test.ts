@@ -80,72 +80,64 @@ function isAlive(pid: number): boolean {
 }
 
 describe("GhostHookRunner", () => {
-  it("runs in-process handlers sequentially and returns the first continuation", async () => {
-    const runner = new GhostHookRunner();
-    const calls: string[] = [];
-    await runner.register((api) => {
-      api.on("session_stop", () => {
-        calls.push("first");
-        return { continue: true }; // Empty continuation is intentionally ignored.
-      });
-      api.on("session_stop", () => {
-        calls.push("second");
-        return { decision: "block", reason: "Revise this answer." };
-      });
-      api.on("session_stop", () => {
-        calls.push("third");
-      });
-    });
+  it("runs session_stop hooks in order and returns the first continuation", async () => {
+    const directory = temporaryDirectory();
+    const config = join(directory, "hooks.json");
+    const order = join(directory, "order.txt");
+    // Each hook appends before answering, so the file is the observed order.
+    const step = (name: string, answer: string) =>
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+        `require("node:fs").appendFileSync(${JSON.stringify(order)}, ${JSON.stringify(`${name}\n`)});`
+        + `process.stdout.write(${JSON.stringify(answer)});`,
+      )}`;
+    writeFileSync(config, JSON.stringify({
+      hooks: {
+        session_stop: [{
+          hooks: [
+            // An empty continuation is intentionally ignored, so the second hook still runs.
+            { type: "command", command: step("first", JSON.stringify({ continue: true })) },
+            { type: "command", command: step("second", JSON.stringify({ decision: "block", reason: "Revise this answer." })) },
+            { type: "command", command: step("third", "{}") },
+          ],
+        }],
+      },
+    }));
 
+    const runner = GhostHookRunner.fromConfig(config);
     const result = await runner.emitSessionStop(event());
-    expect(calls).toEqual(["first", "second"]);
+    expect(readFileSync(order, "utf8").split("\n").filter(Boolean)).toEqual(["first", "second"]);
     expect(ghostSessionStopContinuation(result)).toBe("Revise this answer.");
   });
 
   it("combines nonblocking before_prompt context without starting a continuation", async () => {
-    const runner = new GhostHookRunner();
-    const calls: string[] = [];
-    await runner.register((api) => {
-      api.on("before_prompt", (input) => {
-        calls.push(input.prompt);
-        return { additionalContext: "First advisory." };
-      });
-      api.on("before_prompt", () => ({ additionalContext: "Second advisory." }));
-    });
+    const directory = temporaryDirectory();
+    const config = join(directory, "hooks.json");
+    const advisory = (text: string) =>
+      `${JSON.stringify(process.execPath)} -e ${JSON.stringify(
+        `process.stdout.write(${JSON.stringify(JSON.stringify({ additionalContext: text }))});`,
+      )}`;
+    writeFileSync(config, JSON.stringify({
+      hooks: {
+        before_prompt: [{
+          hooks: [
+            { type: "command", command: advisory("First advisory.") },
+            { type: "command", command: advisory("Second advisory.") },
+          ],
+        }],
+      },
+    }));
 
+    const runner = GhostHookRunner.fromConfig(config);
     const result = await runner.emitBeforePrompt(beforePromptEvent());
-    expect(calls).toEqual(["Continue"]);
     expect(result?.additionalContext).toBe("First advisory.\n\nSecond advisory.");
   });
 
-  it("acknowledges only handlers whose context was actually returned", async () => {
-    const runner = new GhostHookRunner();
-    const acknowledgements: string[] = [];
-    await runner.register((api) => {
-      api.on("before_prompt", () => ({
-        additionalContext: "Delivered.",
-        acknowledge: () => { acknowledgements.push("delivered"); },
-      }));
-      api.on("before_prompt", () => ({
-        acknowledge: () => { acknowledgements.push("not-delivered"); },
-      }));
-    });
-    const result = await runner.emitBeforePrompt(beforePromptEvent());
-    expect(acknowledgements).toEqual([]);
-    await result?.acknowledge?.();
-    expect(acknowledgements).toEqual(["delivered"]);
-  });
-
-  it("replaces the command configuration live and leaves in-process handlers alone", async () => {
+  it("replaces the command configuration live", async () => {
     const directory = temporaryDirectory();
     const config = join(directory, "nested", "hooks.json");
     const runner = GhostHookRunner.fromConfig(config);
     expect(runner.config()).toEqual({ path: config, document: {} });
     expect(runner.hasHandlers("session_stop")).toBe(false);
-
-    await runner.register((api) => {
-      api.on("before_prompt", () => {}, { name: "Builtin context" });
-    });
 
     const first = {
       hooks: {
@@ -160,8 +152,7 @@ describe("GhostHookRunner", () => {
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
     expect(runner.hasHandlers("session_stop")).toBe(true);
     expect(ghostSessionStopContinuation(await runner.emitSessionStop(event()))).toBe("Revise.");
-    expect(runner.status().hooks.map(({ source, name }) => `${source}:${name}`))
-      .toEqual(["builtin:Builtin context", "config:Reviewer"]);
+    expect(runner.status().hooks.map(({ name }) => name)).toEqual(["Reviewer"]);
 
     const invalid = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } };
     await expect(runner.replaceConfig(invalid)).rejects.toThrow(/non-empty NUL-free command/u);
@@ -172,24 +163,15 @@ describe("GhostHookRunner", () => {
     await runner.replaceConfig(second);
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(second);
     expect(runner.hasHandlers("session_stop")).toBe(false);
-    expect(runner.hasHandlers("before_prompt")).toBe(true);
   });
 
-  it("refuses every builtin key and still names a code-registered hook on status", async () => {
+  it("refuses every builtin key", async () => {
     const directory = temporaryDirectory();
     const config = join(directory, "hooks.json");
     writeFileSync(config, JSON.stringify({ hooks: {}, builtin: {} }));
     const runner = GhostHookRunner.fromConfig(config);
 
-    await runner.register((api) => {
-      api.on("session_stop", () => {}, { name: "Review" });
-    });
-    expect(runner.status().hooks).toEqual([{
-      event: "session_stop",
-      source: "builtin",
-      name: "Review",
-      description: "Runs after the assistant pass and may continue it.",
-    }]);
+    expect(runner.status().hooks).toEqual([]);
 
     for (const [document, message] of [
       [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],

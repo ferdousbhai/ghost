@@ -14,9 +14,9 @@ TestCase {
                 { event: "session_stop", count: 2 }
             ],
             hooks: [
-                { event: "before_prompt", source: "config", name: "Prompt policy", description: "Adds policy." },
-                { event: "session_stop", source: "builtin", name: "Continuity", description: "Checks completion." },
-                { event: "session_stop", source: "config", name: "Style", description: "Checks prose." }
+                { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
+                { event: "session_stop", name: "Continuity", description: "Checks completion." },
+                { event: "session_stop", name: "Style", description: "Checks prose." }
             ]
         };
     }
@@ -74,26 +74,10 @@ TestCase {
         count.events[0].count = 1.25;
         compare(HookStatus.normalize(count), null);
 
-        const tunedConfig = validStatus();
-        tunedConfig.hooks[0].settingsKey = "prompt";
-        compare(HookStatus.normalize(tunedConfig), null);
-
-        const badKey = validStatus();
-        badKey.hooks[1].settingsKey = "Review";
-        compare(HookStatus.normalize(badKey), null);
-
-        const tuned = validStatus();
-        tuned.hooks[1].settingsKey = "review";
-        compare(HookStatus.normalize(tuned).hooks[1].settingsKey, "review");
-        compare(HookStatus.normalize(tuned).hooks[2].settingsKey, undefined);
-
-        const badSource = validStatus();
-        badSource.hooks[0].source = "extension";
-        compare(HookStatus.normalize(badSource), null);
-
-        const noSource = validStatus();
-        delete noSource.hooks[0].source;
-        compare(HookStatus.normalize(noSource), null);
+        // A hook row carries exactly event, name and description now.
+        const extraHookField = validStatus();
+        extraHookField.hooks[0].source = "config";
+        compare(HookStatus.normalize(extraHookField), null);
 
         const extraRoot = validStatus();
         extraRoot.command = "/bin/private";

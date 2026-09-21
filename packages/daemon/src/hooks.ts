@@ -31,7 +31,6 @@ export interface GhostBeforePromptEvent extends GhostHookEventBase {
 
 export interface GhostBeforePromptResult {
   additionalContext?: string;
-  acknowledge?: () => Promise<void> | void;
 }
 
 export interface GhostSessionStopEvent extends GhostHookEventBase {
@@ -63,12 +62,8 @@ export interface GhostHookEventStatus {
   count: number;
 }
 
-/** `builtin` is an in-process registration; `config` comes from `hooks.json`. */
-export type GhostHookSource = "builtin" | "config";
-
 export interface GhostHookStatusItem {
   event: GhostHookEvent["type"];
-  source: GhostHookSource;
   name: string;
   description: string;
 }
@@ -86,40 +81,6 @@ export interface GhostHookStatus {
   hooks: GhostHookStatusItem[];
 }
 
-export interface GhostHookContext {
-  ghostName: string;
-  cwd: string;
-  signal: AbortSignal;
-}
-
-export type GhostBeforePromptHandler = (
-  event: GhostBeforePromptEvent,
-  context: GhostHookContext,
-) => Promise<GhostBeforePromptResult | undefined | void> | GhostBeforePromptResult | undefined | void;
-
-export type GhostSessionStopHandler = (
-  event: GhostSessionStopEvent,
-  context: GhostHookContext,
-) => Promise<GhostSessionStopResult | undefined | void> | GhostSessionStopResult | undefined | void;
-
-type GhostHookHandler = (
-  event: GhostHookEvent,
-  context: GhostHookContext,
-) => Promise<GhostHookResult | undefined | void> | GhostHookResult | undefined | void;
-
-export interface GhostHookRegistrationOptions {
-  name?: string;
-  description?: string;
-  timeoutSeconds?: number;
-}
-
-export interface GhostHookAPI {
-  on(event: "before_prompt", handler: GhostBeforePromptHandler, options?: GhostHookRegistrationOptions): void;
-  on(event: "session_stop", handler: GhostSessionStopHandler, options?: GhostHookRegistrationOptions): void;
-}
-
-export type GhostHookFactory = (hooks: GhostHookAPI) => void | Promise<void>;
-
 interface CommandHook {
   type: "command";
   eventName: GhostHookEvent["type"];
@@ -132,25 +93,18 @@ interface CommandHook {
 
 interface GhostHookRunnerOptions {
   logger?: Logger;
-  handlerTimeoutMs?: number;
   /** Test seam for a rejected command execution boundary. */
   commandRunner?: (hook: CommandHook, event: GhostHookEvent) => Promise<CommandResult>;
-}
-
-interface RegisteredHook {
-  handler: GhostHookHandler;
-  name: string;
-  description: string;
-  timeoutMs: number;
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
 const BUILTIN_SETTINGS_KEYS = new Set<string>();
 
 /**
- * The `builtin` section of a `hooks.json` document names the hooks Ghost
- * registers in code. Ghost registers no built-in hook today, so any key is
- * refused; the section stays so an older `hooks.json` still parses when empty.
+ * The `builtin` section of a `hooks.json` document once named hooks Ghost
+ * registered in code. There is no such registration, so every key is refused;
+ * the section is still read so an older `hooks.json` parses when it is empty
+ * and says so plainly when it is not.
  */
 function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: string): void {
   const builtin = parsed.builtin;
@@ -209,13 +163,6 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
   return value.trim();
 }
 
-function timeoutMs(value: unknown, fallbackMs: number, label: string): number {
-  if (value === undefined) return fallbackMs;
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0 || value > 600) {
-    throw new Error(`${label} must be a number in (0, 600].`);
-  }
-  return Math.floor(value * 1_000);
-}
 
 function readCommandHooksDocument(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
@@ -505,11 +452,6 @@ function parseCommandResult(
 
 export class GhostHookRunner {
   private readonly logger: Logger;
-  private readonly handlerTimeoutMs: number;
-  private readonly handlers: Record<GhostHookEvent["type"], RegisteredHook[]> = {
-    before_prompt: [],
-    session_stop: [],
-  };
   private commands: CommandHook[];
   private readonly commandRunner: NonNullable<GhostHookRunnerOptions["commandRunner"]>;
   private commandConfig?: GhostHookCommandConfig;
@@ -522,7 +464,6 @@ export class GhostHookRunner {
     } = {},
   ) {
     this.logger = options.logger ?? silentLogger;
-    this.handlerTimeoutMs = options.handlerTimeoutMs ?? GHOST_HOOK_HANDLER_TIMEOUT_MS;
     this.commands = options.commands ?? [];
     this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
@@ -563,29 +504,6 @@ export class GhostHookRunner {
     });
   }
 
-  async register(factory: GhostHookFactory): Promise<void> {
-    await factory({
-      on: (
-        event: GhostHookEvent["type"],
-        handler: GhostHookHandler,
-        options: GhostHookRegistrationOptions = {},
-      ) => {
-        const registered: RegisteredHook = {
-          handler,
-          name: displayText(options.name, defaultHookName(event, "extension"), `${event} hook name`, 80),
-          description: displayText(
-            options.description,
-            defaultHookDescription(event),
-            `${event} hook description`,
-            240,
-          ),
-          timeoutMs: timeoutMs(options.timeoutSeconds, this.handlerTimeoutMs, `${event} timeoutSeconds`),
-        };
-        this.handlers[event].push(registered);
-      },
-    } as GhostHookAPI);
-  }
-
   private async runCommandFailOpen(
     hook: CommandHook,
     event: GhostHookEvent,
@@ -606,33 +524,19 @@ export class GhostHookRunner {
   }
 
   hasHandlers(event: GhostHookEvent["type"]): boolean {
-    return this.handlers[event].length > 0 || this.commands.some((hook) => hook.eventName === event);
+    return this.commands.some((hook) => hook.eventName === event);
   }
 
   status(): GhostHookStatus {
     const eventOrder = ["before_prompt", "session_stop"] as const;
     const events = eventOrder.map((event) => ({
       event,
-      count: this.handlers[event].length
-        + this.commands.filter((command) => command.eventName === event).length,
+      count: this.commands.filter((command) => command.eventName === event).length,
     })).filter(({ count }) => count > 0);
     const hooks: GhostHookStatusItem[] = [];
     for (const event of eventOrder) {
-      for (const hook of this.handlers[event]) {
-        hooks.push({
-          event,
-          source: "builtin",
-          name: hook.name,
-          description: hook.description,
-        });
-      }
       for (const hook of this.commands.filter((command) => command.eventName === event)) {
-        hooks.push({
-          event,
-          source: "config",
-          name: hook.name,
-          description: hook.description,
-        });
+        hooks.push({ event, name: hook.name, description: hook.description });
       }
     }
     const total = events.reduce((sum, event) => sum + event.count, 0);
@@ -644,83 +548,10 @@ export class GhostHookRunner {
     };
   }
 
-  private async runHandler(
-    handler: GhostHookHandler,
-    event: GhostHookEvent,
-    handlerTimeout = this.handlerTimeoutMs,
-  ): Promise<GhostHookResult | undefined> {
-    if (event.signal.aborted) return undefined;
-    const logger = this.logger.child({
-      ghost: event.ghost_name,
-      conversation: event.conversation_id,
-    });
-    const controller = new AbortController();
-    const onParentAbort = () => controller.abort(event.signal.reason);
-    event.signal.addEventListener("abort", onParentAbort, { once: true });
-    const handlerEvent = { ...event, signal: controller.signal } as GhostHookEvent;
-    const context: GhostHookContext = {
-      ghostName: event.ghost_name,
-      cwd: event.cwd,
-      signal: controller.signal,
-    };
-    let timer: NodeJS.Timeout | undefined;
-    let resolveAbort: (() => void) | undefined;
-    const timeout = new Promise<{ kind: "timeout" }>((resolve) => {
-      timer = setTimeout(() => resolve({ kind: "timeout" }), handlerTimeout);
-      timer.unref();
-    });
-    const aborted = new Promise<{ kind: "aborted" }>((resolve) => {
-      resolveAbort = () => resolve({ kind: "aborted" });
-      event.signal.addEventListener("abort", resolveAbort, { once: true });
-    });
-    const handled = Promise.resolve()
-      .then(() => handler(handlerEvent, context))
-      .then((result) => ({ kind: "result" as const, result: result ?? undefined }))
-      .catch((error) => {
-        logger.warn(`${event.type} hook failed open`, {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return { kind: "result" as const, result: undefined };
-      });
-    const settled = await Promise.race([handled, timeout, aborted]);
-    if (timer) clearTimeout(timer);
-    if (resolveAbort) event.signal.removeEventListener("abort", resolveAbort);
-    event.signal.removeEventListener("abort", onParentAbort);
-    if (settled.kind === "timeout") {
-      controller.abort(new Error(`${event.type} hook timed out`));
-      logger.warn(`${event.type} hook timed out`, {
-        timeoutMs: handlerTimeout,
-      });
-      // Cancellation is a lifecycle boundary, not detach. A hook which owns a
-      // home lease or model/tool operation must settle before its caller may
-      // rename, delete, replace, or shut down that resource.
-      await handled;
-      return undefined;
-    }
-    if (settled.kind === "aborted") {
-      controller.abort(event.signal.reason);
-      await handled;
-      return undefined;
-    }
-    return settled.result;
-  }
 
   async emitBeforePrompt(event: GhostBeforePromptEvent): Promise<GhostBeforePromptResult | undefined> {
     if (event.signal.aborted) return undefined;
     const contexts: string[] = [];
-    const acknowledgements: Array<() => Promise<void> | void> = [];
-    for (const hook of this.handlers.before_prompt) {
-      const result = await this.runHandler(
-        hook.handler,
-        event,
-        hook.timeoutMs,
-      ) as GhostBeforePromptResult | undefined;
-      if (event.signal.aborted) return undefined;
-      if (typeof result?.additionalContext === "string" && result.additionalContext.length > 0) {
-        contexts.push(result.additionalContext);
-        if (typeof result.acknowledge === "function") acknowledgements.push(result.acknowledge);
-      }
-    }
     for (const command of this.commands.filter((hook) => hook.eventName === "before_prompt")) {
       const result = await this.runCommandFailOpen(command, event);
       if (event.signal.aborted) return undefined;
@@ -729,27 +560,11 @@ export class GhostHookRunner {
       }
     }
     if (contexts.length === 0) return undefined;
-    return {
-      additionalContext: contexts.join("\n\n"),
-      ...(acknowledgements.length === 0 ? {} : {
-        acknowledge: async () => {
-          for (const acknowledge of acknowledgements) await acknowledge();
-        },
-      }),
-    };
+    return { additionalContext: contexts.join("\n\n") };
   }
 
   async emitSessionStop(event: GhostSessionStopEvent): Promise<GhostSessionStopResult | undefined> {
     if (event.signal.aborted) return undefined;
-    for (const hook of this.handlers.session_stop) {
-      const result = await this.runHandler(
-        hook.handler,
-        event,
-        hook.timeoutMs,
-      ) as GhostSessionStopResult | undefined;
-      if (event.signal.aborted) return undefined;
-      if (ghostSessionStopContinuation(result)) return result;
-    }
     for (const command of this.commands.filter((hook) => hook.eventName === "session_stop")) {
       const result = await this.runCommandFailOpen(command, event) as GhostSessionStopResult | undefined;
       if (ghostSessionStopContinuation(result)) return result;

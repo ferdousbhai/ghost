@@ -48,7 +48,7 @@ Rectangle {
     }
 
     function canEdit(card: var): bool {
-        return !!card && card.source === "config";
+        return !!card;
     }
 
     /** Open one card's form over a frozen list, starting from `fields` as typed. */
@@ -103,7 +103,7 @@ Rectangle {
     }
 
     function remove(card: var): void {
-        if (root.busy || root.editing || !card || card.source !== "config") return;
+        if (root.busy || root.editing || !card) return;
         root.lastAttempt = null;
         Ghostd.writeHookConfig(HookConfig.withoutHandler(Ghostd.hookConfig, card.event,
             card.groupIndex, card.handlerIndex));
@@ -365,7 +365,6 @@ Rectangle {
         delegate: Rectangle {
             id: hookCard
             required property var modelData
-            readonly property bool config: hookCard.modelData.source === "config"
             readonly property bool tunable: root.canEdit(hookCard.modelData)
             readonly property bool editing: root.editingKey === hookCard.modelData.key
             readonly property bool draft: hookCard.modelData.key === HookConfig.DRAFT_KEY
@@ -417,7 +416,7 @@ Rectangle {
 
                     Text {
                         objectName: "hookName"
-                        width: parent.width - sourceTag.width - deleteButton.width - Theme.gap * 2
+                        width: parent.width - deleteButton.width - Theme.gap
                         text: hookCard.modelData.name
                         textFormat: Text.PlainText
                         color: Theme.foregroundBright
@@ -427,24 +426,12 @@ Rectangle {
                         wrapMode: Text.Wrap
                     }
 
-                    Text {
-                        id: sourceTag
-                        objectName: "hookSource"
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: hookCard.config ? "hooks.json" : "built in"
-                        textFormat: Text.PlainText
-                        color: Theme.foregroundFaint
-                        font.family: Theme.fontFamilyMono
-                        font.pixelSize: Theme.fontSizeCaption
-                    }
-
                     Item {
                         id: deleteButton
                         objectName: "hookDeleteButton"
                         anchors.verticalCenter: parent.verticalCenter
-                        width: hookCard.config ? Theme.controlHeight - Theme.gap : 0
+                        width: Theme.controlHeight - Theme.gap
                         height: Theme.controlHeight - Theme.gap
-                        visible: hookCard.config
 
                         Accessible.role: Accessible.Button
                         Accessible.name: "Remove " + hookCard.modelData.name
@@ -467,7 +454,7 @@ Rectangle {
                             MouseArea {
                                 id: deleteArea
                                 anchors.fill: parent
-                                enabled: hookCard.config && !root.busy && !root.editing
+                                enabled: !root.busy && !root.editing
                                 hoverEnabled: true
                                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                                 onClicked: root.remove(hookCard.modelData)
@@ -491,7 +478,6 @@ Rectangle {
                 Text {
                     objectName: "hookCommand"
                     width: parent.width
-                    visible: hookCard.config
                     text: hookCard.modelData.fields.command
                     textFormat: Text.PlainText
                     color: Theme.foreground

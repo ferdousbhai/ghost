@@ -312,9 +312,10 @@ A ghost keeps its notes in the
 owner's documents with its file tools during ordinary turns. Ghost runs no
 background memory pass of its own.
 
-Ghost registers no built-in hook of its own; every `session_stop` and
-`before_prompt` behavior is a `hooks.json` command the owner chooses, and the
-`builtin` section of that file admits no keys.
+Every `session_stop` and `before_prompt` behavior is a `hooks.json` command the
+owner chooses. Ghost has no in-process hook registration to be the other kind,
+so a status row carries only its event, name, and description; the `builtin`
+section of that file admits no keys and parses only when empty.
 
 ## Daemon HTTP API
 

@@ -245,11 +245,10 @@ describe("GET /api/hooks", () => {
         { event: "session_stop", count: 2 },
       ],
       hooks: [
-        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", name: "Completion", description: "Checks completion." },
         {
           event: "session_stop",
-          source: "builtin",
           name: "Review",
           description: "Reviews the pass.",
         },
@@ -286,11 +285,10 @@ describe("GET /api/hooks", () => {
         { event: "session_stop", count: 2 },
       ],
       hooks: [
-        { event: "before_prompt", source: "builtin", name: "Prompt policy", description: "Adds policy." },
-        { event: "session_stop", source: "config", name: "Completion", description: "Checks completion." },
+        { event: "before_prompt", name: "Prompt policy", description: "Adds policy." },
+        { event: "session_stop", name: "Completion", description: "Checks completion." },
         {
           event: "session_stop",
-          source: "builtin",
           name: "Review",
           description: "Reviews the pass.",
         },

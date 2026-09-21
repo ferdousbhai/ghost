@@ -45,7 +45,7 @@ try {
     { event: "session_stop", count: 1 },
   ]);
   assert.equal(hooks.hooks.length, hooks.total);
-  assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "source", "name", "description"]);
+  assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "name", "description"]);
   const serializedHooks = JSON.stringify(hooks);
   for (const forbidden of [
     "command", "commands", "args", "arguments", "path", "paths", "prompt", "prompts",

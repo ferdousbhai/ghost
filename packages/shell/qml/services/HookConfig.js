@@ -73,11 +73,9 @@ function blankFields() {
 function card(overrides) {
     return Object.assign({
         key: "",
-        source: "config",
         event: "",
         name: "",
         description: "",
-        settingsKey: "",
         fields: blankFields(),
         groupIndex: -1,
         handlerIndex: -1
@@ -107,10 +105,8 @@ function fieldsOf(handler) {
  * wins and the row shows what the file says.
  */
 function cards(statusHooks, document) {
-    const rows = Array.isArray(statusHooks) ? statusHooks : [];
-    // Anything the daemon did not mark as config is shown read-only.
-    const builtin = rows.filter(function (row) { return row.source !== "config"; });
-    const configRows = rows.filter(function (row) { return row.source === "config"; });
+    // Every hook comes from hooks.json, so every status row pairs with a handler.
+    const configRows = Array.isArray(statusHooks) ? statusHooks : [];
     const entries = handlers(document);
     const aligned = configRows.length === entries.length && entries.every(function (entry, index) {
         return configRows[index].event === entry.event;
@@ -118,18 +114,6 @@ function cards(statusHooks, document) {
     const out = [];
     for (let e = 0; e < EVENT_ORDER.length; e += 1) {
         const event = EVENT_ORDER[e];
-        for (let b = 0; b < builtin.length; b += 1) {
-            const row = builtin[b];
-            if (row.event !== event) continue;
-            out.push(card({
-                key: "builtin:" + event + ":" + b,
-                source: "builtin",
-                event,
-                name: row.name,
-                description: row.description,
-                settingsKey: typeof row.settingsKey === "string" ? row.settingsKey : ""
-            }));
-        }
         for (let i = 0; i < entries.length; i += 1) {
             const entry = entries[i];
             if (entry.event !== event) continue;

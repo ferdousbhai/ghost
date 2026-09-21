@@ -156,9 +156,8 @@ function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, source, name, description }) => ({
+    hooks: status.hooks.map(({ event, name, description }) => ({
       event,
-      source,
       name,
       description,
     })),

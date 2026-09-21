@@ -325,7 +325,6 @@ interface PendingPiOwnerPass {
   readonly priorEntryIds: ReadonlySet<string>;
   readonly signal: AbortSignal;
   ownerEntryId?: string;
-  acknowledge?: () => void | Promise<void>;
 }
 
 interface PersistedPiPassBoundary {
@@ -2475,9 +2474,6 @@ export class SessionHost {
           triggerTurn: false,
           ...(input.delivery ? { deliverAs: input.delivery } : {}),
         });
-        // pi writes nothing to disk before the first assistant message, so
-        // the hook is acknowledged once the pass has settled durably.
-        if (result.acknowledge) pass.acknowledge = result.acknowledge;
       }
     }
     hosted.pendingOwnerPasses.push(pass);
@@ -2580,15 +2576,6 @@ export class SessionHost {
           const boundary = this.persistedPiPassBoundary(hosted, pass, claimedOwnerEntries);
           if (!boundary) continue;
           completed.add(pass);
-          if (pass.acknowledge) {
-            try {
-              await pass.acknowledge();
-            } catch {
-              hosted.logger.warn("before_prompt hook acknowledgement failed", {
-                runtime: "pi",
-              });
-            }
-          }
           if (boundary === "superseded") continue;
           const assistantEntry = boundary.assistantEntry;
           const assistant = assistantEntry.message;

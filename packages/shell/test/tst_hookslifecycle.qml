@@ -19,10 +19,9 @@ TestCase {
                 { event: "session_stop", count: 1 }
             ],
             hooks: [
-                { event: "before_prompt", source: "config", name, description: "Adds bounded context." },
+                { event: "before_prompt", name, description: "Adds bounded context." },
                 {
                     event: "session_stop",
-                    source: "builtin",
                     name: "Review",
                     description: "Reviews the assistant pass."
                 }

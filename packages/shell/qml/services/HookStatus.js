@@ -3,16 +3,10 @@
 const EVENT_ORDER = ["before_prompt", "session_stop"];
 const ROOT_KEYS = ["active", "events", "hooks", "total"];
 const EVENT_KEYS = ["count", "event"];
-const HOOK_KEYS = ["description", "event", "name", "source"];
-const SOURCES = ["builtin", "config"];
-const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/;
+const HOOK_KEYS = ["description", "event", "name"];
 
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function hasOwn(object, key) {
-    return Object.prototype.hasOwnProperty.call(object, key);
 }
 
 function exactKeys(object, expected) {
@@ -67,25 +61,17 @@ function normalize(body) {
     for (let index = 0; index < body.hooks.length; index += 1) {
         const hook = body.hooks[index];
         if (!isObject(hook) || !boundedDisplayText(hook.name, 80)
-                || !boundedDisplayText(hook.description, 240)
-                || SOURCES.indexOf(hook.source) < 0) return null;
+                || !boundedDisplayText(hook.description, 240)) return null;
         const order = eventIndex(hook.event);
         if (order < 0 || order < previousHookEventIndex) return null;
         previousHookEventIndex = order;
-        // Only a built-in row may name the hooks.json entry that tunes it.
-        const tuned = hasOwn(hook, "settingsKey");
-        if (tuned && (hook.source !== "builtin" || typeof hook.settingsKey !== "string"
-                || !SETTINGS_KEY.test(hook.settingsKey))) return null;
-        if (!exactKeys(hook, HOOK_KEYS.concat(tuned ? ["settingsKey"] : []))) return null;
+        if (!exactKeys(hook, HOOK_KEYS)) return null;
         observed[hook.event] = (observed[hook.event] || 0) + 1;
-        const normalized = {
+        hooks.push({
             event: hook.event,
-            source: hook.source,
             name: hook.name,
             description: hook.description
-        };
-        if (tuned) normalized.settingsKey = hook.settingsKey;
-        hooks.push(normalized);
+        });
     }
 
     if (body.total !== hooks.length || body.total !== eventTotal

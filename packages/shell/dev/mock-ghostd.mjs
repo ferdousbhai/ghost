@@ -693,8 +693,6 @@ let hooksDocument = {
     }] }],
   },
 };
-const BUILTIN_HOOKS = [];
-
 function hooksDocumentProblem(document) {
   const path = HOOKS_CONFIG_PATH;
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
@@ -740,13 +738,11 @@ function hooksDocumentProblem(document) {
 function hooksStatus() {
   const rows = [];
   for (const event of HOOK_EVENTS) {
-    rows.push(...BUILTIN_HOOKS.filter((row) => row.event === event));
     for (const group of hooksDocument.hooks?.[event] ?? []) {
       for (const handler of group.hooks) {
         const trigger = event === "before_prompt" ? "Before-prompt" : "Session-stop";
         rows.push({
           event,
-          source: "config",
           name: handler.name ?? `${trigger} command hook`,
           description: handler.description ?? (event === "before_prompt"
             ? "Adds context before the owner prompt is sent."

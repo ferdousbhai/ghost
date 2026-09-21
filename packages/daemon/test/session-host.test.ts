@@ -11,6 +11,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  mkdtempSync,
   readdirSync,
   readFileSync,
   renameSync,
@@ -30,6 +31,7 @@ import {
   type Server as HttpServer,
 } from "node:http";
 import type { AddressInfo } from "node:net";
+import { tmpdir } from "node:os";
 import { basename, join, sep } from "node:path";
 import {
   browserSessionFor,
@@ -55,6 +57,54 @@ import {
   openAiCompatiblePreset,
 } from "./helpers/models-presets.js";
 import { GhostHookRunner } from "../src/hooks.js";
+
+/**
+ * A hook runner whose hooks are real `hooks.json` commands, which is the only
+ * kind Ghost has. Each hook appends its stdin event to a per-event record file
+ * as one JSON line and then writes what `answer` returns; `answer` is a snippet
+ * evaluated in the child with `event` (the parsed payload) and `count` (this
+ * hook's 1-based invocation) in scope, so a hook can block for N passes and
+ * then accept. `recorded(event)` replays what the child actually saw.
+ */
+function commandHooks(
+  spec: Partial<Record<"before_prompt" | "session_stop", string>>,
+): { hooks: GhostHookRunner; recorded: (event: "before_prompt" | "session_stop") => Array<Record<string, unknown>> } {
+  const directory = mkdtempSync(join(tmpdir(), "ghost-hook-probe-"));
+  const recordPath = (event: string) => join(directory, `${event}.jsonl`);
+  const hooks: Record<string, unknown> = {};
+  for (const [event, answer] of Object.entries(spec)) {
+    const record = recordPath(event);
+    // A script file, not `node -e`: the command string goes through a shell,
+    // which would hand a quoted multi-line program to the runtime as literal `\n`.
+    const script = join(directory, `${event}.mjs`);
+    writeFileSync(script, `
+      import { appendFileSync, readFileSync } from "node:fs";
+      let input = "";
+      process.stdin.setEncoding("utf8");
+      for await (const chunk of process.stdin) input += chunk;
+      appendFileSync(${JSON.stringify(record)}, input.trim() + "\\n");
+      const count = readFileSync(${JSON.stringify(record)}, "utf8").trim().split("\\n").length;
+      const event = JSON.parse(input);
+      void event; void count;
+      const answer = (${answer ?? "undefined"});
+      process.stdout.write(answer === undefined ? "{}" : JSON.stringify(answer));
+    `);
+    hooks[event] = [{
+      hooks: [{ type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}` }],
+    }];
+  }
+  const config = join(directory, "hooks.json");
+  writeFileSync(config, JSON.stringify({ hooks }));
+  return {
+    hooks: GhostHookRunner.fromConfig(config),
+    recorded: (event) => {
+      const path = recordPath(event);
+      if (!existsSync(path)) return [];
+      return readFileSync(path, "utf8").trim().split("\n").filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    },
+  };
+}
 import { ModelSelection } from "../src/model-selection.js";
 import {
   PI_NATIVE_TOOL_NAMES,
@@ -1979,22 +2029,12 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("re-opens a historical ask, commits a sibling answer, and resumes that branch", async () => {
-    const hooks = new GhostHookRunner();
-    const beforeOwners: string[] = [];
-    const stoppedOwners: string[] = [];
-    let reanswerBlocked = false;
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        beforeOwners.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stoppedOwners.push(event.owner_prompt);
-        if (stoppedOwners.length === 2 && !reanswerBlocked) {
-          reanswerBlocked = true;
-          return { decision: "block", reason: "Make the revised choice explicit." };
-        }
-      });
+    const probe = commandHooks({
+      before_prompt: "undefined",
+      // The second stop asks once for a revision; later stops accept.
+      session_stop: 'count === 2 ? { decision: "block", reason: "Make the revised choice explicit." } : undefined',
     });
+    const hooks = probe.hooks;
     await setup(
       [
         {
@@ -2066,7 +2106,8 @@ describe("SessionHost.runTurn", () => {
     expect(branchAt).toBeGreaterThanOrEqual(0);
     expect(terminalAt).toBeGreaterThan(branchAt);
     expect(events.filter((event) => event.type === "done")).toHaveLength(1);
-    expect(stoppedOwners).toEqual([
+    const beforeOwners = probe.recorded("before_prompt").map((event) => event.prompt);
+    expect(probe.recorded("session_stop").map((event) => event.owner_prompt)).toEqual([
       beforeOwners[0],
       beforeOwners[1],
       beforeOwners[1],
@@ -2194,17 +2235,11 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("queues Pi steering and follow-up messages while a turn is live", async () => {
-    const hooks = new GhostHookRunner();
-    const beforePrompts: string[] = [];
-    const stoppedOwners: string[] = [];
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        beforePrompts.push(event.prompt);
-      });
-      api.on("session_stop", (event) => {
-        stoppedOwners.push(event.owner_prompt);
-      });
+    const probe = commandHooks({
+      before_prompt: "undefined",
+      session_stop: "undefined",
     });
+    const hooks = probe.hooks;
     await setup([
       {
         kind: "tool",
@@ -2248,12 +2283,12 @@ describe("SessionHost.runTurn", () => {
     expect(requests).toContain("Use the quieter direction.");
     expect(requests).toContain("Then explain the tradeoff.");
     expect(host!.queuedMessages("casper", "conv-queue").count).toBe(0);
-    expect(beforePrompts).toEqual([
+    expect(probe.recorded("before_prompt").map((event) => event.prompt)).toEqual([
       "Start.",
       "Use the quieter direction.",
       "Then explain the tradeoff.",
     ]);
-    expect(stoppedOwners).toEqual([
+    expect(probe.recorded("session_stop").map((event) => event.owner_prompt)).toEqual([
       "Use the quieter direction.",
       "Then explain the tradeoff.",
     ]);
@@ -2261,28 +2296,11 @@ describe("SessionHost.runTurn", () => {
 
   it("awaits session_stop and sends only the current assistant pass", async () => {
     const hookContinuationPasses = 12;
-    const hooks = new GhostHookRunner();
-    const active: boolean[] = [];
-    const passes: unknown[][] = [];
-    const hookCwds: string[] = [];
-    const hookOwners: string[] = [];
-    const hookHomes: string[] = [];
-    const hookIdentities: string[] = [];
-    const hookTranscripts: Array<string | undefined> = [];
-    await hooks.register((api) => {
-      api.on("session_stop", (event) => {
-        hookTranscripts.push(event.transcript_path);
-        hookCwds.push(event.cwd);
-        hookOwners.push(event.owner_prompt);
-        hookHomes.push(event.ghost_home);
-        hookIdentities.push(`${event.runtime}:${event.conversation_runtime}:${event.conversation_id}`);
-        active.push(event.stop_hook_active);
-        passes.push(event.messages);
-        if (active.length <= hookContinuationPasses) {
-          return { decision: "block", reason: "Rewrite the answer without canned phrasing." };
-        }
-      });
+    const probe = commandHooks({
+      session_stop: `count <= ${hookContinuationPasses}`
+        + ' ? { decision: "block", reason: "Rewrite the answer without canned phrasing." } : undefined',
     });
+    const hooks = probe.hooks;
     // The hook asks for twelve continuations and then accepts. Ghost honors
     // every blocking result, like Codex Stop hooks: no host bound.
     const passCount = hookContinuationPasses + 1;
@@ -2304,12 +2322,16 @@ describe("SessionHost.runTurn", () => {
       emit: (event) => events.push(event),
     });
 
-    expect(active).toEqual([false, ...Array(passCount - 1).fill(true)]);
-    expect(hookCwds).toEqual(Array(passCount).fill(temp!.ownerHome));
-    expect(hookOwners).toEqual(Array(passCount).fill("Answer me."));
-    expect(hookHomes).toEqual(Array(passCount).fill(join(temp!.root, "casper")));
-    expect(hookIdentities).toEqual(Array(passCount).fill("pi:pi:conv-hooks"));
-    expect(hookTranscripts).toEqual(
+    const stops = probe.recorded("session_stop");
+    const passes = stops.map((stop) => stop.messages as unknown[]);
+    expect(stops.map((stop) => stop.stop_hook_active))
+      .toEqual([false, ...Array(passCount - 1).fill(true)]);
+    expect(stops.map((stop) => stop.cwd)).toEqual(Array(passCount).fill(temp!.ownerHome));
+    expect(stops.map((stop) => stop.owner_prompt)).toEqual(Array(passCount).fill("Answer me."));
+    expect(stops.map((stop) => stop.ghost_home)).toEqual(Array(passCount).fill(join(temp!.root, "casper")));
+    expect(stops.map((stop) => `${stop.runtime}:${stop.conversation_runtime}:${stop.conversation_id}`))
+      .toEqual(Array(passCount).fill("pi:pi:conv-hooks"));
+    expect(stops.map((stop) => stop.transcript_path)).toEqual(
       Array(passCount).fill(join(temp!.root, "casper", "sessions", sessionFileNameFor("conv-hooks"))),
     );
     expect(passes).toHaveLength(passCount);
@@ -2348,27 +2370,10 @@ describe("SessionHost.runTurn", () => {
   });
 
   it("injects before_prompt context into the user turn without an extra model pass", async () => {
-    const hooks = new GhostHookRunner();
-    let hookCwd = "";
-    let transcriptPath = "";
-    let acknowledgedAfterPersistence = false;
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        hookCwd = event.cwd;
-        return {
-          additionalContext: "Avoid the warning from the previous reply.",
-          acknowledge: () => {
-            acknowledgedAfterPersistence = readFileSync(transcriptPath, "utf8")
-              .includes("Avoid the warning from the previous reply.");
-          },
-        };
-      });
+    const probe = commandHooks({
+      before_prompt: '({ additionalContext: "Avoid the warning from the previous reply." })',
     });
-    const { dir } = await setup([{ kind: "text", text: "Direct answer." }], { hooks });
-    transcriptPath = join(
-      ghostPaths(dir).sessionDir,
-      sessionFileNameFor("conv-before-prompt"),
-    );
+    await setup([{ kind: "text", text: "Direct answer." }], { hooks: probe.hooks });
 
     await host!.runTurn("casper", {
       sessionId: "conv-before-prompt",
@@ -2377,60 +2382,21 @@ describe("SessionHost.runTurn", () => {
     });
 
     expect(provider!.requests).toHaveLength(1);
-    expect(hookCwd).toBe(temp!.ownerHome);
+    expect(probe.recorded("before_prompt").map((event) => event.cwd)).toEqual([temp!.ownerHome]);
     expect(JSON.stringify(provider!.requests[0]?.messages)).toContain(
       "Avoid the warning from the previous reply.",
     );
-    expect(acknowledgedAfterPersistence).toBe(true);
-  });
-
-  it("fails open without logging notice details when Pi acknowledgement fails", async () => {
-    const hooks = new GhostHookRunner();
-    const logger = recordingLogger("warn");
-    await hooks.register((api) => {
-      api.on("before_prompt", () => ({
-        additionalContext: "A retained private maintenance notice.",
-        acknowledge: () => {
-          throw new Error("sensitive notice id");
-        },
-      }));
-    });
-    await setup([{ kind: "text", text: "Direct answer." }], {
-      hooks,
-      logger,
-    });
-    const events: PiMessagesEvent[] = [];
-
-    await host!.runTurn("casper", {
-      sessionId: "conv-ack-failure",
-      prompt: "Continue.",
-      emit: (event) => events.push(event),
-    });
-
-    expect(events.at(-1)?.type).toBe("done");
-    expect(logger.records).toContainEqual({
-      level: "warn",
-      message: "before_prompt hook acknowledgement failed",
-      fields: { ghost: "casper", conversation: "conv-ack-failure", runtime: "pi" },
-    });
-    expect(JSON.stringify(logger.records)).not.toContain("sensitive notice id");
   });
 
   it("reconstructs Pi owner turn ids from the persisted branch after cache close", async () => {
-    const hooks = new GhostHookRunner();
-    const turnIds: number[] = [];
-    await hooks.register((api) => {
-      api.on("before_prompt", (event) => {
-        turnIds.push(event.turn_id);
-      });
-    });
-    await setup([{ kind: "text", text: "Answer." }], { hooks });
+    const probe = commandHooks({ before_prompt: "undefined" });
+    await setup([{ kind: "text", text: "Answer." }], { hooks: probe.hooks });
 
     await host!.runTurn("casper", { sessionId: "durable-turn-id", prompt: "One", emit: () => {} });
     await host!.close("casper", "durable-turn-id");
     await host!.runTurn("casper", { sessionId: "durable-turn-id", prompt: "Two", emit: () => {} });
 
-    expect(turnIds).toEqual([1, 2]);
+    expect(probe.recorded("before_prompt").map((event) => event.turn_id)).toEqual([1, 2]);
   });
 
   it("replaces Pi's prompt with the ghost persona while keeping its tools", async () => {

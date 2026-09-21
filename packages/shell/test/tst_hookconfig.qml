@@ -23,11 +23,9 @@ TestCase {
 
     function status(): var {
         return [
-            { event: "before_prompt", source: "builtin", name: "Receipt", description: "Shows receipts." },
-            { event: "before_prompt", source: "config", name: "Before-prompt command hook", description: "Context." },
-            { event: "session_stop", source: "builtin", name: "Review", description: "Reviews.", settingsKey: "review" },
-            { event: "session_stop", source: "config", name: "Review", description: "Reviews." },
-            { event: "session_stop", source: "config", name: "Session-stop command hook", description: "Default." }
+            { event: "before_prompt", name: "Before-prompt command hook", description: "Context." },
+            { event: "session_stop", name: "Review", description: "Reviews." },
+            { event: "session_stop", name: "Session-stop command hook", description: "Default." }
         ];
     }
 
@@ -38,33 +36,27 @@ TestCase {
         compare(HookConfig.parseConfig("not json"), null);
     }
 
-    function test_cardsInterleaveBuiltinAndConfigInEventOrder(): void {
+    function test_cardsPairStatusRowsWithHandlersInEventOrder(): void {
         const cards = HookConfig.cards(status(), document());
-        compare(cards.map(function (card) { return card.source + ":" + card.name; }), [
-            "builtin:Receipt",
-            "config:Before-prompt command hook",
-            "builtin:Review",
-            "config:Review",
-            "config:Session-stop command hook"
+        compare(cards.map(function (card) { return card.name; }), [
+            "Before-prompt command hook",
+            "Review",
+            "Session-stop command hook"
         ]);
-        compare(cards[2].settingsKey, "review");
-        compare(cards[3].key, "config:session_stop:0:0");
-        compare(cards[4].key, "config:session_stop:0:1");
-        compare(cards[3].fields.command, "/bin/review");
-        compare(cards[3].fields.timeout, "5");
-        compare(cards[4].fields.name, "");
-        compare(cards[0].fields.command, "");
-        compare(cards[0].settingsKey, "");
-        compare(cards[0].groupIndex, -1);
+        compare(cards[1].key, "config:session_stop:0:0");
+        compare(cards[2].key, "config:session_stop:0:1");
+        compare(cards[1].fields.command, "/bin/review");
+        compare(cards[1].fields.timeout, "5");
+        compare(cards[2].fields.name, "");
     }
 
     function test_cardsFallBackToTheDocumentWhenStatusDisagrees(): void {
         const stale = status().slice(0, 1);
         const cards = HookConfig.cards(stale, document());
-        compare(cards.length, 4);
-        compare(cards[1].name, "Command hook");
-        compare(cards[2].name, "Review");
-        compare(cards[3].name, "Command hook");
+        compare(cards.length, 3);
+        compare(cards[0].name, "Command hook");
+        compare(cards[1].name, "Review");
+        compare(cards[2].name, "Command hook");
         compare(HookConfig.cards([], null).length, 0);
     }
 
