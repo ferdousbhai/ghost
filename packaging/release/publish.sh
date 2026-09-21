@@ -13,8 +13,8 @@
 # clean container (rolling the release back if not) and carries the rendered
 # recipe to the omarchy-pkgs pull request.
 #
-# --dry-run builds, verifies, and renders from the committed tree and stops
-# before the tag and release; it does not need HEAD to be pushed.
+# --dry-run bumps the version if needed, then builds, verifies, renders and
+# signs from the committed tree and stops before the push, tag and release.
 set -euo pipefail
 
 usage='publish.sh <version> [--dry-run]'
