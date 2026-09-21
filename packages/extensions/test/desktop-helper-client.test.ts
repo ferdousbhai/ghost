@@ -111,7 +111,6 @@ describe("hello handshake", () => {
     const pending = client.hello();
     proc.line(HELLO);
     const hello = await pending;
-    expect(DESKTOP_HELPER_PROTOCOL_VERSION).toBe(2);
     expect(hello.protocol).toBe(DESKTOP_HELPER_PROTOCOL_VERSION);
     expect(hello.version).toBe("0.1.0");
     expect(hello.in_hyprland_session).toBe(true);

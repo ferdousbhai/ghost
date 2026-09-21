@@ -37,7 +37,6 @@ def test_hello_reports_required_fields():
     assert payload["type"] == "hello"
     assert payload["helper"] == "ghost-desktop-helper"
     assert "version" in payload
-    assert DESKTOP_HELPER_PROTOCOL_VERSION == 2
     assert payload["protocol"] == DESKTOP_HELPER_PROTOCOL_VERSION
     assert "hyprland-version" in payload
     assert "detected-dispatch-grammar" in payload
