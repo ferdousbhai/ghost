@@ -230,7 +230,9 @@ owning tool when needed.
 
 ### Pi
 
-The pinned pi dependency has one Ghost patch with two hunks. Extension loading:
+The pinned pi dependency has one Ghost patch, making two changes across four
+files (`agent-session.js`, `extensions/loader.{js,d.ts}`, and the consequential
+call-site edits in `resource-loader.js`). Extension loading:
 file-loaded executable extensions return an error, while inline factories keep
 pi's native implementation; this enforces the resource boundary above and
 removes Jiti/Babel and its retained terminal entry points from the bundle.
@@ -390,8 +392,8 @@ persisted as an assistant answer.
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
-HUD reaches is a named verb there (ghost roster, rename, character, greeting,
-conversations and their title/pin/read/fork/delete/reanswer, ask,
+HUD reaches is a named verb there (ghost list, rename, character, greeting,
+sessions and their title/pin/read/fork/delete/reanswer, ask,
 resources, commands, model, MCP, hooks, remote, status, skill), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,

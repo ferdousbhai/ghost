@@ -1,8 +1,13 @@
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   closeDaemonResources,
+  DEFAULT_SHUTDOWN_FORCE_MS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
   main,
   parseArgs,
   runStagedShutdown,
@@ -250,6 +255,40 @@ describe("runStagedShutdown", () => {
     await output.waitFor("HOST_FORCE");
     await output.waitFor("DONE");
     await expect(exited).resolves.toBe(0);
+  });
+});
+
+/**
+ * The staged shutdown's budget lives in TypeScript; the deadline that lets it
+ * finish lives in a systemd unit. Nothing connected the two, so raising the
+ * grace period would leave `TimeoutStopSec` too small and systemd would SIGKILL
+ * ghostd mid-drain -- with the unit's own comment still claiming the budget fits.
+ */
+describe("the shutdown budget fits the unit's stop deadline", () => {
+  const unitPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "contrib",
+    "ghostd.service",
+  );
+
+  /** `TimeoutStopSec` in milliseconds; systemd's bare number means seconds. */
+  function unitStopTimeoutMs(): number {
+    const unit = readFileSync(unitPath, "utf8");
+    const match = /^TimeoutStopSec=(\d+)(m?s)?$/m.exec(unit);
+    if (!match?.[1]) {
+      throw new Error(
+        `Could not read TimeoutStopSec from ${unitPath}. If the unit stopped setting it, `
+        + "systemd falls back to DefaultTimeoutStopSec and this check needs updating with it.",
+      );
+    }
+    return match[2] === "ms" ? Number(match[1]) : Number(match[1]) * 1000;
+  }
+
+  it("leaves systemd's deadline longer than the staged drain", () => {
+    expect(unitStopTimeoutMs()).toBeGreaterThan(
+      DEFAULT_SHUTDOWN_GRACE_MS + DEFAULT_SHUTDOWN_FORCE_MS,
+    );
   });
 });
 
