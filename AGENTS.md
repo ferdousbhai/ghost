@@ -14,7 +14,9 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **runtime** — the agent harness a conversation runs on. There is one: pi.
 - **daemon** (`ghostd`) — the HTTP API that owns sessions; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
-- **relay** — the opt-in Chromium extension; **helper** — the Python computer-use sidecar.
+- **relay** — the opt-in Chromium extension, its own repository. Never bare
+  "extension": `packages/extensions/` is the pi-side tool seam, a different
+  thing. **helper** — the Python computer-use sidecar.
 
 ## Taste
 

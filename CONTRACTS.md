@@ -459,7 +459,7 @@ relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
 
-The **browser extension** is a separate product in its own repository,
+The **relay extension** is a separate product in its own repository,
 [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension),
 with its own version and store listing. It meets the daemon only at the relay
 WebSocket protocol (its `PROTOCOL.md`; the daemon's mirror is
@@ -469,9 +469,11 @@ imports the other's source, Ghost does not bundle or install it, and only
 conformance test ([`relay-extension.test.ts`](packages/daemon/test/relay-extension.test.ts))
 reads a checkout of the extension — `GHOST_CHROMIUM_EXTENSION_DIR`, else a
 sibling clone `../ghost-chromium-extension` — and skips loudly without one,
-so the gate is only complete with that clone beside this repository. The
-extension release this Ghost agrees with is **v0.5.0** (relay protocol 4);
-update this line with every extension release Ghost must agree with.
+so the gate is only complete with that clone beside this repository. That test
+is the agreement: it compares the clone's constants against
+`relay-protocol.ts`, so no release number is pinned in prose here. A relay
+change that breaks the pair turns the suite red; bumping `PROTOCOL_VERSION` on
+both sides in lockstep is what re-agrees them.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, desktop helper, user unit, and runtime docs/licenses;
@@ -525,7 +527,7 @@ not the daemon, protocols, or graphical-session lifecycle.
   owner's explicit direction. Dictation is Omarchy's Voxtype: the shell runs
   `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
   ships no speech stack of its own.
-- The [Ghost browser extension](https://github.com/ferdousbhai/ghost-chromium-extension)
+- The [Ghost relay extension](https://github.com/ferdousbhai/ghost-chromium-extension)
   is the opt-in MV3 relay into the owner's Chromium, its own product in its
   own repository (seam: its `PROTOCOL.md`). It also drives those tabs for its
   own side-panel chat, on the owner's OpenRouter account, with no ghost
@@ -544,7 +546,7 @@ not the daemon, protocols, or graphical-session lifecycle.
   ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
-  it. Its startup handshake and the extensions client agree on desktop-helper
+  it. Its startup handshake and the `@ghost/extensions` helper client agree on desktop-helper
   protocol version 2; a mismatch retires the sidecar before any request is sent.
   Startup/explicit `hello` is the diagnostic boundary; there is no `doctor` op.
   Client errors retain the operation: unavailable transport is `not_found`,

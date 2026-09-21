@@ -146,6 +146,6 @@ video input. Zero new dependency; bounded by a frame cap and a wall-clock
 budget, and serialized against every other capture by the process-wide chain
 in `screen.ts`.
 
-Helper discovery: the extension spawns the sidecar lazily, one per daemon,
+Helper discovery: the desktop-helper client spawns the sidecar lazily, one per daemon,
 reused across calls; if PyGObject / grim / wtype are missing, tools degrade
 with a clear "install X" error and `hello` reports it.
