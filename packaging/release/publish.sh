@@ -83,11 +83,15 @@ GHOST_RELEASE_REPOSITORY="$repository" \
 GHOST_RELEASE_REPOSITORY="$repository" \
   bash "$script_root/../omarchy/render-contribution.sh" \
     "$out/omarchy-ghost-$version" "$version" "$source_sha" "$runtime_sha"
+# The built, signed packages: the release doubles as the [ghost] pacman
+# repository until Omarchy's own repository carries the package.
+bash "$script_root/build-repo.sh" "$out" "$version"
 
 printf '\nrelease inputs for %s %s (%s):\n' "$repository" "$tag" "$commit"
 cat -- "$out/SHA256SUMS"
 if (( dry_run )); then
-  printf '\ndry run: no tag, no release. Omarchy contribution: %s\n' "$out/omarchy-ghost-$version"
+  printf '\ndry run: no tag, no release. Omarchy contribution: %s; signed repository: %s\n' \
+    "$out/omarchy-ghost-$version" "$out/repo"
   exit 0
 fi
 
@@ -96,14 +100,15 @@ git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Source and runtime inputs for the Omarchy \`ghost\` package. Install through Omarchy: Install → AI → Ghost." \
+  --notes "Install on Omarchy: \`curl -fsSL https://summonghost.com/install | bash\` (adds this release as the signed \`[ghost]\` pacman repository, then installs the package). Also the source and runtime inputs for the Omarchy \`ghost\` package." \
   -- \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
   "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
   "$out/SHA256SUMS" \
   "$out/omarchy-ghost-$version/PKGBUILD" \
-  "$out/omarchy-ghost-$version/"*.install
+  "$out/omarchy-ghost-$version/"*.install \
+  "$out/repo/"*
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 printf 'next: "After publishing" in packaging/release/README.md; the rendered contribution is %s\n' \

@@ -1,8 +1,12 @@
 # Release inputs for the Omarchy package
 
 `publish.sh <version>` turns one exact Ghost source commit into the fixed
-public inputs from which Omarchy builds the stable `ghost` package, and
-publishes them as a GitHub release on `ferdousbhai/ghost`:
+public inputs from which Omarchy builds the stable `ghost` package, builds
+and signs the packages from those inputs, and publishes it all as a GitHub
+release on `ferdousbhai/ghost`. Until Omarchy's repository carries the
+package, the release is also the signed `[ghost]` pacman repository that
+`curl -fsSL https://summonghost.com/install | bash` adds and installs from
+(see "Signed repository" below). The inputs:
 
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
 2. `ghost-runtime-<version>-linux-any.tar.zst` (one archive for every Linux
@@ -75,7 +79,26 @@ creates the annotated tag and the GitHub release carrying:
 - `ghost-<version>.tar.gz`;
 - `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
 - `SHA256SUMS`;
-- the rendered `PKGBUILD` and both package install hooks.
+- the rendered `PKGBUILD` and both package install hooks;
+- the signed repository: `ghost-runtime-<version>-1-any.pkg.tar.zst` and
+  `ghost-<version>-1-any.pkg.tar.zst` with their `.sig`, `ghost.db` and
+  `ghost.files` (plus `.tar.gz` forms) with their `.sig`, and
+  `ghost-signing-key.asc`.
+
+## Signed repository
+
+[`build-repo.sh`](build-repo.sh) builds both packages from the rendered
+recipe with `makepkg`, using the archives beside it rather than the release
+URLs (which do not exist yet), signs the packages and the database with the
+key whose fingerprint [`package-signing-key.fingerprint`](package-signing-key.fingerprint)
+pins, and writes `out/repo/`. That key lives only in the releasing machine's
+keyring; `summonghost.com/install` pins the same fingerprint, downloads the
+public key from the release, trusts it with `pacman-key`, writes
+`/etc/pacman.d/ghost.conf` pointing at `releases/latest/download`, keeps it
+across `omarchy refresh pacman` with a `pre-refresh-pacman` hook, and runs
+`omarchy-pkg-add ghost`. Updates then arrive with `omarchy update`. When the
+package lands in Omarchy's repository, that path takes over and the
+repository assets can stop being published.
 
 The contribution's `.omarchy/package.json` declares that release feed
 (`upstream.github`, the runtime asset per architecture, and the source archive

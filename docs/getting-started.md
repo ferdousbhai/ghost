@@ -21,8 +21,9 @@ of — this page.
 
 Open the Omarchy menu, then **Install → AI → Ghost**. Until the package is in
 Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
-one line builds the same package from the latest release, which carries its own
-`PKGBUILD`:
+one line adds Ghost's own signed package repository (each release doubles as
+one) and installs the same package from it, so `omarchy update` keeps it
+current:
 
 ```sh
 curl -fsSL https://summonghost.com/install | bash
