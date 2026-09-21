@@ -92,6 +92,7 @@ bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-runtime-source.sh"
 bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
 bash "$source_root/packaging/release/test-installer.sh"
+bash "$source_root/packaging/release/test-resolve-installer.sh"
 bash "$source_root/packaging/omarchy/test-contribution.sh"
 
 # Every packaging test suite must be invoked by some other packaging or CI

@@ -11,7 +11,10 @@
 # `release: <version>` and pushes (the pre-push hook runs the gate). After
 # publishing it proves the public one-liner installs the release from a
 # clean container (rolling the release back if not) and carries the rendered
-# recipe to the omarchy-pkgs pull request.
+# recipe to the omarchy-pkgs pull request. Because a rollback returns the
+# one-liner to the release before, it first asks what that release serves
+# (resolve-installer.sh), so a rollback with no installer to land on is
+# announced before the release exists rather than discovered after.
 #
 # --dry-run bumps the version if needed, then builds, verifies, renders and
 # signs from the committed tree and stops before the push, tag and release.
@@ -75,6 +78,23 @@ if (( ! dry_run )); then
 fi
 (( dry_run )) || gh auth status >/dev/null
 
+# What the public one-liner serves before this release touches anything is
+# what a rollback leaves users with. Nothing served (the release before this
+# one carries no install.sh) is not a reason to stop, since publishing is the
+# only way out of it, but it is said now, while the landing page is live and
+# there is still time to decide. A one-liner that does not reach this
+# repository's latest asset at all is a reason to stop: verification cannot
+# pass, and the release would be rolled back for the site's fault.
+fallback="$(bash "$script_root/resolve-installer.sh" "$repository")" && fallback_status=0 || fallback_status=$?
+case "$fallback_status" in
+  0) fallback_note="the public one-liner serves install.sh from $fallback; a rollback of $tag lands there" ;;
+  2) fallback_note="WARNING: the public one-liner serves nothing today, and a rollback of $tag leaves it that way: https://ferdousbhai.com/ghost is live and its install command is a 404 until a release carrying install.sh stays published" ;;
+  *)
+    printf 'not releasing: verify-published.sh could only fail and roll %s back; fix the one-liner first\n' "$tag" >&2
+    exit 1
+    ;;
+esac
+
 commit="$(git rev-parse 'HEAD^{commit}')"
 epoch="$(git show -s --format=%ct "$commit")"
 work="$script_root/work"
@@ -115,6 +135,7 @@ bash "$script_root/build-repo.sh" "$out" "$version"
 
 printf '\nrelease inputs for %s %s (%s):\n' "$repository" "$tag" "$commit"
 cat -- "$out/SHA256SUMS"
+printf '\n%s\n' "$fallback_note"
 if (( dry_run )); then
   printf '\ndry run: no tag, no release. Omarchy contribution: %s; signed repository: %s\n' \
     "$out/omarchy-ghost-$version" "$out/repo"
@@ -148,6 +169,16 @@ if ! bash "$script_root/verify-published.sh" "$version"; then
   printf 'rolling back %s\n' "$tag" >&2
   gh release delete "$tag" --repo "$repository" --yes --cleanup-tag
   git tag -d "$tag" >/dev/null 2>&1 || true
+  # The rollback is only as safe as what "latest" now serves. Say what that
+  # is, and when it is nothing, what the operator is looking at and the two
+  # ways out.
+  if fallback="$(bash "$script_root/resolve-installer.sh" "$repository")"; then
+    printf 'rolled back: the public one-liner serves install.sh from %s again\n' "$fallback" >&2
+  else
+    printf 'rolled back, and that is what users get now: https://ferdousbhai.com/ghost is live and its install command is a 404.\n' >&2
+    printf 'Fix the cause and run publish.sh %s again as soon as you can; to stop the bleeding first, attach the installer this run built to the release "latest" resolves to:\n' "$version" >&2
+    printf '  gh release upload <latest tag> %s --repo %s\n' "$out/install.sh" "$repository" >&2
+  fi
   exit 1
 fi
 

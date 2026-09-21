@@ -93,7 +93,16 @@ with the icloud-notes installer, and holds the docs, the release notes and
 A release counts as shipped only once
 [`verify-published.sh`](verify-published.sh) has run the public one-liner
 in a clean Arch container and found this version installed; otherwise
-`publish.sh` deletes the release and the tag. It then pushes the rendered
+`publish.sh` deletes the release and the tag. That rollback returns the
+one-liner to the release before, so before it tags, `publish.sh` asks
+[`resolve-installer.sh`](resolve-installer.sh) what the one-liner serves
+today and says what a rollback would land on. When the answer is nothing
+(the release before carries no `install.sh`, as every release before 0.4.2
+did) it warns and goes ahead, since publishing is the only way out; after
+a rollback it says the same thing again, with the way out. A one-liner that
+does not redirect to this repository's latest `install.sh` at all stops the
+run before the tag, because verification could only fail and the release
+would be rolled back for the site's fault. It then pushes the rendered
 recipe to the omarchy-pkgs fork branch
 ([`update-omarchy-contribution.sh`](update-omarchy-contribution.sh)) so the
 open pull request tracks the release.
