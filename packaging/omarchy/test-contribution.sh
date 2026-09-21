@@ -232,6 +232,9 @@ done
 grep -Fq 'omarchy-pkg-add ghost' "$script_root/bin/omarchy-install-ai-ghost"
 grep -Fq 'systemctl --user enable --now ghostd.service' "$script_root/bin/omarchy-install-ai-ghost"
 grep -Fq 'omarchy plugin enable ferdousbhai.ghost' "$script_root/bin/omarchy-install-ai-ghost"
+# -T or the link lands *inside* an existing directory and the HUD never loads.
+grep -Fq 'ln -sfnT /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
+! grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
 grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"

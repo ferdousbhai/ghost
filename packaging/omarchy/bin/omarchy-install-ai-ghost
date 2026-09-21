@@ -17,7 +17,15 @@ systemctl --user daemon-reload
 systemctl --user enable --now ghostd.service
 
 mkdir -p ~/.config/omarchy/plugins
-ln -sfn /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
+# -T, because plain `ln -sfn` onto an existing directory creates the link
+# inside it and reports success, leaving a plugin the shell cannot load. A
+# real directory there (an older install) is refused with the remedy instead.
+plugin_link=~/.config/omarchy/plugins/ferdousbhai.ghost
+if ! ln -sfnT /usr/share/ghost/plugin "$plugin_link" 2>/dev/null; then
+  echo "$plugin_link is a real directory, probably from an older install." >&2
+  echo "Move it aside and run this again:  mv $plugin_link{,.bak}" >&2
+  exit 1
+fi
 omarchy-shell shell rescanPlugins
 omarchy plugin enable ferdousbhai.ghost
 
