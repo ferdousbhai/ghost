@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Prove a published release installs the way users get it: a clean Arch
-# container runs the public one-liner (summonghost.com/install) and must end
+# container runs the public one-liner (ferdousbhai.com/ghost/install.sh, which
+# redirects to this release's own install.sh asset) and must end
 # up with this version of `ghost` and `ghost-runtime`. publish.sh runs this
 # after publishing and rolls the release back if it fails.
 #
@@ -29,7 +30,7 @@ useradd -m tester && echo "tester ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/test
 printf "#!/bin/bash\nexec sudo pacman -S --noconfirm --needed \"\$@\"\n" > /usr/local/bin/omarchy-pkg-add
 for stub in systemctl omarchy-shell omarchy; do printf "#!/bin/bash\nexit 0\n" > /usr/local/bin/$stub; done
 chmod +x /usr/local/bin/*
-su tester -c "curl -fsSL https://summonghost.com/install | bash" >/dev/null 2>&1
+su tester -c "curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash" >/dev/null 2>&1
 pacman -Q ghost ghost-runtime
 '
 

@@ -2,7 +2,7 @@
 # Build the `ghost-runtime` and `ghost` packages from the rendered recipe and
 # the release archives, sign them, and write a one-release pacman repository
 # that a GitHub release can serve. publish.sh runs this after rendering; the
-# result is what summonghost.com/install adds as the [ghost] repository until
+# result is what install.sh adds as the [ghost] repository until
 # Omarchy's own repository carries the package.
 #
 #   build-repo.sh <out-dir> <version>

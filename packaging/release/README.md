@@ -5,7 +5,7 @@ public inputs from which Omarchy builds the stable `ghost` package, builds
 and signs the packages from those inputs, and publishes it all as a GitHub
 release on `ferdousbhai/ghost`. Until Omarchy's repository carries the
 package, the release is also the signed `[ghost]` pacman repository that
-`curl -fsSL https://summonghost.com/install | bash` adds and installs from
+`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` adds and installs from
 (see "Signed repository" below). The inputs:
 
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
@@ -73,6 +73,8 @@ through `render-arch-package.sh` and the Omarchy contribution through
 builds and signs the packages ([`build-repo.sh`](build-repo.sh)), creates
 the annotated tag, and publishes the GitHub release carrying:
 
+- `install.sh`, the copy this release was verified with, which is what
+  `https://ferdousbhai.com/ghost/install.sh` redirects to;
 - `ghost-<version>.tar.gz`;
 - `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
 - `SHA256SUMS`;
@@ -81,6 +83,12 @@ the annotated tag, and publishes the GitHub release carrying:
   `ghost-<version>-1-any.pkg.tar.zst` with their `.sig`, `ghost.db` and
   `ghost.files` (plus `.tar.gz` forms) with their `.sig`, and
   `ghost-signing-key.asc`.
+
+The installer itself is [`install.sh`](../../install.sh) at the repository
+root. [`test-installer.sh`](test-installer.sh), which the gate runs, checks
+its syntax, pins the hash of the `add_signed_repo` block it shares verbatim
+with the icloud-notes installer, and holds the docs, the release notes and
+`verify-published.sh` to one spelling of the public one-liner.
 
 A release counts as shipped only once
 [`verify-published.sh`](verify-published.sh) has run the public one-liner
@@ -101,7 +109,7 @@ URLs (which do not exist yet), signs the packages and the database with the
 key whose fingerprint [`package-signing-key.fingerprint`](package-signing-key.fingerprint)
 pins, and writes `out/repo/`. That key lives only in the releasing machine's
 keyring (its backup and rotation are described in the iCloud Notes README,
-which shares the key: <https://github.com/ferdousbhai/icloud-notes#releasing>); `summonghost.com/install` pins the same fingerprint, downloads the
+which shares the key: <https://github.com/ferdousbhai/icloud-notes#releasing>); `install.sh` pins the same fingerprint, downloads the
 public key from the release, trusts it with `pacman-key`, writes
 `/etc/pacman.d/ghost.conf` pointing at `releases/latest/download`, keeps it
 across `omarchy refresh pacman` with a `pre-refresh-pacman` hook, and runs

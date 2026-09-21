@@ -26,7 +26,7 @@ one) and installs the same package from it, so `omarchy update` keeps it
 current:
 
 ```sh
-curl -fsSL https://summonghost.com/install | bash
+curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash
 ```
 
 To work on Ghost itself, build the rolling checkout package instead — see
