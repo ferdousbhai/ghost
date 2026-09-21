@@ -34,15 +34,24 @@ su tester -c "curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash" >/dev/
 pacman -Q ghost ghost-runtime
 '
 
-# GitHub's "latest" redirect can lag a new release by a little; try for a while.
-for attempt in 1 2 3 4; do
-  installed="$(docker run --rm archlinux:base-devel bash -c "$probe" 2>/dev/null || true)"
+# GitHub's latest/download/* alias does not serve a new release's assets the
+# moment it is published, and 0.4.2 was rolled back over exactly that: the
+# probe saw nothing for four attempts, and afterwards the alias answered 504
+# for ghost.db for several more minutes while the explicit tag URL served it
+# fine. Four attempts thirty seconds apart was not the settling time; this is.
+log="$(mktemp)"
+trap 'rm -f -- "$log"' EXIT
+for attempt in 1 2 3 4 5 6 7 8; do
+  installed="$(docker run --rm archlinux:base-devel bash -c "$probe" 2>"$log" || true)"
   if [[ "$installed" == "ghost $version-"*$'\n'"ghost-runtime $version-"* ]]; then
     printf 'Verified: the public one-liner installs\n%s\n' "$installed"
     exit 0
   fi
-  printf 'attempt %s: got "%s", wanted ghost %s; retrying in 30s\n' "$attempt" "${installed:-nothing}" "$version" >&2
-  sleep 30
+  printf 'attempt %s: got "%s", wanted ghost %s; retrying in 45s\n' "$attempt" "${installed:-nothing}" "$version" >&2
+  sleep 45
 done
-printf 'the public one-liner does not install ghost %s\n' "$version" >&2
+# The rollback this triggers is expensive and the reason was being discarded,
+# so the last attempt's own words go to the operator rather than /dev/null.
+printf 'the public one-liner does not install ghost %s. The last attempt said:\n' "$version" >&2
+tail -n 20 -- "$log" >&2
 exit 1
