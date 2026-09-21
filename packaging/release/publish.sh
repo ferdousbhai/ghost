@@ -7,6 +7,12 @@
 #
 #   packaging/release/publish.sh <version> [--dry-run]
 #
+# If the manifests do not say <version> yet, it bumps them, commits
+# `release: <version>` and pushes (the pre-push hook runs the gate). After
+# publishing it proves the public one-liner installs the release from a
+# clean container (rolling the release back if not) and carries the rendered
+# recipe to the omarchy-pkgs pull request.
+#
 # --dry-run builds, verifies, and renders from the committed tree and stops
 # before the tag and release; it does not need HEAD to be pushed.
 set -euo pipefail
@@ -35,21 +41,38 @@ cd -- "$source_root"
   printf 'the tree is dirty; commit or drop the changes first\n' >&2
   exit 1
 }
-if (( ! dry_run )); then
-  git fetch -q origin master
-  [[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/master)" ]] || {
-    printf 'HEAD is not origin/master; push (or pull) first\n' >&2
+if (( ! dry_run )) && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+  printf 'tag %s already exists\n' "$tag" >&2
+  exit 1
+fi
+# The version lives in five manifests; a release starts by making them agree.
+current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
+if [[ "$current" != "$version" ]]; then
+  [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || {
+    printf 'not a release version: %s\n' "$version" >&2
     exit 1
   }
-  if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-    printf 'tag %s already exists\n' "$tag" >&2
+  for manifest in package.json packages/daemon/package.json packages/extensions/package.json \
+      packages/shell/package.json packages/shell/qml/manifest.json; do
+    sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$manifest"
+  done
+  bash "$script_root/verify-release-version.sh" "$source_root" | grep -Fxq "$version" || {
+    printf 'the manifests still do not all say %s after the bump\n' "$version" >&2
     exit 1
+  }
+  git commit -q -am "release: $version"
+  printf 'bumped %s -> %s\n' "$current" "$version"
+fi
+if (( ! dry_run )); then
+  git fetch -q origin master
+  if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/master)" ]]; then
+    git merge-base --is-ancestor origin/master HEAD || {
+      printf 'HEAD has diverged from origin/master; pull first\n' >&2
+      exit 1
+    }
+    git push origin master # the pre-push hook runs the gate
   fi
 fi
-bash "$script_root/verify-release-version.sh" "$source_root" | grep -Fxq "$version" || {
-  printf 'the manifests do not all say %s; bump the version first\n' "$version" >&2
-  exit 1
-}
 (( dry_run )) || gh auth status >/dev/null
 
 commit="$(git rev-parse 'HEAD^{commit}')"
@@ -111,5 +134,19 @@ gh release create "$tag" \
   "$out/repo/"*
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
-printf 'next: "After publishing" in packaging/release/README.md; the rendered contribution is %s\n' \
-  "$out/omarchy-ghost-$version"
+
+# Shipped means installable: the public one-liner must land this version
+# in a clean container. If it does not, "latest" must not point at it.
+if ! bash "$script_root/verify-published.sh" "$version"; then
+  printf 'rolling back %s\n' "$tag" >&2
+  gh release delete "$tag" --repo "$repository" --yes --cleanup-tag
+  git tag -d "$tag" >/dev/null 2>&1 || true
+  exit 1
+fi
+
+# The omarchy-pkgs pull request tracks the release by hand until the package
+# is upstream; a failure here leaves the release intact and says what to do.
+bash "$script_root/update-omarchy-contribution.sh" "$version" "$out/omarchy-ghost-$version" || \
+  printf 'could not update the omarchy-pkgs branch; push %s to pkgbuilds/ghost on the fork by hand\n' \
+    "$out/omarchy-ghost-$version" >&2
+printf 'next: "After publishing" in packaging/release/README.md\n'
