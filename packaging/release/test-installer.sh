@@ -7,7 +7,11 @@
 # installer; both repositories pin the block's hash so a change to one copy
 # fails a test until the twin is updated too.
 set -euo pipefail
-cd -- "$(git rev-parse --show-toplevel)"
+# Relative to this file, not to git: test-check-dependencies.sh also runs this
+# inside makepkg's check() and inside the extracted source archive, where
+# there is no repository.
+script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+cd -- "$(realpath -e -- "$script_dir/../..")"
 
 bash -n install.sh
 

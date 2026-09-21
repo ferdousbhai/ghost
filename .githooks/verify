@@ -30,10 +30,10 @@ pnpm typecheck
 pnpm lint
 pnpm test
 # What the gate checks beyond the workspace: the packaging scripts
-# (they diff packaging/arch/.SRCINFO against a fresh makepkg render), the
-# installer this repository publishes, and the Python sidecar's lint and types.
+# (they diff packaging/arch/.SRCINFO against a fresh makepkg render and chain
+# the other packaging suites, including the installer this repository
+# publishes), and the Python sidecar's lint and types.
 bash packaging/arch/test-check-dependencies.sh
-bash packaging/release/test-installer.sh
 (cd packages/desktop-helper && uv run --frozen ruff check src tests && uv run --frozen mypy && uv run --frozen pytest -q)
 
 # A dirty tree was not what the suite proved; only a clean HEAD earns the marker.

@@ -101,7 +101,7 @@ printf '\nGhost is installed, and in your app launcher.\n'
 # Omarchy 4 Lua config and ghost.conf for a .conf one.
 printf 'To summon it with Super + Ctrl + G, copy the sample your Hyprland config\n'
 printf 'uses from /usr/share/doc/ghost/shell-contrib/hyprland/.\n'
-# `ghost login` refuses before a ghost exists (login-command.ts), so the order
+# `ghost login` refuses before a ghost exists (cli/common.ts), so the order
 # matters and the last thing the installer prints should be the first thing
 # that works.
 printf '\nThen make a ghost and sign in:  ghost new <name> && ghost login <provider>\n'
