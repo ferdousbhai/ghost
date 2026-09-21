@@ -84,7 +84,7 @@ and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
 source and runtime inputs as a GitHub release (`../release/publish.sh`) and
 renders the Omarchy contribution; Omarchy owns the stable package build and
 promotion. Until Omarchy's repository carries the package, each release is also
-the signed `[ghost]` pacman repository the summonghost.com installer adds (see
+the signed `[ghost]` pacman repository `install.sh` adds (see
 [the release README](../release/README.md)); that is an interim install path,
 not a generic Arch publication channel.
 

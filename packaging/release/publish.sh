@@ -97,6 +97,9 @@ GHOST_RELEASE_WORK_ROOT="$work" \
     "$out/ghost-runtime-$version-linux-any.tar.zst" \
     "$source_root" "$version" any "$commit" "$epoch"
 rm -rf -- "$work"
+# The installer is an artifact like the archives, and one that users pipe to
+# bash, so it is staged before the manifest is written and SHA256SUMS covers it.
+install -m 755 -- "$source_root/install.sh" "$out/install.sh"
 bash "$script_root/write-sha256sums.sh" "$out"
 
 source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
@@ -118,13 +121,17 @@ if (( dry_run )); then
   exit 0
 fi
 
+# install.sh ships with the release because ferdousbhai.com/ghost/install.sh
+# redirects to the latest one: users get the copy this release was verified
+# with, not whatever master happens to hold.
 git tag -a "$tag" -m "ghost $version" "$commit"
 git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`curl -fsSL https://summonghost.com/install | bash\` (adds this release as the signed \`[ghost]\` pacman repository, then installs the package). Also the source and runtime inputs for the Omarchy \`ghost\` package." \
+  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` (adds this release as the signed \`[ghost]\` pacman repository, then installs the package). Also the source and runtime inputs for the Omarchy \`ghost\` package." \
   -- \
+  "$out/install.sh" \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
   "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
