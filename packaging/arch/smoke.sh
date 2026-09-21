@@ -138,7 +138,7 @@ else
   }
   require_runtime_license licenses/ghost/LICENSE
   require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
-  require_runtime_license licenses/npm/@earendil-works/pi-ai/0.86.0/LICENSE
+  require_runtime_license licenses/npm/@earendil-works/pi-ai/0.86.1/LICENSE
 
   require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
     graphical-session.target

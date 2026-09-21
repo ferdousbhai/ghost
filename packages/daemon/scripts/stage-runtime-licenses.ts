@@ -82,7 +82,7 @@ function licenseFiles(pkg: PackageIdentity): Array<{ source: string; name: strin
     .map((entry) => ({ source: join(pkg.root, entry.name), name: entry.name }))
     .sort((a, b) => a.name.localeCompare(b.name, "en"));
   if (matches.length > 0) return matches;
-  if (pkg.name.startsWith("@earendil-works/") && pkg.version === "0.86.0") {
+  if (pkg.name.startsWith("@earendil-works/") && pkg.version === "0.86.1") {
     return [{
       source: join(fallbackRoot, "earendil-pi.LICENSE"),
       name: "LICENSE",
