@@ -16,6 +16,7 @@
  * That boundary is a property a future convenience commit could quietly delete,
  * so it is pinned here rather than only in a README.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -32,15 +33,35 @@ import {
 
 // The extension lives in its own repository (github.com/ferdousbhai/
 // ghost-chromium-extension). This test reads a checkout of it: an explicit
-// location wins, else a sibling clone of this repository at the release
-// CONTRACTS.md names. Without one the suite skips and says so — not a false
-// pass, and not a gate that can be satisfied without the extension present.
+// location wins, else a sibling clone of this repository. Without one the suite
+// skips and says so — not a false pass, and not a gate that can be satisfied
+// without the extension present.
 // The extension repository's root is the extension (manifest.json sits there).
-const EXTENSION_DIR = process.env.GHOST_CHROMIUM_EXTENSION_DIR
-  ?? join(
-    dirname(fileURLToPath(import.meta.url)),
-    "..", "..", "..", "..", "ghost-chromium-extension",
-  );
+//
+// A linked worktree (how a master push is built) lives under /tmp, where no
+// sibling clone exists, so the file-relative guess alone would skip the gate on
+// exactly the tree being pushed. `--git-common-dir` points at the main
+// checkout's `.git` wherever this runs, so its grandparent is the real sibling.
+function mainCheckoutSibling(): string | undefined {
+  try {
+    const common = execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+      encoding: "utf8",
+    }).trim();
+    return common ? join(dirname(common), "..", "ghost-chromium-extension") : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const EXTENSION_CANDIDATES = [
+  process.env.GHOST_CHROMIUM_EXTENSION_DIR,
+  join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "ghost-chromium-extension"),
+  mainCheckoutSibling(),
+].filter((dir): dir is string => dir !== undefined);
+const EXTENSION_DIR = EXTENSION_CANDIDATES.find((dir) => existsSync(join(dir, "protocol.js")))
+  ?? EXTENSION_CANDIDATES[0]
+  ?? "";
 const extensionPresent = existsSync(join(EXTENSION_DIR, "protocol.js"));
 if (!extensionPresent) {
   console.warn(

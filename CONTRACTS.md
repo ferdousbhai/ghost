@@ -546,8 +546,11 @@ not the daemon, protocols, or graphical-session lifecycle.
   ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
 - [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
   is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
-  it. Its startup handshake and the `@ghost/extensions` helper client agree on desktop-helper
-  protocol version 2; a mismatch retires the sidecar before any request is sent.
+  it. Its startup handshake and the `@ghost/extensions` helper client agree on
+  `DESKTOP_HELPER_PROTOCOL_VERSION`; the two languages declare it separately, so
+  [`desktop-helper-protocol.test.ts`](packages/extensions/test/desktop-helper-protocol.test.ts)
+  reads the sidecar's source and compares them. A mismatch retires the sidecar
+  before any request is sent.
   Startup/explicit `hello` is the diagnostic boundary; there is no `doctor` op.
   Client errors retain the operation: unavailable transport is `not_found`,
   deadlines/size are `limit_exceeded`, and malformed protocol is `invalid_format`.

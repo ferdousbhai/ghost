@@ -21,6 +21,11 @@ fi
 # above this line so a probe never truncates the log.
 exec > >(tee "$gitdir/ghost-verify-last.log") 2>&1
 
+# @ghost/daemon typechecks against @ghost/extensions' built declarations, so a
+# tree that has never been built (every fresh worktree, and the scratch worktree
+# a master push comes from) fails typecheck for a missing module rather than for
+# anything wrong with it.
+pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
