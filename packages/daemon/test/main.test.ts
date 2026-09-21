@@ -4,10 +4,9 @@ import { describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DEFAULT_SHUTDOWN_FORCE_MS, DEFAULT_SHUTDOWN_GRACE_MS } from "../src/config.js";
 import {
   closeDaemonResources,
-  DEFAULT_SHUTDOWN_FORCE_MS,
-  DEFAULT_SHUTDOWN_GRACE_MS,
   main,
   parseArgs,
   runStagedShutdown,

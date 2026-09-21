@@ -81,6 +81,15 @@ export const DEFAULT_PORT = 7717;
  * could ever answer.
  */
 export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
+/**
+ * The staged shutdown's two deadlines. They live here rather than beside the
+ * shutdown itself because `help-topics.ts` renders the grace period into the
+ * restart recipe a ghost acts on, and the CLI must not import the daemon entry
+ * point to read a number. `ghostd.service`'s `TimeoutStopSec` is the outer
+ * bound behind both, checked in `main.test.ts`.
+ */
+export const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
+export const DEFAULT_SHUTDOWN_FORCE_MS = 2_000;
 export const DEFAULT_HOST = "127.0.0.1";
 const DEFAULT_GHOSTS_DIRNAME = "ghosts";
 

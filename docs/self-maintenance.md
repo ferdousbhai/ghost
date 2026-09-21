@@ -123,8 +123,10 @@ edit, test, commit, build, restart. What that text has no room to explain:
 `systemctl restart`, because a ghost restarting itself is killing its own
 parent. A child of the daemon dies with it and never runs the second half;
 a transient unit is not the daemon's child, so it survives to bring it back
-and to wake the conversation that asked. The daemon drains for 5 seconds
-([`main.ts`](../packages/daemon/src/main.ts)) and `TimeoutStopSec` in
+and to wake the conversation that asked. The daemon drains for
+`DEFAULT_SHUTDOWN_GRACE_MS`
+([`config.ts`](../packages/daemon/src/config.ts)), which `ghost help self`
+renders into the recipe rather than restating, and `TimeoutStopSec` in
 [`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the outer
 bound behind that.
 

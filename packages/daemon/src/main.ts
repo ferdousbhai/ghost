@@ -7,7 +7,13 @@ import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import { LoginManager } from "./auth.js";
 import { loginCommand } from "./login-command.js";
-import { loadConfig, type DaemonConfig, type DaemonConfigOverrides } from "./config.js";
+import {
+  DEFAULT_SHUTDOWN_FORCE_MS,
+  DEFAULT_SHUTDOWN_GRACE_MS,
+  loadConfig,
+  type DaemonConfig,
+  type DaemonConfigOverrides,
+} from "./config.js";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -86,9 +92,6 @@ export interface ParsedArgs {
 export interface MainRuntime {
   afterHomeReservationAcquired?: () => Promise<void>;
 }
-
-export const DEFAULT_SHUTDOWN_GRACE_MS = 5_000;
-export const DEFAULT_SHUTDOWN_FORCE_MS = 2_000;
 
 export interface StagedShutdownOptions {
   /** Synchronously stop listener/session admission. */

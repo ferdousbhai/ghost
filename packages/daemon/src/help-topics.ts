@@ -6,6 +6,7 @@
  * every turn of every ghost. The text is still contract text the ghost acts
  * on: keep it exact, and keep the prompt's pointer sentences in step.
  */
+import { DEFAULT_SHUTDOWN_GRACE_MS } from "./config.js";
 import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
 
 export const HELP_TOPICS = ["timers", "self", "harnesses"] as const;
@@ -61,7 +62,7 @@ function self(input: HelpTopicInput): string[] {
     "# Self-maintenance",
     "The loop: `git fetch`, branch from upstream master, edit, run the touched package's tests and `typecheck`, commit with the reason, `pnpm build`, restart. This is your own Bash, not a delegated task: no worktrees or task branches.",
     "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When your work there would help every owner (a bug fixed, a real efficiency gain, a policy line that proved wrong), consider offering it upstream via `CONTRIBUTING.md` in the checkout; the PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
-    "To restart yourself, finish the turn and tell the owner first; the daemon drains for 5 seconds, then forces:",
+    `To restart yourself, finish the turn and tell the owner first; the daemon drains for ${DEFAULT_SHUTDOWN_GRACE_MS / 1000} seconds, then forces:`,
     "```sh",
     'systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \\',
     '  --description="<reason>" \\',
