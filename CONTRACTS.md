@@ -216,8 +216,8 @@ authoritative list and per-section size ceilings are
 them carry contract the rest of this file relies on: the other-harnesses policy
 pins the ghost to the owner home, runs each handoff with the project directory
 as the harness's own cwd so the headless harness respects that project's
-settings, hands work only to a harness `ghost harnesses` marks eligible, and ends
-a limit in a handoff note in the owner's documents; the
+settings, launches each handoff through `ghost delegate`, which refuses a harness
+without room, and ends a limit in a handoff note in the owner's documents; the
 owner-context policy names the Documents directory in one sentence and nothing
 else about it. Owner documents are read only when relevant, with the runtime's
 own file and search tools, never injected automatically at session start.
@@ -295,13 +295,36 @@ table, no jobs API, no jobs strip, and cannot cancel what it did not start;
 the policy text is `BACKGROUND_WORK_POLICY` in
 [`machine-skills.ts`](packages/daemon/src/machine-skills.ts).
 
-There is no Ghost-owned delegation system. A ghost that wants a specialist
-runs the owner's installed `pi`, `codex`, `omp`, or `claude -p` from its own
-Bash, after `ghost harnesses` marks it eligible (`HARNESS_LIMITS_POLICY` in
-[`machine-skills.ts`](packages/daemon/src/machine-skills.ts));
-that harness runs with the owner's own settings for it — its full tool set,
-project discovery, auth, and session semantics — untouched by the runtime
-parity list above.
+There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
+job control. A ghost that wants a specialist runs the owner's installed `pi`,
+`codex`, `omp`, or `claude -p` from its own Bash as `cd <dir> && ghost delegate
+<harness> -- <args>` (`HARNESS_LIMITS_POLICY` in
+[`machine-skills.ts`](packages/daemon/src/machine-skills.ts)); that harness runs
+with the owner's own settings for it — its full tool set, project discovery,
+auth, and session semantics — untouched by the runtime parity list above.
+`ghost delegate` runs `omarchy agent usage update --limits-only <harness>`
+(ignoring its failure), then applies `ghost harnesses`: a harness not listed
+exits 5, one listed ineligible exits 6, and neither runs. Otherwise the harness
+runs in the foreground in the caller's cwd and process group, with the caller's
+environment and stdin, its stdout and stderr streamed through unchanged; SIGINT
+and SIGTERM are forwarded to it, and once it exits the verb stops reading when
+its pipes have been idle for 100ms, so a descendant holding them cannot hang
+the call. The verb exits with the harness's status (128 plus the signal number
+when a signal ended it, 127 when it could not start).
+
+Every attempt, refused or run, appends one JSON line to
+`$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
+file is 0600, and past 1 MiB it moves to `handoffs.jsonl.1`, replacing the
+previous one): `{v: 1, at, ghost, session, harness, cwd, eligible, windows,
+outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
+(or `null`), `eligible` lists the harnesses eligible at the check, `windows` is
+this harness's live windows then, and `outcome` is `{refused}` with the reason,
+or `{exit, signal, durationMs, limit}`, `durationMs` the harness's own run
+time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
+of a run that did not exit 0, else `null`. No prompt text or arguments are
+kept. A receipt that cannot be written is a warning on stderr, never a changed
+exit status. The log is the evidence for judging routing; nothing in Ghost
+reads it back.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in

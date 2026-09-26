@@ -86,8 +86,8 @@ function harnesses(): string[] {
     "# Other harnesses",
     "Your own cwd is always the owner home; no project instructions, skills, or MCP load into your session. For coding or project-specific tasks you are the orchestrator: hand the work to a headless sub-agent, never do it yourself.",
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
-    "Run each handoff with the project directory as its cwd (`cd <project-dir> && <harness> ...`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
-    "Before handing work to one, run `ghost harnesses`, which lists the installed ones with their session and weekly windows, and hand work only to one it marks eligible. A record it marks stale is refreshed with `omarchy agent usage update <agent>`.",
+    "Run each handoff with the project directory as its cwd, `cd <project-dir> && ghost delegate <harness> -- <args>` (e.g. `ghost delegate claude -- -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
+    "`ghost delegate` refreshes that harness's usage, refuses it (exit 6) when a window is nearly spent or (exit 5) when it is not installed, else runs it here, streams its output, and exits with its status. `ghost harnesses` lists which have room. Every attempt is recorded for the owner.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
   ];
 }
