@@ -238,10 +238,10 @@ If you expect one of these, it is missing on purpose:
 - **No delegation subsystem.** No worker scopes, `/tasks` API, or job
   control; a ghost runs `pi`, `codex`, or `claude -p` from Bash through
   `ghost delegate` when it wants a specialist, and that harness owns its own
-  discovery, tools, and auth. `ghost delegate` only refuses a harness without
-  room and appends one receipt line per attempt, the evidence any change to
-  how a ghost picks a harness has to be judged against; Ghost never reads it
-  back.
+  discovery, tools, and auth. `ghost delegate` only refuses a harness that is
+  not installed or has no room and appends one receipt line per attempt, the
+  evidence any change to how a ghost picks a harness has to be judged
+  against; Ghost never reads it back.
 - **No second browser backend** and no separate ghost browser profile.
 - **No ambient credentials.** Provider and cloud environment variables are
   scrubbed before the pi runtime is built
