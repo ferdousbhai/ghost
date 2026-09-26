@@ -32,6 +32,18 @@ Rectangle {
     Connections {
         target: Ghostd
         function onModelWritten(): void { root.closeRequested(); }
+        // The list and the current model each arrive on their own; a ghost
+        // switch under an open pane lists the new ghost's models.
+        function onActiveGhostChanged(): void { if (root.visible) Ghostd.fetchAvailableModels(); }
+        function onCurrentModelChanged(): void { root.resetHighlight(); }
+        function onModelSourceChanged(): void { root.resetHighlight(); }
+    }
+
+    // Return picks the highlighted row, so the highlight starts where nothing
+    // changes: on the current model with no query, on the best match with one.
+    function resetHighlight(): void {
+        modelList.currentIndex = root.query === ""
+            ? root.rows.findIndex(row => root.isCurrent(row)) : 0;
     }
 
     function open(connect: bool): void {
@@ -58,7 +70,7 @@ Rectangle {
     /** Stays open until the daemon answers: success closes, a refusal shows here. */
     function choose(model: var): void {
         if (Ghostd.modelWriting) return;
-        if (model === null) Ghostd.setChatModel("", "");
+        if (model === null) Ghostd.clearChatModel();
         else Ghostd.setChatModel(model.provider, model.id);
     }
 
@@ -68,9 +80,9 @@ Rectangle {
         anchors.fill: parent
         visible: root.connecting
         closeLabel: "Back"
+        // A sign-in that landed already re-listed the models (adoptLoginView).
         onCloseRequested: {
             root.connecting = false;
-            Ghostd.fetchAvailableModels();
             Qt.callLater(search.focusInput);
         }
     }
@@ -159,11 +171,8 @@ Rectangle {
             spacing: Theme.gap / 2
             model: root.rows
             boundsBehavior: Flickable.StopAtBounds
-            // Return picks the highlighted row, so the highlight starts where
-            // nothing changes: on the current model with no query, on the best
-            // match with one. After the model is set, which resets the index.
-            onModelChanged: modelList.currentIndex = root.query === ""
-                ? root.rows.findIndex(row => root.isCurrent(row)) : 0
+            // Setting the model resets the index, so the highlight follows it.
+            onModelChanged: root.resetHighlight()
 
             delegate: Rectangle {
                 id: modelRow

@@ -193,6 +193,17 @@ describe("GET /api/ghosts/:name/models", () => {
     const body = (await response.json()) as { models: { provider: string; id: string }[] };
     expect(body.models.map((model) => `${model.provider}/${model.id}`)).toEqual(["openrouter/a-model"]);
   });
+
+  it("answers an error, not an empty list, when every provider failed", async () => {
+    const base = await serveWithRuntime(async () => {
+      const runtime = makeFakeRuntime({ login: async () => oauthCredential(), models: { openrouter: ["a-model"] } });
+      runtime.getAvailable = async () => { throw new Error("auth.json unreadable"); };
+      return runtime;
+    });
+    const response = await fetch(`${base}/api/ghosts/casper/models`);
+    expect(response.status).toBe(502);
+    expect(JSON.stringify(await response.json())).toContain("auth.json unreadable");
+  });
 });
 
 describe("POST /api/ghosts/:name/login", () => {

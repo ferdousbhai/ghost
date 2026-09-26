@@ -5015,7 +5015,7 @@ describe("model switch reaches a live cached session", () => {
     expect(await run("/model model-b")).toMatchObject({ isError: true, code: "command_failed" });
 
     // The way back out: `/model default` unsets the binding.
-    expect(await run("/model default")).toMatchObject({ command: "/model", output: expect.stringContaining("unset") });
+    expect(await run("/model Default")).toMatchObject({ command: "/model", output: expect.stringContaining("unset") });
     expect(readGhostModels(paths.home)?.roles?.chat_model).toBeUndefined();
     expect(provider.requests).toHaveLength(0);
   });

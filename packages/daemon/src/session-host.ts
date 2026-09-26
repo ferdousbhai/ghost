@@ -2215,13 +2215,18 @@ export class SessionHost {
    * session, so without this a switch never reaches a conversation that is
    * already open: `GET /model` would report the new model while every further
    * turn kept answering on the old one (there is no idle eviction).
-   * `ModelCatalog.setChatModel` calls this right after the write.
+   * `ModelSelection.setChatModel` calls this right after the write.
    *
    * A busy session is not yanked mid-turn — the active owner keeps the model
    * it started on. It is flagged instead and rebound once that owner releases
    * the AgentSession.
    *
    */
+  private modelSelection(): NonNullable<SessionHostOptions["models"]> {
+    if (!this.models) throw new Error("Model selection is not enabled on this daemon.");
+    return this.models;
+  }
+
   async rebindModel(ghostName: string): Promise<void> {
     this.registry.get(ghostName);
     const opening = [...this.opening.entries()]
@@ -3053,9 +3058,10 @@ export class SessionHost {
         cwd: hosted.session.sessionManager.getCwd(),
         ghostHome: hosted.ghost.dir,
         setChatModel: async (provider, id) => {
-          if (!this.models) throw new Error("Model selection is not enabled on this daemon.");
-          if (provider === "") await this.models.clearChatModel(hosted.ghost.name);
-          else await this.models.setChatModel(hosted.ghost.name, provider, id);
+          await this.modelSelection().setChatModel(hosted.ghost.name, provider, id);
+        },
+        clearChatModel: async () => {
+          await this.modelSelection().clearChatModel(hosted.ghost.name);
         },
       });
       options.emit({ type: "command_output", command: dispatch.command, output });

@@ -565,12 +565,13 @@ Singleton {
     property var modelRequestFactory: null
 
     /**
-     * Nothing can answer yet: no model at all, as opposed to one that is simply
-     * unbound (`modelSource === "none"` still carries whatever would answer).
-     * The HUD's first-run surfaces all read this rather than repeating the
-     * comparison, which is how they drifted apart before.
+     * Nothing can answer yet: no model resolved and none reachable. An unbound
+     * ghost with signed-in providers still answers on pi's default, so a null
+     * `currentModel` alone is not enough (`adoptModelSelection` fetches the
+     * reachable list for exactly this). The HUD's first-run surfaces all read
+     * this rather than repeating the comparison.
      */
-    readonly property bool noModel: root.currentModel === null
+    readonly property bool noModel: root.currentModel === null && root.availableModels.length === 0
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -3947,10 +3948,13 @@ Singleton {
             const body = JSON.parse(xhr.responseText);
             root.currentModel = body.current || null;
             root.modelSource = body.source || "none";
-            return true;
         } catch (error) {
             return false;
         }
+        // Nothing resolved: whether pi can still answer is the reachable list.
+        if (root.currentModel === null && root.availableModelsRequest === null)
+            root.fetchAvailableModels();
+        return true;
     }
 
     function applyCurrentModelResponse(xhr: var, ghost: string, generation: int): bool {
@@ -3976,12 +3980,21 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
     }
 
-    /** Bind the chat model, or unset it when `provider` is empty; `modelWritten` reports success. */
+    /** Bind the chat model; `modelWritten` reports success. */
     function setChatModel(provider: string, id: string): void {
+        root.writeChatModel("PUT", JSON.stringify({ provider: provider, id: id }));
+    }
+
+    /** Unset it, handing the choice back to pi; `modelWritten` reports success. */
+    function clearChatModel(): void {
+        root.writeChatModel("DELETE", null);
+    }
+
+    function writeChatModel(method: string, body: var): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
         const generation = root.modelGeneration;
-        const what = provider === "" ? "DELETE model" : "PUT model";
+        const what = method + " model";
         const xhr = root.newRequest(root.modelRequestFactory);
         root.modelWriteRequest = xhr;
         root.modelError = "";
@@ -4000,10 +4013,8 @@ Singleton {
                 root.modelWritten();
             }
         };
-        const path = "/api/ghosts/" + encodeURIComponent(ghost) + "/model";
-        if (provider === "") root.dispatch(xhr, "DELETE", path, ({}), null);
-        else root.dispatch(xhr, "PUT", path, ({ "Content-Type": "application/json" }),
-            JSON.stringify({ provider: provider, id: id }));
+        root.dispatch(xhr, method, "/api/ghosts/" + encodeURIComponent(ghost) + "/model",
+            body === null ? ({}) : ({ "Content-Type": "application/json" }), body);
     }
 
     function fetchAvailableModels(): void {

@@ -2,6 +2,7 @@ import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.j
 import { resolveGhost } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
+import { parseChatModelSelector } from "../model-selection.js";
 
 type CurrentModel = { current: { provider: string; id: string; runtime: string } | null; source: string };
 type AvailableModels = { models: { provider: string; id: string; name: string }[] };
@@ -29,14 +30,9 @@ export async function modelCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   if (clear) {
     body = (await ctx.client.request("DELETE", base)).body;
   } else if (parsed.positionals[0]) {
-    const slash = parsed.positionals[0].indexOf("/");
-    if (slash < 1 || slash === parsed.positionals[0].length - 1) {
-      throw new ArgsError("A model must be written as provider/id.");
-    }
-    body = (await ctx.client.request("PUT", base, {
-      provider: parsed.positionals[0].slice(0, slash),
-      id: parsed.positionals[0].slice(slash + 1),
-    })).body;
+    const selector = parseChatModelSelector(parsed.positionals[0]);
+    if (!selector) throw new ArgsError("A model must be written as provider/id.");
+    body = (await ctx.client.request("PUT", base, selector)).body;
   } else body = (await ctx.client.request("GET", base)).body;
   emit(ctx, body, (result) => {
     const { current } = result as CurrentModel;

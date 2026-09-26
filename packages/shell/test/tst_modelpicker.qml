@@ -144,6 +144,22 @@ TestCase {
         verify(picker.isCurrent(null));
     }
 
+    // Unbound with nothing declared, the daemon reports no current model; with
+    // models reachable pi still answers, so the HUD must not call it empty.
+    function test_anUnresolvedDefaultIsNotNoModel(): void {
+        const picker = openPicker();
+        picker.choose(picker.rows[0]);
+        tc.complete(tc.sent[tc.sent.length - 1], { current: null, source: "none" });
+        compare(Ghostd.currentModel, null);
+        verify(!Ghostd.noModel);
+    }
+
+    function test_noModelWhenNothingResolvesOrIsReachable(): void {
+        Ghostd.currentModel = null;
+        Ghostd.availableModels = [];
+        verify(Ghostd.noModel);
+    }
+
     function test_connectingSearchesProvidersAndBackReturnsToTheList(): void {
         const picker = openPicker();
         findChild(picker, "connectProvider").clicked();
@@ -165,8 +181,10 @@ TestCase {
         search.accepted();
         compare(tc.sent.length, before);
 
+        // Back without a sign-in returns to the list as it was: no re-listing.
+        const sentBeforeBack = tc.sent.length;
         login.close();
         verify(!picker.connecting);
-        compare(tc.sent[tc.sent.length - 1].url.slice(-"/models".length), "/models");
+        compare(tc.sent.length, sentBeforeBack);
     }
 }

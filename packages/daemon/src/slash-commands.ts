@@ -7,6 +7,7 @@
  * be mistaken for an ordinary model prompt.
  */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { parseChatModelSelector } from "./model-selection.js";
 
 export type GhostCommandAvailability = "available" | "partial" | "unsupported";
 
@@ -164,8 +165,10 @@ export interface GhostBuiltinContext {
   session: AgentSession;
   cwd: string;
   ghostHome: string;
-  /** Bind the ghost's chat model, or unset it with empty strings; open conversations rebind once idle. */
+  /** Bind the ghost's chat model; open conversations rebind once idle. */
   setChatModel: (provider: string, id: string) => Promise<void>;
+  /** Unset it, handing the choice back to pi. */
+  clearChatModel: () => Promise<void>;
 }
 
 function formatTokens(value: number): string {
@@ -180,14 +183,14 @@ export async function executeGhostBuiltin(
   const { session } = context;
   switch (dispatch.command) {
     case "/model": {
-      if (dispatch.args === "default") {
-        await context.setChatModel("", "");
+      if (dispatch.args.toLowerCase() === "default") {
+        await context.clearChatModel();
         return "Chat model unset; pi chooses from the signed-in providers from the next turn.";
       }
       if (dispatch.args) {
-        const slash = dispatch.args.indexOf("/");
-        if (slash < 1 || slash === dispatch.args.length - 1) throw new Error("A model is written as provider/id.");
-        await context.setChatModel(dispatch.args.slice(0, slash), dispatch.args.slice(slash + 1));
+        const selector = parseChatModelSelector(dispatch.args);
+        if (!selector) throw new Error("A model is written as provider/id.");
+        await context.setChatModel(selector.provider, selector.id);
         return `Chat model set to ${dispatch.args}; it answers from the next turn.`;
       }
       const model = session.model;

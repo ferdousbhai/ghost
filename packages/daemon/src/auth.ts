@@ -335,6 +335,9 @@ async function discoverAvailableModels(
   });
 }
 
+/** How long one provider's availability check may take before the model list skips it. */
+const MODEL_LIST_TIMEOUT_MS = 15_000;
+
 export class LoginManager {
   private readonly registry: GhostRegistry;
   private readonly homeOperations: HomeOperationCoordinator;
@@ -392,14 +395,37 @@ export class LoginManager {
 
   /**
    * pi's live answer to which models this ghost's credentials reach; Ghost
-   * keeps no list. Asked one provider at a time, so a provider whose auth check
-   * fails drops out instead of failing the whole list.
+   * keeps no list. Asked one provider at a time, each bounded by
+   * MODEL_LIST_TIMEOUT_MS, so a provider whose auth check fails or hangs drops
+   * out (logged) instead of failing the list or holding the home lease. Only
+   * when every failure leaves nothing is the list itself an error.
    */
   async listAvailableModels(ghostName: string): Promise<AvailableModel[]> {
     return this.withRuntime(ghostName, async (runtime) => {
-      const perProvider = await Promise.all(runtime.getProviders()
-        .map((provider) => discoverAvailableModels(runtime, provider.id)));
-      return perProvider.flatMap((models) => models ?? [])
+      const failures: string[] = [];
+      const perProvider = await Promise.all(runtime.getProviders().map(async (provider) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+          return await Promise.race([
+            runtime.getAvailable(provider.id),
+            new Promise<never>((_, reject) => {
+              timer = setTimeout(() => reject(new Error("timed out")), MODEL_LIST_TIMEOUT_MS);
+            }),
+          ]);
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          failures.push(`${provider.id}: ${reason}`);
+          this.logger.warn("model list skipped a provider", { ghost: ghostName, provider: provider.id, error: reason });
+          return [];
+        } finally {
+          clearTimeout(timer);
+        }
+      }));
+      const models = perProvider.flat();
+      if (models.length === 0 && failures.length > 0) {
+        throw new GhostError("models_unavailable", `No provider could list its models (${failures[0]}).`, 502);
+      }
+      return models
         .filter((model) => isChatModelSelector(model.provider, model.id))
         .map((model) => ({ provider: model.provider, id: model.id, name: model.name }))
         .sort((a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));

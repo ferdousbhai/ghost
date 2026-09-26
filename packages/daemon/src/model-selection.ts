@@ -41,6 +41,13 @@ export function isChatModelSelector(provider: string, id: string): boolean {
   return PROVIDER.test(provider) && MODEL_ID.test(id);
 }
 
+/** `provider/id`, split at the first slash (an id may hold more), or null. */
+export function parseChatModelSelector(text: string): { provider: string; id: string } | null {
+  const slash = text.indexOf("/");
+  if (slash < 1 || slash === text.length - 1) return null;
+  return { provider: text.slice(0, slash), id: text.slice(slash + 1) };
+}
+
 export class ModelSelection {
   private readonly registry: GhostRegistry;
   private readonly homeOperations: HomeOperationCoordinator;
