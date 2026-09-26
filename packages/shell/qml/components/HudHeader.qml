@@ -7,7 +7,7 @@ Item {
     id: root
 
     /** The model indicator was clicked. */
-    signal loginRequested()
+    signal modelsRequested()
 
     implicitHeight: 32
 
@@ -56,8 +56,8 @@ Item {
         spacing: Theme.pad
 
         // Current-model indicator: the model's provider/id, a "Default" hint
-        // when the pick is only a fallback, and a call to action when nothing
-        // is set.
+        // when the pick is only a fallback, "Default" when pi picks unseen,
+        // and a call to action when nothing can answer.
         Rectangle {
             id: modelIndicator
 
@@ -83,7 +83,7 @@ Item {
                         ? (Ghostd.currentModel.provider + "/" + Ghostd.currentModel.id)
                         // A GUI button is a worse place for a CLI incantation
                         // than the CLI is: the click itself is the instruction.
-                        : "Connect a model"
+                        : Ghostd.noModel ? "Connect a provider" : "Default"
                     color: modelIndicator.noneSet ? Theme.warn : Theme.foreground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
@@ -105,7 +105,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: root.loginRequested()
+                onClicked: root.modelsRequested()
             }
         }
 

@@ -7,6 +7,7 @@
  * be mistaken for an ordinary model prompt.
  */
 import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import { parseChatModelSelector } from "./model-selection.js";
 
 export type GhostCommandAvailability = "available" | "partial" | "unsupported";
 
@@ -30,7 +31,7 @@ interface BuiltinSpec {
 }
 
 const BUILTINS: readonly BuiltinSpec[] = [
-  { name: "model", description: "Show the model this conversation answers on", availability: "partial", hint: "[provider/model]" },
+  { name: "model", description: "Show this conversation's model, or set the ghost's", availability: "available", hint: "[provider/model|default]" },
   { name: "session", description: "Show this conversation's transcript path and id", availability: "partial", hint: "[info]" },
   { name: "usage", description: "Show token usage and cost for this conversation", availability: "partial", hint: "[show]" },
   { name: "context", description: "Show how much of the model's context window is used", availability: "available" },
@@ -85,7 +86,6 @@ const BUILTINS: readonly BuiltinSpec[] = [
 const BUILTIN_BY_NAME = new Map(BUILTINS.map((spec) => [spec.name, spec]));
 
 const PARTIAL_INVOCATIONS: Readonly<Record<string, ReadonlySet<string>>> = {
-  model: new Set([""]),
   session: new Set(["", "info"]),
   usage: new Set(["", "show"]),
 };
@@ -165,6 +165,10 @@ export interface GhostBuiltinContext {
   session: AgentSession;
   cwd: string;
   ghostHome: string;
+  /** Bind the ghost's chat model; open conversations rebind once idle. */
+  setChatModel: (provider: string, id: string) => Promise<void>;
+  /** Unset it, handing the choice back to pi. */
+  clearChatModel: () => Promise<void>;
 }
 
 function formatTokens(value: number): string {
@@ -179,6 +183,16 @@ export async function executeGhostBuiltin(
   const { session } = context;
   switch (dispatch.command) {
     case "/model": {
+      if (dispatch.args.toLowerCase() === "default") {
+        await context.clearChatModel();
+        return "Chat model unset; pi chooses from the signed-in providers from the next turn.";
+      }
+      if (dispatch.args) {
+        const selector = parseChatModelSelector(dispatch.args);
+        if (!selector) throw new Error("A model is written as provider/id.");
+        await context.setChatModel(selector.provider, selector.id);
+        return `Chat model set to ${dispatch.args}; it answers from the next turn.`;
+      }
       const model = session.model;
       return model ? `${model.provider}/${model.id} (thinking: ${session.thinkingLevel})` : "No model is bound.";
     }

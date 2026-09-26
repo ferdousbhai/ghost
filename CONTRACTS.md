@@ -349,7 +349,8 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|PUT\|DELETE /api/ghosts/:name/model` | Read, set, or unset `roles.chat_model` as `provider/id`; no catalog, pi validates at turn time. `DELETE` is the way out of a binding (`ghost model --none`). |
+| `GET\|PUT\|DELETE /api/ghosts/:name/model` | Read, set, or unset `roles.chat_model` as `provider/id`; pi validates at turn time. `DELETE` is the way out of a binding (`ghost model --none`). `/model provider/id` in a conversation is the `PUT`, `/model default` the `DELETE`. |
+| `GET /api/ghosts/:name/models` | pi's live `getAvailable` for this ghost's credentials, asked per provider (15 s each) so one failing provider drops out — `502` only when every failure leaves nothing — as `{provider, id, name}` rows limited to ids `PUT` accepts; what the HUD picker and `ghost model --list` choose from. |
 | `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
 | `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
 | `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
@@ -427,8 +428,8 @@ Ghost keeps no fallback chain of its own: retry and model fallback are the
 runtime's, surfaced as `retry_fallback_applied`/`model_fallback` events.
 `chat_model` unset leaves the choice to the
 first declared provider's first model, else Pi's catalog default — Pi's live
-view of what this ghost's own credentials reach. Ghost keeps no model list, no
-catalog API, and no local-runner detection — a local endpoint is an ordinary
+view of what this ghost's own credentials reach. Ghost keeps no model list of
+its own (`GET /models` relays pi's live answer) and no local-runner detection — a local endpoint is an ordinary
 provider entry in `models.json`. A first sign-in binds the chat role from the
 models pi reports as available to that credential right then, preferring one
 that costs nothing so the zero-cost onboarding path cannot start billing;

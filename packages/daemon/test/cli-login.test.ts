@@ -247,3 +247,19 @@ describe("ghost login --list", () => {
     expect(result.stdout).toContain("anthropic   Anthropic   oauth    oauth");
   });
 });
+
+describe("ghost model --list", () => {
+  it("prints what the signed-in providers reach, one provider/id per line", async () => {
+    const daemon = loginDaemon([], []);
+    const inner = daemon.fetch;
+    daemon.fetch = async (input, init) => new URL(input).pathname === "/api/ghosts/casper/models"
+      ? new Response(JSON.stringify({ models: [{ provider: "xai", id: "grok-4.6", name: "Grok 4.6" }] }))
+      : inner(input, init);
+    const result = await runCli(["model", "--list", "-g", "casper"], options(daemon));
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("xai/grok-4.6\n");
+
+    const both = await runCli(["model", "xai/grok-4.6", "--list", "-g", "casper"], options(daemon));
+    expect(both.code).toBe(2);
+  });
+});

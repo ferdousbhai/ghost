@@ -932,6 +932,17 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { providers: await options.login.listProviders(ghostName) });
   };
 
+  const handleListModels = async (
+    ghostName: string,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (!options.login) {
+      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
+      return;
+    }
+    jsonResponse(response, 200, { models: await options.login.listAvailableModels(ghostName) });
+  };
+
   const handleStartLogin = async (
     ghostName: string,
     request: IncomingMessage,
@@ -1689,6 +1700,13 @@ export function createDaemonServer(options: ServerOptions): Server {
           if (method === "DELETE") return await handleClearModel(ghostName, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
+        }
+        if (segments.length === 4 && segments[3] === "models") {
+          if (method !== "GET") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          return await handleListModels(ghostName, response);
         }
         if (segments.length === 4 && segments[3] === "providers") {
           if (method !== "GET") {

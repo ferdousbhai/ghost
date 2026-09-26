@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// ModelLogin — "Connect a model": sign the active ghost into a provider
+// ModelLogin — "Connect a provider": sign the active ghost into a provider
 // (an OpenAI Codex / ChatGPT subscription, OpenRouter, an API key, …) without
 // a terminal. It drives the daemon's login state machine through the Ghostd
 // service: pick a provider, then follow whatever step the daemon reports —
@@ -20,6 +20,11 @@ Rectangle {
 
     signal closeRequested()
 
+    property string closeLabel: "Close"
+    readonly property string query: providerSearch.text.trim().toLowerCase()
+    readonly property var shownProviders: Ghostd.providers.filter(provider => root.query === ""
+        || (provider.name + " " + provider.id).toLowerCase().indexOf(root.query) >= 0)
+
     // The current daemon-reported step, unpacked with guards (no nested access
     // on a possibly-empty object).
     readonly property var view: Ghostd.loginState
@@ -37,8 +42,10 @@ Rectangle {
     color: Theme.background
 
     function open(): void {
+        providerSearch.text = "";
         Ghostd.cancelLogin();
         Ghostd.fetchProviders();
+        Qt.callLater(providerSearch.focusInput);
     }
 
     function close(): void {
@@ -46,6 +53,7 @@ Rectangle {
         root.closeRequested();
     }
 
+    Keys.onEscapePressed: root.close()
     onVisibleChanged: if (!visible) Ghostd.cancelLogin()
     Component.onDestruction: Ghostd.cancelLogin()
 
@@ -57,6 +65,12 @@ Rectangle {
     Connections {
         target: Ghostd
         function onLoginGenerationChanged(): void { codeField.text = ""; }
+    }
+
+    /** A provider's own sign-in: OAuth where it offers one, else its API key. */
+    function startPrimaryLogin(provider: var): void {
+        Ghostd.startLogin(provider.id,
+            (provider.authTypes || []).indexOf("oauth") >= 0 ? "oauth" : "api_key");
     }
 
     function submitCurrentInput(): void {
@@ -75,7 +89,7 @@ Rectangle {
             spacing: Theme.gap
 
             Text {
-                text: "Connect a model"
+                text: "Connect a provider"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSubtitle
@@ -92,7 +106,7 @@ Rectangle {
             Item { Layout.fillWidth: true }
 
             Text {
-                text: "Close"
+                text: root.closeLabel
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
@@ -102,6 +116,22 @@ Rectangle {
                     onClicked: root.close()
                 }
             }
+        }
+
+        SearchField {
+            id: providerSearch
+            objectName: "providerSearch"
+            visible: root.picking
+            Layout.fillWidth: true
+            placeholder: "Search providers"
+            onMoved: step => {
+                const row = providerRepeater.itemAt(step > 0 ? 0 : providerRepeater.count - 1);
+                if (row) row.forceActiveFocus();
+            }
+            // Only a typed query picks a provider: an empty field's first row is
+            // a guess, and a sign-in may bill.
+            onAccepted: if (root.query !== "" && root.shownProviders.length > 0)
+                root.startPrimaryLogin(root.shownProviders[0])
         }
 
         Flickable {
@@ -119,11 +149,11 @@ Rectangle {
                 spacing: Theme.gap
 
                 Text {
-                    visible: Ghostd.providers.length === 0
+                    visible: root.shownProviders.length === 0
                     width: parent.width
                     text: Ghostd.loginError !== ""
                         ? Ghostd.loginError
-                        : "Loading providers…"
+                        : Ghostd.providers.length === 0 ? "Loading providers…" : "No provider matches."
                     color: Ghostd.loginError !== "" ? Theme.danger : Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSize
@@ -131,7 +161,8 @@ Rectangle {
                 }
 
                 Repeater {
-                    model: Ghostd.providers
+                    id: providerRepeater
+                    model: root.shownProviders
 
                     Rectangle {
                         id: providerRow
@@ -150,14 +181,9 @@ Rectangle {
                         border.width: providerRow.activeFocus ? 1 : 0
                         border.color: Theme.accent
 
-                        function startPrimaryLogin(): void {
-                            Ghostd.startLogin(providerRow.modelData.id,
-                                providerRow.hasOauth ? "oauth" : "api_key");
-                        }
-
-                        Keys.onReturnPressed: providerRow.startPrimaryLogin()
-                        Keys.onEnterPressed: providerRow.startPrimaryLogin()
-                        Keys.onSpacePressed: providerRow.startPrimaryLogin()
+                        Keys.onReturnPressed: root.startPrimaryLogin(providerRow.modelData)
+                        Keys.onEnterPressed: root.startPrimaryLogin(providerRow.modelData)
+                        Keys.onSpacePressed: root.startPrimaryLogin(providerRow.modelData)
 
                         RowLayout {
                             anchors.fill: parent
@@ -205,7 +231,7 @@ Rectangle {
                                     : "Paste API key"
                                 primary: true
                                 activeFocusOnTab: false
-                                onClicked: providerRow.startPrimaryLogin()
+                                onClicked: root.startPrimaryLogin(providerRow.modelData)
                             }
 
                             // Secondary: API key, when a provider offers both.

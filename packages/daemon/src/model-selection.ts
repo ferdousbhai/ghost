@@ -32,7 +32,21 @@ export interface ModelSelectionOptions {
   onModelRoutingChanged?: (ghostName: string) => Promise<void> | void;
 }
 
-const SELECTOR = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/u;
+const PROVIDER = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,199}$/u;
+// Model ids also take `@`: Cloudflare's catalog ids read `@cf/meta/…`.
+const MODEL_ID = /^[A-Za-z0-9@][A-Za-z0-9._:/+@-]{0,199}$/u;
+
+/** Whether `provider/id` can be written as a binding; the model list offers only these. */
+export function isChatModelSelector(provider: string, id: string): boolean {
+  return PROVIDER.test(provider) && MODEL_ID.test(id);
+}
+
+/** `provider/id`, split at the first slash (an id may hold more), or null. */
+export function parseChatModelSelector(text: string): { provider: string; id: string } | null {
+  const slash = text.indexOf("/");
+  if (slash < 1 || slash === text.length - 1) return null;
+  return { provider: text.slice(0, slash), id: text.slice(slash + 1) };
+}
 
 export class ModelSelection {
   private readonly registry: GhostRegistry;
@@ -63,7 +77,7 @@ export class ModelSelection {
   }
 
   async setChatModel(ghostName: string, provider: string, id: string): Promise<CurrentModel> {
-    if (!SELECTOR.test(provider) || !SELECTOR.test(id)) {
+    if (!isChatModelSelector(provider, id)) {
       throw new GhostError("invalid_request", "A model is written as provider/id.", 400);
     }
     const ghost = this.registry.get(ghostName);
