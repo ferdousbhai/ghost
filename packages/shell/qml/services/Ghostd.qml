@@ -504,6 +504,8 @@ Singleton {
     signal askWaiting(string ghost, var ask, string sessionId, string title)
     /** Text for the composer: a queued message the daemon refused, or a branch's draft. */
     signal composerDraft(string text)
+    /** setChatModel's PUT/DELETE answered 200. */
+    signal modelWritten()
     signal mcpMutationFinished(string action, string server, bool ok)
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
@@ -551,6 +553,16 @@ Singleton {
     readonly property bool loginPolling: loginPoll.running
     property var modelRequest: null
     property int modelGeneration: 0
+    /** A PUT/DELETE of the chat model; its own slot, so a concurrent read cannot drop its answer. */
+    property var modelWriteRequest: null
+    readonly property bool modelWriting: root.modelWriteRequest !== null
+    /** The model picker's last failure: listing models, or binding one. */
+    property string modelError: ""
+    /** pi's live list of models this ghost's credentials reach. */
+    property var availableModels: []
+    property var availableModelsRequest: null
+    /** Test seam; production always constructs the native QML XHR. */
+    property var modelRequestFactory: null
 
     /**
      * Nothing can answer yet: no model at all, as opposed to one that is simply
@@ -717,6 +729,10 @@ Singleton {
     onActiveGhostChanged: {
         root.modelGeneration += 1;
         root.modelRequest = null;
+        root.modelWriteRequest = null;
+        root.availableModelsRequest = null;
+        root.availableModels = [];
+        root.modelError = "";
         // A rename moves loginGhost before activeGhost, preserving a live flow.
         // Any other selection change makes the old ghost's requests stale.
         if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
@@ -3168,6 +3184,8 @@ Singleton {
             break;
         case "command_output":
             root.receiveCommandOutputFor(state, event);
+            // `/model provider/id` rebinds the ghost; the chip reads the daemon.
+            if (event.command === "/model" && !event.isError) root.fetchCurrentModel();
             break;
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };
@@ -3721,6 +3739,7 @@ Singleton {
         if (view.status === "succeeded") {
             root.refresh();
             root.fetchCurrentModel();
+            root.fetchAvailableModels();
         }
     }
 
@@ -3922,20 +3941,25 @@ Singleton {
     }
 
 
+    /** Adopt a `{ current, source }` body; false when it is malformed. */
+    function adoptModelSelection(xhr: var): bool {
+        try {
+            const body = JSON.parse(xhr.responseText);
+            root.currentModel = body.current || null;
+            root.modelSource = body.source || "none";
+            return true;
+        } catch (error) {
+            return false;
+        }
+    }
+
     function applyCurrentModelResponse(xhr: var, ghost: string, generation: int): bool {
         if (xhr.readyState !== 4 || xhr !== root.modelRequest
                 || ghost !== root.activeGhost || generation !== root.modelGeneration)
             return false;
         root.modelRequest = null;
-        if (xhr.status === 200) {
-            try {
-                const body = JSON.parse(xhr.responseText);
-                root.currentModel = body.current || null;
-                root.modelSource = body.source || "none";
-            } catch (error) {
-                // A malformed selection leaves the last known model standing.
-            }
-        }
+        // A malformed or failed read leaves the last known model standing.
+        if (xhr.status === 200) root.adoptModelSelection(xhr);
         return true;
     }
 
@@ -3943,13 +3967,70 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "") return;
         const generation = root.modelGeneration;
-        const xhr = new XMLHttpRequest();
+        const xhr = root.newRequest(root.modelRequestFactory);
         root.modelRequest = xhr;
         xhr.onreadystatechange = function () {
             root.applyCurrentModelResponse(xhr, ghost, generation);
         };
         root.dispatch(xhr, "GET",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
+    }
+
+    /** Bind the chat model, or unset it when `provider` is empty; `modelWritten` reports success. */
+    function setChatModel(provider: string, id: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const generation = root.modelGeneration;
+        const what = provider === "" ? "DELETE model" : "PUT model";
+        const xhr = root.newRequest(root.modelRequestFactory);
+        root.modelWriteRequest = xhr;
+        root.modelError = "";
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.modelWriteRequest
+                    || ghost !== root.activeGhost || generation !== root.modelGeneration)
+                return;
+            root.modelWriteRequest = null;
+            if (xhr.status !== 200) {
+                root.modelError = root.describeError(xhr, what);
+            } else if (!root.adoptModelSelection(xhr)) {
+                root.modelError = "ghostd sent a malformed model selection";
+            } else {
+                // A read that left before this write would restore the old model.
+                root.modelRequest = null;
+                root.modelWritten();
+            }
+        };
+        const path = "/api/ghosts/" + encodeURIComponent(ghost) + "/model";
+        if (provider === "") root.dispatch(xhr, "DELETE", path, ({}), null);
+        else root.dispatch(xhr, "PUT", path, ({ "Content-Type": "application/json" }),
+            JSON.stringify({ provider: provider, id: id }));
+    }
+
+    function fetchAvailableModels(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "") return;
+        const generation = root.modelGeneration;
+        const xhr = root.newRequest(root.modelRequestFactory);
+        root.availableModelsRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.availableModelsRequest
+                    || ghost !== root.activeGhost || generation !== root.modelGeneration)
+                return;
+            root.availableModelsRequest = null;
+            if (xhr.status === 200) {
+                try {
+                    const body = JSON.parse(xhr.responseText);
+                    root.availableModels = Array.isArray(body.models) ? body.models : [];
+                    root.modelError = "";
+                } catch (error) {
+                    root.modelError = "ghostd sent a malformed model list";
+                }
+            } else {
+                root.modelError = root.describeError(xhr, "GET models");
+            }
+        };
+        root.dispatch(xhr, "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/models", ({}), null);
     }
 
     /** The daemon's own presentable message for a failure, or "". */

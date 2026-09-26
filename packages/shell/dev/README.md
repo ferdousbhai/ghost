@@ -157,7 +157,7 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   activity, markdown render, terminal `done`, notification.
 - The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
   colours, focus grab, Esc.
-- **The "Connect a model" panel** (`ModelLogin.qml`) against the mock's login
+- **The "Connect a provider" panel** (`ModelLogin.qml`, inside `ModelPicker.qml`) against the mock's login
   endpoints: the provider picker, the OAuth auth-URL + paste-code step, the
   `select` step, and the api-key step, each rendered live and captured under
   `dev/evidence/model-login*.png`. Driven by `ipc call ghost login` /

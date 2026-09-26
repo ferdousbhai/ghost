@@ -32,7 +32,7 @@ Item {
      * Summon the window. The payload is the shell's summon payload, as
      * Service.qml's IPC verbs and notification actions send it:
      * `{"section":"board"}` opens on a section, `{"ghost":"casper"}` selects
-     * one first, `{"login":true}` opens the provider login. `sessionId` with
+     * one first, `{"login":true}` opens provider sign-in. `sessionId` with
      * `ghost` opens that conversation.
      */
     function open(payloadJson: string): void {
@@ -47,7 +47,7 @@ Item {
         else if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
         hud.open();
         if (payload.section) hud.showSection(String(payload.section));
-        if (payload.login) hud.openLogin();
+        if (payload.login) hud.openModels(true);
     }
 
     function close(): void {

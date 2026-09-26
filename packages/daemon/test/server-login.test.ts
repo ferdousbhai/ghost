@@ -157,6 +157,44 @@ describe("GET /api/ghosts/:name/providers", () => {
   });
 });
 
+describe("GET /api/ghosts/:name/models", () => {
+  it("lists what pi reports reachable across every signed-in provider", async () => {
+    const base = await serve(async () => oauthCredential(), {
+      anthropic: ["claude-x"],
+      openrouter: ["z-model:free", "a-model", "@cf/meta/llama", "bad model"],
+    });
+    const response = await fetch(`${base}/api/ghosts/casper/models`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { models: { provider: string; id: string }[] };
+    // Only ids a PUT accepts are offered, `@cf/…` included.
+    expect(body.models.map((model) => `${model.provider}/${model.id}`)).toEqual([
+      "anthropic/claude-x",
+      "openrouter/@cf/meta/llama",
+      "openrouter/a-model",
+      "openrouter/z-model:free",
+    ]);
+  });
+
+  it("drops a provider whose availability check fails instead of failing the list", async () => {
+    const base = await serveWithRuntime(async () => {
+      const runtime = makeFakeRuntime({
+        login: async () => oauthCredential(),
+        models: { anthropic: ["claude-x"], openrouter: ["a-model"] },
+      });
+      const getAvailable = runtime.getAvailable.bind(runtime);
+      runtime.getAvailable = async (providerId) => {
+        if (providerId === "anthropic") throw new Error("auth check unreachable");
+        return getAvailable(providerId);
+      };
+      return runtime;
+    });
+    const response = await fetch(`${base}/api/ghosts/casper/models`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { models: { provider: string; id: string }[] };
+    expect(body.models.map((model) => `${model.provider}/${model.id}`)).toEqual(["openrouter/a-model"]);
+  });
+});
+
 describe("POST /api/ghosts/:name/login", () => {
   it("rejects a bad body and an unknown provider", async () => {
     const base = await serve(async () => oauthCredential());

@@ -111,41 +111,10 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        SearchField {
+            id: searchInput
             width: parent.width
-            height: Theme.controlHeight
-            radius: Theme.radius
-            color: Theme.film(0.05)
-            border.width: searchInput.activeFocus ? 1 : 0
-            border.color: Theme.amber(0.50)
-
-            TextInput {
-                id: searchInput
-                anchors.fill: parent
-                anchors.leftMargin: Theme.pad
-                anchors.rightMargin: Theme.pad
-                verticalAlignment: TextInput.AlignVCenter
-                color: Theme.foregroundBright
-                selectionColor: Theme.selection
-                selectedTextColor: Theme.foregroundBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-                clip: true
-                activeFocusOnTab: true
-
-                Accessible.name: "Search commands"
-
-                Text {
-                    anchors.fill: parent
-                    verticalAlignment: Text.AlignVCenter
-                    visible: searchInput.text === ""
-                    text: "Search names, aliases, descriptions, and sources"
-                    color: Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSize
-                    elide: Text.ElideRight
-                }
-            }
+            placeholder: "Search names, aliases, descriptions, and sources"
         }
     }
 

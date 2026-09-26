@@ -4,15 +4,27 @@ import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
 type CurrentModel = { current: { provider: string; id: string; runtime: string } | null; source: string };
+type AvailableModels = { models: { provider: string; id: string; name: string }[] };
 
-/** `ghost model [provider/id|--none]`: show, set, or unset the chat model; pi owns the catalog. */
+/** `ghost model [provider/id|--none|--list]`: show, set, unset, or list the chat model; pi owns the catalog. */
 export async function modelCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const base = `/api/ghosts/${encodeURIComponent(name)}/model`;
   let body: unknown;
   const clear = flagBoolean(parsed, "none");
-  if (clear && parsed.positionals[0]) {
-    throw new ArgsError("Give a model or --none, not both.");
+  const list = flagBoolean(parsed, "list");
+  if ([clear, list, Boolean(parsed.positionals[0])].filter(Boolean).length > 1) {
+    throw new ArgsError("Give one of a model, --none, or --list.");
+  }
+  if (list) {
+    body = (await ctx.client.request("GET", `${base}s`)).body;
+    emit(ctx, body, (result) => {
+      const { models } = result as AvailableModels;
+      return models.length > 0
+        ? models.map((model) => `${model.provider}/${model.id}\n`).join("")
+        : "No models reachable; sign in with ghost login <provider>.\n";
+    });
+    return 0;
   }
   if (clear) {
     body = (await ctx.client.request("DELETE", base)).body;

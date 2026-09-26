@@ -34,10 +34,10 @@ FloatingWindow {
     /** Driven by Panel.qml. Bound to `visible`. */
     property bool shown: false
     property bool sidebarOpen: true
-    property bool loginOpen: false
+    property bool modelsOpen: false
     property string currentSection: "chat"
-    /** What the body shows: the login pane over any section, else the section. */
-    readonly property string view: hud.loginOpen ? "login" : hud.currentSection
+    /** What the body shows: the model pane over any section, else the section. */
+    readonly property string view: hud.modelsOpen ? "models" : hud.currentSection
     /** The navigable sections, in rail order; the body stack follows it. */
     readonly property var sections: navigation.destinations.map(destination => destination.id)
     readonly property int navigationWidth: 64
@@ -87,10 +87,6 @@ FloatingWindow {
     implicitHeight: 620
     minimumSize: Qt.size(568, 360)
 
-    // Leaving login abandons any client-only model intent and restores the
-    // daemon's effective selection. This catches Close, Done, navigation, and
-    // every other way the login pane gives the body back.
-    onLoginOpenChanged: if (!hud.loginOpen) Ghostd.cancelLogin()
 
     // Materialize on summon: the content takes a breath of scale and opacity
     // instead of cutting in. Content-level, because the compositor owns the
@@ -117,7 +113,7 @@ FloatingWindow {
     }
 
     function close(): void {
-        hud.loginOpen = false;
+        hud.modelsOpen = false;
         hud.shown = false;
     }
 
@@ -142,15 +138,16 @@ FloatingWindow {
     /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
         if (hud.sections.indexOf(section) < 0) return;
-        hud.loginOpen = false;
+        hud.modelsOpen = false;
         hud.currentSection = section;
         if (section === "chat") composer.take();
     }
 
-    function openLogin(): void {
+    /** The model pane; `connect` opens straight onto provider sign-in. */
+    function openModels(connect: bool): void {
         hud.currentSection = "chat";
-        hud.loginOpen = true;
-        modelLogin.open();
+        hud.modelsOpen = true;
+        modelPicker.open(connect);
     }
 
     function pendingId(kind: string): string {
@@ -333,15 +330,15 @@ FloatingWindow {
             HudHeader {
                 Layout.fillWidth: true
                 z: 20
-                onLoginRequested: hud.openLogin()
+                onModelsRequested: hud.openModels(Ghostd.noModel)
             }
 
             // One pane per entry of `hud.sections`, in the same order, then
-            // login; the stack shows the one `hud.view` names.
+            // the model pane; the stack shows the one `hud.view` names.
             StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                currentIndex: hud.sections.concat(["login"]).indexOf(hud.view)
+                currentIndex: hud.sections.concat(["models"]).indexOf(hud.view)
 
                 RowLayout {
                     spacing: Theme.sectionGap
@@ -439,7 +436,7 @@ FloatingWindow {
                                 // would wrap every third word.
                                 width: Math.min(transcriptView.width - Theme.pad * 2,
                                     Theme.ch(46) + Theme.pad * 2)
-                                onLoginRequested: hud.openLogin()
+                                onLoginRequested: hud.openModels(true)
                             }
                         }
 
@@ -555,10 +552,10 @@ FloatingWindow {
                     onCloseRequested: hud.showSection("chat")
                 }
 
-                // "Connect a model": swaps in over the transcript body.
-                ModelLogin {
-                    id: modelLogin
-                    onCloseRequested: hud.loginOpen = false
+                // The model picker, with provider sign-in inside it.
+                ModelPicker {
+                    id: modelPicker
+                    onCloseRequested: hud.modelsOpen = false
                 }
             }
         }

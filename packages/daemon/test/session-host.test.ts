@@ -4985,6 +4985,41 @@ describe("model switch reaches a live cached session", () => {
     expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
   });
 
+  it("binds the ghost's chat model from /model provider/id", async () => {
+    temp = makeTempGhosts();
+    provider = await startMockProvider({ script: [{ kind: "text", text: "unused" }] });
+    const dir = seedGhost(temp.root, { name: "casper" });
+    const paths = ghostPaths(dir);
+    writeGhostModels(paths.home, twoModelFile(provider.url));
+    const models = new ModelSelection({
+      registry: temp.registry,
+      homeOperations: homeOperationsFor(temp.registry),
+      onModelRoutingChanged: (ghost) => host!.rebindModel(ghost),
+    });
+    host = new SessionHost({ registry: temp.registry, offline: true, models });
+    const handle = await host.open("casper", "conv-slash-model");
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-a" });
+
+    const run = async (prompt: string) => {
+      const events: PiMessagesEvent[] = [];
+      await host!.runTurn("casper", { sessionId: "conv-slash-model", prompt, emit: (event) => events.push(event) });
+      return events.find((event) => event.type === "command_output");
+    };
+
+    expect(await run("/model ghost-local/model-b")).toMatchObject({
+      command: "/model",
+      output: expect.stringContaining("ghost-local/model-b"),
+    });
+    expect(readGhostModels(paths.home)?.roles?.chat_model).toEqual({ provider: "ghost-local", modelId: "model-b" });
+    expect(handle.model).toEqual({ provider: "ghost-local", id: "model-b" });
+    expect(await run("/model model-b")).toMatchObject({ isError: true, code: "command_failed" });
+
+    // The way back out: `/model default` unsets the binding.
+    expect(await run("/model default")).toMatchObject({ command: "/model", output: expect.stringContaining("unset") });
+    expect(readGhostModels(paths.home)?.roles?.chat_model).toBeUndefined();
+    expect(provider.requests).toHaveLength(0);
+  });
+
   it("defers a switch that lands mid-turn, then applies it to the next turn", async () => {
     temp = makeTempGhosts();
     // Stream slowly so a turn is still in flight when the switch lands.

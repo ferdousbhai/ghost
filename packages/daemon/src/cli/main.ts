@@ -169,8 +169,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "model",
-    usage: "model [provider/id|--none] [-g <name>] [--json] [-q]",
-    summary: "Show, set, or unset the chat model; --none hands the choice back to pi.",
+    usage: "model [provider/id|--none|--list] [-g <name>] [--json] [-q]",
+    summary: "Show, set, unset, or list the chat model; --none hands the choice back to pi.",
     example: "ghost model openrouter/openai/gpt-5.5",
     positionals: [0, 1],
     run: modelCommand,

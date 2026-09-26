@@ -141,6 +141,7 @@ import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
 import { resolveChatModel } from "./model-routing.js";
+import type { ModelSelection } from "./model-selection.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
   buildGhostAvailableSlashCommands,
@@ -585,6 +586,8 @@ export interface SessionHostOptions {
   hooks?: GhostHookRunner;
   homeOperations?: HomeOperationCoordinator;
   retention?: SessionRetentionConfig;
+  /** What `/model provider/id` and `/model default` write through; absent, those forms fail. */
+  models?: Pick<ModelSelection, "setChatModel" | "clearChatModel">;
 }
 
 export interface RunTurnOptions {
@@ -1295,6 +1298,7 @@ export class SessionHost {
   private readonly createGreetingRuntime: typeof createGhostPiRuntime;
   private readonly hooks: GhostHookRunner;
   private readonly homeOperations: HomeOperationCoordinator;
+  private readonly models: SessionHostOptions["models"];
   private readonly sessions = new Map<string, HostedSession>();
   private readonly conversationListeners = new Map<string, Set<ConversationEventSubscription>>();
   /** Prevents parallel turns from constructing duplicate sessions. */
@@ -1384,6 +1388,7 @@ export class SessionHost {
     this.createGreetingRuntime = options.greeting?.createRuntime ?? createGhostPiRuntime;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
+    this.models = options.models;
     this.unregisterHomeMoveParticipant = this.homeOperations.registerMoveParticipant({
       preclaim: (ghostName) => {
         if (this.ghostBusy(ghostName)) {
@@ -3047,6 +3052,11 @@ export class SessionHost {
         session: hosted.session,
         cwd: hosted.session.sessionManager.getCwd(),
         ghostHome: hosted.ghost.dir,
+        setChatModel: async (provider, id) => {
+          if (!this.models) throw new Error("Model selection is not enabled on this daemon.");
+          if (provider === "") await this.models.clearChatModel(hosted.ghost.name);
+          else await this.models.setChatModel(hosted.ghost.name, provider, id);
+        },
       });
       options.emit({ type: "command_output", command: dispatch.command, output });
       options.emit({ type: "done", reason: "stop", usage: zeroUsage() });

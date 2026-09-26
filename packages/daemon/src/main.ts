@@ -429,9 +429,17 @@ async function serveDaemon(
   // then reports that none is reachable.
   const relay = createRelayHub({ logger });
   const homeOperations = new HomeOperationCoordinator(registry);
+  const modelSelection = new ModelSelection({
+    registry,
+    homeOperations,
+    // A model switch must reach any conversation that is already open, not just
+    // the next freshly built session: rebind the live cached sessions.
+    onModelRoutingChanged: (name): Promise<void> => host.rebindModel(name),
+  });
   const host = new SessionHost({
     registry,
     homeOperations,
+    models: modelSelection,
     ownerHome,
     scheduleUnitDir,
     scheduleRuntimeUnitDir,
@@ -451,13 +459,6 @@ async function serveDaemon(
     logger,
     offline: config.offline,
     onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
-  });
-  const modelSelection = new ModelSelection({
-    registry,
-    homeOperations,
-    // A model switch must reach any conversation that is already open, not just
-    // the next freshly built session: rebind the live cached sessions.
-    onModelRoutingChanged: (name) => host.rebindModel(name),
   });
   const mcp = new McpCatalog({ registry, homeOperations, logger });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });

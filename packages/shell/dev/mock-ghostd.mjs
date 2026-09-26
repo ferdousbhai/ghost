@@ -1294,7 +1294,7 @@ const CATALOG = [
 // connected so the available list is non-empty; the rest route through login.
 const credentialed = new Set(["anthropic"]);
 const roles = new Map();
-const _modelRow = (m) => ({
+const availableModelRow = (m) => ({
   provider: m.provider,
   id: m.id,
   name: m.name,
@@ -1800,6 +1800,11 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, resolveCurrent(name));
   }
 
+  if (parts[3] === "models" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, {
+      models: CATALOG.filter((m) => credentialed.has(m.provider)).map(availableModelRow),
+    });
+  }
   if (parts[3] === "providers" && req.method === "GET") {
     return json(res, 200, { providers: PROVIDERS });
   }

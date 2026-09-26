@@ -139,9 +139,11 @@ ghostd login sage --provider openrouter
 
 In the HUD, the same flow, and on a fresh install it is the first thing you
 see: an empty conversation says *Click here to connect a model — free options
-exist*, and the card itself opens the pane. The button in the chat header reads
-**Connect a model** until one is bound, then shows what is bound. Either opens
-the **Connect a model** pane. Each provider
+exist*, and the card itself opens the **Connect a provider** pane. The button in
+the chat header reads **Connect a provider** until a model can answer, then
+shows the model and opens **Choose a model**: a searchable list of every model
+your signed-in providers reach, a **Default** row that hands the choice back to
+pi, and a **Connect a provider** button for adding another. Each provider
 row's primary button is **Sign in**, or the provider's own label — Anthropic's
 reads *Sign in (extra usage)*, because third-party calls draw
 per-token usage rather than an included Claude plan. Where a provider offers
@@ -170,13 +172,17 @@ To look and choose explicitly:
 
 ```sh
 ghost model                        # what is bound now
+ghost model --list                 # what the signed-in providers reach
 ghost model openrouter/<model-id>  # bind the chat model
 ```
 
+In a conversation, `/model` shows the model, `/model <provider>/<id>` binds it,
+and `/model default` hands the choice back to pi.
+
 A model is always written as `provider/id`, split at the *first* slash — an id
-that itself contains slashes is fine. Ghost keeps no catalog: pi validates the
-model when the next turn runs. The HUD pill shows the binding and opens the
-provider login.
+that itself contains slashes is fine. pi validates the model when the next turn
+runs. Signing into another provider never changes a model you already bound;
+choose one of its models afterwards.
 
 To drive the ghost with a local model, install Ollama or LM Studio from the
 Omarchy menu (Install → AI). A local runner is an ordinary provider entry in

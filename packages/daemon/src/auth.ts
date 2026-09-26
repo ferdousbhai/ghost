@@ -16,6 +16,7 @@ import {
   setChatModelRoleIfUnset,
 } from "./models.js";
 import { CHAT_MODEL_NEED, bestForNeed, isAggregatorRouter, resolveChatModel } from "./model-routing.js";
+import { isChatModelSelector } from "./model-selection.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 
 export type AuthType = "oauth" | "api_key";
@@ -115,6 +116,12 @@ export interface ProviderInfo {
   configured: boolean;
   billingNote?: string;
   connectedVia?: AuthType;
+}
+
+export interface AvailableModel {
+  provider: string;
+  id: string;
+  name: string;
 }
 
 interface PendingPrompt {
@@ -381,6 +388,22 @@ export class LoginManager {
 
   async listProviders(ghostName: string): Promise<ProviderInfo[]> {
     return this.withRuntime(ghostName, (runtime) => this.providersFrom(runtime));
+  }
+
+  /**
+   * pi's live answer to which models this ghost's credentials reach; Ghost
+   * keeps no list. Asked one provider at a time, so a provider whose auth check
+   * fails drops out instead of failing the whole list.
+   */
+  async listAvailableModels(ghostName: string): Promise<AvailableModel[]> {
+    return this.withRuntime(ghostName, async (runtime) => {
+      const perProvider = await Promise.all(runtime.getProviders()
+        .map((provider) => discoverAvailableModels(runtime, provider.id)));
+      return perProvider.flatMap((models) => models ?? [])
+        .filter((model) => isChatModelSelector(model.provider, model.id))
+        .map((model) => ({ provider: model.provider, id: model.id, name: model.name }))
+        .sort((a, b) => a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id));
+    });
   }
 
   async logout(ghostName: string, providerId: string): Promise<void> {

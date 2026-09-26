@@ -150,9 +150,10 @@ Roles are `chat_model` (the conversation) and `smol_model` (titles, greetings,
 command-hook completions), one binding each; retry and model fallback belong to
 the runtime, not to `models.json`. The background role follows the driver when
 unset: the chat provider's small tier, then the cheapest usable model anywhere.
-`chat_model` unset leaves the choice to pi. There is no model catalog API and
-no local-runner detection: `ghost model <provider>/<id>` writes the binding,
-and a local endpoint is an ordinary provider in `models.json`.
+`chat_model` unset leaves the choice to pi. Ghost keeps no model list of its own
+and no local-runner detection: the HUD picker, `/model`, and `ghost model
+<provider>/<id>` choose from pi's live list of what the ghost's credentials
+reach, and a local endpoint is an ordinary provider in `models.json`.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use the runtime's own retry and fallback chains; Ghost adds no turn,

@@ -23,6 +23,8 @@ QueueLine 1.0 QueueLine.qml
 Board 1.0 Board.qml
 RemoteAccess 1.0 RemoteAccess.qml
 RenameSession 1.0 RenameSession.qml
+SearchField 1.0 SearchField.qml
+ModelPicker 1.0 ModelPicker.qml
 Roster 1.0 Roster.qml
 ResourcesLine 1.0 ResourcesLine.qml
 SpectralOrb 1.0 SpectralOrb.qml
