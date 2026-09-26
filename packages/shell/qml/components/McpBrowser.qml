@@ -27,6 +27,7 @@ Rectangle {
         ? Ghostd.mcpServers : []
     readonly property var filteredServers: McpConfig.filtered(root.servers, root.searchText)
     readonly property var selectedServer: root.findServer(root.selectedName)
+    readonly property bool selectedDisabled: !!root.selectedServer && root.selectedServer.enabled === false
     readonly property bool editingHiddenValues: !root.adding && root.selectedServer
         && McpConfig.hasHiddenValues(root.selectedServer)
 
@@ -34,10 +35,6 @@ Rectangle {
     implicitHeight: Theme.pad * 34
     color: Theme.background
     clip: true
-
-    function textOf(value: var): string {
-        return value === undefined || value === null ? "" : String(value);
-    }
 
     function findServer(name: string): var {
         for (let i = 0; i < root.servers.length; i++) {
@@ -105,23 +102,6 @@ Rectangle {
         root.editorError = "";
         if (root.adding) Ghostd.addMcpServer(name, parsed.config);
         else Ghostd.updateMcpServer(root.selectedName, parsed.config);
-    }
-
-    function hiddenSummary(server: var): string {
-        if (!server || !server.config) return "";
-        const config = server.config;
-        const parts = [];
-        const argumentsCount = Number(config.argumentCount || 0);
-        if (argumentsCount > 0)
-            parts.push(argumentsCount + " command argument" + (argumentsCount === 1 ? "" : "s"));
-        const env = McpConfig.configuredKeys(config.environment);
-        if (env.length > 0) parts.push("environment: " + env.join(", "));
-        const headers = McpConfig.configuredKeys(config.headers);
-        if (headers.length > 0) parts.push("headers: " + headers.join(", "));
-        if (config.auth && config.auth.configured === true) parts.push("authentication");
-        if (config.oauth && config.oauth.configured === true) parts.push("OAuth client settings");
-        if (McpConfig.remoteUrlIsRedacted(config.url)) parts.push("URL query values");
-        return parts.join(" · ");
     }
 
     Component.onCompleted: {
@@ -331,7 +311,7 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: McpConfig.transport(serverRow.modelData).toUpperCase()
-                                    + " · " + root.textOf(serverRow.modelData.source || "ghost")
+                                    + " · " + McpConfig.text(serverRow.modelData.source || "ghost")
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamilyMono
                                 font.pixelSize: Theme.fontSizeCaption
@@ -419,7 +399,7 @@ Rectangle {
                                         width: parent.width
                                         text: root.selectedServer
                                             ? McpConfig.transport(root.selectedServer).toUpperCase()
-                                                + " · " + root.textOf(root.selectedServer.path)
+                                                + " · " + McpConfig.text(root.selectedServer.path)
                                             : ""
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamilyMono
@@ -432,49 +412,23 @@ Rectangle {
                                     id: detailActions
                                     spacing: Theme.gap / 2
 
-                                    Repeater {
-                                        model: [
-                                            { id: "toggle", label: root.selectedServer
-                                                && root.selectedServer.enabled === false ? "Enable" : "Disable" },
-                                            { id: "edit", label: "Edit" },
-                                            { id: "delete", label: "Delete" }
-                                        ]
-                                        Rectangle {
-                                            id: actionButton
-                                            required property var modelData
-                                            implicitWidth: actionLabel.implicitWidth + Theme.pad
-                                            implicitHeight: Theme.controlHeight - Theme.gap / 2
-                                            radius: Theme.radius
-                                            color: actionArea.containsMouse ? Theme.film(0.09) : Theme.film(0.05)
-                                            border.width: actionButton.modelData.id === "delete" ? 1 : 0
-                                            border.color: Theme.rose(0.24)
-                                            enabled: !Ghostd.mcpMutating
-
-                                            Text {
-                                                id: actionLabel
-                                                anchors.centerIn: parent
-                                                text: actionButton.modelData.label
-                                                color: actionButton.modelData.id === "delete"
-                                                    ? Theme.danger : Theme.foreground
-                                                font.family: Theme.fontFamily
-                                                font.pixelSize: Theme.fontSizeSmall
-                                            }
-                                            MouseArea {
-                                                id: actionArea
-                                                anchors.fill: parent
-                                                enabled: actionButton.enabled
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: {
-                                                    if (!root.selectedServer) return;
-                                                    if (actionButton.modelData.id === "toggle")
-                                                        Ghostd.setMcpEnabled(root.selectedServer.name,
-                                                            root.selectedServer.enabled === false);
-                                                    else if (actionButton.modelData.id === "edit") root.beginEdit();
-                                                    else root.pendingDeleteName = root.selectedServer.name;
-                                                }
-                                            }
-                                        }
+                                    ActionButton {
+                                        label: root.selectedDisabled ? "Enable" : "Disable"
+                                        enabled: !Ghostd.mcpMutating
+                                        onClicked: if (root.selectedServer)
+                                            Ghostd.setMcpEnabled(root.selectedServer.name, root.selectedDisabled)
+                                    }
+                                    ActionButton {
+                                        label: "Edit"
+                                        enabled: !Ghostd.mcpMutating
+                                        onClicked: root.beginEdit()
+                                    }
+                                    ActionButton {
+                                        label: "Delete"
+                                        danger: true
+                                        enabled: !Ghostd.mcpMutating
+                                        onClicked: if (root.selectedServer)
+                                            root.pendingDeleteName = root.selectedServer.name
                                     }
                                 }
                             }
@@ -486,10 +440,8 @@ Rectangle {
                                 spacing: Theme.gap / 2
                                 Text {
                                     width: parent.width
-                                    text: root.selectedServer && root.selectedServer.enabled === false
-                                        ? "Disabled" : "Enabled"
-                                    color: root.selectedServer && root.selectedServer.enabled === false
-                                        ? Theme.foregroundDim : Theme.ghostAmber
+                                    text: root.selectedDisabled ? "Disabled" : "Enabled"
+                                    color: root.selectedDisabled ? Theme.foregroundDim : Theme.ghostAmber
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall
                                     font.weight: Font.DemiBold
@@ -521,7 +473,7 @@ Rectangle {
                                     anchors.right: parent.right
                                     anchors.rightMargin: Theme.pad / 2
                                     anchors.verticalCenter: parent.verticalCenter
-                                    text: "Configured but hidden: " + root.hiddenSummary(root.selectedServer)
+                                    text: "Configured but hidden: " + McpConfig.hiddenParts(root.selectedServer).join(" · ")
                                         + ". Values never leave the daemon."
                                     color: Theme.foregroundDim
                                     font.family: Theme.fontFamily
@@ -546,7 +498,7 @@ Rectangle {
                                     Text {
                                         required property var modelData
                                         width: parent.width
-                                        text: root.textOf(modelData.path) + " — " + root.textOf(modelData.reason)
+                                        text: McpConfig.text(modelData.path) + " — " + McpConfig.text(modelData.reason)
                                         color: Theme.foregroundDim
                                         font.family: Theme.fontFamilyMono
                                         font.pixelSize: Theme.fontSizeCaption
@@ -737,52 +689,16 @@ Rectangle {
                             Row {
                                 anchors.right: parent.right
                                 spacing: Theme.gap
-                                Rectangle {
-                                    implicitWidth: cancelLabel.implicitWidth + Theme.pad * 1.5
-                                    implicitHeight: Theme.controlHeight
-                                    radius: Theme.radius
-                                    color: cancelArea.containsMouse ? Theme.film(0.09) : Theme.film(0.05)
-                                    Text {
-                                        id: cancelLabel
-                                        anchors.centerIn: parent
-                                        text: "Cancel"
-                                        color: Theme.foreground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall
-                                    }
-                                    MouseArea {
-                                        id: cancelArea
-                                        anchors.fill: parent
-                                        enabled: !Ghostd.mcpMutating
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.cancelEdit()
-                                    }
+                                ActionButton {
+                                    label: "Cancel"
+                                    enabled: !Ghostd.mcpMutating
+                                    onClicked: root.cancelEdit()
                                 }
-                                Rectangle {
-                                    implicitWidth: saveLabel.implicitWidth + Theme.pad * 1.5
-                                    implicitHeight: Theme.controlHeight
-                                    radius: Theme.radius
-                                    color: saveArea.containsMouse ? Theme.amber(0.20) : Theme.amber(0.13)
-                                    border.width: 1
-                                    border.color: Theme.amber(0.28)
-                                    Text {
-                                        id: saveLabel
-                                        anchors.centerIn: parent
-                                        text: Ghostd.mcpMutating ? "Saving…" : "Save"
-                                        color: Theme.ghostAmberBright
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        font.weight: Font.DemiBold
-                                    }
-                                    MouseArea {
-                                        id: saveArea
-                                        anchors.fill: parent
-                                        enabled: !Ghostd.mcpMutating
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.save()
-                                    }
+                                ActionButton {
+                                    label: Ghostd.mcpMutating ? "Saving…" : "Save"
+                                    primary: true
+                                    enabled: !Ghostd.mcpMutating
+                                    onClicked: root.save()
                                 }
                             }
                         }

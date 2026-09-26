@@ -26,11 +26,15 @@ Item {
     id: root
 
     property real diameter: 20
-    property bool running: true
+    property bool running: root.visible
     /** Fixes the slow traits, so a ghost looks like itself across every turn. */
-    property string ghost: ""
-    /** Fixes the motion, so no two summonings flicker alike. */
-    property string turnKey: ""
+    property string ghost: Ghostd.activeGhost
+    /**
+     * Fixes the motion, so no two summonings flicker alike. One turn, one orb:
+     * the assistant row advances once per turn, which is exactly the grain
+     * this wants.
+     */
+    property string turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
 
     // The caller's resolution, not the seed's: five columns is what fits at 20px
     // and three at 12px, and a grid the seed chose would make one ghost legible

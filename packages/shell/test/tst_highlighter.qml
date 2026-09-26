@@ -205,6 +205,23 @@ TestCase {
         compare(Highlighter.isMarkdown(data.path), data.md);
     }
 
+    // What Workbench offers to open is exactly what the pane can show.
+    function test_viewable_data() {
+        return [
+            { tag: "markdown", path: "/a/notes.mkd", viewable: true },
+            { tag: "code", path: "/a/types.pyi", viewable: true },
+            { tag: "known filename", path: "/a/Makefile", viewable: true },
+            { tag: "plain", path: "/a/run.log", viewable: true },
+            { tag: "no extension", path: "/a/LICENSE", viewable: false },
+            { tag: "unknown", path: "/a/thing.wat", viewable: false },
+            { tag: "binary", path: "/a/photo.png", viewable: false }
+        ];
+    }
+
+    function test_viewable(data) {
+        compare(Highlighter.isViewable(data.path), data.viewable);
+    }
+
     function test_pathSplitting_data() {
         return [
             { tag: "nested", path: "/home/a/notes/todo.md", name: "todo.md", dir: "/home/a/notes" },

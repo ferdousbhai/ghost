@@ -61,7 +61,7 @@ Item {
 
     function absorb(incoming: string): void {
         if (incoming === root.diskText) return;
-        if (!root.markdown || !editor.dirty) {
+        if (!root.dirty) {
             root.diskText = incoming;
             if (root.markdown) editor.adopt(incoming);
             root.conflictText = "";
@@ -92,23 +92,21 @@ Item {
         root.notice = "Changed on disk while you were editing.";
     }
 
-    function save(): void {
-        // Three reasons not to write, all of them cheap to check: nothing to
-        // save, nothing changed, or a conflict we have not been told how to
-        // settle.
-        if (!root.markdown || !editor.dirty || root.conflictText !== "") return;
+    /** Write the buffer; true when a write was started. Nothing is written
+        when nothing changed or a conflict has not been settled yet. */
+    function save(): bool {
+        if (!root.dirty || root.conflictText !== "") return false;
         autosave.stop();
         root.preWriteDisk = root.diskText;
         root.diskText = editor.buffer;
         file.setText(editor.buffer);
+        return true;
     }
 
     /** Save now and wait for it — for closing, hiding, and rebinding, where
         the pane may not be around when an async write would have landed. */
     function flush(): void {
-        if (!root.markdown || !editor.dirty || root.conflictText !== "") return;
-        root.save();
-        file.waitForJob();
+        if (root.save()) file.waitForJob();
     }
 
     // Both resolutions end with buffer and file holding the same text and
@@ -407,7 +405,7 @@ Item {
             // against a code file's text.
             source: root.markdown ? root.diskText : ""
 
-            onEdited: if (root.conflictText === "") autosave.restart()
+            onEdited: autosave.restart()
         }
 
         CodeView {

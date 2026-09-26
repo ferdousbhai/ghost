@@ -87,7 +87,3 @@ function prepare(state, from, to) {
         return { ok: false, code: "already_exists", before: before };
     return { ok: true, before: before, after: move(before, from, to) };
 }
-
-function rollback(transaction) {
-    return snapshot(transaction.before);
-}

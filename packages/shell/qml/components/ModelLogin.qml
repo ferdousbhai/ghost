@@ -20,8 +20,6 @@ Rectangle {
 
     signal closeRequested()
 
-    property string requestedProvider: ""
-
     // The current daemon-reported step, unpacked with guards (no nested access
     // on a possibly-empty object).
     readonly property var view: Ghostd.loginState
@@ -38,55 +36,27 @@ Rectangle {
     radius: Theme.radius
     color: Theme.background
 
-    function open(provider: string): void {
-        codeField.text = "";
-        root.requestedProvider = provider;
-        Ghostd.resetLogin();
+    function open(): void {
+        Ghostd.cancelLogin();
         Ghostd.fetchProviders();
-        Qt.callLater(root.focusRequestedProvider);
     }
 
     function close(): void {
-        codeField.text = "";
         Ghostd.cancelLogin();
         root.closeRequested();
     }
 
-    function focusRequestedProvider(): void {
-        if (!root.visible || !root.picking || root.requestedProvider === "") return;
-        for (let index = 0; index < providerRepeater.count; index += 1) {
-            const provider = Ghostd.providers[index];
-            if (!provider || provider.id !== root.requestedProvider) continue;
-            const row = providerRepeater.itemAt(index);
-            if (!row) return;
-            row.focus = true;
-            row.forceActiveFocus();
-            const top = row.y;
-            const bottom = top + row.height;
-            if (top < providerList.contentY) providerList.contentY = top;
-            else if (bottom > providerList.contentY + providerList.height)
-                providerList.contentY = Math.max(0, bottom - providerList.height);
-            return;
-        }
-    }
-
-    onVisibleChanged: if (!visible) {
-        codeField.text = "";
-        root.requestedProvider = "";
-        Ghostd.cancelLogin();
-    }
+    onVisibleChanged: if (!visible) Ghostd.cancelLogin()
     Component.onDestruction: Ghostd.cancelLogin()
 
-    // A provider restart, ghost switch, or external reset can end the flow
-    // without changing this persistent component's visibility. The generation
-    // deliberately stays stable during a same-flow rename pause, so a rejected
-    // submit may remain editable there but never cross into a different flow.
+    // Every end of a flow — open, close, hide, a provider restart, a ghost
+    // switch, an external reset — bumps the generation, so this is the one
+    // place the typed field is cleared. The generation deliberately stays
+    // stable during a same-flow rename pause, so a rejected submit may remain
+    // editable there but never cross into a different flow.
     Connections {
         target: Ghostd
         function onLoginGenerationChanged(): void { codeField.text = ""; }
-        function onProvidersChanged(): void {
-            Qt.callLater(root.focusRequestedProvider);
-        }
     }
 
     function submitCurrentInput(): void {
@@ -135,8 +105,6 @@ Rectangle {
         }
 
         Flickable {
-            id: providerList
-            objectName: "providerList"
             visible: root.picking
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -144,7 +112,6 @@ Rectangle {
             contentHeight: providerColumn.implicitHeight
             clip: true
             interactive: contentHeight > height
-            onContentHeightChanged: Qt.callLater(root.focusRequestedProvider)
 
             Column {
                 id: providerColumn
@@ -164,7 +131,6 @@ Rectangle {
                 }
 
                 Repeater {
-                    id: providerRepeater
                     model: Ghostd.providers
 
                     Rectangle {
@@ -231,33 +197,15 @@ Rectangle {
                             }
 
                             // Primary action: OAuth sign-in when offered, else API key.
-                            Rectangle {
-                                implicitWidth: primaryLabel.implicitWidth + Theme.pad
-                                implicitHeight: 26
-                                radius: Theme.radius / 2
-                                color: Theme.accent
-                                border.width: 0
-                                border.color: Theme.accent
-                                opacity: primaryArea.containsMouse ? 0.88 : 1
-
-                                Text {
-                                    id: primaryLabel
-                                    anchors.centerIn: parent
-                                    text: providerRow.hasOauth
-                                        ? (providerRow.modelData.loginLabel || "Sign in")
-                                        : "Paste API key"
-                                    color: Theme.onAccent
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
-                                }
-
-                                MouseArea {
-                                    id: primaryArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: providerRow.startPrimaryLogin()
-                                }
+                            // The row is the Tab stop and already starts this
+                            // login from the keyboard.
+                            ActionButton {
+                                label: providerRow.hasOauth
+                                    ? (providerRow.modelData.loginLabel || "Sign in")
+                                    : "Paste API key"
+                                primary: true
+                                activeFocusOnTab: false
+                                onClicked: providerRow.startPrimaryLogin()
                             }
 
                             // Secondary: API key, when a provider offers both.
@@ -363,29 +311,10 @@ Rectangle {
                         wrapMode: Text.Wrap
                     }
 
-                    Rectangle {
-                        implicitWidth: openLabel.implicitWidth + Theme.pad
-                        implicitHeight: 28
-                        radius: Theme.radius / 2
-                        color: Theme.accent
-                        border.width: 0
-                        border.color: Theme.accent
-                        opacity: openArea.containsMouse ? 0.88 : 1
-                        Text {
-                            id: openLabel
-                            anchors.centerIn: parent
-                            text: "Open in browser"
-                            color: Theme.onAccent
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                        MouseArea {
-                            id: openArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Ghostd.openLoginUrl(root.authUrl)
-                        }
+                    ActionButton {
+                        label: "Open in browser"
+                        primary: true
+                        onClicked: Ghostd.openLoginUrl(root.authUrl)
                     }
                 }
 
@@ -412,30 +341,11 @@ Rectangle {
                         font.weight: Font.DemiBold
                     }
 
-                    Rectangle {
+                    ActionButton {
                         visible: root.verificationUrl !== ""
-                        implicitWidth: deviceOpenLabel.implicitWidth + Theme.pad
-                        implicitHeight: 28
-                        radius: Theme.radius / 2
-                        color: Theme.accent
-                        border.width: 0
-                        border.color: Theme.accent
-                        opacity: deviceOpenArea.containsMouse ? 0.88 : 1
-                        Text {
-                            id: deviceOpenLabel
-                            anchors.centerIn: parent
-                            text: "Open verification page"
-                            color: Theme.onAccent
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                        MouseArea {
-                            id: deviceOpenArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Ghostd.openLoginUrl(root.verificationUrl)
-                        }
+                        label: "Open verification page"
+                        primary: true
+                        onClicked: Ghostd.openLoginUrl(root.verificationUrl)
                     }
                 }
 
@@ -493,29 +403,10 @@ Rectangle {
                         }
                     }
 
-                    Rectangle {
-                        implicitWidth: submitLabel.implicitWidth + Theme.pad
-                        implicitHeight: 28
-                        radius: Theme.radius / 2
-                        color: Theme.accent
-                        border.width: 0
-                        border.color: Theme.accent
-                        opacity: submitArea.containsMouse ? 0.88 : 1
-                        Text {
-                            id: submitLabel
-                            anchors.centerIn: parent
-                            text: "Submit"
-                            color: Theme.onAccent
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                        MouseArea {
-                            id: submitArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.submitCurrentInput()
-                        }
+                    ActionButton {
+                        label: "Submit"
+                        primary: true
+                        onClicked: root.submitCurrentInput()
                     }
                 }
 
@@ -545,8 +436,6 @@ Rectangle {
                             implicitHeight: 36
                             radius: Theme.radius / 2
                             color: optionArea.containsMouse ? Theme.hover : Theme.surface
-                            border.width: 0
-                            border.color: Theme.border
 
                             Text {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -578,31 +467,12 @@ Rectangle {
                     visible: root.status === "succeeded" || root.status === "failed"
                     spacing: Theme.gap
 
-                    Rectangle {
-                        implicitWidth: doneLabel.implicitWidth + Theme.pad
-                        implicitHeight: 28
-                        radius: Theme.radius / 2
-                        color: Theme.accent
-                        border.width: 0
-                        border.color: Theme.accent
-                        opacity: doneArea.containsMouse ? 0.88 : 1
-                        Text {
-                            id: doneLabel
-                            anchors.centerIn: parent
-                            text: root.status === "succeeded" ? "Done" : "Back"
-                            color: Theme.onAccent
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-                        MouseArea {
-                            id: doneArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                if (root.status === "succeeded") root.close();
-                                else Ghostd.resetLogin();
-                            }
+                    ActionButton {
+                        label: root.status === "succeeded" ? "Done" : "Back"
+                        primary: true
+                        onClicked: {
+                            if (root.status === "succeeded") root.close();
+                            else Ghostd.cancelLogin();
                         }
                     }
                 }

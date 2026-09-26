@@ -93,9 +93,6 @@ Item {
             visible: Ghostd.streaming && Ghostd.reachable
             anchors.centerIn: parent
             diameter: 14
-            running: visible
-            ghost: Ghostd.activeGhost
-            turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
         }
 
         GhostGlyph {

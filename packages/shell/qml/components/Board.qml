@@ -30,8 +30,10 @@ Rectangle {
         event.accepted = true;
     }
 
-    // Edits happen in the file; poll it while the pane is up so a card a
-    // harness just moved shows within seconds.
+    // Edits happen in the file; read it when the pane shows and poll it while
+    // the pane is up, so a card a harness just moved shows within seconds.
+    onVisibleChanged: if (root.visible) Ghostd.refreshBoard()
+
     Timer {
         interval: 5000
         repeat: true

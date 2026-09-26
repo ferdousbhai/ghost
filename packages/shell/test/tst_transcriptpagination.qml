@@ -66,7 +66,6 @@ TestCase {
         Ghostd.sessionIds = ({ casper: "" });
         Ghostd.clearTurnProjection();
         Ghostd.sessionsError = "";
-        Ghostd.modelError = "";
         Ghostd.apiToken = "test-token";
         requests = [];
         deleteRequests = [];

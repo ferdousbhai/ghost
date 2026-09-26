@@ -1,11 +1,7 @@
 pragma ComponentBehavior: Bound
 
-// Ghost's lifecycle hooks: the ones the daemon registers in code, and the
-// owner's own command hooks from hooks.json. A built-in row shows what the
-// daemon runs; when hooks.json can tune it (memory upkeep's idle interval),
-// clicking it edits that one number, applied when ghostd next starts. A
-// command hook is the owner's: click it to edit its fields in place, ×
-// removes it, "+ New" adds one. Every edit replaces the whole file through
+// Ghost's lifecycle hooks: the owner's command hooks from hooks.json. Click
+// one to edit its fields in place, × removes it, "+ New" adds one. Every edit replaces the whole file through
 // the daemon's validating loader, so a refused edit reopens with the daemon's
 // reason and nothing is half-written. Model context stays private either way.
 //
@@ -47,10 +43,6 @@ Rectangle {
         Ghostd.fetchHookConfig(force);
     }
 
-    function canEdit(card: var): bool {
-        return !!card;
-    }
-
     /** Open one card's form over a frozen list, starting from `fields` as typed. */
     function open(key: string, event: string, fields: var): void {
         if (root.busy || root.editing || !root.editable) return;
@@ -61,7 +53,7 @@ Rectangle {
     }
 
     function beginEdit(card: var): void {
-        if (root.canEdit(card)) root.open(card.key, card.event, card.fields);
+        root.open(card.key, card.event, card.fields);
     }
 
     function beginDraft(): void {
@@ -365,7 +357,6 @@ Rectangle {
         delegate: Rectangle {
             id: hookCard
             required property var modelData
-            readonly property bool tunable: root.canEdit(hookCard.modelData)
             readonly property bool editing: root.editingKey === hookCard.modelData.key
             readonly property bool draft: hookCard.modelData.key === HookConfig.DRAFT_KEY
             readonly property string event: hookCard.draft ? root.draftEvent : hookCard.modelData.event
@@ -379,7 +370,7 @@ Rectangle {
             border.width: 1
             border.color: hookCard.editing ? Theme.amber(0.35) : Theme.border
 
-            Accessible.role: hookCard.tunable ? Accessible.ListItem : Accessible.StaticText
+            Accessible.role: Accessible.ListItem
             Accessible.name: hookCard.draft ? "New command hook" : hookCard.modelData.name
             Accessible.description: hookCard.modelData.description + ". "
                 + HookStatus.trigger(hookCard.event)
@@ -392,7 +383,7 @@ Rectangle {
             MouseArea {
                 id: cardArea
                 anchors.fill: parent
-                enabled: hookCard.tunable && !hookCard.editing && !root.editing && !root.busy
+                enabled: !hookCard.editing && !root.editing && !root.busy
                 hoverEnabled: true
                 cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: root.beginEdit(hookCard.modelData)
@@ -631,7 +622,7 @@ Rectangle {
             ? "Showing the last verified status."
             : root.editable
                 ? "Command hooks are yours, in " + Ghostd.hookConfigPath
-                    + ". Built-in hooks are part of ghostd. Model context stays private."
+                    + ". Model context stays private."
                 : "Only labels, triggers, and timing are shown. Model context stays private."
         textFormat: Text.PlainText
         color: Theme.foregroundFaint

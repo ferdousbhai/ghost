@@ -27,3 +27,9 @@ Roster 1.0 Roster.qml
 ResourcesLine 1.0 ResourcesLine.qml
 SpectralOrb 1.0 SpectralOrb.qml
 ToolCard 1.0 ToolCard.qml
+Glow 1.0 Glow.qml
+HudHeader 1.0 HudHeader.qml
+Sidebar 1.0 Sidebar.qml
+UpdateNotice 1.0 UpdateNotice.qml
+Welcome 1.0 Welcome.qml
+RowDeleteButton 1.0 RowDeleteButton.qml

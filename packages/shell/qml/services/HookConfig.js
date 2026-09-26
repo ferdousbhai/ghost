@@ -96,41 +96,32 @@ function fieldsOf(handler) {
 }
 
 /**
- * The pane's rows. Built-in hooks come from the status and are read-only.
- * Config hooks come from the document, which is what an edit changes; the
- * daemon emits its config status rows in the order it read the file, so the
- * n-th config row of an event resolves the n-th document handler's display
- * name and description (the daemon fills defaults the file leaves out). When
- * the two disagree — a status fetch that failed after a write — the document
- * wins and the row shows what the file says.
+ * The pane's rows, one per hooks.json handler. They come from the document,
+ * which is what an edit changes; the daemon emits its status rows in the
+ * order it read the file, so the n-th status row resolves the n-th handler's
+ * display name and description (the daemon fills defaults the file leaves
+ * out). When the two disagree — a status fetch that failed after a write —
+ * the document wins and the row shows what the file says.
  */
 function cards(statusHooks, document) {
-    // Every hook comes from hooks.json, so every status row pairs with a handler.
-    const configRows = Array.isArray(statusHooks) ? statusHooks : [];
+    const statusRows = Array.isArray(statusHooks) ? statusHooks : [];
     const entries = handlers(document);
-    const aligned = configRows.length === entries.length && entries.every(function (entry, index) {
-        return configRows[index].event === entry.event;
+    const aligned = statusRows.length === entries.length && entries.every(function (entry, index) {
+        return statusRows[index].event === entry.event;
     });
-    const out = [];
-    for (let e = 0; e < EVENT_ORDER.length; e += 1) {
-        const event = EVENT_ORDER[e];
-        for (let i = 0; i < entries.length; i += 1) {
-            const entry = entries[i];
-            if (entry.event !== event) continue;
-            const status = aligned ? configRows[i] : null;
-            const fields = fieldsOf(entry.handler);
-            out.push(card({
-                key: "config:" + event + ":" + entry.groupIndex + ":" + entry.handlerIndex,
-                event,
-                name: status ? status.name : (fields.name === "" ? "Command hook" : fields.name),
-                description: status ? status.description : fields.description,
-                fields,
-                groupIndex: entry.groupIndex,
-                handlerIndex: entry.handlerIndex
-            }));
-        }
-    }
-    return out;
+    return entries.map(function (entry, i) {
+        const status = aligned ? statusRows[i] : null;
+        const fields = fieldsOf(entry.handler);
+        return card({
+            key: "config:" + entry.event + ":" + entry.groupIndex + ":" + entry.handlerIndex,
+            event: entry.event,
+            name: status ? status.name : (fields.name === "" ? "Command hook" : fields.name),
+            description: status ? status.description : fields.description,
+            fields,
+            groupIndex: entry.groupIndex,
+            handlerIndex: entry.handlerIndex
+        });
+    });
 }
 
 function find(cardList, key) {

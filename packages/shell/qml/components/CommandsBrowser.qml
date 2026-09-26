@@ -24,10 +24,6 @@ Rectangle {
     color: Theme.background
     clip: true
 
-    function textOf(value: var): string {
-        return value === undefined || value === null ? "" : String(value);
-    }
-
     function aliasesText(command: var): string {
         const aliases = CommandCatalog.aliases(command);
         return aliases.length === 0 ? "" : aliases.map(function (alias) {
@@ -301,6 +297,7 @@ Rectangle {
                             id: commandRow
 
                             required property var modelData
+                            readonly property string availability: CommandCatalog.availability(commandRow.modelData)
                             width: commandGroup.width
                             height: commandCopy.implicitHeight + Theme.pad
                             radius: Theme.radius
@@ -311,7 +308,7 @@ Rectangle {
 
                             Accessible.role: Accessible.Button
                             Accessible.name: "/" + CommandCatalog.commandName(commandRow.modelData)
-                            Accessible.description: root.textOf(commandRow.modelData.description)
+                            Accessible.description: CommandCatalog.text(commandRow.modelData.description)
 
                             Behavior on color {
                                 enabled: !Theme.reducedMotion
@@ -353,22 +350,18 @@ Rectangle {
 
                                     Rectangle {
                                         id: availabilityBadge
-                                        visible: CommandCatalog.availability(commandRow.modelData)
-                                            !== "supported"
+                                        visible: commandRow.availability !== "supported"
                                         width: visible ? availabilityText.implicitWidth + Theme.gap : 0
                                         implicitHeight: availabilityText.implicitHeight + 4
                                         radius: Theme.radius / 2
-                                        color: CommandCatalog.availability(commandRow.modelData)
-                                            === "unsupported" ? Theme.rose(0.12) : Theme.amber(0.12)
+                                        color: commandRow.availability === "unsupported" ? Theme.rose(0.12) : Theme.amber(0.12)
                                         border.width: 1
-                                        border.color: CommandCatalog.availability(commandRow.modelData)
-                                            === "unsupported" ? Theme.rose(0.25) : Theme.amber(0.25)
+                                        border.color: commandRow.availability === "unsupported" ? Theme.rose(0.25) : Theme.amber(0.25)
                                         Text {
                                             id: availabilityText
                                             anchors.centerIn: parent
                                             text: CommandCatalog.availabilityLabel(commandRow.modelData)
-                                            color: CommandCatalog.availability(commandRow.modelData)
-                                                === "unsupported" ? Theme.danger : Theme.warn
+                                            color: commandRow.availability === "unsupported" ? Theme.danger : Theme.warn
                                             font.family: Theme.fontFamily
                                             font.pixelSize: Theme.fontSizeCaption
                                             font.weight: Font.DemiBold
@@ -379,7 +372,7 @@ Rectangle {
                                 Text {
                                     width: parent.width
                                     visible: text !== ""
-                                    text: root.textOf(commandRow.modelData.description)
+                                    text: CommandCatalog.text(commandRow.modelData.description)
                                     color: Theme.foreground
                                     font.family: Theme.fontFamily
                                     font.pixelSize: Theme.fontSizeSmall

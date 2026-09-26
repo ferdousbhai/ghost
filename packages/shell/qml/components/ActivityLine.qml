@@ -1,12 +1,8 @@
 // ActivityLine — what the ghost is doing right now, beside the orb.
 //
-// This line reports; it does not perform. Its predecessor rotated invented
-// spectral phrases every three seconds ("Coaxing the haunted mist") because it
-// had nothing real to say: `activity` clears between every tool lifecycle
-// event, so the copy needed a held key and a beat just to stop flickering. Both
-// runtimes now bracket every call with tool execution events, so there is a
-// real sentence available for almost every moment of a turn — and a real one
-// outranks any invented one.
+// This line reports; it does not perform. The runtime brackets every tool call
+// with execution events, so there is a real sentence for almost every moment of
+// a turn.
 //
 // The ladder, in order: the tool call that is running, rendered by the same
 // ToolTrace the transcript cards use, then the plain state the runtime
@@ -89,11 +85,6 @@ Item {
                 visible: Ghostd.streaming
                 anchors.centerIn: parent
                 diameter: 20
-                running: Ghostd.streaming
-                ghost: Ghostd.activeGhost
-                // One turn, one orb. The assistant row advances once per turn,
-                // which is exactly the grain this wants.
-                turnKey: Ghostd.currentSessionId + ":" + Ghostd.assistantRow
             }
 
             Rectangle {

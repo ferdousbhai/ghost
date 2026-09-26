@@ -16,36 +16,46 @@ ColumnLayout {
     visible: steering.length > 0 || followUps.length > 0 || error !== ""
     spacing: Theme.gap / 2
 
-    Flow {
-        visible: root.steering.length > 0
+    // One lane of queued messages: its label, then one elided chip per message.
+    component Lane: Flow {
+        id: lane
+
+        required property string label
+        required property var items
+        required property color labelColor
+        required property color fill
+        required property color edge
+        required property color ink
+
+        visible: lane.items.length > 0
         Layout.fillWidth: true
         spacing: Theme.gap / 2
 
         Text {
-            text: "Steering →"
-            color: Theme.ghostAmber
+            text: lane.label
+            color: lane.labelColor
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
         }
 
         Repeater {
-            model: root.steering
+            model: lane.items
             delegate: Rectangle {
-                id: steerChip
+                id: chip
                 required property string modelData
-                implicitWidth: Math.min(steerText.implicitWidth + Theme.gap, root.width * 0.72)
+                implicitWidth: Math.min(chipText.implicitWidth + Theme.gap, lane.width * 0.72)
                 implicitHeight: 22
                 radius: Theme.bubbleRadiusSmall
-                color: Theme.amber(0.12)
+                color: lane.fill
                 border.width: 1
-                border.color: Theme.amber(0.20)
+                border.color: lane.edge
 
                 Text {
-                    id: steerText
+                    id: chipText
                     anchors.fill: parent
                     anchors.margins: Theme.gap / 2
-                    text: steerChip.modelData
-                    color: Theme.foregroundBright
+                    text: chip.modelData
+                    color: lane.ink
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     elide: Text.ElideRight
@@ -54,42 +64,22 @@ ColumnLayout {
         }
     }
 
-    Flow {
-        visible: root.followUps.length > 0
-        Layout.fillWidth: true
-        spacing: Theme.gap / 2
+    Lane {
+        label: "Steering →"
+        items: root.steering
+        labelColor: Theme.ghostAmber
+        fill: Theme.amber(0.12)
+        edge: Theme.amber(0.20)
+        ink: Theme.foregroundBright
+    }
 
-        Text {
-            text: "Then →"
-            color: Theme.amber(0.70)
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-        }
-
-        Repeater {
-            model: root.followUps
-            delegate: Rectangle {
-                id: followChip
-                required property string modelData
-                implicitWidth: Math.min(followText.implicitWidth + Theme.gap, root.width * 0.72)
-                implicitHeight: 22
-                radius: Theme.bubbleRadiusSmall
-                color: Theme.film(0.05)
-                border.width: 1
-                border.color: Theme.film(0.10)
-
-                Text {
-                    id: followText
-                    anchors.fill: parent
-                    anchors.margins: Theme.gap / 2
-                    text: followChip.modelData
-                    color: Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    elide: Text.ElideRight
-                }
-            }
-        }
+    Lane {
+        label: "Then →"
+        items: root.followUps
+        labelColor: Theme.amber(0.70)
+        fill: Theme.film(0.05)
+        edge: Theme.film(0.10)
+        ink: Theme.foreground
     }
 
     Text {

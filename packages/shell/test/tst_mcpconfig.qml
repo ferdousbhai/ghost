@@ -44,6 +44,23 @@ TestCase {
         compare(Mcp.configuredKeys(remoteServer.config.headers).join(","), "Authorization");
     }
 
+    // An auth block without a credential still withholds its client settings,
+    // so it is named; an oauth block that reports nothing configured is not.
+    function test_hiddenPartsMatchHasHiddenValues(): void {
+        const authOnly = { config: { type: "http", url: "https://example.com/mcp",
+            auth: { type: "oauth", configured: false } } };
+        verify(Mcp.hasHiddenValues(authOnly));
+        compare(Mcp.hiddenParts(authOnly).join(" · "), "authentication");
+
+        const emptyOauth = { config: { type: "http", url: "https://example.com/mcp",
+            oauth: { configured: false } } };
+        verify(!Mcp.hasHiddenValues(emptyOauth));
+        compare(Mcp.hiddenParts(emptyOauth).length, 0);
+
+        compare(Mcp.hiddenParts(remoteServer).join(" · "),
+            "headers: Authorization · OAuth client settings · URL query values");
+    }
+
     function test_replacementTemplateContainsOnlySafeFields(): void {
         const local = JSON.parse(Mcp.template(localServer, "stdio"));
         compare(local.command, "mcp-local");

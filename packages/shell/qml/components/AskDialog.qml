@@ -133,20 +133,20 @@ Rectangle {
         };
     }
 
-    function writeState(id: string, state: var): void {
-        const copy = {};
-        for (const key in root.answers) copy[key] = root.answers[key];
-        copy[id] = state;
-        root.answers = copy;
+    function patch(question: var, change: var): void {
+        const next = Object.assign({}, root.answers);
+        next[question.id] = Object.assign({}, root.answerState(question), change);
+        root.answers = next;
     }
 
     function isSelected(question: var, label: string): bool {
         return root.answerState(question).selectedOptions.indexOf(label) >= 0;
     }
 
+    // A non-multi question the broker will reject if it carries both a picked
+    // option and a typed answer, so setting one clears the other.
     function toggle(question: var, label: string): void {
-        const current = root.answerState(question);
-        let selected = current.selectedOptions.slice();
+        let selected = root.answerState(question).selectedOptions.slice();
         const index = selected.indexOf(label);
         if (question.multi === true) {
             if (index >= 0) selected.splice(index, 1);
@@ -154,30 +154,19 @@ Rectangle {
         } else {
             selected = index >= 0 ? [] : [label];
         }
-        root.writeState(question.id, {
-            selectedOptions: selected,
-            // A non-multi question the broker will reject if it carries both.
-            customInput: question.multi === true ? current.customInput : "",
-            note: current.note
-        });
+        const change = { selectedOptions: selected };
+        if (question.multi !== true) change.customInput = "";
+        root.patch(question, change);
     }
 
     function setCustom(question: var, value: string): void {
-        const current = root.answerState(question);
-        root.writeState(question.id, {
-            selectedOptions: question.multi === true ? current.selectedOptions : [],
-            customInput: value,
-            note: current.note
-        });
+        const change = { customInput: value };
+        if (question.multi !== true) change.selectedOptions = [];
+        root.patch(question, change);
     }
 
     function setNote(question: var, value: string): void {
-        const current = root.answerState(question);
-        root.writeState(question.id, {
-            selectedOptions: current.selectedOptions,
-            customInput: current.customInput,
-            note: value
-        });
+        root.patch(question, { note: value });
     }
 
 
@@ -428,50 +417,6 @@ Rectangle {
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
             onClicked: revealRoot.picked()
-        }
-    }
-
-    // One control, three settings. Only the primary one wears the accent, and
-    // only while there is something to send; `armed` decides both the fill and
-    // whether the pointer is offered at all, `faded` says a send is in flight.
-    component ActionButton: Rectangle {
-        id: buttonRoot
-
-        required property string label
-        property color ink: Theme.foreground
-        property bool primary: false
-        property bool armed: true
-        property bool faded: false
-
-        signal activated()
-
-        implicitWidth: buttonLabel.implicitWidth + Theme.pad
-        implicitHeight: 30
-        radius: Theme.radius / 2
-        color: buttonRoot.primary
-            ? (buttonRoot.armed ? Theme.accent : Theme.borderStrong)
-            : (buttonArea.containsMouse ? Theme.hover : "transparent")
-        opacity: buttonRoot.faded ? 0.5 : 1
-
-        Text {
-            id: buttonLabel
-            anchors.centerIn: parent
-            text: buttonRoot.label
-            color: buttonRoot.primary
-                ? (buttonRoot.armed ? Theme.onAccent : Theme.foregroundDim)
-                : buttonRoot.ink
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            font.weight: buttonRoot.primary ? Font.DemiBold : Font.Normal
-        }
-
-        MouseArea {
-            id: buttonArea
-            anchors.fill: parent
-            hoverEnabled: true
-            enabled: buttonRoot.armed && !buttonRoot.faded
-            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-            onClicked: buttonRoot.activated()
         }
     }
 
@@ -838,15 +783,14 @@ Rectangle {
             // with the composer gone.
             ActionButton {
                 label: "Dismiss  Esc"
-                ink: Theme.foregroundDim
-                faded: root.submitting
-                onActivated: root.dismiss()
+                enabled: !root.submitting
+                onClicked: root.dismiss()
             }
 
             ActionButton {
                 label: "Chat about this"
-                faded: root.submitting
-                onActivated: root.chatRequested()
+                enabled: !root.submitting
+                onClicked: root.chatRequested()
             }
 
             Item { Layout.fillWidth: true }
@@ -854,9 +798,8 @@ Rectangle {
             ActionButton {
                 primary: true
                 label: root.submitting ? "Sending…" : "Answer  ↵"
-                armed: root.canSubmit()
-                faded: root.submitting
-                onActivated: root.submit()
+                enabled: root.canSubmit() && !root.submitting
+                onClicked: root.submit()
             }
         }
     }

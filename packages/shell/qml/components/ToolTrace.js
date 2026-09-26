@@ -34,23 +34,6 @@ function pathArgument(activity) {
 }
 
 /**
- * One name for one job.
- *
- * The wire carries whichever name actually ran, because a transcript is a
- * record of what happened. This is the one place that knows a tool has been
- * renamed; everything below reads the canonical name.
- */
-var CANONICAL = {
-    // pi's memory tools under the names older sessions wrote them with.
-    list_memory: "ghost_memory_list"
-};
-
-function canonicalName(activity) {
-    const name = String(activity.name || "");
-    return CANONICAL[name] || name;
-}
-
-/**
  * The tools that are a verb and one argument. Every one of them reads the same
  * way — "Reading docs/design.md", "Ran pnpm test" — and writing them out was a
  * dozen near-identical blocks that had to be found and edited one at a time.
@@ -61,6 +44,14 @@ var VERBS = {
     read: {
         past: "Read", present: "Reading", of: pathArgument,
         alonePast: "Read a file", alonePresent: "Reading a file"
+    },
+    write: {
+        past: "Wrote", present: "Writing", of: pathArgument,
+        alonePast: "Wrote a file", alonePresent: "Writing a file"
+    },
+    edit: {
+        past: "Edited", present: "Editing", of: pathArgument,
+        alonePast: "Edited a file", alonePresent: "Editing a file"
     },
     ls: {
         past: "Listed", present: "Listing", key: "path",
@@ -78,19 +69,6 @@ var VERBS = {
         past: "Looked for files matching", present: "Looking for files matching",
         key: "pattern", quote: true,
         alonePast: "Looked for files", alonePresent: "Looking for files"
-    },
-    WebFetch: {
-        past: "Read", present: "Reading", key: "url",
-        alonePast: "Read a page", alonePresent: "Reading a page"
-    },
-    WebSearch: {
-        past: "Searched the web for", present: "Searching the web for",
-        key: "query", quote: true,
-        alonePast: "Searched the web", alonePresent: "Searching the web"
-    },
-    Task: {
-        past: "Delegated", present: "Delegating", key: "description",
-        alonePast: "Delegated a task", alonePresent: "Delegating a task"
     },
     ghost_notes_read: {
         past: "Read", present: "Reading", key: "path",
@@ -214,11 +192,6 @@ function askPromptFromQuestions(questions) {
     return head + compact(first.question, 1200) + tail;
 }
 
-function askPrompt(activity) {
-    activity = fields(activity);
-    return askPromptFromQuestions(askQuestions(activity));
-}
-
 /**
  * What expanding an ask card adds: the options it offered, and the questions
  * the collapsed line could only count. Each line carries its own label so the
@@ -234,11 +207,6 @@ function askDetailFromQuestions(questions) {
         if (options.length > 0) lines.push("Options · " + options.join(" · "));
     });
     return lines.join("\n");
-}
-
-function askDetail(activity) {
-    activity = fields(activity);
-    return askDetailFromQuestions(askQuestions(activity));
 }
 
 /**
@@ -257,11 +225,19 @@ function askAutoAnswerFromQuestions(questions) {
     return chosen.length > 0 ? chosen[0].label : "";
 }
 
-function askAutoAnswer(activity) {
-    activity = fields(activity);
-    return askAutoAnswerFromQuestions(askQuestions(activity));
-}
-
+/**
+ * `awaiting` is true when this card is a question the OWNER never answered —
+ * still standing open, or settled without them. A timed-out ask counts even
+ * though the clock did submit something: an answer chosen in the owner's
+ * absence is exactly the one worth a second look. Unknown settlement on a
+ * finished call is not counted: not knowing is not the same as knowing it went
+ * unanswered.
+ *
+ * `action` is the card's button. "Re-answer" is a lie on a question that was
+ * never answered once, so anything but a submitted ask offers a first answer —
+ * and a question the clock answered offers a correction, because there is
+ * already a decision standing that the owner may not agree with.
+ */
 function askPresentation(activity, completed) {
     const questions = askQuestions(activity);
     const settlement = askSettlement(activity);
@@ -281,29 +257,6 @@ function askPresentation(activity, completed) {
 }
 
 /**
- * True when this card is a question the OWNER never answered — still standing
- * open, or settled without them. A timed-out ask counts even though the clock
- * did submit something: an answer chosen in the owner's absence is exactly the
- * one worth a second look. Unknown settlement on a finished call is not
- * counted: not knowing is not the same as knowing it went unanswered.
- */
-function askAwaiting(activity, completed) {
-    activity = fields(activity);
-    return askPresentation(activity, completed).awaiting;
-}
-
-/**
- * The card's action. "Re-answer" is a lie on a question that was never
- * answered once, so anything but a submitted ask offers a first answer — and a
- * question the clock answered offers a correction, because there is already a
- * decision standing that the owner may not agree with.
- */
-function askAction(activity) {
-    activity = fields(activity);
-    return askPresentation(activity, false).action;
-}
-
-/**
  * The file a call wrote, named the way the tool named it. Writers only — a
  * read changed nothing worth opening. Native file tools resolve relative paths
  * against the cwd captured on that activity; legacy Ghost-owned writers stay
@@ -311,7 +264,7 @@ function askAction(activity) {
  */
 function fileTarget(activity) {
     activity = fields(activity);
-    switch (canonicalName(activity)) {
+    switch (String(activity.name || "")) {
     case "write":
     case "edit":
         return pathArgument(activity);
@@ -330,7 +283,7 @@ function fileTarget(activity) {
 /** Which explicit path base the caller must use for {@link fileTarget}. */
 function fileBase(activity) {
     activity = fields(activity);
-    switch (canonicalName(activity)) {
+    switch (String(activity.name || "")) {
     case "write":
     case "edit":
         return "cwd";
@@ -349,8 +302,8 @@ function fileCwd(activity) {
 // A trace describes the purpose of the work, never the mechanism used to do
 // it. These fallbacks also keep restored transcripts useful: persisted tool
 // calls retain their arguments, while live intent/result summaries do not.
-function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) {
-    const name = canonicalName(activity);
+function fallback(activity, completed, failed, preparedAsk) {
+    const name = String(activity.name || "");
     const verb = VERBS[name];
     if (verb) return verbTrace(verb, activity, completed);
 
@@ -386,30 +339,7 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
     }
     case "ghost_notes_list":
         return completed ? "Looked through your docs" : "Looking through your docs";
-    // The writers are not in the verb table: their argument is the same one the
-    // workbench chip resolves, and the caller has usually already paid for it.
-    case "write": {
-        const written = preparedFileTarget === undefined
-            ? fileTarget(activity) : preparedFileTarget;
-        return written !== ""
-            ? (completed ? "Wrote " : "Writing ") + written
-            : (completed ? "Wrote a file" : "Writing a file");
-    }
-    case "edit": {
-        const written = preparedFileTarget === undefined
-            ? fileTarget(activity) : preparedFileTarget;
-        return written !== ""
-            ? (completed ? "Edited " : "Editing ") + written
-            : (completed ? "Edited a file" : "Editing a file");
-    }
-    case "BashOutput":
-        return completed
-            ? "Checked on a running command"
-            : "Checking on a running command";
-    case "KillShell":
-        return completed ? "Stopped a running command" : "Stopping a running command";
-    case "TodoWrite":
-        return completed ? "Updated its plan" : "Updating its plan";
+    case "list_memory":
     case "ghost_memory_list":
         return completed
             ? "Looked through remembered details"
@@ -466,24 +396,23 @@ function fallback(activity, completed, failed, preparedAsk, preparedFileTarget) 
  * that explains what went wrong.
  */
 function resultIsRawContent(activity) {
-    switch (canonicalName(activity)) {
+    switch (String(activity.name || "")) {
     case "read":
     case "ls":
-    case "WebFetch":
         return true;
     default:
         return false;
     }
 }
 
-function text(activity, completed, failed, expanded, preparedAsk, preparedFileTarget) {
+function text(activity, completed, failed, expanded, preparedAsk) {
     activity = fields(activity);
     const limit = expanded ? 1200 : 180;
     const summary = !failed && resultIsRawContent(activity)
         ? "" : compact(activity.summary || "", limit);
     const intent = compact(activity.intent || "", limit);
     const base = summary || intent
-        || fallback(activity, completed, failed, preparedAsk, preparedFileTarget);
+        || fallback(activity, completed, failed, preparedAsk);
     // An ask that failed is not a tool that broke — it is a question that went
     // unanswered, and its own trace already says so. "Couldn't complete" in
     // front of that would report a malfunction where there was only a silence.
@@ -528,7 +457,7 @@ function view(activity, completed, failed, expanded) {
     const diagnosticInput = input(activity);
     const target = fileTarget(activity);
     return {
-        trace: text(activity, completed, failed, expanded, ask, target),
+        trace: text(activity, completed, failed, expanded, ask),
         diagnosticInput: diagnosticInput,
         hasDiagnostics: hasDiagnostics(activity, diagnosticInput),
         askAwaiting: ask.awaiting,

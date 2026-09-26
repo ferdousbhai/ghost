@@ -136,7 +136,6 @@ Rectangle {
                 label: Ghostd.characterSaving ? "Saving" : "Save"
                 primary: true
                 enabled: root.canSave
-                opacity: enabled ? 1 : 0.5
                 onClicked: root.save()
             }
 

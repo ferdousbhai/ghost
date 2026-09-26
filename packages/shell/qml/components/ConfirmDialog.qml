@@ -28,7 +28,6 @@ Item {
     /** When set, the confirm stays locked until this exact string is typed
         back — the gate an erased home directory earns over a stray Return. */
     property string challenge: ""
-    property string challengePlaceholder: ""
 
     readonly property bool answered: root.challenge === ""
         || challengeField.text === root.challenge
@@ -180,16 +179,6 @@ Item {
                         event.accepted = true;
                         root.reject();
                     }
-
-                    Text {
-                        anchors.left: parent.left
-                        anchors.verticalCenter: parent.verticalCenter
-                        visible: challengeField.text === ""
-                        text: root.challengePlaceholder
-                        color: Theme.foregroundFaint
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
                 }
             }
 
@@ -208,85 +197,25 @@ Item {
 
             Item {
                 width: parent.width
-                height: Theme.controlHeight - Theme.gap / 2
+                height: buttons.implicitHeight
 
                 Row {
+                    id: buttons
                     anchors.right: parent.right
-                    anchors.verticalCenter: parent.verticalCenter
                     spacing: Theme.gap
 
-                    Rectangle {
-                        width: Math.max(72, cancelLabel.implicitWidth + Theme.pad)
-                        height: Theme.controlHeight - Theme.gap
-                        radius: Theme.radius / 2
-                        color: cancelArea.containsMouse ? Theme.film(0.10) : Theme.film(0.06)
-                        opacity: root.busy ? 0.5 : 1
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            id: cancelLabel
-                            anchors.centerIn: parent
-                            text: root.cancelText
-                            color: Theme.foreground
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                        }
-
-                        MouseArea {
-                            id: cancelArea
-                            anchors.fill: parent
-                            enabled: !root.busy
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.reject()
-                        }
+                    ActionButton {
+                        label: root.cancelText
+                        enabled: !root.busy
+                        onClicked: root.reject()
                     }
 
-                    Rectangle {
-                        width: Math.max(72, confirmLabel.implicitWidth + Theme.pad)
-                        height: Theme.controlHeight - Theme.gap
-                        radius: Theme.radius / 2
-                        opacity: root.answered ? 1 : 0.45
-                        color: root.destructive
-                            ? (confirmArea.containsMouse && !root.busy && root.answered
-                                ? Theme.rose(0.26) : Theme.rose(0.14))
-                            : (confirmArea.containsMouse && !root.busy && root.answered
-                                ? Theme.film(0.16) : Theme.film(0.10))
-                        border.width: 1
-                        border.color: root.destructive ? Theme.rose(0.40) : Theme.film(0.14)
-
-                        Behavior on opacity {
-                            enabled: !Theme.reducedMotion
-                            NumberAnimation { duration: Theme.durFast }
-                        }
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            id: confirmLabel
-                            anchors.centerIn: parent
-                            text: root.busy ? "…" : root.confirmText
-                            color: root.destructive ? Theme.ghostRose : Theme.foregroundBright
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                            font.weight: Font.DemiBold
-                        }
-
-                        MouseArea {
-                            id: confirmArea
-                            anchors.fill: parent
-                            enabled: !root.busy && root.answered
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.accept()
-                        }
+                    ActionButton {
+                        label: root.busy ? "…" : root.confirmText
+                        primary: !root.destructive
+                        danger: root.destructive
+                        enabled: !root.busy && root.answered
+                        onClicked: root.accept()
                     }
                 }
             }

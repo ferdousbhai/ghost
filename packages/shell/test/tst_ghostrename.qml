@@ -52,7 +52,7 @@ TestCase {
         compare(transaction.after.ghosts[0].name, "Spooky");
         compare(transaction.after.sessionIds.Spooky, "casper-chat");
         verify(!("Casper" in transaction.after.sessionIds));
-        compare(JSON.stringify(GhostRename.rollback(transaction)), expected);
+        compare(JSON.stringify(transaction.before), expected);
     }
 
     function test_successRekeysEverySessionScopedOwnerOnce(): void {

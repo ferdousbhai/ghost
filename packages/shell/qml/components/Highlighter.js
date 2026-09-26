@@ -116,7 +116,6 @@ const BACKTICK = { open: "`", close: "`", escape: true, multiline: true };
 const PY_TRIPLE_D = { open: "\"\"\"", close: "\"\"\"", escape: true, multiline: true };
 const PY_TRIPLE_S = { open: "'''", close: "'''", escape: true, multiline: true };
 
-//
 // line       line-comment openers
 // block      [opener, closer] pairs
 // strings    string forms, longest opener first
@@ -129,6 +128,7 @@ const PY_TRIPLE_S = { open: "'''", close: "'''", escape: true, multiline: true }
 // wordChars  extra characters that belong to an identifier (CSS hyphens)
 // hashColor  #rrggbb is a number (CSS)
 // hashBoundary  a # only opens a comment at a word boundary (shell, YAML)
+// sections   a [table] header at the head of a line colours as a keyword (TOML)
 
 const LANGUAGES = {
     js: {
@@ -236,6 +236,14 @@ const FILENAMES = {
 
 const MARKDOWN = { md: true, markdown: true, mdown: true, mkd: true };
 
+// Extensions the pane shows as plain text: text files with no highlighter here.
+const PLAIN_TEXT = {
+    txt: true, log: true, conf: true, ini: true, env: true, csv: true,
+    diff: true, patch: true, nix: true, vim: true, php: true, pl: true,
+    swift: true, gradle: true, cmake: true, make: true, dockerfile: true,
+    qmldir: true
+};
+
 
 function baseName(path) {
     const clean = String(path || "").replace(/[\\/]+$/u, "");
@@ -266,6 +274,13 @@ function languageOf(path) {
     if (EXTENSIONS[ext]) return EXTENSIONS[ext];
     const name = baseName(path).toLowerCase();
     return FILENAMES[name] || "";
+}
+
+/** Whether the file pane can show `path`: markdown, highlighted code, or a
+    known plain-text file. Anything else is not offered at all. */
+function isViewable(path) {
+    return isMarkdown(path) || languageOf(path) !== ""
+        || PLAIN_TEXT[extensionOf(path)] === true;
 }
 
 function languageLabel(path) {
@@ -407,7 +422,6 @@ function tokenize(src, spec) {
 
         for (const form of spec.strings) {
             if (!src.startsWith(form.open, index)) continue;
-            if (spec.charLit && form.open === "'") continue;
             scanString(form);
             consumed = true;
             break;

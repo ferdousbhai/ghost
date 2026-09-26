@@ -4,8 +4,7 @@ pragma ComponentBehavior: Bound
 // is open, and a way to start a fresh one. Mirrors Roster.qml's shape and
 // interaction, one rung down the left panel. Rows come from
 // GET /api/ghosts/:name/sessions plus at most one unstarted HUD draft; opening
-// one loads its transcript (#26), the sidebar footer below starts a blank
-// thread like "+ new ghost" mints a ghost.
+// one loads its transcript (#26); the sidebar footer's + starts a blank thread.
 //
 // The list is shaped like Apple Notes' sidebar: its section heading and search
 // field sit on top, then the rows. Starred (pinned) state lives on the daemon
@@ -68,13 +67,9 @@ Item {
         function onActiveGhostChanged(): void {
             root.rename.cancel();
         }
-
-        function onSessionsChanged(): void {
-            root.syncRows();
-        }
     }
 
-    onQueryChanged: root.syncRows()
+    onFilteredSessionsChanged: root.syncRows()
     Component.onCompleted: root.syncRows()
 
     // A row's display title: the stored name, else the first user message, else
@@ -222,7 +217,6 @@ Item {
                 }
 
                 Text {
-                    id: titleText
                     visible: !entry.editing
                     anchors.left: starAction.right
                     anchors.leftMargin: Theme.gap / 2
@@ -261,7 +255,7 @@ Item {
                     id: actions
 
                     readonly property bool showActions: !entry.editing
-                        && (entryArea.containsMouse || deleteArea.containsMouse
+                        && (entryArea.containsMouse || deleteAction.containsMouse
                         || entry.deleting)
 
                     anchors.right: parent.right
@@ -295,44 +289,16 @@ Item {
                         }
                     }
 
-                    Rectangle {
+                    RowDeleteButton {
                         id: deleteAction
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
-                        width: 16
-                        height: Theme.controlHeight
                         visible: actions.showActions
                             && !entry.live
                         z: 2
-                        radius: Theme.radius / 2
-                        color: deleteArea.containsMouse || entry.deleting
-                            ? Theme.rose(0.10)
-                            : "transparent"
-
-                        Behavior on color {
-                            enabled: !Theme.reducedMotion
-                            ColorAnimation { duration: Theme.durFast }
-                        }
-
-                        Text {
-                            anchors.centerIn: parent
-                            text: entry.deleting ? "…" : "×"
-                            color: deleteArea.containsMouse || entry.deleting
-                                ? Theme.ghostRose
-                                : Theme.foregroundFaint
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSize
-                        }
-
-                        MouseArea {
-                            id: deleteArea
-                            anchors.fill: parent
-                            enabled: !entry.deleting
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.deleteRequested(entry.sessionData.id,
-                                root.titleOf(entry.sessionData))
-                        }
+                        deleting: entry.deleting
+                        onClicked: root.deleteRequested(entry.sessionData.id,
+                            root.titleOf(entry.sessionData))
                     }
                 }
             }
@@ -358,7 +324,6 @@ Item {
     }
 
     ColumnLayout {
-        id: column
         anchors.fill: parent
         spacing: Theme.gap
 
@@ -461,7 +426,6 @@ Item {
         }
 
         ListView {
-            id: conversationList
             visible: count > 0
             Layout.fillWidth: true
             Layout.fillHeight: visible

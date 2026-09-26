@@ -29,10 +29,11 @@ Item {
     }
 
     /**
-     * Summon the window. The payload is the shell's, and carries the same
-     * verbs the CLI and the tray used to send: `{"section":"board"}` opens on
-     * a section, `{"ghost":"casper"}` selects one first, `{"login":true}`
-     * opens the provider login. `sessionId` with `ghost` opens that conversation.
+     * Summon the window. The payload is the shell's summon payload, as
+     * Service.qml's IPC verbs and notification actions send it:
+     * `{"section":"board"}` opens on a section, `{"ghost":"casper"}` selects
+     * one first, `{"login":true}` opens the provider login. `sessionId` with
+     * `ghost` opens that conversation.
      */
     function open(payloadJson: string): void {
         let payload = ({});

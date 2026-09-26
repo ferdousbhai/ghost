@@ -53,6 +53,30 @@ TestCase {
         verify(Ghostd.lastError.indexOf("already exists") >= 0);
     }
 
+    // A created ghost is switched to like a picked one: the previous ghost's
+    // model is gone at once, and its own resources load once, from the listing.
+    function test_createdGhostDropsThePreviousModelAndFetchesOnce(): void {
+        Ghostd.activeGhost = "existing";
+        Ghostd.currentModel = ({ provider: "old", id: "model" });
+        Ghostd.modelRequest = null;
+
+        Ghostd.createGhost("new-ghost");
+        requests[0].complete(201, { name: "new-ghost", dir: "/tmp/ghosts/new-ghost" });
+        compare(Ghostd.activeGhost, "new-ghost");
+        compare(Ghostd.currentModel, null);
+        compare(Ghostd.modelRequest, null);
+
+        compare(requests.length, 2);
+        compare(requests[1].method, "GET");
+        requests[1].complete(200, [
+            { name: "existing", dir: "/tmp/ghosts/existing" },
+            { name: "new-ghost", dir: "/tmp/ghosts/new-ghost" },
+        ]);
+        verify(Ghostd.modelRequest !== null);
+        Ghostd.modelRequest.abort();
+        Ghostd.modelRequest = null;
+    }
+
     function test_newerListRetiresAndIgnoresOlderCompletion(): void {
         Ghostd.refresh();
         const older = requests[0];

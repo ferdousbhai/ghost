@@ -137,15 +137,12 @@ export type PiMessagesEvent =
 /**
  * A harness or provider refused on quota. Sent before the terminal `error`
  * (or on its own when the runtime reports a limit without ending the turn),
- * so the HUD and hooks can say "limit, resets at …" instead of a generic
- * failure. `resetsAt` is ISO time when the runtime knows it.
+ * so the HUD and hooks can name the limit instead of a generic failure.
  */
 export interface LimitReachedEvent {
   type: "limit_reached";
   harness: "pi";
   kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
-  window?: string;
-  resetsAt?: string;
   message: string;
 }
 

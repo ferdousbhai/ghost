@@ -70,10 +70,10 @@ FocusScope {
         root.selected(destination.id);
     }
 
-    function moveFocus(from: int, delta: int): void {
+    /** Focus a destination by index, wrapping at both ends (-1 is the last). */
+    function focusAt(index: int): void {
         const count = root.destinations.length;
-        const next = (from + delta + count) % count;
-        const item = navItems.itemAt(next);
+        const item = navItems.itemAt((index + count) % count);
         if (item) item.forceActiveFocus();
     }
 
@@ -239,18 +239,16 @@ FocusScope {
 
                 Keys.onPressed: event => {
                     if (event.key === Qt.Key_Up || event.key === Qt.Key_Left) {
-                        root.moveFocus(destinationButton.index, -1);
+                        root.focusAt(destinationButton.index - 1);
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Down || event.key === Qt.Key_Right) {
-                        root.moveFocus(destinationButton.index, 1);
+                        root.focusAt(destinationButton.index + 1);
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Home) {
-                        const first = navItems.itemAt(0);
-                        if (first) first.forceActiveFocus();
+                        root.focusAt(0);
                         event.accepted = true;
                     } else if (event.key === Qt.Key_End) {
-                        const last = navItems.itemAt(root.destinations.length - 1);
-                        if (last) last.forceActiveFocus();
+                        root.focusAt(-1);
                         event.accepted = true;
                     } else if (event.key === Qt.Key_Return
                             || event.key === Qt.Key_Enter
