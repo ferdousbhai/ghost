@@ -21,7 +21,9 @@ Item {
         a rename that ended, or a click on the ghost already selected. */
     signal refocused()
 
+    // Every way out of the summon row, a rename included, drops the draft.
     property bool naming: false
+    onNamingChanged: if (!root.naming) nameField.text = ""
 
     // Held on the list, not the row: the roster is replaced wholesale on every
     // refresh, which rebuilds every delegate underneath a half-typed name.
@@ -107,7 +109,6 @@ Item {
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
                         if (root.naming) {
-                            nameField.text = "";
                             root.naming = false;
                             root.picked();
                         } else {
@@ -190,7 +191,6 @@ Item {
                 }
 
                 Item {
-                    id: nameRow
                     width: parent.width
                     height: Theme.controlHeight
 
@@ -241,46 +241,15 @@ Item {
                             onFocusLost: Qt.callLater(root.rename.commitOnBlur)
                         }
 
-                        Rectangle {
+                        RowDeleteButton {
                             id: banish
                             anchors.verticalCenter: parent.verticalCenter
-                            // Reserve the width whether or not the glyph is
-                            // painted, so the name does not shift on hover.
-                            width: 16
-                            height: Theme.controlHeight
                             visible: !entry.editing
-                                && (entryArea.containsMouse || banishArea.containsMouse
+                                && (entryArea.containsMouse || banish.containsMouse
                                 || entry.deleting)
                             z: 2
-                            radius: Theme.radius / 2
-                            color: banishArea.containsMouse || entry.deleting
-                                ? Theme.rose(0.10)
-                                : "transparent"
-
-                            Behavior on color {
-                                enabled: !Theme.reducedMotion
-                                ColorAnimation { duration: Theme.durFast }
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: entry.deleting ? "…" : "×"
-                                color: banishArea.containsMouse || entry.deleting
-                                    ? Theme.ghostRose
-                                    : Theme.foregroundFaint
-                                font.family: Theme.fontFamily
-                                font.pixelSize: Theme.fontSize
-                            }
-
-                            MouseArea {
-                                id: banishArea
-                                anchors.fill: parent
-                                enabled: !entry.deleting
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                // Raises the question, never answers it.
-                                onClicked: root.deleteRequested(entry.modelData.name)
-                            }
+                            deleting: entry.deleting
+                            onClicked: root.deleteRequested(entry.modelData.name)
                         }
                     }
 
@@ -365,12 +334,10 @@ Item {
                 selectionColor: Theme.selection
                 onAccepted: {
                     Ghostd.createGhost(text);
-                    text = "";
                     root.naming = false;
                     root.picked();
                 }
                 Keys.onEscapePressed: {
-                    nameField.text = "";
                     root.naming = false;
                     root.picked();
                 }

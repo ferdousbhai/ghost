@@ -38,6 +38,8 @@ FloatingWindow {
     property string currentSection: "chat"
     /** What the body shows: the login pane over any section, else the section. */
     readonly property string view: hud.loginOpen ? "login" : hud.currentSection
+    /** The navigable sections, in rail order; the body stack follows it. */
+    readonly property var sections: navigation.destinations.map(destination => destination.id)
     readonly property int navigationWidth: 64
 
     // How this window is named to the compositor, and the regex that finds it
@@ -137,31 +139,18 @@ FloatingWindow {
         return new RegExp(hud.titlePattern).test(title);
     }
 
+    /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
-        if (["chat", "commands", "hooks", "mcp", "remote", "character", "board"]
-                .indexOf(section) < 0)
-            return;
+        if (hud.sections.indexOf(section) < 0) return;
         hud.loginOpen = false;
         hud.currentSection = section;
-        if (section === "chat") {
-            composer.take();
-        } else if (section === "commands") {
-            Ghostd.fetchCommands(false);
-        } else if (section === "hooks") {
-            Ghostd.fetchHooks(false);
-        } else if (section === "mcp") {
-            Ghostd.fetchMcp(false);
-        } else if (section === "character") {
-            Ghostd.fetchCharacter(false);
-        } else if (section === "board") {
-            Ghostd.refreshBoard();
-        }
+        if (section === "chat") composer.take();
     }
 
     function openLogin(): void {
         hud.currentSection = "chat";
         hud.loginOpen = true;
-        modelLogin.open("");
+        modelLogin.open();
     }
 
     function pendingId(kind: string): string {
@@ -246,12 +235,7 @@ FloatingWindow {
             if (Ghostd.pendingAsk === null && hud.shown) composer.take();
         }
 
-        function onQueueMessageRejected(text: string): void {
-            composer.text = text;
-            composer.take();
-        }
-
-        function onBranchDraftReady(text: string): void {
+        function onComposerDraft(text: string): void {
             composer.text = text;
             composer.take();
         }
@@ -352,254 +336,237 @@ FloatingWindow {
                 onLoginRequested: hud.openLogin()
             }
 
-            RowLayout {
-                visible: hud.view === "chat"
+            // One pane per entry of `hud.sections`, in the same order, then
+            // login; the stack shows the one `hud.view` names.
+            StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                spacing: Theme.sectionGap
+                currentIndex: hud.sections.concat(["login"]).indexOf(hud.view)
 
-                // Toggled as one unit with Ctrl+B.
-                Sidebar {
-                    visible: hud.sidebarOpen
-                    // A nested Layout defaults Layout.fillWidth to true, which
-                    // would let the sidebar swallow the whole row and crush the
-                    // transcript; pin it to a fixed column instead.
-                    Layout.fillWidth: false
-                    Layout.preferredWidth: Theme.sidebarMeasure
-                    Layout.minimumWidth: Theme.sidebarMeasure
-                    Layout.maximumWidth: Theme.sidebarMeasure
-                    Layout.fillHeight: true
-                    onRefocused: composer.take()
-                    onGhostDeleteRequested: name => hud.ask("ghost", name, "")
-                    onConversationDeleteRequested: (sessionId, title) =>
-                        hud.ask("conversation", sessionId, title)
-                }
+                RowLayout {
+                    spacing: Theme.sectionGap
 
-                ColumnLayout {
-                    // A narrow window has room for one column, so the file pane
-                    // takes this one's place until it closes.
-                    visible: !hud.workbenchOpen || hud.workbenchSplit
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    spacing: Theme.gap
-
-                    Text {
-                        visible: Ghostd.transcriptHistoryTruncated
-                        Layout.fillWidth: true
-                        text: "Earlier conversation history is unavailable."
-                        color: Theme.foregroundDim
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        wrapMode: Text.Wrap
+                    // Toggled as one unit with Ctrl+B.
+                    Sidebar {
+                        visible: hud.sidebarOpen
+                        // A nested Layout defaults Layout.fillWidth to true, which
+                        // would let the sidebar swallow the whole row and crush the
+                        // transcript; pin it to a fixed column instead.
+                        Layout.fillWidth: false
+                        Layout.preferredWidth: Theme.sidebarMeasure
+                        Layout.minimumWidth: Theme.sidebarMeasure
+                        Layout.maximumWidth: Theme.sidebarMeasure
+                        Layout.fillHeight: true
+                        onRefocused: composer.take()
+                        onGhostDeleteRequested: name => hud.ask("ghost", name, "")
+                        onConversationDeleteRequested: (sessionId, title) =>
+                            hud.ask("conversation", sessionId, title)
                     }
 
-                    ListView {
-                        id: transcriptView
-
-                        // Follow the stream, but only while the user is already
-                        // at the bottom — yanking the view back down while they
-                        // read earlier text is worse than falling behind.
-                        property bool pinned: true
-
+                    ColumnLayout {
+                        // A narrow window has room for one column, so the file pane
+                        // takes this one's place until it closes.
+                        visible: !hud.workbenchOpen || hud.workbenchSplit
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        clip: true
                         spacing: Theme.gap
-                        model: Ghostd.transcript
-                        cacheBuffer: 400
-                        header: ResourcesLine { width: transcriptView.width }
 
-                        delegate: Bubble {
-                            // One required property per ListModel role. A
-                            // dynamically-filled ListModel has no schema, so
-                            // test/fixtures/transcript-role-probe.mjs checks
-                            // these against Ghostd.cloneTranscriptRow.
-                            required property string role
-                            required property string text
-                            required property var toolActivity
-                            required property string error
-                            required property bool pending
-                            required property string entryId
-                            required property int index
-
-                            width: transcriptView.width
-                            rowIndex: index
-                            speaker: role
-                            body: text
-                            activities: toolActivity
-                            failure: error
-                            busy: pending
-                            sourceEntryId: entryId
-                            onBranchRequested: id => hud.requestBranch(id)
+                        Text {
+                            visible: Ghostd.transcriptHistoryTruncated
+                            Layout.fillWidth: true
+                            text: "Earlier conversation history is unavailable."
+                            color: Theme.foregroundDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            wrapMode: Text.Wrap
                         }
 
-                        onContentYChanged: pinned = contentY >= contentHeight - height - 40
-                        onCountChanged: if (pinned) positionViewAtEnd()
-                        onContentHeightChanged: if (pinned) positionViewAtEnd()
+                        ListView {
+                            id: transcriptView
 
-                        // A declared child of a ListView lands in the scrolling
-                        // contentItem, whose height is 0 while the list is
-                        // empty — so centre against the *view* explicitly
-                        // rather than against `parent`.
-                        Welcome {
-                            anchors.horizontalCenter: parent.horizontalCenter
-                            y: Math.max(0, (transcriptView.height - height) / 2)
-                            visible: transcriptView.count === 0
-                            // A greeting is a short paragraph, so the card is
-                            // as wide as one reads well, in columns. A narrow
-                            // HUD gives it the whole column: a fraction of one
-                            // would wrap every third word.
-                            width: Math.min(transcriptView.width - Theme.pad * 2,
-                                Theme.ch(46) + Theme.pad * 2)
-                            onLoginRequested: hud.openLogin()
+                            // Follow the stream, but only while the user is already
+                            // at the bottom — yanking the view back down while they
+                            // read earlier text is worse than falling behind.
+                            property bool pinned: true
+
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            spacing: Theme.gap
+                            model: Ghostd.transcript
+                            cacheBuffer: 400
+                            header: ResourcesLine { width: transcriptView.width }
+
+                            delegate: Bubble {
+                                // One required property per ListModel role. A
+                                // dynamically-filled ListModel has no schema, so
+                                // test/fixtures/transcript-role-probe.mjs checks
+                                // these against Ghostd.cloneTranscriptRow.
+                                required property string role
+                                required property string text
+                                required property var toolActivity
+                                required property string error
+                                required property bool pending
+                                required property string entryId
+                                required property int index
+
+                                width: transcriptView.width
+                                rowIndex: index
+                                speaker: role
+                                body: text
+                                activities: toolActivity
+                                failure: error
+                                busy: pending
+                                sourceEntryId: entryId
+                                onBranchRequested: id => hud.requestBranch(id)
+                            }
+
+                            onContentYChanged: pinned = contentY >= contentHeight - height - 40
+                            onCountChanged: if (pinned) positionViewAtEnd()
+                            onContentHeightChanged: if (pinned) positionViewAtEnd()
+
+                            // A declared child of a ListView lands in the scrolling
+                            // contentItem, whose height is 0 while the list is
+                            // empty — so centre against the *view* explicitly
+                            // rather than against `parent`.
+                            Welcome {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: Math.max(0, (transcriptView.height - height) / 2)
+                                visible: transcriptView.count === 0
+                                // A greeting is a short paragraph, so the card is
+                                // as wide as one reads well, in columns. A narrow
+                                // HUD gives it the whole column: a fraction of one
+                                // would wrap every third word.
+                                width: Math.min(transcriptView.width - Theme.pad * 2,
+                                    Theme.ch(46) + Theme.pad * 2)
+                                onLoginRequested: hud.openLogin()
+                            }
+                        }
+
+                        UpdateNotice {
+                            Layout.fillWidth: true
+                        }
+
+                        ActivityLine {
+                            Layout.fillWidth: true
+                        }
+
+                        QueueLine {
+                            Layout.fillWidth: true
+                            steering: Ghostd.steeringQueue
+                            followUps: Ghostd.followUpQueue
+                            error: Ghostd.queueError
+                        }
+
+                        // A branch that refused. It belongs here, under the
+                        // transcript it would have forked, and clears itself on
+                        // the next attempt or on a click.
+                        Text {
+                            visible: Ghostd.branchError !== ""
+                            Layout.fillWidth: true
+                            text: Ghostd.branchError
+                            color: Theme.ghostRose
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                            wrapMode: Text.Wrap
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: Ghostd.branchError = ""
+                            }
+                        }
+
+                        AskDialog {
+                            visible: Ghostd.pendingAsk !== null
+                            Layout.fillWidth: true
+                            interaction: Ghostd.pendingAsk || ({ questions: [] })
+                            submitting: Ghostd.askSubmitting
+                            error: Ghostd.askError
+                            onAnswered: answer => Ghostd.answerAsk(answer)
+                            onChatRequested: Ghostd.chatAboutAsk()
+                            onDismissed: Ghostd.dismissAsk()
+                        }
+
+                        Composer {
+                            id: composer
+                            visible: Ghostd.pendingAsk === null
+                            Layout.fillWidth: true
+                            // Room for a real draft before it scrolls, never the
+                            // whole pane: the transcript above must stay in view.
+                            maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
+
+                            onSubmitted: (prompt, mode) => {
+                                if (mode === "prompt") Ghostd.send(prompt);
+                                else Ghostd.queueMessage(prompt, mode);
+                            }
                         }
                     }
 
-                    UpdateNotice {
-                        Layout.fillWidth: true
-                    }
+                    // The workbench: a file the ghost wrote, opened from its tool
+                    // card. Nothing is instantiated while it is closed, and while
+                    // it is open it either takes the larger half of the body or,
+                    // on a narrow window, the whole of it.
+                    Loader {
+                        active: hud.workbenchOpen
+                        visible: hud.workbenchOpen
+                        Layout.fillHeight: true
+                        Layout.fillWidth: !hud.workbenchSplit
+                        Layout.preferredWidth: hud.workbenchSplit ? hud.workbenchWidth : 0
+                        Layout.minimumWidth: hud.workbenchSplit ? hud.paneMinimumWidth : 0
 
-                    ActivityLine {
-                        Layout.fillWidth: true
-                    }
-
-                    QueueLine {
-                        Layout.fillWidth: true
-                        steering: Ghostd.steeringQueue
-                        followUps: Ghostd.followUpQueue
-                        error: Ghostd.queueError
-                    }
-
-                    // A branch that refused. It belongs here, under the
-                    // transcript it would have forked, and clears itself on
-                    // the next attempt or on a click.
-                    Text {
-                        visible: Ghostd.branchError !== ""
-                        Layout.fillWidth: true
-                        text: Ghostd.branchError
-                        color: Theme.ghostRose
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                        wrapMode: Text.Wrap
-
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Ghostd.branchError = ""
-                        }
-                    }
-
-                    AskDialog {
-                        visible: Ghostd.pendingAsk !== null
-                        Layout.fillWidth: true
-                        interaction: Ghostd.pendingAsk || ({ questions: [] })
-                        submitting: Ghostd.askSubmitting
-                        error: Ghostd.askError
-                        onAnswered: answer => Ghostd.answerAsk(answer)
-                        onChatRequested: Ghostd.chatAboutAsk()
-                        onDismissed: Ghostd.dismissAsk()
-                    }
-
-                    Composer {
-                        id: composer
-                        visible: Ghostd.pendingAsk === null
-                        Layout.fillWidth: true
-                        // Room for a real draft before it scrolls, never the
-                        // whole pane: the transcript above must stay in view.
-                        maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
-
-                        onSubmitted: (prompt, mode) => {
-                            if (mode === "prompt") Ghostd.send(prompt);
-                            else Ghostd.queueMessage(prompt, mode);
+                        sourceComponent: FilePane {
+                            filePath: Workbench.filePath
+                            onClosed: Workbench.close()
                         }
                     }
                 }
 
-                // The workbench: a file the ghost wrote, opened from its tool
-                // card. Nothing is instantiated while it is closed, and while
-                // it is open it either takes the larger half of the body or,
-                // on a narrow window, the whole of it.
-                Loader {
-                    active: hud.workbenchOpen
-                    visible: hud.workbenchOpen
-                    Layout.fillHeight: true
-                    Layout.fillWidth: !hud.workbenchSplit
-                    Layout.preferredWidth: hud.workbenchSplit ? hud.workbenchWidth : 0
-                    Layout.minimumWidth: hud.workbenchSplit ? hud.paneMinimumWidth : 0
+                Board {
+                    onCloseRequested: hud.showSection("chat")
+                }
 
-                    sourceComponent: FilePane {
-                        filePath: Workbench.filePath
-                        onClosed: Workbench.close()
+                // Character replaces chat rather than nesting its roster/conversation
+                // sidebar inside its own surface. The persona edits through the
+                // daemon's validating writer rather than the workbench's direct
+                // file editor: the daemon owns the size cap, so a bad edit is
+                // refused at Save instead of breaking the next cold start.
+                CharacterPane {
+                    onClosed: hud.showSection("chat")
+                }
+
+                // The effective command palette is conversation-scoped. A pick
+                // returns to chat with the command staged, never already running.
+                CommandsBrowser {
+                    onCommandPicked: invocation => {
+                        hud.currentSection = "chat";
+                        composer.stageCommand(invocation);
                     }
                 }
-            }
 
-            // Character replaces chat rather than nesting its roster/conversation
-            // sidebar inside its own surface. The persona edits through the
-            // daemon's validating writer rather than the workbench's direct
-            // file editor: the daemon owns the size cap, so a bad edit is
-            // refused at Save instead of breaking the next cold start.
-            CharacterPane {
-                visible: hud.view === "character"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onClosed: hud.showSection("chat")
-            }
+                // Machine-level hook configuration is global: the owner's command
+                // hooks are edited in place. It never creates or selects a
+                // conversation merely to show status.
+                HooksBrowser {}
 
-            // The effective command palette is conversation-scoped. A pick
-            // returns to chat with the command staged, never already running.
-            CommandsBrowser {
-                visible: hud.view === "commands"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCommandPicked: invocation => {
-                    hud.currentSection = "chat";
-                    composer.stageCommand(invocation);
+                McpBrowser {}
+
+                RemoteAccess {
+                    onCloseRequested: hud.showSection("chat")
                 }
-            }
 
-            // Machine-level hook configuration is global: built-in hooks are
-            // shown, the owner's command hooks are edited in place. It never
-            // creates or selects a conversation merely to show status.
-            HooksBrowser {
-                visible: hud.view === "hooks"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-
-            McpBrowser {
-                visible: hud.view === "mcp"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-            }
-
-            RemoteAccess {
-                visible: hud.view === "remote"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCloseRequested: hud.showSection("chat")
-            }
-
-            Board {
-                visible: hud.view === "board"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCloseRequested: hud.showSection("chat")
-            }
-
-            // "Connect a model": swaps in over the transcript body.
-            ModelLogin {
-                id: modelLogin
-                visible: hud.view === "login"
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                onCloseRequested: hud.loginOpen = false
+                // "Connect a model": swaps in over the transcript body.
+                ModelLogin {
+                    id: modelLogin
+                    onCloseRequested: hud.loginOpen = false
+                }
             }
         }
 
         // A permanent rail at the far right, reserving its width instead of
         // covering the content.
         GhostNavigation {
+            id: navigation
             anchors.top: parent.top
             anchors.right: parent.right
             anchors.bottom: parent.bottom
@@ -626,8 +593,8 @@ FloatingWindow {
             onDismissed: hud.dismissPending()
         }
 
-        // A browser extension asking to pair shows a six-digit code in its
-        // popup. The same code here is the whole check: Allow only on a match.
+        // The relay asking to pair shows a six-digit code in its popup. The
+        // same code here is the whole check: Allow only on a match.
         ConfirmDialog {
             id: pairDialog
 

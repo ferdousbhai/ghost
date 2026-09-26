@@ -42,8 +42,6 @@ Item {
             ? String(raw).replace(/\r\n/gu, "\n").replace(/\n$/u, "")
             : raw;
     }
-    // A prompt and a command's output render verbatim: a prompt carrying
-    // backticks or underscores has to survive as it was typed.
     readonly property bool plainBody: root.mine || root.commandOutput || root.hookNotice
     readonly property int contentInset: root.mine ? 12 : 0
 
@@ -77,7 +75,6 @@ Item {
         root.liveTail = step.tail;
     }
 
-    onBodyChanged: root.renderBody()
     onDisplayBodyChanged: root.renderBody()
     onPlainBodyChanged: root.renderBody()
     onBusyChanged: root.renderBody()
@@ -424,9 +421,9 @@ Item {
                         }
                     }
 
-                    // No sibling navigator lives here any more. An edit starts
-                    // its own conversation, so the way back to the other answer
-                    // is the sidebar — where every other thread is reached.
+                    // No sibling navigator: an edit starts its own
+                    // conversation, so the way back to the other answer is
+                    // the sidebar, where every other thread is reached.
 
                     // The trail, for when something did need checking after
                     // all. A count rather than a glyph: it is the only thing

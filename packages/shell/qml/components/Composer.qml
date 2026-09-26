@@ -24,10 +24,10 @@ Item {
         && !/\s/u.test(field.text)
     readonly property var slashMatches: root.slashIntent
         ? CommandCatalog.completions(Ghostd.commands, field.text, 6) : []
-    readonly property bool slashOpen: !root.slashDismissed && field.activeFocus
-        && root.slashIntent && root.slashMatches.length > 0
     readonly property bool slashPanelOpen: !root.slashDismissed && field.activeFocus
         && root.slashIntent && (Ghostd.commandsLoading || root.slashMatches.length > 0)
+    readonly property bool slashOpen: root.slashPanelOpen && root.slashMatches.length > 0
+    readonly property bool slashLoading: Ghostd.commandsLoading && root.slashMatches.length === 0
 
     /** The tallest the field grows before it scrolls; the HUD sets it from its height. */
     property int maxHeight: 160
@@ -101,7 +101,7 @@ Item {
         anchors.bottomMargin: Theme.gap
         z: 20
         visible: root.slashPanelOpen
-        height: Ghostd.commandsLoading && root.slashMatches.length === 0
+        height: root.slashLoading
             ? Theme.controlHeight + Theme.pad
             : slashOptions.implicitHeight + Theme.gap
         radius: Theme.bubbleRadius
@@ -112,7 +112,7 @@ Item {
 
         Text {
             anchors.centerIn: parent
-            visible: Ghostd.commandsLoading && root.slashMatches.length === 0
+            visible: root.slashLoading
             text: "Discovering commands…"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily
@@ -264,8 +264,8 @@ Item {
                     loops: Animation.Infinite
                     NumberAnimation { to: 0.35; duration: 600 }
                     NumberAnimation { to: 1; duration: 600 }
+                    onRunningChanged: if (!running) micDot.opacity = 1
                 }
-                onVisibleChanged: if (!Dictation.recording) opacity = 1
             }
 
             MouseArea {
@@ -334,12 +334,12 @@ Item {
                 selectedTextColor: Theme.foregroundBright
                 enabled: Ghostd.pendingAsk === null
 
+                onCursorRectangleChanged: scroller.keepCursorVisible()
+
                 // A block the width of one column, not a hairline between two.
                 // Qt gives the delegate the cursor's height and position; the
                 // width is ours, and in a fixed-width face there is exactly one
                 // right answer for it.
-                onCursorRectangleChanged: scroller.keepCursorVisible()
-
                 cursorDelegate: Rectangle {
                     width: Theme.charWidth
                     color: Theme.ghostAmber

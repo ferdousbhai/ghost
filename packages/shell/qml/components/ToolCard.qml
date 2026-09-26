@@ -49,8 +49,7 @@ Rectangle {
             ? Workbench.absolute(root.presentation.fileTarget)
             : Workbench.absoluteFrom(root.presentation.fileTarget,
                 root.presentation.fileCwd)) : ""
-    readonly property bool openable: root.workbenchPath !== ""
-        && Workbench.kindOf(root.workbenchPath) !== ""
+    readonly property bool openable: Workbench.canOpen(root.workbenchPath)
 
     /** Rose, the failure temperature, rather than the ordinary amber. */
     readonly property bool cool: root.failed || root.askAwaiting
@@ -67,6 +66,10 @@ Rectangle {
     readonly property color detailColor: Theme.light ? Theme.foreground : Theme.foregroundDim
     readonly property color glyphTint: root.cool ? Theme.ghostRose : Theme.ghostAmberBright
 
+    // 16 glyph + the trace Row's own spacing: rows under the trace line up
+    // under its words.
+    readonly property real indent: 16 + Theme.gap / 2
+
     visible: root.trace !== "" || root.askBranch !== null
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
     radius: Theme.bubbleRadiusSmall
@@ -77,30 +80,6 @@ Rectangle {
     Behavior on color {
         enabled: !Theme.reducedMotion
         ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
-    }
-
-    // Whisper in: the card fades up out of the message rather than snapping
-    // into the column. Translate, not `y` — the parent positioner owns `y`.
-    opacity: Theme.reducedMotion ? 1 : 0
-    scale: Theme.reducedMotion ? 1 : 0.95
-    transform: Translate { id: whisperShift; y: Theme.reducedMotion ? 0 : 8 }
-
-    Component.onCompleted: if (!Theme.reducedMotion) whisperIn.start()
-
-    ParallelAnimation {
-        id: whisperIn
-        NumberAnimation {
-            target: root; property: "opacity"; to: 1
-            duration: Theme.durMed; easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            target: root; property: "scale"; to: 1
-            duration: Theme.durMed; easing.type: Easing.OutCubic
-        }
-        NumberAnimation {
-            target: whisperShift; property: "y"; to: 0
-            duration: Theme.durMed; easing.type: Easing.OutCubic
-        }
     }
 
     // Declared before the action row so its smaller MouseAreas win hit-testing.
@@ -179,9 +158,7 @@ Rectangle {
         // already contains a path or a phrase in quotes.
         Row {
             visible: root.askPrompt !== ""
-            // 16 glyph + the trace Row's own spacing, so the quote lines up
-            // under the words above it.
-            x: 16 + Theme.gap / 2
+            x: root.indent
             width: parent.width - x
             spacing: Theme.gap / 2
 
@@ -213,9 +190,7 @@ Rectangle {
             readonly property bool current: Workbench.filePath === root.workbenchPath
 
             visible: root.openable
-            // 16 glyph + the trace Row's own spacing, so the chip starts where
-            // the words above it do.
-            x: 16 + Theme.gap / 2
+            x: root.indent
             width: Math.min(parent.width - x, chipLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? chipLabel.implicitHeight + 6 : 0
             radius: Theme.bubbleRadiusSmall
@@ -301,12 +276,8 @@ Rectangle {
         Rectangle {
             id: askRow
 
-            // Bindings evaluate even while invisible, so a null askBranch must
-            // read as an empty object rather than a TypeError per property.
-            readonly property var nav: root.askBranch || ({})
-
             visible: root.call().name === "ask" && root.askBranch !== null
-            x: 16 + Theme.gap / 2
+            x: root.indent
             width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
             height: visible ? askLabel.implicitHeight + 6 : 0
             radius: Theme.bubbleRadiusSmall
@@ -335,13 +306,12 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: Ghostd.reanswerHistoricalAsk(askRow.nav.resultEntryId || "")
+                onClicked: Ghostd.reanswerHistoricalAsk(root.askBranch.resultEntryId || "")
             }
 
-            // Re-answering still commits a sibling in this conversation — that
-            // is Ghost's two-phase ask tree, not the branch route — but the
-            // shell no longer offers a way to step between those siblings,
-            // because the daemon no longer has one to offer.
+            // Re-answering commits a sibling in this conversation (Ghost's
+            // two-phase ask tree, not the branch route); the shell offers no
+            // way to step between those siblings because the daemon has none.
         }
     }
 }

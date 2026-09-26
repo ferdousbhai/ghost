@@ -24,14 +24,14 @@ Window {
     Component.onCompleted: {
         Ghostd.activeHooks = [{
             event: "session_stop",
-            source: "builtin",
             name: "![remote](" + root.fixtureUrl + "/markdown-name.png) "
                 + "<img src=\"file:///etc/passwd\">",
             description: "<img src=\"" + root.fixtureUrl + "/raw-description.png\"> "
                 + "![data](data:image/svg+xml,<svg onload='fetch(1)'/>) "
                 + "[local](file:///etc/shadow)"
         }];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
+        // One handler, so the status row above names a rendered card.
+        Ghostd.hookConfig = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "true" }] }] } };
         Ghostd.activeHookCount = 1;
         Ghostd.hooksLoaded = true;
         Ghostd.hooksLoading = false;

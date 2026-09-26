@@ -125,7 +125,7 @@ TestCase {
         const aborts = { count: 0 };
         const turn = openTurn("new-live", "New prompt", aborts);
         Ghostd.sessions = [];
-        Ghostd.ensureOptimisticSessionRow("casper", "pi:new-live");
+        Ghostd.ensureLocalSessionRow("casper", "pi:new-live", 1);
 
         compare(Ghostd.sessions.length, 1);
         verify(Ghostd.sessions[0].localOnly);

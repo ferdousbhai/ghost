@@ -381,8 +381,7 @@ The event union is the contract; clients must ignore unknown future event
 types. See [`pi-messages.ts`](packages/daemon/src/pi-messages.ts) and its
 conformance tests. A turn emits `start`, ordered text/thinking/tool/command/
 queue/branch events, and exactly one terminal `done` or `error`. A quota
-refusal is a typed `limit_reached` event (harness, kind, window, `resetsAt`
-when known) sent before that `error`; the classifier is `classifyLimitMessage`. Tool execution
+refusal is a typed `limit_reached` event (harness, kind) sent before that `error`; the classifier is `classifyLimitMessage`. Tool execution
 events include the call id, tool name, captured cwd, and safe summary; private
 reasoning is never restored through the transcript API. A standalone slash
 command emits `start`, `command_output`, then zero-usage `done` and is not

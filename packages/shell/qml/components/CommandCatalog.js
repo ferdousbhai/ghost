@@ -8,18 +8,20 @@ function text(value) {
     return value === undefined || value === null ? "" : String(value);
 }
 
+// A command or alias as typed, without its leading slashes.
+function bare(value) {
+    return text(value).trim().replace(/^\/+/, "");
+}
+
 function commandName(command) {
-    let name = text(command ? command.name : "").trim();
-    while (name.startsWith("/")) name = name.slice(1);
-    return name;
+    return bare(command ? command.name : "");
 }
 
 function aliases(command) {
     if (!command || !Array.isArray(command.aliases)) return [];
     const result = [];
     for (const value of command.aliases) {
-        let alias = text(value).trim();
-        while (alias.startsWith("/")) alias = alias.slice(1);
+        const alias = bare(value);
         if (alias !== "" && result.indexOf(alias) < 0) result.push(alias);
     }
     return result;
@@ -31,9 +33,7 @@ function sourceName(command) {
 }
 
 function sourceLabel(source) {
-    const raw = text(source).trim();
-    if (raw === "") return "Session";
-    const words = raw.replace(/[_-]+/gu, " ");
+    const words = text(source).trim().replace(/[_-]+/gu, " ");
     return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
@@ -51,9 +51,8 @@ function subcommandText(command) {
     if (!command || !Array.isArray(command.subcommands)) return "";
     const names = [];
     for (const subcommand of command.subcommands) {
-        const value = typeof subcommand === "string"
-            ? subcommand : text(subcommand ? subcommand.name : "");
-        const name = value.trim().replace(/^\/+/, "");
+        const name = bare(typeof subcommand === "string"
+            ? subcommand : (subcommand ? subcommand.name : ""));
         if (name !== "" && names.indexOf(name) < 0) names.push(name);
     }
     return names.join("  ·  ");
@@ -118,8 +117,7 @@ function groups(commands, query) {
 }
 
 function completions(commands, token, limit) {
-    let needle = text(token).trim().toLowerCase();
-    while (needle.startsWith("/")) needle = needle.slice(1);
+    const needle = bare(token).toLowerCase();
     const matches = filtered(commands, "").filter(function (command) {
         if (needle === "") return true;
         if (commandName(command).toLowerCase().startsWith(needle)) return true;

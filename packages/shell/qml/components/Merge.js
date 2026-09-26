@@ -142,6 +142,11 @@ function isInsertion(hunk) {
     return hunk.aStart === hunk.aEnd;
 }
 
+/** How many lines `hunk` adds (negative when it removes). */
+function delta(hunk) {
+    return (hunk.bEnd - hunk.bStart) - (hunk.aEnd - hunk.aStart);
+}
+
 /**
  * Does `hunk` belong to the group already covering base range [lo, hi)?
  *
@@ -229,13 +234,15 @@ function merge(base, mine, theirs) {
             seedMine = isInsertion(nextMine) || !isInsertion(nextTheirs);
         }
 
-        const seed = seedMine ? mineHunks[x++] : theirsHunks[y++];
+        // The seed is left in place: it meets its own range, so the grow loop
+        // below absorbs it like any other hunk.
+        const seed = seedMine ? nextMine : nextTheirs;
         const lo = seed.aStart;
         let hi = seed.aEnd;
-        let mineCount = seedMine ? 1 : 0;
-        let theirsCount = seedMine ? 0 : 1;
-        let mineDelta = seedMine ? (seed.bEnd - seed.bStart) - (seed.aEnd - seed.aStart) : 0;
-        let theirsDelta = seedMine ? 0 : (seed.bEnd - seed.bStart) - (seed.aEnd - seed.aStart);
+        let mineCount = 0;
+        let theirsCount = 0;
+        let mineDelta = 0;
+        let theirsDelta = 0;
 
         // Grow until nothing more meets the range. Two passes are not enough:
         // a hunk pulled in from one side can widen the range onto a hunk of the
@@ -248,7 +255,7 @@ function merge(base, mine, theirs) {
                 && joinsGroup(mineHunks[x], lo, hi, hi === lo)) {
                 const hunk = mineHunks[x++];
                 hi = Math.max(hi, hunk.aEnd);
-                mineDelta += (hunk.bEnd - hunk.bStart) - (hunk.aEnd - hunk.aStart);
+                mineDelta += delta(hunk);
                 mineCount++;
                 grew = true;
             }
@@ -256,7 +263,7 @@ function merge(base, mine, theirs) {
                 && joinsGroup(theirsHunks[y], lo, hi, hi === lo)) {
                 const hunk = theirsHunks[y++];
                 hi = Math.max(hi, hunk.aEnd);
-                theirsDelta += (hunk.bEnd - hunk.bStart) - (hunk.aEnd - hunk.aStart);
+                theirsDelta += delta(hunk);
                 theirsCount++;
                 grew = true;
             }

@@ -6,7 +6,8 @@ import "../services"
 // the rim. Set `width`; it is always a circle. The radii are half the size on
 // purpose: RadialGradient defaults them to the full width, so the falloff would
 // still be mid-hue at the bounds and paint a hard-edged square. A non-zero
-// `breath` dims the opacity to `breathLow` and back, `breath` ms each way.
+// `breath` dims the opacity to `breathLow` and back, `breath` ms each way,
+// only while the bloom and its window are showing.
 RadialGradient {
     id: root
 
@@ -26,7 +27,8 @@ RadialGradient {
     }
 
     SequentialAnimation on opacity {
-        running: root.breath > 0 && !Theme.reducedMotion
+        running: root.breath > 0 && root.visible && root.Window.visibility !== Window.Hidden
+            && !Theme.reducedMotion
         loops: Animation.Infinite
         NumberAnimation { to: root.breathLow; duration: root.breath; easing.type: Easing.InOutSine }
         NumberAnimation { to: 1.0; duration: root.breath; easing.type: Easing.InOutSine }

@@ -2,7 +2,7 @@ pragma Singleton
 
 // Workbench — which file the HUD has open beside the chat.
 //
-// The pane that renders it is qs.components/FilePane, and that pane owns the
+// The pane that renders it is components/FilePane.qml, and that pane owns the
 // file's *contents* — every read and write of the open file is its FileView,
 // not ours. `filePath` is always absolute once set, so every consumer can treat
 // it as a real path rather than re-deriving a base.
@@ -21,15 +21,12 @@ import Quickshell.Io
 import QtQuick
 import "."
 import "EditorPolicy.js" as Editor
+import "../components/Highlighter.js" as Highlighter
 
 Singleton {
     id: root
 
     property string filePath: ""
-
-    readonly property string fileName: root.baseName(root.filePath)
-
-    readonly property string kind: root.kindOf(root.filePath)
 
     readonly property string home: {
         const ghost = Ghostd.activeGhost;
@@ -41,23 +38,9 @@ Singleton {
     }
 
     /**
-     * Extensions the code view claims. Curated rather than "anything that is
-     * not markdown": an unlisted extension reads as `kind === ""`, which is how
-     * a caller knows not to offer the file at all.
-     */
-    readonly property var codeExtensions: [
-        "js", "jsx", "mjs", "cjs", "ts", "tsx", "py", "qml", "json", "jsonc",
-        "sh", "bash", "zsh", "fish", "css", "scss", "html", "htm", "yaml",
-        "yml", "toml", "rs", "go", "c", "h", "cpp", "hpp", "cc", "java", "kt",
-        "rb", "lua", "sql", "xml", "svg", "conf", "ini", "env", "txt", "log",
-        "csv", "diff", "patch", "nix", "vim", "php", "pl", "swift", "gradle",
-        "cmake", "make", "dockerfile", "gitignore", "qmldir"
-    ]
-
-    /**
      * Open `path` beside the chat. Absolute or ghost-home-relative. A path no
      * pane can render is ignored rather than opened blank, so `filePath` is
-     * always something `kind` describes.
+     * always a path `canOpen` accepts.
      */
     function open(path: string): void {
         if (!root.canOpen(path)) return;
@@ -68,9 +51,11 @@ Singleton {
         root.filePath = "";
     }
 
+    /** Whether `path` resolves and FilePane can show it; Highlighter.js is
+        the one table of what it can show. */
     function canOpen(path: string): bool {
         const resolved = root.absolute(path);
-        return resolved !== "" && root.kindOf(resolved) !== "";
+        return resolved !== "" && Highlighter.isViewable(resolved);
     }
 
     /**
@@ -119,15 +104,6 @@ Singleton {
         const value = String(path || "");
         const cut = value.lastIndexOf("/");
         return cut < 0 ? value : value.slice(cut + 1);
-    }
-
-    function kindOf(path: string): string {
-        const name = root.baseName(path);
-        const dot = name.lastIndexOf(".");
-        // `dot > 0` and not `>= 0`: a dotfile is its own name, not an extension.
-        const ext = dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
-        if (ext === "md" || ext === "markdown") return "markdown";
-        return root.codeExtensions.indexOf(ext) >= 0 ? "code" : "";
     }
 
     //

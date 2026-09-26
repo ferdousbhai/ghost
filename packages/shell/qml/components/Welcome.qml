@@ -50,8 +50,10 @@ Column {
         width: 72
         height: 72
 
+        // Bobs only while the card and its window are showing.
         SequentialAnimation on bob {
-            running: !Theme.reducedMotion
+            running: root.visible && root.Window.visibility !== Window.Hidden
+                && !Theme.reducedMotion
             loops: Animation.Infinite
             NumberAnimation { to: -6; duration: 3000; easing.type: Easing.InOutSine }
             NumberAnimation { to: 6; duration: 3000; easing.type: Easing.InOutSine }

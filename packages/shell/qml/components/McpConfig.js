@@ -25,14 +25,28 @@ function remoteUrlIsRedacted(url) {
         || value.indexOf("%5Bconfigured%5D") >= 0;
 }
 
-function hasHiddenValues(server) {
+// What the sanitized view withholds, one phrase per kind. An auth block counts
+// whether or not it names a credential: its token URL, client id and secret,
+// and resource are withheld either way. An oauth block reports `configured`
+// exactly when it holds anything.
+function hiddenParts(server) {
     const config = server && server.config ? server.config : {};
-    return Number(config.argumentCount || 0) > 0
-        || configuredKeys(config.environment).length > 0
-        || configuredKeys(config.headers).length > 0
-        || Boolean(config.auth)
-        || Boolean(config.oauth)
-        || remoteUrlIsRedacted(config.url);
+    const parts = [];
+    const argumentsCount = Number(config.argumentCount || 0);
+    if (argumentsCount > 0)
+        parts.push(argumentsCount + " command argument" + (argumentsCount === 1 ? "" : "s"));
+    const env = configuredKeys(config.environment);
+    if (env.length > 0) parts.push("environment: " + env.join(", "));
+    const headers = configuredKeys(config.headers);
+    if (headers.length > 0) parts.push("headers: " + headers.join(", "));
+    if (config.auth) parts.push("authentication");
+    if (config.oauth && config.oauth.configured === true) parts.push("OAuth client settings");
+    if (remoteUrlIsRedacted(config.url)) parts.push("URL query values");
+    return parts;
+}
+
+function hasHiddenValues(server) {
+    return hiddenParts(server).length > 0;
 }
 
 function safeRemoteUrl(value) {

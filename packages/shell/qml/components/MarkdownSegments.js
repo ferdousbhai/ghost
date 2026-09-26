@@ -63,13 +63,7 @@ function advance(body, cursor, settled) {
     // stitched onto the blocks already on screen.
     var reset = text.length < cursor.closed.length
         || text.lastIndexOf(cursor.closed, 0) !== 0;
-    if (reset) {
-        cursor.closed = "";
-        cursor.at = 0;
-        cursor.blockKind = "";
-        cursor.blank = false;
-        cursor.fence = "";
-    }
+    if (reset) Object.assign(cursor, begin());
 
     var segments = [];
     function close(boundary) {

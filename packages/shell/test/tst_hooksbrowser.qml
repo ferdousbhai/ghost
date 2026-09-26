@@ -62,7 +62,6 @@ TestCase {
             name: hostileName,
             description: hostileDescription
         }];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
         Ghostd.activeHookCount = 1;
         Ghostd.hooksLoaded = true;
         Ghostd.hooksLoading = false;
@@ -77,7 +76,6 @@ TestCase {
         Ghostd.hookConfigLoaded = false;
         Ghostd.hookConfigError = "";
         Ghostd.activeHooks = [];
-        Ghostd.hookEvents = [];
         Ghostd.activeHookCount = 0;
         Ghostd.hooksLoaded = false;
         Ghostd.hooksStale = false;
@@ -111,7 +109,6 @@ TestCase {
         Ghostd.activeHooks = [
             { event: "session_stop", name: "Review", description: "Reviews the pass." }
         ];
-        Ghostd.hookEvents = [{ event: "session_stop", count: 1 }];
         Ghostd.activeHookCount = 1;
         Ghostd.hookConfig = configDocument();
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";

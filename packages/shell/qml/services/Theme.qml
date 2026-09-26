@@ -46,7 +46,7 @@ pragma ComponentBehavior: Bound
 // Omarchy's own shell hits this and sets watchChanges: false. It then rewrites
 // theme.name in place with `echo >`, so a watch on *that* file survives and
 // gives us a reliable single-shot edge. We watch theme.name and re-read
-// colors.toml when it fires.
+// colors.toml and shell.toml when it fires.
 //
 // Everything degrades to the fallback palette and the template's own default
 // numbers when Omarchy is absent, so these surfaces still run on a bare
@@ -74,18 +74,13 @@ Singleton {
         "mode": "dark",
         "background": "#1a1b26",
         "dark_background": "#13141c",
-        "darker_background": "#0e0e14",
         "lighter_background": "#24283b",
         "foreground": "#a9b1d6",
-        "dark_foreground": "#565f89",
         "bright_foreground": "#c0caf5",
         "accent": "#7aa2f7",
-        "selection": "#292e42",
-        "muted": "#414868",
         "red": "#f7768e",
         "green": "#9ece6a",
-        "yellow": "#e0af68",
-        "magenta": "#ad8ee6"
+        "yellow": "#e0af68"
     })
 
     function pick(key: string): string {
@@ -182,7 +177,6 @@ Singleton {
     readonly property int spaceHuge: root.spaceFor("huge", 18)
     readonly property int controlGap: root.spaceFor("control-gap", 8)
     readonly property int controlPaddingX: root.spaceFor("control-padding-x", 10)
-    readonly property int popupRowHeight: root.spaceFor("popup-row-height", 28)
     readonly property int panelPadding: root.spaceFor("panel-padding", 18)
 
     // [controls] — Omarchy publishes one chrome colour and one border colour
@@ -238,14 +232,6 @@ Singleton {
         const luma = root.accent.r * 0.299 + root.accent.g * 0.587 + root.accent.b * 0.114;
         return luma > 0.58 ? "#111111" : "#ffffff";
     }
-
-    // The bar's cross-axis size is quoted at base-size 12 and grows with the
-    // type scale when the theme says so.
-    readonly property int barSize: Math.max(1, Math.round(
-        root.shellNumber("bar.size-horizontal", 26)
-        * (root.shellFlag("bar.scale-with-font", true) ? root.fontBase / 12 : 1)))
-    readonly property color barBackground: root.shellColor("bar.background", root.background)
-    readonly property color barForeground: root.shellColor("bar.text", root.foreground)
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral
@@ -308,7 +294,6 @@ Singleton {
     readonly property int gap: root.controlGap
     readonly property int sectionGap: root.spaceHuge
     readonly property int controlHeight: root.spaceFor("control-height", 28)
-    readonly property int compactControlHeight: root.popupRowHeight
 
     // omarchy.org moves everything on one 150ms ease-out; the longer two keep
     // their existing relation to it for the few surfaces that travel further.
@@ -457,12 +442,8 @@ Singleton {
         blockLoading: true
         watchChanges: true
         printErrors: false
-        onFileChanged: {
-            nameFile.reload();
-            // The directory swap has already happened by the time theme.name is
-            // rewritten, so re-reading immediately is safe.
-            colorsFile.reload();
-            shellFile.reload();
-        }
+        // The directory swap has already happened by the time theme.name is
+        // rewritten, so re-reading immediately is safe.
+        onFileChanged: root.reload()
     }
 }

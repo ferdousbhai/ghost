@@ -141,7 +141,6 @@ TestCase {
             ToolTrace.text(askActivity("timedOut"), true, false, false),
             "Time ran out — answered “Leave it alone” for you"
         );
-        compare(ToolTrace.askAutoAnswer(askActivity("timedOut")), "Leave it alone");
     }
 
     // Nothing recommended, nothing submitted. Naming an option here would
@@ -165,19 +164,18 @@ TestCase {
             ToolTrace.text(activity, true, false, false),
             "Time ran out — nothing was answered"
         );
-        compare(ToolTrace.askAutoAnswer(activity), "");
     }
 
     // The undo. A standing decision is corrected, not answered for the first
     // time — but only when the clock actually took one.
     function test_timedOutAskOffersTheChangeRatherThanAFirstAnswer(): void {
-        compare(ToolTrace.askAction(askActivity("timedOut")), "Change it");
+        compare(ToolTrace.view(askActivity("timedOut"), false, false, false).askAction, "Change it");
         compare(
-            ToolTrace.askAction({
+            ToolTrace.view({
                 name: "ask",
                 askSettled: "timedOut",
                 arguments: { questions: [{ id: "q", question: "Which?", options: [] }] }
-            }),
+            }, false, false, false).askAction,
             "Answer it"
         );
     }
@@ -227,14 +225,14 @@ TestCase {
     // The card's whole point: the question survives the scrollback.
     function test_askCardCarriesTheQuestionItself(): void {
         compare(
-            ToolTrace.askPrompt(askActivity("cancelled")),
+            ToolTrace.view(askActivity("cancelled"), false, false, false).askPrompt,
             "Danger · Delete /home/owner/plugins and everything inside it?"
         );
     }
 
     function test_expandedAskNamesTheOptionsAndTheRecommendation(): void {
         compare(
-            ToolTrace.askDetail(askActivity("cancelled")),
+            ToolTrace.view(askActivity("cancelled"), false, false, false).askDetail,
             "Options · Delete it · Leave it alone (recommended)"
         );
     }
@@ -255,37 +253,40 @@ TestCase {
             intent: "",
             summary: ""
         };
-        compare(ToolTrace.askPrompt(activity), "Delete the folder?  +1 more question");
         compare(
-            ToolTrace.askDetail(activity),
+            ToolTrace.view(activity, false, false, false).askPrompt,
+            "Delete the folder?  +1 more question"
+        );
+        compare(
+            ToolTrace.view(activity, false, false, false).askDetail,
             "Options · Yes\nAlso asked · Back it up first?\nOptions · No"
         );
     }
 
     // "Re-answer" presumes a first answer that a cancelled question never got.
     function test_actionOffersAFirstAnswerWhenThereWasNone(): void {
-        compare(ToolTrace.askAction(askActivity("submitted")), "Re-answer");
-        compare(ToolTrace.askAction(askActivity("cancelled")), "Answer it");
-        compare(ToolTrace.askAction(askActivity("")), "Answer it");
+        compare(ToolTrace.view(askActivity("submitted"), false, false, false).askAction, "Re-answer");
+        compare(ToolTrace.view(askActivity("cancelled"), false, false, false).askAction, "Answer it");
+        compare(ToolTrace.view(askActivity(""), false, false, false).askAction, "Answer it");
     }
 
     // The clock's answer is not the owner's answer, so a timed-out card keeps
     // the rose an answered one drops.
     function test_theClocksAnswerIsStillNotTheOwners(): void {
-        verify(ToolTrace.askAwaiting(askActivity("timedOut"), true));
-        verify(!ToolTrace.askAwaiting(askActivity("submitted"), true));
+        verify(ToolTrace.view(askActivity("timedOut"), true, false, false).askAwaiting);
+        verify(!ToolTrace.view(askActivity("submitted"), true, false, false).askAwaiting);
     }
 
     // The rose temperature is for a question with no answer — including one
     // still standing open — and never for one that was answered. Not knowing
     // how a finished ask settled is not the same as knowing it went unanswered.
     function test_onlyAnUnansweredQuestionLeavesTheAmber(): void {
-        verify(ToolTrace.askAwaiting(askActivity("cancelled"), true));
-        verify(ToolTrace.askAwaiting(askActivity("timedOut"), true));
-        verify(ToolTrace.askAwaiting(askActivity(""), false));
-        verify(!ToolTrace.askAwaiting(askActivity("submitted"), true));
-        verify(!ToolTrace.askAwaiting(askActivity("chat"), true));
-        verify(!ToolTrace.askAwaiting(askActivity(""), true));
+        verify(ToolTrace.view(askActivity("cancelled"), true, false, false).askAwaiting);
+        verify(ToolTrace.view(askActivity("timedOut"), true, false, false).askAwaiting);
+        verify(ToolTrace.view(askActivity(""), false, false, false).askAwaiting);
+        verify(!ToolTrace.view(askActivity("submitted"), true, false, false).askAwaiting);
+        verify(!ToolTrace.view(askActivity("chat"), true, false, false).askAwaiting);
+        verify(!ToolTrace.view(askActivity(""), true, false, false).askAwaiting);
     }
 
     function test_ordinaryToolNeverWearsTheQuestionTreatment(): void {
@@ -296,9 +297,9 @@ TestCase {
             intent: "",
             summary: ""
         };
-        compare(ToolTrace.askPrompt(activity), "");
-        compare(ToolTrace.askDetail(activity), "");
-        verify(!ToolTrace.askAwaiting(activity, false));
+        compare(ToolTrace.view(activity, false, false, false).askPrompt, "");
+        compare(ToolTrace.view(activity, false, false, false).askDetail, "");
+        verify(!ToolTrace.view(activity, false, false, false).askAwaiting);
     }
 
     // The questions are on the card now, so the count row would only repeat
@@ -351,20 +352,19 @@ TestCase {
         // The premise: this is exactly the shape that used to read as empty.
         verify(!Array.isArray(activity.arguments.questions));
 
-        compare(ToolTrace.askAutoAnswer(activity), "Leave it alone");
         compare(
             ToolTrace.text(activity, true, false, false),
             "Time ran out — answered “Leave it alone” for you"
         );
         compare(
-            ToolTrace.askPrompt(activity),
+            ToolTrace.view(activity, false, false, false).askPrompt,
             "Danger · Delete /home/owner/plugins and everything inside it?"
         );
         compare(
-            ToolTrace.askDetail(activity),
+            ToolTrace.view(activity, false, false, false).askDetail,
             "Options · Delete it · Leave it alone (recommended)"
         );
-        compare(ToolTrace.askAction(activity), "Change it");
+        compare(ToolTrace.view(activity, false, false, false).askAction, "Change it");
         compare(ToolTrace.input(activity), "");
     }
 
