@@ -167,7 +167,7 @@ describe.skipIf(!extensionPresent)("the extension's permission surface is the se
 
   it("dials loopback and nothing else", async () => {
     const background = await source("background.js");
-    expect(background).toMatch(/ws:\/\/127\.0\.0\.1:\$\{settings\.port\}/);
+    expect(background).toMatch(/ws:\/\/127\.0\.0\.1:\$\{(?:settings\.)?port\}/);
     expect(background).not.toMatch(/wss?:\/\/(?!127\.0\.0\.1)/);
   });
 });

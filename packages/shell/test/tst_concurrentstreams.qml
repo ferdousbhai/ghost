@@ -121,6 +121,25 @@ TestCase {
         compare(secondAborts.count, 0);
     }
 
+    // fail()'s daemon error belongs to the HUD, not to the conversation that
+    // happened to be open: it is never saved into one, and opening a
+    // conversation with no state of its own leaves it standing.
+    function test_aDaemonErrorIsNotSavedIntoTheOpenConversation(): void {
+        const down = "ghostd is not answering on http://127.0.0.1:0";
+        const state = Ghostd.ensureTurnState("casper", "pi:a", "a", "pi");
+        Ghostd.currentSessionId = "pi:a";
+        Ghostd.showTurnState("casper", "pi:a");
+        Ghostd.lastError = down;
+
+        Ghostd.captureActiveTurn(state);
+        compare(state.lastError, "");
+
+        Ghostd.currentSessionId = "";
+        Ghostd.showTurnState("casper", "");
+        compare(Ghostd.lastError, down);
+        Ghostd.lastError = "";
+    }
+
     function test_newLiveRowSurvivesRefetchAndDefersReadWrite(): void {
         const aborts = { count: 0 };
         const turn = openTurn("new-live", "New prompt", aborts);

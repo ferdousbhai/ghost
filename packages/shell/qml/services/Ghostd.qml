@@ -1022,7 +1022,7 @@ Singleton {
                 if (created && !root.ghosts.some(function (ghost) {
                     return ghost && ghost.name === createdName;
                 })) root.ghosts = root.ghosts.concat([created]);
-                root.finishSelectGhost(createdName);
+                root.switchGhost(createdName);
                 root.branchError = "";
                 // The roster, not the POST echo, is the authoritative listing.
                 root.refresh();
@@ -1238,7 +1238,19 @@ Singleton {
     }
 
     function finishSelectGhost(name: string): void {
-        if (name === "" || name === root.activeGhost) return;
+        if (!root.switchGhost(name)) return;
+        root.fetchCurrentModel();
+        root.fetchSessions(name);
+        root.fetchGreeting();
+    }
+
+    /**
+     * Make `name` the active ghost and drop the previous one's state, without
+     * fetching; finishSelectGhost fetches, and a create lets refresh()'s
+     * listing do it. False when there is nothing to switch.
+     */
+    function switchGhost(name: string): bool {
+        if (name === "" || name === root.activeGhost) return false;
         const previous = root.activeTurnState(false);
         if (previous) {
             root.captureActiveTurn(previous);
@@ -1251,9 +1263,7 @@ Singleton {
         root.currentSessionId = root.sessionIds[name] || "";
         root.showTurnState(name, root.currentSessionId);
         root.clearGhostScopedState();
-        root.fetchCurrentModel();
-        root.fetchSessions(name);
-        root.fetchGreeting();
+        return true;
     }
 
     /** Open one conversation of any ghost; Panel's summon payload names both. */
@@ -1478,7 +1488,11 @@ Singleton {
 
     function clearTurnProjection(): void {
         transcriptModel.clear();
-        root.projectTurnProjection(root.newTurnState("", "", "", "pi"));
+        const empty = root.newTurnState("", "", "", "pi");
+        // A daemon-level error (fail()) outlives a conversation switch; a
+        // conversation's own error comes back with its state.
+        empty.lastError = root.lastError;
+        root.projectTurnProjection(empty);
     }
 
     function showTurnState(ghost: string, sessionId: string): void {
@@ -2256,7 +2270,10 @@ Singleton {
         root.ensureLocalSessionRow(ghost, id, 0);
     }
 
-    /** List a conversation the daemon has not persisted yet; `messageCount` is 1 once it is sent. */
+    /**
+     * List a conversation the daemon has not persisted yet: 0 messages for a
+     * blank draft, 1 for one just sent. A row already listed keeps its count.
+     */
     function ensureLocalSessionRow(ghost: string, id: string, messageCount: int): void {
         const state = root.turnStates[root.conversationKey(ghost, id)];
         if (state) state.published = true;
@@ -3353,7 +3370,7 @@ Singleton {
 
     /** "pi usage limit reached", from a limit_reached event. */
     function limitNoticeText(event: var): string {
-        return "pi " + String(event.kind || "limit").replace("_", " ") + " reached";
+        return String(event.harness) + " " + String(event.kind || "limit").replace("_", " ") + " reached";
     }
 
     function notificationTitle(state: var): string {

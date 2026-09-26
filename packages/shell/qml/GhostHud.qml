@@ -284,7 +284,7 @@ FloatingWindow {
         // card by focus-chain propagation even while the composer holds focus,
         // since a plain TextEdit does not consume Ctrl+B.
         Keys.onPressed: event => {
-            if (hud.currentSection === "chat"
+            if (hud.view === "chat"
                     && (event.modifiers & Qt.ControlModifier)
                     && event.key === Qt.Key_B) {
                 hud.sidebarOpen = !hud.sidebarOpen;
