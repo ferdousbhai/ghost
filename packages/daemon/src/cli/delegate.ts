@@ -91,6 +91,8 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     throw new CliError(EXIT_CODE.failure, `cannot check harnesses: ${error.message}`);
   });
   const harness = report.harnesses.find((candidate) => candidate.id === id);
+  // Evidence, not a gate: a log that cannot be written never hides what the
+  // harness did or masks a refusal, it only leaves a warning.
   const record = (outcome: HandoffOutcome) => {
     const receipt: HandoffReceipt = {
       v: 1,
@@ -103,7 +105,12 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
       windows: harness?.usage?.windows ?? [],
       outcome,
     };
-    appendHandoff(handoffLogPath(env, home), receipt);
+    const path = handoffLogPath(env, home);
+    try {
+      appendHandoff(path, receipt);
+    } catch (error) {
+      ctx.runtime.stderr.write(`ghost: cannot record the handoff in ${path}: ${(error as Error).message}\n`);
+    }
   };
 
   if (!harness) {
@@ -115,12 +122,13 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     throw new CliError(EXIT_CODE.conflict, `${id} has no room: ${harness.reason}; see ghost harnesses`);
   }
 
+  const launched = Date.now();
   const result = await run(id, args, ctx);
   const failed = result.exit !== 0;
   record({
     exit: result.exit,
     signal: result.signal,
-    durationMs: Date.now() - started,
+    durationMs: Date.now() - launched,
     limit: failed ? classifyLimitMessage(result.tail) : null,
   });
   if (result.exit !== null) return result.exit;

@@ -319,10 +319,12 @@ previous one): `{v: 1, at, ghost, session, harness, cwd, eligible, windows,
 outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
 (or `null`), `eligible` lists the harnesses eligible at the check, `windows` is
 this harness's live windows then, and `outcome` is `{refused}` with the reason,
-or `{exit, signal, durationMs, limit}`, `limit` being `classifyLimitMessage`'s
-kind for the last 8 KiB of output of a run that did not exit 0, else `null`. No
-prompt text or arguments are kept. The log is the evidence for judging routing;
-nothing in Ghost reads it back.
+or `{exit, signal, durationMs, limit}`, `durationMs` the harness's own run
+time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
+of a run that did not exit 0, else `null`. No prompt text or arguments are
+kept. A receipt that cannot be written is a warning on stderr, never a changed
+exit status. The log is the evidence for judging routing; nothing in Ghost
+reads it back.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in

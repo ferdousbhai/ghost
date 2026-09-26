@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,31 +12,38 @@ afterEach(() => {
   root = undefined;
 });
 
-function machine(): { env: NodeJS.ProcessEnv; log: string; calls: string } {
+function machine(options: { refreshMs?: number } = {}): { env: NodeJS.ProcessEnv; log: string; calls: string } {
   root = mkdtempSync(join(tmpdir(), "ghost-delegate-"));
   const bin = join(root, "bin");
   const usage = join(root, "state", "omarchy", "agents", "usage");
   mkdirSync(bin);
   mkdirSync(usage, { recursive: true });
   const calls = join(root, "calls");
-  const executable = (name: string, body: string) => {
-    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`);
+  const executable = (name: string, body: string, shebang = "#!/bin/sh") => {
+    writeFileSync(join(bin, name), `${shebang}\n${body}\n`);
     chmodSync(join(bin, name), 0o755);
   };
   writeFileSync(join(root, "commands.json"), JSON.stringify({
-    commands: [{ route: "omarchy default agent", args: "[claude|codex|grok]" }],
+    commands: [{ route: "omarchy default agent", args: "[claude|codex|grok|broken]" }],
   }));
-  // `omarchy commands --json` lists agents; `omarchy agent usage update` is logged.
-  executable("omarchy", `[ "$1" = commands ] && exec cat '${join(root, "commands.json")}'\necho "$*" >> '${calls}'`);
+  // `omarchy commands --json` lists agents; `omarchy agent usage update` is logged, and can be slow.
+  executable("omarchy", [
+    `[ "$1" = commands ] && exec cat '${join(root, "commands.json")}'`,
+    `echo "$*" >> '${calls}'`,
+    `sleep ${(options.refreshMs ?? 0) / 1000}`,
+  ].join("\n"));
   // claude echoes its args, or fails on a limit when asked.
   executable("claude", [
     'if [ "$1" = limit ]; then echo "Error: You have hit your usage limit" >&2; exit 1; fi',
     // A descendant that outlives the harness keeps its pipes open.
     'if [ "$1" = linger ]; then sleep 20 & echo done; exit 0; fi',
+    'if [ "$1" = signal ]; then kill -TERM $$; fi',
     'echo "claude got: $*"',
     "exit 3",
   ].join("\n"));
   executable("codex", "echo should-not-run; exit 0");
+  // Installed by every test Omarchy applies, yet its interpreter is gone: spawn fails.
+  executable("broken", "exit 0", "#!/nonexistent/interpreter");
   const fresh = new Date().toISOString();
   const later = "2999-01-01T00:00:00Z";
   writeFileSync(join(usage, "claude.json"), JSON.stringify({
@@ -61,8 +68,9 @@ function receipts(log: string): HandoffReceipt[] {
 describe("ghost delegate", () => {
   it("refreshes the harness, runs it with its args, streams its output, and exits with its status", async () => {
     const { env, log, calls } = machine();
-    const result = await runCli(["delegate", "claude", "--", "-p", "fix it"], { env, home: root });
-    expect(result.stdout).toBe("claude got: -p fix it\n");
+    // Everything after `--` is the harness's, including ghost's own flag names and another `--`.
+    const result = await runCli(["delegate", "claude", "--", "-p", "fix it", "--", "--json"], { env, home: root });
+    expect(result.stdout).toBe("claude got: -p fix it -- --json\n");
     expect(result.code).toBe(3);
     expect(readFileSync(calls, "utf8")).toBe("agent usage update --limits-only claude\n");
     const [receipt] = receipts(log);
@@ -72,7 +80,7 @@ describe("ghost delegate", () => {
       session: "cli-abc",
       harness: "claude",
       cwd: process.cwd(),
-      eligible: ["claude"],
+      eligible: ["claude", "broken"],
       windows: [{ label: "Session (5-hour)", percent: 0.2 }],
       outcome: { exit: 3, signal: null, limit: null },
     });
@@ -95,6 +103,50 @@ describe("ghost delegate", () => {
     expect(Date.now() - started).toBeLessThan(5_000);
     expect(result).toMatchObject({ code: 0, stdout: "done\n" });
     expect(receipts(log)[0]?.outcome).toMatchObject({ exit: 0, limit: null });
+  });
+
+  it("exits 128 plus the signal that ended the harness, and records the signal", async () => {
+    const { env, log } = machine();
+    const result = await runCli(["delegate", "claude", "--", "signal"], { env, home: root });
+    expect(result.code).toBe(128 + 15);
+    expect(receipts(log).map((receipt) => receipt.outcome)).toEqual([
+      expect.objectContaining({ exit: null, signal: "SIGTERM", limit: null }),
+    ]);
+  });
+
+  it("exits 127 and records one receipt when the harness cannot start", async () => {
+    const { env, log } = machine();
+    const result = await runCli(["delegate", "broken", "--", "hi"], { env, home: root });
+    expect(result.code).toBe(127);
+    expect(result.stderr).toMatch(/^ghost: cannot start broken: /u);
+    expect(receipts(log).map((receipt) => receipt.outcome)).toEqual([
+      expect.objectContaining({ exit: 127, signal: null, limit: null }),
+    ]);
+  });
+
+  it("measures durationMs from the launch, not from the usage refresh", async () => {
+    const { env, log } = machine({ refreshMs: 1_000 });
+    const started = Date.now();
+    const result = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
+    expect(result.code).toBe(3);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
+    const outcome = receipts(log)[0]?.outcome as { durationMs: number };
+    expect(outcome.durationMs).toBeLessThan(1_000);
+  });
+
+  it("keeps the harness's status and warns when the receipt cannot be written", async () => {
+    const { env, log } = machine();
+    // The log's directory is taken by a file, so nothing can be appended.
+    mkdirSync(join(root as string, "state"), { recursive: true });
+    writeFileSync(join(root as string, "state", "ghost"), "");
+    const run = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
+    expect(run).toMatchObject({ code: 3, stdout: "claude got: hi\n" });
+    expect(run.stderr).toMatch(/^ghost: cannot record the handoff in .*handoffs\.jsonl: /u);
+    const refusal = await runCli(["delegate", "codex", "--", "hi"], { env, home: root });
+    expect(refusal.code).toBe(6);
+    expect(refusal.stderr).toContain("cannot record the handoff");
+    expect(refusal.stderr).toContain("codex has no room");
+    expect(existsSync(log)).toBe(false);
   });
 
   it("refuses a harness without room, never running it, and records the refusal", async () => {

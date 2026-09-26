@@ -12,6 +12,7 @@ export type HandoffOutcome =
   | {
     exit: number | null;
     signal: string | null;
+    /** The harness's own run time; the usage refresh and check before it are not counted. */
     durationMs: number;
     /** Set only for a failed run whose output names a limit. */
     limit: LimitReachedEvent["kind"] | null;
