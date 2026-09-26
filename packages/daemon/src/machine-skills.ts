@@ -10,9 +10,8 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 
 /**
  * The other agent harnesses on the machine, and the windows they run under.
- * Ghost owns no delegation system and no limits tool: a ghost runs the owner's
- * installed CLIs from Bash, and Omarchy's agents panel already measures their
- * windows into one JSON file per harness, which Bash can read.
+ * Ghost owns no delegation system: a ghost runs the owner's installed CLIs from
+ * Bash, and `ghost harnesses` reads Omarchy's usage records to say which have room.
  */
 export const HARNESS_LIMITS_POLICY = [
   "## Other harnesses",
@@ -20,8 +19,8 @@ export const HARNESS_LIMITS_POLICY = [
     + "your session. For coding or project-specific tasks you are the orchestrator: hand the work "
     + "to a headless sub-agent run from the project directory, never do it yourself. Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs are yours to run "
     + "from Bash (`claude -p`, `codex`, `pi`, `omp`). Start each handoff in its project directory (`cd <dir> && <harness> ...`) "
-    + "so the headless harness respects that project's settings. Read `ghost help harnesses` before handing work to one: it names each "
-    + "harness's usage windows and the handoff note. Never spend a window you were not asked "
+    + "so the headless harness respects that project's settings. Hand work only to a harness `ghost harnesses` marks eligible; "
+    + "`ghost help harnesses` has the handoff note. Never spend a window you were not asked "
     + "to spend.",
 ].join("\n");
 

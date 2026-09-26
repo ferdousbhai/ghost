@@ -216,8 +216,8 @@ authoritative list and per-section size ceilings are
 them carry contract the rest of this file relies on: the other-harnesses policy
 pins the ghost to the owner home, runs each handoff with the project directory
 as the harness's own cwd so the headless harness respects that project's
-settings, reads the owner's agent-CLI session and weekly windows from Omarchy's usage
-records and ends a limit in a handoff note in the owner's documents; the
+settings, hands work only to a harness `ghost harnesses` marks eligible, and ends
+a limit in a handoff note in the owner's documents; the
 owner-context policy names the Documents directory in one sentence and nothing
 else about it. Owner documents are read only when relevant, with the runtime's
 own file and search tools, never injected automatically at session start.
@@ -295,10 +295,9 @@ table, no jobs API, no jobs strip, and cannot cancel what it did not start;
 the policy text is `BACKGROUND_WORK_POLICY` in
 [`machine-skills.ts`](packages/daemon/src/machine-skills.ts).
 
-There is no Ghost-owned delegation system and no limits tool. A ghost that
-wants a specialist runs the owner's installed `pi`, `codex`, `omp`, or
-`claude -p` from its own Bash, after reading that harness's window in
-Omarchy's usage record (`HARNESS_LIMITS_POLICY` in
+There is no Ghost-owned delegation system. A ghost that wants a specialist
+runs the owner's installed `pi`, `codex`, `omp`, or `claude -p` from its own
+Bash, after `ghost harnesses` marks it eligible (`HARNESS_LIMITS_POLICY` in
 [`machine-skills.ts`](packages/daemon/src/machine-skills.ts));
 that harness runs with the owner's own settings for it — its full tool set,
 project discovery, auth, and session semantics — untouched by the runtime
@@ -401,7 +400,24 @@ ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 `self`, `harnesses`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
 and needing no daemon; they are prompt-visible contract text like the policy
-sections. Addressing is
+sections. `ghost harnesses` also reads locally, never through the daemon: the
+agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
+--json`) that Omarchy's own `agent_present` test would call installed, in
+that order: an `omarchy-install-<id>-cli --check` decides when that installer
+exists, a first-run mise stub on `PATH` counts only once `mise which <id>`
+succeeds, and any other executable on `PATH` is the owner's own install. Each is
+joined with its
+Omarchy usage record, `$XDG_STATE_HOME/omarchy/agents/usage/<id>.json` (falling
+back to `~/.local/state`). `--json` prints `{harnesses, refresh}`: each harness
+is `{id, eligible, reason, usage}`, and `usage` is `null` without a record,
+else `{updatedAt, stale, status, windows}` with each window `{label, percent,
+resetsAt}`, `percent` a 0–1 fraction used. A harness is ineligible when any
+window whose reset is still ahead is at 90% or more; `reason` then names it,
+else it is `null`. A record's `ready` only says Omarchy has data to show, so it
+decides nothing. A window whose reset has
+passed is dropped. `stale` marks a record older than 15 minutes; the verb never
+refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
+eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
 `-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell carries
 both variables. Signing in is a provider
