@@ -114,7 +114,7 @@ ends with `ghost say --follow-up`.
 The session receives the Ghost-owned context: the character and the stable
 policy sections, listed in `prompt-budget.test.ts`. The shape they share is
 that each one tells the ghost what it may do without asking — delegate from
-Bash after checking Omarchy's usage windows, hand off through documents on a
+Bash through `ghost delegate`, which checks Omarchy's usage windows, hand off through documents on a
 limit, restart itself, read the owner's Documents when relevant.
 
 ### Why one runtime
@@ -235,9 +235,13 @@ If you expect one of these, it is missing on purpose:
   whose instructions, skills, and MCP are scanned in. Plugins, executable hooks
   and tools beyond the ghost's own, LSP, and subagents stay disabled; a ghost
   that wants a full harness runs it from Bash with the owner's own settings.
-- **No delegation subsystem.** No task records, worker scopes, or `/tasks`
-  API; a ghost runs `pi`, `codex`, or `claude -p` from Bash when it wants a
-  specialist, and that harness owns its own discovery, tools, and auth.
+- **No delegation subsystem.** No worker scopes, `/tasks` API, or job
+  control; a ghost runs `pi`, `codex`, or `claude -p` from Bash through
+  `ghost delegate` when it wants a specialist, and that harness owns its own
+  discovery, tools, and auth. `ghost delegate` only refuses a harness without
+  room and appends one receipt line per attempt, the evidence any change to
+  how a ghost picks a harness has to be judged against; Ghost never reads it
+  back.
 - **No second browser backend** and no separate ghost browser profile.
 - **No ambient credentials.** Provider and cloud environment variables are
   scrubbed before the pi runtime is built
