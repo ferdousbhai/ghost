@@ -113,23 +113,26 @@ async function succeeds(file: string, args: string[], env: NodeJS.ProcessEnv): P
 /**
  * Omarchy's own test (`agent_present` in `omarchy-default-agent`): an agent with
  * an `omarchy-install-<id>-cli` installer is installed when its `--check` says
- * so; a first-run mise stub (a regular file with a `mise use -g` line) only once
- * mise has the tool; anything else on PATH is the owner's own install.
+ * so; a first-run mise stub (a regular file with a `mise use -g "<package>"`
+ * line) only once `mise where <package>` finds some installed version, so a
+ * pending update is not a cold install; anything else on PATH is the owner's own.
  */
 export async function isInstalled(id: string, env: NodeJS.ProcessEnv): Promise<boolean> {
   const path = which(id, env);
   if (path === null) return false;
   const installer = which(`omarchy-install-${id}-cli`, env);
   if (installer !== null) return succeeds(installer, ["--check"], env);
-  let stub = false;
+  let stubPackage: string | null = null;
   try {
     // A stub is a short script; a large file is a real binary and is never read.
     const stat = lstatSync(path);
-    stub = stat.isFile() && stat.size <= 64 * 1024 && /^mise use -g/mu.test(readFileSync(path, "utf8"));
+    if (stat.isFile() && stat.size <= 64 * 1024) {
+      stubPackage = /^mise use -g(?:\s+--?[\w-]+)*\s+"?([^"\s]+)"?/mu.exec(readFileSync(path, "utf8"))?.[1] ?? null;
+    }
   } catch {
     // Unreadable: treat it as the owner's own install.
   }
-  return stub ? succeeds("mise", ["which", id], env) : true;
+  return stubPackage === null ? true : succeeds("mise", ["where", stubPackage], env);
 }
 
 /** `$XDG_STATE_HOME/omarchy/agents/usage`, falling back to `~/.local/state`. */
