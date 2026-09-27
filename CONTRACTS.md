@@ -332,7 +332,9 @@ time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
 of a run that did not exit 0, else `null`. No prompt text or arguments are
 kept. A receipt that cannot be written is a warning on stderr, never a changed
 exit status. The log is the evidence for judging routing; nothing in Ghost
-reads it back.
+reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
+from a checkout, outside the shipped package: attempts, refusals by kind, exit
+outcomes, unmeasured checks, and limits hit, per harness.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in

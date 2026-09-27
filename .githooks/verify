@@ -29,6 +29,8 @@ pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
+# Owner scripts outside the workspace packages.
+bun test scripts
 # What the gate checks beyond the workspace: the packaging scripts
 # (they diff packaging/arch/.SRCINFO against a fresh makepkg render and chain
 # the other packaging suites, including the installer this repository

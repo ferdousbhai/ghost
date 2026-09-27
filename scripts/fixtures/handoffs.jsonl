@@ -1,0 +1,9 @@
+{"v":1,"at":"2026-09-27T15:05:41.316Z","ghost":"dous","session":"pi:a","harness":"claude","cwd":"/p","eligible":["claude","codex"],"windows":[{"label":"Session (5-hour)","percent":0.21,"resetsAt":"2026-09-27T18:10:00Z"}],"status":null,"outcome":{"exit":1,"signal":null,"durationMs":318,"limit":null}}
+{"v":1,"at":"2026-09-27T15:05:47.527Z","ghost":"dous","session":"pi:a","harness":"claude","cwd":"/p","eligible":["claude","codex"],"windows":[],"status":null,"outcome":{"exit":0,"signal":null,"durationMs":488,"limit":null}}
+{"v":1,"at":"2026-09-27T16:00:00.000Z","ghost":"dous","session":"pi:a","harness":"claude","cwd":"/p","eligible":["codex"],"windows":[],"status":null,"outcome":{"refused":"Session (5-hour) 93% used, resets 2026-09-27T18:10:00Z"}}
+{"v":1,"at":"2026-09-27T16:30:00.000Z","ghost":"dous","session":"pi:a","harness":"claude","cwd":"/p","eligible":["codex"],"windows":[],"status":null,"outcome":{"refused":"Session (5-hour) 95% used, resets 2026-09-27T18:10:00Z"}}
+not json
+{"v":1,"at":"2026-09-27T14:00:00.000Z","ghost":"dous","session":"pi:b","harness":"codex","cwd":"/p","eligible":["claude","codex"],"windows":[],"status":null,"outcome":{"exit":1,"signal":null,"durationMs":25624,"limit":"usage_limit"}}
+{"v":1,"at":"2026-09-27T17:00:00.000Z","ghost":"dous","session":"pi:b","harness":"codex","cwd":"/p","eligible":[],"windows":[],"status":null,"outcome":{"refused":"Weekly (7-day) 40% used, ahead of weekly pace (30% by now), resets 2026-10-01T17:00:00Z"}}
+{"v":1,"at":"2026-09-27T17:10:00.000Z","ghost":"dous","session":"pi:b","harness":"omp","cwd":"/p","eligible":["pi"],"windows":[],"status":null,"outcome":{"refused":"not installed"}}
+{"v":1,"at":"2026-09-27T17:20:00.000Z","ghost":"dous","session":"pi:b","harness":"pi","cwd":"/p","eligible":["pi"],"windows":[],"status":"pi limits unavailable","outcome":{"exit":null,"signal":"SIGTERM","durationMs":1200,"limit":null}}
