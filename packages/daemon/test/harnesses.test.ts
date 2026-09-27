@@ -97,6 +97,45 @@ describe("assessHarness", () => {
   });
 });
 
+describe("weekly pace", () => {
+  const DAY = 24 * 3_600_000;
+  const weekly = (percent: number, daysLeft: number | null, label = "Weekly (7-day)") =>
+    assessHarness("claude", record([
+      { label, percent, resetsAt: daysLeft === null ? null : new Date(NOW + daysLeft * DAY).toISOString() },
+    ]), NOW);
+
+  it("allows one day's share at the start of the week, and no more", () => {
+    expect(weekly(0.14, 7).eligible).toBe(true);
+    const ahead = weekly(0.2, 7);
+    expect(ahead.eligible).toBe(false);
+    expect(ahead.reason).toBe(
+      `Weekly (7-day) 20% used, ahead of weekly pace (14% by now), resets ${new Date(NOW + 7 * DAY).toISOString()}`,
+    );
+  });
+
+  it("allows the elapsed share plus a day mid-week", () => {
+    // 3.5 days in: 50% elapsed, 64% allowed.
+    expect(weekly(0.6, 3.5).eligible).toBe(true);
+    expect(weekly(0.7, 3.5)).toMatchObject({ eligible: false, reason: expect.stringContaining("ahead of weekly pace (64% by now)") });
+  });
+
+  it("leaves only the ceiling just before the reset", () => {
+    expect(weekly(0.89, 0.01).eligible).toBe(true);
+    expect(weekly(0.9, 0.01).reason).toMatch(/^Weekly \(7-day\) 90% used, resets /u);
+  });
+
+  it("falls back to the ceiling without a reset, for a reset over a week off, and for a non-weekly window", () => {
+    expect(weekly(0.5, null).eligible).toBe(true);
+    expect(weekly(0.5, 30).eligible).toBe(true);
+    expect(weekly(0.5, 7, "Session (5-hour)").eligible).toBe(true);
+  });
+
+  it("recognizes Omarchy's weekly labels", () => {
+    expect(weekly(0.5, 7, "Weekly").eligible).toBe(false);
+    expect(weekly(0.5, 7, "Fable Weekly").eligible).toBe(false);
+  });
+});
+
 describe("ghost harnesses", () => {
   let root: string | undefined;
 

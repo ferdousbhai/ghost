@@ -7,6 +7,13 @@ const exec = promisify(execFile);
 
 /** A window at or past this fraction used leaves its harness ineligible. */
 export const WINDOW_CEILING = 0.9;
+/**
+ * A weekly window may run this far ahead of pace — the fraction of its week
+ * elapsed since the reset — before its harness is ineligible: one day's share.
+ */
+export const WEEKLY_PACE_SLACK = 1 / 7;
+const WEEK_MS = 7 * 24 * 3_600_000;
+const WEEKLY_LABEL = /week|7-day/iu;
 /** A usage record older than this is reported stale; nothing refreshes it implicitly. */
 export const STALE_AFTER_MS = 15 * 60_000;
 export const REFRESH_COMMAND = "omarchy agent usage update";
@@ -83,9 +90,34 @@ export function assessHarness(id: string, record: unknown, now: number): Harness
   const full = windows.find((window) => window.percent >= WINDOW_CEILING);
   if (full) {
     const resets = full.resetsAt === null ? "" : `, resets ${full.resetsAt}`;
-    return { id, eligible: false, reason: `${full.label} ${Math.round(full.percent * 100)}% used${resets}`, usage };
+    return { id, eligible: false, reason: `${full.label} ${percentText(full.percent)} used${resets}`, usage };
+  }
+  for (const window of windows) {
+    const allowed = weeklyAllowance(window, now);
+    if (allowed !== null && window.percent > allowed) {
+      const reason = `${window.label} ${percentText(window.percent)} used, ahead of weekly pace `
+        + `(${percentText(allowed)} by now), resets ${window.resetsAt}`;
+      return { id, eligible: false, reason, usage };
+    }
   }
   return { id, eligible: true, reason: null, usage };
+}
+
+function percentText(fraction: number): string {
+  return `${Math.round(fraction * 100)}%`;
+}
+
+/**
+ * The most a weekly window may have used by `now`: the elapsed fraction of the
+ * week that ends at its (future) reset, plus the slack. Null for a window
+ * that is not weekly, or whose reset is missing or more than a week off; only
+ * the ceiling judges those.
+ */
+function weeklyAllowance(window: UsageWindow, now: number): number | null {
+  if (window.resetsAt === null || !WEEKLY_LABEL.test(window.label)) return null;
+  const left = Date.parse(window.resetsAt) - now;
+  if (!(left <= WEEK_MS)) return null;
+  return 1 - left / WEEK_MS + WEEKLY_PACE_SLACK;
 }
 
 function which(name: string, env: NodeJS.ProcessEnv): string | null {
