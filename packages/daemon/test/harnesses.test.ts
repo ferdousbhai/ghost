@@ -117,10 +117,12 @@ describe("ghost harnesses", () => {
     };
     writeFileSync(join(root, "commands.json"), commandsJson("[pi|omp|claude|codex|agy|hermes|grok]"));
     executable("omarchy", `cat '${join(root, "commands.json")}'`);
-    // mise has installed pi's tool, nothing else.
-    executable("mise", '[ "$1" = which ] && [ "$2" = pi ]');
-    // pi and agy are Omarchy first-run stubs: pi's is warm, agy's cold.
-    for (const name of ["pi", "agy"]) executable(name, `mise use -g --quiet "${name}" || exit 1\nexec mise x "${name}" -- "${name}" "$@"`);
+    // mise has some version of pi's package installed, nothing else.
+    executable("mise", '[ "$1" = where ] && [ "$2" = "pi@0.86.0" ]');
+    // pi and agy are Omarchy first-run stubs naming their mise package: pi's is warm, agy's cold.
+    for (const [name, pkg] of [["pi", "pi@0.86.0"], ["agy", "antigravity-cli"]] as const) {
+      executable(name, `export MISE_MINIMUM_RELEASE_AGE=0\nmise use -g --quiet "${pkg}" || exit 1\nexec mise x "${pkg}" -- "${name}" "$@"`);
+    }
     // hermes comes from its own installer, whose --check says it is not there yet.
     executable("hermes", "exit 0");
     executable("omarchy-install-hermes-cli", '[ "$1" = --check ] && exit 1');

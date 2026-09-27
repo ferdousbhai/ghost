@@ -429,8 +429,10 @@ sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
 --json`) that Omarchy's own `agent_present` test would call installed, in
 that order: an `omarchy-install-<id>-cli --check` decides when that installer
-exists, a first-run mise stub on `PATH` counts only once `mise which <id>`
-succeeds, and any other executable on `PATH` is the owner's own install. Each is
+exists, a first-run mise stub on `PATH` counts only once `mise where
+<package>` succeeds for the package its `mise use -g` line names (so a pending
+update is not a cold install), and any other executable on `PATH` is the
+owner's own install. Each is
 joined with its
 Omarchy usage record, `$XDG_STATE_HOME/omarchy/agents/usage/<id>.json` (falling
 back to `~/.local/state`). `--json` prints `{harnesses, refresh}`: each harness
