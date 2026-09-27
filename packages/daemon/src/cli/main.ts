@@ -25,6 +25,7 @@ import {
 } from "./admin.js";
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
+import { delegateCommand } from "./delegate.js";
 import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
@@ -321,6 +322,14 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost harnesses --json",
     positionals: [0, 0],
     run: harnessesCommand,
+  },
+  {
+    verb: "delegate",
+    usage: "delegate <harness> -- <args...>",
+    summary: "Run a harness with room here, streaming its output, and record the handoff.",
+    example: "cd ~/code/app && ghost delegate claude -- -p \"Fix the failing test\"",
+    positionals: [1, Number.POSITIVE_INFINITY],
+    run: delegateCommand,
   },
   {
     verb: "smoke",
