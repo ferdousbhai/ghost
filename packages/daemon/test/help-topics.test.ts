@@ -46,15 +46,16 @@ describe("ghost help topics", () => {
     expect(text).not.toContain("your latest conversation");
   });
 
-  it("harnesses: the usage file, its fields, and the handoff note", () => {
+  it("harnesses: the eligibility verb, the refresh command, and the handoff note", () => {
     const text = renderHelpTopic("harnesses", INPUT);
     expect(text).toContain("Your own cwd is always the owner home");
     expect(text).toContain("you are the orchestrator");
     expect(text).toContain("cd <project-dir> && <harness>");
     expect(text).toContain("respects that project's settings");
-    expect(text).toContain("~/.local/state/omarchy/agents/usage/<agent>.json");
-    expect(text).toContain("`percent` as a 0–1 fraction used");
-    expect(text).toContain("omarchy agent usage-update");
+    expect(text).toContain("run `ghost harnesses`");
+    expect(text).toContain("hand work only to one it marks eligible");
+    expect(text).toContain("`omarchy agent usage update <agent>`");
+    expect(text).not.toContain("~/.local/state/omarchy");
     expect(text).toContain("handoff note");
     expect(text).toContain("Never spend a window you were not asked to spend.");
   });

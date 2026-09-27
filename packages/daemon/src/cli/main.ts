@@ -26,6 +26,7 @@ import {
 import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { ghostsCommand } from "./ghosts.js";
+import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName, preferredSessionId } from "./common.js";
@@ -312,6 +313,14 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost status --json",
     positionals: [0, 0],
     run: statusCommand,
+  },
+  {
+    verb: "harnesses",
+    usage: "harnesses [--json] [-q]",
+    summary: "List installed agent CLIs with their usage windows and whether each has room.",
+    example: "ghost harnesses --json",
+    positionals: [0, 0],
+    run: harnessesCommand,
   },
   {
     verb: "smoke",
