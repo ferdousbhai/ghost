@@ -82,6 +82,7 @@ describe("ghost delegate", () => {
       cwd: process.cwd(),
       eligible: ["claude", "broken"],
       windows: [{ label: "Session (5-hour)", percent: 0.2 }],
+      status: null,
       outcome: { exit: 3, signal: null, limit: null },
     });
     expect(JSON.stringify(receipt)).not.toContain("fix it");
@@ -149,6 +150,18 @@ describe("ghost delegate", () => {
     expect(existsSync(log)).toBe(false);
   });
 
+  it("runs a harness Omarchy could not measure, recording that the check was blind", async () => {
+    const { env, log } = machine();
+    writeFileSync(join(env.XDG_STATE_HOME as string, "omarchy", "agents", "usage", "claude.json"), JSON.stringify({
+      updatedAt: new Date().toISOString(),
+      usageStatusText: "Claude limits unavailable",
+      limits: [],
+    }));
+    const result = await runCli(["delegate", "claude", "--", "-p", "x"], { env, home: root });
+    expect(result.code).toBe(3);
+    expect(receipts(log)[0]).toMatchObject({ windows: [], status: "Claude limits unavailable", outcome: { exit: 3 } });
+  });
+
   it("refuses a harness without room, never running it, and records the refusal", async () => {
     const { env, log } = machine();
     const result = await runCli(["delegate", "codex", "--", "exec", "hi"], { env, home: root });
@@ -180,7 +193,7 @@ describe("appendHandoff", () => {
     mkdirSync(join(root, "ghost"));
     writeFileSync(log, "x".repeat(HANDOFF_LOG_LIMIT_BYTES));
     const receipt: HandoffReceipt = {
-      v: 1, at: "2026-09-26T00:00:00.000Z", ghost: null, session: null, harness: "pi", cwd: "/", eligible: [], windows: [],
+      v: 1, at: "2026-09-26T00:00:00.000Z", ghost: null, session: null, harness: "pi", cwd: "/", eligible: [], windows: [], status: null,
       outcome: { refused: "not installed" },
     };
     appendHandoff(log, receipt);

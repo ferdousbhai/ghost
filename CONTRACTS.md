@@ -316,9 +316,11 @@ Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
 file is 0600, and past 1 MiB it moves to `handoffs.jsonl.1`, replacing the
 previous one): `{v: 1, at, ghost, session, harness, cwd, eligible, windows,
-outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
+status, outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
 (or `null`), `eligible` lists the harnesses eligible at the check, `windows` is
-this harness's live windows then, and `outcome` is `{refused}` with the reason,
+this harness's live windows then, `status` is Omarchy's note when it could not
+measure this harness (an unmeasured harness is eligible, and this shows the
+check was blind) or `null`, and `outcome` is `{refused}` with the reason,
 or `{exit, signal, durationMs, limit}`, `durationMs` the harness's own run
 time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
 of a run that did not exit 0, else `null`. No prompt text or arguments are

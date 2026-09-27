@@ -103,6 +103,7 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
       cwd: process.cwd(),
       eligible: report.harnesses.filter((candidate) => candidate.eligible).map((candidate) => candidate.id),
       windows: harness?.usage?.windows ?? [],
+      status: harness?.usage?.status ?? null,
       outcome,
     };
     const path = handoffLogPath(env, home);

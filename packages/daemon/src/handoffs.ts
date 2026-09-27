@@ -30,6 +30,8 @@ export interface HandoffReceipt {
   eligible: string[];
   /** This harness's live usage windows at that check. */
   windows: UsageWindow[];
+  /** Omarchy's note when it could not measure this harness, so an unmeasured pass is visible. */
+  status: string | null;
   outcome: HandoffOutcome;
 }
 
