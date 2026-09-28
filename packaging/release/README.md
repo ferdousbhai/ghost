@@ -92,7 +92,9 @@ with the icloud-notes installer, and holds the docs, the release notes and
 
 A release counts as shipped only once
 [`verify-published.sh`](verify-published.sh) has run the public one-liner
-in a clean Arch container and found this version installed; otherwise
+in a clean Arch container and found this version installed, and has
+installed the previous release from its own tag and found that the `pacman
+-Syu` `omarchy update` runs brings it to this version; otherwise
 `publish.sh` deletes the release and the tag. That rollback returns the
 one-liner to the release before, so before it tags, `publish.sh` asks
 [`resolve-installer.sh`](resolve-installer.sh) what the one-liner serves

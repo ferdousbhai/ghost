@@ -165,7 +165,8 @@ printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag
 
 # Shipped means installable: the public one-liner must land this version
 # in a clean container. If it does not, "latest" must not point at it.
-if ! bash "$script_root/verify-published.sh" "$version"; then
+previous="$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)"
+if ! bash "$script_root/verify-published.sh" "$version" "${previous#v}"; then
   printf 'rolling back %s\n' "$tag" >&2
   gh release delete "$tag" --repo "$repository" --yes --cleanup-tag
   git tag -d "$tag" >/dev/null 2>&1 || true
