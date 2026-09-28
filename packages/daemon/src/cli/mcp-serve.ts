@@ -30,9 +30,12 @@ export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     )).body;
     return result as never;
   });
-  const closed = new Promise<void>((resolve) => {
-    server.onclose = resolve;
-  });
+  const { promise: closed, resolve } = Promise.withResolvers<void>();
+  server.onclose = resolve;
+  // The transport reports only a close it made itself. When the harness ends
+  // stdin, close the server, which aborts a call still in flight so the
+  // daemon withdraws a question the run can no longer receive.
+  process.stdin.once("end", () => void server.close().then(resolve, resolve));
   await server.connect(new StdioServerTransport());
   await closed;
   return 0;

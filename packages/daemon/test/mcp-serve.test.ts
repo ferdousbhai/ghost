@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -22,20 +23,28 @@ afterEach(async () => {
   daemon.temp.cleanup();
 });
 
+const QUESTION = {
+  header: "Deploy",
+  question: "Ship it now?",
+  options: [{ label: "Yes", description: "Deploy" }, { label: "No", description: "Wait" }],
+  multiSelect: false,
+};
+
+/** The environment `ghost delegate` hands a harness, and the harness its MCP servers. */
+function harnessEnv(): Record<string, string> {
+  return {
+    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    HOME: daemon.temp.ownerHome,
+    ...(daemon.env as Record<string, string>),
+    GHOST: "casper",
+    GHOST_SESSION: "conv-1",
+  };
+}
+
 /** A harness's view: `ghost mcp serve` spawned over stdio, as a delegated run would. */
 async function connect(): Promise<Client> {
   client = new Client({ name: "harness", version: "1" });
-  await client.connect(new StdioClientTransport({
-    command: process.execPath,
-    args: [CLI, "mcp", "serve"],
-    env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
-      HOME: daemon.temp.ownerHome,
-      ...daemon.env,
-      GHOST: "casper",
-      GHOST_SESSION: "conv-1",
-    },
-  }));
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, "mcp", "serve"], env: harnessEnv() }));
   return client;
 }
 
@@ -57,17 +66,7 @@ describe("ghost mcp serve", () => {
 
   it("asks the owner in the launching conversation and returns the answer", async () => {
     const harness = await connect();
-    const call = harness.callTool({
-      name: "ask",
-      arguments: {
-        questions: [{
-          header: "Deploy",
-          question: "Ship it now?",
-          options: [{ label: "Yes", description: "Deploy" }, { label: "No", description: "Wait" }],
-          multiSelect: false,
-        }],
-      },
-    });
+    const call = harness.callTool({ name: "ask", arguments: { questions: [QUESTION] } });
     const pending = await until(() => daemon.host.pendingAsk("casper", "conv-1"));
     expect(pending.questions[0]?.question).toBe("Ship it now?");
     daemon.host.answerAsk("casper", "conv-1", pending.id, {
@@ -77,6 +76,24 @@ describe("ghost mcp serve", () => {
     const result = await call;
     expect(result.isError).toBe(false);
     expect(JSON.stringify(result.content)).toContain("Yes");
+  });
+
+  it("stops when the harness ends stdin, withdrawing a question still in flight", async () => {
+    // A killed harness leaves both pipes closed, with no SIGTERM to the server.
+    const child = spawn(process.execPath, [CLI, "mcp", "serve"], { env: harnessEnv(), stdio: ["pipe", "pipe", "pipe"] });
+    const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
+    let stdout = "";
+    child.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
+    const send = (message: object) => child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", ...message })}\n`);
+    send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "harness", version: "1" } } });
+    await until(() => (stdout.includes('"id":1') ? true : null));
+    send({ method: "notifications/initialized" });
+    send({ id: 2, method: "tools/call", params: { name: "ask", arguments: { questions: [QUESTION] } } });
+    await until(() => daemon.host.pendingAsk("casper", "conv-1"));
+    child.stdin.end();
+    child.stdout.destroy();
+    expect(await exited).toBe(0);
+    await until(() => (daemon.host.pendingAsk("casper", "conv-1") === null ? true : null));
   });
 
   it("returns a tool's own failure, and a schema error, as tool errors", async () => {

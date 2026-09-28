@@ -322,7 +322,9 @@ A delegated harness can load the conversation's own tools with `ghost mcp
 serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
 `/sessions/:id/tools` routes, bound at start to `-s`, then `$GHOST_SESSION`
 (which `ghost delegate` passes through). Its `ask` reaches the owner in the
-conversation that launched the run. Nothing configures a harness for it:
+conversation that launched the run, while that conversation has a live turn
+(the HUD learns of a question from the turn stream). Nothing configures a
+harness for it:
 `claude -p --mcp-config`, a Codex `mcp_servers.ghost` entry, or an omp
 `mcp.json` row names `ghost mcp serve`; pi has no MCP client.
 
