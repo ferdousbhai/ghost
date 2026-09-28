@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EffectiveMcpRead } from "../src/mcp-catalog.js";
-import {
-  buildSessionResourceView,
-  type SessionSkillGroup,
-} from "../src/session-resources.js";
+import { buildSessionResourceView } from "../src/session-resources.js";
+import type { SessionSkillGroup } from "@ghost/runtime/resource-view";
 
 const OBSIDIAN = "/home/owner/.agents/skills/obsidian-cli/SKILL.md";
 

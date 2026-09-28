@@ -14,8 +14,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "@ghost/extensions";
-import { FIRST_MEETING_SECTION } from "../src/greeting.js";
-import { CONTEXT_WINDOW_POLICY } from "../src/context-windows.js";
+import { FIRST_MEETING_SECTION } from "@ghost/runtime/persona";
+import { CONTEXT_WINDOW_POLICY } from "@ghost/runtime/context-windows";
 import {
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,

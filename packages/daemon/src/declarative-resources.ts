@@ -2,10 +2,7 @@ import { admitDeclarativeResources, SCAN_MAX_ENTRIES, SCAN_MAX_BYTES, SCAN_MAX_F
 import type { DeclarativeSnapshot } from "@ghost/runtime/declarative-snapshot";
 import { opendir, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, posix, resolve } from "node:path";
-import {
-  buildRuleFromMarkdown,
-  parseFrontmatter,
-} from "./declarative-types.js";
+import { buildRuleFromMarkdown, parseFrontmatter } from "./declarative-types.js";
 import {
   descriptorPath,
   openDirectoryNoFollow,

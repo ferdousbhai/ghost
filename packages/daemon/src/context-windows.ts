@@ -8,7 +8,6 @@ import {
   type EntryLike,
   type WindowedEntry,
 } from "@ghost/runtime/context-windows";
-export * from "@ghost/runtime/context-windows";
 
 async function* sessionWindowEntries(file: string, signal?: AbortSignal): AsyncGenerator<WindowedEntry> {
   if (!existsSync(file)) return;

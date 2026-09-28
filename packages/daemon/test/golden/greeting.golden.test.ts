@@ -24,14 +24,12 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import type { AssistantMessage, Context } from "@earendil-works/pi-ai";
-import {
-  buildGreetingContext,
-  generateGreeting,
-  type GreetingContextInput,
-} from "../../src/greeting.js";
+import { generateGreeting } from "../../src/greeting.js";
+import { buildGreetingContext, type GreetingContextInput } from "@ghost/runtime/greeting";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost, type GreetingGenerator } from "../../src/session-host.js";
-import type { SmolModel, SmolRuntime } from "../../src/smol.js";
+import type { SmolRuntime } from "../../src/smol.js";
+import type { SmolModel } from "@ghost/runtime/smol";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "../helpers/fixtures.js";
 import { fetchNoReuse as fetch } from "../helpers/http-fetch.js";
 import { expectGolden, Normalizer, type GoldenSection } from "./harness.js";

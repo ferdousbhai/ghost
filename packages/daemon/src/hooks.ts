@@ -10,14 +10,15 @@ import {
   type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
   type GhostSessionStopResult,
 } from "@ghost/runtime/hook-policy";
-export { ghostSessionStopContinuation } from "@ghost/runtime/hook-policy";
-export type { GhostBeforePromptEvent, GhostHookCommandConfig, GhostHookStatus, GhostSessionStopEvent } from "@ghost/runtime/hook-policy";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
+
+/** ghostd always has a filesystem ghost home, so its events always carry it (docs/hooks.md). */
+export type LocalHookEvent<Event> = Event & { ghost_home: string; storage?: never };
 
 interface GhostHookRunnerOptions {
   logger?: Logger;
@@ -257,11 +258,11 @@ export class GhostHookRunner {
     return hookStatus(this.commands);
   }
 
-  async emitBeforePrompt(event: GhostBeforePromptEvent): Promise<GhostBeforePromptResult | undefined> {
+  async emitBeforePrompt(event: LocalHookEvent<GhostBeforePromptEvent>): Promise<GhostBeforePromptResult | undefined> {
     return runBeforePromptHooks(this.commands, event, (hook, current) => this.runCommandFailOpen(hook, current));
   }
 
-  async emitSessionStop(event: GhostSessionStopEvent): Promise<GhostSessionStopResult | undefined> {
+  async emitSessionStop(event: LocalHookEvent<GhostSessionStopEvent>): Promise<GhostSessionStopResult | undefined> {
     return runSessionStopHooks(this.commands, event, (hook, current) => this.runCommandFailOpen(hook, current));
   }
 

@@ -7,9 +7,8 @@ import {
   GhostMcpManagerCore,
   type McpManagerLogger,
 } from "@ghost/runtime/mcp-manager";
-import type { MCPServerConfig } from "./mcp-config.js";
+import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 
-export { McpToolCallError, type McpToolDefinition } from "@ghost/runtime/mcp-manager";
 
 export interface McpManagerOptions {
   cwd: string;

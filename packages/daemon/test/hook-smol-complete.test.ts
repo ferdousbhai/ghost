@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { SmolModel } from "../src/smol.js";
+import type { SmolModel } from "@ghost/runtime/smol";
 import {
   completeHookSmol,
   type HookSmolRuntime,

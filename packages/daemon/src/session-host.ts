@@ -1,5 +1,4 @@
 import { bashExecutionToText, parseUserBashCommand, type BashExecutionMessage, type UserBashCommand } from "@ghost/runtime/owner-shell";
-export { parseUserBashCommand } from "@ghost/runtime/owner-shell";
 import { promptPiSession } from "@ghost/runtime/declarative-commands";
 import { ASK_REANSWER_OWNER_MESSAGE_TYPE, persistedOwnerPassBoundary, type OwnerPassKind, type PendingOwnerPass } from "@ghost/runtime/owner-pass";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -42,7 +41,8 @@ import {
   type CompactionConfig,
 } from "@ghost/runtime/compaction";
 import { scrubProviderEnv } from "./env-scrub.js";
-import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
+import { GhostHookRunner } from "./hooks.js";
+import { ghostSessionStopContinuation } from "@ghost/runtime/hook-policy";
 import {
   closeBrowserSession,
   piToolCapabilities,
@@ -53,24 +53,10 @@ import {
   type GhostHomeDigestInput,
   type GhostHomeDigestReaders,
 } from "./extensions.js";
-import {
-  FIRST_MEETING_SECTION,
-  generateGreeting,
-  GreetingCache,
-  localTimeString,
-  wholeDaysSince,
-  type GreetingContextInput,
-  type GreetingResult,
-} from "./greeting.js";
-import {
-  assertValidGhostName,
-  GhostError,
-  ghostPaths,
-  isSeededCharacter,
-  readCharacterFile,
-  type Ghost,
-  type GhostRegistry,
-} from "./ghosts.js";
+import { generateGreeting, GreetingCache, type GreetingResult } from "./greeting.js";
+import { FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/runtime/persona";
+import { localTimeString, wholeDaysSince, type GreetingContextInput } from "@ghost/runtime/greeting";
+import { assertValidGhostName, GhostError, ghostPaths, readCharacterFile, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   ghostCliPath,
@@ -140,13 +126,15 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "@ghost/runtime/ask-tool";
 import type { AskResultItem } from "@ghost/runtime/ask-broker";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
-import { CONTEXT_WINDOW_POLICY, ghostContextWindowsExtension } from "./context-windows.js";
+import { ghostContextWindowsExtension } from "./context-windows.js";
+import { CONTEXT_WINDOW_POLICY } from "@ghost/runtime/context-windows";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
-import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
+import { validateServerName } from "./mcp-config.js";
+import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 import { resolveChatModel } from "@ghost/runtime/model-routing";
 import type { ModelSelection } from "./model-selection.js";
-import type { Rule, Skill } from "./declarative-types.js";
+import type { Rule, Skill } from "@ghost/runtime/declarative-types";
 import {
   buildGhostAvailableSlashCommands,
   classifyGhostBuiltin,
@@ -159,14 +147,8 @@ import {
   normalizeMcpStdioCwd,
   readEffectiveMcp,
 } from "./mcp-catalog.js";
-import {
-  buildSessionResourceView,
-  sessionSkillGroup,
-  replaceSessionMcpView,
-  type SessionMcpGroup,
-  type SessionResourceView,
-  type SessionSkillGroup,
-} from "./session-resources.js";
+import { buildSessionResourceView, replaceSessionMcpView, type SessionMcpGroup, type SessionResourceView } from "./session-resources.js";
+import { sessionSkillGroup, type SessionSkillGroup } from "@ghost/runtime/resource-view";
 import { loadDeclarativeSnapshot } from "./declarative-resources.js";
 import {
   mergeDeclarativeSnapshots,

@@ -262,7 +262,7 @@ is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
 [`compaction.ts`](packages/runtime/src/compaction.ts). One checkpoint reminder is steered in before the
 line, `new_context` rolls over on demand with the ghost's own handoff, and
 `history` searches and reads the transcript across windows
-([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
+([`context-windows.ts`](packages/runtime/src/context-windows.ts), a port of
 pi-posthorse). Ghost adds
 `ask`, browser,
 screen, desktop, and MCP tools. Images are pi's read tool: it attaches them
@@ -275,7 +275,8 @@ An MCP row's `env`, `headers`, URL credentials, per-server `cwd`, `${VAR}`
 expansion policy, and `auth`/`oauth` blocks remain in its private configuration;
 the ghost's `mcp.json` is the whole configuration and nothing is copied outside
 the ghost home. Configuration support is not connection support: the MCP manager
-currently rejects configured authentication blocks. For HTTP/SSE rows,
+refuses to connect a row with an `auth` block; an `oauth` block is kept but runs
+no OAuth flow. For HTTP/SSE rows,
 `headerPolicy: "origin-locked"` prevents automatic redirects on every SDK fetch
 leg, including notification-stream GETs, so private headers cannot follow a
 redirect to another origin. Without that policy the SDK keeps its normal fetch

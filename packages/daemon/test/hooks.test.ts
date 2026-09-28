@@ -2,12 +2,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  GhostHookRunner,
-  ghostSessionStopContinuation,
-  type GhostBeforePromptEvent,
-  type GhostSessionStopEvent,
-} from "../src/hooks.js";
+import { GhostHookRunner, type LocalHookEvent } from "../src/hooks.js";
+import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent } from "@ghost/runtime/hook-policy";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];
@@ -21,7 +17,7 @@ function temporaryDirectory(): string {
   return directory;
 }
 
-function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): GhostBeforePromptEvent {
+function beforePromptEvent(overrides: Partial<LocalHookEvent<GhostBeforePromptEvent>> = {}): LocalHookEvent<GhostBeforePromptEvent> {
   return {
     type: "before_prompt",
     prompt: "Continue",
@@ -38,7 +34,7 @@ function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): Gho
   };
 }
 
-function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStopEvent {
+function event(overrides: Partial<LocalHookEvent<GhostSessionStopEvent>> = {}): LocalHookEvent<GhostSessionStopEvent> {
   return {
     type: "session_stop",
     owner_prompt: "Continue",

@@ -8,17 +8,8 @@
  * `title.test.ts` and `greeting.test.ts` cover what rides on the lane.
  */
 import { describe, expect, it } from "vitest";
-import {
-  rankSmolModels,
-  resolveSmolModel,
-  smallestWithinProvider,
-  SMOL_MODEL_ROLE,
-  smolCatalogFromRuntime,
-  SmolModelUnavailableError,
-  type SmolModel,
-  type SmolModelCatalog,
-  type SmolRuntime,
-} from "../src/smol.js";
+import { smolCatalogFromRuntime, type SmolRuntime } from "../src/smol.js";
+import { rankSmolModels, resolveSmolModel, smallestWithinProvider, SMOL_MODEL_ROLE, SmolModelUnavailableError, type SmolModel, type SmolModelCatalog } from "@ghost/runtime/smol";
 
 interface FakeModel extends SmolModel {
   subscription?: boolean;

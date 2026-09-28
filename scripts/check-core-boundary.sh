@@ -36,8 +36,8 @@ if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' -e "(from|impo
 fi
 
 # Portable runtime policy receives host operations explicitly.
-if grep -rEn --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](node:)?(fs|child_process|http|https|net|tls)(/|[\"'])" \
-    -e "process\.env" packages/runtime/src 2>/dev/null; then
+if grep -rEn --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](bun:|(node:)?(fs|child_process|http|https|http2|net|tls|dns|os|readline|worker_threads)(/|[\"']))" \
+    -e "process\.(env|cwd|argv|exit)" -e "(^|[^.[:alnum:]_])fetch\(" packages/runtime/src 2>/dev/null; then
   printf 'core-boundary: portable runtime imports host I/O (see above)\n' >&2
   fail=1
 fi

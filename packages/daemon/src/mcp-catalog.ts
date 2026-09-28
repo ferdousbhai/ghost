@@ -1,13 +1,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
-import {
-  addMCPServer,
-  removeMCPServer,
-  updateMCPServer,
-  type MCPConfigFile,
-  type MCPServerConfig,
-  type MCPStdioServerConfig,
-} from "./mcp-config.js";
+import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
+import type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { silentLogger, type Logger } from "./log.js";
 import {

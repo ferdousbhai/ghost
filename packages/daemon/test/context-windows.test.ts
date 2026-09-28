@@ -1,13 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildAutoHandoff,
-  CONTEXT_WINDOW_POLICY,
-  currentWindowId,
-  MAX_HANDOFF_CHARS,
-  REMINDER_TYPE,
-  windowEntries,
-  type EntryLike,
-} from "../src/context-windows.js";
+import { buildAutoHandoff, CONTEXT_WINDOW_POLICY, currentWindowId, MAX_HANDOFF_CHARS, REMINDER_TYPE, windowEntries, type EntryLike } from "@ghost/runtime/context-windows";
 
 let sequence = 0;
 function entry(overrides: Partial<EntryLike> & { type: string }): EntryLike {

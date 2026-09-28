@@ -12,15 +12,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
-import {
-  addMCPServer,
-  readMCPConfigFile,
-  removeMCPServer,
-  updateMCPServer,
-  writeMCPConfigFile,
-  type MCPServerConfig,
-} from "../src/mcp-config.js";
-import { GhostMcpManager, McpToolCallError, type McpToolDefinition } from "../src/mcp-manager.js";
+import { addMCPServer, readMCPConfigFile, removeMCPServer, updateMCPServer, writeMCPConfigFile } from "../src/mcp-config.js";
+import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
+import { GhostMcpManager } from "../src/mcp-manager.js";
+import { McpToolCallError, type McpToolDefinition } from "@ghost/runtime/mcp-manager";
 import { expandEnvVars } from "@ghost/runtime/mcp-config-policy";
 import { GhostMcpManagerCore } from "@ghost/runtime/mcp-manager";
 import { createMCPToolName, mintMcpToolNames } from "@ghost/runtime/mcp-tool-names";

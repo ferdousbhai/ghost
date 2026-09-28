@@ -33,8 +33,8 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Ghost no longer depends on Oh My Pi. Three pieces of Ghost's own code were
 ported from it under the MIT license: the shape of the `ask` tool
-(`packages/daemon/src/ask-tool.ts`), the `mcp.json` configuration shape
-(`packages/daemon/src/mcp-config.ts`), and the daemon side of the browser
+(`packages/runtime/src/ask-tool.ts`), the `mcp.json` configuration shape
+(`packages/runtime/src/mcp-config-policy.ts`), and the daemon side of the browser
 relay (`packages/daemon/src/relay.ts`) from its `browser-relay` package. (The
 Chromium extension, also ported from that package, carries the same notice in
 its own repository.) The first two are from Oh My Pi commit
@@ -104,7 +104,7 @@ SOFTWARE.
 
 ## pi-posthorse
 
-`packages/daemon/src/context-windows.ts` is a port of pi-posthorse onto
+`packages/runtime/src/context-windows.ts` is a port of pi-posthorse onto
 upstream pi.
 
 MIT License

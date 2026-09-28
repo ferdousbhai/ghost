@@ -31,11 +31,8 @@ import {
   translateExtensionError,
   type GhostRegistry,
 } from "./ghosts.js";
-import type {
-  GhostHookCommandConfig,
-  GhostHookStatus,
-  GhostHookRunner,
-} from "./hooks.js";
+import type { GhostHookRunner } from "./hooks.js";
+import type { GhostHookCommandConfig, GhostHookStatus } from "@ghost/runtime/hook-policy";
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,

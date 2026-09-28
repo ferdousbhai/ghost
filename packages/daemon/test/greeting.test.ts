@@ -8,18 +8,10 @@
  * moment onboarding ends.
  */
 import { describe, expect, it } from "vitest";
-import {
-  buildGreetingContext,
-  cleanGreeting,
-  generateGreeting,
-  GreetingCache,
-  GREETING_DATA_CLOSE,
-  GREETING_DATA_OPEN,
-  MAX_GREETING_CHARS,
-  wholeDaysSince,
-  type GreetingContextInput,
-} from "../src/greeting.js";
-import type { SmolModel, SmolRuntime } from "../src/smol.js";
+import { generateGreeting, GreetingCache } from "../src/greeting.js";
+import { buildGreetingContext, cleanGreeting, GREETING_DATA_CLOSE, GREETING_DATA_OPEN, MAX_GREETING_CHARS, wholeDaysSince, type GreetingContextInput } from "@ghost/runtime/greeting";
+import type { SmolRuntime } from "../src/smol.js";
+import type { SmolModel } from "@ghost/runtime/smol";
 
 const BASE: GreetingContextInput = {
   ghostName: "casper",

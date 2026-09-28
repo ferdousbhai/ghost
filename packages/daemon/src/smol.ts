@@ -1,8 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { GhostPiRuntime } from "./pi-runtime.js";
 import type { SmolCandidate, SmolModel, SmolModelCatalog } from "@ghost/runtime/smol";
-export { SMOL_MODEL_ROLE, SmolModelUnavailableError, effectiveInputCost, rankSmolModels, resolveSmolModel, smallestWithinProvider, smolModelLabel } from "@ghost/runtime/smol";
-export type { HookModelRole, SmolModel, SmolModelCatalog } from "@ghost/runtime/smol";
 
 /**
  * The slice of `GhostPiRuntime` this module drives. A test passes a fake.

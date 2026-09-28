@@ -20,7 +20,6 @@ import { acquireWriterLock, releaseWriterLock } from "./writer-lock.js";
 import { validateServerName, validateServerConfig, type MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 
 export { validateServerName };
-export type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
 
 /** The file: `mcpServers` is what Ghost reads; other keys pass through untouched. */
 export interface MCPConfigFile {

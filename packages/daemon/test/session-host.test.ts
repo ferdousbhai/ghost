@@ -106,16 +106,8 @@ function commandHooks(
   };
 }
 import { ModelSelection } from "../src/model-selection.js";
-import {
-  PI_NATIVE_TOOL_NAMES,
-  SessionHost,
-  forkConversationTitle,
-  parseUserBashCommand,
-  sessionFileNameFor,
-  sessionKeyOf,
-  type SessionHostOptions,
-  type TrashedConversation,
-} from "../src/session-host.js";
+import { PI_NATIVE_TOOL_NAMES, SessionHost, forkConversationTitle, sessionFileNameFor, sessionKeyOf, type SessionHostOptions, type TrashedConversation } from "../src/session-host.js";
+import { parseUserBashCommand } from "@ghost/runtime/owner-shell";
 import type { PiMessagesEvent } from "../src/pi-messages.js";
 import { readPinState, writePins } from "../src/pins.js";
 import { readReadState, writeReads } from "../src/reads.js";

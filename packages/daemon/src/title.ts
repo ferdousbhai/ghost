@@ -1,14 +1,7 @@
 import type { Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
-import {
-  SMOL_MODEL_ROLE,
-  SmolModelUnavailableError,
-  type SmolRuntime,
-  assistantText,
-  resolveSmolModel,
-  smolCatalogFromRuntime,
-  smolModelLabel,
-} from "./smol.js";
+import { type SmolRuntime, assistantText, smolCatalogFromRuntime } from "./smol.js";
+import { SMOL_MODEL_ROLE, SmolModelUnavailableError, resolveSmolModel, smolModelLabel } from "@ghost/runtime/smol";
 import { buildTitleContext, cleanTitle } from "@ghost/runtime/title";
 
 export { cleanTitle };

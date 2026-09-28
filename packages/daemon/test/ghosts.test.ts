@@ -11,13 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  GhostError,
-  ghostPaths,
-  isGhostHome,
-  isSeededCharacter,
-  isValidGhostName,
-} from "../src/ghosts.js";
+import { GhostError, ghostPaths, isGhostHome, isValidGhostName } from "../src/ghosts.js";
+import { isSeededCharacter } from "@ghost/runtime/persona";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;

@@ -6,7 +6,8 @@
  * rides on it.
  */
 import { describe, expect, it } from "vitest";
-import { SmolModelUnavailableError, type SmolModel, type SmolRuntime } from "../src/smol.js";
+import type { SmolRuntime } from "../src/smol.js";
+import { SmolModelUnavailableError, type SmolModel } from "@ghost/runtime/smol";
 import { cleanTitle, generateTitle } from "../src/title.js";
 
 const cost = (input: number) => ({ input, output: input * 4, cacheRead: 0, cacheWrite: 0 });

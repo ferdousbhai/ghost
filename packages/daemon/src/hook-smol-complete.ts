@@ -12,15 +12,8 @@ import {
   resolveModelRoleRef,
 } from "./models.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
-import {
-  type HookModelRole,
-  SmolModelUnavailableError,
-  type SmolRuntime,
-  assistantText,
-  resolveSmolModel,
-  smolCatalogFromRuntime,
-  smolModelLabel,
-} from "./smol.js";
+import { type SmolRuntime, assistantText, smolCatalogFromRuntime } from "./smol.js";
+import { type HookModelRole, SmolModelUnavailableError, resolveSmolModel, smolModelLabel } from "@ghost/runtime/smol";
 
 export const HOOK_SMOL_MAX_STDIN_BYTES = 1024 * 1024;
 export const HOOK_SMOL_TIMEOUT_MS = 180_000;

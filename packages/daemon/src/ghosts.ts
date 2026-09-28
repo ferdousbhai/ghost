@@ -16,7 +16,6 @@ import { SEEDED_CHARACTER } from "@ghost/runtime/persona";
 import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";
-export { isSeededCharacter } from "@ghost/runtime/persona";
 
 export interface Ghost {
   name: string;
