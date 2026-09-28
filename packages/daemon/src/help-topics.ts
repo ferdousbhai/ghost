@@ -88,6 +88,7 @@ function harnesses(): string[] {
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
     "Run each handoff with the project directory as its cwd, `cd <project-dir> && ghost delegate <harness> -- <args>` (e.g. `ghost delegate claude -- -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "`ghost delegate` refreshes that harness's usage, refuses it (exit 6) when a window is nearly spent or a weekly one is ahead of pace, or (exit 5) when it is not installed, else runs it here, streams its output, and exits with its status. `ghost harnesses` lists which have room. Every attempt is recorded for the owner.",
+    "A run can ask the owner and use your browser, screen, and desktop through `ghost mcp serve`: `claude -p --mcp-config '{\"mcpServers\":{\"ghost\":{\"command\":\"ghost\",\"args\":[\"mcp\",\"serve\"]}}}'`, `codex exec -c 'mcp_servers.ghost.command=\"ghost\"' -c 'mcp_servers.ghost.args=[\"mcp\",\"serve\"]'`. Its questions and tool calls show in this conversation.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
   ];
 }

@@ -122,7 +122,8 @@ export class DaemonClient {
     headers.set("accept", headers.get("accept") ?? "application/json");
     if (this.#tokenValue) headers.set("authorization", `Bearer ${this.#tokenValue}`);
     const timeout = new AbortController();
-    const timer = setTimeout(() => timeout.abort(), timeoutMs);
+    // 0 waits as long as the daemon does: a tool call may be a question for the owner.
+    const timer = timeoutMs > 0 ? setTimeout(() => timeout.abort(), timeoutMs) : undefined;
     const signal = init.signal
       ? AbortSignal.any([init.signal, timeout.signal])
       : timeout.signal;
@@ -146,14 +147,20 @@ export class DaemonClient {
     return response;
   }
 
-  async request<T = unknown>(method: string, path: string, body?: unknown): Promise<CliResponse<T>> {
+  async request<T = unknown>(
+    method: string,
+    path: string,
+    body?: unknown,
+    options: { timeoutMs?: number; signal?: AbortSignal } = {},
+  ): Promise<CliResponse<T>> {
     const response = await this.#fetch(path, {
       method,
+      ...(options.signal ? { signal: options.signal } : {}),
       ...(body === undefined ? {} : {
         body: JSON.stringify(body),
         headers: { "content-type": "application/json" },
       }),
-    });
+    }, true, options.timeoutMs);
     const parsed = await responseBody(response);
     if (!response.ok) throw statusError(response.status, parsed, this.tokenPath);
     return { status: response.status, body: parsed as T };

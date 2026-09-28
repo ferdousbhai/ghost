@@ -15,6 +15,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import {
   collectGhostExtension,
   openGhostHome,
+  type AnyGhostToolDefinition,
   resolveDocumentsDirectory,
 } from "@ghost/extensions";
 import {
@@ -93,6 +94,7 @@ import {
   asRuntimeSessionEvent,
   createPiMessagesAdapter,
   type PiMessagesEvent,
+  toolResultSummary,
   zeroUsage,
 } from "./pi-messages.js";
 import { type ConversationPins, readPinState, writePins } from "./pins.js";
@@ -122,7 +124,7 @@ import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
 import { AskBroker, AskBrokerError, type PendingAsk } from "@ghost/runtime/ask-broker";
-import type { ToolResultMessage } from "@earendil-works/pi-ai";
+import { validateToolArguments, type Tool, type ToolCall, type ToolResultMessage } from "@earendil-works/pi-ai";
 import { AskCancelledError, createAskTool, type AskToolDetails } from "@ghost/runtime/ask-tool";
 import type { AskResultItem } from "@ghost/runtime/ask-broker";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
@@ -478,6 +480,27 @@ export interface RunAskReanswerOptions {
   includeThinking?: boolean;
 }
 
+/** A tool as `ghost mcp serve` lists it; `inputSchema` is the TypeBox (JSON Schema) definition. */
+export interface SessionToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: unknown;
+}
+
+export interface SessionToolResult {
+  content: ToolResultMessage["content"];
+  isError: boolean;
+}
+
+interface SessionTool {
+  name: string;
+  description: string;
+  parameters: unknown;
+  execute(id: string, params: unknown, signal: AbortSignal | undefined): Promise<{ content: ToolResultMessage["content"] }>;
+}
+
+const DELEGATED_MODEL = { provider: "mcp", id: "delegated", input: ["text", "image"] } as const;
+
 export interface GhostSessionHandle {
   ghost: Ghost;
   sessionKey: string;
@@ -540,6 +563,8 @@ interface HostedSession extends GhostSessionHandle {
   ownerPassSettlement?: Promise<void>;
   /** Live SSE emit for the exclusive owner turn, if one is in flight. */
   streamEmit?: (event: PiMessagesEvent) => void;
+  /** The Ghost tools pi runs in-session, kept so `callSessionTool` runs the same ones. */
+  ghostTools: ReadonlyMap<string, AnyGhostToolDefinition>;
   /** Reconstructed from the persisted branch and reserved synchronously per owner action. */
   nextOwnerTurnId: number;
   settlingDeferred?: Promise<void>;
@@ -1933,6 +1958,7 @@ export class SessionHost {
       pendingOwnerPasses: [],
       nextOwnerTurnId: persistedPiOwnerTurnCount(sessionManager.getBranch()),
       ask,
+      ghostTools: ghostExtension.tools,
       settings,
       skills: effectiveDeclarative.skills,
       rules: effectiveDeclarative.rules,
@@ -1986,6 +2012,90 @@ export class SessionHost {
         });
       });
     });
+  }
+
+  /** The tools a delegated harness may call for this conversation (`ghost mcp serve`). */
+  async sessionTools(ghostName: string, sessionId?: string | null): Promise<SessionToolDescriptor[]> {
+    const hosted = await this.hostedForTools(ghostName, sessionId);
+    return this.sessionToolSet(hosted).map(({ name, description, parameters }) => ({
+      name,
+      description,
+      inputSchema: parameters,
+    }));
+  }
+
+  /**
+   * Run one of this conversation's own tools for a delegated harness: the same
+   * definitions pi runs in-session, so policy and failure messages match. The
+   * call shows in the conversation's live stream as a tool card, which is also
+   * what lets the HUD surface an `ask`; it is not written to the transcript.
+   */
+  async callSessionTool(
+    ghostName: string,
+    sessionId: string | null | undefined,
+    name: string,
+    args: unknown,
+    signal?: AbortSignal,
+  ): Promise<SessionToolResult> {
+    const hosted = await this.hostedForTools(ghostName, sessionId);
+    const tool = this.sessionToolSet(hosted).find((candidate) => candidate.name === name);
+    if (!tool) throw new GhostError("tool_not_found", `This ghost has no tool named ${JSON.stringify(name)}.`, 404);
+    const id = `mcp-${randomUUID()}`;
+    let params: unknown;
+    try {
+      params = validateToolArguments(tool as unknown as Tool, { type: "toolCall", id, name, arguments: args as ToolCall["arguments"] });
+    } catch (error) {
+      return { content: [{ type: "text", text: error instanceof Error ? error.message : String(error) }], isError: true };
+    }
+    hosted.streamEmit?.({
+      type: "tool_execution_start",
+      id,
+      toolName: name,
+      arguments: params,
+      cwd: hosted.session.sessionManager.getCwd(),
+      intent: "Called by a delegated run",
+    });
+    try {
+      const result = await tool.execute(id, params, signal);
+      const summary = toolResultSummary(result);
+      hosted.streamEmit?.({ type: "tool_execution_end", id, toolName: name, isError: false, ...(summary ? { summary } : {}) });
+      return { content: result.content, isError: false };
+    } catch (error) {
+      const text = error instanceof Error ? error.message : String(error);
+      hosted.streamEmit?.({ type: "tool_execution_end", id, toolName: name, isError: true, summary: text });
+      return { content: [{ type: "text", text }], isError: true };
+    } finally {
+      this.touchSession(hosted);
+    }
+  }
+
+  private async hostedForTools(ghostName: string, sessionId?: string | null): Promise<HostedSession> {
+    const handle = await this.open(ghostName, sessionId);
+    const hosted = this.sessions.get(handle.sessionKey);
+    if (!hosted) throw new GhostError("session_closed", "The conversation closed before its tools could run.", 409);
+    return hosted;
+  }
+
+  /** `ask` on this session's broker, then the Ghost tools with the session's cwd. */
+  private sessionToolSet(hosted: HostedSession): SessionTool[] {
+    const ask = createAskTool({ broker: hosted.ask, timeoutMs: () => this.askTimeoutSeconds * 1000 });
+    const ghostTools = [...hosted.ghostTools.values()].map((tool): SessionTool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.parameters,
+      execute: (id, params, signal) => tool.execute(id, params as never, signal, {
+        cwd: hosted.session.sessionManager.getCwd(),
+        // The harness model is not ours to know; an MCP client takes image
+        // content and decides for itself, so screen tools keep their images.
+        model: DELEGATED_MODEL,
+      }),
+    }));
+    return [{
+      name: ask.name,
+      description: ask.description,
+      parameters: ask.parameters,
+      execute: (id, params, signal) => ask.execute(id, params as never, signal, undefined as never, undefined as never),
+    }, ...ghostTools];
   }
 
   pendingAsk(

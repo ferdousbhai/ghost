@@ -1231,6 +1231,42 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { accepted: true });
   };
 
+  /** `ghost mcp serve`'s backend: list this conversation's tools, or run one. */
+  const handleSessionTools = async (
+    ghostName: string,
+    conversation: ConversationIdentity,
+    toolName: string | undefined,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (toolName === undefined) {
+      if (method !== "GET") {
+        errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+        return;
+      }
+      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversation.conversationId) });
+      return;
+    }
+    if (method !== "POST") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
+    const connection = abortOnClose(request, response);
+    try {
+      jsonResponse(response, 200, await options.host.callSessionTool(
+        ghostName,
+        conversation.conversationId,
+        toolName,
+        body.arguments ?? {},
+        connection.signal,
+      ));
+    } finally {
+      connection.release();
+    }
+  };
+
   const handleQueue = async (
     ghostName: string,
     conversation: ConversationIdentity,
@@ -1625,6 +1661,22 @@ export function createDaemonServer(options: ServerOptions): Server {
           return await handleAsk(
             ghostName,
             decodeConversationIdentity(segments[4] ?? ""),
+            method,
+            request,
+            response,
+          );
+        }
+        if ((segments.length === 6 || segments.length === 7) && segments[3] === "sessions" && segments[5] === "tools") {
+          // Running a tool acts on this desktop directly; a tailnet caller,
+          // even the owner, acts only through the ghost.
+          if (admission.identity) {
+            errorResponse(response, 403, "local_only", "Ghost tools run only for the machine-local token.");
+            return;
+          }
+          return await handleSessionTools(
+            ghostName,
+            decodeConversationIdentity(segments[4] ?? ""),
+            segments[6],
             method,
             request,
             response,
