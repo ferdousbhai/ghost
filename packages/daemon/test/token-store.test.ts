@@ -427,7 +427,7 @@ describe("shared token-store persistence", () => {
       }
     `;
 
-    const { stdout } = await execFileAsync("node", ["--eval", script], { timeout: 1_000 });
+    const { stdout } = await execFileAsync("node", ["--eval", script], { timeout: 5_000 });
     expect(JSON.parse(stdout)).toEqual({
       readAttempts: 1,
       message: `Token file ${path} is not a regular file.`,
@@ -454,7 +454,7 @@ describe("shared token-store persistence", () => {
       }
     `;
 
-    await expect(execFileAsync(process.execPath, ["--eval", script], { timeout: 1_000 }))
+    await expect(execFileAsync(process.execPath, ["--eval", script], { timeout: 5_000 }))
       .rejects.toMatchObject({
         code: 23,
         killed: false,

@@ -5035,7 +5035,9 @@ describe("model switch reaches a live cached session", () => {
       prompt: "one",
       emit: () => {},
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    // Wait for its model request: before that the turn may not own the session
+    // yet, and a switch landing then rightly applies to this turn.
+    await waitFor(() => provider!.requests.length > 0 ? true : null);
 
     // Switch while busy: the model must not be yanked out from under the run.
     setGhostModelRole(paths.home, "chat_model", "ghost-local", "model-b");
