@@ -321,7 +321,8 @@ when a signal ended it, 127 when it could not start).
 A delegated harness can load the conversation's own tools with `ghost mcp
 serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
 `/sessions/:id/tools` routes, bound at start to `-s`, then `$GHOST_SESSION`
-(which `ghost delegate` passes through). Its `ask` reaches the owner in the
+(which `ghost delegate` passes through); an id not listed yet, a new
+conversation whose first turn is still running, binds as given. Its `ask` reaches the owner in the
 conversation that launched the run, while that conversation has a live turn
 (the HUD learns of a question from the turn stream). Nothing configures a
 harness for it:

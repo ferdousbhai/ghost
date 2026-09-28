@@ -33,31 +33,31 @@ const QUESTION = {
 };
 
 /** The environment `ghost delegate` hands a harness, and the harness its MCP servers. */
-function harnessEnv(): Record<string, string> {
+function harnessEnv(session = "conv-1"): Record<string, string> {
   return {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: daemon.temp.ownerHome,
     ...(daemon.env as Record<string, string>),
     GHOST: "casper",
-    GHOST_SESSION: "conv-1",
+    GHOST_SESSION: session,
   };
 }
 
 /** A harness's view: `ghost mcp serve` spawned over stdio, as a delegated run would. */
-async function connect(): Promise<Client> {
+async function connect(session?: string): Promise<Client> {
   client = new Client({ name: "harness", version: "1" });
-  await client.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, "mcp", "serve"], env: harnessEnv() }));
+  await client.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, "mcp", "serve"], env: harnessEnv(session) }));
   return client;
 }
 
 let liveTurn: { end: () => Promise<void> } | undefined;
 
 /** Hold an owner `!` turn open, as the ghost's shell running `ghost delegate` does. */
-async function startLiveTurn(): Promise<PiMessagesEvent[]> {
+async function startLiveTurn(sessionId = "conv-1"): Promise<PiMessagesEvent[]> {
   const events: PiMessagesEvent[] = [];
   const controller = new AbortController();
   const turn = daemon.host.runTurn("casper", {
-    sessionId: "conv-1",
+    sessionId,
     prompt: "!sleep 30",
     signal: controller.signal,
     emit: (event) => events.push(event),
@@ -115,6 +115,15 @@ describe("ghost mcp serve", () => {
     child.stdout.destroy();
     expect(await exited).toBe(0);
     await until(() => (daemon.host.pendingAsk("casper", "conv-1") === null ? true : null));
+  });
+
+  it("serves a new conversation whose first `!` command is still running", async () => {
+    // pi writes the conversation only after its first assistant message, so
+    // it is not listed yet; the id the daemon handed the shell still binds.
+    await startLiveTurn("fresh-1");
+    expect((await daemon.host.listSessions("casper")).some((session) => session.id.includes("fresh-1"))).toBe(false);
+    const { tools } = await (await connect("pi:fresh-1")).listTools();
+    expect(tools.map((tool) => tool.name)).toContain("ask");
   });
 
   it("fails an ask at once when no turn is live to show it", async () => {
