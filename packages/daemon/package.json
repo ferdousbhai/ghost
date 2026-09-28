@@ -30,7 +30,8 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "ws": "^8.18.0",
     "yaml": "^2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.4.3",
+    "@ghost/runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",

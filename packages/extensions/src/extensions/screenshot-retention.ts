@@ -62,7 +62,17 @@ function escapeForPattern(value: string): string {
 
 export const DEFAULT_SCREENSHOT_RETENTION = 20;
 
-export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
+import {
+  assertScreenshotBytesWithinLimit,
+  MAX_SCREENSHOT_BYTES,
+  screenshotLimitError,
+} from "@ghost/runtime/screenshot-limits";
+
+export {
+  assertScreenshotBase64WithinLimit,
+  assertScreenshotBytesWithinLimit,
+  MAX_SCREENSHOT_BYTES,
+} from "@ghost/runtime/screenshot-limits";
 
 const MAX_SCREENSHOT_COLLISIONS = 10_000;
 const CREATE_SCREENSHOT_FLAGS = constants.O_WRONLY
@@ -70,28 +80,6 @@ const CREATE_SCREENSHOT_FLAGS = constants.O_WRONLY
   | constants.O_EXCL
   | constants.O_NOFOLLOW;
 const GENERATED_TIMESTAMP = "\\d{4}-\\d{2}-\\d{2}T\\d{2}-\\d{2}-\\d{2}-\\d{3}";
-
-function screenshotLimitError(label: string, bytes: number): GhostError {
-  return new GhostError(
-    "limit_exceeded",
-    `${label} is ${bytes} bytes; screenshots are limited to ${MAX_SCREENSHOT_BYTES} bytes.`,
-    { bytes, maxBytes: MAX_SCREENSHOT_BYTES },
-  );
-}
-
-export function assertScreenshotBase64WithinLimit(data: string, label: string): void {
-  const padding = data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0;
-  const decodedBytes = Math.max(Math.floor(data.length * 3 / 4) - padding, 0);
-  if (decodedBytes > MAX_SCREENSHOT_BYTES) {
-    throw screenshotLimitError(label, decodedBytes);
-  }
-}
-
-export function assertScreenshotBytesWithinLimit(bytes: number, label: string): void {
-  if (!Number.isFinite(bytes) || bytes < 0 || bytes > MAX_SCREENSHOT_BYTES) {
-    throw screenshotLimitError(label, bytes);
-  }
-}
 
 function collisionName(baseName: string, attempt: number): string {
   if (attempt === 0) return baseName;
