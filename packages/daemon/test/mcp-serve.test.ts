@@ -124,6 +124,16 @@ describe("SessionHost.callSessionTool", () => {
     expect(events[1]).toMatchObject({ toolName: "ghost_browser", isError: true });
   });
 
+  it("streams a delegated call into an owner `!` command's turn", async () => {
+    const events: PiMessagesEvent[] = [];
+    const turn = daemon.host.runTurn("casper", { sessionId: "conv-1", prompt: "!sleep 1", emit: (event) => events.push(event) });
+    await until(() => events.some((event) => event.type === "tool_execution_start") ? true : null);
+    await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
+    await turn;
+    expect(events.filter((event) => event.type === "tool_execution_start").map((event) => (event as { toolName: string }).toolName))
+      .toEqual(["bash", "ghost_browser"]);
+  });
+
   it("refuses a tool the ghost does not have", async () => {
     await expect(daemon.host.callSessionTool("casper", "conv-1", "rm_rf", {})).rejects.toMatchObject({ status: 404 });
   });

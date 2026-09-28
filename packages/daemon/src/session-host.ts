@@ -2880,6 +2880,9 @@ export class SessionHost {
     let toolFinished = false;
     let pendingTerminal: Extract<PiMessagesEvent, { type: "done" | "error" }> | undefined;
     const onAbort = () => hosted.session.abortBash();
+    // A delegated run the command starts (`!ghost delegate …`) shows its
+    // tool calls, and so its questions, in this stream.
+    hosted.streamEmit = options.emit;
     try {
       options.emit({ type: "start" });
       options.emit({
@@ -2962,6 +2965,7 @@ export class SessionHost {
       };
     } finally {
       options.signal?.removeEventListener("abort", onAbort);
+      hosted.streamEmit = undefined;
       try {
         if (pendingTerminal) options.emit(pendingTerminal);
       } finally {
