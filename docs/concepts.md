@@ -241,7 +241,9 @@ If you expect one of these, it is missing on purpose:
   discovery, tools, and auth. `ghost delegate` only refuses a harness that is
   not installed or has no room and appends one receipt line per attempt, the
   evidence any change to how a ghost picks a harness has to be judged
-  against; Ghost never reads it back.
+  against; Ghost never reads it back. A delegated run reaches the owner and
+  the ghost's browser, screen, and desktop only through `ghost mcp serve`,
+  which runs the conversation's own tools in the daemon.
 - **No routing claims.** Nothing yet shows that how a ghost picks a harness
   improves outcomes; the handoff receipts are how that gets measured, and
   nothing trains on them. A delegated harness keeps its own tool loop and

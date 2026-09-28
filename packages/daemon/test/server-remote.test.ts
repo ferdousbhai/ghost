@@ -144,6 +144,22 @@ describe("tailnet identity", () => {
       .toEqual({ login: null, role: "owner" });
   });
 
+  it("runs ghost tools only for the machine-local token, never a tailnet owner", async () => {
+    const base = await serve();
+    const tools = `${base}/api/ghosts/casper/sessions/conv-1/tools`;
+    for (const [url, init] of [
+      [tools, {}],
+      [`${tools}/ghost_screen`, { method: "POST", body: "{}" }],
+    ] as const) {
+      const response = await fetch(url, {
+        ...init,
+        headers: { ...asTailnet("owner@example.com"), "content-type": "application/json" },
+      });
+      expect(response.status).toBe(403);
+      expect(await response.json()).toMatchObject({ error: { code: "local_only" } });
+    }
+  });
+
   it("keeps local resource paths owner-only even though the route is read-only", async () => {
     const base = await serve();
     const response = await fetch(

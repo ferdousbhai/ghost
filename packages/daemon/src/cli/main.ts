@@ -179,8 +179,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "mcp",
-    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>|test <name>|reconnect <name>] [-g <name>] [--json] [-q]",
-    summary: "Inspect or change this ghost's MCP servers; new servers start disabled.",
+    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>|test <name>|reconnect <name>|serve] [-g <name>] [-s <id>] [--json] [-q]",
+    summary: "Inspect or change this ghost's MCP servers (new ones start disabled), or `serve` this conversation's own tools over stdio to a delegated harness.",
     example: "ghost mcp enable github",
     positionals: [0, 3],
     run: mcpCommand,

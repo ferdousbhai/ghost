@@ -56,6 +56,9 @@ describe("ghost help topics", () => {
     expect(text).toContain("(exit 5) when it is not installed");
     expect(text).toContain("exits with its status");
     expect(text).toContain("`ghost harnesses` lists which have room");
+    // Print mode denies MCP tools it was not told to allow.
+    expect(text).toContain("claude -p --allowedTools mcp__ghost --mcp-config");
+    expect(text).toContain("a run you background cannot ask");
     expect(text).not.toContain("~/.local/state/omarchy");
     expect(text).toContain("handoff note");
     expect(text).toContain("Never spend a window you were not asked to spend.");

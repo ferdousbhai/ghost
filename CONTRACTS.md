@@ -318,6 +318,16 @@ its pipes have been idle for 100ms, so a descendant holding them cannot hang
 the call. The verb exits with the harness's status (128 plus the signal number
 when a signal ended it, 127 when it could not start).
 
+A delegated harness can load the conversation's own tools with `ghost mcp
+serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
+`/sessions/:id/tools` routes, bound at start to `-s`, then `$GHOST_SESSION`
+(which `ghost delegate` passes through). Its `ask` reaches the owner in the
+conversation that launched the run, while that conversation has a live turn
+(the HUD learns of a question from the turn stream). Nothing configures a
+harness for it:
+`claude -p --mcp-config`, a Codex `mcp_servers.ghost` entry, or an omp
+`mcp.json` row names `ghost mcp serve`; pi has no MCP client.
+
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
 file is 0600, and past 1 MiB it moves to `handoffs.jsonl.1`, replacing the
@@ -396,6 +406,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be inspected without creating a transcript. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from pi's JSONL. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
+| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the conversation's own tools (`ask` and the Ghost tools, `{name, description, inputSchema}`), or run one with `{arguments}` → `{content, isError}`: the same definitions pi runs in-session, validated against the same schema; a tool's failure is `isError` with its message. A call emits `tool_execution_start`/`tool_execution_end` (intent "Called by a delegated run") into the conversation's live owner-turn stream when one is open; it is not written to the transcript. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn. A steer reaches the model mid-turn; a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
