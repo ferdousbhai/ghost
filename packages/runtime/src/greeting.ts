@@ -1,4 +1,5 @@
 import type { Context } from "@earendil-works/pi-ai";
+import { fenceUntrusted } from "./untrusted-fence.js";
 
 
 /**
@@ -102,9 +103,7 @@ function greetingData(input: GreetingContextInput): string[] {
 
 export function buildGreetingContext(input: GreetingContextInput): Context {
   const rawData = greetingData(input).join("\n");
-  const data = `${GREETING_DATA_OPEN}\n${rawData
-    .replaceAll(GREETING_DATA_OPEN, `&lt;untrusted source="${GREETING_DATA_SOURCE}" id="${GREETING_DATA_NONCE}">`)
-    .replaceAll(GREETING_DATA_CLOSE, `&lt;/untrusted id="${GREETING_DATA_NONCE}">`)}\n${GREETING_DATA_CLOSE}`;
+  const data = fenceUntrusted(rawData, { source: GREETING_DATA_SOURCE, nonce: GREETING_DATA_NONCE });
   const content = [
     ...greetingInstructions(input),
     "",

@@ -3,18 +3,18 @@ export const MAX_DESKTOP_STATE_ITEMS = 40;
 export const MAX_DESKTOP_STATE_WINDOWS = 40;
 export const MAX_DESKTOP_STATE_TITLE = 80;
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
 }
-function truncate(value: unknown, max = MAX_DESKTOP_STATE_TITLE): string {
+export function truncate(value: unknown, max = MAX_DESKTOP_STATE_TITLE): string {
   const text = typeof value === "string" ? value : "";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }
-function finiteNumber(value: unknown): number | undefined {
+export function finiteNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
-function workspaceName(client: Record<string, unknown>): string {
+export function workspaceName(client: Record<string, unknown>): string {
   const workspace = asRecord(client["workspace"]);
   const name = workspace?.["name"];
   if (typeof name === "string") return name;

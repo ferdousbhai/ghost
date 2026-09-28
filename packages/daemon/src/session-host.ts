@@ -1,6 +1,6 @@
 import { bashExecutionToText, parseUserBashCommand, type BashExecutionMessage, type UserBashCommand } from "@ghost/runtime/owner-shell";
 import { promptPiSession } from "@ghost/runtime/declarative-commands";
-import { ASK_REANSWER_OWNER_MESSAGE_TYPE, persistedOwnerPassBoundary, type OwnerPassKind, type PendingOwnerPass } from "@ghost/runtime/owner-pass";
+import { ASK_REANSWER_OWNER_MESSAGE_TYPE, entryText, persistedOwnerPassBoundary, type OwnerPassKind, type PendingOwnerPass } from "@ghost/runtime/owner-pass";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   lstat,
@@ -242,16 +242,6 @@ interface PiSettlementResult {
 interface PiSettlementBarrier {
   readonly settled: Promise<PiSettlementResult>;
   cancel(): boolean;
-}
-
-function entryText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.flatMap((part) => {
-    if (!part || typeof part !== "object" || (part as { type?: unknown }).type !== "text") return [];
-    const text = (part as { text?: unknown }).text;
-    return typeof text === "string" ? [text] : [];
-  }).join("");
 }
 
 function customMessageAttribution(entry: Extract<SessionEntry, { type: "custom_message" }>): string | undefined {

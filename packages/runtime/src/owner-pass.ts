@@ -15,7 +15,8 @@ export type PersistedOwnerPassResult<Pass extends PendingOwnerPass> =
   | "superseded"
   | null;
 
-function entryText(content: unknown): string {
+/** The concatenated text parts of a message's content; other parts are dropped. */
+export function entryText(content: unknown): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.flatMap((part) => {

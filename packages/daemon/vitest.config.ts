@@ -1,6 +1,11 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Tests run the runtime's source, never a stale build of it.
+  resolve: {
+    alias: [{ find: /^@ghost\/runtime\/(.*)$/, replacement: fileURLToPath(new URL("../runtime/src/$1.ts", import.meta.url)) }],
+  },
   test: {
     include: ["test/**/*.test.ts"],
     setupFiles: ["test/setup.ts"],

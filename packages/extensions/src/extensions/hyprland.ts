@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { condenseDesktopState, MAX_DESKTOP_STATE_TITLE } from "@ghost/runtime/desktop-state";
+import { asRecord, condenseDesktopState, finiteNumber, truncate, workspaceName } from "@ghost/runtime/desktop-state";
 import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import { stringEnum } from "../tool-schema.js";
@@ -80,17 +80,6 @@ export interface HyprlandExtensionOptions extends GhostExtensionOptions {
   readonly env?: NodeJS.ProcessEnv;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function truncate(value: unknown, max = MAX_DESKTOP_STATE_TITLE): string {
-  const text = typeof value === "string" ? value : "";
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
-
 interface BoundedStrings {
   readonly values: string[];
   readonly omitted: number;
@@ -128,10 +117,6 @@ function boundedActionStrings(value: unknown): BoundedStrings {
     if (values.length >= MAX_DESKTOP_OBSERVATION_LIST_ITEMS) break;
   }
   return { values, omitted: Math.max(value.length - values.length, 0) };
-}
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function boundedCount(reported: unknown, observed: number): number {
@@ -289,14 +274,6 @@ function clampAxQueryLimit(value: number): number {
 function clampClicks(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(Math.floor(value), MAX_CLICKS));
-}
-
-function workspaceName(client: Record<string, unknown>): string {
-  const workspace = asRecord(client["workspace"]);
-  const name = workspace?.["name"];
-  if (typeof name === "string") return name;
-  const id = workspace?.["id"];
-  return typeof id === "number" ? String(id) : "";
 }
 
 export { condenseDesktopState } from "@ghost/runtime/desktop-state";

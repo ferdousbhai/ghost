@@ -1,6 +1,11 @@
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  // Tests run the runtime's source, never a stale build of it.
+  resolve: {
+    alias: [{ find: /^@ghost\/runtime\/(.*)$/, replacement: fileURLToPath(new URL("../runtime/src/$1.ts", import.meta.url)) }],
+  },
   // Pi ships prompt text as Bun-native `.md` imports. Vitest only needs these
   // modules to resolve while exercising the extension SDK surface.
   assetsInclude: [
