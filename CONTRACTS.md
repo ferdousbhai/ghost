@@ -332,7 +332,9 @@ time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
 of a run that did not exit 0, else `null`. No prompt text or arguments are
 kept. A receipt that cannot be written is a warning on stderr, never a changed
 exit status. The log is the evidence for judging routing; nothing in Ghost
-reads it back.
+reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
+from a checkout, outside the shipped package: attempts, refusals by kind, exit
+outcomes, unmeasured checks, and limits hit, per harness.
 
 Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
 protocol, failure behavior, and settings are defined in
@@ -445,8 +447,12 @@ back to `~/.local/state`). `--json` prints `{harnesses, refresh}`: each harness
 is `{id, eligible, reason, usage}`, and `usage` is `null` without a record,
 else `{updatedAt, stale, status, windows}` with each window `{label, percent,
 resetsAt}`, `percent` a 0–1 fraction used. A harness is ineligible when any
-window whose reset is still ahead is at 90% or more; `reason` then names it,
-else it is `null`. A record's `ready` only says Omarchy has data to show, so it
+window whose reset is still ahead is at 90% or more, or when a weekly one (a
+label matching `week` or `7-day`, its reset at most a week off) has used more
+than the fraction of its week elapsed since the reset plus one day's share
+(1/7); `reason` then names the window, else it is `null`. The thresholds are
+constants in [`harnesses.ts`](packages/daemon/src/harnesses.ts), not owner
+settings. A record's `ready` only says Omarchy has data to show, so it
 decides nothing. A window whose reset has
 passed is dropped. `stale` marks a record older than 15 minutes; the verb never
 refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
