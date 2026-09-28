@@ -499,6 +499,9 @@ interface SessionTool {
   execute(id: string, params: unknown, signal: AbortSignal | undefined): Promise<{ content: ToolResultMessage["content"] }>;
 }
 
+const NO_LIVE_TURN_FOR_ASK = "No turn is live in this conversation, so the owner would never see the question. "
+  + "Ask only from a run started inside a ghost turn: `ghost delegate` from the ghost's shell, or `!ghost delegate …` in the HUD.";
+
 const DELEGATED_MODEL = { provider: "mcp", id: "delegated", input: ["text", "image"] } as const;
 
 export interface GhostSessionHandle {
@@ -2040,6 +2043,11 @@ export class SessionHost {
     const hosted = await this.hostedForTools(ghostName, sessionId);
     const tool = this.sessionToolSet(hosted).find((candidate) => candidate.name === name);
     if (!tool) throw new GhostError("tool_not_found", `This ghost has no tool named ${JSON.stringify(name)}.`, 404);
+    // The owner sees a question only through a live turn's stream; without one
+    // it would wait out the ask timeout unseen.
+    if (name === "ask" && !hosted.streamEmit) {
+      return { content: [{ type: "text", text: NO_LIVE_TURN_FOR_ASK }], isError: true };
+    }
     const id = `mcp-${randomUUID()}`;
     let params: unknown;
     try {

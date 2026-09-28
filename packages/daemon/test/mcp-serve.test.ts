@@ -15,6 +15,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  await liveTurn?.end();
+  liveTurn = undefined;
   await client?.close();
   client = undefined;
   await daemon.listening.close();
@@ -48,6 +50,23 @@ async function connect(): Promise<Client> {
   return client;
 }
 
+let liveTurn: { end: () => Promise<void> } | undefined;
+
+/** Hold an owner `!` turn open, as the ghost's shell running `ghost delegate` does. */
+async function startLiveTurn(): Promise<PiMessagesEvent[]> {
+  const events: PiMessagesEvent[] = [];
+  const controller = new AbortController();
+  const turn = daemon.host.runTurn("casper", {
+    sessionId: "conv-1",
+    prompt: "!sleep 30",
+    signal: controller.signal,
+    emit: (event) => events.push(event),
+  });
+  await until(() => (events.some((event) => event.type === "tool_execution_start") ? true : null));
+  liveTurn = { end: async () => { controller.abort(); await turn.catch(() => {}); } };
+  return events;
+}
+
 async function until<T>(read: () => T | null): Promise<T> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const value = read();
@@ -65,6 +84,7 @@ describe("ghost mcp serve", () => {
   });
 
   it("asks the owner in the launching conversation and returns the answer", async () => {
+    await startLiveTurn();
     const harness = await connect();
     const call = harness.callTool({ name: "ask", arguments: { questions: [QUESTION] } });
     const pending = await until(() => daemon.host.pendingAsk("casper", "conv-1"));
@@ -79,6 +99,7 @@ describe("ghost mcp serve", () => {
   });
 
   it("stops when the harness ends stdin, withdrawing a question still in flight", async () => {
+    await startLiveTurn();
     // A killed harness leaves both pipes closed, with no SIGTERM to the server.
     const child = spawn(process.execPath, [CLI, "mcp", "serve"], { env: harnessEnv(), stdio: ["pipe", "pipe", "pipe"] });
     const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
@@ -94,6 +115,13 @@ describe("ghost mcp serve", () => {
     child.stdout.destroy();
     expect(await exited).toBe(0);
     await until(() => (daemon.host.pendingAsk("casper", "conv-1") === null ? true : null));
+  });
+
+  it("fails an ask at once when no turn is live to show it", async () => {
+    const result = await (await connect()).callTool({ name: "ask", arguments: { questions: [QUESTION] } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("No turn is live in this conversation");
+    expect(daemon.host.pendingAsk("casper", "conv-1")).toBeNull();
   });
 
   it("returns a tool's own failure, and a schema error, as tool errors", async () => {
