@@ -1,7 +1,5 @@
 import { admitDeclarativeResources, SCAN_MAX_ENTRIES, SCAN_MAX_BYTES, SCAN_MAX_FILE_BYTES, SCAN_MAX_DEPTH, SCAN_TIMEOUT_MS, GHOST_INSTRUCTION_FILES, type MarkdownFile } from "@ghost/runtime/declarative-admission";
 import type { DeclarativeSnapshot } from "@ghost/runtime/declarative-snapshot";
-export type { DeclarativeSnapshot } from "@ghost/runtime/declarative-snapshot";
-export { SCAN_MAX_ENTRIES, SCAN_MAX_BYTES, SCAN_MAX_FILE_BYTES, SCAN_MAX_DEPTH, SCAN_TIMEOUT_MS } from "@ghost/runtime/declarative-admission";
 import { opendir, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, posix, resolve } from "node:path";
 import {

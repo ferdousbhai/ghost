@@ -12,7 +12,7 @@ export {
   openRegularFileNoFollow,
 } from "./linux-fs.js";
 
-export type { CharacterFile } from "./types.js";
+export type { CharacterFile } from "@ghost/runtime/persona";
 
 export {
   buildGhostSystemPrompt,

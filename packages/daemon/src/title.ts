@@ -9,13 +9,9 @@ import {
   smolCatalogFromRuntime,
   smolModelLabel,
 } from "./smol.js";
-
-/**
- * The provider-neutral instruction. No provider-specific tokens or formatting,
- * because a ghost may run on any model. The first user message is appended.
- */
 import { buildTitleContext, cleanTitle } from "@ghost/runtime/title";
-export { TITLE_PROMPT, MAX_TITLE_PROMPT_INPUT, MAX_TITLE_WORDS, MAX_TITLE_CHARS, buildTitleContext, cleanTitle } from "@ghost/runtime/title";
+
+export { cleanTitle };
 
 export interface GenerateTitleInput {
   readonly runtime: SmolRuntime;

@@ -5,7 +5,7 @@
  */
 import { parse as parseYaml } from "yaml";
 import { ghostPaths } from "./ghosts.js";
-import { isRecord } from "./mcp-server-shape.js";
+import { isRecord } from "@ghost/runtime/mcp-config-policy";
 import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from "./private-file.js";
 
 export interface GhostSettings {

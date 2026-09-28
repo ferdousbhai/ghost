@@ -15,7 +15,7 @@ import {
   resolveChatModelRef,
   setChatModelRoleIfUnset,
 } from "./models.js";
-import { CHAT_MODEL_NEED, bestForNeed, isAggregatorRouter, resolveChatModel } from "./model-routing.js";
+import { CHAT_MODEL_NEED, bestForNeed, isAggregatorRouter, resolveChatModel } from "@ghost/runtime/model-routing";
 import { isChatModelSelector } from "./model-selection.js";
 import { createGhostPiRuntime } from "./pi-runtime.js";
 

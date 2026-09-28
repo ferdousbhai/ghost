@@ -17,24 +17,15 @@ import {
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import { acquireWriterLock, releaseWriterLock } from "./writer-lock.js";
-
-import { expandEnvVars as expandEnvVarsWithEnvironment, expandEnvVarsDeep as expandEnvVarsDeepWithEnvironment } from "@ghost/runtime/mcp-config-policy";
-export { validateServerName, validateServerConfig } from "@ghost/runtime/mcp-config-policy";
-export type { MCPAuthConfig, MCPRequestIdFormat, MCPServerConfig, MCPStdioServerConfig, MCPHttpServerConfig, MCPSseServerConfig } from "@ghost/runtime/mcp-config-policy";
 import { validateServerName, validateServerConfig, type MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
+
+export { validateServerName };
+export type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
 
 /** The file: `mcpServers` is what Ghost reads; other keys pass through untouched. */
 export interface MCPConfigFile {
   mcpServers?: Record<string, MCPServerConfig>;
   [key: string]: unknown;
-}
-
-/** Local adapter supplies ambient values; portable policy never reads process.env. */
-export function expandEnvVars(value: string, extraEnv?: Record<string, string>): string {
-  return expandEnvVarsWithEnvironment(value, { ...process.env, ...extraEnv });
-}
-export function expandEnvVarsDeep<T>(value: T, extraEnv?: Record<string, string>): T {
-  return expandEnvVarsDeepWithEnvironment(value, { ...process.env, ...extraEnv });
 }
 
 export function readMCPConfigFile(

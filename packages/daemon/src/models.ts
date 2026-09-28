@@ -1,3 +1,4 @@
+import type { GhostModelRoleBinding } from "@ghost/runtime/model-routing";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -25,6 +26,8 @@ import {
   WriterLockManualError,
 } from "./writer-lock.js";
 
+export type { GhostModelRoleBinding };
+
 export interface GhostModelDefinition {
   id: string;
   name?: string;
@@ -48,9 +51,6 @@ export interface GhostProviderConfig {
   models?: GhostModelDefinition[];
   [key: string]: unknown;
 }
-
-import type { GhostModelRoleBinding } from "@ghost/runtime/model-routing";
-export type { GhostModelRoleBinding } from "@ghost/runtime/model-routing";
 
 /**
  * The inference roles a ghost binds. Only `chat_model` is load-bearing for a

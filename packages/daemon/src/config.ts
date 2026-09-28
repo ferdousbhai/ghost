@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "./compaction.js";
+import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "@ghost/runtime/compaction";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";

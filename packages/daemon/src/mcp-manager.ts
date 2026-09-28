@@ -9,15 +9,7 @@ import {
 } from "@ghost/runtime/mcp-manager";
 import type { MCPServerConfig } from "./mcp-config.js";
 
-export {
-  McpToolCallError,
-  type McpConnectionStatus,
-  type McpConnectResult,
-  type McpToolDefinition,
-  type McpToolDetails,
-  type McpErrorCode,
-  type McpManagerLogger,
-} from "@ghost/runtime/mcp-manager";
+export { McpToolCallError, type McpToolDefinition } from "@ghost/runtime/mcp-manager";
 
 export interface McpManagerOptions {
   cwd: string;

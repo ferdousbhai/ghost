@@ -1,4 +1,3 @@
-import { CHARACTER_FILENAME, characterBodyTooLong, MAX_CHARACTER_BODY_LENGTH } from "@ghost/runtime/persona";
 /**
  * Mutations pair the path-keyed in-process queue with descriptor locks and
  * atomic rename so independently opened home handles share one publication
@@ -14,6 +13,12 @@ import {
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join, resolve, sep } from "node:path";
+import {
+  CHARACTER_FILENAME,
+  characterBodyTooLong,
+  MAX_CHARACTER_BODY_LENGTH,
+  type CharacterFile,
+} from "@ghost/runtime/persona";
 import { GhostError } from "./errors.js";
 import {
   descriptorPath,
@@ -22,9 +27,8 @@ import {
   openRegularFileNoFollow,
   withDescriptorLock,
 } from "./linux-fs.js";
-import type { CharacterFile } from "./types.js";
 
-export { CHARACTER_FILENAME, MAX_CHARACTER_BODY_LENGTH } from "@ghost/runtime/persona";
+export { CHARACTER_FILENAME, MAX_CHARACTER_BODY_LENGTH };
 
 const fileMutationQueues = new Map<string, Promise<unknown>>();
 

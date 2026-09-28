@@ -46,7 +46,7 @@ The common defect here is a change that works on the path you tested and is miss
 - `packages/runtime/src/` — portable persona, question, handoff/history and model policy consumed by the daemon and hosted SummonGhost; no host I/O or session loop
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
-- `packages/daemon/src/models.ts`, `model-selection.ts`, `model-routing.ts`, `smol.ts` — model roles, the chat-model binding, and which model a role resolves to
+- `packages/daemon/src/models.ts`, `model-selection.ts`, `smol.ts`, and `packages/runtime/src/model-routing.ts` — model roles, the chat-model binding, and which model a role resolves to
 - `packages/daemon/src/hooks.ts` — harness hooks
 - `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI

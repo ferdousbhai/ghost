@@ -75,7 +75,6 @@ export function renderOwnerContextPolicy(documentsDir: string): string {
   ].join("\n");
 }
 
-export type { MachineSkillOptions, MachineSkillDiagnostic, MachineSkillSnapshot } from "@ghost/runtime/machine-skills";
 export function machineSkillPaths(ownerHome: string, options: MachineSkillOptions = {}): string[] {
   return sharedMachineSkillPaths(ownerHome, options, join);
 }

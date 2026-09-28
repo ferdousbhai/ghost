@@ -84,14 +84,10 @@ command/error payload.
 
 ## Host storage metadata
 
-The local daemon supplies `ghost_home` and, when present, native transcript paths
-on the owner's machine. The shared hosted adapter keeps those files in backend
-storage, so it omits filesystem fields it cannot truthfully supply and uses
-`storage: { kind: "backend", ghost_id, session_id }` instead. Its `cwd` is the
-assigned remote computer's actual home. A command must not treat backend identifiers
-as local file paths. Hook event data is transient stdin; model credentials and the
-stored conversation stay in the backend. Hosted command-hook integration is tracked
-in SummonGhost's implementation queue; this contract does not claim it is deployed.
+ghostd always sends `ghost_home` and, when the session has them, its native
+transcript paths. A host with no filesystem ghost home (hosted SummonGhost)
+omits those fields and sends `storage: { kind: "backend", ghost_id, session_id }`
+instead; a command must not treat those identifiers as local paths.
 
 ## `before_prompt` protocol
 

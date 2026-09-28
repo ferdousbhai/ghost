@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { loadDeclarativeSnapshot } from "../src/declarative-resources.js";
-import { mergeDeclarativeSnapshots, renderPiDeclarativePrompt } from "../src/declarative-snapshot.js";
+import { mergeDeclarativeSnapshots, renderPiDeclarativePrompt } from "@ghost/runtime/declarative-snapshot";
 import { parseFrontmatter } from "../src/declarative-types.js";
 
 const roots: string[] = [];

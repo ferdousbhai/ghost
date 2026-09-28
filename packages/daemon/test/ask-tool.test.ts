@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { AskBroker } from "../src/ask-broker.js";
+import { AskBroker } from "@ghost/runtime/ask-broker";
 import {
   AskCancelledError,
   createAskTool,
   isAskToolInput,
   type AskToolInput,
-} from "../src/ask-tool.js";
+} from "@ghost/runtime/ask-tool";
 
 const QUESTION = {
   header: "Shape",

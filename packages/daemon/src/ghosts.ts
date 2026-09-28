@@ -1,5 +1,3 @@
-import { SEEDED_CHARACTER } from "@ghost/runtime/persona";
-export { isSeededCharacter } from "@ghost/runtime/persona";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -14,9 +12,11 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
+import { SEEDED_CHARACTER } from "@ghost/runtime/persona";
 import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";
+export { isSeededCharacter } from "@ghost/runtime/persona";
 
 export interface Ghost {
   name: string;

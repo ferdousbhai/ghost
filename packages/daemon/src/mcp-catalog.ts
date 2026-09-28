@@ -14,7 +14,7 @@ import {
   homeOperationsFor,
   type HomeOperationCoordinator,
 } from "./home-operations.js";
-import { isRecord, mcpServerValidationErrors } from "./mcp-server-shape.js";
+import { isRecord, mcpServerValidationErrors } from "@ghost/runtime/mcp-config-policy";
 import {
   PrivateReadError,
   readPrivateFileText,
@@ -22,7 +22,6 @@ import {
 } from "./private-file.js";
 
 export type McpConfigSource = "canonical" | "legacy";
-export type { McpTransport, McpConfiguredKeysView, McpAuthView, McpOAuthView, McpStdioServerConfigView, McpRemoteServerConfigView, McpServerConfigView } from "@ghost/runtime/mcp-catalog-policy";
 import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "@ghost/runtime/mcp-catalog-policy";
 import type { McpServerConfigView } from "@ghost/runtime/mcp-catalog-policy";
 export interface McpServerView {
@@ -132,7 +131,6 @@ export function expandMcpServerConfig(config: MCPServerConfig): MCPServerConfig 
   return expandMcpServerConfigWithEnvironment(config, process.env);
 }
 
-export { sanitizeMcpServerConfig } from "@ghost/runtime/mcp-catalog-policy";
 
 function validateMutation(name: string, value: unknown): asserts value is MCPServerConfig {
   const errors = mcpServerValidationErrors(name, value);

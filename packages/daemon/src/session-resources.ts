@@ -1,9 +1,9 @@
+import { isAbsolute, join, resolve } from "node:path";
 import { skillView, type SessionResourceSource, type SessionResourceStatus, type SessionResourceDiagnostic, type SessionSkillGroup, type SessionSkillView } from "@ghost/runtime/resource-view";
 export { sessionSkillGroup } from "@ghost/runtime/resource-view";
-export type { SessionResourceSource, SessionResourceStatus, SessionResourceDiagnostic, SessionSkillInput, SessionSkillGroup, SessionSkillView } from "@ghost/runtime/resource-view";
+export type { SessionSkillGroup } from "@ghost/runtime/resource-view";
 import type { ConversationRuntime } from "./conversation-identity.js";
 import type { EffectiveMcpRead } from "./mcp-catalog.js";
-import { isAbsolute, join, resolve } from "node:path";
 
 export interface SessionMcpGroup {
   source: Exclude<SessionResourceSource, "machine">;

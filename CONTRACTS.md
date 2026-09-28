@@ -259,7 +259,7 @@ Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
 bounded recovery record (owner inputs of the current window, the unconsumed
 tool batch, the prior checkpoint) and no model is called; Pi's retained tail
 is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
-[`compaction.ts`](packages/daemon/src/compaction.ts). One checkpoint reminder is steered in before the
+[`compaction.ts`](packages/runtime/src/compaction.ts). One checkpoint reminder is steered in before the
 line, `new_context` rolls over on demand with the ghost's own handoff, and
 `history` searches and reads the transcript across windows
 ([`context-windows.ts`](packages/daemon/src/context-windows.ts), a port of
@@ -491,7 +491,7 @@ pi reports as free at sign-in time, never a constant that can be delisted.
 follows the driver: the chat provider's small tier, then the cheapest usable
 model anywhere. A negative price is pi's dynamic-router sentinel, not a bargain,
 on every cost key. The rule is
-[`resolveSmolModel`](packages/daemon/src/smol.ts). An explicit unusable binding fails loudly rather than silently
+[`resolveSmolModel`](packages/runtime/src/smol.ts). An explicit unusable binding fails loudly rather than silently
 switching models.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
@@ -499,85 +499,6 @@ errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
 hosted-session, concurrency, or spend cap.
 
 ## Package boundaries
-
-`@ghost/runtime/persona` owns character limits, seed detection, first-meeting
-guidance and prompt construction. Hosts provide the character location and
-storage label; character text remains verbatim. The extensions package consumes
-this I/O-free subpath. Pi peers are optional for consumers of pure policy and
-remain explicit dependencies of session hosts. Hosted conversations retain a
-persisted opening snapshot; shared policy removes their text-rewriting generator.
-
-Declarative resource types, metadata admission, named-resource precedence and
-prompt rendering also live in @ghost/runtime. The host supplies Pi's frontmatter
-parser and already-admitted immutable file bytes. Local scanning retains its
-no-symlink checks and scan budgets; sharing policy does not broaden discovery or
-turn notes into instructions. Hosted resource storage uses a distinct owner/ghost namespace with opening-session
-snapshots; ordinary notes remain data. Hosted template expansion and agent resource writes/edits use host adapters.
-Hosted machine roots use bounded remote bytes and backend Pi discovery; agent
-resource deletion still requires host integration.
-
-`@ghost/runtime` also owns owner-shell parsing (`!` / `!!`) and transcript formatting,
-replacing daemon-local copies. Pi executes the command; each host supplies transport.
-`!!` remains excluded from model context and history content.
-
-`@ghost/runtime/smol` owns pure background-model ranking and role resolution.
-The daemon supplies Pi's credentialed catalogue; hosted supplies its eligible
-free OpenRouter catalogue. Hosted auxiliary inference may use only zero-price
-models.
-`@ghost/runtime/title` owns the first-message title prompt and cleanup limits;
-local and hosted runtimes supply the smol completion and title lifecycle.
-`@ghost/runtime/greeting` owns the bounded, fenced greeting prompt and output
-acceptance rules. Hosts supply character, local clock, conversation recency,
-model completion and cache storage; an absent greeting is an ordinary result.
-
-`@ghost/runtime/owner-pass` owns matching a submitted owner pass to persisted Pi
-entries and its final assistant boundary, replacing the daemon's inline matcher.
-The host owns admission, durable pass state and settlement; the shared matcher
-never starts a turn or executes a hook.
-`@ghost/runtime/hook-policy` owns command configuration admission, redacted status,
-ordered aggregation, result interpretation and stop-continuation selection. The
-daemon supplies its existing filesystem and process adapter. Hosted supplies
-backend configuration and tenant-bound VM execution; neither host introduces a
-second parser or an unconditional continuation hook. Local events still carry real
-local paths. A host without a filesystem ghost home omits `ghost_home`,
-`session_file` and `transcript_path`, and identifies backend storage with
-`storage: { kind: "backend", ghost_id, session_id }`. It must never label a path on
-the application host as a path usable by an owner command.
-
-`@ghost/runtime/mcp-manager` owns MCP client connection lifecycle, tool pagination,
-list-change refresh, naming, redacted errors and Pi tool definitions. Hosts inject
-the transport factory and may inject an SDK client factory for their schema
-validator. The local daemon alone constructs stdio/HTTP/SSE transports and
-reads cwd/process environment; hosted uses a tenant-scoped backend transport.
-The core's `callTool(name, args, signal)` invokes only a currently advertised
-tool and shares the Pi definition's call path without requiring a host to
-fabricate a Pi extension context.
-Confirmed MCP `isError` replies carry `McpToolCallError.outcome = "server_error"`;
-disconnection and SDK transport failures carry `"uncertain"` so a durable
-host does not replay a call whose remote side may already have executed it.
-
-`@ghost/runtime/desktop-state` owns the bounded, read-only projection of
-Hyprland clients, workspaces, active window and monitors. Local Ghost gets
-source JSON from its desktop helper; hosted Ghost gets it from fixed commands
-on the assigned desktop VM. The shared policy performs no compositor I/O and
-does not confer focus, capture, input or accessibility capabilities.
-
-`@ghost/runtime` owns portable question, tool-batch barrier, model-routing and
-handoff-threshold, deterministic recovery-record and history-budget policy. The context-window Pi extension is
-also shared; its transcript traversal receives an explicit host adapter rather
-than importing filesystem APIs. Local Ghost supplies JSONL traversal. Hosted
-Ghost supplies its backend history tool and rejects a missing history adapter. The daemon and hosted SummonGhost consume the same
-package; this replaces their independent source copies. It owns no host I/O,
-credentials, session loop or persistence. Pi remains the executor. Hosted
-recovery supplies durable observations to the shared barrier policy. Package
-exports are versioned; consumers pin the built artifact and verify its source.
-
-An `ask` tool marks its Pi batch sequential in both products. Earlier calls
-finish before the question opens; later calls wait for its settlement. Multiple
-questions in one response are presented in order rather than superseding each
-other. This is a dependency barrier within one response, not a limit on
-concurrent conversations. Other batches retain Pi's execution policy.
-
 
 Ghost is two sides of one product plus one separate product. **ghost-core**
 is everything a second interface could reuse: `packages/runtime`,
@@ -588,6 +509,34 @@ seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
 relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
+
+`packages/runtime` (`@ghost/runtime`) is the policy both session hosts run:
+this daemon, and hosted SummonGhost, which vendors a packed copy
+(`scripts/pack-ghost-runtime.mjs` there; its `SOURCE.json` names the commit).
+It owns no host I/O, credentials, session loop, or persistence: each module
+takes what it needs from its host as arguments or an adapter, and pi stays the
+executor. It owns persona (character limits, seed detection, first-meeting
+text, system-prompt assembly); declarative resources (types, admission,
+precedence, prompt rendering, explicit skill invocation), with the host
+supplying pi's frontmatter parser and admitted file bytes while the daemon keeps
+its no-symlink scan and budgets; machine-skill roots and the normalization of
+pi's discovery, with the host supplying file access and pi's loader; the skill
+resource view; owner-shell `!`/`!!` parsing; matching an owner pass to persisted
+entries, the host keeping admission and settlement; command-hook admission,
+status, aggregation, and stop continuation, the daemon supplying the process
+runner; MCP config policy and the client lifecycle, only the daemon building
+stdio/HTTP/SSE transports or reading the process environment (an MCP `isError`
+reply is `McpToolCallError.outcome` `"server_error"`, a lost transport
+`"uncertain"`, so a durable host never replays a call that may have run); the
+desktop-state projection; smol ranking, title, and greeting prompts and output
+acceptance; model routing; the ask broker and tool; compaction settings; and the
+context-window extension, the daemon supplying JSONL history traversal. The
+daemon and extensions take it as a workspace package, and a daemon module over
+it adds only host I/O.
+
+An `ask` tool makes its pi tool batch sequential: earlier calls finish before
+the question opens, later ones wait for its answer, and several questions in one
+response open in order. Other batches keep pi's execution policy.
 
 The **relay extension** is a separate product in its own repository,
 [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension),
@@ -728,18 +677,3 @@ Protocols implemented by a sidecar have one detailed document:
 Focused tests beside the implementation are part of these contracts. GitHub
 issues track unfinished work and release evidence; this file describes the
 desired end state, not the backlog.
-
-Explicit skill invocation and Pi prompt-template adaptation live in @ghost/runtime.
-Both session hosts pass their admitted immutable resources; Pi owns template
-argument expansion. Forced skills remain owner-attributed custom messages.
-
-Machine-skill root selection and Ghost's normalization of Pi discovery results live
-in @ghost/runtime/machine-skills. The host supplies join/existence/byte reads and
-Pi's loader. Pi's ignore, symlink and first-name precedence behavior stays intact.
-Hosted discovery satisfies this adapter using a per-call snapshot filesystem and
-hash-pinned Pi discovery code in the Worker. Transport capture bounds are explicit
-hosting exceptions; the ghost-private parser never replaces Pi's machine loader.
-
-Skill resource-view precedence/status projection is shared in @ghost/runtime.
-Hosted inspection reads saved conversation snapshots and never performs discovery
-or admits new resources just because the owner opens the inspector.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nativeCompactionSettings } from "../src/compaction.js";
+import { nativeCompactionSettings } from "@ghost/runtime/compaction";
 
 describe("nativeCompactionSettings", () => {
   it("reserves the last 20% of the model's window by default", () => {

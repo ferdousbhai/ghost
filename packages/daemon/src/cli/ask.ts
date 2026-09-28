@@ -1,4 +1,4 @@
-import type { PendingAsk } from "../ask-broker.js";
+import type { PendingAsk } from "@ghost/runtime/ask-broker";
 import { ArgsError, type ParsedCliArgs } from "./args.js";
 import { resolveTarget } from "./common.js";
 import { emit } from "./output.js";

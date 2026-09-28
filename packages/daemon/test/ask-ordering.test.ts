@@ -2,8 +2,8 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { expect, it, vi } from "vitest";
-import { AskBroker } from "../src/ask-broker.js";
-import { createAskTool, isAskToolInput } from "../src/ask-tool.js";
+import { AskBroker } from "@ghost/runtime/ask-broker";
+import { createAskTool, isAskToolInput } from "@ghost/runtime/ask-tool";
 
 it("Pi waits for each local Ghost question before executing later calls in the same batch", async () => {
   const broker = new AskBroker();

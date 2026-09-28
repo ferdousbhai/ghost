@@ -28,7 +28,7 @@ import {
   oauthCredential,
   type LoginImpl,
 } from "./helpers/fake-login-runtime.js";
-import { isAggregatorRouter } from "../src/model-routing.js";
+import { isAggregatorRouter } from "@ghost/runtime/model-routing";
 import { fakePiModel } from "./helpers/fake-pi-model.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 

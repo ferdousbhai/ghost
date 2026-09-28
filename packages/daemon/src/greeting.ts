@@ -1,9 +1,9 @@
-export { FIRST_MEETING_SECTION } from "@ghost/runtime/persona";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
 import type { GhostModelRoleBinding } from "./models.js";
 import { buildGreetingContext, cleanGreeting, GREETING_TIMEOUT_MS, GREETING_CACHE_TTL_MS, type GreetingContextInput } from "@ghost/runtime/greeting";
-export { buildGreetingContext, cleanGreeting, localTimeString, wholeDaysSince, GREETING_CHARACTER_BUDGET_CHARS, MAX_GREETING_CHARS, MAX_GREETING_SENTENCE_ENDERS, GREETING_LEAK_MARKERS, GREETING_TIMEOUT_MS, GREETING_CACHE_TTL_MS, GREETING_DATA_OPEN, GREETING_DATA_CLOSE } from "@ghost/runtime/greeting";
+export { buildGreetingContext, cleanGreeting, localTimeString, wholeDaysSince, MAX_GREETING_CHARS, GREETING_DATA_OPEN, GREETING_DATA_CLOSE } from "@ghost/runtime/greeting";
 export type { GreetingContextInput } from "@ghost/runtime/greeting";
+export { FIRST_MEETING_SECTION } from "@ghost/runtime/persona";
 import {
   SMOL_MODEL_ROLE,
   type SmolRuntime,

@@ -7,6 +7,7 @@
  * ax_query→ref→ax_perform semantic flow, how honesty metadata reaches the model,
  * and how the tool degrades when a backend (AT-SPI, ydotool) is missing.
  */
+import { MAX_DESKTOP_STATE_TITLE, MAX_DESKTOP_STATE_WINDOWS } from "@ghost/runtime/desktop-state";
 import { describe, expect, it } from "vitest";
 import {
   condenseAxHitTest,
@@ -25,8 +26,6 @@ import {
   MAX_DESKTOP_OBSERVATION_ITEMS,
   MAX_DESKTOP_OBSERVATION_LIST_ITEMS,
   MAX_DESKTOP_OBSERVATION_TEXT,
-  MAX_LISTED_WINDOWS,
-  MAX_TITLE_LENGTH,
 } from "../src/extensions/hyprland.js";
 import { GhostError } from "../src/errors.js";
 import {
@@ -221,16 +220,16 @@ describe("condenseDesktopState", () => {
   });
 
   it("truncates long titles and caps the window list", () => {
-    const many = Array.from({ length: MAX_LISTED_WINDOWS + 5 }, (_unused, index) => ({
+    const many = Array.from({ length: MAX_DESKTOP_STATE_WINDOWS + 5 }, (_unused, index) => ({
       address: `0x${index}`,
       class: "c",
-      title: "t".repeat(MAX_TITLE_LENGTH + 40),
+      title: "t".repeat(MAX_DESKTOP_STATE_TITLE + 40),
       workspace: { id: 1, name: "1" },
     }));
     const state = condenseDesktopState(many, [], null);
-    expect(state.windows).toHaveLength(MAX_LISTED_WINDOWS);
+    expect(state.windows).toHaveLength(MAX_DESKTOP_STATE_WINDOWS);
     expect(state.omitted).toBe(5);
-    expect(state.windows[0]?.title).toHaveLength(MAX_TITLE_LENGTH);
+    expect(state.windows[0]?.title).toHaveLength(MAX_DESKTOP_STATE_TITLE);
   });
 
   it("survives the sidecar returning nothing useful", () => {
@@ -270,7 +269,7 @@ describe("bounded desktop observations", () => {
         height: 1080,
       })),
     );
-    expect(state.windows).toHaveLength(MAX_LISTED_WINDOWS);
+    expect(state.windows).toHaveLength(MAX_DESKTOP_STATE_WINDOWS);
     expect(state.workspaces).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
     expect(state.monitors).toHaveLength(MAX_DESKTOP_OBSERVATION_ITEMS);
     expect(state).toMatchObject({

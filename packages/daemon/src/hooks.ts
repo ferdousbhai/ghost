@@ -11,11 +11,7 @@ import {
   type GhostSessionStopResult,
 } from "@ghost/runtime/hook-policy";
 export { ghostSessionStopContinuation } from "@ghost/runtime/hook-policy";
-export type {
-  GhostBeforePromptEvent, GhostBeforePromptResult, GhostHookCommandConfig,
-  GhostHookEvent, GhostHookResult, GhostHookStatus, GhostSessionStopEvent,
-  GhostSessionStopResult,
-} from "@ghost/runtime/hook-policy";
+export type { GhostBeforePromptEvent, GhostHookCommandConfig, GhostHookStatus, GhostSessionStopEvent } from "@ghost/runtime/hook-policy";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
@@ -23,26 +19,20 @@ import { serializeByKey } from "./promise-chain.js";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
 interface GhostHookRunnerOptions {
   logger?: Logger;
   /** Test seam for a rejected command execution boundary. */
   commandRunner?: (hook: CommandHook, event: GhostHookEvent) => Promise<CommandResult>;
 }
 
-function readCommandHooksDocument(path: string): Record<string, unknown> {
+/** The parsed file, unvalidated: `parseHooksDocument` admits it. */
+function readCommandHooksDocument(path: string): unknown {
   if (!existsSync(path)) return {};
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
     throw new Error(`Cannot load Ghost hooks from ${path}: ${(error as Error).message}`);
   }
-  if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  return parsed;
 }
 
 function runCommandHook(
@@ -206,10 +196,11 @@ export class GhostHookRunner {
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
     const document = readCommandHooksDocument(path);
+    const commands = parseHooksDocument(document, path);
     return new GhostHookRunner({
       ...options,
-      commands: parseHooksDocument(document, path),
-      commandConfig: { path, document },
+      commands,
+      commandConfig: { path, document: document as Record<string, unknown> },
     });
   }
 

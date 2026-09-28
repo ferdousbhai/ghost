@@ -14,7 +14,6 @@ import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
 import {
   addMCPServer,
-  expandEnvVars,
   readMCPConfigFile,
   removeMCPServer,
   updateMCPServer,
@@ -22,8 +21,9 @@ import {
   type MCPServerConfig,
 } from "../src/mcp-config.js";
 import { GhostMcpManager, McpToolCallError, type McpToolDefinition } from "../src/mcp-manager.js";
+import { expandEnvVars } from "@ghost/runtime/mcp-config-policy";
 import { GhostMcpManagerCore } from "@ghost/runtime/mcp-manager";
-import { createMCPToolName, mintMcpToolNames } from "../src/mcp-tool-names.js";
+import { createMCPToolName, mintMcpToolNames } from "@ghost/runtime/mcp-tool-names";
 import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 import { tempDir, useCleanups } from "./helpers/fixtures.js";
 

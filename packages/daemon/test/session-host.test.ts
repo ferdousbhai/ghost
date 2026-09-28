@@ -42,7 +42,7 @@ import {
 import { GhostMcpManager } from "../src/mcp-manager.js";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
-import { createMCPToolName } from "../src/mcp-tool-names.js";
+import { createMCPToolName } from "@ghost/runtime/mcp-tool-names";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ghostPaths } from "../src/ghosts.js";
 import {

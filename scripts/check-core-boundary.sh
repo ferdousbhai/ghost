@@ -37,7 +37,7 @@ fi
 
 # Portable runtime policy receives host operations explicitly.
 if grep -rEn --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](node:)?(fs|child_process|http|https|net|tls)(/|[\"'])" \
-    packages/runtime/src 2>/dev/null; then
+    -e "process\.env" packages/runtime/src 2>/dev/null; then
   printf 'core-boundary: portable runtime imports host I/O (see above)\n' >&2
   fail=1
 fi

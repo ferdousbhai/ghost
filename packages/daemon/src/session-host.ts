@@ -1,7 +1,7 @@
 import { bashExecutionToText, parseUserBashCommand, type BashExecutionMessage, type UserBashCommand } from "@ghost/runtime/owner-shell";
 export { parseUserBashCommand } from "@ghost/runtime/owner-shell";
 import { promptPiSession } from "@ghost/runtime/declarative-commands";
-import { ASK_REANSWER_OWNER_MESSAGE_TYPE, persistedOwnerPassBoundary, type OwnerPassKind } from "@ghost/runtime/owner-pass";
+import { ASK_REANSWER_OWNER_MESSAGE_TYPE, persistedOwnerPassBoundary, type OwnerPassKind, type PendingOwnerPass } from "@ghost/runtime/owner-pass";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   lstat,
@@ -40,7 +40,7 @@ import {
   DEFAULT_COMPACTION_CONFIG,
   nativeCompactionSettings,
   type CompactionConfig,
-} from "./compaction.js";
+} from "@ghost/runtime/compaction";
 import { scrubProviderEnv } from "./env-scrub.js";
 import { GhostHookRunner, ghostSessionStopContinuation } from "./hooks.js";
 import {
@@ -135,16 +135,16 @@ import type { RunningSource } from "./running-source.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { createGhostPiRuntime, type GhostPiRuntime } from "./pi-runtime.js";
 import { loadGhostSettings, type GhostSettings } from "./ghost-settings.js";
-import { AskBroker, AskBrokerError, type PendingAsk } from "./ask-broker.js";
+import { AskBroker, AskBrokerError, type PendingAsk } from "@ghost/runtime/ask-broker";
 import type { ToolResultMessage } from "@earendil-works/pi-ai";
-import { AskCancelledError, createAskTool, type AskToolDetails } from "./ask-tool.js";
-import type { AskResultItem } from "./ask-broker.js";
+import { AskCancelledError, createAskTool, type AskToolDetails } from "@ghost/runtime/ask-tool";
+import type { AskResultItem } from "@ghost/runtime/ask-broker";
 import { piExtensionFromGhost, renderPersonaPrompt } from "./pi-extension-bridge.js";
 import { CONTEXT_WINDOW_POLICY, ghostContextWindowsExtension } from "./context-windows.js";
 import { GhostMcpManager } from "./mcp-manager.js";
 import { DEFAULT_ASK_TIMEOUT_SECONDS } from "./config.js";
 import { validateServerName, type MCPServerConfig } from "./mcp-config.js";
-import { resolveChatModel } from "./model-routing.js";
+import { resolveChatModel } from "@ghost/runtime/model-routing";
 import type { ModelSelection } from "./model-selection.js";
 import type { Rule, Skill } from "./declarative-types.js";
 import {
@@ -171,7 +171,7 @@ import { loadDeclarativeSnapshot } from "./declarative-resources.js";
 import {
   mergeDeclarativeSnapshots,
   renderPiDeclarativePrompt,
-} from "./declarative-snapshot.js";
+} from "@ghost/runtime/declarative-snapshot";
 import {
   conversationCwdPath,
   readLegacyConversationCwd,
@@ -247,14 +247,10 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
 
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 
-interface PendingPiOwnerPass {
+interface PendingPiOwnerPass extends PendingOwnerPass {
   readonly id: string;
-  readonly kind: OwnerPassKind;
-  readonly ownerPrompt: string;
   readonly turnId: number;
-  readonly priorEntryIds: ReadonlySet<string>;
   readonly signal: AbortSignal;
-  ownerEntryId?: string;
 }
 
 interface PiSettlementResult {

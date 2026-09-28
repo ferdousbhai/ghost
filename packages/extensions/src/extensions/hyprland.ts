@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { condenseDesktopState } from "@ghost/runtime/desktop-state";
+import { condenseDesktopState, MAX_DESKTOP_STATE_TITLE } from "@ghost/runtime/desktop-state";
 import type { GhostExtensionAPI, GhostExtensionFactory } from "../extension-api.js";
 import { GhostError } from "../errors.js";
 import { stringEnum } from "../tool-schema.js";
@@ -72,10 +72,6 @@ export const MAX_DESKTOP_OBSERVATION_TEXT = 200;
 
 export const MAX_DESKTOP_OBSERVATION_LIST_ITEMS = 12;
 
-export const MAX_LISTED_WINDOWS = 40;
-
-export const MAX_TITLE_LENGTH = 80;
-
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{1,16}$/;
 
 export interface HyprlandExtensionOptions extends GhostExtensionOptions {
@@ -90,7 +86,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function truncate(value: unknown, max = MAX_TITLE_LENGTH): string {
+function truncate(value: unknown, max = MAX_DESKTOP_STATE_TITLE): string {
   const text = typeof value === "string" ? value : "";
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
 }

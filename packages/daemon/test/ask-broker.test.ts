@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { AskBroker, AskBrokerError } from "../src/ask-broker.js";
+import { AskBroker, AskBrokerError } from "@ghost/runtime/ask-broker";
 
 const QUESTIONS = [{
   id: "shape",
