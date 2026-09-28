@@ -12,7 +12,7 @@ afterEach(() => {
   root = undefined;
 });
 
-function machine(options: { refreshMs?: number } = {}): { env: NodeJS.ProcessEnv; log: string; calls: string } {
+function machine(options: { refreshMs?: number; refreshedClaudePercent?: number } = {}): { env: NodeJS.ProcessEnv; log: string; calls: string } {
   root = mkdtempSync(join(tmpdir(), "ghost-delegate-"));
   const bin = join(root, "bin");
   const usage = join(root, "state", "omarchy", "agents", "usage");
@@ -31,6 +31,10 @@ function machine(options: { refreshMs?: number } = {}): { env: NodeJS.ProcessEnv
     `[ "$1" = commands ] && exec cat '${join(root, "commands.json")}'`,
     `echo "$*" >> '${calls}'`,
     `sleep ${(options.refreshMs ?? 0) / 1000}`,
+    // The launch-time refresh can find a window that moved since the last one.
+    ...(options.refreshedClaudePercent === undefined ? [] : [
+      `cp '${join(root, "claude-refreshed.json")}' '${join(usage, "claude.json")}'`,
+    ]),
   ].join("\n"));
   // claude echoes its args, or fails on a limit when asked.
   executable("claude", [
@@ -53,6 +57,10 @@ function machine(options: { refreshMs?: number } = {}): { env: NodeJS.ProcessEnv
   writeFileSync(join(usage, "codex.json"), JSON.stringify({
     updatedAt: fresh,
     limits: [{ label: "Weekly (7-day)", percent: 0.99, resetsAt: later }],
+  }));
+  writeFileSync(join(root, "claude-refreshed.json"), JSON.stringify({
+    updatedAt: fresh,
+    limits: [{ label: "Session (5-hour)", percent: options.refreshedClaudePercent ?? 0.2, resetsAt: later }],
   }));
   return {
     env: { PATH: `${bin}:/usr/bin:/bin`, XDG_STATE_HOME: join(root, "state"), GHOST: "aria", GHOST_SESSION: "cli-abc" },
@@ -169,6 +177,21 @@ describe("ghost delegate", () => {
     expect(result.stdout).not.toContain("should-not-run");
     expect(result.stderr).toMatch(/codex has no room: Weekly \(7-day\) 99% used/u);
     expect(receipts(log)[0]).toMatchObject({ harness: "codex", outcome: { refused: expect.stringMatching(/^Weekly/u) } });
+  });
+
+  it("refuses a harness whose window crossed the limit since it was picked", async () => {
+    // `ghost harnesses` still shows room; the refresh at launch finds the session spent.
+    const { env, log } = machine({ refreshedClaudePercent: 0.95 });
+    const before = await runCli(["harnesses", "-q"], { env, home: root });
+    expect(before.stdout).toContain("claude");
+    const result = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
+    expect(result.code).toBe(6);
+    expect(result.stdout).not.toContain("claude got");
+    expect(receipts(log)[0]).toMatchObject({
+      harness: "claude",
+      eligible: expect.not.arrayContaining(["claude"]),
+      outcome: { refused: expect.stringMatching(/^Session \(5-hour\) 95% used/u) },
+    });
   });
 
   it("refuses a harness that is not installed", async () => {

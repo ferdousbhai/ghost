@@ -242,6 +242,10 @@ If you expect one of these, it is missing on purpose:
   not installed or has no room and appends one receipt line per attempt, the
   evidence any change to how a ghost picks a harness has to be judged
   against; Ghost never reads it back.
+- **No routing claims.** Nothing yet shows that how a ghost picks a harness
+  improves outcomes; the handoff receipts are how that gets measured, and
+  nothing trains on them. A delegated harness keeps its own tool loop and
+  permissions: Ghost refuses or records a launch but does not steer the run.
 - **No second browser backend** and no separate ghost browser profile.
 - **No ambient credentials.** Provider and cloud environment variables are
   scrubbed before the pi runtime is built
