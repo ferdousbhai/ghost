@@ -21,6 +21,8 @@ import {
 import {
   createAgentSession,
   createBashTool,
+  createLocalBashOperations,
+  type BashOperations,
   createSyntheticSourceInfo,
   DefaultResourceLoader,
   SessionManager,
@@ -497,6 +499,21 @@ interface SessionTool {
   description: string;
   parameters: unknown;
   execute(id: string, params: unknown, signal: AbortSignal | undefined): Promise<{ content: ToolResultMessage["content"] }>;
+}
+
+/**
+ * The owner's `!` commands run with the conversation's identity, as the
+ * model's bash does, so `ghost` verbs they run (`ghost delegate`, and the
+ * `ghost mcp serve` a delegated harness starts) address this conversation.
+ * pi keeps its own shell environment; the identity is exported ahead of the
+ * command rather than replacing that environment.
+ */
+function conversationShellOperations(ghostName: string, conversationId: string): BashOperations {
+  const local = createLocalBashOperations();
+  const exports = Object.entries(conversationEnvironment(ghostName, conversationId))
+    .map(([name, value]) => `export ${name}='${value.replaceAll("'", "'\\''")}'`)
+    .join("; ");
+  return { exec: (command, cwd, options) => local.exec(`${exports}\n${command}`, cwd, options) };
 }
 
 const NO_LIVE_TURN_FOR_ASK = "No turn is live in this conversation, so the owner would never see the question. "
@@ -2919,7 +2936,10 @@ export class SessionHost {
             summary: tailSummary(streamedTail),
           });
         },
-        { excludeFromContext: command.excludeFromContext },
+        {
+          excludeFromContext: command.excludeFromContext,
+          operations: conversationShellOperations(...sessionKeyParts(hosted.sessionKey)),
+        },
       );
 
       // A `!cd` runs like any other shell command: it affects that

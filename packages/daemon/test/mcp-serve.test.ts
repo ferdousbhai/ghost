@@ -162,6 +162,17 @@ describe("SessionHost.callSessionTool", () => {
       .toEqual(["bash", "ghost_browser"]);
   });
 
+  it("gives an owner `!` command the conversation's identity, as the model's bash has", async () => {
+    const events: PiMessagesEvent[] = [];
+    await daemon.host.runTurn("casper", {
+      sessionId: "conv-1",
+      prompt: "!printf '%s|%s' \"$GHOST\" \"$GHOST_SESSION\"",
+      emit: (event) => events.push(event),
+    });
+    const text = events.flatMap((event) => (event.type === "text_end" ? [event.content] : [])).join("");
+    expect(text).toContain("casper|pi:conv-1");
+  });
+
   it("refuses a tool the ghost does not have", async () => {
     await expect(daemon.host.callSessionTool("casper", "conv-1", "rm_rf", {})).rejects.toMatchObject({ status: 404 });
   });

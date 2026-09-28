@@ -469,8 +469,8 @@ passed is dropped. `stale` marks a record older than 15 minutes; the verb never
 refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
 eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
 `-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
-`$GHOST_SESSION`, then the latest conversation; a ghost's own shell carries
-both variables. Signing in is a provider
+`$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
+owner's `!` commands in a conversation, carry both variables. Signing in is a provider
 account, not a model, so it is the top-level `ghost login <provider>`,
 `ghost logout <provider>`, and `ghost login --list`: thin clients of the
 `/login`, `/providers`, and account routes above, where the daemon owns the
