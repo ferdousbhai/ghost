@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { describe, expect, it, vi } from "vitest";
 import * as z from "zod";
@@ -21,6 +22,7 @@ import {
   type MCPServerConfig,
 } from "../src/mcp-config.js";
 import { GhostMcpManager, McpToolCallError, type McpToolDefinition } from "../src/mcp-manager.js";
+import { GhostMcpManagerCore } from "@ghost/runtime/mcp-manager";
 import { createMCPToolName, mintMcpToolNames } from "../src/mcp-tool-names.js";
 import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 import { tempDir, useCleanups } from "./helpers/fixtures.js";
@@ -147,7 +149,33 @@ describe("GhostMcpManager", () => {
       const failure = await call(tool, { text: "x" }).then(() => undefined, (error: unknown) => error);
       expect(failure).toBeInstanceOf(McpToolCallError);
       expect((failure as Error).message).toBe("mcp_tool_call_failed");
+      // The server SDK serializes thrown handlers as confirmed isError replies.
+      expect((failure as McpToolCallError).outcome).toBe("server_error");
     }
+  });
+
+  it("runs the same lifecycle through the portable core with an injected SDK client", async () => {
+    const fixture = await fixtureServer();
+    let clients = 0;
+    const manager = new GhostMcpManagerCore({
+      transportFactory: () => fixture.transport(),
+      clientFactory: () => {
+        clients++;
+        return new Client({ name: "ghost", version: "0.1.0" }, { capabilities: {} });
+      },
+    });
+    cleanups.push(() => manager.disconnectAll());
+    const config: MCPServerConfig = { type: "http", url: "http://fixture.invalid/mcp" };
+    expect((await manager.connectServers({ fixture: config })).connectedServers).toEqual(["fixture"]);
+    expect((await manager.callTool("mcp__fixture_echo", { text: "portable" })).content)
+      .toEqual([{ type: "text", text: "echo: portable" }]);
+    expect(await manager.reconnectServer("fixture")).toBe(true);
+    expect(clients).toBe(2);
+    await manager.disconnectAll();
+    expect(manager.getTools()).toEqual([]);
+    const unavailable = await manager.callTool("mcp__fixture_echo", { text: "late" })
+      .then(() => undefined, (error: Error) => error);
+    expect(unavailable).toMatchObject({ code: "mcp_tool_call_failed", outcome: "uncertain" });
   });
 
   it("reports a failed connection with a stable code and no detail", async () => {
@@ -187,7 +215,37 @@ describe("GhostMcpManager", () => {
     await manager.disconnectAll();
     expect(manager.getConnectionStatus("fixture")).toBe("disconnected");
     expect(manager.getTools()).toEqual([]);
-    await expect(call(stale, { text: "late" })).rejects.toBeInstanceOf(McpToolCallError);
+    const staleError = await call(stale, { text: "late" }).then(() => undefined, (error: unknown) => error);
+    expect(staleError).toBeInstanceOf(McpToolCallError);
+    expect((staleError as McpToolCallError).outcome).toBe("uncertain");
+  });
+
+  it("waits for received tool-list changes without reconnecting or publishing stale results", async () => {
+    const fixture = await fixtureServer();
+    let clients = 0;
+    const manager = new GhostMcpManagerCore({
+      transportFactory: () => fixture.transport(),
+      clientFactory: () => { clients++; return new Client({ name: "ghost", version: "0.1.0" }, { capabilities: {} }); },
+    });
+    cleanups.push(() => manager.disconnectAll());
+    await manager.connectServers({ fixture: { type: "http", url: "http://fixture.invalid/mcp" } });
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    manager.setOnToolsChanged(async () => { entered.resolve(); await release.promise; });
+    fixture.server.registerTool("second", { description: "Second" }, async () => ({ content: [] }));
+    await entered.promise;
+    let settled = false;
+    const waiting = manager.waitForToolRefreshes().then(() => { settled = true; });
+    try {
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      fixture.server.registerTool("third", { description: "Third" }, async () => ({ content: [] }));
+    } finally { release.resolve(); }
+    await waiting;
+    await Promise.all([manager.refreshConnectedTools(), manager.refreshConnectedTools()]);
+    await vi.waitFor(() => expect(manager.getTools().map((tool) => tool.name).sort())
+      .toEqual(["mcp__fixture_echo", "mcp__fixture_second", "mcp__fixture_third"]));
+    expect(clients).toBe(1);
   });
 });
 

@@ -18,58 +18,10 @@ import {
 import { serializeByKey } from "./promise-chain.js";
 import { acquireWriterLock, releaseWriterLock } from "./writer-lock.js";
 
-export interface MCPAuthConfig {
-  type: "oauth" | "apikey";
-  credentialId?: string;
-  tokenUrl?: string;
-  clientId?: string;
-  clientSecret?: string;
-  resource?: string;
-}
-
-export type MCPRequestIdFormat = "string" | "number";
-
-interface MCPServerConfigBase {
-  enabled?: boolean;
-  timeout?: number;
-  requestIdFormat?: MCPRequestIdFormat;
-  auth?: MCPAuthConfig;
-  oauth?: {
-    clientId?: string;
-    clientSecret?: string;
-    redirectUri?: string;
-    callbackPort?: number;
-    callbackPath?: string;
-    prompt?: string;
-  };
-}
-
-export interface MCPStdioServerConfig extends MCPServerConfigBase {
-  type?: "stdio";
-  command: string;
-  args?: string[];
-  env?: Record<string, string>;
-  /** Pass `env` values verbatim, without `${VAR}` expansion. */
-  envPolicy?: "literal";
-  cwd?: string;
-}
-
-export interface MCPHttpServerConfig extends MCPServerConfigBase {
-  type: "http";
-  url: string;
-  headers?: Record<string, string>;
-  /** Send `headers` only to the configured origin, never across a redirect. */
-  headerPolicy?: "origin-locked";
-}
-
-export interface MCPSseServerConfig extends MCPServerConfigBase {
-  type: "sse";
-  url: string;
-  headers?: Record<string, string>;
-  headerPolicy?: "origin-locked";
-}
-
-export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig | MCPSseServerConfig;
+import { expandEnvVars as expandEnvVarsWithEnvironment, expandEnvVarsDeep as expandEnvVarsDeepWithEnvironment } from "@ghost/runtime/mcp-config-policy";
+export { validateServerName, validateServerConfig } from "@ghost/runtime/mcp-config-policy";
+export type { MCPAuthConfig, MCPRequestIdFormat, MCPServerConfig, MCPStdioServerConfig, MCPHttpServerConfig, MCPSseServerConfig } from "@ghost/runtime/mcp-config-policy";
+import { validateServerName, validateServerConfig, type MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 
 /** The file: `mcpServers` is what Ghost reads; other keys pass through untouched. */
 export interface MCPConfigFile {
@@ -77,51 +29,12 @@ export interface MCPConfigFile {
   [key: string]: unknown;
 }
 
-export function validateServerName(name: string): string | undefined {
-  if (!name) return "Server name cannot be empty";
-  if (name.length > 100) return "Server name is too long (max 100 characters)";
-  if (!/^[a-zA-Z0-9_.:-]+$/.test(name)) {
-    return "Server name can only contain letters, numbers, dash, underscore, dot, and colon";
-  }
-  return undefined;
-}
-
-/** Transport-level consistency, after Ghost's own field validation. */
-export function validateServerConfig(name: string, config: MCPServerConfig): string[] {
-  const errors: string[] = [];
-  const type = config.type ?? "stdio";
-  const hasCommand = "command" in config && Boolean(config.command);
-  const hasUrl = "url" in config && Boolean(config.url);
-  if (hasCommand && hasUrl) {
-    errors.push(`Server "${name}": both "command" and "url" are set - server should be either stdio (command) OR http/sse (url), not both`);
-  }
-  if (type === "stdio") {
-    if (!hasCommand) errors.push(`Server "${name}": stdio server requires "command" field`);
-  } else if (type === "http" || type === "sse") {
-    if (!hasUrl) errors.push(`Server "${name}": ${type} server requires "url" field`);
-  } else {
-    errors.push(`Server "${name}": unknown server type "${String(type)}"`);
-  }
-  return errors;
-}
-
-const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
-
-/** Expand `${VAR}` and `${VAR:-default}` from the process environment. */
+/** Local adapter supplies ambient values; portable policy never reads process.env. */
 export function expandEnvVars(value: string, extraEnv?: Record<string, string>): string {
-  return value.replace(ENV_PATTERN, (_match, name: string, fallback: string | undefined) =>
-    extraEnv?.[name] ?? process.env[name] ?? fallback ?? "");
+  return expandEnvVarsWithEnvironment(value, { ...process.env, ...extraEnv });
 }
-
 export function expandEnvVarsDeep<T>(value: T, extraEnv?: Record<string, string>): T {
-  if (typeof value === "string") return expandEnvVars(value, extraEnv) as T;
-  if (Array.isArray(value)) return value.map((item) => expandEnvVarsDeep(item, extraEnv)) as T;
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, expandEnvVarsDeep(entry, extraEnv)]),
-    ) as T;
-  }
-  return value;
+  return expandEnvVarsDeepWithEnvironment(value, { ...process.env, ...extraEnv });
 }
 
 export function readMCPConfigFile(

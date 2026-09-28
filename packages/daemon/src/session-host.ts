@@ -1,3 +1,7 @@
+import { bashExecutionToText, parseUserBashCommand, type BashExecutionMessage, type UserBashCommand } from "@ghost/runtime/owner-shell";
+export { parseUserBashCommand } from "@ghost/runtime/owner-shell";
+import { promptPiSession } from "@ghost/runtime/declarative-commands";
+import { ASK_REANSWER_OWNER_MESSAGE_TYPE, persistedOwnerPassBoundary, type OwnerPassKind } from "@ghost/runtime/owner-pass";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import {
   lstat,
@@ -191,44 +195,9 @@ export const PI_NATIVE_TOOL_NAMES: readonly string[] = [
 ];
 
 
-/** pi persists a forced `/skill` prompt as a custom message of this type. */
-const SKILL_PROMPT_MESSAGE_TYPE = "skill-prompt";
 
 type BashResult = Awaited<ReturnType<AgentSession["executeBash"]>>;
 
-interface BashExecutionMessage {
-  role: "bashExecution";
-  command: string;
-  output: string;
-  exitCode: number | undefined;
-  cancelled: boolean;
-  truncated: boolean;
-  timestamp: number;
-  excludeFromContext?: boolean;
-}
-
-function bashExecutionToText(message: BashExecutionMessage): string {
-  const status = message.cancelled
-    ? "[cancelled]"
-    : message.exitCode === undefined || message.exitCode === 0
-      ? ""
-      : `[exit ${message.exitCode}]`;
-  const output = message.truncated ? `${message.output}\n[output truncated]` : message.output;
-  return [`$ ${message.command}`, output.trimEnd(), status].filter(Boolean).join("\n");
-}
-
-export interface UserBashCommand {
-  command: string;
-  excludeFromContext: boolean;
-}
-
-export function parseUserBashCommand(text: string): UserBashCommand | null {
-  const trimmed = text.trimStart();
-  if (!trimmed.startsWith("!")) return null;
-  const excludeFromContext = trimmed.startsWith("!!");
-  const command = trimmed.slice(excludeFromContext ? 2 : 1).trim();
-  return { command, excludeFromContext };
-}
 
 function bashExecutionText(
   command: UserBashCommand,
@@ -251,43 +220,6 @@ function tailSummary(text: string, maxLength = 800): string | undefined {
   const clean = text.trimEnd();
   if (!clean) return undefined;
   return clean.length <= maxLength ? clean : `…${clean.slice(-maxLength)}`;
-}
-
-function parseSkillInvocation(prompt: string): { name: string; args: string } | null {
-  const match = /^\/skill:([A-Za-z0-9_.-]+)(?:\s+([\s\S]*))?$/.exec(prompt.trim());
-  return match ? { name: match[1] ?? "", args: (match[2] ?? "").trim() } : null;
-}
-
-/**
- * Preserve the explicit `/skill:name args` command surface. The prompt lets
- * the model discover skills; this path is the owner's force-invocation, which
- * sends the admitted skill bytes as an owner-attributed message.
- */
-async function promptPiSession(
-  session: AgentSession,
-  prompt: string,
-  skills: readonly Skill[],
-): Promise<void> {
-  const invocation = parseSkillInvocation(prompt);
-  const skill = invocation ? skills.find((candidate) => candidate.name === invocation.name) : undefined;
-  if (invocation && skill && skill.snapshotContent !== undefined) {
-    const content = [
-      `<skill name=${JSON.stringify(skill.name)} path=${JSON.stringify(skill.filePath)}>`,
-      skill.snapshotContent,
-      "</skill>",
-      ...(invocation.args ? [`Arguments: ${invocation.args}`] : []),
-    ].join("\n");
-    await session.sendCustomMessage({
-      customType: SKILL_PROMPT_MESSAGE_TYPE,
-      content,
-      display: true,
-      details: { attribution: "user", skill: skill.name },
-    }, { triggerTurn: true, deliverAs: "steer" });
-    return;
-  }
-  // pi expands `/name args` against the admitted Markdown commands the loader
-  // was given (`promptsOverride`); everything else is the owner's message.
-  await session.prompt(prompt);
 }
 
 /** Registers whichever manager the hosted MCP slot holds when pi (re)loads. */
@@ -313,27 +245,17 @@ function persistedPiOwnerTurnCount(entries: readonly SessionEntry[]): number {
   return count;
 }
 
-type PiOwnerPassKind = "direct" | "steer" | "followUp" | "custom" | "reanswer";
-
-const ASK_REANSWER_OWNER_MESSAGE_TYPE = "ghost-ask-reanswer-owner";
 const MODEL_TURN_PERSISTENCE_ERROR = "Could not durably settle this owner turn.";
 
 interface PendingPiOwnerPass {
   readonly id: string;
-  readonly kind: PiOwnerPassKind;
+  readonly kind: OwnerPassKind;
   readonly ownerPrompt: string;
   readonly turnId: number;
   readonly priorEntryIds: ReadonlySet<string>;
   readonly signal: AbortSignal;
   ownerEntryId?: string;
 }
-
-interface PersistedPiPassBoundary {
-  readonly pass: PendingPiOwnerPass;
-  readonly assistantEntry: Extract<SessionEntry, { type: "message" }>;
-}
-
-type PersistedPiPassResult = PersistedPiPassBoundary | "superseded" | null;
 
 interface PiSettlementResult {
   readonly settlementError?: unknown;
@@ -357,36 +279,6 @@ function entryText(content: unknown): string {
 function customMessageAttribution(entry: Extract<SessionEntry, { type: "custom_message" }>): string | undefined {
   const details = entry.details as { attribution?: unknown } | undefined;
   return typeof details?.attribution === "string" ? details.attribution : undefined;
-}
-
-function piOwnerEntry(entry: SessionEntry): { kind: PiOwnerPassKind; prompt: string } | null {
-  if (entry.type === "message" && entry.message.role === "user") {
-    if ((entry.message as { attribution?: string }).attribution === "agent") return null;
-    return {
-      kind: "direct",
-      prompt: entryText(entry.message.content),
-    };
-  }
-  if (entry.type !== "custom_message") return null;
-  if (entry.customType === ASK_REANSWER_OWNER_MESSAGE_TYPE) {
-    return { kind: "reanswer", prompt: entryText(entry.content) };
-  }
-  if (customMessageAttribution(entry) === "user") {
-    return { kind: "custom", prompt: entryText(entry.content) };
-  }
-  return null;
-}
-
-function passEntryMatches(
-  pass: PendingPiOwnerPass,
-  owner: { kind: PiOwnerPassKind; prompt: string },
-): boolean {
-  if (pass.kind === "direct") return owner.kind === "direct" || owner.kind === "custom";
-  // pi queues steer and follow-up text as ordinary user messages.
-  if (pass.kind === "steer" || pass.kind === "followUp") {
-    return owner.kind === "direct" && owner.prompt === pass.ownerPrompt;
-  }
-  return owner.kind === pass.kind && owner.prompt === pass.ownerPrompt;
 }
 
 /**
@@ -2438,7 +2330,7 @@ export class SessionHost {
   private async preparePiOwnerPass(
     hosted: HostedSession,
     input: {
-      kind: PiOwnerPassKind;
+      kind: OwnerPassKind;
       ownerPrompt: string;
       signal?: AbortSignal;
       delivery?: "steer" | "followUp";
@@ -2488,40 +2380,6 @@ export class SessionHost {
     }
     hosted.pendingOwnerPasses.push(pass);
     return pass;
-  }
-
-  private persistedPiPassBoundary(
-    hosted: HostedSession,
-    pass: PendingPiOwnerPass,
-    claimedOwnerEntries: Set<string>,
-  ): PersistedPiPassResult {
-    const branch = hosted.session.sessionManager.getBranch();
-    let ownerIndex = pass.ownerEntryId
-      ? branch.findIndex((entry) => entry.id === pass.ownerEntryId)
-      : -1;
-    if (ownerIndex < 0) {
-      for (let index = 0; index < branch.length; index += 1) {
-        const entry = branch[index];
-        if (!entry || pass.priorEntryIds.has(entry.id) || claimedOwnerEntries.has(entry.id)) continue;
-        const owner = piOwnerEntry(entry);
-        if (owner && passEntryMatches(pass, owner)) {
-          ownerIndex = index;
-          pass.ownerEntryId = entry.id;
-          claimedOwnerEntries.add(entry.id);
-          break;
-        }
-      }
-    }
-    if (ownerIndex < 0) return null;
-    let assistantEntry: Extract<SessionEntry, { type: "message" }> | undefined;
-    for (let index = ownerIndex + 1; index < branch.length; index += 1) {
-      const entry = branch[index];
-      if (!entry) continue;
-      if (piOwnerEntry(entry)) return assistantEntry ? { pass, assistantEntry } : "superseded";
-      if (entry.type === "message" && entry.message.role === "assistant"
-        && entry.message.stopReason !== "toolUse") assistantEntry = entry;
-    }
-    return assistantEntry ? { pass, assistantEntry } : null;
   }
 
   private async emitPiSessionStop(
@@ -2583,7 +2441,7 @@ export class SessionHost {
       const completed = new Set<PendingPiOwnerPass>();
       try {
         for (const pass of [...hosted.pendingOwnerPasses]) {
-          const boundary = this.persistedPiPassBoundary(hosted, pass, claimedOwnerEntries);
+          const boundary = persistedOwnerPassBoundary(hosted.session.sessionManager.getBranch(), pass, claimedOwnerEntries);
           if (!boundary) continue;
           completed.add(pass);
           if (boundary === "superseded") continue;

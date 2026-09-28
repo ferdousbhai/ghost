@@ -1,13 +1,12 @@
+import { admitDeclarativeResources, SCAN_MAX_ENTRIES, SCAN_MAX_BYTES, SCAN_MAX_FILE_BYTES, SCAN_MAX_DEPTH, SCAN_TIMEOUT_MS, GHOST_INSTRUCTION_FILES, type MarkdownFile } from "@ghost/runtime/declarative-admission";
+import type { DeclarativeSnapshot } from "@ghost/runtime/declarative-snapshot";
+export type { DeclarativeSnapshot } from "@ghost/runtime/declarative-snapshot";
+export { SCAN_MAX_ENTRIES, SCAN_MAX_BYTES, SCAN_MAX_FILE_BYTES, SCAN_MAX_DEPTH, SCAN_TIMEOUT_MS } from "@ghost/runtime/declarative-admission";
 import { opendir, type FileHandle } from "node:fs/promises";
 import { basename, isAbsolute, join, posix, resolve } from "node:path";
 import {
   buildRuleFromMarkdown,
   parseFrontmatter,
-  type FileSlashCommand,
-  type PromptTemplate,
-  type Rule,
-  type Skill,
-  type SourceMeta,
 } from "./declarative-types.js";
 import {
   descriptorPath,
@@ -15,22 +14,6 @@ import {
   openRegularFileNoFollow,
 } from "@ghost/extensions";
 import { GhostError } from "./ghosts.js";
-
-export const SCAN_MAX_ENTRIES = 512;
-export const SCAN_MAX_BYTES = 1_048_576;
-export const SCAN_MAX_FILE_BYTES = 262_144;
-export const SCAN_MAX_DEPTH = 8;
-export const SCAN_TIMEOUT_MS = 1_000;
-
-export interface DeclarativeSnapshot {
-  contextFiles: Array<{ path: string; content: string }>;
-  skills: Skill[];
-  rules: Rule[];
-  promptTemplates: PromptTemplate[];
-  slashCommands: FileSlashCommand[];
-  warnings: string[];
-  truncated: boolean;
-}
 
 interface ScanBudget {
   readonly started: number;
@@ -40,23 +23,6 @@ interface ScanBudget {
   truncated: boolean;
   warnings: string[];
   traceOpen?: (path: string) => void;
-}
-
-interface MarkdownFile {
-  relativePath: string;
-  absolutePath: string;
-  content: string;
-}
-
-const GHOST_INSTRUCTION_FILES = ["AGENTS.md", "CLAUDE.md"] as const;
-
-function sourceFor(path: string, level: "user" | "native"): SourceMeta {
-  return {
-    provider: level === "native" ? "ghost-recommended" : "ghost-pinned",
-    providerName: level === "native" ? "Ghost recommended" : "Ghost",
-    path,
-    level,
-  };
 }
 
 function checkBudget(budget: ScanBudget): boolean {
@@ -344,13 +310,6 @@ async function scanMarkdownDirectory(
   return files;
 }
 
-function description(body: string, frontmatter: Record<string, unknown>): string {
-  const configured = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
-  if (configured) return configured;
-  const first = body.split("\n").find((line) => line.trim())?.trim() ?? "";
-  return first.length > 60 ? `${first.slice(0, 60)}...` : first;
-}
-
 export async function loadDeclarativeSnapshot(
   rootPath: string,
   options: {
@@ -388,106 +347,11 @@ export async function loadDeclarativeSnapshot(
     const ruleFiles = await scanMarkdownDirectory(root, rootPath, "rules", budget);
     const promptFiles = await scanMarkdownDirectory(root, rootPath, "prompts", budget);
     const commandFiles = await scanMarkdownDirectory(root, rootPath, "commands", budget);
-    const skillEntries = new Map<string, Skill>();
-    for (const file of skillFiles) {
-      let parsed: ReturnType<typeof parseFrontmatter>;
-      try {
-        parsed = parseFrontmatter(file.content);
-      } catch {
-        budget.warnings.push(`${file.relativePath} was ignored because its skill metadata is invalid.`);
-        continue;
-      }
-      const { frontmatter } = parsed;
-      const name = typeof frontmatter.name === "string" ? frontmatter.name.trim() : "";
-      const detail = typeof frontmatter.description === "string"
-        ? frontmatter.description.trim()
-        : "";
-      if (!name || !detail) {
-        budget.warnings.push(`${file.relativePath} was ignored because its skill name or description is missing.`);
-        continue;
-      }
-      skillEntries.set(name, {
-        name,
-        description: detail,
-        filePath: file.absolutePath,
-        baseDir: join(file.absolutePath, ".."),
-        containRoot: join(file.absolutePath, ".."),
-        source: options.level === "native" ? "ghost-recommended:native" : `ghost-pinned:${options.level}`,
-        snapshotContent: file.content,
-        hide: frontmatter.hide === true || frontmatter.disableModelInvocation === true,
-        _source: sourceFor(file.absolutePath, options.level),
-      });
-    }
-    const skills = [...skillEntries.values()];
-
-    const ruleEntries = new Map<string, Rule>();
-    for (const file of ruleFiles) {
-      try {
-        parseFrontmatter(file.content);
-      } catch {
-        budget.warnings.push(`${file.relativePath} was ignored because its rule metadata is invalid.`);
-        continue;
-      }
-      const name = basename(file.relativePath, ".md");
-      ruleEntries.set(name, buildRuleFromMarkdown(
-        name,
-        file.content,
-        file.absolutePath,
-        sourceFor(file.absolutePath, options.level),
-      ));
-    }
-    const rules = [...ruleEntries.values()];
-    const promptEntries = new Map<string, PromptTemplate>();
-    for (const file of promptFiles) {
-      let parsed: ReturnType<typeof parseFrontmatter>;
-      try {
-        parsed = parseFrontmatter(file.content);
-      } catch {
-        budget.warnings.push(`${file.relativePath} was ignored because its prompt metadata is invalid.`);
-        continue;
-      }
-      const { frontmatter, body } = parsed;
-      const source = `(${options.level}:ghost-pinned)`;
-      const detail = description(body, frontmatter);
-      const name = basename(file.relativePath, ".md");
-      promptEntries.set(name, {
-        name,
-        description: detail ? `${detail} ${source}` : source,
-        content: body,
-        source,
-      });
-    }
-    const promptTemplates = [...promptEntries.values()];
-    const commandEntries = new Map<string, FileSlashCommand>();
-    for (const file of commandFiles) {
-      let parsed: ReturnType<typeof parseFrontmatter>;
-      try {
-        parsed = parseFrontmatter(file.content);
-      } catch {
-        budget.warnings.push(`${file.relativePath} was ignored because its command metadata is invalid.`);
-        continue;
-      }
-      const { frontmatter, body } = parsed;
-      const name = basename(file.relativePath, ".md");
-      commandEntries.set(name, {
-        name,
-        description: description(body, frontmatter),
-        content: body,
-        source: `via Ghost ${options.level}`,
-        _source: { providerName: "Ghost", level: options.level },
-      });
-    }
-    const slashCommands = [...commandEntries.values()];
-
-    return {
-      contextFiles,
-      skills,
-      rules,
-      promptTemplates,
-      slashCommands,
-      warnings: budget.warnings,
-      truncated: budget.truncated,
-    };
+    return admitDeclarativeResources({
+      contextFiles, skillFiles, ruleFiles, promptFiles, commandFiles,
+      level: options.level, warnings: budget.warnings, truncated: budget.truncated,
+      parentPath: (path) => join(path, ".."),
+    }, { parseFrontmatter, buildRuleFromMarkdown });
   } finally {
     await root.close();
   }

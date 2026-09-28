@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The ghost-core / ghost-omarchy split, proved on every lint run.
 #
-# ghost-core (daemon, extensions) is everything a second interface could
+# ghost-core (daemon, extensions, runtime) is everything a second interface could
 # reuse. The browser extension is a separate product in its own repository
 # (github.com/ferdousbhai/ghost-chromium-extension) that meets core only at
 # the relay WebSocket protocol. Core meets the Omarchy side (@ghost/omarchy, the desktop helper) only at
@@ -16,7 +16,7 @@ cd -- "$(git rev-parse --show-toplevel)"
 
 fail=0
 
-for manifest in packages/daemon/package.json packages/extensions/package.json; do
+for manifest in packages/daemon/package.json packages/extensions/package.json packages/runtime/package.json; do
   if [[ -f "$manifest" ]] && grep -Eq '"@ghost/(omarchy|shell)"' "$manifest"; then
     printf 'core-boundary: %s depends on the Omarchy side\n' "$manifest" >&2
     fail=1
@@ -24,14 +24,21 @@ for manifest in packages/daemon/package.json packages/extensions/package.json; d
 done
 
 if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"']@ghost/(omarchy|shell)" \
-    packages/daemon/src packages/extensions/src 2>/dev/null; then
+    packages/daemon/src packages/extensions/src packages/runtime/src 2>/dev/null; then
   printf 'core-boundary: core imports the Omarchy side (see above)\n' >&2
   fail=1
 fi
 
-if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|@ghost/extensions|\\.\\./(daemon|extensions))" \
+if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|@ghost/extensions|@ghost/runtime|\\.\\./(daemon|extensions|runtime))" \
     packages/shell 2>/dev/null; then
   printf 'core-boundary: the Omarchy side imports core sources (see above)\n' >&2
+  fail=1
+fi
+
+# Portable runtime policy receives host operations explicitly.
+if grep -rEn --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](node:)?(fs|child_process|http|https|net|tls)(/|[\"'])" \
+    packages/runtime/src 2>/dev/null; then
+  printf 'core-boundary: portable runtime imports host I/O (see above)\n' >&2
   fail=1
 fi
 

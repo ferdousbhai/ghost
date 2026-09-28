@@ -41,4 +41,14 @@ describe("character", () => {
     await writeFile(home.characterPath, "x".repeat(MAX_CHARACTER_BODY_LENGTH + 1), "utf8");
     await expect(home.readCharacter()).rejects.toMatchObject({ code: "limit_exceeded" });
   });
+
+  it("refuses an oversized owner edit before writing, counting UTF-16 code units", async () => {
+    const original = (await home.readCharacter())?.body;
+    const allowed = "🙂".repeat(MAX_CHARACTER_BODY_LENGTH / 2);
+    await home.writeCharacter({ body: allowed });
+    expect((await home.readCharacter())?.body).toBe(allowed);
+    await expect(home.writeCharacter({ body: `${allowed}x` })).rejects.toMatchObject({ code: "limit_exceeded" });
+    expect((await home.readCharacter())?.body).toBe(allowed);
+    expect(original).not.toBe(allowed);
+  });
 });

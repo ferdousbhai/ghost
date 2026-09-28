@@ -1,5 +1,3 @@
 
 
-export interface CharacterFile {
-  readonly body: string;
-}
+export type { CharacterFile } from "@ghost/runtime/persona";

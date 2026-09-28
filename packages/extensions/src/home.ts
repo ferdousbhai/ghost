@@ -1,3 +1,4 @@
+import { CHARACTER_FILENAME, characterBodyTooLong, MAX_CHARACTER_BODY_LENGTH } from "@ghost/runtime/persona";
 /**
  * Mutations pair the path-keyed in-process queue with descriptor locks and
  * atomic rename so independently opened home handles share one publication
@@ -23,8 +24,7 @@ import {
 } from "./linux-fs.js";
 import type { CharacterFile } from "./types.js";
 
-export const CHARACTER_FILENAME = "character.md";
-export const MAX_CHARACTER_BODY_LENGTH = 20_000;
+export { CHARACTER_FILENAME, MAX_CHARACTER_BODY_LENGTH } from "@ghost/runtime/persona";
 
 const fileMutationQueues = new Map<string, Promise<unknown>>();
 
@@ -163,7 +163,7 @@ export class GhostHome {
   ): Promise<CharacterFile | null> {
     const body = await readConfinedText(this.dir, this.characterPath, "Character path");
     if (body === null) return null;
-    if ((options?.enforceLimit ?? true) && body.length > MAX_CHARACTER_BODY_LENGTH) {
+    if ((options?.enforceLimit ?? true) && characterBodyTooLong(body)) {
       throw new GhostError(
         "limit_exceeded",
         `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
@@ -179,7 +179,7 @@ export class GhostHome {
    * write time, not discovered when the next cold session fails to start.
    */
   async writeCharacter(input: { body: string }): Promise<void> {
-    if (input.body.length > MAX_CHARACTER_BODY_LENGTH) {
+    if (characterBodyTooLong(input.body)) {
       throw new GhostError(
         "limit_exceeded",
         `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `

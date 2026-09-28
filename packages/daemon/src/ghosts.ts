@@ -1,3 +1,5 @@
+import { SEEDED_CHARACTER } from "@ghost/runtime/persona";
+export { isSeededCharacter } from "@ghost/runtime/persona";
 import { randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -140,22 +142,6 @@ export function ghostPaths(dir: string): {
   };
 }
 
-const SEEDED_CHARACTER = (name: string) => `# ${name}
-
-You are ${name}.
-
-## Voice
-
-Write in the first person. Be specific and concrete; prefer the detail you
-actually remember over a general statement you could have made about anything.
-
-## What you know
-
-Everything worth keeping — the owner's facts, decisions, and tasks, and your own
-reflections — is a note in the owner's documents, where every ghost and the
-owner can read it. This file is only who you are.
-`;
-
 /**
  * The character file's raw bytes, or null when the ghost has none.
  *
@@ -170,27 +156,6 @@ export function readCharacterFile(dir: string): string | null {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-}
-
-/**
- * True when `text` is still the file `GhostRegistry.create` wrote — the ghost
- * has been summoned but never met.
- *
- * A populated character file is the durable "this ghost has been onboarded"
- * latch. There is deliberately no flag file beside it: a flag would be a second
- * source of truth about a question the character file already answers, and the
- * two would drift the first time somebody edited one of them by hand.
- *
- * Missing and blank both count as seeded. An empty character.md is not a persona
- * somebody wrote; it is the same "the owner has not been here" the seed means.
- *
- * The comparison is exact: being wrong here means offering onboarding to a
- * ghost that has already been written, which is worse than missing it once.
- */
-export function isSeededCharacter(name: string, text: string | null | undefined): boolean {
-  if (text === null || text === undefined) return true;
-  if (text.trim() === "") return true;
-  return text === SEEDED_CHARACTER(name);
 }
 
 /**

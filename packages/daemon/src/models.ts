@@ -49,10 +49,8 @@ export interface GhostProviderConfig {
   [key: string]: unknown;
 }
 
-export interface GhostModelRoleBinding {
-  provider: string;
-  modelId: string;
-}
+import type { GhostModelRoleBinding } from "@ghost/runtime/model-routing";
+export type { GhostModelRoleBinding } from "@ghost/runtime/model-routing";
 
 /**
  * The inference roles a ghost binds. Only `chat_model` is load-bearing for a

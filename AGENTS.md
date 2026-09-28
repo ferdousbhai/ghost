@@ -43,6 +43,7 @@ The common defect here is a change that works on the path you tested and is miss
 
 ## Code index
 
+- `packages/runtime/src/` — portable persona, question, handoff/history and model policy consumed by the daemon and hosted SummonGhost; no host I/O or session loop
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
 - `packages/daemon/src/models.ts`, `model-selection.ts`, `model-routing.ts`, `smol.ts` — model roles, the chat-model binding, and which model a role resolves to
@@ -50,7 +51,7 @@ The common defect here is a change that works on the path you tested and is miss
 - `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/desktop-helper/src/ghost_desktop_helper/` — Python computer-use sidecar
-- ghost-core is `packages/{daemon,extensions}`; ghost-omarchy is `packages/{shell,desktop-helper}`; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
+- ghost-core is `packages/{daemon,extensions,runtime}`; ghost-omarchy is `packages/{shell,desktop-helper}`; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
 - `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` — the owner command-hook protocol; `docs/desktop-helper.md` — the sidecar protocol
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
