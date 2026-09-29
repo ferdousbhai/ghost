@@ -58,6 +58,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("`ghost harnesses` lists which have room");
     expect(text).toContain("`ghost delegate` gives claude and codex runs your own tools");
     expect(text).toContain("--owner-named");
+    expect(text).toContain("--permission-mode acceptEdits");
     expect(text).toContain("a run you background cannot ask");
     expect(text).not.toContain("~/.local/state/omarchy");
     expect(text).toContain("handoff note");
