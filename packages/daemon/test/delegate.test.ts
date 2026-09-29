@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, st
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { withGhostTools } from "../src/cli/delegate.js";
 import { appendHandoff, HANDOFF_LOG_LIMIT_BYTES, type HandoffReceipt } from "../src/handoffs.js";
 import { runCli } from "./helpers/cli.js";
 
@@ -149,7 +150,7 @@ describe("ghost delegate", () => {
     mkdirSync(join(root as string, "state"), { recursive: true });
     writeFileSync(join(root as string, "state", "ghost"), "");
     const run = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
-    expect(run).toMatchObject({ code: 3, stdout: "claude got: hi\n" });
+    expect(run).toMatchObject({ code: 3, stdout: expect.stringMatching(/^claude got: hi /u) });
     expect(run.stderr).toMatch(/^ghost: cannot record the handoff in .*handoffs\.jsonl: /u);
     const refusal = await runCli(["delegate", "codex", "--", "hi"], { env, home: root });
     expect(refusal.code).toBe(6);
@@ -194,6 +195,16 @@ describe("ghost delegate", () => {
     });
   });
 
+  it("runs claude with the ghost's tools and records who picked it", async () => {
+    const { env, log } = machine();
+    const ghostPick = await runCli(["delegate", "claude", "--", "-p", "fix it"], { env, home: root });
+    expect(ghostPick.stdout).toBe(`claude got: -p fix it --allowedTools mcp__ghost --mcp-config {"mcpServers":{"ghost":{"command":"ghost","args":["mcp","serve"]}}}\n`);
+    await runCli(["delegate", "--owner-named", "claude", "--", "-p", "fix it"], { env, home: root });
+    const { GHOST: _ghost, ...ownerShell } = env;
+    await runCli(["delegate", "claude", "--", "-p", "fix it"], { env: ownerShell, home: root });
+    expect(receipts(log).map((receipt) => receipt.pick)).toEqual(["ghost", "owner", "owner"]);
+  });
+
   it("refuses a harness that is not installed", async () => {
     const { env, log } = machine();
     const result = await runCli(["delegate", "grok", "--", "hi"], { env, home: root });
@@ -209,6 +220,29 @@ describe("ghost delegate", () => {
   });
 });
 
+describe("withGhostTools", () => {
+  const config = '{"mcpServers":{"ghost":{"command":"ghost","args":["mcp","serve"]}}}';
+
+  it("gives claude the ghost server after the task, and allows its tools", () => {
+    expect(withGhostTools("claude", ["-p", "fix it"]))
+      .toEqual(["-p", "fix it", "--allowedTools", "mcp__ghost", "--mcp-config", config]);
+  });
+
+  it("gives codex the ghost server as config overrides ahead of its subcommand", () => {
+    expect(withGhostTools("codex", ["exec", "fix it"])).toEqual([
+      "-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', "exec", "fix it",
+    ]);
+  });
+
+  it("leaves a run that names its own MCP config, a claude run with `--`, and other harnesses alone", () => {
+    expect(withGhostTools("claude", ["-p", "x", "--mcp-config", "{}"])).toEqual(["-p", "x", "--mcp-config", "{}"]);
+    expect(withGhostTools("claude", ["-p", "--", "x"])).toEqual(["-p", "--", "x"]);
+    expect(withGhostTools("codex", ["-c", "mcp_servers.ghost.command=\"x\"", "exec", "y"]))
+      .toEqual(["-c", "mcp_servers.ghost.command=\"x\"", "exec", "y"]);
+    expect(withGhostTools("pi", ["-p", "x"])).toEqual(["-p", "x"]);
+  });
+});
+
 describe("appendHandoff", () => {
   it("moves a full log aside, keeping one previous generation", () => {
     root = mkdtempSync(join(tmpdir(), "ghost-handoffs-"));
@@ -216,7 +250,7 @@ describe("appendHandoff", () => {
     mkdirSync(join(root, "ghost"));
     writeFileSync(log, "x".repeat(HANDOFF_LOG_LIMIT_BYTES));
     const receipt: HandoffReceipt = {
-      v: 1, at: "2026-09-26T00:00:00.000Z", ghost: null, session: null, harness: "pi", cwd: "/", eligible: [], windows: [], status: null,
+      v: 1, at: "2026-09-26T00:00:00.000Z", ghost: null, session: null, harness: "pi", pick: "owner", cwd: "/", eligible: [], windows: [], status: null,
       outcome: { refused: "not installed" },
     };
     appendHandoff(log, receipt);

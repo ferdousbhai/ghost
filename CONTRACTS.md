@@ -324,17 +324,23 @@ serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
 (which `ghost delegate` passes through); an id not listed yet, a new
 conversation whose first turn is still running, binds as given. Its `ask` reaches the owner in the
 conversation that launched the run, while that conversation has a live turn
-(the HUD learns of a question from the turn stream). Nothing configures a
-harness for it:
-`claude -p --mcp-config`, a Codex `mcp_servers.ghost` entry, or an omp
-`mcp.json` row names `ghost mcp serve`; pi has no MCP client.
+(the HUD learns of a question from the turn stream). `ghost delegate` adds
+it to the two harnesses whose flags for it are known, unless the run already
+names an MCP config: `claude` gets `--allowedTools mcp__ghost --mcp-config
+<ghost server>` after its own arguments (both flags take lists, and a `--`
+in them leaves the run alone), `codex` gets `-c mcp_servers.ghost.command`
+and `.args` overrides ahead of them. That table is a deliberate exception to
+the no-per-harness-adapter rule: two flags per harness, no chat adapter, and
+it replaces a recipe every model had to copy exactly. Other harnesses load
+it themselves (an omp `mcp.json` row); pi has no MCP client.
 
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
 file is 0600, and past 1 MiB it moves to `handoffs.jsonl.1`, replacing the
-previous one): `{v: 1, at, ghost, session, harness, cwd, eligible, windows,
+previous one): `{v: 1, at, ghost, session, harness, pick, cwd, eligible, windows,
 status, outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
-(or `null`), `eligible` lists the harnesses eligible at the check, `windows` is
+(or `null`), `pick` is `"owner"` when `--owner-named` says the owner named the
+harness or no `$GHOST` is set (the owner ran the verb), else `"ghost"`, `eligible` lists the harnesses eligible at the check, `windows` is
 this harness's live windows then, `status` is Omarchy's note when it could not
 measure this harness (an unmeasured harness is eligible, and this shows the
 check was blind) or `null`, and `outcome` is `{refused}` with the reason,

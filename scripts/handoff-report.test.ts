@@ -7,11 +7,11 @@ test("reports the fixture log deterministically", () => {
   const text = readFileSync(join(import.meta.dir, "fixtures", "handoffs.jsonl"), "utf8");
   expect(report(text)).toBe(`8 handoffs, 2026-09-27T14:00:00.000Z to 2026-09-27T17:20:00.000Z (1 malformed skipped)
 
-harness  attempts  refused  ok  failed  unmeasured  median run
-claude   4         2        1   1       0           0.4s
-codex    2         1        0   1       0           25.6s
-omp      1         1        0   0       0           -
-pi       1         0        0   1       1           1.2s
+harness  attempts  owner picks  refused  ok  failed  unmeasured  median run
+claude   4         1            2        1   1       0           0.4s
+codex    2         0            1        0   1       0           25.6s
+omp      1         0            1        0   0       0           -
+pi       1         0            0        0   1       1           1.2s
 
 Refusals:
   2  claude: Session (5-hour) full

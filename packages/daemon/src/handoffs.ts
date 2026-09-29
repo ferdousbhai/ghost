@@ -25,6 +25,8 @@ export interface HandoffReceipt {
   ghost: string | null;
   session: string | null;
   harness: string;
+  /** Who chose the harness: the owner (named it, or ran the verb themselves) or the ghost. */
+  pick: "owner" | "ghost";
   cwd: string;
   /** The harnesses eligible when this one was checked. */
   eligible: string[];

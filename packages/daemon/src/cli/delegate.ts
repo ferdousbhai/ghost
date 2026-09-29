@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
 import { readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../pi-messages.js";
-import type { ParsedCliArgs } from "./args.js";
+import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 
@@ -76,6 +76,27 @@ function run(id: string, args: string[], ctx: CliContext): Promise<RunResult> {
   });
 }
 
+export const DELEGATE_ARGS: ArgsSpec = { boolean: ["owner-named"], value: [] };
+
+const GHOST_MCP_CONFIG = JSON.stringify({ mcpServers: { ghost: { command: "ghost", args: ["mcp", "serve"] } } });
+
+/**
+ * The harness's arguments plus `ghost mcp serve`, for the harnesses whose way
+ * to load an MCP server is known, so a run can ask the owner and use the
+ * ghost's browser, screen, and desktop. Left alone when the run already
+ * names an MCP config, or (claude) when a `--` would make the flags text.
+ */
+export function withGhostTools(id: string, args: readonly string[]): string[] {
+  if (id === "claude" && !args.includes("--") && !args.includes("--mcp-config")) {
+    // Both flags take a list, so they go last, after the task.
+    return [...args, "--allowedTools", "mcp__ghost", "--mcp-config", GHOST_MCP_CONFIG];
+  }
+  if (id === "codex" && !args.some((arg) => arg.includes("mcp_servers.ghost"))) {
+    return ["-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', ...args];
+  }
+  return [...args];
+}
+
 /**
  * `ghost delegate <harness> -- <args>`: refresh the harness's usage, refuse it
  * without room, else run it here and exit with its status. Each attempt appends
@@ -100,6 +121,8 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
       ghost: env.GHOST?.trim() || null,
       session: env.GHOST_SESSION?.trim() || null,
       harness: id,
+      // The owner named the harness, or launched it with no ghost involved.
+      pick: flagBoolean(parsed, "owner-named") || !env.GHOST?.trim() ? "owner" : "ghost",
       cwd: process.cwd(),
       eligible: report.harnesses.filter((candidate) => candidate.eligible).map((candidate) => candidate.id),
       windows: harness?.usage?.windows ?? [],
@@ -124,7 +147,7 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   }
 
   const launched = Date.now();
-  const result = await run(id, args, ctx);
+  const result = await run(id, withGhostTools(id, args), ctx);
   const failed = result.exit !== 0;
   record({
     exit: result.exit,

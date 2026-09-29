@@ -15,12 +15,15 @@ import { isAbsolute, join } from "node:path";
 interface Receipt {
   at: string;
   harness: string;
+  /** Absent before receipts recorded who picked. */
+  pick?: "owner" | "ghost";
   status: string | null;
   outcome: { refused: string } | { exit: number | null; signal: string | null; durationMs: number; limit: string | null };
 }
 
 interface Row {
   attempts: number;
+  ownerPicks: number;
   refused: number;
   ok: number;
   failed: number;
@@ -82,9 +85,10 @@ export function report(text: string): string {
   const refusals = new Map<string, number>();
   const limits = new Map<string, number>();
   for (const receipt of receipts) {
-    const row = byHarness.get(receipt.harness) ?? { attempts: 0, refused: 0, ok: 0, failed: 0, unmeasured: 0, durations: [] };
+    const row = byHarness.get(receipt.harness) ?? { attempts: 0, ownerPicks: 0, refused: 0, ok: 0, failed: 0, unmeasured: 0, durations: [] };
     byHarness.set(receipt.harness, row);
     row.attempts += 1;
+    if (receipt.pick === "owner") row.ownerPicks += 1;
     if (receipt.status) row.unmeasured += 1;
     const outcome = receipt.outcome;
     if ("refused" in outcome) {
@@ -98,10 +102,10 @@ export function report(text: string): string {
     if (outcome.limit) bump(limits, `${receipt.harness}: ${outcome.limit}`);
   }
   const ats = receipts.map((receipt) => receipt.at).sort();
-  const header = ["harness", "attempts", "refused", "ok", "failed", "unmeasured", "median run"];
+  const header = ["harness", "attempts", "owner picks", "refused", "ok", "failed", "unmeasured", "median run"];
   const rows = [...byHarness].sort(([a], [b]) => a.localeCompare(b)).map(([harness, row]) => {
     const middle = median(row.durations);
-    return [harness, row.attempts, row.refused, row.ok, row.failed, row.unmeasured]
+    return [harness, row.attempts, row.ownerPicks, row.refused, row.ok, row.failed, row.unmeasured]
       .map(String)
       .concat(middle === null ? "-" : `${(middle / 1000).toFixed(1)}s`);
   });
