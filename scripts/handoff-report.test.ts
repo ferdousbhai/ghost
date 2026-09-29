@@ -48,3 +48,12 @@ test("a cutoff after every receipt reports nothing but still counts malformed li
 test("says so when there is nothing to report", () => {
   expect(report("")).toBe("No handoff receipts.\n");
 });
+
+test("a named file that does not exist is an error, not a crash", () => {
+  const fixture = join(import.meta.dir, "fixtures", "handoffs.jsonl");
+  const missing = join(import.meta.dir, "fixtures", "no-such-handoffs.jsonl");
+  const run = Bun.spawnSync([process.execPath, join(import.meta.dir, "handoff-report.ts"), fixture, missing]);
+  expect(run.exitCode).toBe(2);
+  expect(run.stdout.toString()).toBe("");
+  expect(run.stderr.toString()).toBe(`no such file: ${missing}\n`);
+});

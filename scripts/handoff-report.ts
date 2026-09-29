@@ -6,7 +6,8 @@
  *   bun scripts/handoff-report.ts [--since <ISO date>] [file...]
  *
  * With no files it reads `handoffs.jsonl.1` then `handoffs.jsonl` under
- * `$XDG_STATE_HOME/ghost` (falling back to `~/.local/state`), skipping missing ones.
+ * `$XDG_STATE_HOME/ghost` (falling back to `~/.local/state`), skipping missing ones;
+ * a named file that is missing is an error (exit 2).
  * `--since` drops receipts whose `at` is before that instant; a bare date is UTC midnight.
  */
 import { existsSync, readFileSync } from "node:fs";
@@ -144,5 +145,10 @@ if (import.meta.main) {
     args.splice(at, 2);
   }
   const files = args.length > 0 ? args : defaultFiles(process.env);
+  const missing = files.find((path) => !existsSync(path));
+  if (missing !== undefined) {
+    process.stderr.write(`no such file: ${missing}\n`);
+    process.exit(2);
+  }
   process.stdout.write(report(files.map((path) => readFileSync(path, "utf8")).join("\n"), { since }));
 }
