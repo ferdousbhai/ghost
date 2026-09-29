@@ -3,10 +3,11 @@
  * The owner's report over `ghost delegate`'s handoff log (receipt schema in
  * CONTRACTS.md). Outside the core on purpose: Ghost never reads the log back.
  *
- *   bun scripts/handoff-report.ts [file...]
+ *   bun scripts/handoff-report.ts [--since <ISO date>] [file...]
  *
  * With no files it reads `handoffs.jsonl.1` then `handoffs.jsonl` under
  * `$XDG_STATE_HOME/ghost` (falling back to `~/.local/state`), skipping missing ones.
+ * `--since` drops receipts whose `at` is before that instant; a bare date is UTC midnight.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -78,8 +79,12 @@ function bump(map: Map<string, number>, key: string): void {
   map.set(key, (map.get(key) ?? 0) + 1);
 }
 
-export function report(text: string): string {
-  const { receipts, malformed } = parse(text);
+/** `since` is an epoch-ms cutoff: receipts whose `at` is earlier are left out entirely. */
+export function report(text: string, options: { since?: number } = {}): string {
+  const parsed = parse(text);
+  const { since } = options;
+  const receipts = since === undefined ? parsed.receipts : parsed.receipts.filter((receipt) => !(Date.parse(receipt.at) < since));
+  const { malformed } = parsed;
   if (receipts.length === 0) return `No handoff receipts${malformed ? ` (${malformed} malformed)` : ""}.\n`;
   const byHarness = new Map<string, Row>();
   const refusals = new Map<string, number>();
@@ -126,6 +131,18 @@ function defaultFiles(env: NodeJS.ProcessEnv): string[] {
 }
 
 if (import.meta.main) {
-  const files = process.argv.length > 2 ? process.argv.slice(2) : defaultFiles(process.env);
-  process.stdout.write(report(files.map((path) => readFileSync(path, "utf8")).join("\n")));
+  const args = process.argv.slice(2);
+  let since: number | undefined;
+  const at = args.indexOf("--since");
+  if (at !== -1) {
+    const value = args[at + 1];
+    since = value === undefined ? Number.NaN : Date.parse(value);
+    if (Number.isNaN(since)) {
+      process.stderr.write(value === undefined ? "--since needs an ISO-8601 date\n" : `--since: not an ISO-8601 date: ${value}\n`);
+      process.exit(2);
+    }
+    args.splice(at, 2);
+  }
+  const files = args.length > 0 ? args : defaultFiles(process.env);
+  process.stdout.write(report(files.map((path) => readFileSync(path, "utf8")).join("\n"), { since }));
 }
