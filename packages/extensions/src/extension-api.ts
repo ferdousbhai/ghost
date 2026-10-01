@@ -34,11 +34,14 @@ export interface GhostToolModel {
  * What a tool execution or hook can see of its session. `cwd` is the session's
  * current working directory, which for a ghost session is the ghost home
  * unless the model has changed it; `model` is absent when the runtime exposes
- * no model instance for that call.
+ * no model instance for that call. `caller` names who acts — the session id
+ * in-session, a delegated run's own id over `ghost mcp serve` — and keys the
+ * desktop lease.
  */
 export interface GhostToolContext {
   readonly cwd: string;
   readonly model?: GhostToolModel | undefined;
+  readonly caller?: string | undefined;
 }
 
 export interface GhostToolDefinition<

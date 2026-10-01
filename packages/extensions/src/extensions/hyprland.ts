@@ -23,6 +23,7 @@ import {
   type HelloPayload,
   type HonestyMetadata,
 } from "./desktop-helper-client.js";
+import { getSharedDesktopLease, type DesktopLease } from "./desktop-lease.js";
 
 export const GHOST_DESKTOP = "ghost_desktop";
 
@@ -72,12 +73,27 @@ export const MAX_DESKTOP_OBSERVATION_TEXT = 200;
 
 export const MAX_DESKTOP_OBSERVATION_LIST_ITEMS = 12;
 
+/** Actions that move focus, the pointer, or input, and so claim the desktop lease. */
+const DESKTOP_INPUT_ACTIONS: ReadonlySet<string> = new Set([
+  "focus",
+  "workspace",
+  "key",
+  "type",
+  "click",
+  "drag",
+  "scroll",
+  "mouse_move",
+  "ax_perform",
+  "ax_set",
+]);
+
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{1,16}$/;
 
 export interface HyprlandExtensionOptions extends GhostExtensionOptions {
   readonly run?: CommandRunner;
   readonly helper?: DesktopHelper;
   readonly env?: NodeJS.ProcessEnv;
+  readonly lease?: DesktopLease;
 }
 
 interface BoundedStrings {
@@ -389,6 +405,7 @@ export function createHyprlandExtension(
 ): GhostExtensionFactory {
   const run = options.run ?? runCommand;
   const helper = options.helper ?? getSharedDesktopHelper();
+  const lease = options.lease ?? getSharedDesktopLease();
 
   return (pi: GhostExtensionAPI) => {
     pi.registerTool({
@@ -505,7 +522,7 @@ export function createHyprlandExtension(
           description: "For notify: default normal.",
         })),
       }),
-      execute: async (_toolCallId, params, signal, _ctx) => {
+      execute: async (_toolCallId, params, signal, ctx) => {
         const opts = { signal: signal ?? undefined } as const;
 
         // Shared shapes: an invalid_format error tagged with the current action,
@@ -558,6 +575,8 @@ export function createHyprlandExtension(
         // and backend gaps into clear errors before the op is even sent.
         const hello = await helper.hello();
         requireSession(hello);
+        const caller = ctx.caller ?? "unnamed caller";
+        if (DESKTOP_INPUT_ACTIONS.has(params.action)) lease.claim(caller);
 
         switch (params.action) {
           case "state": {
@@ -573,7 +592,10 @@ export function createHyprlandExtension(
               state.activewindow,
               state.monitors,
             );
-            return untrustedTextResult(JSON.stringify(condensed), {
+            const held = lease.peek();
+            const heldBy = held && held.holder !== caller ? held.holder : null;
+            return untrustedTextResult(JSON.stringify({ ...condensed, ...(heldBy ? { heldBy } : {}) }), {
+              heldBy,
               windows: condensed.windows.length,
               workspaces: condensed.workspaces.length,
               monitors: condensed.monitors.length,

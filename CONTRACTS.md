@@ -322,7 +322,9 @@ A delegated harness can load the conversation's own tools with `ghost mcp
 serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
 `/sessions/:id/tools` routes, bound at start to `-s`, then `$GHOST_SESSION`
 (which `ghost delegate` passes through); an id not listed yet, a new
-conversation whose first turn is still running, binds as given. Its `ask` reaches the owner in the
+conversation whose first turn is still running, binds as given. Each serve
+process sends its own `caller` (the MCP client's name plus a per-process id)
+with every call, which keys the desktop lease. Its `ask` reaches the owner in the
 conversation that launched the run, while that conversation has a live turn
 (the HUD learns of a question from the turn stream). `ghost delegate` adds
 it to the two harnesses whose flags for it are known, unless the run already
@@ -413,7 +415,7 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be inspected without creating a transcript. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from pi's JSONL. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
 | `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
-| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the conversation's own tools (`ask` and the Ghost tools, `{name, description, inputSchema}`), or run one with `{arguments}` → `{content, isError}`: the same definitions pi runs in-session, validated against the same schema; a tool's failure is `isError` with its message. A call emits `tool_execution_start`/`tool_execution_end` (intent "Called by a delegated run") into the conversation's live owner-turn stream (a model turn or an owner `!` command) when one is open; it is not written to the transcript. With no live turn, `ask` fails at once (`isError`), since the owner would never see it. |
+| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the conversation's own tools (`ask` and the Ghost tools, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`: the same definitions pi runs in-session, validated against the same schema; a tool's failure is `isError` with its message. A call emits `tool_execution_start`/`tool_execution_end` (intent "Called by a delegated run") into the conversation's live owner-turn stream (a model turn or an owner `!` command) when one is open; it is not written to the transcript. With no live turn, `ask` fails at once (`isError`), since the owner would never see it. |
 | `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn. A steer reaches the model mid-turn; a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
 | `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
@@ -521,7 +523,14 @@ switching models.
 
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
-hosted-session, concurrency, or spend cap.
+hosted-session, concurrency, or spend cap. The one deliberate exception is the
+desktop lease ([`desktop-lease.ts`](packages/extensions/src/extensions/desktop-lease.ts)):
+there is one pointer and one focus, so a `ghost_desktop` action that moves
+either (focus, workspace, key, type, click, drag, scroll, mouse_move,
+ax_perform, ax_set) claims the desktop for its caller — the conversation, or
+one `ghost mcp serve` process — and another caller's such action fails
+`conflict` naming the holder until the holder has been idle 15 s. Reads and
+captures never claim; `state` reports a foreign holder as `heldBy`.
 
 ## Package boundaries
 

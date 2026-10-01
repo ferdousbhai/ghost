@@ -156,10 +156,11 @@ export function fakeHelper(options: FakeHelperOptions = {}): FakeHelper {
 export interface ContextOptions {
   readonly cwd: string;
   readonly model?: FixtureModel | undefined;
+  readonly caller?: string | undefined;
 }
 
 export function makeContext(options: ContextOptions): GhostToolContext {
-  return { cwd: options.cwd, model: options.model };
+  return { cwd: options.cwd, model: options.model, caller: options.caller };
 }
 
 export interface DesktopHarness {

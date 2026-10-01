@@ -12,6 +12,7 @@ export function ghostToolContextFromPi(ctx: ExtensionContext): GhostToolContext 
   const model = ctx.model;
   return {
     cwd: ctx.cwd,
+    caller: `conversation ${ctx.sessionManager.getSessionId()}`,
     model: model === undefined
       ? undefined
       : { provider: model.provider, id: model.id, input: model.input },

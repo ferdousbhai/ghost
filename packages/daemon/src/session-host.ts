@@ -2056,9 +2056,10 @@ export class SessionHost {
     name: string,
     args: unknown,
     signal?: AbortSignal,
+    caller?: string,
   ): Promise<SessionToolResult> {
     const hosted = await this.hostedForTools(ghostName, sessionId);
-    const tool = this.sessionToolSet(hosted).find((candidate) => candidate.name === name);
+    const tool = this.sessionToolSet(hosted, caller).find((candidate) => candidate.name === name);
     if (!tool) throw new GhostError("tool_not_found", `This ghost has no tool named ${JSON.stringify(name)}.`, 404);
     // The owner sees a question only through a live turn's stream; without one
     // it would wait out the ask timeout unseen.
@@ -2102,7 +2103,7 @@ export class SessionHost {
   }
 
   /** `ask` on this session's broker, then the Ghost tools with the session's cwd. */
-  private sessionToolSet(hosted: HostedSession): SessionTool[] {
+  private sessionToolSet(hosted: HostedSession, caller?: string): SessionTool[] {
     const ask = createAskTool({ broker: hosted.ask, timeoutMs: () => this.askTimeoutSeconds * 1000 });
     const ghostTools = [...hosted.ghostTools.values()].map((tool): SessionTool => ({
       name: tool.name,
@@ -2110,6 +2111,7 @@ export class SessionHost {
       parameters: tool.parameters,
       execute: (id, params, signal) => tool.execute(id, params as never, signal, {
         cwd: hosted.session.sessionManager.getCwd(),
+        caller: caller ?? "a delegated run",
         // The harness model is not ours to know; an MCP client takes image
         // content and decides for itself, so screen tools keep their images.
         model: DELEGATED_MODEL,

@@ -1261,6 +1261,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         toolName,
         body.arguments ?? {},
         connection.signal,
+        typeof body.caller === "string" ? body.caller.slice(0, 120) : undefined,
       ));
     } finally {
       connection.release();

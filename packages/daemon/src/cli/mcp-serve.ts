@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -28,12 +29,16 @@ export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     const { tools } = (await ctx.client.request<{ tools: SessionToolDescriptor[] }>("GET", `${path}/tools`)).body;
     return { tools: tools as never };
   });
+  // One id per serve process keys the desktop lease, so two harnesses bound to
+  // the same conversation still take turns steering the desktop.
+  const runId = randomUUID().slice(0, 8);
   server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
+    const caller = `${server.getClientVersion()?.name ?? "delegated run"} ${runId}`;
     const result = (await ctx.client.request<SessionToolResult>(
       "POST",
       `${path}/tools/${encodeURIComponent(name)}`,
-      { arguments: args ?? {} },
+      { arguments: args ?? {}, caller },
       { timeoutMs: 0, signal: extra.signal },
     )).body;
     return result as never;

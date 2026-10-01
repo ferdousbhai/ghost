@@ -145,6 +145,26 @@ describe("ghost mcp serve", () => {
     const invalid = await harness.callTool({ name: "ask", arguments: { questions: "no" } });
     expect(invalid.isError).toBe(true);
   });
+  it("names each serve process as its own caller, so harnesses take turns on the desktop", async () => {
+    const callers: Array<string | undefined> = [];
+    const hosted = (daemon.host as unknown as { sessions: Map<string, { ghostTools: Map<string, unknown> }> })
+      .sessions.values().next().value!;
+    const browser = hosted.ghostTools.get("ghost_browser") as Record<string, unknown>;
+    hosted.ghostTools.set("ghost_browser", {
+      ...browser,
+      execute: async (_id: string, _params: unknown, _signal: unknown, ctx: { caller?: string }) => {
+        callers.push(ctx.caller);
+        return { content: [{ type: "text", text: "ok" }] };
+      },
+    });
+    await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
+    await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
+    await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
+    expect(callers[0]).toMatch(/^harness [0-9a-f]{8}$/u);
+    expect(callers[1]).toMatch(/^harness [0-9a-f]{8}$/u);
+    expect(callers[1]).not.toBe(callers[0]);
+    expect(callers[2]).toBe("a delegated run");
+  });
 });
 
 describe("SessionHost.callSessionTool", () => {
