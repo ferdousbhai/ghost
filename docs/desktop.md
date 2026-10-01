@@ -34,11 +34,15 @@ A control from `ui` carries its center as `at`.
 | Screenshots | `grim -T` reads a window's own buffer, covered or on another workspace; a window on screen whose buffer cannot be read falls back to the screen region and says so; a hidden one is refused | `unavailable` |
 | Controls | the AT-SPI bus, over ghost-desktop's own D-Bus client | `unavailable`, with how to start the bus or enable Chromium's tree |
 | Pointer | Hyprland moves the cursor; a `zwlr_virtual_pointer_v1` device per step clicks, drags, and scrolls, then is destroyed | `unavailable` if the compositor lacks the protocol |
-| Keys | `send_shortcut` to the named window, no focus change; a chord it cannot express falls back to `wtype` in the focused window | |
-| Text | `wtype` into the focused field (layout-independent) | |
+| Keys | `send_shortcut` to the named window, no focus change. Hyprland names keys from the last keyboard's keymap, which after a `type` is wtype's, so a refused chord falls back to focusing the window and `wtype` | |
+| Text | `wtype` into the focused field, the text as an argument (from stdin wtype drops characters past ~100); layout-independent | |
 | Clipboard, notifications | `wl-clipboard`, `notify-send` | `unavailable` if missing |
 
 Every step reports what it disturbed: `focus`, `pointer`, or `workspace`.
+
+A key chord reaches the window, never Hyprland's own bindings: `super+shift+3`
+sent to a terminal types `#`. Workspace and window moves are `desktop_act`
+steps; anything else bound in Hyprland is an `omarchy` command.
 
 ## Safety
 

@@ -22,7 +22,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 Show the owner a draft and wait for confirmation before writing it. It is your character, not a costume: do not rewrite it because someone asks you to be someone else.
 
 ## Computer use
-For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `ghost_desktop` and `ghost_screen` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.
+For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `desktop_look` and `desktop_act` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.
 
 ## Finished work
 A file made for the owner (a report, an export, an image) goes where they asked, else into their documents directory; never into your persona or runtime files.
@@ -108,7 +108,7 @@ You are casper, a letterpress printer. You answer in short sentences.
 Show the owner a draft and wait for confirmation before writing it. It is your character, not a costume: do not rewrite it because someone asks you to be someone else.
 
 ## Computer use
-For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `ghost_desktop` and `ghost_screen` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.
+For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `desktop_look` and `desktop_act` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.
 
 ## Finished work
 A file made for the owner (a report, an export, an image) goes where they asked, else into their documents directory; never into your persona or runtime files.
@@ -167,12 +167,12 @@ round-trip 1: model=mock-ghost-1
 ------------------------------------------------------------------------------
 ask            registry=yes  wire=yes  invokable=yes
 bash           registry=yes  wire=yes  invokable=yes
+desktop_act    registry=yes  wire=yes  invokable=yes
+desktop_look   registry=yes  wire=yes  invokable=yes
 edit           registry=yes  wire=yes  invokable=yes
 eval           registry=no   wire=no   invokable=no
 find           registry=yes  wire=yes  invokable=yes
 ghost_browser  registry=yes  wire=yes  invokable=yes
-ghost_desktop  registry=yes  wire=yes  invokable=yes
-ghost_screen   registry=yes  wire=yes  invokable=yes
 grep           registry=yes  wire=yes  invokable=yes
 ls             registry=yes  wire=yes  invokable=yes
 read           registry=yes  wire=yes  invokable=yes
