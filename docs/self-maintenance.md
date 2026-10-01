@@ -59,13 +59,15 @@ The computer-use helper is a separate executable the daemon spawns,
 `ghost-desktop-helper` on PATH. To run it from the same clone:
 
 ```sh
-uv tool install -e ~/src/ghost/packages/desktop-helper
+uv tool install -e --no-managed-python --python 3.14 ~/src/ghost/packages/desktop-helper
 ```
 
 An editable install follows the clone's source on every daemon start, so a
 pull needs no reinstall unless the helper's dependencies changed; then repeat
-the command with `--reinstall`. `uv tool list --show-paths` shows which clone
-it points at.
+the command with `--reinstall`. The interpreter flags matter: a tool install
+ignores the package's own Python pin, and on a uv-managed Python the system
+PyGObject is unreachable, so every accessibility op fails. `uv tool list
+--show-paths` shows which clone it points at.
 
 `ghostd.service` sets `ProtectSystem=strict` with `ReadWritePaths=%h %t`, so the
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is

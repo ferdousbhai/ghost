@@ -101,8 +101,11 @@ today `python-gobject` is built for **Python 3.14**, so:
 - The helper appends the matching system `site-packages` to `sys.path` at
   import when (and only when) `gi` is missing from an isolated environment —
   see `_bootstrap_system_gi` in `src/ghost_desktop_helper/__init__.py`. That is
-  what makes a plain `uv run` / `uv tool install` work at all, since neither
-  can be told `--system-site-packages` from project config. It appends rather
+  what makes `uv run` and `uv tool install` work at all, since neither
+  can be told `--system-site-packages` from project config. `uv tool install`
+  also ignores `.python-version` and `[tool.uv]`, so it needs the interpreter
+  flags below, or it builds on a managed Python where the bootstrap cannot
+  apply. It appends rather
   than prepends (no distro package can shadow the environment) and is guarded
   on the exact minor version. Set `GHOST_DESKTOP_NO_SYSTEM_GI=1` to skip it in
   an environment that compiled its own bindings.
