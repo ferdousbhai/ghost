@@ -49,15 +49,14 @@ data_files=()
 executables=()
 if [[ "$component" == runtime ]]; then
   data_files=(
-    /usr/lib/ghost/desktop-helper/ghost_desktop_helper/__main__.py
-    /usr/lib/ghost/desktop-helper/ghost_desktop_helper/_vendor/omaharness/LICENSE
+    /usr/lib/ghost/runtime/ghost-desktop.js
     /usr/lib/systemd/user/ghostd.service
     /usr/lib/ghost/runtime/ghostd.js
     /usr/lib/ghost/runtime/ghost.js
     /usr/lib/ghost/runtime/photon_rs_bg.wasm
     /usr/share/doc/ghost/docs/hooks.md
   )
-  executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop-helper
+  executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop
     /usr/lib/ghost/package-smoke/service-browser-smoke.sh)
   absent=(/usr/share/ghost/plugin /usr/share/applications/ghost.desktop
     /usr/share/icons /usr/share/doc/ghost/shell-contrib)
@@ -104,21 +103,10 @@ if [[ "$component" == ui ]]; then
   desktop-file-validate "$root/usr/share/applications/ghost.desktop"
   python -m json.tool "$root/usr/share/ghost/plugin/manifest.json" >/dev/null
 else
-  PYTHONDONTWRITEBYTECODE=1 \
-  PYTHONPATH="$root/usr/lib/ghost/desktop-helper" \
-    python -c 'import PIL; import ghost_desktop_helper._vendor.omaharness'
-  if [[ -e "$root/usr/lib/ghost/desktop-helper/omaharness" ]]; then
-    printf 'package payload exposes the private harness as top-level omaharness\n' >&2
-    exit 1
-  fi
-  if find "$root/usr/lib/ghost/desktop-helper" \
-    \( -type d -name __pycache__ -o -type f \( -name '*.pyc' -o -name '*.pyo' \) \) \
-    -print -quit | grep -q .; then
-    printf 'package payload contains generated Python bytecode\n' >&2
-    exit 1
-  fi
   GHOST_BUN_EXECUTABLE="$(command -v bun)" \
     "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
+  GHOST_BUN_EXECUTABLE="$(command -v bun)" \
+    "$root/usr/bin/ghost-desktop" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'
 
   mapfile -t runtime_license_manifests < <(
     find "$root/usr/share/licenses" -path '*/runtime/BUNDLED-LICENSES' -type f -print

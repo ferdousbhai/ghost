@@ -93,10 +93,9 @@ The package does not write into a user's config directory, so linking it into
 `~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
 The browser extension is its own product and is not in this package: install
 Ghost for Chromium from the Chrome Web Store or from
-<https://github.com/ferdousbhai/ghost-chromium-extension>. The computer-use helper
-is installed in a private Python import directory and exposed through
-`ghost-desktop-helper`, preventing its vendored `omaharness` modules from
-colliding with a system Python package.
+<https://github.com/ferdousbhai/ghost-chromium-extension>. Computer use is
+`ghost-desktop`, a stdio MCP server bundled like `ghostd`; any MCP client can run
+it, not only Ghost.
 
 ## Desktop boundary
 
@@ -141,7 +140,7 @@ If only the runtime is installed, name only `ghost-runtime`.
 That removes package-owned files only.
 
 `smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
-the private helper imports, desktop entry, Chromium manifest, Quickshell assets,
+the ghost-desktop bundle, desktop entry, Chromium manifest, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive. There is no hosted CI: `pnpm verify` is the whole gate, the pre-push
 hook refuses a master push until it has passed on that exact tree, and

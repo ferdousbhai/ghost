@@ -33,7 +33,7 @@ When a rule here fights the task, the
 answer is to say so and get the owner's decision, not to add a special case.
 [`docs/concepts.md`](docs/concepts.md) lists what is deliberately absent and
 what would have to change for each absence to end. `ghostd` owns sessions and state transitions; the Quickshell HUD,
-terminal client, Chromium relay, and desktop helper are clients or sidecars.
+terminal client, Chromium relay, and `ghost-desktop` are clients or sidecars.
 The daemon listens on loopback unless the owner explicitly enables the built-in
 Tailscale Serve viewer.
 
@@ -265,7 +265,7 @@ line, `new_context` rolls over on demand with the ghost's own handoff, and
 ([`context-windows.ts`](packages/runtime/src/context-windows.ts), a port of
 pi-posthorse). Ghost adds
 `ask`, browser,
-screen, desktop, and MCP tools. Images are pi's read tool: it attaches them
+desktop (`desktop_look`, `desktop_act`), and MCP tools. Images are pi's read tool: it attaches them
 resized, and tells a model that cannot take one that the image was omitted.
 Ghost adds no second model for pictures. The exact assembly is
 [`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
@@ -524,13 +524,16 @@ switching models.
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
 hosted-session, concurrency, or spend cap. The one deliberate exception is the
-desktop lease ([`desktop-lease.ts`](packages/extensions/src/extensions/desktop-lease.ts)):
-there is one pointer and one focus, so a `ghost_desktop` action that moves
-either (focus, workspace, key, type, click, drag, scroll, mouse_move,
-ax_perform, ax_set) claims the desktop for its caller — the conversation, or
-one `ghost mcp serve` process — and another caller's such action fails
-`conflict` naming the holder until the holder has been idle 15 s. Reads and
-captures never claim; `state` reports a foreign holder as `heldBy`.
+desktop lease ([`lease.ts`](packages/desktop/src/lease.ts)): there is one
+pointer and one focus, so every `desktop_act` call claims the desktop for its
+caller, and another caller's call fails `busy` naming the holder until the
+holder has been idle 15 s. The lease is a file under
+`$XDG_RUNTIME_DIR/ghost-desktop/`, shared by every `ghost-desktop` process of
+the user, so a ghost and a separately launched MCP client (Claude Code) take
+turns too. A caller is a call's `_meta.caller` — ghostd sends the
+conversation, `ghost mcp serve` its client and process — else the connecting
+client plus that server process. `desktop_look` never claims and reports a
+foreign holder as `heldBy`.
 
 ## Package boundaries
 
@@ -538,9 +541,9 @@ Ghost is two sides of one product plus one separate product. **ghost-core**
 is everything a second interface could reuse: `packages/runtime`,
 `packages/daemon`, and `packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
 `packages/shell` (published as `@ghost/omarchy`; the directory name is
-historical) and `packages/desktop-helper`. The sides meet only at named
+historical) and `packages/desktop` (`ghost-desktop`). The sides meet only at named
 seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
-relay WebSocket protocol, and the helper JSON-lines protocol with its PATH
+relay WebSocket protocol, and MCP over stdio with `ghost-desktop`'s PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
 
@@ -589,7 +592,7 @@ change that breaks the pair turns the suite red; bumping `PROTOCOL_VERSION` on
 both sides in lockstep is what re-agrees them.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
-owns the daemon, CLI, desktop helper, user unit, and runtime docs/licenses;
+owns the daemon, CLI, `ghost-desktop`, user unit, and runtime docs/licenses;
 `ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
 that exact runtime version. The checkout variants are `ghost-runtime-dev` and
 `ghost-dev`. Installing only the runtime keeps desktop/browser automation in the
@@ -657,16 +660,21 @@ not the daemon, protocols, or graphical-session lifecycle.
   backend. Client text
   frames are capped at `MAX_RELAY_MESSAGE_BYTES`
   ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
-- [`packages/desktop-helper`](packages/desktop-helper/src/ghost_desktop_helper)
-  is the Python JSON-lines computer-use sidecar. Root pnpm commands do not cover
-  it. Its startup handshake and the `@ghost/extensions` helper client agree on
-  `DESKTOP_HELPER_PROTOCOL_VERSION`; the two languages declare it separately, so
-  [`desktop-helper-protocol.test.ts`](packages/extensions/test/desktop-helper-protocol.test.ts)
-  reads the sidecar's source and compares them. A mismatch retires the sidecar
-  before any request is sent.
-  Startup/explicit `hello` is the diagnostic boundary; there is no `doctor` op.
-  Client errors retain the operation: unavailable transport is `not_found`,
-  deadlines/size are `limit_exceeded`, and malformed protocol is `invalid_format`.
+- [`packages/desktop`](packages/desktop/src) is `ghost-desktop`, Hyprland
+  computer use as a stdio MCP server with two tools, `desktop_look` (never
+  changes the desktop) and `desktop_act` (ordered steps); any MCP client can
+  run it. It needs no Python and no uinput: it drives `hyprctl`, `grim`,
+  `wtype`, `wl-clipboard`, the AT-SPI bus over its own D-Bus client, and a
+  `zwlr_virtual_pointer_v1` pointer over its own Wayland client. A window
+  capture reads that window's own buffer (`grim -T`); a hidden window it cannot
+  read is refused, never replaced by the screen under it. Input is refused on
+  a locked or unknown session. ghostd spawns one per daemon on first use
+  ([`desktop.ts`](packages/extensions/src/extensions/desktop.ts)): unlike an
+  owner's MCP server its tools keep their names and its errors reach the model
+  word for word, because they carry the remedy; its text is fenced as
+  untrusted. No `ghost-desktop` on PATH means no desktop tools. Each error
+  starts with its code (`unavailable`, `locked`, `busy`, `not_found`,
+  `invalid`, `failed`).
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
@@ -675,8 +683,7 @@ not the daemon, protocols, or graphical-session lifecycle.
   reads. The only install path for owners is Omarchy's package repository.
 
 Protocols implemented by a sidecar have one detailed document:
-[`docs/hooks.md`](docs/hooks.md) and
-[`docs/desktop-helper.md`](docs/desktop-helper.md).
+[`docs/hooks.md`](docs/hooks.md) and [`docs/desktop.md`](docs/desktop.md).
 
 ## Harness and lifecycle invariants
 

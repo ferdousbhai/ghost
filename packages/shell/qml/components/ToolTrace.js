@@ -346,8 +346,14 @@ function fallback(activity, completed, failed, preparedAsk) {
             : "Looking through remembered details";
     case "write_memory":
         return completed ? "Saved something to memory" : "Saving something to memory";
-    case "ghost_screen":
-        return completed ? "Checked what’s on screen" : "Checking what’s on screen";
+    case "desktop_look": {
+        const args = activity.arguments || ({});
+        if (args.image === true || args.region || args.monitor)
+            return completed ? "Checked what’s on screen" : "Checking what’s on screen";
+        if (args.ui === true)
+            return completed ? "Looked through a window" : "Looking through a window";
+        return completed ? "Checked the desktop" : "Checking the desktop";
+    }
     case "ghost_browser": {
         const action = argument(activity, "action");
         const url = argument(activity, "url");
@@ -367,20 +373,21 @@ function fallback(activity, completed, failed, preparedAsk) {
                 : "Following something on the page";
         return completed ? "Checked the current page" : "Checking the current page";
     }
-    case "ghost_desktop": {
-        const action = argument(activity, "action");
-        if (action === "workspace")
+    case "desktop_act": {
+        const steps = (activity.arguments || ({})).steps;
+        const verbs = Array.isArray(steps)
+            ? steps.map(step => String((step && step.do) || "")) : [];
+        const only = verbs.length === 1 ? verbs[0] : "";
+        if (only === "workspace")
             return completed ? "Switched workspaces" : "Switching workspaces";
-        if (action === "focus")
+        if (only === "focus")
             return completed ? "Focused a window" : "Focusing a window";
-        if (action === "type")
+        if (only === "type")
             return completed ? "Typed on the desktop" : "Typing on the desktop";
-        if (action === "notify")
+        if (only === "notify")
             return completed ? "Sent a notification" : "Sending a notification";
-        if (action === "ax_query")
-            return completed
-                ? "Looked through the current window"
-                : "Looking through the current window";
+        if (only === "launch")
+            return completed ? "Opened an app" : "Opening an app";
         return completed ? "Worked on the desktop" : "Working on the desktop";
     }
     default:

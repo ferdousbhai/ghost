@@ -1,17 +1,14 @@
 import type { GhostExtensionFactory } from "../extension-api.js";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
-import { createHyprlandExtension, desktopToolNames, type HyprlandExtensionOptions } from "./hyprland.js";
+import { createDesktopExtension, desktopToolNames, type DesktopExtensionOptions } from "./desktop.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
-import { createScreenExtension, screenToolNames, type ScreenExtensionOptions } from "./screen.js";
 
 export type GhostExtensionSetOptions = PersonaExtensionOptions
-  & ScreenExtensionOptions
-  & HyprlandExtensionOptions
+  & DesktopExtensionOptions
   & BrowserExtensionOptions;
 
 export function ghostToolNames(): string[] {
   return [
-    ...screenToolNames(),
     ...desktopToolNames(),
     ...browserToolNames(),
   ];
@@ -21,12 +18,10 @@ export function createGhostExtension(
   options: GhostExtensionSetOptions,
 ): GhostExtensionFactory {
   const persona = createPersonaExtension(options);
-  const screen = createScreenExtension(options);
-  const desktop = createHyprlandExtension(options);
+  const desktop = createDesktopExtension(options);
   const browser = createBrowserExtension(options);
   return async (pi) => {
     await persona(pi);
-    await screen(pi);
     await desktop(pi);
     await browser(pi);
   };
@@ -56,7 +51,7 @@ export {
   type RelayTransport,
 } from "./browser-relay-backend.js";
 export type { BrowserFailure } from "./browser-backend.js";
-export { createScreenExtension, GHOST_SCREEN } from "./screen.js";
+export { DESKTOP_ACT, DESKTOP_LOOK } from "./desktop.js";
 export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
 export {
   textResult,

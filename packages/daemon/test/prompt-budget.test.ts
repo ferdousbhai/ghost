@@ -82,7 +82,7 @@ function renderStablePolicy(): Record<string, string> {
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
   "Character file": 561,
-  "Computer use": 359,
+  "Computer use": 357,
   "Finished work": 176,
   "Other harnesses": 689,
   "Background work": 588,
@@ -94,7 +94,7 @@ const CEILINGS: Record<string, number> = {
   "First meeting": 317,
 };
 
-const TOTAL_CEILING = 5250;
+const TOTAL_CEILING = 5248;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

@@ -709,7 +709,7 @@ describe("SessionHost.open", () => {
     expect(names).not.toContain("web_fetch");
     expect(names).not.toContain("task");
     expect(handle.session.getToolDefinition("task")).toBeUndefined();
-    for (const name of ["ghost_browser", "ghost_desktop", "ghost_screen"]) {
+    for (const name of ["ghost_browser", "desktop_look", "desktop_act"]) {
       expect(handle.session.getToolDefinition(name), `${name} must be available`).toBeDefined();
     }
   });

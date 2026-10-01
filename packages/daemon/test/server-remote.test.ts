@@ -149,7 +149,7 @@ describe("tailnet identity", () => {
     const tools = `${base}/api/ghosts/casper/sessions/conv-1/tools`;
     for (const [url, init] of [
       [tools, {}],
-      [`${tools}/ghost_screen`, { method: "POST", body: "{}" }],
+      [`${tools}/desktop_look`, { method: "POST", body: "{}" }],
     ] as const) {
       const response = await fetch(url, {
         ...init,

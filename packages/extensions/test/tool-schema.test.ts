@@ -3,18 +3,8 @@ import {
   BROWSER_ACTIONS,
   GHOST_BROWSER,
 } from "../src/extensions/browser.js";
-import {
-  AX_SET_ATTRIBUTES,
-  DESKTOP_ACTIONS,
-  GHOST_DESKTOP,
-  NOTIFY_URGENCIES,
-} from "../src/extensions/hyprland.js";
 import { createGhostExtension } from "../src/extensions/index.js";
 import { relayBackend } from "../src/extensions/browser-relay-backend.js";
-import {
-  GHOST_SCREEN,
-  SCREEN_TARGETS,
-} from "../src/extensions/screen.js";
 import { loadExtension } from "./support/harness.js";
 
 interface JsonSchema {
@@ -27,16 +17,11 @@ describe("stringEnum", () => {
 
   it("keeps every registered string enum strict-provider compatible", async () => {
     const harness = await loadExtension(
-      createGhostExtension({ backend: relayBackend({}) }),
+      createGhostExtension({ backend: relayBackend({}), desktop: { listTools: async () => [], callTool: async () => ({ content: [] }) } }),
       "/tmp/ghost-tool-schema-test",
     );
     const expected = [
       [GHOST_BROWSER, "action", BROWSER_ACTIONS],
-      [GHOST_DESKTOP, "action", DESKTOP_ACTIONS],
-      [GHOST_DESKTOP, "attribute", AX_SET_ATTRIBUTES],
-      [GHOST_DESKTOP, "coordinate_space", ["screen", "window"]],
-      [GHOST_DESKTOP, "urgency", NOTIFY_URGENCIES],
-      [GHOST_SCREEN, "target", SCREEN_TARGETS],
     ] as const;
 
     for (const [toolName, fieldName, values] of expected) {

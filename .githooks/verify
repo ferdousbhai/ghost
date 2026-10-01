@@ -34,9 +34,8 @@ bun test scripts
 # What the gate checks beyond the workspace: the packaging scripts
 # (they diff packaging/arch/.SRCINFO against a fresh makepkg render and chain
 # the other packaging suites, including the installer this repository
-# publishes), and the Python sidecar's lint and types.
+# publishes).
 bash packaging/arch/test-check-dependencies.sh
-(cd packages/desktop-helper && uv run --frozen ruff check src tests && uv run --frozen mypy && uv run --frozen pytest -q)
 
 # A dirty tree was not what the suite proved; only a clean HEAD earns the marker.
 if [[ -z "$(git status --porcelain)" ]]; then

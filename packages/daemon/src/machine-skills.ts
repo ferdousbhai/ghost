@@ -5,7 +5,7 @@ import { machineSkillPaths as sharedMachineSkillPaths, snapshotMachineSkills, ty
 
 export const OMARCHY_COMPUTER_USE_POLICY = [
   "## Computer use",
-  "For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `ghost_desktop` and `ghost_screen` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.",
+  "For laptop, shell, and Omarchy-system actions, find the route in `omarchy commands --json` or `omarchy <group> --help`, then run `omarchy <group> <action>` from Bash. `desktop_look` and `desktop_act` are for when Omarchy has no route, the route failed, or the task manipulates content inside an application; `ghost_browser` is for web pages.",
 ].join("\n");
 
 /**

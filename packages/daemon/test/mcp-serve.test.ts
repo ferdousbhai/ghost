@@ -79,7 +79,7 @@ async function until<T>(read: () => T | null): Promise<T> {
 describe("ghost mcp serve", () => {
   it("lists the conversation's own tools", async () => {
     const { tools } = await (await connect()).listTools();
-    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["ask", "ghost_browser", "ghost_screen", "ghost_desktop"]));
+    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["ask", "ghost_browser", "desktop_look", "desktop_act"]));
     expect(tools.find((tool) => tool.name === "ask")?.inputSchema).toMatchObject({ type: "object" });
   });
 
@@ -164,6 +164,14 @@ describe("ghost mcp serve", () => {
     expect(callers[1]).toMatch(/^harness [0-9a-f]{8}$/u);
     expect(callers[1]).not.toBe(callers[0]);
     expect(callers[2]).toBe("a delegated run");
+  });
+});
+
+describe("desktop tools over ghost mcp serve", () => {
+  it("reach ghost-desktop with the serve process as the caller, which keys its lease", async () => {
+    const result = await (await connect()).callTool({ name: "desktop_look", arguments: {} });
+    expect(result.isError).toBeFalsy();
+    expect(JSON.stringify(result.content)).toMatch(/\\"caller\\":\\"harness [0-9a-f]{8}\\"/u);
   });
 });
 

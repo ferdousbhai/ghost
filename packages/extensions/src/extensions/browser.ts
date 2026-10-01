@@ -392,8 +392,7 @@ export function createBrowserExtension(
             // A model that can see gets the pixels — a description of a screenshot
             // is strictly lossier. A model that cannot gets the path, since an
             // image block in a tool result is silently dropped for text-only
-            // models (the same reason ghost_screen points at a file). Either way
-            // the saved path stays in details.
+            // models. Either way the saved path stays in details.
             if (resolveToolCapabilities(options, ctx).vision) {
               let data: string | undefined;
               try {

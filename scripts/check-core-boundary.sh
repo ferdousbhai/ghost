@@ -4,33 +4,34 @@
 # ghost-core (daemon, extensions, runtime) is everything a second interface could
 # reuse. The browser extension is a separate product in its own repository
 # (github.com/ferdousbhai/ghost-chromium-extension) that meets core only at
-# the relay WebSocket protocol. Core meets the Omarchy side (@ghost/omarchy, the desktop helper) only at
-# the seams CONTRACTS.md names — the daemon HTTP/SSE API, the relay WebSocket
-# protocol, and the helper JSON-lines protocol with its PATH spawn — so core
-# must never depend on or import Omarchy-side code, and the Omarchy side must
-# never import core sources (it consumes the API and protocols instead).
-# String references to the helper binary are the spawn seam, not imports,
-# and do not count.
+# the relay WebSocket protocol. Core meets the Omarchy side (@ghost/omarchy, and
+# @ghost/desktop, the ghost-desktop MCP server) only at the seams CONTRACTS.md
+# names — the daemon HTTP/SSE API, the relay WebSocket protocol, and MCP over
+# stdio with ghost-desktop's PATH spawn — so core must never depend on or
+# import Omarchy-side code, and the Omarchy side must never import core sources
+# (it consumes the API and protocols instead). String references to the
+# ghost-desktop binary are the spawn seam, and the runtime build bundling its
+# entry point is packaging; neither counts.
 set -euo pipefail
 cd -- "$(git rev-parse --show-toplevel)"
 
 fail=0
 
 for manifest in packages/daemon/package.json packages/extensions/package.json packages/runtime/package.json; do
-  if [[ -f "$manifest" ]] && grep -Eq '"@ghost/(omarchy|shell)"' "$manifest"; then
+  if [[ -f "$manifest" ]] && grep -Eq '"@ghost/(omarchy|shell|desktop)"' "$manifest"; then
     printf 'core-boundary: %s depends on the Omarchy side\n' "$manifest" >&2
     fail=1
   fi
 done
 
-if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"']@ghost/(omarchy|shell)" \
+if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"']@ghost/(omarchy|shell|desktop)" \
     packages/daemon/src packages/extensions/src packages/runtime/src 2>/dev/null; then
   printf 'core-boundary: core imports the Omarchy side (see above)\n' >&2
   fail=1
 fi
 
-if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|@ghost/extensions|@ghost/runtime|\\.\\./(daemon|extensions|runtime))" \
-    packages/shell 2>/dev/null; then
+if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|@ghost/extensions|@ghost/runtime|(\\.\\./)+(daemon|extensions|runtime)/)" \
+    packages/shell packages/desktop/src 2>/dev/null; then
   printf 'core-boundary: the Omarchy side imports core sources (see above)\n' >&2
   fail=1
 fi

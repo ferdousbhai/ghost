@@ -75,7 +75,7 @@ tools when a request may depend on it.
 | `ghost` CLI | a terminal client over that API, with a named verb for every daemon capability | [`cli/main.ts`](../packages/daemon/src/cli/main.ts) |
 | Ghost shell plugin | the Omarchy desktop surfaces: chat, roster, panes, bar dot | [`packages/shell/qml/`](../packages/shell/qml) |
 | Chromium extension | the opt-in MV3 extension that lends the ghost the browser the owner already uses — its own product, in its own repo | [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension) |
-| Desktop helper | the Python JSON-lines computer-use sidecar (AT-SPI, capture, input) | [`docs/desktop-helper.md`](desktop-helper.md) |
+| `ghost-desktop` | computer use as a stdio MCP server (`desktop_look`, `desktop_act`), usable by any MCP client | [`docs/desktop.md`](desktop.md) |
 
 The daemon is the only session owner: one process owns a session, and every
 other surface is a client. The CLI never edits a ghost home directly, and the
@@ -85,9 +85,9 @@ the owner's explicit direction.
 
 Computer use is CLI-first: the ghost is told to discover a route with
 `omarchy commands --json` and run `omarchy <group> <action>` through Bash, and
-to reach for `ghost_desktop` / `ghost_screen` only when Omarchy has no route,
+to reach for `desktop_look` / `desktop_act` only when Omarchy has no route,
 a route failed, or the work is inside an arbitrary application's window.
-`ghost_browser` drives pages. The helper is the fallback, not the first move. If background computer use arrives from Omarchy or a third party, the fallback ops go with it.
+`ghost_browser` drives pages. `ghost-desktop` is the fallback, not the first move. If background computer use arrives from Omarchy or a third party, the fallback ops go with it.
 
 There is one browser. Until the owner pairs the relay with their own Chromium,
 browser calls fail and say so. There is no second backend and no dedicated
@@ -198,7 +198,7 @@ none. The protocol is in [hooks.md](hooks.md).
 - **Runtime-native behavior wins.** Ghost projects policy through pi's
   supported settings and hooks. It adds machinery only for product
   boundaries the runtime does not own: persona lifecycle, daemon sessions, the
-  HUD, browser relay, desktop sidecar, shared authentication policy, and
+  HUD, browser relay, `ghost-desktop`, shared authentication policy, and
   recoverable moves.
 - **Self-maintenance through the machine's own facilities.** A ghost may edit,
   build, and restart its own source. The clone it is allowed to touch is the
@@ -284,7 +284,7 @@ If you expect one of these, it is missing on purpose:
 - [getting-started.md](getting-started.md) — install and first conversation.
 - [`CONTRACTS.md`](../CONTRACTS.md) — the normative wire, storage, and package
   boundaries.
-- [hooks.md](hooks.md), [desktop-helper.md](desktop-helper.md),
+- [hooks.md](hooks.md), [desktop.md](desktop.md),
   [injection-defense.md](injection-defense.md) — one document per protocol.
 - [self-maintenance.md](self-maintenance.md) — how a ghost edits and restarts
   itself; [`CONTRIBUTING.md`](../CONTRIBUTING.md) — how a ghost or a human

@@ -17,15 +17,11 @@ _runtime_depends=(
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
-  'python>=3.11'
-  'python-dbus>=1.4'
-  'python-gobject>=3.50'
-  'python-pillow>=10'
   'qrencode'
   'ripgrep'
   'systemd'
+  'wl-clipboard'
   'wtype>=0.4'
-  'ydotool>=1.0'
 )
 _ui_depends=('qt6-5compat>=6.8' 'quickshell>=0.3' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
@@ -34,7 +30,6 @@ makedepends=(
   'desktop-file-utils'
   'git'
   'pnpm>=10.12.2'
-  'uv'
 )
 checkdepends=(
   'jq'
@@ -73,16 +68,9 @@ check() {
 
   bash packaging/release/test-release-source.sh
   bash packaging/arch/test-check-dependencies.sh
-  GHOST_ARCH_CHECK_RUNTIME_TEST_ROOT="$srcdir" \
-    bash packaging/arch/test-check-runtime.sh packaging/arch/PKGBUILD
   pnpm test
   pnpm typecheck
   pnpm lint
-  (
-    cd -- "$srcdir/ghost/packages/desktop-helper"
-    bash "$srcdir/ghost/packaging/arch/run-with-check-runtime.sh" "$srcdir" \
-      uv run --frozen pytest -m 'not live'
-  )
 }
 
 package_ghost-runtime-dev() {

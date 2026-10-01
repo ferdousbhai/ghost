@@ -7,8 +7,8 @@ has its own character, reads the owner's documents, and runs locally as an
 
 A ghost keeps pi's native file tools, Bash, steering, and branchable
 conversations, and adds owner questions (`ask`), a browser
-relay into the owner's own Chromium, a computer-use sidecar for the Omarchy
-desktop, MCP, skills, rules, and Markdown commands from its ghost home, model
+relay into the owner's own Chromium, computer use on the Omarchy desktop
+(`ghost-desktop`, an MCP server any client can run), MCP, skills, rules, and Markdown commands from its ghost home, model
 roles, scheduled work through systemd timers, and context
 windows in place of summarizing compaction. Its notes are Markdown in the
 owner's Documents directory, shared by every ghost and the owner; nothing there

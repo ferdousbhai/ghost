@@ -12,22 +12,17 @@ pkgbase = ghost-dev
 	makedepends = desktop-file-utils
 	makedepends = git
 	makedepends = pnpm>=10.12.2
-	makedepends = uv
 	depends = at-spi2-core>=2.58
 	depends = bun>=1.3.14
 	depends = fd
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
-	depends = python>=3.11
-	depends = python-dbus>=1.4
-	depends = python-gobject>=3.50
-	depends = python-pillow>=10
 	depends = qrencode
 	depends = ripgrep
 	depends = systemd
+	depends = wl-clipboard
 	depends = wtype>=0.4
-	depends = ydotool>=1.0
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = xdg-utils>=1.2
@@ -45,15 +40,11 @@ pkgname = ghost-runtime-dev
 	depends = grim>=1.5
 	depends = hyprland>=0.56
 	depends = libnotify>=0.8
-	depends = python>=3.11
-	depends = python-dbus>=1.4
-	depends = python-gobject>=3.50
-	depends = python-pillow>=10
 	depends = qrencode
 	depends = ripgrep
 	depends = systemd
+	depends = wl-clipboard
 	depends = wtype>=0.4
-	depends = ydotool>=1.0
 	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
 	optdepends = npm: npx-launched MCP servers and other owner-installed pi integrations
 	provides = ghost-runtime=0.0.1.r100.g0c04ce7-1

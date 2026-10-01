@@ -45,14 +45,9 @@ if [[ "$component" == runtime ]]; then
     "$pkgdir/usr/lib/ghost/runtime/ghost.js"
   install -Dm644 "$runtime_root/lib/photon_rs_bg.wasm" \
     "$pkgdir/usr/lib/ghost/runtime/photon_rs_bg.wasm"
-  install -Dm755 "$source_root/packaging/arch/ghost-desktop-helper" \
-    "$pkgdir/usr/bin/ghost-desktop-helper"
-
-  while IFS= read -r -d '' file; do
-    install -Dm644 "$file" \
-      "$appdir/desktop-helper/${file#"$source_root/packages/desktop-helper/src/"}"
-  done < <(find "$source_root/packages/desktop-helper/src" -type f \
-    \( -name '*.py' -o -name LICENSE \) -print0)
+  install -Dm755 "$runtime_root/bin/ghost-desktop" "$pkgdir/usr/bin/ghost-desktop"
+  install -Dm644 "$runtime_root/lib/ghost-desktop.js" \
+    "$pkgdir/usr/lib/ghost/runtime/ghost-desktop.js"
 
   install -Dm644 "$source_root/packages/daemon/contrib/ghostd.service" \
     "$pkgdir/usr/lib/systemd/user/ghostd.service"

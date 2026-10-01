@@ -3,7 +3,7 @@
   "version": "0.4.3",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Ghost's built-in extensions \u2014 the plain-file ghost home as an AI persona \u2014 plus the ghost-home/v2 reader/writer.",
+  "description": "Ghost's built-in extensions — the plain-file ghost home as an AI persona — plus the ghost-home/v2 reader/writer.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,6 +25,7 @@
     "test": "bun --bun ./node_modules/vitest/vitest.mjs run"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.29.0",
     "tldts": "^7.4.11",
     "typebox": "1.3.27",
     "@ghost/runtime": "workspace:*"

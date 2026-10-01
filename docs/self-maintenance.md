@@ -55,19 +55,21 @@ The empty `ExecStart=` is required: without it systemd appends rather than
 replaces. Apply with `systemctl --user daemon-reload && systemctl --user
 restart ghostd`.
 
-The computer-use helper is a separate executable the daemon spawns,
-`ghost-desktop-helper` on PATH. To run it from the same clone:
+Computer use is a separate executable the daemon spawns once, `ghost-desktop`
+on PATH, or `$GHOST_DESKTOP` when set. Bun runs its source directly, so the
+same clone needs no build for it: add a second launcher,
 
 ```sh
-uv tool install -e --no-managed-python --python 3.14 ~/src/ghost/packages/desktop-helper
+cat > ~/.local/bin/ghost-desktop-dev <<'EOF'
+#!/usr/bin/env bash
+exec /home/<owner>/.bun/bin/bun \
+  /home/<owner>/src/ghost/packages/desktop/src/main.ts "$@"
+EOF
+chmod 755 ~/.local/bin/ghost-desktop-dev
 ```
 
-An editable install follows the clone's source on every daemon start, so a
-pull needs no reinstall unless the helper's dependencies changed; then repeat
-the command with `--reinstall`. The interpreter flags matter: a tool install
-ignores the package's own Python pin, and on a uv-managed Python the system
-PyGObject is unreachable, so every accessibility op fails. `uv tool list
---show-paths` shows which clone it points at.
+and `Environment=GHOST_DESKTOP=%h/.local/bin/ghost-desktop-dev` under the same
+`[Service]` override. A daemon restart picks up a changed `packages/desktop`.
 
 `ghostd.service` sets `ProtectSystem=strict` with `ReadWritePaths=%h %t`, so the
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is

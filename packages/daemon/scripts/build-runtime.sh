@@ -45,13 +45,16 @@ build_bundle() {
 
 build_bundle src/main.ts ghostd
 build_bundle src/cli/main.ts ghost
+build_bundle ../desktop/src/main.ts ghost-desktop
 install -m755 "$package_root/scripts/launchers/ghostd" "$runtime_root/bin/ghostd"
 install -m755 "$package_root/scripts/launchers/ghost" "$runtime_root/bin/ghost"
+install -m755 "$package_root/scripts/launchers/ghost-desktop" "$runtime_root/bin/ghost-desktop"
 
 bun "$package_root/scripts/stage-runtime-assets.ts" \
   "$source_root" "$runtime_root" "$meta_root/ghostd.json"
 bun "$package_root/scripts/stage-runtime-licenses.ts" \
-  "$source_root" "$runtime_root" "$meta_root/ghostd.json" "$meta_root/ghost.json"
+  "$source_root" "$runtime_root" "$meta_root/ghostd.json" "$meta_root/ghost.json" \
+  "$meta_root/ghost-desktop.json"
 find -P "$runtime_root" -type d -exec chmod 755 {} +
 find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {} +
 
