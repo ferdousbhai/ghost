@@ -38,8 +38,6 @@ export {
   createBrowserExtension,
   createGhostExtension,
   GHOST_BROWSER,
-  DESKTOP_ACT,
-  DESKTOP_LOOK,
   ghostToolNames,
   MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,

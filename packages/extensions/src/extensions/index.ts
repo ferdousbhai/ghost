@@ -1,6 +1,6 @@
 import type { GhostExtensionFactory } from "../extension-api.js";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
-import { createDesktopExtension, desktopToolNames, type DesktopExtensionOptions } from "./desktop.js";
+import { createDesktopExtension, DESKTOP_TOOLS, type DesktopExtensionOptions } from "./desktop.js";
 import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 
 export type GhostExtensionSetOptions = PersonaExtensionOptions
@@ -9,7 +9,7 @@ export type GhostExtensionSetOptions = PersonaExtensionOptions
 
 export function ghostToolNames(): string[] {
   return [
-    ...desktopToolNames(),
+    ...DESKTOP_TOOLS,
     ...browserToolNames(),
   ];
 }
@@ -51,7 +51,6 @@ export {
   type RelayTransport,
 } from "./browser-relay-backend.js";
 export type { BrowserFailure } from "./browser-backend.js";
-export { DESKTOP_ACT, DESKTOP_LOOK } from "./desktop.js";
 export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
 export {
   textResult,

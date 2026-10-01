@@ -375,9 +375,8 @@ function fallback(activity, completed, failed, preparedAsk) {
     }
     case "desktop_act": {
         const steps = (activity.arguments || ({})).steps;
-        const verbs = Array.isArray(steps)
-            ? steps.map(step => String((step && step.do) || "")) : [];
-        const only = verbs.length === 1 ? verbs[0] : "";
+        const only = Array.isArray(steps) && steps.length === 1
+            ? String((steps[0] && steps[0].do) || "") : "";
         if (only === "workspace")
             return completed ? "Switched workspaces" : "Switching workspaces";
         if (only === "focus")

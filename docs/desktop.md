@@ -21,7 +21,7 @@ this page covers what the schemas cannot.
 
 ## Coordinates
 
-Everything is in desktop (logical) coordinates, the ones `hyprctl` reports. A
+Everything is in desktop (logical) coordinates, the ones Hyprland reports. A
 screenshot at the default scale 1 has one image pixel per desktop unit, so an
 image pixel plus the image's `geometry` origin is the screen point to click.
 A control from `ui` carries its center as `at`.
@@ -30,7 +30,7 @@ A control from `ui` carries its center as `at`.
 
 | Need | How | Fails as |
 | --- | --- | --- |
-| Windows, focus, workspaces, launching | `hyprctl` in the session's dispatch grammar (Lua on 0.56+, legacy strings before); every value is a Lua string literal, never raw code | `unavailable` outside Hyprland |
+| Windows, focus, workspaces, launching, events | Hyprland's request and event sockets, dispatching in the session's grammar (Lua on 0.56+, legacy strings before); every value is a Lua string literal, never raw code | `unavailable` outside Hyprland |
 | Screenshots | `grim -T` reads a window's own buffer, covered or on another workspace; a window on screen whose buffer cannot be read falls back to the screen region and says so; a hidden one is refused | `unavailable` |
 | Controls | the AT-SPI bus, over ghost-desktop's own D-Bus client | `unavailable`, with how to start the bus or enable Chromium's tree |
 | Pointer | Hyprland moves the cursor; a `zwlr_virtual_pointer_v1` device per step clicks, drags, and scrolls, then is destroyed | `unavailable` if the compositor lacks the protocol |

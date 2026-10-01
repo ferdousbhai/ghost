@@ -663,7 +663,7 @@ not the daemon, protocols, or graphical-session lifecycle.
 - [`packages/desktop`](packages/desktop/src) is `ghost-desktop`, Hyprland
   computer use as a stdio MCP server with two tools, `desktop_look` (never
   changes the desktop) and `desktop_act` (ordered steps); any MCP client can
-  run it. It needs no Python and no uinput: it drives `hyprctl`, `grim`,
+  run it. It needs no Python and no uinput: it drives Hyprland's IPC sockets, `grim`,
   `wtype`, `wl-clipboard`, the AT-SPI bus over its own D-Bus client, and a
   `zwlr_virtual_pointer_v1` pointer over its own Wayland client. A window
   capture reads that window's own buffer (`grim -T`); a hidden window it cannot
