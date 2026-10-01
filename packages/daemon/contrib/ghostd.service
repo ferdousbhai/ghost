@@ -57,7 +57,7 @@ RestrictSUIDSGID=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=no
 # PrivateTmp only isolates /tmp and /var/tmp. The user runtime directory stays
-# available for the omaharness lock and Wayland/Hyprland sockets.
+# available for the ghost-desktop lease and the Wayland, Hyprland, and D-Bus sockets.
 ReadWritePaths=%h %t
 UMask=0077
 Slice=session.slice

@@ -61,5 +61,5 @@ A failed call is an MCP error result whose text starts with a code:
 `unavailable`, `locked`, `busy`, `not_found`, `invalid`, or `failed`. The rest
 of the text is written for the model and names the next move.
 
-The Wayland wire protocol is ported from
+The Wayland wire protocol and the Lua dispatch encoding are ported from
 [hypruse](https://github.com/IlyasKhallouki/hypruse) (MIT, Ilyas Khallouki).

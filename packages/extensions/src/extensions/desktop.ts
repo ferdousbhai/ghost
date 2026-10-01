@@ -58,8 +58,14 @@ function spawnedDesktop(): DesktopServer {
       });
     },
     async callTool(name, args, caller, signal) {
+      let connected: Client;
       try {
-        return await (await connect()).callTool(
+        connected = await connect();
+      } catch (error) {
+        throw new GhostError("not_found", `ghost-desktop did not start: ${error instanceof Error ? error.message : String(error)}.`);
+      }
+      try {
+        return await connected.callTool(
           { name, arguments: args, ...(caller ? { _meta: { caller } } : {}) },
           undefined,
           { timeout: DESKTOP_TIMEOUT_MS, ...(signal ? { signal } : {}) },
