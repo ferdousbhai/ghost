@@ -26,7 +26,8 @@ mkdir -p "$runtime_root/bin" "$runtime_root/lib" "$runtime_root/licenses/ghost" 
   "$runtime_root/licenses/npm/@earendil-works/pi-ai/0.86.1"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost"
-chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"
+chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$runtime_root/bin/ghost-desktop"
 
 cat > "$runtime_root/lib/ghostd.js" <<EOF
 if (process.argv.includes("--help")) {
@@ -45,6 +46,10 @@ if (process.argv.includes("--help")) {
 } else {
   process.exitCode = 2;
 }
+EOF
+cat > "$runtime_root/lib/ghost-desktop.js" <<EOF
+if (process.argv.includes("--version")) console.log("$version");
+else process.exitCode = 2;
 EOF
 printf '\0asm\1\0\0\0' > "$runtime_root/lib/photon_rs_bg.wasm"
 cp "$source_root/LICENSE" "$runtime_root/licenses/ghost/LICENSE"

@@ -56,6 +56,7 @@ require_identical "$temporary/top-level.expected" "$temporary/top-level.actual" 
 ) > "$temporary/bin.actual"
 printf '%s\n' \
   $'f\tghost' \
+  $'f\tghost-desktop' \
   $'f\tghostd' \
   | LC_ALL=C sort > "$temporary/bin.expected"
 require_identical "$temporary/bin.expected" "$temporary/bin.actual" \
@@ -66,6 +67,7 @@ require_identical "$temporary/bin.expected" "$temporary/bin.actual" \
   find . -maxdepth 1 -mindepth 1 -printf '%y\t%P\n' | LC_ALL=C sort
 ) > "$temporary/lib.actual"
 printf '%s\n' \
+  $'f\tghost-desktop.js' \
   $'f\tghost.js' \
   $'f\tghostd.js' \
   $'f\tphoton_rs_bg.wasm' \
@@ -82,13 +84,12 @@ if find -P "$runtime_root" -type d ! -perm 755 -print -quit | grep -q .; then
   printf 'runtime source contains a directory with an unsafe mode\n' >&2
   exit 1
 fi
-if find -P "$runtime_root" -type f ! -path "$runtime_root/bin/ghost" \
-  ! -path "$runtime_root/bin/ghostd" ! -perm 644 -print -quit | grep -q .; then
+if find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" ! -perm 644 -print -quit | grep -q .; then
   printf 'runtime source contains a data file with an unsafe mode\n' >&2
   exit 1
 fi
 
-for path in bin/ghost bin/ghostd; do
+for path in bin/ghost bin/ghostd bin/ghost-desktop; do
   [[ -f "$runtime_root/$path" && -x "$runtime_root/$path" \
     && "$(stat -c '%a' "$runtime_root/$path")" == 755 ]] || {
     printf 'runtime launcher is missing or unsafe: %s\n' "$path" >&2
@@ -96,7 +97,7 @@ for path in bin/ghost bin/ghostd; do
   }
   grep -Fq 'GHOST_BUN_EXECUTABLE:-/usr/bin/bun' "$runtime_root/$path"
 done
-for path in lib/ghost.js lib/ghostd.js lib/photon_rs_bg.wasm BUNDLED-LICENSES; do
+for path in lib/ghost.js lib/ghostd.js lib/ghost-desktop.js lib/photon_rs_bg.wasm BUNDLED-LICENSES; do
   [[ -f "$runtime_root/$path" && "$(stat -c '%a' "$runtime_root/$path")" == 644 ]] || {
     printf 'runtime data file is missing or unsafe: %s\n' "$path" >&2
     exit 1
