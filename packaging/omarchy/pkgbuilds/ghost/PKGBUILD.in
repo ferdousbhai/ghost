@@ -15,15 +15,11 @@ _runtime_depends=(
   'grim>=1.5'
   'hyprland>=0.56'
   'libnotify>=0.8'
-  'python>=3.11'
-  'python-dbus>=1.4'
-  'python-gobject>=3.50'
-  'python-pillow>=10'
   'qrencode'
   'ripgrep'
   'systemd'
+  'wl-clipboard'
   'wtype>=0.4'
-  'ydotool>=1.0'
 )
 _ui_depends=('qt6-5compat>=6.8' 'quickshell>=0.3' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
