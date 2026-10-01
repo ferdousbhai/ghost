@@ -1,5 +1,5 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport, getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
@@ -11,7 +11,7 @@ export const DESKTOP_ACT = "desktop_act";
 
 const DESKTOP_TIMEOUT_MS = 120_000;
 
-/** The `ghost-desktop` MCP server as the desktop tools use it; a seam for tests. */
+/** The tool names the bridge registers. */
 export const DESKTOP_TOOLS: readonly string[] = [DESKTOP_LOOK, DESKTOP_ACT];
 
 /** The `ghost-desktop` MCP server as the desktop tools use it; a seam for tests. */
@@ -39,7 +39,7 @@ function spawnedDesktop(): DesktopServer {
       next.onclose = () => { client = undefined; };
       await next.connect(new StdioClientTransport({
         command: process.env.GHOST_DESKTOP || "ghost-desktop",
-        env: { ...getDefaultEnvironment(), ...process.env } as Record<string, string>,
+        env: process.env as Record<string, string>,
         stderr: "ignore",
       }));
       return next;
@@ -47,9 +47,16 @@ function spawnedDesktop(): DesktopServer {
     client.catch(() => { client = undefined; });
     return client;
   };
-  const tools = connect().then((connected) => connected.listTools()).then((listed) => listed.tools, () => []);
+  // A list is kept only once one arrives: a server that failed to start is asked again next session.
+  let tools: Promise<Tool[]> | undefined;
   return {
-    listTools: () => tools,
+    listTools() {
+      tools ??= connect().then((connected) => connected.listTools()).then((listed) => listed.tools);
+      return tools.catch(() => {
+        tools = undefined;
+        return [];
+      });
+    },
     async callTool(name, args, caller, signal) {
       try {
         return await (await connect()).callTool(
@@ -70,6 +77,11 @@ function spawnedDesktop(): DesktopServer {
 }
 
 let shared: DesktopServer | undefined;
+
+function sharedDesktop(): DesktopServer {
+  shared ??= spawnedDesktop();
+  return shared;
+}
 
 const ERROR_CODES: Record<string, GhostErrorCode> = {
   busy: "conflict",
@@ -106,9 +118,7 @@ async function toolResult(result: CallToolResult, vision: boolean): Promise<Ghos
  */
 export function createDesktopExtension(options: DesktopExtensionOptions = {}): GhostExtensionFactory {
   return async (pi: GhostExtensionAPI) => {
-    if (!options.desktop) shared ??= spawnedDesktop();
-    const desktop = options.desktop ?? shared;
-    if (!desktop) return;
+    const desktop = options.desktop ?? sharedDesktop();
     // Without ghost-desktop the list is empty and the conversation has no desktop tools.
     for (const tool of (await desktop.listTools()).filter((listed) => DESKTOP_TOOLS.includes(listed.name))) {
       pi.registerTool({

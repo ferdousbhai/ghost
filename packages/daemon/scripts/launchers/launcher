@@ -1,0 +1,34 @@
+#!/bin/sh
+# One launcher for every runtime command: installed as ghostd, ghost, and
+# ghost-desktop, it runs the bundle named after itself.
+set -eu
+
+case $0 in
+  */*) launcher=$0 ;;
+  *) launcher=$(command -v -- "$0") ;;
+esac
+name=${launcher##*/}
+
+bun_executable=${GHOST_BUN_EXECUTABLE:-/usr/bin/bun}
+case $bun_executable in
+  /*) ;;
+  *)
+    printf '%s\n' "$name: GHOST_BUN_EXECUTABLE must be an absolute path" >&2
+    exit 127
+    ;;
+esac
+if [ ! -x "$bun_executable" ]; then
+  printf '%s: Bun is not executable at %s\n' "$name" "$bun_executable" >&2
+  exit 127
+fi
+
+bin_dir=${launcher%/*}
+if [ -f "$bin_dir/../lib/ghost/runtime/$name.js" ]; then
+  bundle=$bin_dir/../lib/ghost/runtime/$name.js
+elif [ -f "$bin_dir/../lib/$name.js" ]; then
+  bundle=$bin_dir/../lib/$name.js
+else
+  printf '%s\n' "$name: installed runtime bundle is missing" >&2
+  exit 127
+fi
+exec "$bun_executable" "$bundle" "$@"

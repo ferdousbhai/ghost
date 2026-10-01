@@ -565,7 +565,7 @@ runner; MCP config policy and the client lifecycle, only the daemon building
 stdio/HTTP/SSE transports or reading the process environment (an MCP `isError`
 reply is `McpToolCallError.outcome` `"server_error"`, a lost transport
 `"uncertain"`, so a durable host never replays a call that may have run); the
-desktop-state projection; the untrusted-content fence; smol ranking, title, and greeting prompts and output
+untrusted-content fence; smol ranking, title, and greeting prompts and output
 acceptance; model routing; the ask broker and tool; compaction settings; and the
 context-window extension, the daemon supplying JSONL history traversal. The
 daemon and extensions take it as a workspace package, and a daemon module over

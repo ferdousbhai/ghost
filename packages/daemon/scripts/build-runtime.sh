@@ -46,9 +46,9 @@ build_bundle() {
 build_bundle src/main.ts ghostd
 build_bundle src/cli/main.ts ghost
 build_bundle ../desktop/src/main.ts ghost-desktop
-install -m755 "$package_root/scripts/launchers/ghostd" "$runtime_root/bin/ghostd"
-install -m755 "$package_root/scripts/launchers/ghost" "$runtime_root/bin/ghost"
-install -m755 "$package_root/scripts/launchers/ghost-desktop" "$runtime_root/bin/ghost-desktop"
+install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
+install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost"
+install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"
 
 bun "$package_root/scripts/stage-runtime-assets.ts" \
   "$source_root" "$runtime_root" "$meta_root/ghostd.json"

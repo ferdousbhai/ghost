@@ -24,8 +24,8 @@ epoch=1
 runtime_root="$work/runtime"
 mkdir -p "$runtime_root/bin" "$runtime_root/lib" "$runtime_root/licenses/ghost" \
   "$runtime_root/licenses/npm/@earendil-works/pi-ai/0.86.1"
-cp "$source_root/packages/daemon/scripts/launchers/ghostd" "$runtime_root/bin/ghostd"
-cp "$source_root/packages/daemon/scripts/launchers/ghost" "$runtime_root/bin/ghost"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost"
 chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost"
 
 cat > "$runtime_root/lib/ghostd.js" <<EOF

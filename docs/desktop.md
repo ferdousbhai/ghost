@@ -46,9 +46,8 @@ steps; anything else bound in Hyprland is an `omarchy` command.
 
 ## Safety
 
-- **Locked session.** `desktop_act` does nothing unless both Hyprland and
-  logind can be asked and neither says locked; an unknown state counts as
-  locked.
+- **Locked session.** `desktop_act` does nothing when Hyprland or logind
+  says the screen is locked, or when neither can say.
 - **One driver at a time.** The lease in `CONTRACTS.md` ("Ghosts run
   unthrottled"): another caller's `desktop_act` fails `busy` until the holder
   has been idle 15 s.

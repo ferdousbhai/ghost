@@ -9,9 +9,9 @@ trap cleanup EXIT
 runtime="$work/runtime"
 mkdir -p "$runtime/bin" "$runtime/lib" "$runtime/licenses/ghost" \
   "$runtime/licenses/npm/@earendil-works/pi-ai/0.86.1"
-cp "$source_root/packages/daemon/scripts/launchers/ghost" "$runtime/bin/ghost"
-cp "$source_root/packages/daemon/scripts/launchers/ghostd" "$runtime/bin/ghostd"
-cp "$source_root/packages/daemon/scripts/launchers/ghost-desktop" "$runtime/bin/ghost-desktop"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghostd"
+cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost-desktop"
 printf 'console.log("0.3.0");\n' > "$runtime/lib/ghostd.js"
 cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost.js"
 cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost-desktop.js"
