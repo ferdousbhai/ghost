@@ -56,20 +56,21 @@ replaces. Apply with `systemctl --user daemon-reload && systemctl --user
 restart ghostd`.
 
 Computer use is a separate executable the daemon spawns once, `ghost-desktop`
-on PATH, or `$GHOST_DESKTOP` when set. Bun runs its source directly, so the
-same clone needs no build for it: add a second launcher,
+on PATH, or `$GHOST_DESKTOP` when set. It is its own repository,
+[ghost-desktop](https://github.com/ferdousbhai/ghost-desktop); to run a clone of it (Bun runs the source directly,
+no build), clone it to `~/src/ghost-desktop` and add a second launcher,
 
 ```sh
 cat > ~/.local/bin/ghost-desktop-dev <<'EOF'
 #!/usr/bin/env bash
 exec /home/<owner>/.bun/bin/bun \
-  /home/<owner>/src/ghost/packages/desktop/src/main.ts "$@"
+  /home/<owner>/src/ghost-desktop/src/main.ts "$@"
 EOF
 chmod 755 ~/.local/bin/ghost-desktop-dev
 ```
 
 and `Environment=GHOST_DESKTOP=%h/.local/bin/ghost-desktop-dev` under the same
-`[Service]` override. A daemon restart picks up a changed `packages/desktop`.
+`[Service]` override. A daemon restart picks up a pull of that clone.
 
 `ghostd.service` sets `ProtectSystem=strict` with `ReadWritePaths=%h %t`, so the
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is

@@ -26,7 +26,7 @@ development guide.
 Detailed external protocols have one home:
 
 - [hooks](../../docs/hooks.md)
-- [ghost-desktop](../../docs/desktop.md)
+- [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop#readme)
 
 ## Persistent state
 

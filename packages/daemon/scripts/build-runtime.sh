@@ -26,26 +26,30 @@ version="$(bun -e \
   'process.stdout.write((await Bun.file(process.argv[1]).json()).version)' \
   "$package_root/package.json")"
 
+# Ghost's own bundles carry its release version; ghost-desktop, its own repo
+# pinned in the root package.json, keeps the version it reports itself.
 build_bundle() {
   local entry="$1"
   local name="$2"
+  shift 2
   bun build \
     --target=bun \
     --format=esm \
     --sourcemap=none \
     --minify \
     --keep-names \
-    --define "process.env.GHOSTD_VERSION=\"$version\"" \
+    "$@" \
     --external fsevents \
     --metafile="$meta_root/$name.json" \
     --outfile="$runtime_root/lib/$name.js" \
-    "$package_root/$entry"
+    "$entry"
   chmod 644 "$runtime_root/lib/$name.js" "$meta_root/$name.json"
 }
 
-build_bundle src/main.ts ghostd
-build_bundle src/cli/main.ts ghost
-build_bundle ../desktop/src/main.ts ghost-desktop
+ghost_version=(--define "process.env.GHOSTD_VERSION=\"$version\"")
+build_bundle "$package_root/src/main.ts" ghostd "${ghost_version[@]}"
+build_bundle "$package_root/src/cli/main.ts" ghost "${ghost_version[@]}"
+build_bundle "$source_root/node_modules/ghost-desktop/src/main.ts" ghost-desktop
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost"
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"

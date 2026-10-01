@@ -13,6 +13,7 @@
     "prepare": "git config core.hooksPath .githooks 2>/dev/null || true"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.10"
+    "@biomejs/biome": "^2.5.10",
+    "ghost-desktop": "github:ferdousbhai/ghost-desktop#v0.1.3"
   }
 }

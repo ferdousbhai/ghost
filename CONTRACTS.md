@@ -524,7 +524,7 @@ switching models.
 Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
 errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
 hosted-session, concurrency, or spend cap. The one deliberate exception is the
-desktop lease ([`lease.ts`](packages/desktop/src/lease.ts)): there is one
+desktop lease (ghost-desktop's [`lease.ts`](https://github.com/ferdousbhai/ghost-desktop/blob/master/src/lease.ts)): there is one
 pointer and one focus, so every `desktop_act` call claims the desktop for its
 caller, and another caller's call fails `busy` naming the holder until the
 holder has been idle 15 s. The lease is a file under
@@ -537,11 +537,11 @@ foreign holder as `heldBy`.
 
 ## Package boundaries
 
-Ghost is two sides of one product plus one separate product. **ghost-core**
+Ghost is two sides of one product plus two separate products. **ghost-core**
 is everything a second interface could reuse: `packages/runtime`,
 `packages/daemon`, and `packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
 `packages/shell` (published as `@ghost/omarchy`; the directory name is
-historical) and `packages/desktop` (`ghost-desktop`). The sides meet only at named
+historical) and `ghost-desktop`, its own repository. The sides meet only at named
 seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
 relay WebSocket protocol, and MCP over stdio with `ghost-desktop`'s PATH
 spawn — and core never imports the Omarchy side:
@@ -660,21 +660,19 @@ not the daemon, protocols, or graphical-session lifecycle.
   backend. Client text
   frames are capped at `MAX_RELAY_MESSAGE_BYTES`
   ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
-- [`packages/desktop`](packages/desktop/src) is `ghost-desktop`, Hyprland
-  computer use as a stdio MCP server with two tools, `desktop_look` (never
-  changes the desktop) and `desktop_act` (ordered steps); any MCP client can
-  run it. It needs no Python and no uinput: it drives Hyprland's IPC sockets, `grim`,
-  `wtype`, `wl-clipboard`, the AT-SPI bus over its own D-Bus client, and a
-  `zwlr_virtual_pointer_v1` pointer over its own Wayland client. A window
-  capture reads that window's own buffer (`grim -T`); a hidden window it cannot
-  read is refused, never replaced by the screen under it. Input is refused on
-  a locked or unknown session. ghostd spawns one per daemon on first use
+- [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server
+  with two tools, `desktop_look` (never changes the desktop) and `desktop_act`
+  (ordered steps); any MCP client can run it. It is its own repository with
+  its own version, pinned by tag in the root `package.json` and bundled into
+  the runtime as `ghost-desktop` by
+  [`build-runtime.sh`](packages/daemon/scripts/build-runtime.sh), so the
+  package still ships it. What Ghost relies on is its README's host contract:
+  the two tool names, `_meta.caller` in, and `_meta.code` out on a failure.
+  ghostd spawns one per daemon on first use
   ([`desktop.ts`](packages/extensions/src/extensions/desktop.ts)): unlike an
   owner's MCP server its tools keep their names and its errors reach the model
   word for word, because they carry the remedy; its text is fenced as
-  untrusted. No `ghost-desktop` on PATH means no desktop tools. Each error
-  starts with its code (`unavailable`, `locked`, `busy`, `not_found`,
-  `invalid`, `failed`).
+  untrusted. No `ghost-desktop` on PATH means no desktop tools.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
@@ -683,7 +681,7 @@ not the daemon, protocols, or graphical-session lifecycle.
   reads. The only install path for owners is Omarchy's package repository.
 
 Protocols implemented by a sidecar have one detailed document:
-[`docs/hooks.md`](docs/hooks.md) and [`docs/desktop.md`](docs/desktop.md).
+[`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).
 
 ## Harness and lifecycle invariants
 
