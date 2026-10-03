@@ -182,7 +182,10 @@ using stderr as the reason. Other exit codes, malformed output, thrown handlers,
 and timeouts are logged and fail open.
 Handlers are cancelled when the client aborts the turn.
 
-Ghost sets `stop_hook_active: true` on continuation passes. The hook owns its
+The owner's queued follow-up outranks a hook: Ghost skips `session_stop` for a
+pass while a follow-up waits, and drops a continuation when one arrives while
+the hook runs, so a hook never needs to watch for the owner typing. Ghost sets
+`stop_hook_active: true` on continuation passes. The hook owns its
 continuation policy, the same way Codex Stop hooks do: Ghost will keep honoring
 a blocking result until the hook accepts, the client aborts, or the hook fails
 open. Use `stop_hook_active` to avoid a loop that will never resolve. The

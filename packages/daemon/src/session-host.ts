@@ -511,11 +511,12 @@ export class SessionHost {
     const blocks = { next: 0 };
     let terminal: TurnEvent = { type: "done", reason: "stop", usage: zeroUsage() };
     try {
-      let next: { text: string; origin?: "follow_up" | "hook" } | undefined = { text: prompt };
+      type Pass = { text: string; origin?: "follow_up" | "hook" };
+      let next: Pass | undefined = { text: prompt };
       let turnId = 0;
       while (next && !controller.signal.aborted) {
         turnId += 1;
-        const { text, origin } = next;
+        const { text, origin }: Pass = next;
         await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         if (origin !== "hook") {
@@ -527,8 +528,12 @@ export class SessionHost {
           terminal = failure;
           break;
         }
-        const continuation = await this.sessionStop(ghost, id, text, turnId, origin === "hook", controller.signal);
-        if (continuation) {
+        // The owner's own queued message is the next instruction: a stop hook
+        // is not asked while one waits, and loses to one sent while it ran.
+        const continuation: string | null = turn.followUps.length > 0
+          ? null
+          : await this.sessionStop(ghost, id, text, turnId, origin === "hook", controller.signal);
+        if (continuation && turn.followUps.length === 0) {
           stream.emit({ type: "session_stop_continued", reason: continuation });
           next = { text: continuation, origin: "hook" };
           continue;

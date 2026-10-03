@@ -287,6 +287,63 @@ describe("owner commands and hooks", () => {
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
     expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
   });
+
+  /** A stop hook that blocks the first time it is asked, once `go` exists. */
+  function blockOnceStopHook(): { hooks: GhostHookRunner; started: string; go: string } {
+    const scratch = tempDir();
+    cleanups.push(scratch.cleanup);
+    const started = join(scratch.path, "started");
+    const seen = join(scratch.path, "seen");
+    const go = join(scratch.path, "go");
+    const script = join(scratch.path, "stop.sh");
+    writeFileSync(script, [
+      "#!/bin/bash",
+      `touch ${started}`,
+      `while [ ! -e ${go} ]; do sleep 0.02; done`,
+      `if [ -e ${seen} ]; then echo '{}'; else touch ${seen}; echo '{"decision":"block","reason":"verify it"}'; fi`,
+      "",
+    ].join("\n"));
+    chmodSync(script, 0o755);
+    const hooksPath = join(scratch.path, "hooks.json");
+    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [{ type: "command", command: script }] }] } }));
+    return { hooks: GhostHookRunner.fromConfig(hooksPath), started, go };
+  }
+
+  it("does not ask the stop hook while the owner's follow-up waits", async () => {
+    const stop = blockOnceStopHook();
+    writeFileSync(stop.go, "");
+    const fake = harness([]);
+    const gate = fake.gate("first");
+    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second", "verified")]);
+    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    await waitFor(() => fake.calls().length === 1);
+    await sessions.queueMessage("casper", "c1", "followUp", "two");
+    gate.release();
+    await running;
+
+    // The first pass is not reviewed; the follow-up's own pass is.
+    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two", "Stop hook feedback:\nverify it"]);
+    expect(events.findIndex((event) => event.type === "owner_message"))
+      .toBeLessThan(events.findIndex((event) => event.type === "session_stop_continued"));
+  });
+
+  it("lets a follow-up sent while the stop hook runs win over its continuation", async () => {
+    const stop = blockOnceStopHook();
+    const fake = harness(replies("first", "second"));
+    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    await waitFor(() => existsSync(stop.started));
+    await sessions.queueMessage("casper", "c1", "followUp", "two");
+    writeFileSync(stop.go, "");
+    await running;
+
+    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
+    expect(events).toContainEqual({ type: "owner_message", text: "two" });
+    expect(events.some((event) => event.type === "session_stop_continued")).toBe(false);
+  });
 });
 
 describe("conversation metadata", () => {

@@ -253,7 +253,9 @@ owner's `!command` runs in the owner home with the conversation's identity
 and is logged; `!!command` is logged but never handed on.
 
 A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
---follow-up`) runs as the next pass in the same stream, a steer included.
+--follow-up`) runs as the next pass in the same stream, a steer included. A
+queued follow-up outranks a stop hook: no `session_stop` is asked while one
+waits, and one sent while the hook runs replaces its continuation.
 Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
 and nothing else. Images, attachments, and model choice are the harness's.
 
