@@ -35,6 +35,7 @@ pragma ComponentBehavior: Bound
 // shared design tokens.
 import QtQuick
 import "../services"
+import "MarkdownCompat.js" as MarkdownCompat
 
 Item {
     id: root
@@ -149,7 +150,7 @@ Item {
             visible: root.reading
             // Empty while hidden: a hidden Text still parses and lays out, and
             // source-mode typing should not pay for a second document.
-            text: root.reading ? field.text : ""
+            text: root.reading ? MarkdownCompat.normalize(field.text) : ""
             textFormat: Text.MarkdownText
             color: Theme.foreground
             linkColor: Theme.ghostAmber

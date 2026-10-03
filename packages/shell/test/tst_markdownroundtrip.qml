@@ -51,7 +51,10 @@ TestCase {
 
     function test_inlineAndBlockStructureSurvive(): void {
         compare(tc.roundTrip("# Heading\n"), "# Heading\n\n");
-        compare(tc.roundTrip("**b** _i_ ~~s~~ `c`\n"), "**b** _i_ ~~s~~ `c`\n\n");
+        // Qt 6.11.2 also stopped parsing `_` and `~` emphasis at all (the
+        // markers are eaten, see tst_markdowncompat.qml), so they cannot come
+        // back. Re-run 2026-10-03: source editing stands, more so.
+        compare(tc.roundTrip("**b** _i_ ~~s~~ `c`\n"), "**b** i s `c`\n\n");
         compare(tc.roundTrip("- one\n- two\n"), "- one\n- two\n");
         compare(tc.roundTrip("- [ ] todo\n- [x] done\n"), "- [ ] todo\n- [x] done\n");
         compare(tc.roundTrip("> quote\n"), "> quote\n\n");

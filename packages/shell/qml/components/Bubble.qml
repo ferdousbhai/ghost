@@ -13,6 +13,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import "../services"
+import "MarkdownCompat.js" as MarkdownCompat
 import "MarkdownSegments.js" as MarkdownSegments
 
 Item {
@@ -306,7 +307,7 @@ Item {
                             required property string markdown
                             objectName: "replyBlock"
                             width: bodyView.width
-                            text: markdown
+                            text: root.plainBody ? markdown : MarkdownCompat.normalize(markdown)
                         }
                     }
 
@@ -315,7 +316,7 @@ Item {
                         objectName: "replyTail"
                         width: bodyView.width
                         visible: root.liveTail !== ""
-                        text: root.liveTail
+                        text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail)
                     }
                 }
 
