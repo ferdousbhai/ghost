@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { resolveGhost, resolveTarget } from "./common.js";
-import { emit, table } from "./output.js";
+import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
 const ghostPath = (name: string, suffix = ""): string => `/api/ghosts/${encodeURIComponent(name)}${suffix}`;
@@ -31,13 +31,6 @@ export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): 
   return 0;
 }
 
-/** `ghost greeting`: the smol model's opening line, as the HUD asks for it. */
-export async function greetingCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const body = (await ctx.client.request("POST", ghostPath(name, "/greeting"), {})).body;
-  emit(ctx, body, (result) => `${(result as { greeting: string | null }).greeting ?? "(no greeting)"}\n`);
-  return 0;
-}
 
 /** `ghost delete --yes -s <id>`: move one conversation and its sidecars to Trash. */
 export async function deleteSessionCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
@@ -56,43 +49,8 @@ export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promi
   return 0;
 }
 
-/** `ghost reanswer <entryId> -s <id>`: reopen a historical ask and resume that branch. */
-export async function reanswerCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const entryId = parsed.positionals[0];
-  if (!entryId) throw new ArgsError("ghost reanswer needs the ask entry id");
-  const { path } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("POST", `${path}/reanswer`, { entryId })).body;
-  emit(ctx, body);
-  return 0;
-}
 
-/** `ghost resources -s <id>`: the session's admitted skill and MCP snapshot. */
-export async function resourcesCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { path } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("GET", `${path}/resources`)).body;
-  emit(ctx, body, (result) => {
-    const view = result as { skills?: Array<{ name: string; source: string; status: string }>; mcpServers?: Array<{ name: string; status: string }> };
-    const lines = [
-      table((view.skills ?? []).map((skill) => [skill.name, skill.source, skill.status]), ["SKILL", "SOURCE", "STATUS"]),
-      table((view.mcpServers ?? []).map((server) => [server.name, server.status]), ["MCP", "STATUS"]),
-    ];
-    return `${lines.join("\n\n")}\n`;
-  });
-  return 0;
-}
 
-/** `ghost commands -s <id>`: the pi slash commands this conversation accepts. */
-export async function commandsCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { path } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("GET", `${path}/commands`)).body;
-  emit(ctx, body, (result) => {
-    const rows = (result as { commands?: Array<{ name: string; description?: string }> }).commands ?? [];
-    return rows.length > 0
-      ? `${table(rows.map((row) => [`/${row.name}`, row.description ?? ""]), ["COMMAND", "DESCRIPTION"])}\n`
-      : "No slash commands.\n";
-  });
-  return 0;
-}
 
 /** `ghost remote [status|on|off]`: the Tailscale Serve viewer. */
 export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {

@@ -133,31 +133,26 @@ TestCase {
     }
 
 
-    function test_unansweredAskSurvivesWithNoTextBesideIt(): void {
-        // The shape that broke a real conversation: the app closed on an open
-        // question, so the turn's last message is a lone `ask` call. Drop that
-        // row and the card's re-answer branch goes with it, leaving a question
-        // nobody can ever answer.
+    function test_toolOnlyTurnSurvivesWithNoTextBesideIt(): void {
         const rows = TurnBlocks.rows([
-            { role: "user", content: [{ type: "text", text: "let's delete it" }], entryId: "u1" },
-            {
-                role: "assistant",
-                entryId: "a1",
-                content: [{
-                    type: "toolCall",
-                    id: "call_1",
-                    name: "ask",
-                    ghostAsk: { index: 0, count: 1, resultEntryId: "c8495d57" }
-                }]
-            },
-            { role: "assistant", content: [], entryId: "a2" }
+            { role: "user", content: [{ type: "text", text: "tidy it" }] },
+            { role: "assistant", content: [{ type: "toolCall", id: "call_1", name: "Bash" }] },
+            { role: "assistant", content: [] }
         ]);
         compare(rows.length, 2);
         compare(rows[1].role, "assistant");
         compare(rows[1].text, "");
         compare(rows[1].parts.length, 1);
-        compare(rows[1].parts[0].name, "ask");
-        compare(rows[1].parts[0].ghostAsk.resultEntryId, "c8495d57");
+    }
+
+    function test_failedTurnKeepsItsErrorEvenWithoutText(): void {
+        const rows = TurnBlocks.rows([
+            { role: "user", content: [{ type: "text", text: "hello" }] },
+            { role: "assistant", content: [], errorMessage: "claude usage limit reached" }
+        ]);
+        compare(rows.length, 2);
+        compare(rows[1].error, "claude usage limit reached");
+        compare(rows[0].error, undefined);
     }
 
     function test_oneTurnSplitAcrossMessagesBecomesOneRow(): void {
@@ -174,8 +169,6 @@ TestCase {
         // made it one; regrouping is what lets the split see them together.
         compare(rows[1].text, "13 repos.");
         compare(rows[1].parts.length, 4);
-        // The row answers as the turn started, so a rewind lands where it should.
-        compare(rows[1].entryId, "a1");
     }
 
     function test_emptyMessagesLeaveNoRow(): void {
@@ -188,7 +181,7 @@ TestCase {
 
     function test_toolOnlyRowsDoNotSwallowTheNextPrompt(): void {
         const rows = TurnBlocks.rows([
-            { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "ask" }], entryId: "a1" },
+            { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }], entryId: "a1" },
             { role: "user", content: [{ type: "text", text: "second" }], entryId: "u2" },
             { role: "assistant", content: [{ type: "text", text: "done" }], entryId: "a2" }
         ]);

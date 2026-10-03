@@ -70,8 +70,8 @@ describe("ghostd help", () => {
     }
 
     expect(output).not.toContain("ghostd import");
+    expect(output).not.toContain("ghostd login");
     for (const command of [
-      "login",
       "relay-token",
       "api-token",
       "remote",

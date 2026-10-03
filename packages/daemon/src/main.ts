@@ -5,8 +5,6 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
-import { LoginManager } from "./auth.js";
-import { loginCommand } from "./login-command.js";
 import {
   DEFAULT_SHUTDOWN_FORCE_MS,
   DEFAULT_SHUTDOWN_GRACE_MS,
@@ -14,17 +12,16 @@ import {
   type DaemonConfig,
   type DaemonConfigOverrides,
 } from "./config.js";
-import { scrubProviderEnv } from "./env-scrub.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
-import { GhostRegistry } from "./ghosts.js";
+import { GhostRegistry, ghostPaths } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
-import { hookSmolCompleteCommand } from "./hook-smol-complete.js";
+import { hookCompleteCommand } from "./hook-complete.js";
 import { createJournalSink } from "./journal.js";
+import { importPiConversations } from "./pi-import.js";
 import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
-import { ModelSelection } from "./model-selection.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
 import { resolveRunningSource } from "./running-source.js";
@@ -43,17 +40,12 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
-  ghostd login [<ghost>] [--provider <id>] [--api-key] [options]
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
   ghostd remote [on|off|status]
   ghostd hook-smol-complete
 
 Subcommands:
-  login                    Sign a ghost into a model provider from the terminal
-                           (the same flow the shell drives over HTTP). Prompts
-                           for the ghost and provider when not given; --api-key
-                           selects the api-key flow over OAuth.
   relay-token              Print the browser-relay pairing token (minting one on
                            first run) to paste into the Chromium extension.
                            --rotate mints a new one and invalidates the old.
@@ -63,15 +55,15 @@ Subcommands:
                            401. --rotate mints a new one and invalidates the old.
   remote                   Show or change the daemon's tailnet exposure through
                            Tailscale Serve. Defaults to status.
-  hook-smol-complete       Internal command-hook bridge. Reads ghost_home,
-                           prompt, and an optional role as JSON on stdin and
-                           writes that role's one completion as JSON on stdout.
+  hook-smol-complete       Command-hook bridge. Reads ghost_home and prompt as
+                           JSON on stdin and writes one completion from the
+                           ghost's preferred harness as JSON on stdout.
 
 Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --offline            Forbid pi's catalogue network calls (refresh off)
+      --offline            Skip the daily release check
       --log-level <level>  debug | info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
@@ -146,7 +138,6 @@ export async function runStagedShutdown(options: StagedShutdownOptions): Promise
 }
 
 export interface ShutdownSignalOptions {
-  login: Pick<LoginManager, "dispose">;
   listening: Pick<ListeningServer, "server" | "relay" | "close">;
   host: Pick<SessionHost, "beginShutdown" | "disposeAll"> & {
     forceDisposeAll(): void | Promise<void>;
@@ -214,7 +205,6 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
         try {
           const result = await runStagedShutdown({
             stopAdmission: () => {
-              options.login.dispose();
               options.listening.server.close();
               options.listening.server.closeIdleConnections();
             },
@@ -309,13 +299,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
-  // only XDG state, remote touches config and Tailscale Serve, and login takes
-  // the home reservation itself.
+  // only XDG state, and remote touches config and Tailscale Serve.
   if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
-  if (argv[0] === "login") return loginCommand(argv.slice(1));
-  if (argv[0] === "hook-smol-complete") return hookSmolCompleteCommand(argv.slice(1));
+  if (argv[0] === "hook-smol-complete") return hookCompleteCommand(argv.slice(1));
 
   let parsed: ParsedArgs;
   try {
@@ -343,13 +331,6 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  // Before pi, before any session. Idempotent, but this is the call that
-  // matters: everything downstream inherits this environment.
-  const { removed } = scrubProviderEnv(process.env, { offline: config.offline });
-  if (removed.length > 0) {
-    logger.warn("removed inherited provider credentials and routing overrides", { removed });
-  }
-
   let hooks: GhostHookRunner;
   const hooksPath = config.hooksPath;
   try {
@@ -368,7 +349,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
   } catch (error) {
     const detail =
       error instanceof HomeReservationBusyError
-        ? "another ghostd is running or a login is in progress"
+        ? "another ghostd is running"
         : (error as Error).message;
     logger.error("could not reserve the ghost home", {
       ghostsRoot: config.ghostsRoot,
@@ -405,7 +386,6 @@ async function serveDaemon(
     DAEMON_VERSION,
     dirname(fileURLToPath(import.meta.url)),
   );
-  // Offline forbids every catalogue call, the release check included.
   const updates = config.offline
     ? null
     : new UpdateChecker({ version: runningSource.version, sourceRoot: runningSource.root, logger });
@@ -414,6 +394,8 @@ async function serveDaemon(
   try {
     await Promise.all(registry.list().map(async (ghost) => {
       await ensureGhostHomeLayout(ghost.dir);
+      const imported = await importPiConversations(ghostPaths(ghost.dir).sessionDir, logger);
+      if (imported > 0) logger.info("imported pi conversations", { ghost: ghost.name, imported });
     }));
   } catch (error) {
     logger.error("could not ensure a ghost home layout", {
@@ -429,36 +411,18 @@ async function serveDaemon(
   // then reports that none is reachable.
   const relay = createRelayHub({ logger });
   const homeOperations = new HomeOperationCoordinator(registry);
-  const modelSelection = new ModelSelection({
-    registry,
-    homeOperations,
-    // A model switch must reach any conversation that is already open, not just
-    // the next freshly built session: rebind the live cached sessions.
-    onModelRoutingChanged: (name): Promise<void> => host.rebindModel(name),
-  });
   const host = new SessionHost({
     registry,
     homeOperations,
-    models: modelSelection,
     ownerHome,
     scheduleUnitDir,
     scheduleRuntimeUnitDir,
     runningSource,
     logger,
-    offline: config.offline,
-    compaction: config.compaction,
-    askTimeoutSeconds: config.askTimeoutSeconds,
     hooks,
     extensionOptions: {
       ...(relay ? { relayTransport: relay } : {}),
     },
-  });
-  const login = new LoginManager({
-    registry,
-    homeOperations,
-    logger,
-    offline: config.offline,
-    onLoginSucceeded: (name, signal) => host.refreshAuth(name, signal),
   });
   const mcp = new McpCatalog({ registry, homeOperations, logger });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
@@ -469,8 +433,6 @@ async function serveDaemon(
       registry,
       host,
       homeOperations,
-      login,
-      models: modelSelection,
       mcp,
       hooks,
       runningSource,
@@ -513,7 +475,6 @@ async function serveDaemon(
   });
 
   await waitForShutdownSignal({
-    login,
     listening,
     host,
     browsers: { closeAll: closeAllBrowserSessions },

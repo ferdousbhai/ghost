@@ -18,15 +18,6 @@ Singleton {
         return true;
     }
 
-    function openLoginUrl(url: string): bool {
-        if (!Policy.isLoginUrl(url)) {
-            console.warn("ghost shell rejected an unsafe daemon login URL");
-            return false;
-        }
-        Quickshell.execDetached(["xdg-open", url]);
-        return true;
-    }
-
     /**
      * Hand an absolute local path — a file or a directory — to whatever the
      * desktop has registered for it. Used by Workbench's editor fallback;

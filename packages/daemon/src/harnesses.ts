@@ -200,3 +200,26 @@ export async function readHarnessReport(
     .map((id) => assessHarness(id, readRecord(directory, id), now));
   return { harnesses, refresh: REFRESH_COMMAND };
 }
+
+/** Omarchy's default agent (`omarchy default agent`), or null when none is chosen. */
+export async function omarchyDefaultAgent(env: NodeJS.ProcessEnv): Promise<string | null> {
+  try {
+    const { stdout } = await exec("omarchy-default-agent", [], { env, timeout: 5_000 });
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The order a ghost tries harnesses in: the `preferred` ids that are eligible,
+ * in the order given (the conversation's own, the ghost's `harness` setting,
+ * Omarchy's default), then every other eligible one, in Omarchy's order.
+ */
+export function orderHarnesses(eligible: readonly string[], preferred: readonly (string | null)[]): string[] {
+  const ordered: string[] = [];
+  for (const id of [...preferred, ...eligible]) {
+    if (id && eligible.includes(id) && !ordered.includes(id)) ordered.push(id);
+  }
+  return ordered;
+}

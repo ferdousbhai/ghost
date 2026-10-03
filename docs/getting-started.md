@@ -14,8 +14,10 @@ of — this page.
   there is no generic Arch/Hyprland support promise.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
-- **A model provider you can sign into** — an OpenRouter account is enough, and
-  its free models cost nothing.
+- **An agent CLI you are signed into** — Omarchy installs Claude Code, Codex,
+  Grok, Copilot, OpenCode, pi, and others; sign into at least one the way you
+  normally would (`claude`, `codex login`, …). A ghost's turns run on it, on
+  your own subscription.
 
 ## 1. Install the package
 
@@ -47,7 +49,7 @@ commands that finish the job, which are section 3 — do not skip it.
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
-it with its runtime's native file tools, its own notes included. Ghost does
+it with its harness's native file tools, its own notes included. Ghost does
 not index the directory or read any of it until a request
 calls for it.
 
@@ -114,94 +116,36 @@ helps with what you asked first, learns about you in the gaps, and offers a
 character draft for your approval before writing itself. Nothing is blocked
 waiting for that.
 
-## 5. Connect a provider and pick a model
+## 5. Which agent answers
 
-Terminal:
-
-```sh
-ghost login --list                 # who you can sign in to
-ghost login openrouter -g sage
-printf %s "$KEY" | ghost login openrouter --key-stdin -g sage
-```
-
-`ghost login` goes through the running daemon, which owns the whole flow.
-`--oauth` chooses the browser flow where the provider offers both; the default
-is the paste-a-key flow. `--key-stdin` reads one key from stdin so a script
-never puts it in argv, and `ghost logout <provider>` signs out again. The
-credential goes into pi's own store, `~/ghosts/<name>/.pi/auth.json`.
-
-With the daemon stopped, `ghostd login` does the same thing offline:
+Nothing to configure: each turn runs on one of the agent CLIs you already use,
+headless, in the conversation's own directory under the ghost home. Ghost
+picks, per turn, the one already carrying the conversation, then the ghost's
+`harness` setting, then your Omarchy default agent (`omarchy default agent
+<name>`), then any other installed agent whose usage windows have room:
 
 ```sh
-ghostd login                    # prompts for ghost and provider
-ghostd login sage --provider openrouter
+ghost harnesses          # which agents are installed and which have room
 ```
 
-In the HUD, the same flow, and on a fresh install it is the first thing you
-see: an empty conversation says *Click here to connect a model — free options
-exist*, and the card itself opens the **Connect a provider** pane. The button in
-the chat header reads **Connect a provider** until a model can answer, then
-shows the model and opens **Choose a model**: a searchable list of every model
-your signed-in providers reach, a **Default** row that hands the choice back to
-pi, and a **Connect a provider** button for adding another. Each provider
-row's primary button is **Sign in**, or the provider's own label — Anthropic's
-reads *Sign in (extra usage)*, because third-party calls draw
-per-token usage rather than an included Claude plan. Where a provider offers
-only an API key the button says **Paste API key**; where it offers both, a
-separate **API key** button sits beside the OAuth one.
+To prefer one for a ghost, put it in that ghost's `settings.yml`:
 
-A successful login binds a usable chat model if the role is still unset, so you
-may already be done.
-
-**Which model that is, and why you will not be billed by surprise.** The
-binding is chosen from the models pi reports as *available to your credential
-at that moment*, not from a list recorded in Ghost — so it reflects the
-provider's current roster rather than whatever was current when this was
-written. Among those, a zero-cost model wins: signing into OpenRouter for the
-free tier binds a free model, and a provider whose models all cost something
-(every subscription provider) is unaffected and keeps the ordinary ranking.
-Aggregator routers that charge per request are skipped even when the catalogue
-lists them at zero (`auth.ts`).
-
-If you have a subscription pi supports — Anthropic, GitHub Copilot, OpenAI
-Codex, xAI, Kimi and others in `ghost login --list` — sign into that instead
-and the ghost runs on it. `ghost login --list` marks which ones are
-subscriptions.
-
-To look and choose explicitly:
-
-```sh
-ghost model                        # what is bound now
-ghost model --list                 # what the signed-in providers reach
-ghost model openrouter/<model-id>  # bind the chat model
+```yaml
+harness: codex
 ```
 
-In a conversation, `/model` shows the model, `/model <provider>/<id>` binds it,
-and `/model default` hands the choice back to pi.
-
-A model is always written as `provider/id`, split at the *first* slash — an id
-that itself contains slashes is fine. pi validates the model when the next turn
-runs. Signing into another provider never changes a model you already bound;
-choose one of its models afterwards.
-
-To drive the ghost with a local model, install Ollama or LM Studio from the
-Omarchy menu (Install → AI). A local runner is an ordinary provider entry in
-`~/ghosts/<name>/models.json`, an OpenAI-compatible endpoint with the models it
-serves (the shape is `GhostProviderConfig` in
-[`models.ts`](../packages/daemon/src/models.ts)); the easiest way to add one is
-to ask the ghost, which has the file and the schema. Then `ghost model
-<provider>/<model>` makes it the chat model. For the hard questions, let the
-ghost delegate from Bash to a specialist CLI (`claude -p`, `codex`, `pi`);
-pick a chat model that accepts images if you want it to read screenshots.
+An agent that cannot take a turn — not signed in, out of quota — hands it to
+the next, which is given the conversation so far. The model, sign-in, tools,
+and permissions are that agent's own, configured as you would for yourself;
+Ghost has no model picker or provider login. For the hard questions, a ghost
+also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
 
 ## 6. First conversation in the HUD
 
 Summon the HUD (`SUPER+CTRL+G`, your app launcher, or
 `omarchy-shell shell toggle ferdousbhai.ghost`). An
 empty conversation shows the ghost's glyph, its name, and the static line
-`What's on your mind?`. A greeting in that ghost's own voice — written by its
-`smol_model` — crossfades over the static line a moment later if it arrives; a
-failed greeting is silently no greeting, never an error.
+`What's on your mind?`.
 
 Type, and:
 
@@ -209,16 +153,13 @@ Type, and:
 |---|---|
 | `Enter` | send |
 | `Shift+Enter` | newline |
-| `Enter` *(mid-turn)* | steer the turn that is already running |
-| `Ctrl+Enter` *(mid-turn)* | queue the text as a follow-up instead of steering |
+| `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
 | `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 
 The 64-pixel rail on the right switches sections: **Chat**, **Board**,
-**Character**, **Commands**, **Hooks**, **MCP**, and **Remote access**. (The
-admitted skills and MCP servers are not a rail section; they read as one line at
-the top of a conversation.) Clicking the ghost mark in the Omarchy bar toggles
-the HUD.
+**Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
+mark in the Omarchy bar toggles the HUD.
 
 ## 7. The same ghost from the terminal
 
@@ -232,7 +173,7 @@ ghost show -s cli-abc
 `ghost say` streams the turn; tool activity goes to stderr so stdout stays the
 answer. It continues the most recently updated conversation unless you pass
 `--new` or `-s <id>` (an id or any unique prefix). While a turn is running,
-`--steer` and `--follow-up` queue text into it; a `--follow-up` to an idle
+`--follow-up` queues text to run after it; a `--follow-up` to an idle
 conversation becomes its next turn, which is how a ghost's own background
 command reports back.
 
@@ -252,13 +193,12 @@ skill, so another agent on this machine can drive the same client.
 
 | Path | What |
 |---|---|
-| `~/ghosts/<name>/` | the ghost home: `character.md`, `sessions/`, `models.json`, and whatever else that ghost uses |
-| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, ask timeout, remote) — optional; a missing file is fine, a malformed one is an error |
+| `~/ghosts/<name>/` | the ghost home: `character.md`, `settings.yml`, `mcp.json`, and `sessions/<id>/`, one directory per conversation |
+| `~/.config/ghost/config.json` | daemon config (port, host, ghosts root, remote) — optional; a missing file is fine, a malformed one is an error |
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
 | `~/.local/state/ghost/relay-token` | the browser-relay pairing token |
-| `~/ghosts/<name>/.pi/auth.json` | that ghost's provider logins, written by pi |
 | XDG Pictures | `ghost-<ghost>-{screen,browser}-<timestamp>.png` screenshots |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
@@ -268,7 +208,7 @@ and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
 host).
 
 Nothing in that list is owned by pacman. Upgrading or removing the package
-leaves personas, conversations, credentials, tokens, your documents,
+leaves personas, conversations, tokens, your documents,
 and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
@@ -296,7 +236,8 @@ and any skill you installed untouched.
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
 | The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, link it into `~/.config/omarchy/plugins/` and `omarchy-shell shell rescanPlugins`. |
-| You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage |
+| A turn fails at once | `ghost harnesses` — is any agent installed with room? Run that agent by hand once to confirm it is signed in |
+| You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
 After an upgrade, re-enable rather than restart, so an installation made with
 an older unit moves onto the graphical-session lifecycle:

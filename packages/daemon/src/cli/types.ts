@@ -13,9 +13,6 @@ export type CliFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
-/** One interactive answer read from the terminal during `ghost login`. */
-export type CliPrompt = (request: { query: string; secret: boolean }) => Promise<string>;
-
 export interface GhostCliOptions {
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -23,8 +20,6 @@ export interface GhostCliOptions {
   stderr?: CliWritable;
   fetch?: CliFetch;
   stdin?: CliStdin;
-  /** Test/embedding seam for terminal prompts; defaults to a readline over the real TTY. */
-  prompt?: CliPrompt;
 }
 
 export interface CliRuntime {
@@ -34,7 +29,6 @@ export interface CliRuntime {
   stderr: CliWritable;
   fetch: CliFetch;
   stdin: CliStdin;
-  prompt?: CliPrompt;
 }
 
 export interface CliContext {

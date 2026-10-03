@@ -26,7 +26,7 @@ TestCase {
     function tool(name, status, args): var {
         return {
             id: "tool-" + name, name: name, status: status,
-            arguments: args, cwd: "", summary: "", intent: "", askSettled: ""
+            arguments: args, cwd: "", summary: "", intent: ""
         };
     }
 
@@ -77,16 +77,6 @@ TestCase {
             tool("grep", "running", { pattern: "retry" })
         ];
         compare(line.phrase, "Searching for “retry”");
-    }
-
-    function test_aModelFallbackSaysWhichModelItCrossedTo(): void {
-        const line = createTemporaryObject(lineComponent, tc);
-        verify(line !== null);
-        Ghostd.streaming = true;
-        Ghostd.activity = "switching model · claude-sonnet-5";
-        compare(line.phrase, "Switching to claude-sonnet-5");
-        Ghostd.activity = "using fallback · claude-sonnet-5";
-        compare(line.phrase, "Falling back to claude-sonnet-5");
     }
 
     function test_aFailedTurnShowsItsErrorInsteadOfActivity(): void {

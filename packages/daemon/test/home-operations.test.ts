@@ -5,18 +5,24 @@ import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
-import { deferred } from "./helpers/fake-login-runtime.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 function makeSessionHost(fixture: TempGhosts): SessionHost {
   return new SessionHost({
     registry: fixture.registry,
     ownerHome: fixture.ownerHome,
-    offline: true,
     scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
   });
 }

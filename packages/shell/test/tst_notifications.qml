@@ -16,7 +16,7 @@ TestCase {
         Notifier.notificationIds = ({});
         Notifier.enabled = true;
         Ghostd.activeGhost = "casper";
-        Ghostd.currentSessionId = "pi:one";
+        Ghostd.currentSessionId = "one";
         Ghostd.hudChatFocused = true;
     }
 
@@ -27,30 +27,30 @@ TestCase {
     }
 
     function test_suppressesOnlyTheViewedConversation(): void {
-        Ghostd.turnFinished("casper", "Done", "pi:one", "First");
+        Ghostd.turnFinished("casper", "Done", "one", "First");
         verify(!sender.running);
-        Ghostd.turnFinished("casper", "Background finished", "pi:two", "Second");
+        Ghostd.turnFinished("casper", "Background finished", "two", "Second");
         verify(sender.running);
         compare(sender.command.slice(-2), ["casper · Second", "Background finished"]);
     }
 
     function test_unfocusedChatStillNotifies(): void {
         Ghostd.hudChatFocused = false;
-        Ghostd.turnFailed("casper", "Sign in to continue", "pi:one", "First");
+        Ghostd.turnFailed("casper", "Sign in to continue", "one", "First");
         verify(sender.running);
         verify(sender.command.includes("--urgency=critical"));
     }
 
     function test_replacesWithinConversationAndKeepsOthersIndependent(): void {
-        Notifier.turnFinished("casper", "pi:one", "First", "Done");
+        Notifier.turnFinished("casper", "one", "First", "Done");
         sender.stdout.read("41");
-        Notifier.askWaiting("casper", "pi:one", "First", { questions: [{ question: "Continue?" }] });
-        Notifier.turnFinished("casper", "pi:two", "Second", "Other done");
+        Notifier.turnFailed("casper", "one", "First", "Stopped");
+        Notifier.turnFinished("casper", "two", "Second", "Other done");
         compare(Notifier.pending.length, 2);
         sender.simulateExited();
         tryVerify(() => sender.running);
         verify(sender.command.includes("--replace-id=41"));
-        compare(sender.command.slice(-1)[0], "Needs your input · Continue?");
+        compare(sender.command.slice(-1)[0], "Stopped");
         sender.stdout.read("41");
         sender.simulateExited();
         tryVerify(() => sender.running);
@@ -59,9 +59,9 @@ TestCase {
     }
 
     function test_pendingUpdatesKeepOnlyTheLatestToastForEachConversation(): void {
-        Notifier.turnFinished("casper", "pi:one", "First", "Done");
-        Notifier.askWaiting("casper", "pi:one", "First", { questions: [{ question: "Continue?" }] });
-        Notifier.turnFinished("casper", "pi:one", "First", "Already answered");
+        Notifier.turnFinished("casper", "one", "First", "Done");
+        Notifier.turnFailed("casper", "one", "First", "Stopped");
+        Notifier.turnFinished("casper", "one", "First", "Already answered");
         sender.stdout.read("41");
         sender.simulateExited();
         tryVerify(() => sender.running);

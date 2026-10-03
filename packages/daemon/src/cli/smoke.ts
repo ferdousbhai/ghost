@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { freePort, waitUntilServing } from "../loopback.js";
@@ -116,8 +116,9 @@ export async function smokeCommand(
     GHOSTD_HOST: "127.0.0.1",
     GHOSTD_API_TOKEN_FILE: tokenFile,
     XDG_STATE_HOME: join(scratch, "state"),
-    XDG_CONFIG_HOME: join(scratch, "config"),
-    XDG_DATA_HOME: join(scratch, "data"),
+    // Harnesses keep their sign-ins under the owner's own XDG config and data
+    // directories, so only Ghost's config moves into the scratch tree.
+    GHOSTD_CONFIG: join(scratch, "config", "ghost", "config.json"),
     GHOSTD_OFFLINE: "1",
   };
   const command = daemonCommand(ctx);
@@ -155,11 +156,11 @@ export async function smokeCommand(
     step = "new probe";
     await runScratchCli(["new", "probe", "-q"], options);
     report("new probe", true);
-    const model = flagString(parsed, "model");
-    if (model) {
-      step = "model";
-      await runScratchCli(["model", model, "-g", "probe", "-q"], options);
-      report("model", true, model);
+    const harness = flagString(parsed, "harness");
+    if (harness) {
+      step = "harness";
+      writeFileSync(join(scratch, "ghosts", "probe", "settings.yml"), `harness: ${harness}\n`);
+      report("harness", true, harness);
     }
     step = "turn";
     if (flagBoolean(parsed, "no-turn")) {
@@ -177,9 +178,8 @@ export async function smokeCommand(
       if (!reply) throw new Error("turn returned no text");
       report("turn", true, reply);
 
-      // A second turn in the same conversation. For a runtime that keeps its
-      // process warm this rides the live one; either way the reply must show
-      // the conversation kept its context, and the counts must add up.
+      // A second turn in the same conversation resumes the harness's own
+      // session: the reply must show the conversation kept its context.
       step = "second turn";
       const sessionId = readSessionId(
         (await runScratchCli(["sessions", "-g", "probe", "--json"], options)).stdout,
@@ -205,8 +205,8 @@ export async function smokeCommand(
         (await runScratchCli(["sessions", "-g", "probe", "--json"], options)).stdout,
         sessionId,
       );
-      if (listed.messageCount < 6) {
-        throw new Error(`three turns recorded messageCount ${listed.messageCount}, expected at least 6`);
+      if (listed.messageCount < 4) {
+        throw new Error(`two turns recorded messageCount ${listed.messageCount}, expected 4`);
       }
       report("accounting", true, `messageCount ${listed.messageCount}`, true);
     }

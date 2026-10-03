@@ -27,8 +27,8 @@ function ascending(a, b) {
  * Split an assistant turn.
  *
  * `blocks` maps content index → `{ kind, text }` (text blocks only), matching
- * the buffer the SSE reader fills. `toolIndices` are the content indices that
- * carry tool calls.
+ * the buffer the SSE reader fills. `toolIndices` are the positions of the tool
+ * calls among those indices; a live call's is fractional (Ghostd.toolSlot).
  *
  * Returns `{ body, captions }`: the reply markdown — the text after the last
  * tool call, or the latest text before it while the turn is still inside its
@@ -93,53 +93,54 @@ function partsOf(message) {
 /**
  * Regroup a stored conversation into the rows the live stream would have made.
  *
- * Older storage projections may give one turn several consecutive assistant
- * messages. Regrouping keeps a restored answer in one row, split the way the
- * live stream would have shown it.
+ * One turn may be stored as several consecutive assistant messages.
+ * Regrouping keeps a restored answer in one row, split the way the live stream
+ * would have shown it. A row with no text survives when it still holds a tool
+ * call or a failure.
  *
- * A row with no text survives when it still holds a tool call. That is the only
- * thing standing between an unanswered `ask` and a dead conversation: its
- * message is a lone `toolCall` part, so dropping the row takes the card's
- * re-answer branch with it and the question can never be answered.
- *
- * Returns `[{ role, text, parts, entryId, contentTruncated }]`; `parts` is the
- * row's ordered content, for a caller that recovers tool cards from it.
+ * Returns `[{ role, text, parts, contentTruncated, error }]`; `parts`
+ * is the row's ordered content, for a caller that recovers tool cards from it,
+ * and `error` is the failed turn's `errorMessage`, or "".
  */
 function rows(messages) {
     var out = [];
     var parts = [];
-    var head = null;
+    var open = false;
     var contentTruncated = false;
+    var error = "";
 
     function commit() {
-        if (head === null) return;
+        if (!open) return;
         var text = fromParts(parts);
         var carriesTool = parts.some(function (part) {
             return part && part.type === "toolCall";
         });
-        if (text !== "" || carriesTool) {
+        if (text !== "" || carriesTool || error !== "") {
             out.push({
                 role: "assistant",
                 text: text,
                 parts: parts,
-                entryId: typeof head.entryId === "string" ? head.entryId : "",
-                contentTruncated: contentTruncated
+                contentTruncated: contentTruncated,
+                error: error
             });
         }
         parts = [];
-        head = null;
+        open = false;
         contentTruncated = false;
+        error = "";
     }
 
     for (var i = 0; i < (messages || []).length; i++) {
         var message = messages[i];
         if (!message) continue;
         if (message.role === "assistant") {
-            if (head === null) head = message;
+            open = true;
             // push.apply, not concat: a restored turn is one message per tool
             // call, and concat copies the whole accumulator each time.
             Array.prototype.push.apply(parts, partsOf(message));
             if (message.contentTruncated === true) contentTruncated = true;
+            if (typeof message.errorMessage === "string" && message.errorMessage !== "")
+                error = message.errorMessage;
             continue;
         }
         if (message.role === "hook") {
@@ -151,7 +152,6 @@ function rows(messages) {
                 role: "hook",
                 text: notice,
                 parts: hookParts,
-                entryId: typeof message.entryId === "string" ? message.entryId : "",
                 contentTruncated: message.contentTruncated === true
             });
             continue;
@@ -165,7 +165,6 @@ function rows(messages) {
             role: "user",
             text: prompt,
             parts: userParts,
-            entryId: typeof message.entryId === "string" ? message.entryId : "",
             contentTruncated: message.contentTruncated === true
         });
     }

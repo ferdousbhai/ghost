@@ -12,7 +12,6 @@ TestCase {
     }
 
     SignalSpy { id: failedSpy; target: Ghostd; signalName: "turnFailed" }
-    SignalSpy { id: askSpy; target: Ghostd; signalName: "askWaiting" }
 
     function init(): void {
         Ghostd.cancel();
@@ -26,7 +25,6 @@ TestCase {
         Ghostd.hudVisible = false;
         finishedSpy.clear();
         failedSpy.clear();
-        askSpy.clear();
         Ghostd.sessions = [];
     }
 
@@ -42,17 +40,16 @@ TestCase {
     }
 
     function openTurn(id: string, prompt: string, abortCounter: var): var {
-        const publicId = "pi:" + id;
-        Ghostd.adoptConversation("casper", publicId);
-        const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
+        Ghostd.adoptConversation("casper", id);
+        const state = Ghostd.ensureTurnState("casper", id);
         Ghostd.beginTurnFor(state);
         Ghostd.appendTurnRow(state, {
             role: "user", text: prompt, toolActivity: [],
-            error: "", pending: false, entryId: ""
+            error: "", pending: false
         });
         Ghostd.appendTurnRow(state, {
             role: "assistant", text: "", toolActivity: [],
-            error: "", pending: true, entryId: ""
+            error: "", pending: true
         });
         state.assistantRow = state.rows.length - 1;
         const xhr = {
@@ -94,10 +91,10 @@ TestCase {
         // conversation's visible transcript.
         push(first, { type: "text_delta", contentIndex: 0, delta: " continues" });
         Ghostd.flushTurn(first.state, true);
-        compare(Ghostd.currentSessionId, "pi:two");
+        compare(Ghostd.currentSessionId, "two");
         compare(Ghostd.transcript.get(1).text, secondText);
 
-        Ghostd.adoptConversation("casper", "pi:one");
+        Ghostd.adoptConversation("casper", "one");
         compare(secondAborts.count, 0);
         compare(Ghostd.transcript.get(1).text, firstText + " continues");
         verify(Ghostd.streaming);
@@ -126,9 +123,9 @@ TestCase {
     // conversation with no state of its own leaves it standing.
     function test_aDaemonErrorIsNotSavedIntoTheOpenConversation(): void {
         const down = "ghostd is not answering on http://127.0.0.1:0";
-        const state = Ghostd.ensureTurnState("casper", "pi:a", "a", "pi");
-        Ghostd.currentSessionId = "pi:a";
-        Ghostd.showTurnState("casper", "pi:a");
+        const state = Ghostd.ensureTurnState("casper", "a");
+        Ghostd.currentSessionId = "a";
+        Ghostd.showTurnState("casper", "a");
         Ghostd.lastError = down;
 
         Ghostd.captureActiveTurn(state);
@@ -144,14 +141,14 @@ TestCase {
         const aborts = { count: 0 };
         const turn = openTurn("new-live", "New prompt", aborts);
         Ghostd.sessions = [];
-        Ghostd.ensureLocalSessionRow("casper", "pi:new-live", 1);
+        Ghostd.ensureLocalSessionRow("casper", "new-live", 1);
 
         compare(Ghostd.sessions.length, 1);
         verify(Ghostd.sessions[0].localOnly);
         compare(Ghostd.mergeSessionListing("casper", []).length, 1);
 
         const held = Object.keys(Ghostd.readSessionRequests).length;
-        Ghostd.markConversationRead("casper", "pi:new-live");
+        Ghostd.markConversationRead("casper", "new-live");
         compare(Object.keys(Ghostd.readSessionRequests).length, held);
 
         Ghostd.cancelTurn(turn.state);
@@ -185,127 +182,60 @@ TestCase {
 
     function test_listingCollapsesExtraUnstartedRows(): void {
         const now = new Date().toISOString();
-        Ghostd.currentSessionId = "pi:keep";
+        Ghostd.currentSessionId = "keep";
         const visible = Ghostd.orderSessions([
             {
-                id: "pi:old", conversationId: "old", runtime: "pi",
-                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "old", title: null, messageCount: 0, updatedAt: now, createdAt: now,
                 pinned: false, localOnly: true
             },
             {
-                id: "pi:keep", conversationId: "keep", runtime: "pi",
-                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "keep", title: null, messageCount: 0, updatedAt: now, createdAt: now,
                 pinned: false, localOnly: true
             },
             {
-                id: "pi:fork", conversationId: "fork", runtime: "pi",
-                title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "listed-empty", title: null, messageCount: 0, updatedAt: now, createdAt: now,
                 pinned: false
             },
             {
-                id: "pi:named", conversationId: "named", runtime: "pi",
-                title: "Weekend", messageCount: 2, updatedAt: now, createdAt: now,
+                id: "named", title: "Weekend", messageCount: 2, updatedAt: now, createdAt: now,
                 pinned: false
             }
         ]);
         compare(visible.length, 3);
-        compare(visible.filter(function (session) { return session.id === "pi:keep"; }).length, 1);
-        compare(visible.filter(function (session) { return session.id === "pi:named"; }).length, 1);
-        compare(visible.filter(function (session) { return session.id === "pi:fork"; }).length, 1);
-        compare(visible.filter(function (session) { return session.id === "pi:old"; }).length, 0);
+        compare(visible.filter(function (session) { return session.id === "keep"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "named"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "listed-empty"; }).length, 1);
+        compare(visible.filter(function (session) { return session.id === "old"; }).length, 0);
     }
 
-    function test_qualifiedIdsKeepDistinctSelectionAndResumeIds(): void {
-        const parsed = Ghostd.parseConversationActionId("pi:inferred");
-        verify(parsed !== null);
-        compare(parsed.conversationId, "inferred");
-        const inferred = Ghostd.ensureTurnState("casper", "pi:inferred");
-        verify(inferred !== null);
-        compare(inferred.conversationId, "inferred");
-        const first = Ghostd.ensureTurnState("casper", "pi:default", "default", "pi");
-        const second = Ghostd.ensureTurnState("casper", "pi:other", "other", "pi");
+    function test_conversationIdsAreSentBareAndValidated(): void {
+        const first = Ghostd.ensureTurnState("casper", "hud-abc");
+        const second = Ghostd.ensureTurnState("casper", "other");
         verify(first !== second);
-        verify(first.key !== second.key);
-        compare(first.conversationId, "default");
-        compare(second.conversationId, "other");
-        compare(Ghostd.validSessionRows([
-            { id: "pi:default", conversationId: "default", runtime: "pi" },
-            { id: "pi:other", conversationId: "other", runtime: "pi" }
-        ]).length, 2);
-        // An id the daemon can no longer mint is not a session row.
-        compare(Ghostd.validSessionRows([
-            { id: "claude-code:default", conversationId: "default", runtime: "claude-code" }
-        ]).length, 0);
-
-        Ghostd.appendTurnRow(first, {
-            role: "assistant", text: "First history", toolActivity: [],
-            error: "", pending: false, entryId: "first-entry"
-        });
-        Ghostd.appendTurnRow(second, {
-            role: "assistant", text: "Second history", toolActivity: [],
-            error: "", pending: false, entryId: "second-entry"
-        });
-
-        Ghostd.adoptConversation("casper", first.sessionId);
-        compare(Ghostd.currentSessionId, "pi:default");
-        compare(Ghostd.transcript.get(0).text, "First history");
-        compare(Ghostd.buildBody("casper", "continue", first).options.sessionId, "default");
-
-        Ghostd.adoptConversation("casper", second.sessionId);
-        compare(Ghostd.currentSessionId, "pi:other");
-        compare(Ghostd.transcript.get(0).text, "Second history");
-        compare(Ghostd.buildBody("casper", "continue", second).options.sessionId, "other");
+        compare(Ghostd.buildBody("continue", first).options.sessionId, "hud-abc");
+        verify(!("model" in Ghostd.buildBody("continue", first)));
+        compare(Ghostd.ensureTurnState("casper", ".hidden"), null);
+        compare(Ghostd.ensureTurnState("casper", "pi:old"), null);
+        compare(Ghostd.validSessionRows([{ id: "a" }, { id: "../x" }, { id: "" }, {}]).length, 1);
+        verify(Ghostd.validConversationId(Ghostd.mintConversationId()));
     }
 
-    function test_staleModelResponsesCannotOverwriteOrCrossGhosts(): void {
-        Ghostd.sessions = [
-            { id: "pi:default", conversationId: "default", runtime: "pi" }
-        ];
-        Ghostd.ensureTurnState("casper", "pi:default", "default", "pi");
-        Ghostd.adoptConversation("casper", "pi:default");
-        Ghostd.currentModel = { provider: "openai-codex", id: "old" };
-
-        const staleGeneration = Ghostd.modelGeneration;
-        const stale = {
-            readyState: 4,
-            status: 200,
-            responseText: JSON.stringify({
-                current: { provider: "openai-codex", id: "old" },
-                source: "role"
-            })
-        };
-        // A newer selection bumps the generation; the in-flight read cannot
-        // deliver its older view over it.
-        Ghostd.modelGeneration += 1;
-        const currentGeneration = Ghostd.modelGeneration;
-        const fresh = {
-            readyState: 4,
-            status: 200,
-            responseText: JSON.stringify({
-                current: { provider: "openrouter", id: "free-tiny" },
-                source: "role"
-            })
-        };
-        Ghostd.modelRequest = fresh;
-        verify(!Ghostd.applyCurrentModelResponse(stale, "casper", staleGeneration));
-        verify(Ghostd.applyCurrentModelResponse(fresh, "casper", currentGeneration));
-        compare(Ghostd.currentModel.provider, "openrouter");
-
-        // A response for the ghost that is no longer active is dropped.
-        const oldGhostGeneration = Ghostd.modelGeneration;
-        Ghostd.modelRequest = stale;
-        Ghostd.activeGhost = "mina";
-        verify(!Ghostd.applyCurrentModelResponse(stale, "casper", oldGhostGeneration));
-        compare(Ghostd.currentModel.provider, "openrouter");
+    function test_currentHarnessFollowsTheOpenConversationRow(): void {
+        Ghostd.sessions = [{ id: "a", harness: "claude" }, { id: "b", harness: null }];
+        Ghostd.currentSessionId = "a";
+        compare(Ghostd.currentHarness, "claude");
+        Ghostd.currentSessionId = "b";
+        compare(Ghostd.currentHarness, "");
+        Ghostd.currentSessionId = "";
     }
 
     function test_backgroundCompletionCarriesConversationAndTitle(): void {
         const first = openTurn("one", "Fix login", { count: 0 });
-        Ghostd.sessions = [{ id: "pi:one", title: "Login redirect" }];
+        Ghostd.sessions = [{ id: "one", title: "Login redirect" }];
         openTurn("two", "Other work", { count: 0 });
         push(first, { type: "text_end", contentIndex: 0, content: "Fixed. Tests pass." });
         push(first, { type: "done", reason: "stop" });
-        compare(Array.from(finishedSpy.signalArguments[0]), ["casper", "Fixed. Tests pass.", "pi:one", "Login redirect"]);
+        compare(Array.from(finishedSpy.signalArguments[0]), ["casper", "Fixed. Tests pass.", "one", "Login redirect"]);
     }
 
     function test_remoteCancellationDoesNotAnnounceSuccessOrFailure(): void {
@@ -316,25 +246,9 @@ TestCase {
         compare(failedSpy.count, 0);
     }
 
-    function test_backgroundAskNotifiesOnceAcrossPollingAndNavigation(): void {
-        const first = openTurn("one", "First prompt", { count: 0 });
-        openTurn("two", "Second prompt", { count: 0 });
-        const ask = { id: "ask-one", questions: [{ question: "Keep sessions?" }] };
-        Ghostd.receivePendingAskFor(first.state, ask);
-        Ghostd.receivePendingAskFor(first.state, ask);
-        compare(askSpy.count, 1);
-        compare(Array.from(askSpy.signalArguments[0]), ["casper", ask, "pi:one", "First prompt"]);
-        Ghostd.adoptConversation("casper", "pi:one");
-        Ghostd.receivePendingAskFor(first.state, ask);
-        compare(askSpy.count, 1);
-        Ghostd.receivePendingAskFor(first.state, null);
-        Ghostd.receivePendingAskFor(first.state, { id: "ask-two" });
-        compare(askSpy.count, 2);
-    }
-
     function test_emptyConversationDoesNotCachePlaceholderTitle(): void {
-        Ghostd.adoptConversation("casper", "pi:new");
-        const state = Ghostd.ensureTurnState("casper", "pi:new", "new", "pi");
+        Ghostd.adoptConversation("casper", "new");
+        const state = Ghostd.ensureTurnState("casper", "new");
         Ghostd.captureActiveTurn(state);
         state.rows.push({ role: "user", text: "Fix login redirect" });
         compare(Ghostd.notificationTitle(state), "Fix login redirect");

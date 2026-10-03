@@ -46,7 +46,7 @@ afterEach(async () => {
 async function serve(relay: RelayHub | null | undefined): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  host = new SessionHost({ registry: temp.registry, offline: true });
+  host = new SessionHost({ registry: temp.registry });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
@@ -282,7 +282,7 @@ describe("the upgrade shares the port with the API", () => {
 describe("building a server does not mint a secret", () => {
   it("leaves the token file alone until something tries to pair", () => {
     const registry = new GhostRegistry("/nonexistent-ghosts-root");
-    const sessionHost = new SessionHost({ registry, offline: true });
+    const sessionHost = new SessionHost({ registry });
     // The default path: a hub built here must not create it. `tokenPath` is
     // computed, not created.
     const server = createDaemonServer({ registry, host: sessionHost, apiToken: null });

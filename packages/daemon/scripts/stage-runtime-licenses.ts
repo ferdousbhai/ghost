@@ -31,7 +31,6 @@ if (!sourceRootArg || !runtimeRootArg || metafileArgs.length === 0) {
 const sourceRoot = resolve(sourceRootArg);
 const runtimeRoot = resolve(runtimeRootArg);
 const licensesRoot = join(runtimeRoot, "licenses");
-const fallbackRoot = join(sourceRoot, "packages", "daemon", "scripts", "runtime-licenses");
 
 function pathWithin(root: string, candidate: string): boolean {
   const rel = relative(root, candidate);
@@ -82,27 +81,6 @@ function licenseFiles(pkg: PackageIdentity): Array<{ source: string; name: strin
     .map((entry) => ({ source: join(pkg.root, entry.name), name: entry.name }))
     .sort((a, b) => a.name.localeCompare(b.name, "en"));
   if (matches.length > 0) return matches;
-  if (pkg.name.startsWith("@earendil-works/") && pkg.version === "0.86.1") {
-    return [{
-      source: join(fallbackRoot, "earendil-pi.LICENSE"),
-      name: "LICENSE",
-    }];
-  }
-  if (pkg.name === "ignore" && pkg.version === "7.0.5") {
-    return [{
-      source: join(fallbackRoot, "ignore.LICENSE-MIT"),
-      name: "LICENSE-MIT",
-    }];
-  }
-  // Pulled in by @anthropic-ai/sdk through pi-ai. Its npm metadata says MIT,
-  // but the published commit's repository carries only the root Apache-2.0
-  // LICENSE, so that file is what ships.
-  if (pkg.name === "standardwebhooks" && pkg.version === "1.1.1") {
-    return [{
-      source: join(fallbackRoot, "standardwebhooks.LICENSE"),
-      name: "LICENSE",
-    }];
-  }
   throw new Error(`bundled package has no license file: ${pkg.name}@${pkg.version}`);
 }
 

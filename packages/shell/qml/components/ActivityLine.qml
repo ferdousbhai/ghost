@@ -44,10 +44,6 @@ Item {
      * with the arguments that make it mean something.
      */
     function stateLine(activity: string): string {
-        if (activity.startsWith("switching model · "))
-            return "Switching to " + activity.slice("switching model · ".length);
-        if (activity.startsWith("using fallback · "))
-            return "Falling back to " + activity.slice("using fallback · ".length);
         if (activity === "thinking") return "Thinking";
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
         return "Working";

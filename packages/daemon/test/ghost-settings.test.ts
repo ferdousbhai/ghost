@@ -18,27 +18,25 @@ describe("loadGhostSettings", () => {
   it("reads only the visible settings.yml, never a runtime or ambient overlay", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
     const paths = ghostPaths(home);
-    mkdirSync(paths.agentDir, { recursive: true });
-    mkdirSync(join(home, ".omp"), { recursive: true });
+    for (const hidden of [".pi", ".omp"]) mkdirSync(join(home, hidden), { recursive: true });
     writeFileSync(
       paths.settingsFile,
-      "self:\n  checkout: /srv/ghost\nttsr:\n  disabledRules: [noisy]\nreview:\n  immuneTurns: 3\n  journal: true\n  mode: \"true\"\n",
+      "harness: codex\nself:\n  checkout: /srv/ghost\nreview:\n  immuneTurns: 3\n  journal: true\n",
       "utf8",
     );
-    writeFileSync(join(paths.agentDir, "config.yml"), "self:\n  checkout: /srv/hostile\n", "utf8");
-    writeFileSync(join(home, ".omp", "config.yml"), "self:\n  checkout: /srv/hostile\n", "utf8");
+    writeFileSync(join(home, ".pi", "config.yml"), "harness: hostile\nself:\n  checkout: /srv/hostile\n", "utf8");
+    writeFileSync(join(home, ".omp", "config.yml"), "harness: hostile\nself:\n  checkout: /srv/hostile\n", "utf8");
     vi.stubEnv("PI_CONFIG_FILES", join(home, ".omp", "config.yml"));
 
     const settings = loadGhostSettings(home);
 
+    expect(settings.getString("harness")).toBe("codex");
     expect(settings.getString("self.checkout")).toBe("/srv/ghost");
-    expect(settings.getStringList("ttsr.disabledRules")).toEqual(["noisy"]);
-    expect(settings.getNumber("review.immuneTurns")).toBe(3);
-    expect(settings.getBoolean("review.journal")).toBe(true);
-    expect(settings.getBoolean("review.mode")).toBeUndefined();
     expect(settings.getString("missing.key")).toBeUndefined();
-    expect(settings.getStringList("self.checkout")).toBeUndefined();
-    expect(settings.getNumber("self.checkout")).toBeUndefined();
+    // Only strings are strings: a number, a boolean, or a mapping is absent.
+    expect(settings.getString("review.immuneTurns")).toBeUndefined();
+    expect(settings.getString("review.journal")).toBeUndefined();
+    expect(settings.getString("self")).toBeUndefined();
   });
 
   it("is empty when settings.yml is absent", () => {

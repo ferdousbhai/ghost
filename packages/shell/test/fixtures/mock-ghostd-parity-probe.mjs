@@ -63,7 +63,7 @@ try {
   assert.equal(perGhostHooks.status, 404);
 
   const projectRoute = await fetch(
-    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/pi%3Asess-casper-1/project`,
+    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/project`,
   );
   assert.equal(projectRoute.status, 404);
 
@@ -74,26 +74,32 @@ try {
   assert.ok(mcp.servers.every((server) => server.source === "canonical"));
   assert.ok(mcp.servers.every((server) => server.path === "mcp.json"));
 
-  const resourcesResponse = await fetch(
-    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/pi%3Asess-casper-1/resources`,
-  );
-  assert.equal(resourcesResponse.status, 200);
-  const resources = await resourcesResponse.json();
-  for (const row of [...resources.skills, ...resources.mcpServers, ...resources.diagnostics]) {
-    assert.ok(["machine", "ghost"].includes(row.source));
-  }
-
   const rosterResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`);
   assert.equal(rosterResponse.status, 200);
   const roster = await rosterResponse.json();
   const casper = roster.find((ghost) => ghost.name === "casper");
   assert.ok(casper);
 
+  const sessionsResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`);
+  assert.equal(sessionsResponse.status, 200);
+  const { sessions } = await sessionsResponse.json();
+  assert.deepEqual(Object.keys(sessions[0]), [
+    "id", "title", "preview", "harness", "createdAt", "updatedAt", "messageCount", "pinned", "unread",
+  ]);
+
   const transcriptResponse = await fetch(
-    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/pi%3Asess-casper-1/transcript`,
+    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/transcript`,
   );
   assert.equal(transcriptResponse.status, 200);
-  const transcript = JSON.stringify(await transcriptResponse.json());
+  const transcriptBody = await transcriptResponse.json();
+  assert.deepEqual(Object.keys(transcriptBody), [
+    "id", "title", "harness", "messages", "total", "truncated", "historyTruncated",
+  ]);
+  for (const message of transcriptBody.messages) {
+    assert.equal(typeof message.entryId, "string");
+    assert.ok("parentId" in message);
+  }
+  const transcript = JSON.stringify(transcriptBody);
   assert.ok(transcript.includes(join(homedir(), "project-brief.md")));
   assert.ok(!transcript.includes(join(casper.dir, "plans")));
 
@@ -117,6 +123,15 @@ try {
   assert.equal(turnResponse.status, 200);
   const turnEvents = await turnResponse.text();
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
+  assert.ok(!turnEvents.includes('"toolcall_'));
+  assert.ok(!turnEvents.includes('"command_output"'));
+
+  // Removed routes stay removed.
+  for (const path of ["model", "models", "providers", "sessions/sess-casper-1/ask",
+    "sessions/sess-casper-1/commands", "sessions/sess-casper-1/resources"]) {
+    const removed = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/${path}`);
+    assert.equal(removed.status, 404, path);
+  }
   assert.ok(!turnEvents.includes(join(casper.dir, "plans")));
   if (created.dir.startsWith(join(homedir(), ".cache"))) rmSync(created.dir, { recursive: true, force: true });
 } finally {

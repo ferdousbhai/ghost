@@ -58,11 +58,7 @@ require_install_hook_activation() {
 }
 
 command -v rg >/dev/null || {
-  printf 'ripgrep is required by pi grep and package checks but is not installed\n' >&2
-  exit 1
-}
-command -v fd >/dev/null || {
-  printf 'fd is required by pi find but is not installed\n' >&2
+  printf 'ripgrep is required by package checks but is not installed\n' >&2
   exit 1
 }
 command -v node >/dev/null || {
@@ -122,10 +118,7 @@ require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry optdepends 'npm: npx-launched MCP servers and other owner-installed pi integrations' "$work/ghost-dev.SRCINFO"
-# pi otherwise downloads these into its cache on the first grep/find call.
-require_srcinfo_dependency fd "$work/ghost-dev.SRCINFO"
-require_srcinfo_dependency ripgrep "$work/ghost-dev.SRCINFO"
+require_srcinfo_entry optdepends 'npm: npx-launched MCP servers' "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency systemd "$work/ghost-dev.SRCINFO"
 
 bash "$source_root/packaging/release/render-arch-package.sh" \
@@ -138,9 +131,7 @@ require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
-require_srcinfo_entry optdepends 'npm: npx-launched MCP servers and other owner-installed pi integrations' "$work/ghost/.SRCINFO"
-require_srcinfo_dependency fd "$work/ghost/.SRCINFO"
-require_srcinfo_dependency ripgrep "$work/ghost/.SRCINFO"
+require_srcinfo_entry optdepends 'npm: npx-launched MCP servers' "$work/ghost/.SRCINFO"
 require_srcinfo_dependency systemd "$work/ghost/.SRCINFO"
 sed -n 's/^	depends = //p' "$work/ghost-dev.SRCINFO" \
   | sed '/^ghost-runtime/d' | LC_ALL=C sort > "$work/development-depends"

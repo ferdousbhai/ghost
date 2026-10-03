@@ -9,11 +9,10 @@ import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./
 import type { CliContext } from "./types.js";
 
 /**
- * `ghost mcp serve`: this conversation's own tools (ask, browser, screen,
- * desktop) as a stdio MCP server for a harness `ghost delegate` launched. The
- * conversation is fixed at start (`-s`, then `$GHOST_SESSION`), so a delegated
- * run's questions reach the conversation that started it; every call runs in
- * the daemon, through the same tools the ghost uses in-session.
+ * `ghost mcp serve`: the ghost's own tools (browser, desktop) as a stdio MCP
+ * server, for the harness carrying a conversation and for a run `ghost
+ * delegate` launched. The conversation is fixed at start (`-s`, then
+ * `$GHOST_SESSION`); every call runs in the daemon.
  */
 export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   // A conversation whose first turn is still running is not listed yet, so an
@@ -46,8 +45,7 @@ export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   const { promise: closed, resolve } = Promise.withResolvers<void>();
   server.onclose = resolve;
   // The transport reports only a close it made itself. When the harness ends
-  // stdin, close the server, which aborts a call still in flight so the
-  // daemon withdraws a question the run can no longer receive.
+  // stdin, close the server, which aborts a call still in flight.
   process.stdin.once("end", () => void server.close().then(resolve, resolve));
   await server.connect(new StdioServerTransport());
   await closed;

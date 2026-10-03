@@ -7,6 +7,3 @@ packages:
 injectWorkspacePackages: true
 syncInjectedDepsAfterScripts:
   - build
-
-patchedDependencies:
-  '@earendil-works/pi-coding-agent@0.86.1': patches/@earendil-works__pi-coding-agent@0.86.1.patch

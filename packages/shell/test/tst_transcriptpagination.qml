@@ -9,7 +9,6 @@ TestCase {
 
     property var requests: []
     property var deleteRequests: []
-    property var branchRequests: []
     property string deleteSettlementError: ""
 
     Connections {
@@ -37,9 +36,8 @@ TestCase {
             historyTruncated: var): var {
         return {
             id: state.sessionId,
-            conversationId: state.conversationId,
-            runtime: state.runtime,
             title: null,
+            harness: "claude",
             messages: rows,
             total: total,
             truncated: truncated,
@@ -48,12 +46,11 @@ TestCase {
     }
 
     function activeState(id: string): var {
-        const publicId = "pi:" + id;
         Ghostd.activeGhost = "casper";
-        Ghostd.currentSessionId = publicId;
-        Ghostd.sessionIds = ({ casper: publicId });
-        const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
-        Ghostd.showTurnState("casper", publicId);
+        Ghostd.currentSessionId = id;
+        Ghostd.sessionIds = ({ casper: id });
+        const state = Ghostd.ensureTurnState("casper", id);
+        Ghostd.showTurnState("casper", id);
         return state;
     }
 
@@ -69,7 +66,6 @@ TestCase {
         Ghostd.apiToken = "test-token";
         requests = [];
         deleteRequests = [];
-        branchRequests = [];
         deleteSettlementError = "";
         Ghostd.transcriptRequestFactory = function () {
             return FakeXhr.make(requests);
@@ -77,16 +73,12 @@ TestCase {
         Ghostd.deleteSessionRequestFactory = function () {
             return FakeXhr.make(deleteRequests);
         };
-        Ghostd.branchRequestFactory = function () {
-            return FakeXhr.make(branchRequests);
-        };
     }
 
     function cleanup(): void {
         Ghostd.cancelAllTranscriptLoads();
         Ghostd.transcriptRequestFactory = null;
         Ghostd.deleteSessionRequestFactory = null;
-        Ghostd.branchRequestFactory = null;
         Ghostd.turnStates = ({});
         Ghostd.currentSessionId = "";
         Ghostd.clearTurnProjection();
@@ -96,7 +88,7 @@ TestCase {
         const state = activeState("long");
         state.rows = [{
             role: "user", text: "old-visible-row", toolActivity: [],
-            error: "", pending: false, entryId: "old"
+            error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
 
@@ -118,8 +110,6 @@ TestCase {
         compare(state.rows[999].text, "message-999");
         compare(state.rows[1000].text, "message-1000");
         compare(state.rows[1004].text, "message-1004");
-        const ids = new Set(state.rows.map(function (row) { return row.entryId; }));
-        compare(ids.size, 1005);
         compare(Ghostd.sessionsError, "");
         verify(!Ghostd.transcriptHistoryTruncated);
     }
@@ -158,6 +148,28 @@ TestCase {
         verify(!Ghostd.transcriptHistoryTruncated);
     }
 
+    function test_aPageForAnotherConversationIsRejected(): void {
+        const state = activeState("mine");
+        Ghostd.loadConversationTranscript(state, false);
+        const foreign = page(state, messages(0, 1), 1, false);
+        foreign.id = "someone-else";
+        requests[0].complete(200, foreign);
+        compare(state.rows.length, 0);
+        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
+    }
+
+    function test_failedTurnErrorIsRestored(): void {
+        const state = activeState("failed-turn");
+        Ghostd.loadConversationTranscript(state, false);
+        requests[0].complete(200, page(state, [
+            { role: "user", content: "hi", entryId: "u", parentId: null },
+            { role: "assistant", content: [], errorMessage: "codex usage limit reached",
+                entryId: "a", parentId: "u" }
+        ], 2, false, false));
+        compare(state.rows.length, 2);
+        compare(state.rows[1].error, "codex usage limit reached");
+    }
+
     function test_savedTextTruncationIsVisibleAfterRehydration(): void {
         const state = activeState("bounded");
         Ghostd.loadConversationTranscript(state, false);
@@ -173,59 +185,11 @@ TestCase {
             "bounded text\n\n*[Saved message truncated]*");
     }
 
-    function test_deepBranchLoadsCompleteHistoryInsteadOfAdoptingInlinePage(): void {
-        activeState("source");
-
-        Ghostd.branchFrom("entry-1005");
-        compare(branchRequests.length, 1);
-        compare(branchRequests[0].method, "POST");
-        verify(branchRequests[0].url.indexOf("/sessions/pi%3Asource/branch") >= 0);
-
-        const branched = {
-            sessionId: "pi:branched",
-            conversationId: "branched",
-            runtime: "pi"
-        };
-        branchRequests[0].complete(200, {
-            id: branched.sessionId,
-            conversationId: branched.conversationId,
-            runtime: branched.runtime,
-            sessionId: branched.conversationId,
-            title: null,
-            draft: "message-1005",
-            // The branch POST uses the daemon's default limit and is therefore
-            // not authoritative for a deep history.
-            transcript: page(branched, messages(0, 1000), 1005, true)
-        });
-
-        compare(Ghostd.currentSessionId, branched.sessionId);
-        compare(Ghostd.transcript.count, 0);
-        compare(requests.length, 1);
-        verify(requests[0].url.indexOf("/sessions/pi%3Abranched/transcript") >= 0);
-        verify(requests[0].url.endsWith("?limit=1000&offset=0"));
-
-        requests[0].complete(200,
-            page(branched, messages(0, 1000), 1005, true));
-        compare(requests.length, 2);
-        compare(Ghostd.transcript.count, 0);
-        verify(requests[1].url.endsWith("?limit=1000&offset=1000"));
-        requests[1].complete(200,
-            page(branched, messages(1000, 5), 1005, true));
-
-        compare(Ghostd.transcript.count, 1005);
-        compare(Ghostd.transcript.get(0).text, "message-0");
-        compare(Ghostd.transcript.get(999).text, "message-999");
-        compare(Ghostd.transcript.get(1000).text, "message-1000");
-        compare(Ghostd.transcript.get(1004).text, "message-1004");
-        compare(Ghostd.sessionsError, "");
-        compare(Ghostd.branchError, "");
-    }
-
     function test_emptyPageCompletesAndClearsOldRows(): void {
         const state = activeState("empty");
         state.rows = [{
             role: "assistant", text: "stale", toolActivity: [],
-            error: "", pending: false, entryId: "stale"
+            error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
         Ghostd.loadConversationTranscript(state, false);
@@ -240,7 +204,7 @@ TestCase {
         const state = activeState("not-started");
         state.rows = [{
             role: "user", text: "local placeholder", toolActivity: [],
-            error: "", pending: false, entryId: "local"
+            error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
         Ghostd.loadConversationTranscript(state, true);
@@ -261,7 +225,7 @@ TestCase {
         const shortState = activeState("short");
         shortState.rows = [{
             role: "user", text: "known-good", toolActivity: [],
-            error: "", pending: false, entryId: "known"
+            error: "", pending: false
         }];
         Ghostd.showTurnState("casper", shortState.sessionId);
         Ghostd.loadConversationTranscript(shortState, false);
@@ -353,13 +317,13 @@ TestCase {
         requests = [];
         Ghostd.loadConversationTranscript(first, false);
         const switched = requests[0];
-        Ghostd.adoptConversation("casper", "pi:second");
-        Ghostd.ensureTurnState("casper", "pi:second", "second", "pi");
+        Ghostd.adoptConversation("casper", "second");
+        Ghostd.ensureTurnState("casper", "second");
         verify(switched.aborted);
         switched.complete(200, page(first, messages(20, 1), 1, false));
         compare(first.rows.length, 1);
         compare(first.rows[0].text, "message-10");
-        compare(Ghostd.currentSessionId, "pi:second");
+        compare(Ghostd.currentSessionId, "second");
         compare(Ghostd.transcript.count, 0);
     }
 
@@ -399,8 +363,6 @@ TestCase {
         const deleted = activeState("deleted");
         Ghostd.sessions = [{
             id: deleted.sessionId,
-            conversationId: deleted.conversationId,
-            runtime: deleted.runtime,
             title: null
         }];
         Ghostd.loadConversationTranscript(deleted, false);
@@ -419,8 +381,7 @@ TestCase {
 
         requests = [];
         const active = activeState("destroy-active");
-        const background = Ghostd.ensureTurnState(
-            "casper", "pi:destroy-background", "destroy-background", "pi");
+        const background = Ghostd.ensureTurnState("casper", "destroy-background");
         Ghostd.loadConversationTranscript(active, false);
         Ghostd.loadConversationTranscript(background, false);
         const activeLoad = requests[0];
@@ -441,7 +402,7 @@ TestCase {
         const state = activeState("failure");
         state.rows = [{
             role: "user", text: "known history", toolActivity: [],
-            error: "", pending: false, entryId: "known"
+            error: "", pending: false
         }];
         Ghostd.showTurnState("casper", state.sessionId);
         Ghostd.loadConversationTranscript(state, false);

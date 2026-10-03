@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
-import type { LimitReachedEvent } from "./pi-messages.js";
+import type { LimitReachedEvent } from "./turn-events.js";
 import type { UsageWindow } from "./harnesses.js";
 
 /** Past this size the log moves to `handoffs.jsonl.1`, replacing the previous one. */

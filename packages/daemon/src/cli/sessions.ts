@@ -5,7 +5,7 @@ import { emit, relativeTime, table, textContent, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
 
 function displaySessionId(session: SessionSummary): string {
-  return session.conversationId;
+  return session.id;
 }
 
 export async function sessionsCommand(
@@ -32,7 +32,7 @@ export async function sessionsCommand(
 
 interface TranscriptBody {
   id: string;
-  conversationId: string;
+  harness: string | null;
   title: string | null;
   messages: Array<{ role: "user" | "assistant" | "hook"; content: unknown }>;
   total: number;
@@ -90,7 +90,7 @@ export async function showCommand(
 }
 
 export async function sessionActionCommand(
-  verb: "title" | "fork" | "pin" | "unpin",
+  verb: "title" | "pin" | "unpin",
   parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
@@ -100,22 +100,12 @@ export async function sessionActionCommand(
     body = (await ctx.client.request("PUT", `${path}/title`, {
       title: parsed.positionals[0],
     })).body;
-  } else if (verb === "fork") {
-    body = (await ctx.client.request("POST", `${path}/branch`, {
-      action: "fork",
-      entryId: parsed.positionals[0],
-    })).body;
   } else {
     body = (await ctx.client.request("PUT", `${path}/pin`, {
       pinned: verb === "pin",
     })).body;
   }
   emit(ctx, body, () => {
-    if (verb === "fork") {
-      const result = body as { id?: unknown; draft?: unknown };
-      return `${typeof result.id === "string" ? result.id : "forked"}\n`
-        + (typeof result.draft === "string" && result.draft ? `${result.draft}\n` : "");
-    }
     if (verb === "title") return `${(body as { title?: string }).title ?? parsed.positionals[0]}\n`;
     return `${verb === "pin" ? "pinned" : "unpinned"} ${session.id}\n`;
   });

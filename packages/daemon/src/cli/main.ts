@@ -12,18 +12,13 @@ import {
 } from "./args.js";
 import {
   characterCommand,
-  commandsCommand,
   deleteSessionCommand,
-  greetingCommand,
   readCommand,
-  reanswerCommand,
   boardCommand,
   browserCommand,
   remoteCommand,
   renameCommand,
-  resourcesCommand,
 } from "./admin.js";
-import { askCommand } from "./ask.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { DELEGATE_ARGS, delegateCommand } from "./delegate.js";
 import { ghostsCommand } from "./ghosts.js";
@@ -33,8 +28,6 @@ import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName, preferredSessionId } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
-import { LOGIN_ARGS, loginCommand, logoutCommand } from "./login.js";
-import { modelCommand } from "./model.js";
 import { sayCommand } from "./say.js";
 import { sessionActionCommand, sessionsCommand, showCommand } from "./sessions.js";
 import { renderSkillText, skillCommand } from "./skill.js";
@@ -67,9 +60,8 @@ const CLI_ARGS: ArgsSpec = {
     "exit-on-first",
     "keep",
     "no-turn",
-    "none",
   ],
-  value: ["ghost", "session", "message", "limit", "offset", "q", "model"],
+  value: ["ghost", "session", "message", "limit", "offset", "q", "harness"],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -138,14 +130,6 @@ export const COMMANDS: readonly Command[] = [
     run: (parsed, ctx) => sessionActionCommand("title", parsed, ctx),
   },
   {
-    verb: "fork",
-    usage: "fork <entryId> [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Fork a conversation before a user entry.",
-    example: "ghost fork entry-123 -s cli-abc",
-    positionals: [1, 1],
-    run: (parsed, ctx) => sessionActionCommand("fork", parsed, ctx),
-  },
-  {
     verb: "pin",
     usage: "pin [-g <name>] [-s <id>] [--json] [-q]",
     summary: "Pin a conversation.",
@@ -160,22 +144,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost unpin -s cli-abc",
     positionals: [0, 0],
     run: (parsed, ctx) => sessionActionCommand("unpin", parsed, ctx),
-  },
-  {
-    verb: "ask",
-    usage: "ask [answer <label|index|text>|chat|skip] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Inspect or resolve one pending question.",
-    example: "ghost ask answer 1 -s cli-abc",
-    positionals: [0, 2],
-    run: askCommand,
-  },
-  {
-    verb: "model",
-    usage: "model [provider/id|--none|--list] [-g <name>] [--json] [-q]",
-    summary: "Show, set, unset, or list the chat model; --none hands the choice back to pi.",
-    example: "ghost model openrouter/openai/gpt-5.5",
-    positionals: [0, 1],
-    run: modelCommand,
   },
   {
     verb: "mcp",
@@ -194,24 +162,6 @@ export const COMMANDS: readonly Command[] = [
     run: hooksCommand,
   },
   {
-    verb: "login",
-    usage: "login <provider>|--list [--oauth|--api-key] [--key-stdin] [-g <name>] [--json] [-q]",
-    summary: "Sign in to a provider, or list the providers.",
-    example: "ghost login openrouter",
-    flags: LOGIN_ARGS,
-    positionals: [0, 1],
-    run: loginCommand,
-  },
-  {
-    verb: "logout",
-    usage: "logout <provider> [-g <name>] [--json] [-q]",
-    summary: "Sign out of a provider.",
-    example: "ghost logout openrouter",
-    flags: LOGIN_ARGS,
-    positionals: [0, 1],
-    run: logoutCommand,
-  },
-  {
     verb: "rename",
     usage: "rename <new-name> [-g <name>] [--json] [-q]",
     summary: "Rename a ghost and move its whole home.",
@@ -228,14 +178,6 @@ export const COMMANDS: readonly Command[] = [
     run: characterCommand,
   },
   {
-    verb: "greeting",
-    usage: "greeting [-g <name>] [--json] [-q]",
-    summary: "Ask the smol model for the opening line the HUD shows.",
-    example: "ghost greeting",
-    positionals: [0, 0],
-    run: greetingCommand,
-  },
-  {
     verb: "delete",
     usage: "delete --yes [-g <name>] [-s <id>] [--json] [-q]",
     summary: "Move a conversation and its sidecars to Trash.",
@@ -250,30 +192,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost read -s cli-abc",
     positionals: [0, 0],
     run: readCommand,
-  },
-  {
-    verb: "reanswer",
-    usage: "reanswer <entryId> [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Reopen a historical owner question and resume that branch.",
-    example: "ghost reanswer entry-123 -s cli-abc",
-    positionals: [1, 1],
-    run: reanswerCommand,
-  },
-  {
-    verb: "resources",
-    usage: "resources [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Show the skills and MCP servers a conversation admitted.",
-    example: "ghost resources -s cli-abc",
-    positionals: [0, 0],
-    run: resourcesCommand,
-  },
-  {
-    verb: "commands",
-    usage: "commands [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "List the slash commands a conversation accepts.",
-    example: "ghost commands -s cli-abc",
-    positionals: [0, 0],
-    run: commandsCommand,
   },
   {
     verb: "board",
@@ -334,7 +252,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "smoke",
-    usage: "smoke [--model <provider/id>] [--keep] [--no-turn] [--json] [-q]",
+    usage: "smoke [--harness <id>] [--keep] [--no-turn] [--json] [-q]",
     summary: "Exercise a throwaway daemon and ghost home.",
     example: "ghost smoke --no-turn --json",
     positionals: [0, 0],
@@ -413,7 +331,6 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
     stderr: options.stderr ?? process.stderr,
     fetch: options.fetch ?? globalThis.fetch,
     stdin: options.stdin ?? process.stdin,
-    ...(options.prompt === undefined ? {} : { prompt: options.prompt }),
   };
 }
 

@@ -24,8 +24,9 @@ TestCase {
                 activities: toolActivity
                 failure: ""
                 busy: true
-                sourceEntryId: ""
                 rowIndex: 0
+                // Every card instantiated, so each one's teardown is exercised.
+                toolsOpen: true
             }
         }
     }
@@ -33,12 +34,11 @@ TestCase {
     function call(id: string, status: string): var {
         return {
             id: id,
-            name: "ask",
+            name: "Bash",
             status: status,
             arguments: ({}),
             intent: "Checking " + id,
-            summary: "",
-            askBranch: { resultEntryId: "result-" + id }
+            summary: ""
         };
     }
 

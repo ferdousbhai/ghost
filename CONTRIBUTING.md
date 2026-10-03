@@ -45,7 +45,8 @@ branches go to `origin`, and `fork` below reads `origin`.
 
 2. Read `CLAUDE.md` and `CONTRACTS.md`. A change that crosses a package
    boundary or the wire changes `CONTRACTS.md` in the same commit, and a
-   runtime-shaped change is decided for pi, the one runtime.
+   harness-shaped change is one row of `harness-table.ts`, tested against that
+   harness's real output.
 
 3. Edit, then run the touched package's tests and `typecheck`. Behavior
    changes ship with a focused test. Raising a ceiling in
@@ -56,7 +57,7 @@ branches go to `origin`, and `fork` below reads `origin`.
    in a trailer, with what it was running:
 
    ```
-   Ghost: <name> on pi, ghostd <version> <commit>
+   Ghost: <name> on <harness>, ghostd <version> <commit>
    ```
 
 5. A ghost shows the owner the branch and asks before pushing. The push and

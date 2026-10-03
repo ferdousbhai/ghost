@@ -46,11 +46,6 @@ function isModelUrl(value) {
     return scheme === "mailto" && value.length > "mailto:".length;
 }
 
-function isLoginUrl(value) {
-    var scheme = schemeOf(value);
-    return (scheme === "http" || scheme === "https") && hasSafeWebForm(value, scheme);
-}
-
 /**
  * An absolute local path the desktop's handler can be given.
  *

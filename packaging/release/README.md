@@ -23,14 +23,9 @@ The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
 The v3 runtime archive is a package *source*, not an installed pacman package.
 Its payload contains `bin/ghostd`, `bin/ghost`, `lib/ghostd.js`, `lib/ghost.js`,
 required static assets, and the exact licenses for the bundled application
-closure. Ghost, pi, provider, and MCP support remain bundled for offline use.
+closure. Ghost and its MCP support remain bundled for offline use.
 Bundles are minified with function and class names preserved for diagnostics;
-Photon's image-processing WASM and the full license closure stay in the payload.
-The source archive includes the pinned Pi patch described in
-[`CONTRACTS.md`](../../CONTRACTS.md#pi). Pi upgrades must keep
-`test/pi-extension-loading.test.ts` and `test/session-host.test.ts` passing and
-recheck the bundled runtime; the patch removes the unused file-extension loader,
-not Ghost's inline factories.
+the full license closure stays in the payload.
 QML, the desktop
 helper, browser extension, services, launchers, licenses, and docs come from the
 same sanitized source snapshot, so a stable package cannot mix an old UI with a
@@ -38,9 +33,7 @@ new daemon or client.
 
 Installed launchers use `/usr/bin/bun`, so the stable `ghost-runtime` package and the
 checkout-only `ghost-runtime-dev` recipe require system Bun 1.3.14 or newer. The current
-build/check toolchain requires Bun 1.4.0 or newer. Both recipes also depend on
-system `fd` and `ripgrep` for pi's native `find` and `grep`. This prevents a
-read-only planning turn from downloading search tools into pi's cache.
+build/check toolchain requires Bun 1.4.0 or newer.
 
 ## Reproducibility boundary
 

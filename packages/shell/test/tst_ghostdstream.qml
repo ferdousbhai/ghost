@@ -34,17 +34,16 @@ TestCase {
     }
 
     function openTurn(id: string, abortCounter: var): var {
-        const publicId = "pi:" + id;
-        Ghostd.adoptConversation("casper", publicId);
-        const state = Ghostd.ensureTurnState("casper", publicId, id, "pi");
+        Ghostd.adoptConversation("casper", id);
+        const state = Ghostd.ensureTurnState("casper", id);
         Ghostd.beginTurnFor(state);
         Ghostd.appendTurnRow(state, {
             role: "user", text: "Start", toolActivity: [],
-            error: "", pending: false, entryId: ""
+            error: "", pending: false
         });
         Ghostd.appendTurnRow(state, {
             role: "assistant", text: "", toolActivity: [],
-            error: "", pending: true, entryId: ""
+            error: "", pending: true
         });
         state.assistantRow = state.rows.length - 1;
         const xhr = {
@@ -60,10 +59,6 @@ TestCase {
 
     function makeInteractionDirty(state: var): void {
         state.activity = "read";
-        state.pendingAsk = ({ id: "ask-1" });
-        state.askSubmitting = true;
-        state.askError = "old ask error";
-        state.steeringQueue = ["steer"];
         state.followUpQueue = ["later"];
         state.queueSubmitting = true;
         state.queueError = "old queue error";
@@ -73,10 +68,6 @@ TestCase {
     function verifyInteractionSettled(state: var): void {
         verify(!state.streaming);
         compare(state.activity, "");
-        compare(state.pendingAsk, null);
-        verify(!state.askSubmitting);
-        compare(state.askError, "");
-        compare(state.steeringQueue.length, 0);
         compare(state.followUpQueue.length, 0);
         verify(!state.queueSubmitting);
         compare(state.queueError, "");
@@ -92,9 +83,9 @@ TestCase {
         compare(tools[0].intent, "Checking your Dropbox for the invoice.");
     }
 
-    function test_dequeuedSteerBecomesTranscriptRowWithoutReload(): void {
-        const turn = openTurn("steer", null);
-        turn.state.steeringQueue = ["Use the shorter version."];
+    function test_dequeuedFollowUpBecomesTranscriptRowWithoutReload(): void {
+        const turn = openTurn("follow-up", null);
+        turn.state.followUpQueue = ["Use the shorter version."];
         Ghostd.handleTurnEvent(turn.state,
             { type: "text_end", contentIndex: 0, content: "First pass" });
         Ghostd.handleTurnEvent(turn.state,
@@ -107,7 +98,7 @@ TestCase {
         compare(turn.state.rows[2].text, "Use the shorter version.");
         compare(turn.state.rows[3].role, "assistant");
         verify(turn.state.rows[3].pending);
-        compare(turn.state.steeringQueue.length, 0);
+        compare(turn.state.followUpQueue.length, 0);
         verify(turn.state.streaming);
         // The active projection mirrors the rows without a transcript reload.
         compare(Ghostd.transcript.count, 4);
@@ -131,16 +122,16 @@ TestCase {
         compare(Ghostd.transcript.get(2).role, "hook");
     }
 
-    function test_consecutiveSteersDoNotCreateEmptyAssistantRows(): void {
-        const turn = openTurn("steer-batch", null);
+    function test_consecutiveFollowUpsDoNotCreateEmptyAssistantRows(): void {
+        const turn = openTurn("follow-up-batch", null);
 
-        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "First steer" });
-        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "Second steer" });
+        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "First follow-up" });
+        Ghostd.handleTurnEvent(turn.state, { type: "owner_message", text: "Second follow-up" });
 
         compare(turn.state.rows.length, 4);
         compare(turn.state.rows[0].role, "user");
-        compare(turn.state.rows[1].text, "First steer");
-        compare(turn.state.rows[2].text, "Second steer");
+        compare(turn.state.rows[1].text, "First follow-up");
+        compare(turn.state.rows[2].text, "Second follow-up");
         compare(turn.state.rows[3].role, "assistant");
         verify(turn.state.rows[3].pending);
     }
@@ -177,37 +168,15 @@ TestCase {
     function test_limitReachedNamesTheLimitInsteadOfAGenericFailure(): void {
         const turn = openTurn("limit", null);
         Ghostd.handleTurnEvent(turn.state, {
-            type: "limit_reached", harness: "pi", kind: "usage_limit",
-            message: "pi usage limit reached."
+            type: "limit_reached", harness: "claude", kind: "usage_limit",
+            message: "claude usage limit reached."
         });
         compare(turn.state.activity, "limit reached");
         Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "the provider ended the turn." });
-        compare(turn.state.lastError, "pi usage limit reached");
+        compare(turn.state.lastError, "claude usage limit reached");
         // The next turn starts without the stale notice.
         const next = openTurn("after-limit", null);
         compare(next.state.limitNotice, "");
-    }
-
-    function test_reanswerBranchUsesTheSameTerminalCleanup(): void {
-        const publicId = "pi:reanswer";
-        Ghostd.adoptConversation("casper", publicId);
-        const state = Ghostd.ensureTurnState("casper", publicId, "reanswer", "pi");
-        Ghostd.beginTurnFor(state);
-        Ghostd.handleTurnEvent(state, {
-            type: "branch_changed",
-            transcript: {
-                id: publicId,
-                conversationId: "reanswer",
-                runtime: "pi",
-                messages: [{ role: "user", content: "Earlier question", entryId: "entry-1" }]
-            }
-        });
-        makeInteractionDirty(state);
-        Ghostd.handleTurnEvent(state, { type: "done" });
-
-        verifyInteractionSettled(state);
-        compare(state.rows[0].text, "Earlier question");
-        verify(!state.rows[1].pending);
     }
 
     function test_watchdogSettlesAndRetiresThePartialStream(): void {
@@ -222,26 +191,6 @@ TestCase {
         verify(!Ghostd.reachable);
         compare(turn.state.lastError, "the stream stopped responding");
         verifyInteractionSettled(turn.state);
-    }
-
-    function test_askExecutionEndClearsTimedOutDialogBeforeTurnEnds(): void {
-        const turn = openTurn("ask-timeout", null);
-        turn.state.pendingAsk = ({ id: "ask-timeout" });
-        turn.state.askSubmitting = true;
-        turn.state.askError = "old error";
-
-        Ghostd.handleTurnEvent(turn.state, {
-            type: "tool_execution_end",
-            id: "call-ask",
-            toolName: "ask",
-            isError: false,
-            summary: "Timed out"
-        });
-
-        compare(turn.state.pendingAsk, null);
-        verify(!turn.state.askSubmitting);
-        compare(turn.state.askError, "");
-        verify(turn.state.streaming);
     }
 
     function test_toolExecutionCapturesTheCallCwd(): void {
@@ -259,22 +208,61 @@ TestCase {
         compare(tools[0].cwd, "/home/owner/project-a");
     }
 
-    function test_restoredToolKeepsItsOwnCwd(): void {
+    // A stored call keeps no cwd, so a relative path is never resolved
+    // against a directory the call may not have run in.
+    function test_restoredToolHasNoCwd(): void {
         const tools = Ghostd.messageTools({
-            content: [{
-                type: "toolCall",
-                id: "history-write",
-                name: "write",
-                arguments: { path: "notes.md" },
-                cwd: "/home/owner/project-before-cd"
-            }]
+            content: [{ type: "toolCall", id: "history-write", name: "write", arguments: { path: "notes.md" } }]
         });
-
         compare(tools.length, 1);
-        compare(tools[0].cwd, "/home/owner/project-before-cd");
-        compare(Ghostd.messageTools({
-            content: [{ type: "toolCall", name: "write", arguments: { path: "old.md" } }]
-        })[0].cwd, "");
+        compare(tools[0].cwd, "");
+    }
+
+    function test_restoredFailedCallStaysFailed(): void {
+        const tools = Ghostd.messageTools({ content: [
+            { type: "toolCall", id: "a", name: "Bash", arguments: {}, failed: true },
+            { type: "toolCall", id: "b", name: "Bash", arguments: {} }
+        ] });
+        compare(tools[0].status, "failed");
+        compare(tools[1].status, "complete");
+    }
+
+    // Tool events carry no content index, so a call is placed after the text
+    // that announced it and before the text that follows.
+    function test_liveToolSplitsNarrationFromReply(): void {
+        const turn = openTurn("tool-order", null);
+        Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 0, content: "Checking." });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c1", toolName: "Read", arguments: { file_path: "/a" }
+        });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c2", toolName: "Read", arguments: { file_path: "/b" }
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 1, content: "Done." });
+        Ghostd.flushTurn(turn.state, true);
+
+        compare(turn.state.rows[1].text, "Done.");
+        const tools = turn.state.rows[1].toolActivity;
+        compare(tools.length, 2);
+        compare(tools[0].intent, "Checking.");
+        compare(tools[1].intent, "Checking.");
+    }
+
+    function test_ownerCommandStreamsAsABashCard(): void {
+        const turn = openTurn("owner-command", null);
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "cmd", toolName: "bash",
+            arguments: { command: "ls" }, cwd: "/home/owner", intent: "Run a local command"
+        });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_end", id: "cmd", toolName: "bash", isError: false, summary: "a b"
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "done", reason: "stop" });
+
+        compare(turn.state.lastError, "");
+        compare(turn.state.rows[1].role, "assistant");
+        compare(turn.state.rows[1].toolActivity[0].name, "bash");
+        compare(turn.state.rows[1].toolActivity[0].status, "complete");
     }
 
     function test_cancelRetiresXhrBeforeItsSynchronousAbortCallback(): void {

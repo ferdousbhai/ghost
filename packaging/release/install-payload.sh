@@ -43,8 +43,6 @@ if [[ "$component" == runtime ]]; then
     "$pkgdir/usr/lib/ghost/runtime/ghostd.js"
   install -Dm644 "$runtime_root/lib/ghost.js" \
     "$pkgdir/usr/lib/ghost/runtime/ghost.js"
-  install -Dm644 "$runtime_root/lib/photon_rs_bg.wasm" \
-    "$pkgdir/usr/lib/ghost/runtime/photon_rs_bg.wasm"
   install -Dm755 "$runtime_root/bin/ghost-desktop" "$pkgdir/usr/bin/ghost-desktop"
   install -Dm644 "$runtime_root/lib/ghost-desktop.js" \
     "$pkgdir/usr/lib/ghost/runtime/ghost-desktop.js"

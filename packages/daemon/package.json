@@ -23,9 +23,6 @@
     "dev": "bun src/main.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.86.1",
-    "@earendil-works/pi-ai": "0.86.1",
-    "@earendil-works/pi-coding-agent": "0.86.1",
     "@ghost/extensions": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
     "ws": "^8.18.0",

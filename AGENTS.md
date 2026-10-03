@@ -6,22 +6,22 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 ## Authoritative contract
 
-`CONTRACTS.md` defines the ghost-home layout, daemon API, model roles, package boundaries, and harness invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
+`CONTRACTS.md` defines the ghost-home layout, daemon API, the harness table, package boundaries, and lifecycle invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
 
 ## Glossary
 
 - **owner** — the one person this machine and its ghosts belong to. There is no other user role.
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
-- **runtime** — the agent harness a conversation runs on. There is one: pi.
-- **daemon** (`ghostd`) — the HTTP API that owns sessions; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
+- **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
+- **daemon** (`ghostd`) — the HTTP API that owns conversations; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
 - **relay** — the opt-in Chromium extension, its own repository. Never bare
-  "extension": `packages/extensions/` is the pi-side tool seam, a different
-  thing. **ghost-desktop** — the computer-use MCP server (`desktop_look`,
+  "extension": `packages/extensions/` is the ghost's own tools (served over
+  `ghost mcp serve`), a different thing. **ghost-desktop** — the computer-use MCP server (`desktop_look`,
   `desktop_act`); any MCP client can run it.
 
 ## Taste
 
-Find the real constraint, then the simplest design under which the correct behavior is obvious. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. The contract's first rule (`CONTRACTS.md`, "Product boundary") is that work here simplifies and never adds complexity: every change says what it deletes or why nothing could be, an external component comes in only as a replacement for machinery of ours, and a dependency is weighed by what it adds to the install as well as by the code it saves. pi already ships retries, permission policy, hooks, and tool loops — when it can own a behavior, it owns it, because a ghostd copy of the same machinery ends up fighting the runtime's version: express project policy through the runtime's settings and hooks rather than building a parallel loop, read its source in `node_modules` before writing a workaround, and name any deliberate exception in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors plus the runtime's retry and fallback chains.
+Find the real constraint, then the simplest design under which the correct behavior is obvious. Do not preserve complexity because it already exists, and do not add machinery because it looks architecturally sound. The contract's first rule (`CONTRACTS.md`, "Product boundary") is that work here simplifies and never adds complexity: every change says what it deletes or why nothing could be, an external component comes in only as a replacement for machinery of ours, and a dependency is weighed by what it adds to the install as well as by the code it saves. Each harness already ships its model, auth, retries, permission policy, hooks, tool loop, and compaction — when the harness can own a behavior, it owns it, because a ghostd copy of the same machinery ends up fighting the harness's version: a harness row is launch flags plus an output parser, never a chat loop, and anything more is a deliberate exception named in `CONTRACTS.md`. Ghosts run unthrottled: no concurrency, hosted-session, or provider-turn caps — surface limits as errors, and fall through to the next eligible harness.
 
 If a rule here fights the task in front of you, say so loudly and get sign-off before breaking it.
 
@@ -44,12 +44,13 @@ The common defect here is a change that works on the path you tested and is miss
 
 ## Code index
 
-- `packages/runtime/src/` — portable persona, question, handoff/history and model policy consumed by the daemon and hosted SummonGhost; no host I/O or session loop
+- `packages/runtime/src/` — portable persona, hook, MCP-config, and browser policy; no host I/O
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
-- `packages/daemon/src/session-host.ts` — session lifecycle and runtime orchestration
-- `packages/daemon/src/models.ts`, `model-selection.ts`, `smol.ts`, and `packages/runtime/src/model-routing.ts` — model roles, the chat-model binding, and which model a role resolves to
-- `packages/daemon/src/hooks.ts` — harness hooks
-- `packages/extensions/src/` — pure Ghost extensions (the `extension-api.ts` seam) and ghost-home file operations; `packages/daemon/src/pi-extension-bridge.ts` adapts them to pi
+- `packages/daemon/src/session-host.ts` — turns, harness choice and fallback, conversation metadata, ghost lifecycle
+- `packages/daemon/src/harness-table.ts` — one row per agent CLI: launch flags and output parser; `harness-process.ts` runs one; `conversation-log.ts` is the history every client reads
+- `packages/daemon/src/prompt-policy.ts` — the stable system-prompt policy sections
+- `packages/daemon/src/hooks.ts` — the owner's command hooks around each pass
+- `packages/extensions/src/` — the ghost's own tools (the `extension-api.ts` seam), served to harnesses over `ghost mcp serve`, and ghost-home file operations
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/extensions/src/extensions/desktop.ts` — ghostd's bridge to [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop), the computer-use MCP server in its own repo
 - ghost-core is `packages/{daemon,extensions,runtime}`; ghost-omarchy is `packages/shell` plus the ghost-desktop repo; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries

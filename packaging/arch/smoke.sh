@@ -53,7 +53,6 @@ if [[ "$component" == runtime ]]; then
     /usr/lib/systemd/user/ghostd.service
     /usr/lib/ghost/runtime/ghostd.js
     /usr/lib/ghost/runtime/ghost.js
-    /usr/lib/ghost/runtime/photon_rs_bg.wasm
     /usr/share/doc/ghost/docs/hooks.md
   )
   executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop
@@ -126,7 +125,7 @@ else
   }
   require_runtime_license licenses/ghost/LICENSE
   require_runtime_license licenses/ghost/THIRD_PARTY_NOTICES.md
-  require_runtime_license licenses/npm/@earendil-works/pi-ai/0.86.1/LICENSE
+  require_runtime_license licenses/npm/@modelcontextprotocol/sdk/1.29.0/LICENSE
 
   require_unit_directive /usr/lib/systemd/user/ghostd.service Unit PartOf \
     graphical-session.target

@@ -1,5 +1,4 @@
 import {
-  existsSync,
   linkSync,
   mkdirSync,
   readFileSync,
@@ -10,13 +9,12 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { GhostMcpManager } from "../src/mcp-manager.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostError } from "../src/ghosts.js";
-import { homeOperationsFor } from "../src/home-operations.js";
 import {
   expandMcpServerConfig,
   McpCatalog,
+  normalizeMcpStdioCwd,
 } from "../src/mcp-catalog.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
@@ -341,8 +339,6 @@ describe("McpCatalog ghost-only discovery", () => {
     expect(snapshot.servers.map((server) => server.name)).toEqual(["valid"]);
     expect(snapshot.skipped).toHaveLength(Object.keys(malformed).length);
     expect(JSON.stringify(snapshot)).not.toContain(sentinel);
-    await expect(catalog.test("casper", "bad_command"))
-      .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
     for (const [index, config] of Object.values(malformed).entries()) {
       await expect(catalog.add("casper", `mutation-${index}`, config))
         .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
@@ -544,274 +540,15 @@ describe("McpCatalog mutations", () => {
     expect(Object.keys(readServers(home)).sort()).toEqual(["alpha", "bravo", "charlie", "delta"]);
   });
 
-  it("tests one server without opening a session or exposing transport errors", async () => {
-    const { catalog, home } = setup();
-    const serverPath = join(home, "probe-mcp.mjs");
-    writeFileSync(
-      serverPath,
-      `import { createInterface } from "node:readline";
-const lines = createInterface({ input: process.stdin });
-const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
-lines.on("line", (line) => {
-  const request = JSON.parse(line);
-  if (request.id === undefined) return;
-  if (request.method === "initialize") send(request.id, {
-    protocolVersion: "2025-11-25", capabilities: { tools: {} },
-    serverInfo: { name: "probe", version: "1.0.0" }
-  });
-
-  else if (request.method === "tools/list") send(request.id, { tools: [{
-    name: "ping", description: "Probe tool", inputSchema: { type: "object", properties: {} }
-  }] });
-  else send(request.id, {});
-});
-`,
-      "utf8",
-    );
-    await catalog.add("casper", "probe", {
-      type: "stdio",
-      command: process.execPath,
-      args: [serverPath],
-    });
-
-    await expect(catalog.test("casper", "probe")).resolves.toEqual({
-      name: "probe",
-      ok: true,
-      status: "connected",
-      toolCount: 1,
-      message: "Connection succeeded.",
-    });
-  });
-
-  for (const scenario of [
-    { label: "successful cleanup", connectFails: false, disconnectFails: false, ok: true },
-    { label: "failed connect and cleanup", connectFails: true, disconnectFails: true, ok: false },
-  ] as const) {
-    it(`holds the home lease through isolated probe ${scenario.label}`, async () => {
-      const { home } = setup();
-      const coordinator = homeOperationsFor(temp!.registry);
-      const catalog = new McpCatalog({ registry: temp!.registry, homeOperations: coordinator });
-      writeJson(home, "mcp.json", {
-        mcpServers: { probe: { type: "stdio", command: "/bin/true" } },
-      });
-      const connectGate = Promise.withResolvers<void>();
-      const connectEntered = Promise.withResolvers<void>();
-      const disconnectGate = Promise.withResolvers<void>();
-      const disconnectEntered = Promise.withResolvers<void>();
-      const order: string[] = [];
-      let connectManager: GhostMcpManager | undefined;
-      let disconnectManager: GhostMcpManager | undefined;
-      let observedConfigs: unknown;
-      vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementation(async function (
-        this: GhostMcpManager,
-        configs,
-      ) {
-        connectManager = this;
-        observedConfigs = configs;
-        order.push("connect-entered");
-        connectEntered.resolve();
-        await connectGate.promise;
-        if (scenario.connectFails) {
-          order.push("connect-failed");
-          throw new Error("injected probe failure");
-        }
-        order.push("connect-completed");
-        return {
-          connectedServers: ["probe"],
-          errors: new Map(),
-          tools: [],
-          exaApiKeys: [],
-        };
-      });
-      vi.spyOn(GhostMcpManager.prototype, "disconnectAll").mockImplementation(async function (
-        this: GhostMcpManager,
-      ) {
-        disconnectManager = this;
-        order.push("disconnect-entered");
-        disconnectEntered.resolve();
-        await disconnectGate.promise;
-        if (scenario.disconnectFails) {
-          order.push("disconnect-failed");
-          throw new Error("injected disconnect failure");
-        }
-        order.push("disconnect-completed");
-      });
-
-      let probeSettled = false;
-      const probe = catalog.test("casper", "probe").then((result) => {
-        probeSettled = true;
-        order.push("probe-settled");
-        return result;
-      });
-      await connectEntered.promise;
-      let moveReady = false;
-      const move = coordinator.reserveMove("casper").then((release) => {
-        moveReady = true;
-        order.push("move-ready");
-        return release;
-      });
-
-      try {
-        await vi.waitFor(() => expect(coordinator.moveReservationCount).toBe(1));
-        expect(moveReady).toBe(false);
-        expect(probeSettled).toBe(false);
-        expect(temp!.registry.get("casper").dir).toBe(home);
-
-        connectGate.resolve();
-        await disconnectEntered.promise;
-        expect(moveReady).toBe(false);
-        expect(probeSettled).toBe(false);
-        expect(temp!.registry.get("casper").dir).toBe(home);
-      } finally {
-        connectGate.resolve();
-        disconnectGate.resolve();
-      }
-
-      const result = await probe;
-      const releaseMove = await move;
-      expect(result).toMatchObject({ name: "probe", ok: scenario.ok });
-      expect(connectManager).toBeDefined();
-      expect(disconnectManager).toBe(connectManager);
-      expect(observedConfigs).toEqual({
-        probe: { type: "stdio", command: "/bin/true", cwd: home },
-      });
-      const disconnectFinished = scenario.disconnectFails
-        ? order.indexOf("disconnect-failed")
-        : order.indexOf("disconnect-completed");
-      expect(disconnectFinished).toBeGreaterThan(order.indexOf("disconnect-entered"));
-      expect(disconnectFinished).toBeLessThan(order.indexOf("move-ready"));
-
-      try {
-        const moved = temp!.registry.rename("casper", `probe-${scenario.ok ? "success" : "failure"}`);
-        expect(existsSync(home)).toBe(false);
-        expect(readFileSync(join(moved.dir, "mcp.json"), "utf8")).toContain('"probe"');
-      } finally {
-        releaseMove();
-      }
-    });
-  }
-
-  it("uses the same policy-aware expansion for isolated connection probes", async () => {
-    const { catalog, home } = setup();
-    vi.stubEnv("GHOST_MCP_PROBE_ORDINARY", "probe-expanded");
-    vi.stubEnv("GHOST_MCP_PROBE_PROTECTED", "probe-ambient-secret");
-    const ordinary = "$" + "{GHOST_MCP_PROBE_ORDINARY}";
-    const protectedValue = "$" + "{GHOST_MCP_PROBE_PROTECTED}";
-    writeJson(home, "mcp.json", {
-      mcpServers: {
-        literal_stdio: {
-          type: "stdio",
-          command: ordinary,
-          args: [ordinary],
-          env: { TOKEN: protectedValue },
-          envPolicy: "literal",
-        },
-        literal_http: {
-          type: "http",
-          url: `https://example.invalid/${ordinary}`,
-          headers: { Authorization: protectedValue },
-          headerPolicy: "origin-locked",
-        },
-        literal_sse: {
-          type: "sse",
-          url: `https://example.invalid/${ordinary}`,
-          headers: { Authorization: protectedValue },
-          headerPolicy: "origin-locked",
-        },
-        inherited_stdio: {
-          type: "stdio",
-          command: ordinary,
-          env: { TOKEN: protectedValue },
-        },
-        inherited_http: {
-          type: "http",
-          url: `https://example.invalid/${ordinary}`,
-          headers: { Authorization: protectedValue },
-        },
-      },
-    });
-    const observed = new Map<string, unknown>();
-    vi.spyOn(GhostMcpManager.prototype, "connectServers").mockImplementation(async (configs) => {
-      for (const [name, config] of Object.entries(configs)) observed.set(name, config);
-      return {
-        connectedServers: Object.keys(configs),
-        errors: new Map(),
-        tools: [],
-      };
-    });
-
-    for (const name of [
-      "literal_stdio",
-      "literal_http",
-      "literal_sse",
-      "inherited_stdio",
-      "inherited_http",
-    ]) {
-      await expect(catalog.test("casper", name)).resolves.toMatchObject({ ok: true });
-    }
-    expect(observed.get("literal_stdio")).toMatchObject({
-      command: "probe-expanded",
-      args: ["probe-expanded"],
-      env: { TOKEN: protectedValue },
-    });
-    for (const name of ["literal_http", "literal_sse"]) {
-      expect(observed.get(name)).toMatchObject({
-        url: "https://example.invalid/probe-expanded",
-        headers: { Authorization: protectedValue },
-      });
-    }
-    expect(observed.get("inherited_stdio")).toMatchObject({
-      command: "probe-expanded",
-      env: { TOKEN: "probe-ambient-secret" },
-    });
-    expect(observed.get("inherited_http")).toMatchObject({
-      url: "https://example.invalid/probe-expanded",
-      headers: { Authorization: "probe-ambient-secret" },
-    });
-  });
-
-  it("anchors absent and relative stdio cwd to the immutable config source root", async () => {
-    const { catalog, home } = setup();
-    const child = join(home, "child");
-    mkdirSync(child);
-    const serverPath = join(home, "cwd-probe.mjs");
-    const absentResult = join(home, "absent-cwd.txt");
-    const relativeResult = join(home, "relative-cwd.txt");
-    writeFileSync(
-      serverPath,
-      `import { createInterface } from "node:readline";
-import { writeFileSync } from "node:fs";
-writeFileSync(process.argv[2], process.cwd());
-const lines = createInterface({ input: process.stdin });
-const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
-lines.on("line", (line) => {
-  const request = JSON.parse(line);
-  if (request.id === undefined) return;
-  if (request.method === "initialize") send(request.id, {
-    protocolVersion: "2025-11-25", capabilities: { tools: {} },
-    serverInfo: { name: "cwd-probe", version: "1.0.0" }
-  });
-  else if (request.method === "tools/list") send(request.id, { tools: [] });
-  else send(request.id, {});
-});
-`,
-      "utf8",
-    );
-    await catalog.add("casper", "absent-cwd", {
-      type: "stdio",
-      command: process.execPath,
-      args: [serverPath, absentResult],
-    });
-    await catalog.add("casper", "relative-cwd", {
-      type: "stdio",
-      command: process.execPath,
-      args: [serverPath, relativeResult],
-      cwd: "child",
-    });
-
-    await expect(catalog.test("casper", "absent-cwd")).resolves.toMatchObject({ ok: true });
-    await expect(catalog.test("casper", "relative-cwd")).resolves.toMatchObject({ ok: true });
-    expect(readFileSync(absentResult, "utf8")).toBe(home);
-    expect(readFileSync(relativeResult, "utf8")).toBe(child);
+  it("anchors absent and relative stdio cwd to the config source root, leaving remote rows alone", () => {
+    const root = "/home/owner/ghosts/casper";
+    expect(normalizeMcpStdioCwd({ type: "stdio", command: "probe" }, root))
+      .toEqual({ type: "stdio", command: "probe", cwd: root });
+    expect(normalizeMcpStdioCwd({ command: "probe", cwd: "child" }, root))
+      .toMatchObject({ cwd: join(root, "child") });
+    expect(normalizeMcpStdioCwd({ command: "probe", cwd: "/srv/../opt/x" }, root))
+      .toMatchObject({ cwd: "/opt/x" });
+    const remote = { type: "http" as const, url: "https://example.invalid/mcp" };
+    expect(normalizeMcpStdioCwd(remote, root)).toBe(remote);
   });
 });

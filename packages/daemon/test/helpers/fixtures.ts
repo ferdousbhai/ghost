@@ -9,12 +9,10 @@ import { dirname, join } from "node:path";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
 import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
-import { writeGhostModels } from "../../src/models.js";
-import { openAiCompatiblePreset } from "./models-presets.js";
-import type { PiMessagesEvent } from "../../src/pi-messages.js";
+import type { TurnEvent } from "../../src/turn-events.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
-import { startMockProvider, type MockProvider, type MockStep } from "./mock-provider.js";
+import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./fake-harness.js";
 
 export interface TempGhosts {
   root: string;
@@ -65,10 +63,9 @@ export interface SeedGhostOptions {
   name?: string;
   character?: string;
   docs?: Record<string, string>;
-  provider?: { baseUrl: string; modelId: string; providerId?: string };
 }
 
-/** A ghost home with a persona, optional retained docs, and a models.json. */
+/** A ghost home with a persona and optional retained docs. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
@@ -86,19 +83,6 @@ export function seedGhost(root: string, options: SeedGhostOptions = {}): string 
     mkdirSync(join(full, ".."), { recursive: true });
     writeFileSync(full, content, "utf8");
   }
-  if (options.provider) {
-    mkdirSync(paths.agentDir, { recursive: true });
-    writeGhostModels(
-      paths.home,
-      openAiCompatiblePreset({
-        providerId: options.provider.providerId ?? "ghost-local",
-        baseUrl: options.provider.baseUrl,
-        modelId: options.provider.modelId,
-        // Keyless local server; pi still wants a non-empty key on the wire.
-        apiKey: "not-needed",
-      }),
-    );
-  }
   return dir;
 }
 
@@ -107,7 +91,7 @@ export interface TestDaemon {
   env: NodeJS.ProcessEnv;
   host: SessionHost;
   listening: ListeningServer;
-  provider: MockProvider;
+  harness: FakeHarness;
   temp: TempGhosts;
   tokenFile: string;
 }
@@ -115,7 +99,7 @@ export interface TestDaemon {
 export interface StartTestDaemonOptions {
   ghost?: string;
   openSession?: string;
-  providerScript?: MockStep[];
+  turns?: FakeTurn[];
 }
 
 /** A real authenticated daemon bound only to disposable test-owned state. */
@@ -124,19 +108,14 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   const ghost = options.ghost ?? "casper";
   const temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  const provider = await startMockProvider({
-    script: options.providerScript ?? [{ kind: "text", text: "hello" }],
-  });
-  seedGhost(temp.root, {
-    name: ghost,
-    provider: { baseUrl: provider.url, modelId: provider.modelId },
-  });
+  const harness = fakeHarness(options.turns ?? replies("hello"));
+  seedGhost(temp.root, { name: ghost });
   const homeOperations = new HomeOperationCoordinator(temp.registry);
   const host = new SessionHost({
     registry: temp.registry,
     homeOperations,
     ownerHome: temp.ownerHome,
-    offline: true,
+    ...onlyHarnesses(harness),
   });
   const listening = await startDaemonServer({
     registry: temp.registry,
@@ -162,16 +141,16 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
       emit: () => {},
     });
   }
-  return { apiToken, env, host, listening, provider, temp, tokenFile };
+  return { apiToken, env, host, listening, harness, temp, tokenFile };
 }
 
 /**
- * Parse an SSE body according to Ghost's pi-messages contract: split on a
+ * Parse an SSE body according to Ghost's turn wire: split on a
  * blank line, take the first `data:` line of each
  * frame, ignore `[DONE]`, ignore frames with no data line (keepalives).
  */
-export function parseSseStream(body: string): PiMessagesEvent[] {
-  const events: PiMessagesEvent[] = [];
+export function parseSseStream(body: string): TurnEvent[] {
+  const events: TurnEvent[] = [];
   for (const frame of body.replace(/\r\n/g, "\n").split("\n\n")) {
     if (!frame.trim()) continue;
     const data = frame
@@ -180,7 +159,7 @@ export function parseSseStream(body: string): PiMessagesEvent[] {
       ?.slice(5)
       .trim();
     if (!data || data === "[DONE]") continue;
-    events.push(JSON.parse(data) as PiMessagesEvent);
+    events.push(JSON.parse(data) as TurnEvent);
   }
   return events;
 }

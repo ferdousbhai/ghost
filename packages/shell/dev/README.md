@@ -33,7 +33,7 @@ cd packages/shell
 
 # Terminal 1: two ghosts, owned temporary context, and canned streamed replies.
 node dev/mock-ghostd.mjs --port 17717
-# Shape a preview: --slow (30ms deltas), --tool-steps N, --ask-timeout S,
+# Shape a preview: --slow (30ms deltas), --tool-steps N,
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
 # --stall-stream (stream never settles).
 
@@ -94,13 +94,10 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Character / Commands / Hooks / MCP / Board /
+  bottom, and the permanent Chat / Board / Character / Hooks / MCP /
   Remote access rail at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
-  focused. Character edits `character.md`.
-  Commands shows the session's searchable Ghost catalog and stages a chosen slash
-  command in chat; typing `/` opens its compact
-  autocomplete, including clear partial/unsupported labels. Hooks shows the
+  focused. Character edits `character.md`. Hooks shows the
   daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
   timing, and the loaded count. It never returns hook commands, paths, prompts,
   or injected context, and opening it does not create a conversation. MCP lists
@@ -115,7 +112,7 @@ stop the mock separately.
   then the reply arriving word by word with `**bold**` rendered as bold. The
   narration never reaches the transcript, and the tool call settles behind the
   row's quiet "1 step" toggle rather than into a card of its own.
-- A finished turn, failure, or pending question raises a desktop toast unless
+- A finished turn or failure raises a desktop toast unless
   its conversation is being viewed in the focused chat panel. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
@@ -157,11 +154,6 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
   activity, markdown render, terminal `done`, notification.
 - The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
   colours, focus grab, Esc.
-- **The "Connect a provider" panel** (`ModelLogin.qml`, inside `ModelPicker.qml`) against the mock's login
-  endpoints: the provider picker, the OAuth auth-URL + paste-code step, the
-  `select` step, and the api-key step, each rendered live and captured under
-  `dev/evidence/model-login*.png`. Driven by `ipc call ghost login` /
-  `loginTo <id> <authType>`.
 - **The bar widget in the owner's own bar**, after `omarchy-restart-shell`:
   `omarchy-shell shell debugBarGeometry` reports it filling a 27x26 host slot
   level with its neighbours.

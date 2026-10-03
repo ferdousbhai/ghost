@@ -1,64 +1,47 @@
 /**
- * Golden end-to-end session fixtures — the tripwire for issue #3's strip phase.
+ * Golden end-to-end session fixtures.
  *
  * The unit suites next door assert *properties* ("the persona contains the
- * character body", "the memory writer persists a file"). Those survive a refactor that
- * quietly changes everything else about a turn. These fixtures assert the
- * opposite thing: this exact scripted conversation produces this exact
- * observable behaviour, byte for byte, and any drift shows up as a diff.
- *
- * That makes them the safety net for deleting vendored OMP subsystems: a strip
- * that silently drops a prompt section, reorders the tool surface, changes an
- * event shape, or stops writing a file fails here even though no property test
- * was ever written for it.
+ * character body", "a follow-up runs after the pass"). Those survive a
+ * refactor that quietly changes everything else about a turn. These fixtures
+ * assert the opposite thing: this exact scripted conversation produces this
+ * exact observable behaviour, byte for byte, and any drift shows up as a diff.
  *
  * ## What a fixture records
  *
- * Only surfaces Ghost owns or can pin:
+ * Only surfaces Ghost owns:
  *
- * - **The complete system prompt** sent through the provider-neutral Pi path.
- * - **The tool surface**, both as advertised on the wire and as the session's
- *   active registry reports it.
- * - **The pi-messages event stream** of every turn, canonicalised.
+ * - **The persona** a harness finds in its conversation directory.
+ * - **The launch**: prompt, resume flag, harness session, cwd, conversation
+ *   identity, and MCP servers handed to the harness.
+ * - **The turn event stream** of every turn, canonicalised.
  * - **The rendered transcript** and the conversation listing.
- * - **The ghost home on disk** after the conversation, including the names of
- *   opaque runtime artifacts owned there.
+ * - **The ghost home on disk** after the conversation.
  *
  * ## What is deliberately excluded, and why
  *
- * - **`agentDir` internals** — `.pi/models.db`, the `sessions/*.jsonl`
- *   transcripts. Binary/SQLite and full of ids and clock values; the rendered
- *   transcript is the same information in a stable shape.
- * - **Wall-clock everything**: entry timestamps, `createdAt`/`updatedAt`, the
- *   greeting's `localTime`. Normalised to placeholders (the greeting fixture
- *   pins a clock explicitly instead, so the prompt text stays real).
- * - **Entry ids** are content-addressed hashes over timestamped entries, so
- *   they are re-mapped to first-seen ordinals `#1`, `#2`, … which still pins
- *   the parent/child *shape* of the branch tree.
+ * - **Conversation logs** under `sessions/`: full of clock values; the
+ *   rendered transcript is the same information in a stable shape.
+ * - **Wall-clock everything**: entry timestamps, `createdAt`/`updatedAt`.
+ * - **Entry ids** are re-mapped to first-seen ordinals `#1`, `#2`, … which
+ *   still pins the parent/child shape of the conversation.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
- * - **Tool presentation.** Ghost composes Pi's native tools with its custom
- *   tools. The fixture records a *presence table* over a named universe of
- *   tools (`toolSurfaceTable`) rather than the raw list, so a strip that drops
- *   or renames a tool still fails without pinning unrelated catalogue growth.
- *   Ambient machine MCP is no longer a source of variation: focused SessionHost
- *   tests pin the visible ghost config plus the explicitly bound project
- *   snapshot.
  *
- * Tool-call ids (`call_1`, …) and token usage are NOT normalised: the mock
- * provider mints both deterministically, so a change there is a real change.
+ * Tool-call ids and harness session ids come from the scripted harness, so a
+ * change there is a real change.
  *
  * ## Regenerating
  *
  *     UPDATE_GOLDEN=1 pnpm --filter @ghost/daemon test test/golden
  *
- * Review the resulting diff like any other diff — that diff *is* the behavioural
- * change the strip introduced.
+ * Review the resulting diff like any other diff — that diff *is* the
+ * behavioural change.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect } from "vitest";
-import { GHOST_AGENT_DIRNAME, GHOST_SESSIONS_DIRNAME } from "../../src/ghosts.js";
+import { GHOST_SESSIONS_DIRNAME } from "../../src/ghosts.js";
 
 const FIXTURE_DIR = fileURLToPath(new URL("./fixtures/", import.meta.url));
 
@@ -174,12 +157,10 @@ export class Normalizer {
  * Every plain file under a ghost home, as `--- path ---` then its content,
  * sorted by path.
  *
- * Two directories are listed by name only, never by content:
- * `.pi/` (derived Pi runtime state) and `sessions/` (raw Pi transcripts, full
- * of ids and clock values; the rendered transcript covers the same ground in
- * a stable shape). Listing their *filenames* still pins the contract that
- * sessions and derived agent state live inside the ghost home — and that
- * credentials do not: no `agent.db` is created there any more.
+ * `sessions/` is listed by name only, never by
+ * content: conversation logs are full of ids and clock values, and the
+ * rendered transcript covers the same ground in a stable shape. Listing the
+ * names still pins that conversations live inside the ghost home.
  *
  * The remaining visible files pin this fixture's ghost-owned persona, memory,
  * and policy state. The owner's own documents and Claude's native transcript
@@ -188,7 +169,7 @@ export class Normalizer {
 export function ghostHomeSnapshot(
   dir: string,
   normalizer: Normalizer,
-  opaqueDirs: readonly string[] = [GHOST_AGENT_DIRNAME, GHOST_SESSIONS_DIRNAME],
+  opaqueDirs: readonly string[] = [GHOST_SESSIONS_DIRNAME],
 ): string {
   const blocks: string[] = [];
   const files: string[] = [];
@@ -229,37 +210,6 @@ export function ghostHomeSnapshot(
   }
   return blocks.length > 0 ? blocks.join("\n") : "(empty)";
 }
-
-/**
- * A presence table over a named universe of tool names.
- *
- * `registry` is what `session.getActiveToolNames()` reports; `wire` is what was
- * advertised to the model in the request body. Ghost registers its custom
- * tools directly beside Pi's native tools, so the fixture pins both views and
- * makes any accidental divergence visible.
- *
- * Names outside `universe` are counted, never listed — see the header on why a
- * session's raw tool list is not portable.
- */
-export function toolSurfaceTable(
-  universe: readonly string[],
-  registry: readonly string[],
-  wire: readonly string[],
-  resolvable?: (name: string) => boolean,
-): string {
-  const inRegistry = new Set(registry);
-  const onWire = new Set(wire);
-  const width = Math.max(...universe.map((name) => name.length));
-  const yn = (value: boolean) => (value ? "yes" : "no ");
-  const rows = [...universe].sort().map((name) =>
-    `${name.padEnd(width)}  registry=${yn(inRegistry.has(name))}  wire=${yn(onWire.has(name))}`
-    + (resolvable ? `  invokable=${yn(resolvable(name)).trimEnd()}` : ""));
-  // Deliberately not a count: how many extras a machine contributes is exactly
-  // the part that is not portable.
-  rows.push("(tools outside this universe are not compared)");
-  return rows.join("\n");
-}
-
 
 export interface GoldenSection {
   readonly title: string;

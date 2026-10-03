@@ -32,7 +32,6 @@ function filesBelow(root: string): string[] {
 const declared = new Set<string>();
 const identities = new Set<string>();
 let sawGhost = false;
-let sawPi = false;
 for (const line of lines) {
   const fields = line.split("\t");
   if (fields.length !== 5) throw new Error(`invalid bundled license row: ${line}`);
@@ -46,7 +45,6 @@ for (const line of lines) {
   if (identities.has(identity)) throw new Error(`duplicate bundled license identity: ${line}`);
   identities.add(identity);
   if (kind === "ghost") sawGhost = true;
-  if (name.startsWith("@earendil-works/pi-")) sawPi = true;
   for (const relativePath of pathList.split(",")) {
     if (!relativePath.startsWith("licenses/") || isAbsolute(relativePath)) {
       throw new Error(`invalid bundled license path: ${relativePath}`);
@@ -61,7 +59,7 @@ for (const line of lines) {
     declared.add(relativePath);
   }
 }
-if (!sawGhost || !sawPi) throw new Error("bundled license closure omits Ghost or Pi");
+if (!sawGhost) throw new Error("bundled license closure omits Ghost");
 
 const actual = filesBelow(join(runtimeRoot, "licenses"));
 const expected = [...declared].sort();

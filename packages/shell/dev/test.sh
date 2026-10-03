@@ -80,7 +80,6 @@ if [[ ${#xdg_open_owners[@]} -ne 1 || ${xdg_open_owners[0]} != qml/services/Exte
 fi
 
 rg -q 'onLinkActivated: link => ExternalLinks\.openModelUrl\(link\)' qml/components/Bubble.qml
-rg -q 'ExternalLinks\.openLoginUrl\(url\)' qml/services/Ghostd.qml
 
 # Hook labels originate in trusted machine configuration but still remain
 # display-only text. AutoText must never turn them into a resource surface.

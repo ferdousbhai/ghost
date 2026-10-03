@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
+import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 
 let temp: TempGhosts | null = null;
-let provider: MockProvider | null = null;
+let harness: FakeHarness | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 
@@ -15,8 +15,8 @@ afterEach(async () => {
   listening = null;
   await host?.disposeAll();
   host = null;
-  await provider?.close();
-  provider = null;
+  harness?.cleanup();
+  harness = null;
   temp?.cleanup();
   temp = null;
 });
@@ -24,26 +24,22 @@ afterEach(async () => {
 async function setup(): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  provider = await startMockProvider({ script: [{ kind: "text", text: "hello" }] });
-  seedGhost(temp.root, {
-    name: "casper",
-    provider: { baseUrl: provider.url, modelId: provider.modelId },
-  });
+  harness = fakeHarness(replies("hello"));
+  seedGhost(temp.root, { name: "casper" });
   host = new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
     scheduleUnitDir: join(temp.ownerHome, ".config", "systemd", "user"),
     scheduleRuntimeUnitDir: join(temp.ownerHome, ".runtime", "systemd", "user"),
     scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
-    machineSkillPaths: [],
-    offline: true,
-    title: { enabled: false },
+    ...onlyHarnesses(harness),
   });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
     port: 0,
     apiToken: null,
+    relay: null,
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -69,8 +65,6 @@ async function nextEvent(
 ): Promise<{
   type: string;
   id: string;
-  conversationId: string;
-  runtime: "pi";
   updatedAt: string;
 }> {
   const decoder = new TextDecoder();
@@ -85,8 +79,6 @@ async function nextEvent(
         if (line) return JSON.parse(line.slice(5).trim()) as {
           type: string;
           id: string;
-          conversationId: string;
-          runtime: "pi";
           updatedAt: string;
         };
         continue;
@@ -132,7 +124,7 @@ describe("conversation unread state", () => {
 
     await host!.markRead(
       "casper",
-      row.conversationId,
+      row.id,
       new Date(Date.parse(row.updatedAt) + 1),
     );
     row = (await host!.listSessions("casper"))[0]!;
@@ -145,9 +137,8 @@ describe("conversation unread state", () => {
       emit: () => {},
     });
     expect((await host!.listSessions("casper"))[0]).toMatchObject({
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
+      id: "conv-1",
+      harness: "fake",
       unread: true,
     });
   });
@@ -168,16 +159,14 @@ describe("GET /api/ghosts/:name/events", () => {
     await postTurn(base);
     expect(await nextEvent(reader)).toMatchObject({
       type: "conversation-updated",
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
+      id: "conv-1",
     });
     let listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
     };
     expect(listing.sessions[0]?.unread).toBe(true);
 
-    const marked = await fetch(`${base}/api/ghosts/casper/sessions/pi%3Aconv-1/read`, {
+    const marked = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/read`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: "{}",
@@ -185,9 +174,7 @@ describe("GET /api/ghosts/:name/events", () => {
     expect(marked.status).toBe(200);
     expect(await nextEvent(reader)).toMatchObject({
       type: "conversation-updated",
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
+      id: "conv-1",
     });
     listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: Array<{ unread: boolean }>;
@@ -198,24 +185,28 @@ describe("GET /api/ghosts/:name/events", () => {
     await expect(reader.closed).rejects.toBeDefined();
   });
 
-  it("opens no hosted session and unregisters a dropped client", async () => {
+  it("starts no turn and unregisters a dropped client", async () => {
     const base = await setup();
     const controller = new AbortController();
     const response = await fetch(`${base}/api/ghosts/casper/events`, {
       signal: controller.signal,
     });
     const internals = host as unknown as {
-      sessions: Map<string, unknown>;
-      conversationListeners: Map<string, Set<unknown>>;
+      live: Map<string, unknown>;
+      listeners: Map<string, Set<unknown>>;
     };
-    expect(internals.sessions.size).toBe(0);
-    expect(internals.conversationListeners.get("casper")?.size).toBe(1);
+    expect(internals.live.size).toBe(0);
+    expect(internals.listeners.get("casper")?.size).toBe(1);
 
     controller.abort();
     await expect(response.body!.getReader().closed).rejects.toBeDefined();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(internals.conversationListeners.has("casper")).toBe(false);
-    expect(internals.sessions.size).toBe(0);
+    // The server sees the dropped socket on its own schedule.
+    const deadline = Date.now() + 2_000;
+    while (internals.listeners.has("casper") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(internals.listeners.has("casper")).toBe(false);
+    expect(internals.live.size).toBe(0);
   });
 
   it.each(["rename", "delete"] as const)(
@@ -242,10 +233,7 @@ describe("GET /api/ghosts/:name/events", () => {
         body: JSON.stringify({ name: "casper" }),
       });
       expect(recreated.status).toBe(201);
-      seedGhost(temp!.root, {
-        name: "casper",
-        provider: { baseUrl: provider!.url, modelId: provider!.modelId },
-      });
+      seedGhost(temp!.root, { name: "casper" });
 
       const controller = new AbortController();
       const newResponse = await fetch(`${base}/api/ghosts/casper/events`, {
@@ -255,12 +243,12 @@ describe("GET /api/ghosts/:name/events", () => {
       await postTurn(base);
       expect(await nextEvent(newReader)).toMatchObject({
         type: "conversation-updated",
-        id: "pi:conv-1",
+        id: "conv-1",
       });
       const internals = host as unknown as {
-        conversationListeners: Map<string, Set<unknown>>;
+        listeners: Map<string, Set<unknown>>;
       };
-      expect(internals.conversationListeners.get("casper")?.size).toBe(1);
+      expect(internals.listeners.get("casper")?.size).toBe(1);
 
       controller.abort();
       await expect(newReader.closed).rejects.toBeDefined();
@@ -285,10 +273,10 @@ describe("GET /api/ghosts/:name/events", () => {
     const unsubscribeNew = host!.subscribeConversationEvents("casper", () => {});
     unsubscribeOld();
     const internals = host as unknown as {
-      conversationListeners: Map<string, Set<unknown>>;
+      listeners: Map<string, Set<unknown>>;
     };
-    expect(internals.conversationListeners.get("casper")?.size).toBe(1);
+    expect(internals.listeners.get("casper")?.size).toBe(1);
     unsubscribeNew();
-    expect(internals.conversationListeners.has("casper")).toBe(false);
+    expect(internals.listeners.has("casper")).toBe(false);
   });
 });

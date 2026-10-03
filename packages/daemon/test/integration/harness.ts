@@ -3,9 +3,8 @@
  *
  * This boots the production Registry -> SessionHost -> HTTP server chain on an
  * ephemeral loopback port. The ghost home, XDG roots, and process HOME all
- * point inside one OS-temp directory, inherited provider credentials are
- * scrubbed before Pi is constructed, and the only model endpoint is the
- * scripted loopback provider.
+ * point inside one OS-temp directory, and the only harness is a scripted one
+ * (`fakeHarness`), so no agent CLI or model is ever reached.
  *
  * The clients below use node:http with pooling disabled. SSE is decoded from
  * the bytes delivered by the real socket; no EventSource or route stub sits in
@@ -19,19 +18,14 @@ import {
 } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { findProviderCredentialEnv, scrubProviderEnv } from "../../src/env-scrub.js";
 import { GhostRegistry } from "../../src/ghosts.js";
 import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
-import type { PiMessagesEvent } from "../../src/pi-messages.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
+import type { TurnEvent } from "../../src/turn-events.js";
+import { fakeHarness, onlyHarnesses, type FakeHarness, type FakeTurn } from "../helpers/fake-harness.js";
 import { seedGhost } from "../helpers/fixtures.js";
-import {
-  startMockProvider,
-  type MockProvider,
-  type MockProviderOptions,
-} from "../helpers/mock-provider.js";
 
 const API_TOKEN = "a".repeat(64);
 const DEFAULT_WAIT_MS = 5_000;
@@ -46,7 +40,7 @@ export interface JsonResponse<T = unknown> {
 export interface SseWireFrame {
   raw: string;
   data?: string;
-  event?: PiMessagesEvent;
+  event?: TurnEvent;
 }
 
 interface FrameWaiter {
@@ -132,7 +126,7 @@ export class RealSseClient {
     });
   }
 
-  get events(): PiMessagesEvent[] {
+  get events(): TurnEvent[] {
     return this.frames.flatMap((frame) => frame.event ? [frame.event] : []);
   }
 
@@ -153,17 +147,17 @@ export class RealSseClient {
   }
 
   waitForEvent(
-    predicate: PiMessagesEvent["type"] | ((event: PiMessagesEvent) => boolean),
+    predicate: TurnEvent["type"] | ((event: TurnEvent) => boolean),
     timeoutMs = DEFAULT_WAIT_MS,
-  ): Promise<PiMessagesEvent> {
+  ): Promise<TurnEvent> {
     const matches = typeof predicate === "string"
-      ? (event: PiMessagesEvent) => event.type === predicate
+      ? (event: TurnEvent) => event.type === predicate
       : predicate;
     return this.waitForFrame(
       (frame) => frame.event !== undefined && matches(frame.event),
       typeof predicate === "string" ? `${predicate} SSE event` : "matching SSE event",
       timeoutMs,
-    ).then((frame) => frame.event as PiMessagesEvent);
+    ).then((frame) => frame.event as TurnEvent);
   }
 
   disconnect(): void {
@@ -192,7 +186,7 @@ export class RealSseClient {
       raw,
       ...(data ? { data } : {}),
       ...(data && data !== "[DONE]"
-        ? { event: JSON.parse(data) as PiMessagesEvent }
+        ? { event: JSON.parse(data) as TurnEvent }
         : {}),
     };
     this.frames.push(frame);
@@ -224,8 +218,7 @@ export class RealSseClient {
 }
 
 export interface RealDaemonHarnessOptions {
-  script: MockProviderOptions["script"];
-  provider?: Omit<MockProviderOptions, "script">;
+  turns: FakeTurn[];
   ghostName?: string;
 }
 
@@ -235,8 +228,10 @@ export interface RealDaemonHarness {
   readonly ghostHome: string;
   readonly ghostName: string;
   readonly port: number;
-  readonly provider: MockProvider;
+  readonly harness: FakeHarness;
   readonly host: SessionHost;
+  /** Resolve once the harness has been launched `count` times in all. */
+  waitForLaunches(count: number): Promise<void>;
   request<T = unknown>(method: string, path: string, body?: unknown): Promise<JsonResponse<T>>;
   startTurn(sessionId: string, prompt: string): Promise<RealSseClient>;
   close(): Promise<void>;
@@ -281,32 +276,25 @@ export async function startRealDaemonHarness(
   process.env.GHOSTD_API_TOKEN_FILE = join(xdgStateHome, "ghost", "api-token");
   process.env.GHOSTD_RELAY_TOKEN_FILE = join(xdgStateHome, "ghost", "relay-token");
   process.env.GHOSTD_RELAY = "off";
-  scrubProviderEnv(process.env, { offline: true });
-  if (findProviderCredentialEnv(process.env).length > 0) {
-    restoreEnvironment(environment);
-    rmSync(tempRoot, { recursive: true, force: true });
-    throw new Error("The integration harness did not scrub every provider credential variable.");
-  }
 
-  let provider: MockProvider | null = null;
+  let harness: FakeHarness | null = null;
   let host: SessionHost | null = null;
   let listening: ListeningServer | null = null;
   const clients = new Set<RealSseClient>();
   try {
     const registry = new GhostRegistry(ghostsRoot);
     registry.ensureRoot();
-    provider = await startMockProvider({ script: options.script, ...(options.provider ?? {}) });
+    const fake = fakeHarness(options.turns);
+    harness = fake;
     const ghostName = options.ghostName ?? "casper";
-    const ghostHome = seedGhost(ghostsRoot, {
-      name: ghostName,
-      provider: { baseUrl: provider.url, modelId: provider.modelId },
-    });
+    const ghostHome = seedGhost(ghostsRoot, { name: ghostName });
     const homeOperations = new HomeOperationCoordinator(registry);
     host = new SessionHost({
       registry,
-      offline: true,
-      title: { enabled: false },
-      greeting: { enabled: false },
+      homeOperations,
+      ownerHome: disposableHome,
+      env: { ...process.env },
+      ...onlyHarnesses(fake),
     });
     const mcp = new McpCatalog({ registry, homeOperations });
     listening = await startDaemonServer({
@@ -410,10 +398,13 @@ export async function startRealDaemonHarness(
       ghostHome,
       ghostName,
       port: listening.port,
-      provider,
+      harness: fake,
       host,
       request,
       startTurn,
+      waitForLaunches: (count) => within((async () => {
+        while (fake.calls().length < count) await new Promise((resolve) => setTimeout(resolve, 10));
+      })(), `${count} harness launch(es)`),
       close() {
         if (closing) return closing;
         closing = (async () => {
@@ -421,8 +412,8 @@ export async function startRealDaemonHarness(
             for (const client of clients) client.disconnect();
             await listening?.close();
             await host?.disposeAll();
-            await provider?.close();
           } finally {
+            harness?.cleanup();
             restoreEnvironment(environment);
             rmSync(tempRoot, { recursive: true, force: true });
           }
@@ -434,7 +425,7 @@ export async function startRealDaemonHarness(
     for (const client of clients) client.disconnect();
     await listening?.close().catch(() => {});
     await host?.disposeAll().catch(() => {});
-    await provider?.close().catch(() => {});
+    harness?.cleanup();
     restoreEnvironment(environment);
     rmSync(tempRoot, { recursive: true, force: true });
     throw error;

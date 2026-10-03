@@ -15,7 +15,6 @@
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "@ghost/extensions";
 import { FIRST_MEETING_SECTION } from "@ghost/runtime/persona";
-import { CONTEXT_WINDOW_POLICY } from "@ghost/runtime/context-windows";
 import {
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,
@@ -23,7 +22,7 @@ import {
   OWNER_DELIVERABLE_POLICY,
   OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
-} from "../src/machine-skills.js";
+} from "../src/prompt-policy.js";
 import { renderScheduledWorkPolicy } from "../src/schedules.js";
 import { renderSelfMaintenancePolicy } from "../src/self-maintenance.js";
 import type { RunningSource } from "../src/running-source.js";
@@ -34,7 +33,6 @@ const HOME_DIR = "/home/owner/ghosts/casper";
 const UNIT_DIR = "/home/owner/.config/systemd/user";
 const CHECKOUT = "/home/owner/src/ghost";
 const DOCUMENTS = "/home/owner/Documents";
-const SESSION_ID = "01JZZZZZZZZZZZZZZZZZZZZZZZ";
 const RUNNING: RunningSource = {
   version: "0.0.1",
   commit: "0".repeat(40),
@@ -66,14 +64,12 @@ function renderStablePolicy(): Record<string, string> {
     "Finished work": OWNER_DELIVERABLE_POLICY,
     "Other harnesses": HARNESS_LIMITS_POLICY,
     "Background work": BACKGROUND_WORK_POLICY,
-    "Context windows": CONTEXT_WINDOW_POLICY,
     Hooks: OWNER_HOOKS_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
     "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
     "Self-maintenance": renderSelfMaintenancePolicy({
       ghostName: GHOST_NAME,
       running: RUNNING,
-      sessionId: SESSION_ID,
     }),
     "First meeting": FIRST_MEETING_SECTION,
   };
@@ -82,19 +78,18 @@ function renderStablePolicy(): Record<string, string> {
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
   "Character file": 561,
-  "Computer use": 357,
+  "Computer use": 386,
   "Finished work": 176,
-  "Other harnesses": 689,
-  "Background work": 588,
-  "Context windows": 406,
-  Hooks: 372,
+  "Other harnesses": 731,
+  "Background work": 596,
+  Hooks: 376,
   "Owner context": 880,
   "Scheduled work": 324,
   "Self-maintenance": 578,
   "First meeting": 317,
 };
 
-const TOTAL_CEILING = 5248;
+const TOTAL_CEILING = 4925;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

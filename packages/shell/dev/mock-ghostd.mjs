@@ -4,8 +4,8 @@
  * touches disk, and it is removed on exit. Authentication is intentionally not
  * enforced here; auth behavior is tested against the real daemon.
  *
- * A prompt containing "ask" opens the dialog deterministically because no
- * model is present to decide when to ask.
+ * A prompt starting with "!" runs as the owner's own command, the way the
+ * daemon streams one: a `bash` tool card and no reply.
  */
 import {
   mkdirSync,
@@ -32,7 +32,8 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
-const ASK_TIMEOUT_S = Math.max(0, Number(opt("--ask-timeout", "120")) || 0);
+/** The agent CLI the mock claims carried each turn it answers. */
+const MOCK_HARNESS = "claude";
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
@@ -130,131 +131,25 @@ const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
 
 const conversationEventClients = new Map();
 
-function conversationIdentity(conversationId) {
-  return { id: `pi:${conversationId}`, runtime: "pi", conversationId };
-}
-
-function parseConversationIdentity(id) {
-  const prefix = "pi:";
-  if (!id.startsWith(prefix) || id.length === prefix.length) return null;
-  return { id, runtime: "pi", conversationId: id.slice(prefix.length) };
-}
+/** The daemon's conversation-id rule: 1–128 of `[A-Za-z0-9._-]`, not led by a dot. */
+const validConversationId = (id) =>
+  typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id);
 
 function routeConversation(parts) {
   try {
-    return parseConversationIdentity(decodeURIComponent(parts[4]));
+    const id = decodeURIComponent(parts[4]);
+    return validConversationId(id) ? id : null;
   } catch {
     return null;
   }
 }
 
-function publishConversationUpdated(name, conversationId,
-    updatedAt = new Date().toISOString()) {
-  const event = `data: ${JSON.stringify({
-    type: "conversation-updated",
-    ...conversationIdentity(conversationId),
-    updatedAt,
-  })}\n\n`;
+function publishConversationUpdated(name, id, updatedAt = new Date().toISOString()) {
+  const event = `data: ${JSON.stringify({ type: "conversation-updated", id, updatedAt })}\n\n`;
   for (const response of conversationEventClients.get(name) ?? []) {
     if (!response.writableEnded) response.write(event);
   }
 }
-
-// Effective command discovery is session-scoped in the real daemon. These
-// exercise built-ins, aliases, input hints, subcommands, skills, and a file
-// command so both the full browser and slash completion have meaningful data.
-const MOCK_COMMANDS = [
-  {
-    name: "help",
-    aliases: ["?"],
-    description: "Show command help and keyboard shortcuts.",
-    input: null,
-    subcommands: [],
-    source: "built-in",
-  },
-  {
-    name: "tree",
-    aliases: ["branch", "branches"],
-    description: "Inspect and move through the current conversation tree.",
-    input: "[entry]",
-    subcommands: [{ name: "show" }, { name: "list" }],
-    source: "built-in",
-    availability: "unsupported",
-    unavailableReason: "Ghost forks conversations instead of rewinding an in-place tree.",
-  },
-  {
-    name: "settings",
-    aliases: ["config"],
-    description: "Open settings for this ghost.",
-    input: null,
-    subcommands: [],
-    source: "built-in",
-    availability: "partial",
-    unavailableReason: "Models are bound with `ghost model`; other settings remain file-backed.",
-  },
-  {
-    name: "skill:research",
-    aliases: [],
-    description: "Force-invoke the research skill with optional arguments.",
-    input: "[topic]",
-    subcommands: [],
-    source: "skill",
-  },
-  {
-    name: "release-notes",
-    aliases: ["release"],
-    description: "Draft release notes from the recent git history.",
-    input: { usage: "<version>" },
-    subcommands: [],
-    source: "ghost",
-  },
-];
-
-const MOCK_SESSION_RESOURCES = {
-  runtime: "pi",
-  skills: [
-    {
-      name: "research",
-      path: "/tmp/ghost-shell-preview/.agents/skills/research/SKILL.md",
-      source: "machine",
-      precedence: 0,
-      status: "shadowed",
-      shadowedBy: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
-    },
-    {
-      name: "research",
-      path: "/tmp/ghost-shell-preview/ghosts/casper/skills/research/SKILL.md",
-      source: "ghost",
-      precedence: 1,
-      status: "admitted",
-    },
-  ],
-  diagnostics: [{
-    source: "machine",
-    path: "/tmp/ghost-shell-preview/.agents/skills/old-skill/SKILL.md",
-    reason: "Skill name does not match its directory.",
-  }],
-  mcpServers: [
-    {
-      name: "local-files",
-      path: "/tmp/ghost-shell-preview/ghosts/casper/mcp.json",
-      source: "ghost",
-      precedence: 1,
-      enabled: true,
-      status: "admitted",
-    },
-    {
-      name: "legacy-events",
-      path: "/tmp/ghost-shell-preview/ghosts/casper/mcp.json",
-      source: "ghost",
-      precedence: 1,
-      enabled: false,
-      status: "disabled",
-      reason: "Disabled in the admitted configuration.",
-    },
-  ],
-  mcpDiagnostics: [],
-};
 
 // Raw values stay only in the mock's in-memory store. `mcpSnapshot` mirrors the
 // real daemon's sanitized GET response, including names/counts but never the
@@ -375,7 +270,6 @@ function validMcpConfig(config) {
   return false;
 }
 
-const deletedContext = new Map();
 /** The daemon's character cap (MAX_CHARACTER_BODY_LENGTH); shells must read
     it from responses, never pin it. */
 const CHARACTER_LIMIT = 20000;
@@ -386,11 +280,6 @@ function characterBodyFor(name) {
   if (writtenCharacter.has(name)) return writtenCharacter.get(name);
   // Matches what seedMockHome writes to disk.
   return `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
-}
-
-function _contextDeletedFor(name) {
-  if (!deletedContext.has(name)) deletedContext.set(name, new Set());
-  return deletedContext.get(name);
 }
 
 function seedMockHome(name) {
@@ -411,111 +300,74 @@ if (OWNS_GHOSTS_ROOT) {
   process.once("SIGTERM", stop);
 }
 
-// The daemon persists a ghost's conversations (pi sessions); the mock keeps
-// them in memory. Each ghost is seeded with a titled thread and an untitled one
-// (title === null exercises the HUD's fallback). A turn appends to its session
-// and, on the first turn, "titles" it in the background like the real daemon.
+// The daemon persists a ghost's conversations; the mock keeps them in memory.
+// Each ghost is seeded with a titled thread and an untitled one (title === null
+// exercises the HUD's fallback). A turn appends to its conversation and, on
+// the first turn, "titles" it like the real daemon.
 
-/** @type {Map<string, Map<string, { id, title, createdAt, updatedAt, messages }>>} */
+/** @type {Map<string, Map<string, { id, title, harness, createdAt, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
-// Persisted messages carry an `entryId`; the branch glyph is bound to it, so a
-// transcript without one has nothing to branch from and the surface cannot be
-// demoed at all. Opaque and monotonic here, as it is in a real transcript.
+// Persisted messages carry an `entryId` and the `parentId` before it; opaque
+// and monotonic here, as in a real transcript.
 let entrySeq = 0;
-let forkSeq = 0;
-const nextEntryId = () => `entry-${++entrySeq}`;
-const entry = (message) => ({ ...message, entryId: nextEntryId() });
+function append(s, message) {
+  const parentId = s.messages.at(-1)?.entryId ?? null;
+  s.messages.push({ ...message, entryId: `entry-${++entrySeq}`, parentId });
+}
 
-/**
- * The question the seeded transcript timed out on. It is the live ask again
- * when that card is re-answered, so it lives where both readers reach it.
- */
-const SEEDED_QUESTION = {
-  id: "q-notes",
-  header: "Launch notes",
-  question: "Three sections in the roadmap note are unfinished. Which do you want me to draft first?",
-  recommended: 1,
-  options: [
-    { label: "The roadmap section", description: "Six bullets, mostly written. I'd tidy and finish it." },
-    {
-      label: "The pricing page copy",
-      description: "Nothing written yet; I'd draft it from your docs and memory.",
-      preview: "Three tiers, no annual discount, one sentence each.",
-    },
-    { label: "The changelog", description: "Mechanical — I can generate it from the git log." },
-    { label: "None of them; just tell me what's left", description: "No writing. One paragraph back." },
-  ],
-};
+function seedSession(fields, messages) {
+  const s = { ...fields, messages: [] };
+  for (const message of messages) append(s, message);
+  return s;
+}
 
 function ghostSessions(name) {
   if (!sessionStore.has(name)) {
     const now = Date.now();
-    const seed = new Map();
-    // A failed tool call and a timed-out ask are rehydrate-only surfaces: no
-    // turn produces them on demand, so unless they are in the seed there is
+    // A failed tool call and a failed turn are rehydrate-only surfaces: no
+    // scripted turn produces them, so unless they are in the seed there is
     // nothing to open. `content` as an ordered part list is the stored shape
-    // that can carry them (TurnBlocks.partsOf); a plain string cannot.
-    const notesResult = nextEntryId();
-    const notesAsk = {
-      type: "toolCall",
-      id: "call-seed-ask-notes",
-      name: "ask",
-      arguments: { questions: [SEEDED_QUESTION] },
-      ghostAsk: { resultEntryId: notesResult, settled: "timedOut" },
-    };
-    const titled = {
-      ...conversationIdentity(`sess-${name}-1`),
+    // that can carry a tool call (TurnBlocks.partsOf); a plain string cannot.
+    const titled = seedSession({
+      id: `sess-${name}-1`,
       title: "first contact",
+      harness: "claude",
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
-      messages: [
-        entry({ role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 }),
-        entry({ role: "assistant", content: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.`, timestamp: now - 7_195_000 }),
-        entry({ role: "user", content: "and what do you remember about me?", timestamp: now - 3_610_000 }),
-        entry({ role: "assistant", content: "Nothing yet — but branch that question and you get a second thread to ask it differently.", timestamp: now - 3_609_000 }),
-        entry({ role: "user", content: "open the current project brief and tell me what's left", timestamp: now - 3_608_000 }),
-        entry({
-          role: "assistant",
-          timestamp: now - 3_607_000,
-          content: [
-            { type: "text", text: "Opening the current project brief" },
-            // A restored call has no live intent and no summary, so the card
-            // falls back to the arguments: they have to say what it was for.
-            {
-              type: "toolCall",
-              id: "call-seed-browser",
-              name: "read",
-              arguments: { path: join(SESSION_CWD, "project-brief.md") },
-              cwd: SESSION_CWD,
-              failed: true,
-            },
-            notesAsk,
-          ],
-        }),
-        entry({ role: "assistant", content: "I never got an answer, so I stopped at the roadmap section and left the rest alone.", timestamp: now - 3_606_000 }),
-      ],
-      // The ask *results* are entries of this conversation that no renderable
-      // message carries — the transcript route drops tool-result messages — so
-      // the mock keeps them here, which is also what makes an unknown
-      // re-answer entryId a 400 rather than a guess.
-      askResults: new Map([
-        [notesResult, { call: notesAsk }],
-      ]),
-    };
-    const untitled = {
-      ...conversationIdentity(`sess-${name}-2`),
-      title: null, // background titling hasn't run — exercises the fallback label
+    }, [
+      { role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 },
+      { role: "assistant", content: [{ type: "text", text: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.` }], timestamp: now - 7_195_000 },
+      { role: "user", content: "open the current project brief and tell me what's left", timestamp: now - 3_608_000 },
+      {
+        role: "assistant",
+        timestamp: now - 3_607_000,
+        content: [
+          { type: "text", text: "Opening the current project brief" },
+          // A restored call has no live intent and no summary, so the card
+          // falls back to the arguments: they have to say what it was for.
+          {
+            type: "toolCall",
+            id: "call-seed-read",
+            name: "Read",
+            arguments: { file_path: join(SESSION_CWD, "project-brief.md") },
+            failed: true,
+          },
+          { type: "text", text: "The brief isn't where I expected, so I stopped there." },
+        ],
+      },
+    ]);
+    const untitled = seedSession({
+      id: `sess-${name}-2`,
+      title: null, // titling hasn't run — exercises the fallback label
+      harness: "codex",
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
-      messages: [
-        entry({ role: "user", content: "quick question about memory", timestamp: now - 600_000 }),
-        entry({ role: "assistant", content: "Ask away — this is the untitled seed conversation.", timestamp: now - 595_000 }),
-      ],
-    };
-    seed.set(titled.id, titled);
-    seed.set(untitled.id, untitled);
-    sessionStore.set(name, seed);
+    }, [
+      { role: "user", content: "quick question about memory", timestamp: now - 600_000 },
+      { role: "assistant", content: [], errorMessage: "codex usage limit reached", timestamp: now - 595_000 },
+    ]);
+    sessionStore.set(name, new Map([[titled.id, titled], [untitled.id, untitled]]));
   }
   return sessionStore.get(name);
 }
@@ -535,9 +387,8 @@ const transcriptOf = (s, params) => {
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
-    conversationId: s.conversationId,
-    runtime: s.runtime,
     title: s.title ?? null,
+    harness: s.harness ?? null,
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
@@ -545,122 +396,49 @@ const transcriptOf = (s, params) => {
   };
 };
 
-/**
- * The fork's name, on the file-copy convention the daemon uses: the source
- * title with any trailing " (k)" dropped, then the smallest free n >= 2. A
- * source nobody has titled yet forks into one nobody has titled either —
- * inventing "(2)" for a null title would name the copy better than the thing
- * it was copied from.
- */
-function forkTitle(store, sourceTitle) {
-  if (!sourceTitle) return null;
-  // Same shape the daemon strips (session-host.ts forkConversationTitle), so a
-  // demo names a copy the way the real thing would.
-  const base = sourceTitle.replace(/^(.*\S)\s+\(\d+\)$/u, "$1");
-  const taken = new Set([...store.values()].map((s) => s.title).filter(Boolean));
-  for (let n = 2; ; n++) {
-    const candidate = `${base} (${n})`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
+const firstLine = (text) => String(text).split("\n")[0].slice(0, 120);
 
-/**
- * Branch: copy the thread up to (not including) `entryId` into a conversation
- * of its own and hand back the branched text as a draft. The source is not
- * touched — that is the whole point of the action, so the mock must not cheat
- * it by rewinding in place.
- */
-function forkSession(name, source, entryId) {
-  const store = ghostSessions(name);
-  const at = source.messages.findIndex((m) => m.entryId === entryId);
-  if (at < 0 || source.messages[at].role !== "user") return null;
-  const now = Date.now();
-  const fork = {
-    ...conversationIdentity(`sess-${name}-fork-${++forkSeq}`),
-    title: forkTitle(store, source.title),
-    createdAt: new Date(now).toISOString(),
-    updatedAt: new Date(now).toISOString(),
-    // A copy is a new conversation, so its entries are new entries.
-    messages: source.messages.slice(0, at).map(entry),
-  };
-  store.set(fork.id, fork);
+const sessionSummary = (s) => {
+  const first = s.messages.find((m) => m.role === "user" && typeof m.content === "string");
   return {
-    ...conversationIdentity(fork.conversationId),
-    sessionId: fork.conversationId,
-    title: fork.title,
-    draft: source.messages[at].content,
-    transcript: transcriptOf(fork),
+    id: s.id,
+    title: s.title ?? null,
+    preview: first ? firstLine(first.content) : null,
+    harness: s.harness ?? null,
+    createdAt: s.createdAt,
+    updatedAt: s.updatedAt,
+    messageCount: s.messages.length,
+    // Pin state is in the listing shape; the pin route itself is not mocked, so
+    // nothing here ever flips it and the listing order is plain newest-first.
+    pinned: s.pinned === true,
+    unread: !s.readAt || s.updatedAt > s.readAt,
   };
-}
-
-const sessionSummary = (s) => ({
-  id: s.id,
-  conversationId: s.conversationId,
-  runtime: s.runtime,
-  title: s.title ?? null,
-  createdAt: s.createdAt,
-  updatedAt: s.updatedAt,
-  messageCount: s.messageCount ?? s.messages.length,
-  // Pin state is in the listing shape; the pin route itself is not mocked, so
-  // nothing here ever flips it and the listing order is plain newest-first.
-  pinned: s.pinned === true,
-  unread: !s.readAt || s.updatedAt > s.readAt,
-});
-
-
-
-
-function recordTurn(name, sessionId, prompt, assistantText, ownerMessages = []) {
-  if (!sessionId) return;
-  const store = ghostSessions(name);
-  const now = Date.now();
-  const identity = conversationIdentity(sessionId);
-  let s = store.get(identity.id);
-  if (!s) {
-    // A brand-new conversation the HUD minted: the daemon creates it lazily here.
-    s = {
-      ...identity,
-      title: null,
-      createdAt: new Date(now).toISOString(),
-      updatedAt: new Date(now).toISOString(),
-      messages: [],
-    };
-    store.set(identity.id, s);
-  }
-  s.messages.push(entry({ role: "user", content: prompt, timestamp: now }));
-  for (const text of ownerMessages) {
-    s.messages.push(entry({ role: "user", content: text, timestamp: now }));
-  }
-  s.messages.push(entry({ role: "assistant", content: assistantText, timestamp: now }));
-  s.updatedAt = new Date(now).toISOString();
-  // Background titling after the first turn: derive a title from the prompt.
-  if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
-  publishConversationUpdated(name, sessionId, s.updatedAt);
-}
-
-// The empty-chat opening line. Both branches of the contract are demoable:
-// `casper` answers as a ghost that already knows the owner, `moaning-myrtle`
-// answers `onboarding: true` (it has no character.md yet and says so), and any
-// ghost created at runtime falls through to `greeting: null` — the "the daemon
-// could not produce one" case, where the HUD must simply keep its static line.
-
-/** @type {Record<string, { greeting: string, onboarding: boolean }>} */
-const GREETINGS = {
-  casper: {
-    greeting:
-      "You left the launch note half-written, and the roadmap still has an open section. "
-      + "Want to pick that thread back up? I can also just sit here quietly.",
-    onboarding: false,
-  },
-  "moaning-myrtle": {
-    greeting:
-      "We haven’t met yet. I don’t have a character to speak from — no name I chose, no temperament, "
-      + "nothing about how you want me to talk to you. Tell me any of it and I’ll write it down as mine.",
-    onboarding: true,
-  },
 };
 
-const GREETING_MS = 800;
+/** Persist one turn's exchanges: `[{ prompt, reply }]`, follow-ups after the first. */
+function recordTurn(name, id, exchanges) {
+  if (!validConversationId(id)) return;
+  const store = ghostSessions(name);
+  const now = Date.now();
+  let s = store.get(id);
+  if (!s) {
+    // A brand-new conversation the HUD minted: the daemon creates it lazily here.
+    s = { id, title: null, createdAt: new Date(now).toISOString(), messages: [] };
+    store.set(id, s);
+  }
+  for (const { prompt, reply } of exchanges) {
+    append(s, { role: "user", content: prompt, timestamp: now });
+    append(s, { role: "assistant", content: [{ type: "text", text: reply }], timestamp: now });
+  }
+  s.harness = MOCK_HARNESS;
+  s.updatedAt = new Date(now).toISOString();
+  // Titling after the first turn: derive a title from the prompt.
+  if (!s.title) s.title = exchanges[0]?.prompt.slice(0, 40) || "New conversation";
+  publishConversationUpdated(name, id, s.updatedAt);
+}
+
+/** Ghosts that have no character yet; their scripted turn writes one. */
+const ONBOARDING = new Set(["moaning-myrtle"]);
 
 const json = (res, status, body) => {
   const payload = JSON.stringify(body);
@@ -780,228 +558,84 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-// Ghost's ask tool pauses the turn while the SSE stream stays open, so the mock
-// pauses the same way: the turn script awaits a promise and the HTTP routes
-// settle it. One ask per conversation, matching the daemon's broker.
+const usageFor = (text) => ({
+  input: 812,
+  output: text.length >> 2,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 812 + (text.length >> 2),
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+});
 
-const pendingAsks = new Map();
-const askKey = (name, sessionId) => JSON.stringify([name, sessionId]);
-let askSeq = 0;
-
-const ASK_WAIT = Symbol("ask-wait");
-
-function timedOutResults(questions) {
-  return questions.map((question) => {
-    const options = question.options ?? [];
-    const recommended = typeof question.recommended === "number"
-      ? options[question.recommended] : undefined;
-    return { id: question.id, selectedOptions: recommended ? [recommended.label] : [] };
-  });
+/** A finished tool call: the start/end pair the daemon brackets every call with. */
+function* toolCall(id, toolName, args, intent, summary) {
+  yield { type: "tool_execution_start", id, toolName, arguments: args, cwd: SESSION_CWD, intent };
+  yield { type: "tool_execution_end", id, toolName, isError: false, summary };
 }
 
-/**
- * Present a question and hand back the promise the turn blocks on. It resolves
- * with whichever got there first — a valid POST, or the deadline.
- */
-function openAsk(name, sessionId, questions) {
-  const key = askKey(name, sessionId);
-  const { promise, resolve } = Promise.withResolvers();
-  const armed = ASK_TIMEOUT_S > 0;
-  const pending = {
-    view: {
-      id: `ask-${++askSeq}`,
-      questions,
-      ...(armed ? { timeoutAt: new Date(Date.now() + ASK_TIMEOUT_S * 1000).toISOString() } : {}),
-    },
-    timer: null,
-    settle(answer) {
-      if (pendingAsks.get(key) !== pending) return false;
-      pendingAsks.delete(key);
-      clearTimeout(pending.timer);
-      resolve(answer);
-      return true;
-    },
-  };
-  pendingAsks.set(key, pending);
-  // On expiry the daemon answers with the question's own recommendation and
-  // lets the turn carry on, so a question nobody is there for never stalls one.
-  if (armed) {
-    pending.timer = setTimeout(
-      () => pending.settle({ kind: "submit", timedOut: true, results: timedOutResults(questions) }),
-      ASK_TIMEOUT_S * 1000,
-    );
+function* textBlock(contentIndex, text) {
+  yield { type: "text_start", contentIndex };
+  for (const chunk of text.match(/\s*\S+/gu) ?? []) {
+    yield { type: "text_delta", contentIndex, delta: chunk };
   }
-  return promise;
+  yield { type: "text_end", contentIndex, content: text };
 }
-
-function askSummary(answer) {
-  if (answer.kind === "chat") return "Moved to chat";
-  if (answer.kind !== "submit") return "Dismissed without an answer";
-  const chosen = (answer.results ?? []).flatMap((result) => result.selectedOptions ?? []);
-  const picked = chosen.length > 0 ? chosen.join(", ") : "nothing";
-  return answer.timedOut ? `Timed out — answered with ${picked}` : `Answered with ${picked}`;
-}
-
-const settledFrom = (answer) => {
-  if (answer.kind === "chat") return "chat";
-  if (answer.kind !== "submit") return "cancelled";
-  return answer.timedOut ? "timedOut" : "submitted";
-};
-
-const LIVE_QUESTION = {
-  id: "q-live",
-  header: "Before I write anything",
-  question: "I can take this three ways. Which do you want?",
-  recommended: 1,
-  options: [
-    { label: "Answer here and stop", description: "One paragraph back, nothing written to disk." },
-    {
-      label: "Answer and keep it as a note",
-      description: "One concise note in Documents.",
-      preview: "Documents/notes/what-the-owner-asked-for.md",
-    },
-    { label: "Answer and save a note", description: "A shared note in Documents, yours to edit after." },
-    { label: "Neither — forget I asked", description: "No answer, no files." },
-  ],
-};
 
 /**
- * A scripted turn: the ghost narrating itself, one tool call — two for a ghost
- * still being written, and one more when the prompt asks for a question —
- * then a two-paragraph answer.
+ * The owner's own `!command`: the daemon streams it as a `bash` tool card and
+ * ends the turn with no reply.
  */
-function* script(name, prompt, sessionId) {
+function* ownerCommand(command) {
+  yield { type: "start" };
+  const id = "owner-command";
+  yield {
+    type: "tool_execution_start",
+    id,
+    toolName: "bash",
+    arguments: { command, excludeFromContext: false },
+    cwd: SESSION_CWD,
+    intent: "Run a local command",
+  };
+  yield { type: "tool_execution_update", id, toolName: "bash", summary: `mock output of ${command}` };
+  yield { type: "tool_execution_end", id, toolName: "bash", isError: false, summary: `mock output of ${command}` };
+  yield { type: "done", reason: "stop", usage: usageFor("") };
+}
+
+/**
+ * A scripted pass: the ghost narrating itself, one tool call — two for a ghost
+ * still being written — then a two-paragraph answer. Follow-ups queued while
+ * it runs are drained by `pump` before the terminal event.
+ */
+function* script(name, prompt) {
   let contentIndex = 0;
   yield { type: "start" };
   // The preamble a real model emits before reaching for a tool. It belongs
   // beside the orb, never in the reading column, so this is what the HUD's
   // split (qml/services/TurnBlocks.js) has to get right.
-  const preamble = contentIndex++;
-  const narration = "Checking what I remember about that";
-  yield { type: "text_start", contentIndex: preamble };
-  for (const chunk of narration.match(/\s*\S+/gu) ?? []) {
-    yield { type: "text_delta", contentIndex: preamble, delta: chunk };
-  }
-  yield { type: "text_end", contentIndex: preamble, content: narration };
-  const memory = contentIndex++;
-  yield { type: "toolcall_start", contentIndex: memory, id: "call_1", toolName: "read_note" };
-  yield { type: "toolcall_delta", contentIndex: memory, delta: '{"query":"' };
-  yield { type: "toolcall_delta", contentIndex: memory, delta: `${prompt.slice(0, 24)}"}` };
-  yield {
-    type: "toolcall_end",
-    contentIndex: memory,
-    toolCall: { type: "toolCall", id: "call_1", name: "read_note", arguments: { query: prompt.slice(0, 24) } },
-  };
-  yield {
-    type: "tool_execution_start",
-    id: "call_1",
-    toolName: "read_note",
-    arguments: { query: prompt.slice(0, 24) },
-    cwd: SESSION_CWD,
-    intent: "Read the relevant note",
-  };
-  yield {
-    type: "tool_execution_end",
-    id: "call_1",
-    toolName: "read_note",
-    isError: false,
-    summary: "Note checked",
-  };
+  yield* textBlock(contentIndex++, "Checking what I remember about that");
+  // Tool calls take no content index; the daemon numbers text blocks only.
+  yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) },
+    "Read the relevant note", "Note checked");
   for (let step = 1; step < TOOL_STEPS; step++) {
-    const index = contentIndex++;
-    const id = `call_long_${step}`;
-    const toolName = step % 3 === 0 ? "grep" : (step % 3 === 1 ? "read" : "glob");
-    const args = {
-      step: step + 1,
-      path: join(SESSION_CWD, `step-${step + 1}.md`),
-    };
-    yield { type: "toolcall_start", contentIndex: index, id, toolName };
-    yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(args) };
-    yield {
-      type: "toolcall_end",
-      contentIndex: index,
-      toolCall: { type: "toolCall", id, name: toolName, arguments: args },
-    };
-    yield {
-      type: "tool_execution_start",
-      id,
-      toolName,
-      arguments: args,
-      cwd: SESSION_CWD,
-      intent: `Run tool-heavy step ${step + 1}`,
-    };
-    yield {
-      type: "tool_execution_end",
-      id,
-      toolName,
-      isError: false,
-      summary: `Completed step ${step + 1}`,
-    };
+    const toolName = step % 3 === 0 ? "Grep" : (step % 3 === 1 ? "Read" : "Glob");
+    yield* toolCall(`call_long_${step}`, toolName,
+      { step: step + 1, file_path: join(SESSION_CWD, `step-${step + 1}.md`) },
+      `Run tool-heavy step ${step + 1}`, `Completed step ${step + 1}`);
   }
-  // A ghost whose greeting said it has no character writes one during the turn
-  // with the same native file tool the real runtimes use.
-  if (GREETINGS[name]?.onboarding) {
-    const character = contentIndex++;
+  // A ghost with no character writes one during the turn with the same
+  // native file tool the real harnesses use.
+  if (ONBOARDING.has(name)) {
     const content = `# ${name}\n\nDrafted in the dev harness, from: ${prompt.slice(0, 40)}`;
     const path = join(GHOSTS_ROOT, name, "character.md");
-    yield { type: "toolcall_start", contentIndex: character, id: "call_2", toolName: "write" };
-    yield { type: "toolcall_delta", contentIndex: character, delta: `{"path":${JSON.stringify(path)}` };
-    yield { type: "toolcall_delta", contentIndex: character, delta: `,"content":${JSON.stringify(content)}}` };
-    yield {
-      type: "toolcall_end",
-      contentIndex: character,
-      toolCall: { type: "toolCall", id: "call_2", name: "write", arguments: { path, content } },
-    };
+    yield* toolCall("call_2", "Write", { file_path: path, content },
+      "Write my character", "Character written");
   }
-  // The ask surface, on the documented trigger word. `toolcall_end` clears the
-  // HUD's pending ask, so the question opens after it — on the
-  // `tool_execution_start` the client answers by starting its ask poll.
-  let asked = "";
-  if (/ask/iu.test(prompt)) {
-    const index = contentIndex++;
-    const questions = [LIVE_QUESTION];
-    const call = { type: "toolCall", id: "call_ask", name: "ask", arguments: { questions } };
-    yield { type: "toolcall_start", contentIndex: index, id: call.id, toolName: "ask" };
-    yield { type: "toolcall_delta", contentIndex: index, delta: JSON.stringify(call.arguments) };
-    yield { type: "toolcall_end", contentIndex: index, toolCall: call };
-    const wait = openAsk(name, sessionId, questions);
-    yield {
-      type: "tool_execution_start",
-      id: call.id,
-      toolName: "ask",
-      arguments: call.arguments,
-      cwd: SESSION_CWD,
-      intent: "Ask before writing anything",
-    };
-    const answered = yield { sentinel: ASK_WAIT, wait };
-    asked = askSummary(answered);
-    yield { type: "tool_execution_end", id: call.id, toolName: "ask", isError: false, summary: asked };
-  }
-  const answer = contentIndex++;
-  yield { type: "text_start", contentIndex: answer };
   const reply =
     `You said: **${prompt}**\n\n`
-    + (asked ? `On the question: **${asked}**.\n\n` : "")
-    + `I am ${name}, a mock ghost. I live entirely in this dev harness — no pi session, `
-    + `no model, no memory files. The real daemon streams the same pi-messages events, `
+    + `I am ${name}, a mock ghost. I live entirely in this dev harness — no agent CLI, `
+    + `no model, no memory files. The real daemon streams the same turn events, `
     + `so whatever renders here renders there.`;
-  for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
-    yield { type: "text_delta", contentIndex: answer, delta: chunk };
-  }
-  yield { type: "text_end", contentIndex: answer, content: reply };
-  const usage = {
-    input: 812,
-    output: reply.length >> 2,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 812 + (reply.length >> 2),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-  if (!flag("--omit-terminal") && !flag("--stall-stream")) {
-    yield flag("--fail")
-      ? { type: "error", reason: "error", usage, errorMessage: "mock-ghostd --fail" }
-      : { type: "done", reason: "stop", usage };
-  }
+  yield* textBlock(contentIndex++, reply);
 }
 
 const answering = new Set();
@@ -1015,7 +649,7 @@ const ghostIsAnswering = (name) => [...answering].some((key) => {
   }
 });
 
-function openStream(req, res, name, sessionId) {
+function openStream(req, res) {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -1029,140 +663,74 @@ function openStream(req, res, name, sessionId) {
   res.on("close", () => {
     stream.closed = true;
     clearInterval(keepalive);
-    // Nobody is left to answer, and the ask holds `answering` open until it is
-    // settled — which would leave the ghost busy for the whole timeout.
-    pendingAsks.get(askKey(name, sessionId))?.settle({ kind: "cancel" });
   });
   return stream;
 }
 
 /**
- * Drive a scripted generator onto an SSE response. Events go out as they are
- * yielded; the ASK_WAIT sentinel is awaited instead and its answer fed back in,
- * which is how a turn pauses on a question. Returns the last completed
- * assistant text, or null if the client left mid-stream.
+ * Drive scripted events onto an SSE response. Returns the reply text, or null
+ * if the client left mid-stream.
  */
-async function pump(res, events, stream, turn) {
-  let assistantText = "";
-  let resumeWith;
-  for (;;) {
-    const step = events.next(resumeWith);
-    resumeWith = undefined;
-    if (step.done) return assistantText;
+async function pump(res, events, stream) {
+  let reply = "";
+  for (const event of events) {
     if (stream.closed) return null;
-    const event = step.value;
-    if (event.sentinel === ASK_WAIT) {
-      resumeWith = await event.wait;
-      continue;
-    }
-    if (event.type === "text_end") assistantText = event.content;
+    if (event.type === "text_end") reply = event.content;
     res.write(`data: ${JSON.stringify(event)}\n\n`);
-    // Pi injects accepted steering at the next provider boundary and emits a
-    // user message before the following assistant step. QueueLine owns it until
-    // this point; owner_message moves it into transcript order.
-    if (event.type === "tool_execution_end" && turn.steering.length > 0) {
-      for (const text of turn.steering.splice(0)) {
-        turn.consumedOwners.push(text);
-        res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
-      }
-    }
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
+  return reply;
 }
 
 async function streamTurn(req, res, name, body) {
   const prompt = extractPrompt(body);
-  const sessionId = body?.options?.sessionId;
-  const stream = openStream(req, res, name, sessionId);
+  const sessionId = body.options.sessionId;
+  const stream = openStream(req, res);
   const key = turnKey(name, sessionId);
-  const turn = { streaming: true, steering: [], followUp: [], consumedOwners: [] };
+  const turn = { streaming: true, followUp: [] };
   activeTurns.set(key, turn);
   answering.add(key);
-  let assistantText;
+  const exchanges = [];
+  let failed = false;
   try {
-    assistantText = await pump(res, script(name, prompt, sessionId), stream, turn);
+    if (prompt.startsWith("!")) {
+      if (await pump(res, ownerCommand(prompt.slice(1).trim()), stream) === null) return;
+      res.end();
+      return;
+    }
+    let reply = await pump(res, script(name, prompt), stream);
+    if (reply === null) return;
+    exchanges.push({ prompt, reply });
+    // A queued follow-up runs after the current pass: the daemon announces it
+    // with owner_message, then streams the pass that answers it.
+    while (turn.followUp.length > 0) {
+      const text = turn.followUp.shift();
+      res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
+      reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
+      if (reply === null) return;
+      exchanges.push({ prompt: text, reply });
+    }
+    if (flag("--stall-stream")) {
+      await new Promise((resolve) => res.once("close", resolve));
+      return;
+    }
+    if (!flag("--omit-terminal")) {
+      const usage = usageFor(reply);
+      failed = flag("--fail");
+      res.write(`data: ${JSON.stringify(failed
+        ? { type: "error", reason: "error", usage, errorMessage: "mock-ghostd --fail" }
+        : { type: "done", reason: "stop", usage })}\n\n`);
+    }
+    res.end();
   } finally {
     answering.delete(key);
     turn.streaming = false;
     activeTurns.delete(key);
   }
-  if (assistantText === null) return;
-  if (flag("--stall-stream")) {
-    await new Promise((resolve) => res.once("close", resolve));
-    return;
-  }
-  res.end();
-  // Persist the completed turn so the session listing + transcript reflect it,
+  // Persist the completed turn so the listing and transcript reflect it,
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
   // no reply, so nothing is recorded.
-  if (!flag("--fail")) {
-    recordTurn(name, sessionId, prompt, assistantText, turn.consumedOwners);
-  }
-}
-
-const askCallIndex = (session, call) =>
-  session.messages.findIndex((m) => Array.isArray(m.content) && m.content.includes(call));
-
-/**
- * Re-answering a persisted ask: rewind to the message that carried it, put the
- * same question back on screen, then answer from there. The real daemon reopens
- * the ask first and commits the branch after; the mock commits first so the
- * dialog opens over history that already reads as rewound.
- */
-function* reanswerScript(name, sessionId, session, entryId, record) {
-  const call = record.call;
-  const questions = call.arguments.questions;
-  const rewound = session.messages.slice(0, askCallIndex(session, call) + 1);
-  yield { type: "branch_changed", transcript: transcriptOf({ ...session, messages: rewound }) };
-  const id = `ask-reanswer-${entryId}`;
-  const wait = openAsk(name, sessionId, questions);
-  yield {
-    type: "tool_execution_start",
-    id,
-    toolName: "ask",
-    arguments: { questions },
-    cwd: SESSION_CWD,
-    intent: "Re-answer an earlier question",
-  };
-  const answered = yield { sentinel: ASK_WAIT, wait };
-  const settled = askSummary(answered);
-  yield { type: "tool_execution_end", id, toolName: "ask", isError: false, summary: settled };
-  // The branch is a commit, not a preview: the old result is overwritten and
-  // everything after it is gone, so a second re-answer starts from what this
-  // one decided rather than from the seed.
-  call.ghostAsk.settled = settledFrom(answered);
-  const reply = `**${settled}** — and everything that came after the question went with the branch.`;
-  yield { type: "text_start", contentIndex: 0 };
-  for (const chunk of reply.match(/\s*\S+/gu) ?? []) {
-    yield { type: "text_delta", contentIndex: 0, delta: chunk };
-  }
-  yield { type: "text_end", contentIndex: 0, content: reply };
-  session.messages = [...rewound, entry({ role: "assistant", content: reply, timestamp: Date.now() })];
-  session.updatedAt = new Date().toISOString();
-  const usage = {
-    input: 640,
-    output: reply.length >> 2,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 640 + (reply.length >> 2),
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-  yield { type: "done", reason: "stop", usage };
-}
-
-async function streamReanswer(req, res, name, sessionId, session, entryId, record) {
-  const stream = openStream(req, res, name, sessionId);
-  const key = turnKey(name, sessionId);
-  answering.add(key);
-  try {
-    await pump(res, reanswerScript(name, sessionId, session, entryId, record), stream, {
-      steering: [],
-      consumedOwners: [],
-    });
-  } finally {
-    answering.delete(key);
-  }
-  res.end();
+  if (!failed) recordTurn(name, sessionId, exchanges);
 }
 
 function extractPrompt(body) {
@@ -1173,159 +741,6 @@ function extractPrompt(body) {
     return last.content.filter((p) => p?.type === "text").map((p) => p.text).join(" ");
   }
   return "(no prompt)";
-}
-
-
-const PROVIDERS = [
-  { id: "openai-codex", name: "OpenAI Codex", subscription: true, authTypes: ["oauth"] },
-  { id: "anthropic", name: "Anthropic", subscription: true, authTypes: ["oauth", "api_key"] },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    subscription: false,
-    authTypes: ["oauth", "api_key"],
-    loginLabel: "Sign in with OpenRouter",
-  },
-];
-
-const logins = new Map();
-
-function startLogin(providerId, authType) {
-  const loginId = `login-${Math.random().toString(36).slice(2, 10)}`;
-  const session = { loginId, providerId, authType, view: { loginId, providerId, authType } };
-  logins.set(loginId, session);
-  if (authType === "api_key") {
-    session.view.status = "awaiting_input";
-    session.view.prompt = { kind: "secret", message: `${providerId} API key`, secret: true };
-  } else if (providerId === "openai-codex") {
-    // Offer the same choice pi's own codex flow does.
-    session.view.status = "awaiting_select";
-    session.view.prompt = {
-      kind: "select",
-      message: "How do you want to sign in?",
-      secret: false,
-      options: [
-        { id: "callback", label: "Open a browser" },
-        { id: "device_code", label: "Use a device code" },
-      ],
-    };
-  } else {
-    // openrouter (and anything else) OAuth: a callback URL plus a paste field.
-    session.view.status = "awaiting_input";
-    session.view.authUrl = "https://example.com/oauth/authorize?client=ghost&code=demo";
-    session.view.prompt = { kind: "manual_code", message: "Paste the code from your browser", secret: true };
-  }
-  return session.view;
-}
-
-function loginInput(session, value) {
-  const view = session.view;
-  if (view.status === "awaiting_select") {
-    if (value === "device_code") {
-      view.status = "awaiting_device_code";
-      view.deviceCode = "GHOST-1234";
-      view.verificationUrl = "https://example.com/activate";
-      view.deviceExpiresInSeconds = 900;
-      delete view.prompt;
-      // Auto-complete the device poll shortly, like a real provider would.
-      setTimeout(() => finishLogin(session), 4000);
-    } else {
-      view.status = "awaiting_input";
-      view.authUrl = "https://example.com/oauth/authorize?client=ghost&code=demo";
-      view.prompt = { kind: "manual_code", message: "Paste the code from your browser", secret: true };
-    }
-    return view;
-  }
-  // A pasted code / api key completes the flow.
-  finishLogin(session);
-  return session.view;
-}
-
-// A finished login credentials the catalogue provider it maps to, so a model
-// that was usable:false becomes usable after the switcher routes through login.
-const LOGIN_TO_CATALOG = { "openai-codex": "openai", anthropic: "anthropic", openrouter: "google" };
-
-function finishLogin(session) {
-  const view = session.view;
-  view.status = "succeeded";
-  view.message = "Signed in.";
-  const mapped = LOGIN_TO_CATALOG[session.providerId];
-  if (mapped) credentialed.add(mapped);
-  view.modelBound = { provider: session.providerId, modelId: "demo/first-model" };
-  delete view.prompt;
-}
-
-// A small stand-in for pi's ~1,270-model registry: enough providers and rows
-// to exercise available-vs-catalog, the vision badge, search, and paging.
-
-function modelVersion(id) {
-  const dotted = id.match(/(?:^|[-_])(\d+\.\d+)/);
-  if (dotted?.[1]) return Number.parseFloat(dotted[1]);
-  const dashed = id.match(/(?:^|[-_])(\d{1,2})-(\d{1,2})(?=-|$)/);
-  if (dashed?.[1] && dashed[2]) return Number.parseFloat(`${dashed[1]}.${dashed[2]}`);
-  const single = id.match(/(?:^|[-_])(\d+)/);
-  return single?.[1] ? Number.parseFloat(single[1]) : 0;
-}
-
-function compareModels(a, b) {
-  const provider = a.provider.localeCompare(b.provider);
-  if (provider !== 0) return provider;
-  const version = modelVersion(b.id) - modelVersion(a.id);
-  return version || a.id.localeCompare(b.id);
-}
-
-/** @type {{ provider: string, id: string, name: string, contextWindow?: number, cost?: object, hasVision: boolean, connectedVia?: string, subscriptionType?: string }[]} */
-const CATALOG = [
-  { provider: "anthropic", id: "claude-opus-4", name: "Claude Opus 4", contextWindow: 200000, cost: { input: 15, output: 75 }, hasVision: true },
-  { provider: "anthropic", id: "claude-sonnet-4", name: "Claude Sonnet 4", contextWindow: 200000, cost: { input: 3, output: 15 }, hasVision: true },
-  { provider: "anthropic", id: "claude-haiku-3-5", name: "Claude Haiku 3.5", contextWindow: 200000, cost: { input: 0.8, output: 4 }, hasVision: true },
-  { provider: "google", id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", contextWindow: 1000000, cost: { input: 0.3, output: 2.5 }, hasVision: true },
-  { provider: "google", id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", contextWindow: 2000000, cost: { input: 1.25, output: 10 }, hasVision: true },
-  { provider: "ollama", id: "llama3.2", name: "Llama 3.2 (local)", contextWindow: 131072, cost: { input: 0, output: 0 }, hasVision: false },
-  { provider: "ollama", id: "qwen2.5-coder", name: "Qwen2.5 Coder (local)", contextWindow: 32768, cost: { input: 0, output: 0 }, hasVision: false },
-  { provider: "openai", id: "gpt-4o", name: "GPT-4o", contextWindow: 128000, cost: { input: 2.5, output: 10 }, hasVision: true },
-  { provider: "openai", id: "gpt-4o-mini", name: "GPT-4o mini", contextWindow: 128000, cost: { input: 0.15, output: 0.6 }, hasVision: true },
-  { provider: "openai", id: "o3", name: "o3", contextWindow: 200000, cost: { input: 2, output: 8 }, hasVision: true },
-  { provider: "xai", id: "grok-4", name: "Grok 4", contextWindow: 256000, cost: { input: 5, output: 15 }, hasVision: false },
-  { provider: "xai", id: "grok-4-fast", name: "Grok 4 Fast", contextWindow: 256000, cost: { input: 0.2, output: 0.5 }, hasVision: false },
-].sort(compareModels);
-
-// Which providers this mock pretends to be credentialed for. `anthropic` starts
-// connected so the available list is non-empty; the rest route through login.
-const credentialed = new Set(["anthropic"]);
-const roles = new Map();
-const availableModelRow = (m) => ({
-  provider: m.provider,
-  id: m.id,
-  name: m.name,
-  contextWindow: m.contextWindow,
-  cost: m.cost,
-  hasVision: m.hasVision,
-  ...(m.connectedVia ? { connectedVia: m.connectedVia } : {}),
-  ...(m.subscriptionType ? { subscriptionType: m.subscriptionType } : {}),
-});
-
-const currentModelRow = (m) => ({
-  provider: m.provider,
-  id: m.id,
-  name: m.name,
-  ...(m.contextWindow ? { contextWindow: m.contextWindow } : {}),
-  hasVision: m.hasVision,
-  ...(m.connectedVia ? { connectedVia: m.connectedVia } : {}),
-  ...(m.subscriptionType ? { subscriptionType: m.subscriptionType } : {}),
-});
-
-function resolveCurrent(name) {
-  const role = roles.get(name);
-  if (!role) return { current: null, source: "none" };
-  const m = CATALOG.find((x) => x.provider === role.provider && x.id === role.id);
-  return {
-    current: {
-      ...(m ? currentModelRow(m) : { provider: role.provider, id: role.id, name: role.id }),
-      runtime: "pi",
-    },
-    source: "explicit",
-  };
 }
 
 const mockServer = createServer(async (req, res) => {
@@ -1478,17 +893,14 @@ const mockServer = createServer(async (req, res) => {
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
-    deletedContext.delete(name);
     writtenCharacter.delete(name);
     mcpStore.delete(name);
-    roles.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
   // Renaming a ghost moves its home directory; conversation ids survive it
   // untouched, so the mock re-keys the ghost's state under the new name rather
-  // than rebuilding any of it. A pending ask is keyed by ghost name too, but
-  // one only exists mid-turn and `ghost_busy` already refuses that.
+  // than rebuilding any of it.
   if (parts.length === 4 && parts[3] === "name" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
     const next = typeof body?.name === "string" ? body.name.trim() : "";
@@ -1504,7 +916,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, deletedContext, writtenCharacter, mcpStore, roles]) {
+    for (const store of [sessionStore, writtenCharacter, mcpStore]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
@@ -1519,6 +931,9 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
     const sessionId = body?.options?.sessionId;
+    if (!validConversationId(sessionId)) {
+      return json(res, 400, { error: { message: "options.sessionId is not a conversation id", code: "invalid_conversation_id" } });
+    }
     if (answering.has(turnKey(name, sessionId))) {
       return json(res, 409, {
         error: {
@@ -1584,10 +999,7 @@ const mockServer = createServer(async (req, res) => {
   }
   if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
     await readBody(req).catch(() => ({}));
-    // The delay is the point, not an accident: the real daemon runs a model to
-    // write this, so the HUD must paint its static line first and crossfade.
-    await new Promise((r) => setTimeout(r, GREETING_MS));
-    return json(res, 200, GREETINGS[name] ?? { greeting: null, onboarding: false });
+    return json(res, 200, { greeting: null, onboarding: ONBOARDING.has(name) });
   }
   if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
     const list = [...ghostSessions(name).values()]
@@ -1598,20 +1010,8 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const storedTasks = delegatedTaskStore.get(delegatedTaskKey(name, conversation.id)) ?? [];
-    if (storedTasks.some((task) =>
-      ["queued", "starting", "running", "cancelling"].includes(task.state))) {
-      return json(res, 409, {
-        error: {
-          code: "tasks_active",
-          message: "Cancel or wait for this conversation's delegated tasks before deleting it.",
-        },
-      });
-    }
-    const deleted = ghostSessions(name).delete(conversation.id);
-    if (deleted) {
-      publishConversationUpdated(name, conversation.conversationId);
-    }
+    const deleted = ghostSessions(name).delete(conversation);
+    if (deleted) publishConversationUpdated(name, conversation);
     return deleted
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
@@ -1620,21 +1020,11 @@ const mockServer = createServer(async (req, res) => {
     await readBody(req).catch(() => ({}));
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation.id);
+    const s = ghostSessions(name).get(conversation);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     s.readAt = new Date().toISOString();
-    publishConversationUpdated(name, s.conversationId, s.updatedAt);
+    publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "commands" && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    return json(res, 200, { commands: MOCK_COMMANDS });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "resources" && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    return json(res, 200, { ...MOCK_SESSION_RESOURCES, runtime: conversation.runtime });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {
@@ -1647,7 +1037,7 @@ const mockServer = createServer(async (req, res) => {
     }
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation.id);
+    const s = ghostSessions(name).get(conversation);
     if (!s) {
       return json(res, 404, {
         error: { message: "no such session", code: "session_not_found" },
@@ -1658,11 +1048,10 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const turn = activeTurns.get(turnKey(name, conversation.conversationId));
+    const turn = activeTurns.get(turnKey(name, conversation));
     const snapshot = () => ({
       streaming: turn?.streaming === true,
-      count: (turn?.steering.length ?? 0) + (turn?.followUp.length ?? 0),
-      steering: turn?.steering ?? [],
+      count: turn?.followUp.length ?? 0,
       followUp: turn?.followUp ?? [],
     });
     if (req.method === "GET") return json(res, 200, snapshot());
@@ -1684,8 +1073,8 @@ const mockServer = createServer(async (req, res) => {
           error: { message: "this conversation is not streaming", code: "session_not_streaming" },
         });
       }
-      const queue = body.mode === "steer" ? turn.steering : turn.followUp;
-      queue.push(text);
+      // A steer is accepted but runs as a follow-up after the current pass.
+      turn.followUp.push(text);
       return json(res, 200, snapshot());
     }
   }
@@ -1705,134 +1094,12 @@ const mockServer = createServer(async (req, res) => {
     }
     const conversation = routeConversation(parts);
     if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation.id);
+    const s = ghostSessions(name).get(conversation);
     if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
     s.title = title;
-    publishConversationUpdated(name, s.conversationId, s.updatedAt);
+    publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "branch" && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation.id);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
-      });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    if (body?.action !== "fork") {
-      return json(res, 400, { error: { message: "action must be \"fork\"", code: "invalid_branch" } });
-    }
-    const forked = forkSession(name, s, typeof body?.entryId === "string" ? body.entryId : "");
-    return forked
-      ? json(res, 200, forked)
-      : json(res, 400, { error: { message: "no user message with that entryId", code: "invalid_branch" } });
-  }
-
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "GET") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const pending = pendingAsks.get(askKey(name, conversation.conversationId));
-    return json(res, 200, { ask: pending ? pending.view : null });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "ask" && req.method === "POST") {
-    const body = await readBody(req).catch(() => ({}));
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const pending = pendingAsks.get(askKey(name, conversation.conversationId));
-    // Settled or superseded reads the same from here: the question this client
-    // is holding is not the one being waited on.
-    if (!pending || pending.view.id !== body?.askId) {
-      return json(res, 409, {
-        error: { message: "this conversation is not waiting for that answer", code: "ask_not_pending" },
-      });
-    }
-    if (body?.kind !== "submit" && body?.kind !== "chat" && body?.kind !== "cancel") {
-      return json(res, 400, { error: { message: 'kind must be "submit", "chat", or "cancel"', code: "invalid_request" } });
-    }
-    // The daemon validates every result against the question that was asked;
-    // the mock takes the shape on trust — the dialog is what is under test here.
-    pending.settle({ kind: body.kind, results: Array.isArray(body.results) ? body.results : [] });
-    return json(res, 200, { ok: true });
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "reanswer" && req.method === "POST") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
-    const s = ghostSessions(name).get(conversation.id);
-    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
-    if (answering.has(turnKey(name, conversation.conversationId))) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "session_busy" },
-      });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    const entryId = typeof body?.entryId === "string" ? body.entryId : "";
-    const record = s.askResults?.get(entryId);
-    // An ask an earlier branch discarded is no longer re-answerable: the
-    // message that carried it went with everything after that branch point.
-    if (!record || askCallIndex(s, record.call) < 0) {
-      return json(res, 400, {
-        error: { message: "no ask result with that entryId", code: "ask_not_reanswerable" },
-      });
-    }
-    return streamReanswer(req, res, name, conversation.conversationId, s, entryId, record);
-  }
-
-  if (parts[3] === "model" && parts.length === 4 && req.method === "GET") {
-    return json(res, 200, resolveCurrent(name));
-  }
-  if (parts[3] === "model" && parts.length === 4 && req.method === "PUT") {
-    const body = await readBody(req).catch(() => null);
-    const provider = typeof body?.provider === "string" ? body.provider : "";
-    const id = typeof body?.id === "string" ? body.id : "";
-    if (!provider || !id) {
-      return json(res, 400, { error: { message: "A model is written as provider/id.", code: "invalid_request" } });
-    }
-    roles.set(name, { provider, id });
-    return json(res, 200, resolveCurrent(name));
-  }
-  // The way out of a binding: `ghost model --none`. Unbinding leaves the role
-  // unset, which is the fresh-install state this mock already starts in.
-  if (parts[3] === "model" && parts.length === 4 && req.method === "DELETE") {
-    roles.delete(name);
-    return json(res, 200, resolveCurrent(name));
-  }
-
-  if (parts[3] === "models" && parts.length === 4 && req.method === "GET") {
-    return json(res, 200, {
-      models: CATALOG.filter((m) => credentialed.has(m.provider)).map(availableModelRow),
-    });
-  }
-  if (parts[3] === "providers" && req.method === "GET") {
-    return json(res, 200, { providers: PROVIDERS });
-  }
-  if (parts[3] === "login" && parts.length === 4 && req.method === "POST") {
-    const body = await readBody(req).catch(() => ({}));
-    const providerId = typeof body?.providerId === "string" ? body.providerId : "";
-    const authType = body?.authType === "api_key" ? "api_key" : "oauth";
-    if (!PROVIDERS.some((p) => p.id === providerId && p.authTypes.includes(authType))) {
-      return json(res, 400, { error: { message: "unknown provider", code: "unknown_provider" } });
-    }
-    return json(res, 201, startLogin(providerId, authType));
-  }
-  if (parts[3] === "login" && parts.length === 5 && req.method === "GET") {
-    const session = logins.get(parts[4]);
-    if (!session) return json(res, 404, { error: { message: "no such login", code: "login_not_found" } });
-    return json(res, 200, session.view);
-  }
-  if (parts[3] === "login" && parts.length === 6 && parts[5] === "input" && req.method === "POST") {
-    const session = logins.get(parts[4]);
-    if (!session) return json(res, 404, { error: { message: "no such login", code: "login_not_found" } });
-    if (session.view.status === "succeeded" || session.view.status === "failed") {
-      return json(res, 409, { error: { message: "login already settled", code: "login_settled" } });
-    }
-    const body = await readBody(req).catch(() => ({}));
-    const value = typeof body?.value === "string" ? body.value : "";
-    return json(res, 200, loginInput(session, value));
-  }
-
   return json(res, 404, { error: "not found" });
 });
 mockServer.listen(PORT, HOST, () => {

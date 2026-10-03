@@ -1,0 +1,44 @@
+{"type":"session","id":"01a100ae-d843-7636-a02c-76ae2056d5ad"}
+{"type":"message_start","message":{"role":"system","stopReason":null}}
+{"type":"message_end","message":{"role":"system","stopReason":null}}
+{"type":"message_start","message":{"role":"user","stopReason":null}}
+{"type":"message_end","message":{"role":"user","stopReason":null}}
+{"type":"message_start","message":{"role":"assistant","stopReason":"pending"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_start","contentIndex":0,"delta":null}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"{\""}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"command"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"\":\""}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"echo"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":" ghost"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"-pro"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"be"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"-"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"42"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"\",\""}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"timeout"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"\":"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"null"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_delta","contentIndex":0,"delta":"}"}}
+{"type":"message_update","assistantMessageEvent":{"type":"toolcall_end","contentIndex":0,"delta":null}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"toolUse"}}
+{"type":"tool_execution_start","toolCallId":"call_lieWthvnwF99CUMOHJjQPxiy|fc_072b914c11be3990016ac0afe42b7887d29acafdb3ff3be856","toolName":"bash","args":{"command":"echo ghost-probe-42","timeout":null}}
+{"type":"tool_execution_update","toolCallId":"call_lieWthvnwF99CUMOHJjQPxiy|fc_072b914c11be3990016ac0afe42b7887d29acafdb3ff3be856","toolName":"bash","args":{"command":"echo ghost-probe-42","timeout":null},"partialResult":{"content":[]}}
+{"type":"tool_execution_update","toolCallId":"call_lieWthvnwF99CUMOHJjQPxiy|fc_072b914c11be3990016ac0afe42b7887d29acafdb3ff3be856","toolName":"bash","args":{"command":"echo ghost-probe-42","timeout":null},"partialResult":{"content":[{"type":"text","text":"ghost-probe-42\n"}],"details":{}}}
+{"type":"tool_execution_end","toolCallId":"call_lieWthvnwF99CUMOHJjQPxiy|fc_072b914c11be3990016ac0afe42b7887d29acafdb3ff3be856","toolName":"bash","isError":false,"result":{"content":[{"type":"text","text":"ghost-probe-42\n"}]}}
+{"type":"message_start","message":{"role":"toolResult","stopReason":null}}
+{"type":"message_end","message":{"role":"toolResult","stopReason":null}}
+{"type":"message_start","message":{"role":"assistant","stopReason":"pending"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_start","contentIndex":0,"delta":null}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"Z"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"EP"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"HY"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"R"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":":"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" My"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" name"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" is"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":" Ze"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"phyr"}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_delta","contentIndex":0,"delta":"."}}
+{"type":"message_update","assistantMessageEvent":{"type":"text_end","contentIndex":0,"delta":null}}
+{"type":"message_end","message":{"role":"assistant","stopReason":"stop"}}

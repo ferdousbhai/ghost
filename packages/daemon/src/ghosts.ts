@@ -24,7 +24,6 @@ export interface Ghost {
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
-export const GHOST_AGENT_DIRNAME = ".pi";
 const GHOST_CHARACTER_FILENAME = "character.md";
 const GHOST_SETTINGS_FILENAME = "settings.yml";
 
@@ -123,18 +122,13 @@ function createdAtOf(dir: string): string {
 
 export function ghostPaths(dir: string): {
   home: string;
-  agentDir: string;
-  settingsRuntimeDir: string;
   settingsFile: string;
   sessionDir: string;
   characterFile: string;
 } {
   const home = resolve(dir);
-  const agentDir = join(home, GHOST_AGENT_DIRNAME);
   return {
     home,
-    agentDir,
-    settingsRuntimeDir: join(agentDir, "runtime"),
     settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
     characterFile: join(home, GHOST_CHARACTER_FILENAME),

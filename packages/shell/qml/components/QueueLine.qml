@@ -1,7 +1,7 @@
 pragma ComponentBehavior: Bound
 
-// What the ghost will hear next: steering lands in the running turn, follow-ups
-// wait for it to end. Amber marks the live one; the queued ones stay on film.
+// What the ghost will hear next: follow-ups queued behind the running turn,
+// each run after the current pass ends.
 import QtQuick
 import QtQuick.Layouts
 import "../services"
@@ -9,77 +9,51 @@ import "../services"
 ColumnLayout {
     id: root
 
-    property var steering: []
     property var followUps: []
     property string error: ""
 
-    visible: steering.length > 0 || followUps.length > 0 || error !== ""
+    visible: followUps.length > 0 || error !== ""
     spacing: Theme.gap / 2
 
-    // One lane of queued messages: its label, then one elided chip per message.
-    component Lane: Flow {
+    // Its label, then one elided chip per queued message.
+    Flow {
         id: lane
 
-        required property string label
-        required property var items
-        required property color labelColor
-        required property color fill
-        required property color edge
-        required property color ink
-
-        visible: lane.items.length > 0
+        visible: root.followUps.length > 0
         Layout.fillWidth: true
         spacing: Theme.gap / 2
 
         Text {
-            text: lane.label
-            color: lane.labelColor
+            text: "Then →"
+            color: Theme.amber(0.70)
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
         }
 
         Repeater {
-            model: lane.items
+            model: root.followUps
             delegate: Rectangle {
                 id: chip
                 required property string modelData
                 implicitWidth: Math.min(chipText.implicitWidth + Theme.gap, lane.width * 0.72)
                 implicitHeight: 22
                 radius: Theme.bubbleRadiusSmall
-                color: lane.fill
+                color: Theme.film(0.05)
                 border.width: 1
-                border.color: lane.edge
+                border.color: Theme.film(0.10)
 
                 Text {
                     id: chipText
                     anchors.fill: parent
                     anchors.margins: Theme.gap / 2
                     text: chip.modelData
-                    color: lane.ink
+                    color: Theme.foreground
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
                     elide: Text.ElideRight
                 }
             }
         }
-    }
-
-    Lane {
-        label: "Steering →"
-        items: root.steering
-        labelColor: Theme.ghostAmber
-        fill: Theme.amber(0.12)
-        edge: Theme.amber(0.20)
-        ink: Theme.foregroundBright
-    }
-
-    Lane {
-        label: "Then →"
-        items: root.followUps
-        labelColor: Theme.amber(0.70)
-        fill: Theme.film(0.05)
-        edge: Theme.film(0.10)
-        ink: Theme.foreground
     }
 
     Text {

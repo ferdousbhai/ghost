@@ -95,9 +95,11 @@ export async function listSessions(client: DaemonClient, ghost: string): Promise
 }
 
 export function resolveSessionPrefix(rows: readonly SessionSummary[], requested: string): SessionSummary {
-  const exact = rows.filter((row) => row.id === requested || row.conversationId === requested);
+  // `pi:` is how ids were written before Ghost had more than one harness.
+  const wanted = requested.startsWith("pi:") ? requested.slice(3) : requested;
+  const exact = rows.filter((row) => row.id === wanted);
   if (exact.length === 1) return exact[0] as SessionSummary;
-  const matches = rows.filter((row) => row.id.startsWith(requested) || row.conversationId.startsWith(requested));
+  const matches = rows.filter((row) => row.id.startsWith(wanted));
   if (matches.length === 1) return matches[0] as SessionSummary;
   if (matches.length === 0) throw notFound(`session ${JSON.stringify(requested)}`);
   throw new ArgsError(

@@ -8,7 +8,7 @@ desktop entry are in [`../contrib/`](../contrib/README.md).
 ## It arrives with the `ghost` package
 
 This directory is half of one product. The other half is `ghostd`, a loopback
-daemon that owns sessions, models, and every ghost's home, and the two must be
+daemon that owns sessions and every ghost's home, and the two must be
 the same version. So the package is the only way in: it installs these files
 to `/usr/share/ghost/plugin` and prints the rest for you to run — a package may
 not write into your home, so the link and the enable are yours.

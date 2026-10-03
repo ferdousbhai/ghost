@@ -34,10 +34,7 @@ FloatingWindow {
     /** Driven by Panel.qml. Bound to `visible`. */
     property bool shown: false
     property bool sidebarOpen: true
-    property bool modelsOpen: false
     property string currentSection: "chat"
-    /** What the body shows: the model pane over any section, else the section. */
-    readonly property string view: hud.modelsOpen ? "models" : hud.currentSection
     /** The navigable sections, in rail order; the body stack follows it. */
     readonly property var sections: navigation.destinations.map(destination => destination.id)
     readonly property int navigationWidth: 64
@@ -46,17 +43,15 @@ FloatingWindow {
     // again. Both halves of launch-or-focus go through here.
     readonly property string titlePattern: "^Ghost( — .*)?$"
 
-    // Deleting a conversation, banishing a ghost, and branching over an unsent
-    // draft are asked in a modal over the whole window rather than in the row:
-    // the row is 16px of a scrolling sidebar, and a question that costs
-    // something deserves the middle of the screen. One question stands at a
-    // time, as { kind: "conversation" | "ghost" | "branch", id, title } or
-    // null. It lives here, not in the list that raised it, because the dialog
+    // Deleting a conversation and banishing a ghost are asked in a modal over
+    // the whole window rather than in the row: the row is 16px of a scrolling
+    // sidebar, and a question that costs something deserves the middle of the
+    // screen. One question stands at a time, as { kind: "conversation" |
+    // "ghost", id, title } or null. It lives here, not in the list that raised it, because the dialog
     // outlives the delegate (a refresh rebuilds every row).
     property var pending: null
     readonly property string pendingSession: hud.pendingId("conversation")
     readonly property string pendingGhost: hud.pendingId("ghost")
-    readonly property string pendingBranch: hud.pendingId("branch")
 
     // The file pane sits beside the chat when both columns can still be read,
     // and takes the chat's place when they cannot. The test is on the width
@@ -113,7 +108,6 @@ FloatingWindow {
     }
 
     function close(): void {
-        hud.modelsOpen = false;
         hud.shown = false;
     }
 
@@ -138,16 +132,8 @@ FloatingWindow {
     /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
         if (hud.sections.indexOf(section) < 0) return;
-        hud.modelsOpen = false;
         hud.currentSection = section;
         if (section === "chat") composer.take();
-    }
-
-    /** The model pane; `connect` opens straight onto provider sign-in. */
-    function openModels(connect: bool): void {
-        hud.currentSection = "chat";
-        hud.modelsOpen = true;
-        modelPicker.open(connect);
     }
 
     function pendingId(kind: string): string {
@@ -172,18 +158,6 @@ FloatingWindow {
         if (hud.pendingGhost !== "") Ghostd.ghostDeleteError = "";
     }
 
-    /**
-     * Branch from a message. The copy the daemon makes is a new conversation,
-     * so nothing already said is at risk — but the branched text lands in the
-     * composer, overwriting whatever is in it, so an unsent draft gets a
-     * question first. It is the one thing here nothing else can recover.
-     */
-    function requestBranch(entryId: string): void {
-        if (entryId === "") return;
-        if (composer.hasDraft) hud.ask("branch", entryId, "");
-        else Ghostd.branchFrom(entryId);
-    }
-
     // The pairing prompt has no event stream; a cheap unauthenticated poll
     // while the HUD is up is what makes it appear.
     Timer {
@@ -196,7 +170,7 @@ FloatingWindow {
     Binding {
         target: Ghostd
         property: "hudChatFocused"
-        value: hud.shown && hud.focused() && hud.view === "chat"
+        value: hud.shown && hud.focused() && hud.currentSection === "chat"
     }
 
     Connections {
@@ -221,15 +195,6 @@ FloatingWindow {
             if (hud.pendingGhost === "" || Ghostd.deletingGhost !== "") return;
             if (!Ghostd.ghosts.some(ghost => ghost.name === hud.pendingGhost))
                 hud.dismissPending();
-        }
-
-        // The ask form takes the keyboard while a question is standing, so
-        // answering or dismissing one has to hand it back — otherwise the
-        // composer returns with nothing focused and the next thing typed goes
-        // nowhere. Gated on the HUD being up: grabbing the caret for a window
-        // nobody is looking at is worse than not.
-        function onPendingAskChanged(): void {
-            if (Ghostd.pendingAsk === null && hud.shown) composer.take();
         }
 
         function onComposerDraft(text: string): void {
@@ -281,7 +246,7 @@ FloatingWindow {
         // card by focus-chain propagation even while the composer holds focus,
         // since a plain TextEdit does not consume Ctrl+B.
         Keys.onPressed: event => {
-            if (hud.view === "chat"
+            if (hud.currentSection === "chat"
                     && (event.modifiers & Qt.ControlModifier)
                     && event.key === Qt.Key_B) {
                 hud.sidebarOpen = !hud.sidebarOpen;
@@ -330,15 +295,13 @@ FloatingWindow {
             HudHeader {
                 Layout.fillWidth: true
                 z: 20
-                onModelsRequested: hud.openModels(Ghostd.noModel)
             }
 
-            // One pane per entry of `hud.sections`, in the same order, then
-            // the model pane; the stack shows the one `hud.view` names.
+            // One pane per entry of `hud.sections`, in the same order.
             StackLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                currentIndex: hud.sections.concat(["models"]).indexOf(hud.view)
+                currentIndex: hud.sections.indexOf(hud.currentSection)
 
                 RowLayout {
                     spacing: Theme.sectionGap
@@ -392,7 +355,6 @@ FloatingWindow {
                             spacing: Theme.gap
                             model: Ghostd.transcript
                             cacheBuffer: 400
-                            header: ResourcesLine { width: transcriptView.width }
 
                             delegate: Bubble {
                                 // One required property per ListModel role. A
@@ -404,7 +366,6 @@ FloatingWindow {
                                 required property var toolActivity
                                 required property string error
                                 required property bool pending
-                                required property string entryId
                                 required property int index
 
                                 width: transcriptView.width
@@ -414,8 +375,6 @@ FloatingWindow {
                                 activities: toolActivity
                                 failure: error
                                 busy: pending
-                                sourceEntryId: entryId
-                                onBranchRequested: id => hud.requestBranch(id)
                             }
 
                             onContentYChanged: pinned = contentY >= contentHeight - height - 40
@@ -430,13 +389,11 @@ FloatingWindow {
                                 anchors.horizontalCenter: parent.horizontalCenter
                                 y: Math.max(0, (transcriptView.height - height) / 2)
                                 visible: transcriptView.count === 0
-                                // A greeting is a short paragraph, so the card is
-                                // as wide as one reads well, in columns. A narrow
-                                // HUD gives it the whole column: a fraction of one
-                                // would wrap every third word.
+                                // As wide as a line reads well, in columns. A
+                                // narrow HUD gives it the whole column: a fraction
+                                // of one would wrap every third word.
                                 width: Math.min(transcriptView.width - Theme.pad * 2,
                                     Theme.ch(46) + Theme.pad * 2)
-                                onLoginRequested: hud.openModels(true)
                             }
                         }
 
@@ -450,52 +407,20 @@ FloatingWindow {
 
                         QueueLine {
                             Layout.fillWidth: true
-                            steering: Ghostd.steeringQueue
                             followUps: Ghostd.followUpQueue
                             error: Ghostd.queueError
                         }
 
-                        // A branch that refused. It belongs here, under the
-                        // transcript it would have forked, and clears itself on
-                        // the next attempt or on a click.
-                        Text {
-                            visible: Ghostd.branchError !== ""
-                            Layout.fillWidth: true
-                            text: Ghostd.branchError
-                            color: Theme.ghostRose
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeSmall
-                            wrapMode: Text.Wrap
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: Ghostd.branchError = ""
-                            }
-                        }
-
-                        AskDialog {
-                            visible: Ghostd.pendingAsk !== null
-                            Layout.fillWidth: true
-                            interaction: Ghostd.pendingAsk || ({ questions: [] })
-                            submitting: Ghostd.askSubmitting
-                            error: Ghostd.askError
-                            onAnswered: answer => Ghostd.answerAsk(answer)
-                            onChatRequested: Ghostd.chatAboutAsk()
-                            onDismissed: Ghostd.dismissAsk()
-                        }
-
                         Composer {
                             id: composer
-                            visible: Ghostd.pendingAsk === null
                             Layout.fillWidth: true
                             // Room for a real draft before it scrolls, never the
                             // whole pane: the transcript above must stay in view.
                             maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
 
-                            onSubmitted: (prompt, mode) => {
-                                if (mode === "prompt") Ghostd.send(prompt);
-                                else Ghostd.queueMessage(prompt, mode);
+                            onSubmitted: prompt => {
+                                if (Ghostd.streaming) Ghostd.queueMessage(prompt);
+                                else Ghostd.send(prompt);
                             }
                         }
                     }
@@ -532,15 +457,6 @@ FloatingWindow {
                     onClosed: hud.showSection("chat")
                 }
 
-                // The effective command palette is conversation-scoped. A pick
-                // returns to chat with the command staged, never already running.
-                CommandsBrowser {
-                    onCommandPicked: invocation => {
-                        hud.currentSection = "chat";
-                        composer.stageCommand(invocation);
-                    }
-                }
-
                 // Machine-level hook configuration is global: the owner's command
                 // hooks are edited in place. It never creates or selects a
                 // conversation merely to show status.
@@ -550,12 +466,6 @@ FloatingWindow {
 
                 RemoteAccess {
                     onCloseRequested: hud.showSection("chat")
-                }
-
-                // The model picker, with provider sign-in inside it.
-                ModelPicker {
-                    id: modelPicker
-                    onCloseRequested: hud.modelsOpen = false
                 }
             }
         }
@@ -610,25 +520,6 @@ FloatingWindow {
             error: Ghostd.relayError
             onConfirmed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, true)
             onDismissed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, false)
-        }
-
-        // Branching overwrites the composer with the branched message's text.
-        // Only asked when that would cost something the user typed.
-        ConfirmDialog {
-            anchors.fill: parent
-            open: hud.pendingBranch !== ""
-            title: "Replace what you're typing?"
-            body: "Branching opens a copy of this conversation and puts that "
-                + "message's text in the composer. What you have typed there "
-                + "now is not saved anywhere."
-            confirmText: "Replace"
-            destructive: false
-            onConfirmed: {
-                const entryId = hud.pendingBranch;
-                hud.pending = null;
-                Ghostd.branchFrom(entryId);
-            }
-            onDismissed: hud.dismissPending()
         }
 
         // Banishing a ghost is the same question one notch louder: the daemon

@@ -25,7 +25,7 @@ qml/Service.qml           service kind: daemon connection, toasts, IPC
 qml/Panel.qml             panel kind: the host's open/close contract
 qml/GhostHud.qml          chat window
 qml/GhostBarWidget.qml    bar-widget kind: the mark in a host bar slot
-qml/components/           chat, ask, queue, tools, routing, board, orb
+qml/components/           chat, queue, tools, routing, board, orb
 qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
 contrib/                  Omarchy integration
 dev/                      isolated preview, mock daemon, checks
@@ -42,20 +42,19 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   strongly owned until terminal settlement.
 - The shell edits durable state only through authenticated daemon routes. It
   never reads ghost homes or the owner's documents directly.
-- `ask` replaces the composer while owner input is pending. It is not tool
-  approval. Enter answers, Escape dismisses, and restored cards preserve how a
-  question settled.
-- While streaming, Enter steers, Ctrl+Enter queues a follow-up, and Shift+Enter
-  inserts a newline.
+- While streaming, Enter queues a follow-up that runs after the current pass,
+  and Shift+Enter inserts a newline.
+- The agent CLI (harness) answering a conversation is the daemon's choice; the
+  header names it ("via claude") and nothing in the shell picks a model or
+  signs in to a provider.
 - Plans and tasks live in the owner's documents; the shell has no jobs strip,
   plan mode, or progress/todo projection.
 - Tool activity is transient beside the orb. Settled replies keep failed calls
-  and asks visible by default; the complete trace is available behind the steps
-  disclosure, which the message reveals on hover along with its copy and edit
-  controls. A turn that ran tools and said nothing keeps the count painted —
+  visible by default; the complete trace is available behind the steps
+  disclosure, which the message reveals on hover along with its copy control. A turn that ran tools and said nothing keeps the count painted —
   there is no text to hover over, so it is the whole row.
-- Context panels expose character, commands, hooks, MCP, the board, the bound
-  model, remote access, and connection state.
+- Context panels expose character, hooks, MCP, the board, remote access, and
+  connection state.
 - Dictation is Omarchy's Voxtype. The composer shows a toggle only while its
   state file exists, hands focus back to the field after toggling, and says
   when Voxtype is listening.

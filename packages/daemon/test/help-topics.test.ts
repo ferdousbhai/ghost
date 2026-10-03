@@ -48,7 +48,7 @@ describe("ghost help topics", () => {
 
   it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {
     const text = renderHelpTopic("harnesses", INPUT);
-    expect(text).toContain("Your own cwd is always the owner home");
+    expect(text).toContain("Your turns run in this conversation's own directory");
     expect(text).toContain("you are the orchestrator");
     expect(text).toContain("cd <project-dir> && ghost delegate <harness> -- <args>");
     expect(text).toContain("respects that project's settings");
@@ -60,7 +60,6 @@ describe("ghost help topics", () => {
     expect(text).toContain("--owner-named");
     expect(text).toContain("--permission-mode acceptEdits");
     expect(text).toContain("--allowedTools Bash");
-    expect(text).toContain("a run you background cannot ask");
     expect(text).not.toContain("~/.local/state/omarchy");
     expect(text).toContain("handoff note");
     expect(text).toContain("Never spend a window you were not asked to spend.");

@@ -1,5 +1,6 @@
 /**
- * HTTP tests over a real listening server on an ephemeral loopback port.
+ * HTTP tests over a real listening server on an ephemeral loopback port, with
+ * a scripted harness standing in for the owner's agent CLIs.
  *
  * The SSE assertions use Ghost's in-repo conformance parser
  * (`parseSseStream`), matching the shell's framing rules so a change that would
@@ -7,58 +8,53 @@
  */
 import {
   existsSync,
-  mkdirSync,
   readFileSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
-import type { PiMessagesEvent } from "../src/pi-messages.js";
+import type { TurnEvent } from "../src/turn-events.js";
 import {
   startDaemonServer,
   type ListeningServer,
   type ServerOptions,
 } from "../src/server.js";
-import {
-  SessionHost,
-  sessionFileNameFor,
-  type SessionHostOptions,
-} from "../src/session-host.js";
+import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-import { startMockProvider, type MockProvider } from "./helpers/mock-provider.js";
 import { fetchNoReuse as fetch } from "./helpers/http-fetch.js";
 
 let temp: TempGhosts | null = null;
-let provider: MockProvider | null = null;
+let harness: FakeHarness | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
 let homeOperations: HomeOperationCoordinator | null = null;
+const gates: Array<() => void> = [];
 
 afterEach(async () => {
+  for (const release of gates.splice(0)) release();
   await listening?.close();
   listening = null;
   homeOperations = null;
   await host?.disposeAll();
   host = null;
-  await provider?.close();
-  provider = null;
+  harness?.cleanup();
+  harness = null;
   temp?.cleanup();
   temp = null;
 });
 
 async function serve(
-  script: Parameters<typeof startMockProvider>[0]["script"] = [
-    { kind: "text", text: "hello there" },
-  ],
+  turns: FakeTurn[] = replies("hello there"),
   serverOptions: {
     maxBodyBytes?: number;
     apiToken?: string | null;
     hooks?: ServerOptions["hooks"];
-    conversationFileProbe?: SessionHostOptions["conversationFileProbe"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
     update?: ServerOptions["update"];
@@ -66,22 +62,16 @@ async function serve(
 ) {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
-  provider = await startMockProvider({ script });
-  seedGhost(temp.root, {
-    name: "casper",
-    provider: { baseUrl: provider.url, modelId: provider.modelId },
-  });
+  harness = fakeHarness(turns);
+  seedGhost(temp.root, { name: "casper" });
   homeOperations = new HomeOperationCoordinator(temp.registry);
   host = new SessionHost({
     registry: temp.registry,
     homeOperations,
     ownerHome: temp.ownerHome,
-    offline: true,
     scheduleCommandRunner: serverOptions.scheduleCommandRunner
       ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
-    ...(serverOptions.conversationFileProbe === undefined
-      ? {}
-      : { conversationFileProbe: serverOptions.conversationFileProbe }),
+    ...onlyHarnesses(harness),
   });
   const mcp = new McpCatalog({
     registry: temp.registry,
@@ -96,6 +86,7 @@ async function serve(
     mcp,
     homeOperations,
     port: 0,
+    relay: null,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
     ...(serverOptions.maxBodyBytes === undefined
@@ -106,6 +97,26 @@ async function serve(
     ...(serverOptions.update === undefined ? {} : { update: serverOptions.update }),
   });
   return `http://127.0.0.1:${listening.port}`;
+}
+
+/**
+ * Serve with a first turn that holds until released, so "a conversation is
+ * answering" is a state the test owns rather than a race it has to win.
+ */
+async function serveHeld(after: FakeTurn[] = replies("after")): Promise<{ base: string; release(): void }> {
+  const base = await serve([]);
+  const gate = harness!.gate("hold");
+  gates.push(gate.release);
+  harness!.setTurns([{ events: [{ type: "text", block: "a", delta: "held" }], gate: gate.path }, ...after]);
+  return { base, release: gate.release };
+}
+
+async function waitForLaunches(count: number): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  while (harness!.calls().length < count) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${count} harness launch(es)`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 async function waitForHomeMove(): Promise<void> {
@@ -120,7 +131,7 @@ async function postTurn(
   base: string,
   body: unknown,
   headers: Record<string, string> = {},
-): Promise<{ status: number; headers: Headers; events: PiMessagesEvent[]; raw: string }> {
+): Promise<{ status: number; headers: Headers; events: TurnEvent[]; raw: string }> {
   const response = await fetch(`${base}/api/ghosts/casper/messages`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream", ...headers },
@@ -141,54 +152,11 @@ const TURN_BODY = {
   options: { sessionId: "conv-1" },
 };
 
-const piId = (conversationId: string): string => `pi:${conversationId}`;
-const piSegment = (conversationId: string): string => encodeURIComponent(piId(conversationId));
-
-function writeMcpRouteFixture(dir: string, fileName: string, toolName: string): string {
-  const serverPath = join(dir, fileName);
-  writeFileSync(
-    serverPath,
-    `import { createInterface } from "node:readline";
-const lines = createInterface({ input: process.stdin });
-const send = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
-lines.on("line", (line) => {
-  const request = JSON.parse(line);
-  if (request.id === undefined) return;
-  if (request.method === "initialize") send(request.id, {
-    protocolVersion: "2025-11-25", capabilities: { tools: {} },
-    serverInfo: { name: "route-fixture", version: "1.0.0" }
-  });
-  else if (request.method === "tools/list") send(request.id, { tools: [{
-    name: ${JSON.stringify(toolName)}, description: "Route fixture",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false }
-  }] });
-  else send(request.id, {});
+const turnBody = (sessionId: string, prompt = "Who are you?") => ({
+  ...TURN_BODY,
+  context: { messages: [{ role: "user", content: prompt }] },
+  options: { sessionId },
 });
-`,
-    "utf8",
-  );
-  return serverPath;
-}
-
-async function waitForAsk(base: string, sessionId: string): Promise<{
-  id: string;
-  questions: Array<{ id: string; question: string }>;
-}> {
-  const deadline = Date.now() + 2_000;
-  while (Date.now() < deadline) {
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment(sessionId)}/ask`,
-    );
-    expect(response.status).toBe(200);
-    const body = await response.json() as { ask: null | {
-      id: string;
-      questions: Array<{ id: string; question: string }>;
-    } };
-    if (body.ask) return body.ask;
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  throw new Error("timed out waiting for ask interaction");
-}
 
 /** A runner built without a hooks.json: nothing to read, nothing to replace. */
 const noHooksFile = {
@@ -438,211 +406,36 @@ describe("/api/ghosts/:name/character", () => {
   });
 });
 
-describe("POST /api/ghosts/:name/messages runtime admission", () => {
-  const body = (sessionId: string, prompt: string) => ({
-    ...TURN_BODY,
-    context: { messages: [{ role: "user", content: prompt }] },
-    options: { sessionId },
-  });
+describe("POST /api/ghosts/:name/messages admission", () => {
+  it("refuses a second turn in an answering conversation before SSE, and admits it after", async () => {
+    const { base, release } = await serveHeld();
+    const first = postTurn(base, turnBody("conv-busy", "hold this turn"));
+    await waitForLaunches(1);
 
-  it("keeps admitted HTTP turns and MCP transitions mutually exclusive before SSE", async () => {
-    const base = await serve([{ kind: "text", text: "lease stayed intact" }]);
-    const admitted = Promise.withResolvers<void>();
-    const releaseStream = Promise.withResolvers<void>();
-    const originalAdmit = host!.admitTurn.bind(host);
-    vi.spyOn(host!, "admitTurn").mockImplementation(async (ghostName, options) => {
-      const admission = await originalAdmit(ghostName, options);
-      admitted.resolve();
-      return {
-        release: admission.release,
-        run: async (streamOptions) => {
-          await releaseStream.promise;
-          await admission.run(streamOptions);
-        },
-      };
-    });
+    const rejected = await postTurn(base, turnBody("conv-busy", "must fail before SSE"));
+    expect(rejected.status).toBe(409);
+    expect(rejected.headers.get("content-type")).toContain("application/json");
+    expect(JSON.parse(rejected.raw)).toMatchObject({ error: { code: "session_busy" } });
 
-    const firstId = "http-admitted-mcp-lease";
-    const firstTurn = postTurn(base, body(firstId, "hold admission before streaming"));
-    await admitted.promise;
-    const collection = `${base}/api/ghosts/casper/mcp`;
-    const rejectedMutation = await fetch(collection, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        name: "blocked",
-        config: { type: "stdio", command: process.execPath, args: ["--version"] },
-      }),
-    });
-    expect(rejectedMutation.status).toBe(409);
-    expect(await rejectedMutation.json()).toMatchObject({ error: { code: "session_busy" } });
-    const ghostMcpPath = join(temp!.root, "casper", "mcp.json");
-    expect(existsSync(ghostMcpPath)).toBe(false);
+    // Another conversation of the same ghost is not held behind it.
+    const other = await postTurn(base, turnBody("conv-other", "a different conversation"));
+    expect(other.status).toBe(200);
+    expect(other.events.at(-1)).toMatchObject({ type: "done" });
 
-    writeFileSync(ghostMcpPath, JSON.stringify({
-      mcpServers: {
-        existing: {
-          enabled: false,
-          type: "stdio",
-          command: process.execPath,
-          args: ["--version"],
-        },
-      },
-    }));
-    const mcpBytes = readFileSync(ghostMcpPath, "utf8");
-    const rejectedReconnect = await fetch(`${collection}/existing/reconnect`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    });
-    expect(rejectedReconnect.status).toBe(409);
-    expect(await rejectedReconnect.json()).toMatchObject({ error: { code: "session_busy" } });
-    expect(readFileSync(ghostMcpPath, "utf8")).toBe(mcpBytes);
-
-    releaseStream.resolve();
-    const first = await firstTurn;
-    expect(first.status).toBe(200);
-    expect(first.events.filter((event) => event.type === "done" || event.type === "error"))
+    release();
+    expect((await first).events.at(-1)).toMatchObject({ type: "done" });
+    const retried = await postTurn(base, turnBody("conv-busy", "after release"));
+    expect(retried.status).toBe(200);
+    expect(retried.events.filter((event) => event.type === "done" || event.type === "error"))
       .toEqual([expect.objectContaining({ type: "done" })]);
-
-    const transitionEntered = Promise.withResolvers<void>();
-    const releaseTransition = Promise.withResolvers<void>();
-    const transition = host!.withMcpReload("casper", async () => {
-      transitionEntered.resolve();
-      await releaseTransition.promise;
-    });
-    await transitionEntered.promise;
-    const rejectedTurn = await postTurn(
-      base,
-      body("http-blocked-by-mcp-lease", "must fail before SSE"),
-    );
-    expect(rejectedTurn.status).toBe(409);
-    expect(rejectedTurn.headers.get("content-type")).toContain("application/json");
-    expect(JSON.parse(rejectedTurn.raw)).toMatchObject({ error: { code: "session_busy" } });
-    expect(existsSync(join(
-      ghostPaths(join(temp!.root, "casper")).sessionDir,
-      sessionFileNameFor("http-blocked-by-mcp-lease"),
-    ))).toBe(false);
-    releaseTransition.resolve();
-    await transition;
-
-    const retriedTurn = await postTurn(
-      base,
-      body("http-after-mcp-lease", "run after the transition releases its lease"),
-    );
-    expect(retriedTurn.status).toBe(200);
-    expect(retriedTurn.events.filter((event) => event.type === "done" || event.type === "error"))
-      .toEqual([expect.objectContaining({ type: "done" })]);
+    expect(harness!.calls().map((call) => call.prompt)).not.toContain("must fail before SSE");
   });
-});
-
-describe("GET /api/ghosts/:name/sessions/:id/commands", () => {
-  it("serves Ghost's session command catalog and enforces GET", async () => {
-    const base = await serve();
-    const url = `${base}/api/ghosts/casper/sessions/${piSegment("conv-commands")}/commands`;
-
-    const response = await fetch(url);
-    expect(response.status).toBe(200);
-    const body = await response.json() as {
-      commands: Array<{ name: string; source: string; availability: string }>;
-    };
-    expect(body.commands).toContainEqual(expect.objectContaining({
-      name: "tools",
-      source: "builtin",
-      availability: "available",
-    }));
-    expect(body.commands).toContainEqual(expect.objectContaining({
-      name: "mcp",
-      source: "builtin",
-      availability: "unsupported",
-    }));
-
-    expect((await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: "{}",
-    })).status).toBe(405);
-    expect((await fetch(
-      `${base}/api/ghosts/missing/sessions/${piSegment("conv-commands")}/commands`,
-    )).status).toBe(404);
-
-  });
-
-  it("streams standalone command output instead of an assistant message", async () => {
-    const base = await serve();
-    const result = await postTurn(base, {
-      ...TURN_BODY,
-      context: { messages: [{ role: "user", content: "/tools" }] },
-      options: { sessionId: "conv-tools" },
-    });
-
-    expect(result.status).toBe(200);
-    expect(result.events).toContainEqual(expect.objectContaining({
-      type: "command_output",
-      command: "/tools",
-      output: expect.stringContaining("read"),
-    }));
-    expect(result.events.some((event) => event.type === "text_start")).toBe(false);
-    expect(provider!.requests).toHaveLength(0);
-  });
-});
-
-describe("GET /api/ghosts/:name/sessions/:id/resources", () => {
-  it("serves the immutable Pi admission snapshot and enforces GET", async () => {
-    const base = await serve();
-    const skillDirectory = join(
-      temp!.ownerHome,
-      ".agents",
-      "skills",
-      "obsidian-cli",
-    );
-    const skillPath = join(skillDirectory, "SKILL.md");
-    mkdirSync(skillDirectory, { recursive: true });
-    writeFileSync(
-      skillPath,
-      "---\nname: obsidian-cli\ndescription: Use the official Obsidian CLI.\n---\n",
-    );
-    writeFileSync(
-      join(temp!.root, "casper", "mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          disabled: { type: "stdio", command: "never-start", enabled: false },
-          broken: { type: "stdio" },
-        },
-      }),
-    );
-    const url = `${base}/api/ghosts/casper/sessions/${piSegment("conv-resources")}/resources`;
-
-    const response = await fetch(url);
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      runtime: "pi",
-      skills: [expect.objectContaining({
-        name: "obsidian-cli",
-        source: "machine",
-        precedence: 0,
-        status: "admitted",
-      })],
-      mcpServers: expect.arrayContaining([
-        expect.objectContaining({ name: "disabled", enabled: false, status: "disabled" }),
-        expect.objectContaining({
-          name: "broken",
-          enabled: false,
-          status: "skipped",
-          reason: expect.any(String),
-        }),
-      ]),
-    });
-    expect((await fetch(url, { method: "POST" })).status).toBe(405);
-  });
-
 });
 
 describe("session Connect routes", () => {
   it("does not expose live voice or a collaboration host", async () => {
     const base = await serve();
-    const segment = piSegment("conv-connect");
+    const segment = "conv-connect";
     for (const route of ["live", "collab"]) {
       const url = `${base}/api/ghosts/casper/sessions/${segment}/${route}`;
       expect((await fetch(url)).status).toBe(404);
@@ -761,63 +554,6 @@ describe("ghost MCP routes", () => {
     },
   );
 
-  it.each([
-    { action: "test", move: "rename" },
-    { action: "reconnect", move: "delete" },
-  ] as const)(
-    "keeps composite $action and its response snapshot on one home through $move",
-    async ({ action, move }) => {
-      const actionEntered = Promise.withResolvers<void>();
-      const releaseAction = Promise.withResolvers<void>();
-      let readCount = 0;
-      const base = await serve(undefined, {
-        mcpReadProbe: async () => {
-          readCount += 1;
-          if (readCount !== 1) return;
-          actionEntered.resolve();
-          await releaseAction.promise;
-        },
-      });
-      const originalHome = join(temp!.root, "casper");
-      writeFileSync(join(originalHome, "mcp.json"), JSON.stringify({
-        mcpServers: {
-          original: {
-            type: "stdio",
-            command: process.execPath,
-            args: ["-e", "process.exit(1)"],
-          },
-        },
-      }));
-      const originalInode = statSync(originalHome, { bigint: true }).ino;
-
-      const acting = jsonRequest(
-        `${base}/api/ghosts/casper/mcp/original/${action}`,
-        "POST",
-        {},
-      );
-      await actionEntered.promise;
-      const moving = requestHomeMove(base, move);
-      await waitForHomeMove();
-
-      releaseAction.resolve();
-      const actionResponse = await acting;
-      expect(actionResponse.status).toBe(200);
-      expect(await actionResponse.json()).toMatchObject({
-        servers: [expect.objectContaining({ name: "original" })],
-        result: expect.objectContaining({ name: "original" }),
-      });
-      const movedHome = await movedHomeFrom(await moving, move);
-      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
-
-      const replacementHome = await recreateOldName(base);
-      expect(statSync(replacementHome, { bigint: true }).ino).not.toBe(originalInode);
-      expect(await (await fetch(`${base}/api/ghosts/casper/mcp`)).json())
-        .toEqual({ servers: [], skipped: [] });
-      expect(JSON.parse(readFileSync(join(movedHome, "mcp.json"), "utf8")))
-        .toMatchObject({ mcpServers: { original: expect.any(Object) } });
-    },
-  );
-
   it("keeps inherited-object MCP names as ordinary own entries over HTTP", async () => {
     const base = await serve();
     const collection = `${base}/api/ghosts/casper/mcp`;
@@ -867,135 +603,6 @@ describe("ghost MCP routes", () => {
     expect(Object.hasOwn(persisted.mcpServers, "__proto__")).toBe(true);
     expect(Object.hasOwn(persisted.mcpServers, "constructor")).toBe(true);
     expect(Object.hasOwn(persisted.mcpServers, "toString")).toBe(false);
-  });
-
-  it("returns post-reload connection state for every mutation of an open session", async () => {
-    const base = await serve();
-    const collection = `${base}/api/ghosts/casper/mcp`;
-    const ghostDir = join(temp!.root, "casper");
-    const firstServer = writeMcpRouteFixture(ghostDir, "route-mcp-first.mjs", "first_echo");
-    const secondServer = writeMcpRouteFixture(ghostDir, "route-mcp-second.mjs", "second_echo");
-    const opened = await host!.open("casper", "route-mcp-live");
-    const firstTool = "mcp__route_fixture_first_echo";
-    const secondTool = "mcp__route_fixture_second_echo";
-
-    const added = await jsonRequest(collection, "POST", {
-      name: "route_fixture",
-      config: { type: "stdio", command: process.execPath, args: [firstServer], enabled: true },
-    });
-    expect(added.status).toBe(201);
-    expect(await added.json()).toMatchObject({
-      servers: [expect.objectContaining({
-        name: "route_fixture",
-        connectionStatus: "connected",
-      })],
-    });
-    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
-
-    const disabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
-      enabled: false,
-    });
-    expect(disabled.status).toBe(200);
-    expect(await disabled.json()).toMatchObject({
-      servers: [expect.objectContaining({
-        name: "route_fixture",
-        connectionStatus: "disabled",
-      })],
-    });
-    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
-
-    const enabled = await jsonRequest(`${collection}/route_fixture/enabled`, "PUT", {
-      enabled: true,
-    });
-    expect(enabled.status).toBe(200);
-    expect(await enabled.json()).toMatchObject({
-      servers: [expect.objectContaining({
-        name: "route_fixture",
-        connectionStatus: "connected",
-      })],
-    });
-    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolDefinition(firstTool)).toBeDefined();
-
-    const replaced = await jsonRequest(`${collection}/route_fixture`, "PUT", {
-      config: { type: "stdio", command: process.execPath, args: [secondServer] },
-    });
-    expect(replaced.status).toBe(200);
-    expect(await replaced.json()).toMatchObject({
-      servers: [expect.objectContaining({
-        name: "route_fixture",
-        connectionStatus: "connected",
-      })],
-    });
-    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-    expect(opened.session.getToolDefinition(firstTool)).toBeUndefined();
-    expect(opened.session.getToolDefinition(secondTool)).toBeDefined();
-
-    const removed = await jsonRequest(`${collection}/route_fixture`, "DELETE");
-    expect(removed.status).toBe(200);
-    expect(await removed.json()).toMatchObject({ servers: [] });
-    expect(opened.session.getToolDefinition(secondTool)).toBeUndefined();
-    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("disconnected");
-  });
-
-  it("reports a live reload failure without discarding the old manager or durable mutation", async () => {
-    const base = await serve();
-    const collection = `${base}/api/ghosts/casper/mcp`;
-    const ghostDir = join(temp!.root, "casper");
-    const firstServer = writeMcpRouteFixture(ghostDir, "route-mcp-stable.mjs", "stable_echo");
-    const secondServer = writeMcpRouteFixture(ghostDir, "route-mcp-next.mjs", "next_echo");
-    const opened = await host!.open("casper", "route-mcp-reload-failure");
-    const stableTool = "mcp__route_fixture_stable_echo";
-    const nextTool = "mcp__route_fixture_next_echo";
-
-    const added = await jsonRequest(collection, "POST", {
-      name: "route_fixture",
-      config: { type: "stdio", command: process.execPath, args: [firstServer], enabled: true },
-    });
-    expect(added.status).toBe(201);
-    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
-
-    vi.spyOn(opened.session, "reload")
-      .mockRejectedValueOnce(new Error("injected live MCP publication failure"));
-    const failed = await jsonRequest(`${collection}/route_fixture`, "PUT", {
-      config: {
-        type: "stdio",
-        command: process.execPath,
-        args: [secondServer],
-        cwd: ghostDir,
-      },
-    });
-    expect(failed.status).toBe(500);
-    expect(await failed.json()).toMatchObject({ error: { code: "internal_error" } });
-    expect(opened.session.getToolDefinition(stableTool)).toBeDefined();
-    expect(opened.session.getToolDefinition(nextTool)).toBeUndefined();
-    expect(host!.mcpConnectionStatus("casper", "route_fixture")).toBe("connected");
-
-    const durable = await fetch(collection);
-    expect(durable.status).toBe(200);
-    expect(await durable.json()).toMatchObject({
-      servers: [expect.objectContaining({
-        name: "route_fixture",
-        connectionStatus: "connected",
-        config: expect.objectContaining({ cwd: ghostDir }),
-      })],
-    });
-
-    const retried = await jsonRequest(`${collection}/route_fixture`, "PUT", {
-      config: {
-        type: "stdio",
-        command: process.execPath,
-        args: [secondServer],
-        cwd: ghostDir,
-      },
-    });
-    expect(retried.status).toBe(200);
-    expect(await retried.json()).toMatchObject({
-      servers: [expect.objectContaining({ connectionStatus: "connected" })],
-    });
-    expect(opened.session.getToolDefinition(stableTool)).toBeUndefined();
-    expect(opened.session.getToolDefinition(nextTool)).toBeDefined();
   });
 });
 
@@ -1073,50 +680,54 @@ describe("POST /api/ghosts", () => {
 });
 
 describe("POST /api/ghosts/:name/messages", () => {
-
-  it("streams one well-formed pi-messages turn", async () => {
-    const base = await serve([
-      { kind: "tool", name: "ghost_memory_list", args: {} },
-      { kind: "text", text: "I set type for a living." },
-    ]);
+  it("streams one well-formed turn", async () => {
+    const base = await serve([{
+      events: [
+        { type: "tool_start", id: "t1", name: "Read", args: { path: "character.md" } },
+        { type: "tool_end", id: "t1", isError: false, output: "# casper" },
+        { type: "text", block: "a", delta: "I set type for a living." },
+      ],
+    }]);
     const { status, headers, events, raw } = await postTurn(base, TURN_BODY);
 
     expect(status).toBe(200);
     expect(headers.get("content-type")).toContain("text/event-stream");
     expect(headers.get("cache-control")).toBe("no-store");
-    // The opening comment makes the accepted stream visible before runtime
+    // The opening comment makes the accepted stream visible before harness
     // work; event frames retain the canonical `data: <json>\n\n` shape.
     expect(raw.startsWith(": keepalive\n\ndata: ")).toBe(true);
 
     const types = events.map((event) => event.type);
-    expect(types[0]).toBe("start");
-    expect(types.filter((type) => type === "start")).toHaveLength(1);
-    expect(types).toContain("toolcall_start");
-    expect(types).toContain("toolcall_end");
-    expect(types).toContain("tool_execution_start");
-    expect(types).toContain("tool_execution_end");
-    expect(types).toContain("text_start");
-    expect(types).toContain("text_delta");
-    expect(types).toContain("text_end");
-    expect(types.at(-1)).toBe("done");
-    expect(types.filter((type) => type === "done" || type === "error")).toHaveLength(1);
-
-    const done = events.at(-1) as Extract<PiMessagesEvent, { type: "done" }>;
+    expect(types).toEqual([
+      "start",
+      "tool_execution_start",
+      "tool_execution_end",
+      "text_start",
+      "text_delta",
+      "text_end",
+      "done",
+    ]);
+    const done = events.at(-1) as Extract<TurnEvent, { type: "done" }>;
     expect(done.reason).toBe("stop");
-    expect(done.usage.totalTokens).toBeGreaterThan(0);
 
     const text = events
-      .filter((event): event is Extract<PiMessagesEvent, { type: "text_delta" }> =>
+      .filter((event): event is Extract<TurnEvent, { type: "text_delta" }> =>
         event.type === "text_delta")
       .map((event) => event.delta)
       .join("");
-    expect(text).toContain("set type");
+    expect(text).toBe("I set type for a living.");
   });
 
   it("never leaks reasoning onto the wire", async () => {
-    const base = await serve();
-    const { events } = await postTurn(base, TURN_BODY);
+    const base = await serve([{
+      events: [
+        { type: "thinking", block: "r", delta: "private reasoning" },
+        { type: "text", block: "a", delta: "Answer." },
+      ],
+    }]);
+    const { events, raw } = await postTurn(base, TURN_BODY);
     expect(events.some((event) => event.type.startsWith("thinking"))).toBe(false);
+    expect(raw).not.toContain("private reasoning");
   });
 
   it("ignores a caller-supplied turn id header", async () => {
@@ -1126,14 +737,19 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(response.headers.get("x-ghost-turn-id")).toBeNull();
   });
 
-  it("keeps separate conversations in separate sessions", async () => {
-    const base = await serve();
+  it("keeps separate conversations in separate directories", async () => {
+    const base = await serve(replies("one", "two"));
     await postTurn(base, TURN_BODY);
     await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
     const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: unknown[];
     };
     expect(sessions).toHaveLength(2);
+    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
+    expect(harness!.calls().map((call) => call.cwd)).toEqual([
+      conversationDir(sessionDir, "conv-1"),
+      conversationDir(sessionDir, "conv-2"),
+    ]);
   });
 
   it("fails before the stream for an unknown ghost", async () => {
@@ -1149,7 +765,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     });
   });
 
-  it("rejects a malformed pi-messages body with a client error", async () => {
+  it("rejects a malformed turn body with a client error", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/messages`, {
       method: "POST",
@@ -1160,105 +776,62 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
 
-  it("still terminates the stream when the provider fails", async () => {
-    const base = await serve([
-      {
-        kind: "error",
-        status: 400,
-        body: JSON.stringify({ error: { message: "boom", code: "invalid_request" } }),
-      },
-    ]);
+  it("still terminates the stream when the harness fails", async () => {
+    const base = await serve([{ exit: 1, stderr: "boom: the harness crashed" }]);
     const { status, events } = await postTurn(base, TURN_BODY);
     expect(status).toBe(200);
     expect(events[0]?.type).toBe("start");
-    expect(events.at(-1)?.type).toBe("error");
+    expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: expect.stringContaining("boom") });
+    expect(terminalCount(events)).toBe(1);
   });
 });
 
-describe("Ghost ask interaction", () => {
-  it("publishes a blocking ask and accepts the first validated answer", async () => {
-    const base = await serve([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Paper",
-            question: "Which paper stock?",
-            options: [
-              { label: "Cream", description: "Warm paper stock" },
-              { label: "White", description: "Bright paper stock" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Cream stock selected." },
-    ]);
-    const turn = postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: "conv-ask" },
-    });
-    const ask = await waitForAsk(base, "conv-ask");
-    expect(ask.questions[0]).toMatchObject({ id: "question-1", question: "Which paper stock?" });
+function terminalCount(events: readonly TurnEvent[]): number {
+  return events.filter((event) => event.type === "done" || event.type === "error").length;
+}
 
-    const queued = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "steer", text: "Keep the result understated." }),
-    });
+describe("/api/ghosts/:name/sessions/:id/queue", () => {
+  const queueUrl = (base: string, id: string) => `${base}/api/ghosts/casper/sessions/${id}/queue`;
+  const enqueue = (base: string, id: string, body: unknown) => fetch(queueUrl(base, id), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  it("queues a steer during a live turn and runs it as the next pass of the same stream", async () => {
+    const { base, release } = await serveHeld(replies("Kept it understated."));
+    const turn = postTurn(base, turnBody("conv-queue", "Set the type."));
+    await waitForLaunches(1);
+
+    const queued = await enqueue(base, "conv-queue", { mode: "steer", text: "Keep the result understated." });
     expect(queued.status).toBe(200);
-    expect(await queued.json()).toMatchObject({
+    expect(await queued.json()).toEqual({
       streaming: true,
-      steering: ["Keep the result understated."],
+      count: 1,
+      followUp: ["Keep the result understated."],
     });
-    const queueStatus = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`,
-    );
-    expect(await queueStatus.json()).toMatchObject({ count: 1 });
+    expect(await (await fetch(queueUrl(base, "conv-queue"))).json()).toMatchObject({ streaming: true, count: 1 });
 
-    const invalid = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        askId: ask.id,
-        kind: "submit",
-        results: [{ id: "question-1", selectedOptions: ["Cardboard"] }],
-      }),
-    });
-    expect(invalid.status).toBe(400);
-    expect(await invalid.json()).toMatchObject({ error: { code: "invalid_ask_answer" } });
+    for (const body of [{ mode: "later", text: "x" }, { mode: "followUp", text: "   " }, { mode: "steer" }]) {
+      const response = await enqueue(base, "conv-queue", body);
+      expect(response.status, JSON.stringify(body)).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    }
 
-    const accepted = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        askId: ask.id,
-        kind: "submit",
-        results: [{ id: "question-1", selectedOptions: ["Cream"] }],
-      }),
-    });
-    expect(accepted.status).toBe(200);
-    expect(await accepted.json()).toEqual({ accepted: true });
-
+    release();
     const completed = await turn;
-    expect(completed.events.at(-1)?.type).toBe("done");
-    const after = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`);
-    expect(await after.json()).toEqual({ ask: null });
+    const ownerIndex = completed.events.findIndex((event) => event.type === "owner_message");
+    expect(completed.events[ownerIndex]).toEqual({ type: "owner_message", text: "Keep the result understated." });
+    expect(completed.events.slice(ownerIndex).some((event) => event.type === "text_delta")).toBe(true);
+    expect(terminalCount(completed.events)).toBe(1);
+    expect(harness!.calls().map((call) => call.prompt)).toEqual(["Set the type.", "Keep the result understated."]);
 
-    const duplicate = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ askId: ask.id, kind: "chat" }),
-    });
-    expect(duplicate.status).toBe(409);
-
-    const tooLate = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/queue`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ mode: "followUp", text: "Too late" }),
-    });
+    expect(await (await fetch(queueUrl(base, "conv-queue"))).json())
+      .toEqual({ streaming: false, count: 0, followUp: [] });
+    const tooLate = await enqueue(base, "conv-queue", { mode: "followUp", text: "Too late" });
     expect(tooLate.status).toBe(409);
+    expect(await tooLate.json()).toMatchObject({ error: { code: "session_not_streaming" } });
+    expect((await fetch(queueUrl(base, "conv-queue"), { method: "DELETE" })).status).toBe(405);
   });
 });
 
@@ -1269,252 +842,69 @@ describe("GET /api/ghosts/:name/sessions", () => {
       .toEqual({ sessions: [] });
     await postTurn(base, TURN_BODY);
     const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{
-        id: string;
-        title: string | null;
-        createdAt: string;
-        updatedAt: string;
-        messageCount: number;
-      }>;
+      sessions: Array<Record<string, unknown>>;
     };
     expect(sessions).toHaveLength(1);
+    expect(Object.keys(sessions[0]!).sort()).toEqual([
+      "createdAt",
+      "harness",
+      "id",
+      "messageCount",
+      "pinned",
+      "preview",
+      "title",
+      "unread",
+      "updatedAt",
+    ]);
     expect(sessions[0]).toMatchObject({
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
+      id: "conv-1",
+      title: null,
+      preview: "Who are you?",
+      harness: "fake",
+      messageCount: 2,
+      pinned: false,
+      unread: true,
     });
-    expect(sessions[0]?.messageCount).toBeGreaterThan(0);
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect("title" in sessions[0]!).toBe(true);
   });
 
-  it("round-trips an unsafe Pi resume id without accepting its filename as an alias", async () => {
-    const base = await serve();
-    const conversationId = "folder/chat?draft=#one and two";
-    expect((await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: conversationId },
-    })).status).toBe(200);
-    expect((await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: conversationId },
-    })).status).toBe(200);
-
-    const firstHandle = await host!.open("casper", conversationId);
-    expect(await host!.open("casper", conversationId)).toBe(firstHandle);
-    const sessionFile = firstHandle.sessionFile;
-    await host!.close("casper", conversationId);
-    const reopened = await host!.open("casper", conversationId);
-    expect(reopened).not.toBe(firstHandle);
-    expect(reopened.sessionFile).toBe(sessionFile);
+  it("accepts a 128-character id and rejects any other shape before storage, on every route", async () => {
+    const base = await serve(replies("boundary"));
+    const boundary = "a".repeat(128);
+    expect((await postTurn(base, turnBody(boundary))).status).toBe(200);
     const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; conversationId: string; messageCount: number }>;
+      sessions: Array<{ id: string }>;
     };
-    expect(listing.sessions).toEqual([
-      expect.objectContaining({
-        id: piId(conversationId),
-        conversationId,
-        messageCount: 5,
-      }),
-    ]);
+    expect(listing.sessions.map((row) => row.id)).toEqual([boundary]);
+    expect((await fetch(`${base}/api/ghosts/casper/sessions/${boundary}/transcript`)).status).toBe(200);
 
-    const transcriptUrl = `${base}/api/ghosts/casper/sessions/`
-      + `${encodeURIComponent(piId(conversationId))}/transcript`;
-    const transcript = await fetch(transcriptUrl);
-    expect(transcript.status).toBe(200);
-    expect(await transcript.json()).toMatchObject({
-      id: piId(conversationId),
-      conversationId,
-      runtime: "pi",
-      total: 4,
-    });
-
-    const generatedStem = sessionFileNameFor(conversationId).slice(0, -".jsonl".length);
-    expect(generatedStem).not.toBe(conversationId);
-    expect((await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: generatedStem },
-    })).status).toBe(200);
-    const afterAlias = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; conversationId: string }>;
-    };
-    expect(afterAlias.sessions.map((row) => row.conversationId))
-      .toEqual(expect.arrayContaining([conversationId, generatedStem]));
-    expect(await host!.open("casper", generatedStem)).not.toBe(firstHandle);
-    expect((await (await fetch(transcriptUrl)).json() as { total: number }).total).toBe(4);
-  });
-
-  it("preserves boundary Unicode ids and rejects overflow without truncation", async () => {
-    const base = await serve();
-    const asciiBoundary = "a".repeat(200);
-    const astralBoundary = `${"b".repeat(199)}\u{1f47b}`;
-    for (const conversationId of [asciiBoundary, astralBoundary]) {
-      expect((await postTurn(base, {
-        ...TURN_BODY,
-        options: { sessionId: conversationId },
-      })).status).toBe(200);
-    }
-
-    const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; conversationId: string }>;
-    };
-    expect(listing.sessions.map((row) => row.conversationId)).toEqual(expect.arrayContaining([
-      asciiBoundary,
-      astralBoundary,
-    ]));
-    const transcript = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment(astralBoundary)}/transcript`,
-    );
-    expect(transcript.status).toBe(200);
-    expect(await transcript.json()).toMatchObject({
-      id: piId(astralBoundary),
-      conversationId: astralBoundary,
-    });
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment(astralBoundary)}/pin`,
-      {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pinned: true }),
-      },
-    )).status).toBe(200);
-
-    const overflow = "c".repeat(201);
-    const rejectedPost = await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: overflow },
-    });
-    expect(rejectedPost.status).toBe(400);
-    expect(JSON.parse(rejectedPost.raw)).toMatchObject({
-      error: { code: "invalid_conversation_id" },
-    });
-    for (const suffix of ["transcript", "pin"]) {
-      const response = await fetch(
-        `${base}/api/ghosts/casper/sessions/${piSegment(overflow)}/${suffix}`,
-        suffix === "pin"
-          ? {
-              method: "PUT",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ pinned: true }),
-            }
-          : {},
-      );
-      expect(response.status).toBe(400);
-      expect(await response.json()).toMatchObject({ error: { code: "invalid_conversation_id" } });
-    }
-  });
-
-  it("rejects lone surrogates before storage and omits malformed stored identities", async () => {
-    const base = await serve();
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
-    for (const [index, invalid] of ["\ud800", "\udc00"].entries()) {
-      const rejected = await postTurn(base, {
-        ...TURN_BODY,
-        options: { sessionId: invalid },
-      });
-      expect(rejected.status).toBe(400);
-      expect(JSON.parse(rejected.raw)).toMatchObject({
-        error: { code: "invalid_conversation_id" },
-      });
-
-      const seedId = `unsafe/identity-${index}`;
-      expect((await postTurn(base, {
-        ...TURN_BODY,
-        options: { sessionId: seedId },
-      })).status).toBe(200);
-      const handle = await host!.open("casper", seedId);
-      const sessionFile = handle.sessionFile!;
-      await host!.close("casper", seedId);
-      const original = readFileSync(sessionFile, "utf8");
-      expect(original).toContain(JSON.stringify(seedId));
-      writeFileSync(
-        sessionFile,
-        original.replace(JSON.stringify(seedId), JSON.stringify(invalid)),
-        "utf8",
-      );
-      expect(existsSync(join(sessionDir, sessionFileNameFor(seedId)))).toBe(true);
-
-      await expect(host!.readTranscript("casper", invalid)).rejects.toMatchObject({
-        code: "invalid_conversation_id",
-        status: 400,
-      });
-      await expect(host!.renameConversation("casper", invalid, "No alias"))
-        .rejects.toMatchObject({ code: "invalid_conversation_id", status: 400 });
+    for (const invalid of ["a".repeat(129), ".hidden", "folder/chat", "chat?draft", "\u{1f47b}", "\ud800"]) {
+      const rejected = await postTurn(base, turnBody(invalid));
+      expect(rejected.status, invalid).toBe(400);
+      expect(JSON.parse(rejected.raw)).toMatchObject({ error: { code: "invalid_conversation_id" } });
+      // A lone surrogate cannot even be percent-encoded into a path.
+      if (invalid === "\ud800") continue;
+      const segment = encodeURIComponent(invalid);
+      for (const [suffix, init] of [
+        ["/transcript", {}],
+        ["/pin", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned: true }) }],
+        ["/title", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ title: "x" }) }],
+        ["", { method: "DELETE" }],
+      ] as const) {
+        const response = await fetch(`${base}/api/ghosts/casper/sessions/${segment}${suffix}`, init);
+        expect(response.status, `${invalid}${suffix}`).toBe(400);
+        expect(await response.json()).toMatchObject({ error: { code: "invalid_conversation_id" } });
+      }
     }
-    const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ conversationId: string }>;
-    };
-    expect(listing.sessions).toEqual([]);
-  });
-
-  it("omits transplanted hash metadata and rejects every file-backed alias action", async () => {
-    const base = await serve();
-    const requested = "unsafe/requested identity";
-    const stored = "unsafe/stored identity";
-    expect((await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: requested },
-    })).status).toBe(200);
-    const handle = await host!.open("casper", requested);
-    const requestedPath = handle.sessionFile!;
-    await host!.close("casper", requested);
-    const original = readFileSync(requestedPath, "utf8");
-    expect(original).toContain(JSON.stringify(requested));
-    writeFileSync(
-      requestedPath,
-      original.replace(JSON.stringify(requested), JSON.stringify(stored)),
-      "utf8",
-    );
-
-    expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
-      .toEqual({ sessions: [] });
-    const actionRequests: Array<() => Promise<Response>> = [
-      () => fetch(`${base}/api/ghosts/casper/sessions/${piSegment(requested)}/transcript`),
-      () => fetch(`${base}/api/ghosts/casper/sessions/${piSegment(requested)}/title`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ title: "Must not relabel" }),
-      }),
-      () => fetch(`${base}/api/ghosts/casper/sessions/${piSegment(requested)}/branch`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "fork", entryId: "not-reached" }),
-      }),
-      () => fetch(`${base}/api/ghosts/casper/sessions/${piSegment(requested)}`, {
-        method: "DELETE",
-      }),
-    ];
-    for (const request of actionRequests) {
-      const response = await request();
-      expect(response.status).toBe(409);
-      expect(await response.json()).toMatchObject({ error: { code: "session_identity_mismatch" } });
-    }
-    expect(existsSync(requestedPath)).toBe(true);
-
-    expect((await postTurn(base, {
-      ...TURN_BODY,
-      options: { sessionId: stored },
-    })).status).toBe(200);
-    const listing = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; conversationId: string }>;
-    };
-    expect(listing.sessions).toEqual([
-      expect.objectContaining({ id: piId(stored), conversationId: stored }),
-    ]);
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment(stored)}/transcript`,
-    )).status).toBe(200);
-    expect((await fetch(`${base}/api/ghosts/casper/sessions/${piSegment(stored)}/title`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "Correct physical identity" }),
-    })).status).toBe(200);
+    expect(harness!.calls()).toHaveLength(1);
+    expect(existsSync(join(sessionDir, ".hidden"))).toBe(false);
   });
 });
 
 describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
   const setPin = (base: string, id: string, body: unknown) => fetch(
-    `${base}/api/ghosts/casper/sessions/${piSegment(id)}/pin`,
+    `${base}/api/ghosts/casper/sessions/${id}/pin`,
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -1534,21 +924,21 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
     await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
     expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
-      .toEqual([["pi:conv-2", false], ["pi:conv-1", false]]);
+      .toEqual([["conv-2", false], ["conv-1", false]]);
 
     const pinned = await setPin(base, "conv-1", { pinned: true });
     expect(pinned.status).toBe(200);
     expect(await pinned.json()).toEqual({ ok: true, pinned: true });
     expect(existsSync(join(temp!.root, "casper", "sessions", "pins.json"))).toBe(true);
     expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
-      .toEqual([["pi:conv-1", true], ["pi:conv-2", false]]);
+      .toEqual([["conv-1", true], ["conv-2", false]]);
 
     // Idempotent both ways.
     expect((await setPin(base, "conv-1", { pinned: true })).status).toBe(200);
     const unpinned = await setPin(base, "conv-1", { pinned: false });
     expect(await unpinned.json()).toEqual({ ok: true, pinned: false });
     expect((await listSessions(base)).map((session) => session.id))
-      .toEqual(["pi:conv-2", "pi:conv-1"]);
+      .toEqual(["conv-2", "conv-1"]);
   });
 
   it("rejects a non-boolean or missing pinned", async () => {
@@ -1569,7 +959,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
 
     const wrongMethod = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/pin`,
+      `${base}/api/ghosts/casper/sessions/conv-1/pin`,
     );
     expect(wrongMethod.status).toBe(405);
   });
@@ -1579,7 +969,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     await postTurn(base, TURN_BODY);
     expect((await setPin(base, "conv-1", { pinned: true })).status).toBe(200);
 
-    await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}`, {
+    await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(JSON.parse(readFileSync(join(temp!.root, "casper", "sessions", "pins.json"), "utf8")))
@@ -1589,7 +979,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
 
 describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
   const rename = (base: string, id: string, body: unknown) => fetch(
-    `${base}/api/ghosts/casper/sessions/${piSegment(id)}/title`,
+    `${base}/api/ghosts/casper/sessions/${id}/title`,
     {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -1601,7 +991,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
     await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: Array<{ id: string; title: string | null }>;
     }
-  ).sessions.find((session) => session.id === piId(id))?.title ?? null;
+  ).sessions.find((session) => session.id === id)?.title ?? null;
 
   it("names a conversation and trims it", async () => {
     const base = await serve();
@@ -1642,7 +1032,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/title", () => {
     expect(missing.status).toBe(404);
     expect(await missing.json()).toMatchObject({ error: { code: "not_found" } });
     expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/title`,
+      `${base}/api/ghosts/casper/sessions/conv-1/title`,
     )).status).toBe(405);
   });
 });
@@ -1670,9 +1060,9 @@ describe("PUT /api/ghosts/:name/name", () => {
     const { sessions } = await (await fetch(`${base}/api/ghosts/wisp/sessions`)).json() as {
       sessions: Array<{ id: string }>;
     };
-    expect(sessions.map((session) => session.id)).toEqual(["pi:conv-1"]);
+    expect(sessions.map((session) => session.id)).toEqual(["conv-1"]);
     expect((await fetch(
-      `${base}/api/ghosts/wisp/sessions/${piSegment("conv-1")}/transcript`,
+      `${base}/api/ghosts/wisp/sessions/conv-1/transcript`,
     )).status).toBe(200);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`)).status).toBe(404);
   });
@@ -1722,28 +1112,20 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
 
-    const deleted = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}`, {
+    const deleted = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
-    const body = await deleted.json() as {
-      ok: boolean;
-      trash: Array<{ artifact: string; source: string; trash: string; kind: string }>;
-    };
-    expect(body).toMatchObject({
-      ok: true,
-      trash: [{ artifact: "transcript", kind: "fallback" }],
-    });
-    expect(existsSync(body.trash[0]!.source)).toBe(false);
-    expect(existsSync(body.trash[0]!.trash)).toBe(true);
+    const body = await deleted.json() as { ok: boolean; trash: string };
+    expect(body.ok).toBe(true);
+    const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
+    // The whole conversation directory moves, its log with it.
+    expect(existsSync(conversationDir(sessionDir, "conv-1"))).toBe(false);
+    expect(existsSync(join(body.trash, LOG_FILENAME))).toBe(true);
     expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
       .toEqual({ sessions: [] });
-    expect((await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
-    )).status)
-      .toBe(404);
 
-    const missing = await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}`, {
+    const missing = await fetch(`${base}/api/ghosts/casper/sessions/conv-1`, {
       method: "DELETE",
     });
     expect(missing.status).toBe(404);
@@ -1791,28 +1173,9 @@ describe("DELETE /api/ghosts/:name", () => {
   });
 
   it("409s while any of the ghost's conversations is answering", async () => {
-    // A blocking `ask` holds the turn open, so "busy" is a state the test owns
-    // rather than a race it has to win.
-    const base = await serve([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Paper",
-            question: "Which paper stock?",
-            options: [
-              { label: "Cream", description: "Warm paper stock" },
-              { label: "White", description: "Bright paper stock" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Cream stock selected." },
-    ]);
-    const turn = postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-ask" } });
-    const ask = await waitForAsk(base, "conv-ask");
+    const { base, release } = await serveHeld();
+    const turn = postTurn(base, turnBody("conv-held"));
+    await waitForLaunches(1);
 
     const renameBusy = await fetch(`${base}/api/ghosts/casper/name`, {
       method: "PUT",
@@ -1824,14 +1187,13 @@ describe("DELETE /api/ghosts/:name", () => {
     const busy = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
     expect(busy.status).toBe(409);
     expect(await busy.json()).toMatchObject({ error: { code: "ghost_busy" } });
+    const sessionBusy = await fetch(`${base}/api/ghosts/casper/sessions/conv-held`, { method: "DELETE" });
+    expect(sessionBusy.status).toBe(409);
+    expect(await sessionBusy.json()).toMatchObject({ error: { code: "session_busy" } });
     expect(existsSync(join(temp!.root, "casper"))).toBe(true);
     expect(existsSync(join(temp!.root, "wisp"))).toBe(false);
 
-    await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-ask")}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ askId: ask.id, kind: "cancel" }),
-    });
+    release();
     await turn;
 
     const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
@@ -1841,257 +1203,70 @@ describe("DELETE /api/ghosts/:name", () => {
 
 describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
   it("returns the conversation's renderable messages", async () => {
-    const base = await serve([{ kind: "text", text: "I set type for a living." }]);
+    const base = await serve(replies("I set type for a living."));
     await postTurn(base, TURN_BODY);
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
-    );
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`);
     expect(response.status).toBe(200);
     const transcript = await response.json() as {
       id: string;
-      conversationId: string;
-      runtime: "pi";
       title: string | null;
+      harness: string | null;
       messages: Array<{ role: string; content: unknown }>;
+      total: number;
+      truncated: boolean;
     };
-    expect(transcript).toMatchObject({
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
-    });
-    expect(transcript.messages.length).toBeGreaterThanOrEqual(2);
-    expect(transcript.messages[0]?.role).toBe("user");
-    expect(transcript.messages.some((message) => message.role === "assistant")).toBe(true);
-  });
-
-  it.each(["rename", "delete"] as const)(
-    "finishes an admitted transcript read from the original home before %s and old-name reuse",
-    async (move) => {
-      const readerEntered = Promise.withResolvers<void>();
-      const releaseReader = Promise.withResolvers<void>();
-      let resolvedPath = "";
-      const base = await serve([{ kind: "text", text: "Original-home answer." }], {
-        conversationFileProbe: async (operation, path) => {
-          if (operation !== "transcript-read") return;
-          resolvedPath = path;
-          readerEntered.resolve();
-          await releaseReader.promise;
-        },
-      });
-      await postTurn(base, TURN_BODY);
-      const originalHome = join(temp!.root, "casper");
-      const originalTranscript = join(
-        ghostPaths(originalHome).sessionDir,
-        sessionFileNameFor("conv-1"),
-      );
-      const originalInode = statSync(originalHome, { bigint: true }).ino;
-
-      const reading = fetch(
-        `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
-      );
-      await readerEntered.promise;
-      expect(resolvedPath).toBe(originalTranscript);
-      const moving = move === "rename"
-        ? fetch(`${base}/api/ghosts/casper/name`, {
-            method: "PUT",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ name: "wisp" }),
-          })
-        : fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-      await waitForHomeMove();
-
-      releaseReader.resolve();
-      const readResponse = await reading;
-      expect(readResponse.status).toBe(200);
-      const originalResult = await readResponse.json() as {
-        messages: Array<{ content: unknown }>;
-      };
-      expect(JSON.stringify(originalResult.messages)).toContain("Original-home answer.");
-      const movedResponse = await moving;
-      expect(movedResponse.status).toBe(200);
-      const movedBody = await movedResponse.json() as { trash?: string };
-      const movedHome = move === "rename" ? join(temp!.root, "wisp") : movedBody.trash!;
-      expect(statSync(movedHome, { bigint: true }).ino).toBe(originalInode);
-      expect(existsSync(join(
-        ghostPaths(movedHome).sessionDir,
-        sessionFileNameFor("conv-1"),
-      ))).toBe(true);
-
-      const recreated = await fetch(`${base}/api/ghosts`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: "casper" }),
-      });
-      expect(recreated.status).toBe(201);
-      expect(statSync(originalHome, { bigint: true }).ino).not.toBe(originalInode);
-      expect((await fetch(
-        `${base}/api/ghosts/casper/sessions/${piSegment("conv-1")}/transcript`,
-      )).status).toBe(404);
-      if (move === "rename") {
-        const renamed = await fetch(
-          `${base}/api/ghosts/wisp/sessions/${piSegment("conv-1")}/transcript`,
-        );
-        expect(renamed.status).toBe(200);
-        expect(JSON.stringify(await renamed.json())).toContain("Original-home answer.");
-      }
-    },
-  );
-
-  it("404s an unknown conversation id", async () => {
-    const base = await serve();
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("nope")}/transcript`,
-    );
-    expect(response.status).toBe(404);
-    expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
-  });
-});
-
-describe("Ghost conversation tree routes", () => {
-  it("branches a user message off into a new conversation over HTTP", async () => {
-    const base = await serve([{ kind: "text", text: "Branch answer." }]);
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });
-    await postTurn(base, {
-      ...TURN_BODY,
-      context: { messages: [{ role: "user", content: "Original follow-up" }] },
-      options: { sessionId: "conv-tree" },
-    });
-    const original = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-tree")}/transcript`,
-    )).json() as { messages: Array<{ role: string; entryId: string }> };
-    const firstUser = original.messages.find((message) => message.role === "user")!;
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-tree")}/branch`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "fork", entryId: firstUser.entryId }),
-      },
-    );
-    expect(response.status).toBe(200);
-    const forked = await response.json() as {
-      id: string;
-      conversationId: string;
-      runtime: "pi";
-      sessionId: string;
-      title: string | null;
-      draft: string;
-      transcript: { id: string; messages: unknown[] };
-    };
-    expect(forked.draft).toBe("Who are you?");
-    expect(forked.transcript).toMatchObject({ id: forked.id, messages: [] });
-    expect(forked.conversationId).toBe(forked.sessionId);
-    expect(forked.sessionId).not.toBe("conv-tree");
-
-    // The source conversation is untouched.
-    const source = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-tree")}/transcript`,
-    )).json() as { messages: unknown[] };
-    expect(source.messages).toEqual(original.messages);
-
-    // And the new conversation is listed and resumable by its own id.
-    const listed = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
-      sessions: Array<{ id: string; title: string | null }>;
-    };
-    expect(listed.sessions.map((row) => row.id)).toContain(forked.id);
-    await postTurn(base, {
-      ...TURN_BODY,
-      context: { messages: [{ role: "user", content: "Alternative question" }] },
-      options: { sessionId: forked.sessionId },
-    });
-    const alternative = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent(forked.id)}/transcript`,
-    )).json() as { messages: unknown[] };
-    expect(JSON.stringify(alternative.messages)).toContain("Alternative question");
-    expect(JSON.stringify(alternative.messages)).not.toContain("Original follow-up");
-  });
-
-  it("rejects an unknown branch action, a non-user entry, and an unknown conversation", async () => {
-    const base = await serve([{ kind: "text", text: "Branch answer." }]);
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-tree" } });
-    const transcript = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-tree")}/transcript`,
-    )).json() as { messages: Array<{ role: string; entryId: string }> };
-    const assistant = transcript.messages.find((message) => message.role === "assistant")!;
-    const branch = async (body: unknown, sessionId = "conv-tree") => fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment(sessionId)}/branch`,
-      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
-    );
-
-    const navigate = await branch({ action: "navigate", entryId: assistant.entryId });
-    expect(navigate.status).toBe(400);
-    expect(await navigate.json()).toMatchObject({ error: { code: "invalid_request" } });
-
-    const nonUser = await branch({ action: "fork", entryId: assistant.entryId });
-    expect(nonUser.status).toBe(400);
-    expect(await nonUser.json()).toMatchObject({ error: { code: "invalid_branch" } });
-
-    const unknown = await branch({ action: "fork", entryId: assistant.entryId }, "nope");
-    expect(unknown.status).toBe(404);
-    expect(await unknown.json()).toMatchObject({ error: { code: "not_found" } });
-  });
-
-  it("streams a historical Ask re-answer and its resumed model continuation", async () => {
-    const base = await serve([
-      {
-        kind: "tool",
-        name: "ask",
-        args: {
-          questions: [{
-            header: "Paper",
-            question: "Which paper stock?",
-            options: [
-              { label: "Cream", description: "Warm paper stock" },
-              { label: "White", description: "Bright paper stock" },
-            ],
-            multiSelect: false,
-          }],
-        },
-      },
-      { kind: "text", text: "Stock selected." },
+    expect(transcript).toMatchObject({ id: "conv-1", title: null, harness: "fake", total: 2, truncated: false });
+    expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", [{ type: "text", text: "Who are you?" }]],
+      ["assistant", [{ type: "text", text: "I set type for a living." }]],
     ]);
-    const initial = postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-reanswer" } });
-    const firstAsk = await waitForAsk(base, "conv-reanswer");
-    await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-reanswer")}/ask`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        askId: firstAsk.id,
-        kind: "submit",
-        results: [{ id: "question-1", selectedOptions: ["Cream"] }],
-      }),
-    });
-    await initial;
-    const transcript = await (await fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-reanswer")}/transcript`,
-    )).json() as { messages: Array<{ content: unknown }> };
-    const askCall = transcript.messages
-      .flatMap((message) => Array.isArray(message.content) ? message.content : [])
-      .find((part) => (part as { name?: unknown }).name === "ask") as {
-        ghostAsk?: { resultEntryId?: string };
-      };
+  });
 
-    const reanswerResponse = fetch(
-      `${base}/api/ghosts/casper/sessions/${piSegment("conv-reanswer")}/reanswer`, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream" },
-      body: JSON.stringify({ entryId: askCall.ghostAsk?.resultEntryId }),
-      },
-    ).then(async (response) => ({ response, raw: await response.text() }));
-    const revised = await waitForAsk(base, "conv-reanswer");
-    await fetch(`${base}/api/ghosts/casper/sessions/${piSegment("conv-reanswer")}/ask`, {
+  it("pages with limit and offset and rejects a non-numeric one", async () => {
+    const base = await serve(replies("one", "two"));
+    await postTurn(base, turnBody("conv-1", "first"));
+    await postTurn(base, turnBody("conv-1", "second"));
+    const page = await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?limit=1&offset=2`)).json() as {
+      messages: Array<{ role: string; content: unknown }>;
+      total: number;
+      truncated: boolean;
+    };
+    expect(page).toMatchObject({ total: 4, truncated: true });
+    expect(page.messages).toEqual([expect.objectContaining({ role: "user", content: [{ type: "text", text: "second" }] })]);
+    for (const query of ["limit=many", "offset=later"]) {
+      const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?${query}`);
+      expect(response.status, query).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
+    }
+  });
+
+  it("reads the renamed home's conversation after a rename and nothing under a recreated old name", async () => {
+    const base = await serve(replies("Original-home answer."));
+    await postTurn(base, TURN_BODY);
+    expect((await fetch(`${base}/api/ghosts/casper/name`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "wisp" }),
+    })).status).toBe(200);
+    expect((await fetch(`${base}/api/ghosts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        askId: revised.id,
-        kind: "submit",
-        results: [{ id: "question-1", selectedOptions: ["White"] }],
-      }),
-    });
-    const completed = await reanswerResponse;
-    expect(completed.response.status).toBe(200);
-    const events = parseSseStream(completed.raw);
-    expect(events.some((event) => event.type === "branch_changed")).toBe(true);
-    expect(events.at(-1)?.type).toBe("done");
+      body: JSON.stringify({ name: "casper" }),
+    })).status).toBe(201);
+
+    const renamed = await fetch(`${base}/api/ghosts/wisp/sessions/conv-1/transcript`);
+    expect(renamed.status).toBe(200);
+    expect(JSON.stringify(await renamed.json())).toContain("Original-home answer.");
+    expect(await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`)).json())
+      .toMatchObject({ id: "conv-1", messages: [], total: 0 });
+  });
+
+  it("reads a conversation with no log yet as empty, and 404s an unknown ghost", async () => {
+    const base = await serve();
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: "nope", harness: null, messages: [], total: 0 });
+    expect((await fetch(`${base}/api/ghosts/nobody/sessions/nope/transcript`)).status).toBe(404);
   });
 });
 
@@ -2129,14 +1304,12 @@ describe("routing and transport", () => {
     }
   });
 
-  it("refuses to guess a runtime for an unqualified session action id", async () => {
+  it("reads a legacy pi: id as the bare conversation id", async () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
-    const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript`);
-    expect(response.status).toBe(400);
-    expect(await response.json()).toMatchObject({
-      error: { code: "invalid_conversation_id" },
-    });
+    const response = await fetch(`${base}/api/ghosts/casper/sessions/${encodeURIComponent("pi:conv-1")}/transcript`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ id: "conv-1", total: 2 });
   });
 
   it("decodes valid ghost names and conversation ids", async () => {
@@ -2144,15 +1317,9 @@ describe("routing and transport", () => {
     expect((await fetch(`${base}/api/ghosts/casp%65r/sessions`)).status).toBe(200);
 
     await postTurn(base, TURN_BODY);
-    const transcript = await fetch(
-      `${base}/api/ghosts/casp%65r/sessions/${piSegment("conv-1")}/transcript`,
-    );
+    const transcript = await fetch(`${base}/api/ghosts/casp%65r/sessions/conv%2D1/transcript`);
     expect(transcript.status).toBe(200);
-    expect(await transcript.json()).toMatchObject({
-      id: "pi:conv-1",
-      conversationId: "conv-1",
-      runtime: "pi",
-    });
+    expect(await transcript.json()).toMatchObject({ id: "conv-1", harness: "fake" });
   });
 
   it("allows a loopback browser origin and refuses a remote one", async () => {

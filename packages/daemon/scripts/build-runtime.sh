@@ -54,8 +54,6 @@ install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghos
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost"
 install -m755 "$package_root/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"
 
-bun "$package_root/scripts/stage-runtime-assets.ts" \
-  "$source_root" "$runtime_root" "$meta_root/ghostd.json"
 bun "$package_root/scripts/stage-runtime-licenses.ts" \
   "$source_root" "$runtime_root" "$meta_root/ghostd.json" "$meta_root/ghost.json" \
   "$meta_root/ghost-desktop.json"

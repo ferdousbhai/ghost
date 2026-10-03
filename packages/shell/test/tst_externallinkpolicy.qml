@@ -32,23 +32,6 @@ TestCase {
         compare(Policy.isModelUrl(data.url), data.allowed);
     }
 
-    function test_loginUrls_data() {
-        return [
-            { tag: "provider https", url: "https://auth.example.com/oauth?code=abc", allowed: true },
-            { tag: "provider http", url: "http://auth.example.com/oauth", allowed: true },
-            { tag: "mixed-case https", url: "HTTPS://AUTH.EXAMPLE/oauth", allowed: true },
-            { tag: "mailto", url: "mailto:support@example.com", allowed: false },
-            { tag: "file", url: "file:///tmp/callback", allowed: false },
-            { tag: "userinfo", url: "https://auth.example.com@attacker.test", allowed: false },
-            { tag: "scheme confusion", url: "https:\\attacker.test", allowed: false },
-            { tag: "no scheme", url: "auth.example.com/oauth", allowed: false }
-        ];
-    }
-
-    function test_loginUrls(data) {
-        compare(Policy.isLoginUrl(data.url), data.allowed);
-    }
-
     function test_localPaths_data() {
         return [
             { tag: "a directory", path: "/home/u/work/app", allowed: true },

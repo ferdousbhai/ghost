@@ -7,17 +7,11 @@ import { assertLoopback } from "./config.js";
 import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
 import type { RemoteServe } from "./remote-serve.js";
 import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
-import type { AuthType, LoginManager } from "./auth.js";
-import {
-  requireConversationIdentity,
-  type ConversationIdentity,
-} from "./conversation-identity.js";
+import { requireConversationId } from "./conversation-log.js";
 import type {
   McpCatalog,
   McpCatalogSnapshot,
-  McpConnectionTest,
 } from "./mcp-catalog.js";
-import type { ModelSelection } from "./model-selection.js";
 import {
   homeOperationsFor,
   type HomeOperationCoordinator,
@@ -36,14 +30,14 @@ import type { GhostHookCommandConfig, GhostHookStatus } from "@ghost/runtime/hoo
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,
-  parsePiMessagesRequest,
-  PiMessagesRequestError,
+  parseTurnRequest,
+  TurnRequestError,
   SSE_HEADERS,
   SSE_KEEPALIVE_COMMENT,
   SSE_KEEPALIVE_INTERVAL_MS,
   zeroUsage,
-  type PiMessagesEvent,
-} from "./pi-messages.js";
+  type TurnEvent,
+} from "./turn-events.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
 import type { UpdateAvailable } from "./update-check.js";
@@ -53,14 +47,6 @@ export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
   homeOperations?: HomeOperationCoordinator;
-  /**
-   * Provider login orchestration. Omit to leave the `/providers` and `/login`
-   * routes out entirely (they 404) — a server that only ever runs turns needs
-   * no login surface.
-   */
-  login?: LoginManager;
-  /** Chat-model selection. Omit to leave the `/model` route out (it 404s). */
-  models?: ModelSelection;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
   /** The last update check's answer, for `GET /api/status`; omitted or null means none known. */
@@ -212,8 +198,8 @@ function decodePathSegment(segment: string): string {
   }
 }
 
-function decodeConversationIdentity(segment: string): ConversationIdentity {
-  return requireConversationIdentity(decodePathSegment(segment));
+function decodeConversationId(segment: string): string {
+  return requireConversationId(decodePathSegment(segment));
 }
 
 function bearerToken(header: string | string[] | undefined): string {
@@ -252,17 +238,17 @@ async function readJsonBody(
     const buffer = chunk as Buffer;
     total += buffer.length;
     if (total > maxBytes) {
-      throw new PiMessagesRequestError("payload_too_large", "Request body is too large.");
+      throw new TurnRequestError("payload_too_large", "Request body is too large.");
     }
     chunks.push(buffer);
   }
   if (total === 0) {
-    throw new PiMessagesRequestError("invalid_request", "Request body is required.");
+    throw new TurnRequestError("invalid_request", "Request body is required.");
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new PiMessagesRequestError("invalid_request", "Request body must be JSON.");
+    throw new TurnRequestError("invalid_request", "Request body must be JSON.");
   }
 }
 
@@ -276,7 +262,7 @@ async function readJsonObjectBody(
 ): Promise<Record<string, unknown>> {
   const body = await readJsonBody(request, maxBytes);
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new PiMessagesRequestError("invalid_request", "Request body must be a JSON object.");
+    throw new TurnRequestError("invalid_request", "Request body must be a JSON object.");
   }
   return body as Record<string, unknown>;
 }
@@ -448,17 +434,14 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
-    const releaseLoginMove = await options.login?.reserveGhostMove(ghostName);
     let releaseHomeMove: (() => void) | undefined;
     try {
       releaseHomeMove = await homeOperations.reserveMove(ghostName);
       const { trash } = await options.host.deleteGhost(ghostName);
-      options.login?.forgetGhost(ghostName);
       logger.info("ghost deleted", { ghost: ghostName, trash });
       jsonResponse(response, 200, { ok: true, trash });
     } finally {
       releaseHomeMove?.();
-      releaseLoginMove?.();
     }
   };
 
@@ -561,22 +544,18 @@ export function createDaemonServer(options: ServerOptions): Server {
       await readJsonBody(request, maxBodyBytes);
     } catch (error) {
       // Greeting has no request fields; only a size violation is meaningful.
-      if (error instanceof PiMessagesRequestError && error.code === "payload_too_large") throw error;
+      if (error instanceof TurnRequestError && error.code === "payload_too_large") throw error;
     }
     jsonResponse(response, 200, await options.host.greeting(ghostName));
   };
 
   const handleDeleteSession = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     response: ServerResponse,
   ): Promise<void> => {
-    const { artifacts } = await options.host.deleteSession(
-      ghostName,
-      conversation.conversationId,
-      conversation.runtime,
-    );
-    jsonResponse(response, 200, { ok: true, trash: artifacts });
+    const { trash } = await options.host.deleteSession(ghostName, conversationId);
+    jsonResponse(response, 200, { ok: true, trash });
   };
 
   /**
@@ -585,7 +564,7 @@ export function createDaemonServer(options: ServerOptions): Server {
    */
   const handleSetSessionPin = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -595,24 +574,24 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
       return;
     }
-    await options.host.setPinned(ghostName, conversation.conversationId, pinned);
+    await options.host.setPinned(ghostName, conversationId, pinned);
     jsonResponse(response, 200, { ok: true, pinned });
   };
 
   const handleMarkSessionRead = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     await readJsonObjectBody(request, maxBodyBytes);
-    const readAt = await options.host.markRead(ghostName, conversation.conversationId);
+    const readAt = await options.host.markRead(ghostName, conversationId);
     jsonResponse(response, 200, { ok: true, readAt });
   };
 
   const handleRenameSession = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
@@ -638,54 +617,11 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     const stored = await options.host.renameConversation(
       ghostName,
-      conversation.conversationId,
+      conversationId,
       trimmed,
     );
     jsonResponse(response, 200, { ok: true, title: stored });
   };
-
-  const handleSessionCommands = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    response: ServerResponse,
-  ): Promise<void> => {
-    jsonResponse(response, 200, {
-      commands: await options.host.availableCommands(
-        ghostName,
-        conversation.conversationId,
-      ),
-    });
-  };
-
-  const handleSessionResources = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    response: ServerResponse,
-  ): Promise<void> => {
-    jsonResponse(
-      response,
-      200,
-      await options.host.admittedResources(
-        ghostName,
-        conversation.conversationId,
-      ),
-    );
-  };
-
-  const decorateMcpSnapshot = (
-    ghostName: string,
-    snapshot: McpCatalogSnapshot,
-    extra: Record<string, unknown> = {},
-  ): Record<string, unknown> => ({
-    ...snapshot,
-    servers: snapshot.servers.map((server) => ({
-      ...server,
-      connectionStatus: server.enabled
-        ? options.host.mcpConnectionStatus(ghostName, server.name)
-        : "disabled",
-    })),
-    ...extra,
-  });
 
   const mcpSnapshotLeased = async (
     ghostName: string,
@@ -694,7 +630,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     if (!options.mcp) {
       throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
     }
-    return decorateMcpSnapshot(ghostName, await options.mcp.listLeased(ghostName), extra);
+    return { ...(await options.mcp.listLeased(ghostName)), ...extra };
   };
 
   const mcpSnapshot = (
@@ -708,13 +644,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const mutateMcp = async (
     ghostName: string,
     mutation: () => Promise<McpCatalogSnapshot>,
-  ): Promise<Record<string, unknown>> => homeOperations.withLease(ghostName, async () => {
-    // Catalog mutations already return the freshly read durable view. Keep
-    // that write inside the MCP transition, then inspect connection state only
-    // after every live manager has finished reloading.
-    const snapshot = await options.host.withMcpReload(ghostName, mutation);
-    return decorateMcpSnapshot(ghostName, snapshot);
-  });
+  ): Promise<Record<string, unknown>> => homeOperations.withLease(ghostName, async () => ({ ...(await mutation()) }));
 
   const handleMcpCollection = async (
     ghostName: string,
@@ -808,45 +738,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, snapshot);
   };
 
-  const handleMcpAction = async (
-    ghostName: string,
-    serverName: string,
-    action: "test" | "reconnect",
-    method: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    const mcp = options.mcp;
-    if (!mcp) {
-      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
-      return;
-    }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const snapshot = await homeOperations.withLease(ghostName, async () => {
-      let result: McpConnectionTest | { name: string; status: string; ok: boolean };
-      if (action === "test") {
-        result = await mcp.testLeased(ghostName, serverName);
-      } else {
-        const exists = (await mcp.listLeased(ghostName)).servers.some(
-          (server) => server.name === serverName,
-        );
-        if (!exists) {
-          throw new GhostError(
-            "mcp_server_not_found",
-            `No MCP server named ${JSON.stringify(serverName)}.`,
-            404,
-          );
-        }
-        const status = await options.host.reconnectMcpLeased(ghostName, serverName);
-        result = { name: serverName, status, ok: status === "connected" };
-      }
-      return mcpSnapshotLeased(ghostName, { result });
-    });
-    jsonResponse(response, 200, snapshot);
-  };
-
   /**
    * Rename one ghost. The name is the home directory's name, so this moves the
    * whole home and every other route's `:name` changes with it — which is why
@@ -863,8 +754,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
       return;
     }
-    // Keep the route's contract ordering: validate the destination before the
-    // login coordinator resolves the source home.
     assertValidGhostName(name);
     if (name === ghostName) {
       const renamed = await options.host.renameGhost(ghostName, name);
@@ -872,23 +761,20 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, { ok: true, name: renamed.name });
       return;
     }
-    const releaseLoginMove = await options.login?.reserveGhostMove(ghostName);
     let releaseHomeMove: (() => void) | undefined;
     try {
       releaseHomeMove = await homeOperations.reserveMove(ghostName);
       const renamed = await options.host.renameGhost(ghostName, name);
-      options.login?.renameGhost(renamed);
       logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
       jsonResponse(response, 200, { ok: true, name: renamed.name });
     } finally {
       releaseHomeMove?.();
-      releaseLoginMove?.();
     }
   };
 
   const handleTranscript = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     url: URL,
     response: ServerResponse,
   ): Promise<void> => {
@@ -913,153 +799,15 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     jsonResponse(response, 200, await options.host.readTranscript(
       ghostName,
-      conversation.conversationId,
+      conversationId,
       query,
     ));
-  };
-
-  const handleListProviders = async (
-    ghostName: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    jsonResponse(response, 200, { providers: await options.login.listProviders(ghostName) });
-  };
-
-  const handleListModels = async (
-    ghostName: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    jsonResponse(response, 200, { models: await options.login.listAvailableModels(ghostName) });
-  };
-
-  const handleStartLogin = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { providerId, authType } = body as {
-      providerId?: unknown;
-      authType?: unknown;
-    };
-    if (typeof providerId !== "string") {
-      errorResponse(response, 400, "invalid_request", "\"providerId\" must be a string.");
-      return;
-    }
-    if (authType !== "oauth" && authType !== "api_key") {
-      errorResponse(response, 400, "invalid_request", "\"authType\" must be \"oauth\" or \"api_key\".");
-      return;
-    }
-    const view = await options.login.start(ghostName, providerId, authType as AuthType);
-    // The status line stays 200; a failed login is a state the client polls,
-    // not an HTTP error.
-    jsonResponse(response, 201, view);
-  };
-
-  const handleLogout = async (
-    ghostName: string,
-    providerId: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    await options.login.logout(ghostName, providerId);
-    jsonResponse(response, 200, { ok: true, providerId });
-  };
-
-  const handleLoginStatus = (
-    ghostName: string,
-    loginId: string,
-    response: ServerResponse,
-  ): void => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    jsonResponse(response, 200, options.login.view(ghostName, loginId));
-  };
-
-  const handleLoginInput = async (
-    ghostName: string,
-    loginId: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.login) {
-      errorResponse(response, 404, "not_found", "Login is not enabled on this daemon.");
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const value = (body as { value?: unknown }).value;
-    if (typeof value !== "string") {
-      errorResponse(response, 400, "invalid_request", "\"value\" must be a string.");
-      return;
-    }
-    jsonResponse(response, 200, options.login.submitInput(ghostName, loginId, value));
-  };
-
-  const handleCurrentModel = async (
-    ghostName: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.models) {
-      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
-      return;
-    }
-    jsonResponse(response, 200, await options.models.getCurrent(ghostName));
-  };
-
-  const handleSetModel = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.models) {
-      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { provider, id } = body as { provider?: unknown; id?: unknown };
-    if (typeof provider !== "string" || provider === "") {
-      errorResponse(response, 400, "invalid_request", "\"provider\" must be a non-empty string.");
-      return;
-    }
-    if (typeof id !== "string" || id === "") {
-      errorResponse(response, 400, "invalid_request", "\"id\" must be a non-empty string.");
-      return;
-    }
-    jsonResponse(response, 200, await options.models.setChatModel(ghostName, provider, id));
-  };
-
-  const handleClearModel = async (
-    ghostName: string,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (!options.models) {
-      errorResponse(response, 404, "not_found", "Model selection is not enabled on this daemon.");
-      return;
-    }
-    jsonResponse(response, 200, await options.models.clearChatModel(ghostName));
   };
 
   const streamSessionEvents = async (
     request: IncomingMessage,
     response: ServerResponse,
-    run: (emit: (event: PiMessagesEvent) => void, signal: AbortSignal) => Promise<void>,
+    run: (emit: (event: TurnEvent) => void, signal: AbortSignal) => Promise<void>,
   ): Promise<void> => {
     const connection = abortOnClose(request, response);
     response.writeHead(200, SSE_HEADERS);
@@ -1073,7 +821,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     liveStreams.add(response);
 
     let terminal = false;
-    const emit = (event: PiMessagesEvent): void => {
+    const emit = (event: TurnEvent): void => {
       if (response.writableEnded || terminal) return;
       if (event.type === "done" || event.type === "error") terminal = true;
       response.write(encodeSseEvent(event));
@@ -1119,7 +867,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     // Fail before any byte of the stream, so the client sees a real status
     // code rather than an SSE error event it has to unwrap.
     const ghost = options.registry.get(ghostName);
-    const parsed = parsePiMessagesRequest(await readJsonBody(request, maxBodyBytes));
+    const parsed = parseTurnRequest(await readJsonBody(request, maxBodyBytes));
     const admission = await options.host.admitTurn(ghost.name, {
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
@@ -1138,103 +886,10 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
   };
 
-  const handleBranch = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { action, entryId } = body as { action?: unknown; entryId?: unknown };
-    if (typeof entryId !== "string" || entryId === "") {
-      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
-      return;
-    }
-    if (action === "fork") {
-      jsonResponse(
-        response,
-        200,
-        await options.host.forkConversation(
-          ghostName,
-          conversation.conversationId,
-          entryId,
-        ),
-      );
-      return;
-    }
-    errorResponse(response, 400, "invalid_request", '"action" must be "fork".');
-  };
-
-  const handleAskReanswer = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { entryId } = body as { entryId?: unknown };
-    if (typeof entryId !== "string" || entryId === "") {
-      errorResponse(response, 400, "invalid_request", '"entryId" must be a non-empty string.');
-      return;
-    }
-    options.registry.get(ghostName);
-    await streamSessionEvents(request, response, (emit, signal) =>
-      options.host.runAskReanswer(ghostName, {
-        sessionId: conversation.conversationId,
-        entryId,
-        emit,
-        signal,
-        includeThinking: options.includeThinking,
-      }));
-  };
-
-  const handleAsk = async (
-    ghostName: string,
-    conversation: ConversationIdentity,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    if (method === "GET") {
-      jsonResponse(response, 200, { ask: options.host.pendingAsk(
-        ghostName,
-        conversation.conversationId,
-      ) });
-      return;
-    }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { askId, ...answer } = body;
-    if (typeof askId !== "string" || askId === "") {
-      errorResponse(response, 400, "invalid_request", '"askId" must be a non-empty string.');
-      return;
-    }
-    options.host.answerAsk(
-      ghostName,
-      conversation.conversationId,
-      askId,
-      answer,
-    );
-    jsonResponse(response, 200, { accepted: true });
-  };
-
   /** `ghost mcp serve`'s backend: list this conversation's tools, or run one. */
   const handleSessionTools = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     toolName: string | undefined,
     method: string,
     request: IncomingMessage,
@@ -1245,7 +900,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
         return;
       }
-      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversation.conversationId) });
+      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversationId) });
       return;
     }
     if (method !== "POST") {
@@ -1257,7 +912,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     try {
       jsonResponse(response, 200, await options.host.callSessionTool(
         ghostName,
-        conversation.conversationId,
+        conversationId,
         toolName,
         body.arguments ?? {},
         connection.signal,
@@ -1270,7 +925,7 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   const handleQueue = async (
     ghostName: string,
-    conversation: ConversationIdentity,
+    conversationId: string,
     method: string,
     request: IncomingMessage,
     response: ServerResponse,
@@ -1278,7 +933,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     if (method === "GET") {
       jsonResponse(response, 200, options.host.queuedMessages(
         ghostName,
-        conversation.conversationId,
+        conversationId,
       ));
       return;
     }
@@ -1301,7 +956,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       200,
       await options.host.queueMessage(
         ghostName,
-        conversation.conversationId,
+        conversationId,
         mode,
         text.trim(),
       ),
@@ -1575,7 +1230,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleDeleteSession(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             response,
           );
         }
@@ -1586,7 +1241,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleSetSessionPin(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             request,
             response,
           );
@@ -1598,7 +1253,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleMarkSessionRead(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             request,
             response,
           );
@@ -1610,39 +1265,8 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleRenameSession(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "commands") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleSessionCommands(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "resources") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          if (admission.identity?.role === "guest") {
-            errorResponse(
-              response,
-              403,
-              "owner_only",
-              "Session resource paths are visible only to the owner.",
-            );
-            return;
-          }
-          return await handleSessionResources(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
             response,
           );
         }
@@ -1653,17 +1277,8 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleTranscript(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             url,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "ask") {
-          return await handleAsk(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
             response,
           );
         }
@@ -1676,7 +1291,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           }
           return await handleSessionTools(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             segments[6],
             method,
             request,
@@ -1686,25 +1301,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "queue") {
           return await handleQueue(
             ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "branch") {
-          return await handleBranch(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "reanswer") {
-          return await handleAskReanswer(
-            ghostName,
-            decodeConversationIdentity(segments[4] ?? ""),
+            decodeConversationId(segments[4] ?? ""),
             method,
             request,
             response,
@@ -1731,77 +1328,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             response,
           );
         }
-        if (
-          segments.length === 6
-          && segments[3] === "mcp"
-          && (segments[5] === "test" || segments[5] === "reconnect")
-        ) {
-          return await handleMcpAction(
-            ghostName,
-            decodePathSegment(segments[4] ?? ""),
-            segments[5],
-            method,
-            response,
-          );
-        }
-        if (segments.length === 4 && segments[3] === "model") {
-          if (method === "GET") return await handleCurrentModel(ghostName, response);
-          if (method === "PUT") return await handleSetModel(ghostName, request, response);
-          if (method === "DELETE") return await handleClearModel(ghostName, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-          return;
-        }
-        if (segments.length === 4 && segments[3] === "models") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleListModels(ghostName, response);
-        }
-        if (segments.length === 4 && segments[3] === "providers") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleListProviders(ghostName, response);
-        }
-        if (segments.length === 5 && segments[3] === "providers") {
-          if (method !== "DELETE") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleLogout(
-            ghostName,
-            decodePathSegment(segments[4] ?? ""),
-            response,
-          );
-        }
-        if (segments.length === 4 && segments[3] === "login") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleStartLogin(ghostName, request, response);
-        }
-        if (segments.length === 5 && segments[3] === "login") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return handleLoginStatus(ghostName, decodePathSegment(segments[4] ?? ""), response);
-        }
-        if (segments.length === 6 && segments[3] === "login" && segments[5] === "input") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleLoginInput(
-            ghostName,
-            decodePathSegment(segments[4] ?? ""),
-            request,
-            response,
-          );
-        }
         errorResponse(response, 404, "not_found", "Not found.");
       } catch (error) {
         if (response.headersSent) {
@@ -1816,7 +1342,7 @@ export function createDaemonServer(options: ServerOptions): Server {
           errorResponse(response, error.status, error.code, error.message);
           return;
         }
-        if (error instanceof PiMessagesRequestError) {
+        if (error instanceof TurnRequestError) {
           if (error.code === "payload_too_large") {
             errorResponse(response, 413, error.code, error.message);
             // Answer and hang up rather than reading the rest of a body we

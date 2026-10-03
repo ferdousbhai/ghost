@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { PiMessagesEvent } from "../src/pi-messages.js";
+import type { TurnEvent } from "../src/turn-events.js";
 import { startTestDaemon, type TestDaemon } from "./helpers/fixtures.js";
 
 const CLI = fileURLToPath(new URL("../src/cli/main.ts", import.meta.url));
@@ -21,18 +21,11 @@ afterEach(async () => {
   client = undefined;
   await daemon.listening.close();
   await daemon.host.disposeAll();
-  await daemon.provider.close();
+  daemon.harness.cleanup();
   daemon.temp.cleanup();
 });
 
-const QUESTION = {
-  header: "Deploy",
-  question: "Ship it now?",
-  options: [{ label: "Yes", description: "Deploy" }, { label: "No", description: "Wait" }],
-  multiSelect: false,
-};
-
-/** The environment `ghost delegate` hands a harness, and the harness its MCP servers. */
+/** The environment a harness runs `ghost mcp serve` with. */
 function harnessEnv(session = "conv-1"): Record<string, string> {
   return {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
@@ -43,7 +36,7 @@ function harnessEnv(session = "conv-1"): Record<string, string> {
   };
 }
 
-/** A harness's view: `ghost mcp serve` spawned over stdio, as a delegated run would. */
+/** A harness's view: `ghost mcp serve` spawned over stdio. */
 async function connect(session?: string): Promise<Client> {
   client = new Client({ name: "harness", version: "1" });
   await client.connect(new StdioClientTransport({ command: process.execPath, args: [CLI, "mcp", "serve"], env: harnessEnv(session) }));
@@ -52,9 +45,9 @@ async function connect(session?: string): Promise<Client> {
 
 let liveTurn: { end: () => Promise<void> } | undefined;
 
-/** Hold an owner `!` turn open, as the ghost's shell running `ghost delegate` does. */
-async function startLiveTurn(sessionId = "conv-1"): Promise<PiMessagesEvent[]> {
-  const events: PiMessagesEvent[] = [];
+/** Hold an owner `!` turn open in a conversation. */
+async function startLiveTurn(sessionId = "conv-1"): Promise<TurnEvent[]> {
+  const events: TurnEvent[] = [];
   const controller = new AbortController();
   const turn = daemon.host.runTurn("casper", {
     sessionId,
@@ -76,30 +69,34 @@ async function until<T>(read: () => T | null): Promise<T> {
   throw new Error("timed out");
 }
 
+/** Replace one of the ghost's tools in the host's cache, after it has been loaded once. */
+async function replaceTool(name: string, execute: (...args: never[]) => Promise<unknown>): Promise<void> {
+  await daemon.host.sessionTools("casper", "conv-1");
+  const cache = (daemon.host as unknown as { tools: Map<string, Promise<{ tools: Map<string, Record<string, unknown>> }>> }).tools;
+  const { tools } = await cache.values().next().value!;
+  tools.set(name, { ...tools.get(name)!, execute });
+}
+
 describe("ghost mcp serve", () => {
-  it("lists the conversation's own tools", async () => {
+  it("lists the ghost's browser and desktop tools, and nothing it no longer serves", async () => {
     const { tools } = await (await connect()).listTools();
-    expect(tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["ask", "ghost_browser", "desktop_look", "desktop_act"]));
-    expect(tools.find((tool) => tool.name === "ask")?.inputSchema).toMatchObject({ type: "object" });
+    const names = tools.map((tool) => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["ghost_browser", "desktop_look", "desktop_act"]));
+    expect(names).not.toContain("ask");
+    expect(tools.find((tool) => tool.name === "ghost_browser")?.inputSchema).toMatchObject({ type: "object" });
   });
 
-  it("asks the owner in the launching conversation and returns the answer", async () => {
-    await startLiveTurn();
-    const harness = await connect();
-    const call = harness.callTool({ name: "ask", arguments: { questions: [QUESTION] } });
-    const pending = await until(() => daemon.host.pendingAsk("casper", "conv-1"));
-    expect(pending.questions[0]?.question).toBe("Ship it now?");
-    daemon.host.answerAsk("casper", "conv-1", pending.id, {
-      kind: "submit",
-      results: [{ id: pending.questions[0]?.id, selectedOptions: ["Yes"] }],
+  it("stops when the harness ends stdin, aborting a call still in flight", async () => {
+    let aborted = false;
+    await replaceTool("ghost_browser", async (_id: never, _params: never, signal: never) => {
+      const abort = signal as AbortSignal | undefined;
+      await new Promise<void>((resolve) => {
+        if (abort?.aborted) resolve();
+        abort?.addEventListener("abort", () => resolve(), { once: true });
+      });
+      aborted = true;
+      return { content: [{ type: "text", text: "aborted" }] };
     });
-    const result = await call;
-    expect(result.isError).toBe(false);
-    expect(JSON.stringify(result.content)).toContain("Yes");
-  });
-
-  it("stops when the harness ends stdin, withdrawing a question still in flight", async () => {
-    await startLiveTurn();
     // A killed harness leaves both pipes closed, with no SIGTERM to the server.
     const child = spawn(process.execPath, [CLI, "mcp", "serve"], { env: harnessEnv(), stdio: ["pipe", "pipe", "pipe"] });
     const exited = new Promise<number | null>((resolve) => child.on("exit", (code) => resolve(code)));
@@ -109,61 +106,48 @@ describe("ghost mcp serve", () => {
     send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "harness", version: "1" } } });
     await until(() => (stdout.includes('"id":1') ? true : null));
     send({ method: "notifications/initialized" });
-    send({ id: 2, method: "tools/call", params: { name: "ask", arguments: { questions: [QUESTION] } } });
-    await until(() => daemon.host.pendingAsk("casper", "conv-1"));
+    send({ id: 2, method: "tools/call", params: { name: "ghost_browser", arguments: { action: "tabs" } } });
+    await new Promise((resolve) => setTimeout(resolve, 200));
     child.stdin.end();
     child.stdout.destroy();
     expect(await exited).toBe(0);
-    await until(() => (daemon.host.pendingAsk("casper", "conv-1") === null ? true : null));
+    await until(() => (aborted ? true : null));
   });
 
   it("serves a new conversation whose first `!` command is still running", async () => {
-    // pi writes the conversation only after its first assistant message, so
-    // it is not listed yet; the id the daemon handed the shell still binds.
+    // A conversation with no message yet is not listed; the id the daemon
+    // handed the shell still binds.
     await startLiveTurn("fresh-1");
-    expect((await daemon.host.listSessions("casper")).some((session) => session.id.includes("fresh-1"))).toBe(false);
-    const { tools } = await (await connect("pi:fresh-1")).listTools();
-    expect(tools.map((tool) => tool.name)).toContain("ask");
+    expect((await daemon.host.listSessions("casper")).some((session) => session.id === "fresh-1")).toBe(false);
+    const { tools } = await (await connect("fresh-1")).listTools();
+    expect(tools.map((tool) => tool.name)).toContain("ghost_browser");
   });
 
-  it("fails an ask at once when no turn is live to show it", async () => {
-    const result = await (await connect()).callTool({ name: "ask", arguments: { questions: [QUESTION] } });
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("No turn is live in this conversation");
-    expect(daemon.host.pendingAsk("casper", "conv-1")).toBeNull();
-  });
-
-  it("returns a tool's own failure, and a schema error, as tool errors", async () => {
+  it("returns a tool's own failure as a tool error", async () => {
     const harness = await connect();
     const browser = await harness.callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
     expect(browser.isError).toBe(true);
-    // No relay is paired here: the browser tool's own refusal, not a schema error.
+    // No relay is paired here: the browser tool's own refusal.
     expect(JSON.stringify(browser.content)).toMatch(/relay/iu);
     const direct = await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
     expect(browser.content).toEqual(direct.content);
-
-    const invalid = await harness.callTool({ name: "ask", arguments: { questions: "no" } });
-    expect(invalid.isError).toBe(true);
   });
+
   it("names each serve process as its own caller, so harnesses take turns on the desktop", async () => {
     const callers: Array<string | undefined> = [];
-    const hosted = (daemon.host as unknown as { sessions: Map<string, { ghostTools: Map<string, unknown> }> })
-      .sessions.values().next().value!;
-    const browser = hosted.ghostTools.get("ghost_browser") as Record<string, unknown>;
-    hosted.ghostTools.set("ghost_browser", {
-      ...browser,
-      execute: async (_id: string, _params: unknown, _signal: unknown, ctx: { caller?: string }) => {
-        callers.push(ctx.caller);
-        return { content: [{ type: "text", text: "ok" }] };
-      },
+    await replaceTool("ghost_browser", async (_id: never, _params: never, _signal: never, ctx: never) => {
+      callers.push((ctx as { caller?: string }).caller);
+      return { content: [{ type: "text", text: "ok" }] };
     });
     await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
     await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
     await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
+    await daemon.host.callSessionTool("casper", null, "ghost_browser", { action: "tabs" });
     expect(callers[0]).toMatch(/^harness [0-9a-f]{8}$/u);
     expect(callers[1]).toMatch(/^harness [0-9a-f]{8}$/u);
     expect(callers[1]).not.toBe(callers[0]);
-    expect(callers[2]).toBe("a delegated run");
+    expect(callers[2]).toBe("conversation conv-1");
+    expect(callers[3]).toBe("a delegated run");
   });
 });
 
@@ -176,38 +160,19 @@ describe("desktop tools over ghost mcp serve", () => {
 });
 
 describe("SessionHost.callSessionTool", () => {
-  it("shows a delegated call as a tool card in the live turn stream", async () => {
-    const events: PiMessagesEvent[] = [];
-    const stream = (event: PiMessagesEvent) => events.push(event);
-    // Stand in for an owner turn whose Bash call is running `ghost delegate`.
-    const hosted = (daemon.host as unknown as { sessions: Map<string, { streamEmit?: typeof stream }> })
-      .sessions.values().next().value!;
-    hosted.streamEmit = stream;
-    await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
-    expect(events.map((event) => event.type)).toEqual(["tool_execution_start", "tool_execution_end"]);
-    expect(events[0]).toMatchObject({ toolName: "ghost_browser", intent: "Called by a delegated run" });
-    expect(events[1]).toMatchObject({ toolName: "ghost_browser", isError: true });
-  });
-
-  it("streams a delegated call into an owner `!` command's turn", async () => {
-    const events: PiMessagesEvent[] = [];
-    const turn = daemon.host.runTurn("casper", { sessionId: "conv-1", prompt: "!sleep 1", emit: (event) => events.push(event) });
-    await until(() => events.some((event) => event.type === "tool_execution_start") ? true : null);
-    await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
-    await turn;
-    expect(events.filter((event) => event.type === "tool_execution_start").map((event) => (event as { toolName: string }).toolName))
-      .toEqual(["bash", "ghost_browser"]);
-  });
-
-  it("gives an owner `!` command the conversation's identity, as the model's bash has", async () => {
-    const events: PiMessagesEvent[] = [];
+  it("gives an owner `!` command the conversation's identity, as the harness's shell has", async () => {
+    const events: TurnEvent[] = [];
     await daemon.host.runTurn("casper", {
       sessionId: "conv-1",
       prompt: "!printf '%s|%s' \"$GHOST\" \"$GHOST_SESSION\"",
       emit: (event) => events.push(event),
     });
-    const text = events.flatMap((event) => (event.type === "text_end" ? [event.content] : [])).join("");
-    expect(text).toContain("casper|pi:conv-1");
+    expect(events).toContainEqual(expect.objectContaining({
+      type: "tool_execution_end",
+      toolName: "bash",
+      isError: false,
+      summary: "casper|conv-1",
+    }));
   });
 
   it("refuses a tool the ghost does not have", async () => {

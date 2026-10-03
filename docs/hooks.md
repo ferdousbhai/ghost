@@ -1,17 +1,15 @@
 # Ghost hooks
 
-Ghost owns an awaited lifecycle boundary above its principal conversation
-harness, pi. A `pi`, `codex`, or `claude -p` child the ghost runs from Bash
-keeps its own native hook behavior; Ghost does not translate, duplicate, or
-await those hooks as principal events.
+Ghost owns an awaited lifecycle boundary around each harness pass of a
+conversation turn. The harness carrying the turn (Claude Code, Codex, …), and
+any harness the ghost runs from Bash, keeps its own native hook behavior;
+Ghost does not translate, duplicate, or await those hooks.
 
-Ghost supports two events. `before_prompt` runs after the user submits a prompt
-but before the model request. It can add advisory context to that request without
-blocking or creating another model turn. `session_stop` runs after an assistant
-pass and before Ghost emits the turn's terminal `done` frame. It can accept the
-pass or return model-visible context for a hidden continuation. The stop boundary
-is awaited by Ghost rather than inferred from notification-only
-`agent_end` events.
+Ghost supports two events. `before_prompt` runs after the owner submits a prompt
+and before the harness is launched with it. It can add advisory context to that
+prompt without blocking or creating another turn. `session_stop` runs after a
+harness pass ends and before Ghost emits the turn's terminal `done` frame. It
+can accept the pass or return context for a continuation pass.
 
 ## Configuration
 
@@ -66,7 +64,7 @@ accepted only when empty, so an older `hooks.json` still parses.
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
 awaited command hooks. They run for every principal conversation, above the
-model harness, and commands run with the daemon user's permissions. It is therefore
+harness, and commands run with the daemon user's permissions. It is therefore
 a trusted machine configuration
 surface, not portable ghost data.
 
@@ -84,29 +82,29 @@ command/error payload.
 
 ## Host storage metadata
 
-ghostd always sends `ghost_home` and, when the session has them, its native
-transcript paths. A host with no filesystem ghost home (hosted SummonGhost)
+ghostd always sends `ghost_home` and the conversation log's path. A host with
+no filesystem ghost home (hosted SummonGhost)
 omits those fields and sends `storage: { kind: "backend", ghost_id, session_id }`
 instead; a command must not treat those identifiers as local paths.
 
 ## `before_prompt` protocol
 
-A command receives the user prompt, session metadata, runtime, ghost name,
-explicit ghost-home storage root, and operational working directory:
+A command receives the owner prompt, conversation metadata, the harness that
+carried the conversation last (absent before its first turn), ghost name,
+ghost-home storage root, and the conversation directory:
 
 ```json
 {
   "type": "before_prompt",
   "prompt": "Continue.",
   "turn_id": 4,
-  "session_id": "...",
-  "session_file": "...",
+  "session_id": "conversation-a",
+  "session_file": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
-  "cwd": "/home/me/project",
-  "runtime": "pi",
+  "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
   "conversation_id": "conversation-a",
-  "conversation_runtime": "pi"
+  "harness": "claude"
 }
 ```
 
@@ -119,7 +117,8 @@ same user-initiated model request, return:
 
 `before_prompt` cannot block and does not accept continuation decisions. Errors,
 timeouts, and malformed output fail open. Context is hidden from the chat UI: it
-is a non-displayed custom context message in the pi session.
+is appended to the prompt the harness receives, inside `<hook-context>`, and is
+not written to the conversation log.
 
 ## `session_stop` protocol
 
@@ -140,29 +139,32 @@ contains the same message directly:
     "role": "assistant",
     "content": [{ "type": "text", "text": "The answer." }]
   },
-  "session_id": "...",
-  "session_file": "...",
-  "transcript_path": "...",
+  "session_id": "conversation-a",
+  "session_file": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
+  "transcript_path": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
   "stop_hook_active": false,
   "ghost_name": "casper",
   "ghost_home": "/home/me/ghosts/casper",
-  "cwd": "/home/me/project",
-  "runtime": "pi",
+  "cwd": "/home/me/ghosts/casper/sessions/conversation-a",
   "conversation_id": "conversation-a",
-  "conversation_runtime": "pi"
+  "harness": "claude"
 }
 ```
 
-`runtime` is `pi`. `messages` exposes only the current
-assistant pass; conversation history remains owned by the runtime.
+`harness` is the harness that answered the pass. `messages` exposes only that
+pass, its content Ghost's assistant parts (`text`, and `toolCall` with
+`failed: true` on a call that failed).
 `owner_prompt` is the owner's original request for this turn and does not
 change across continuations (it is how keep-going keys the tally). A blocking
 result is injected the way Codex and Claude Code inject Stop feedback: a
 user-role prompt whose text is `Stop hook feedback:` plus the reason, so the
 latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
-`transcript_path`, when present, is the pi session file on disk, so a hook can
-review the whole owner turn, not just the current pass. It is omitted when no transcript exists yet, and is untrusted
-content exactly like `messages`.
+`transcript_path` is the conversation log on disk
+([`conversation-log.ts`](../packages/daemon/src/conversation-log.ts)), one JSON
+object per line, so a hook can review the whole owner turn, not just the
+current pass: an owner message is `{"type":"user","text"}` with no `origin`; a
+follow-up or hook continuation carries `origin` `"follow_up"` or `"hook"`. It
+is untrusted content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
 continuation:
@@ -188,22 +190,20 @@ continuation reason is a Codex-style user-role prompt (`Stop hook feedback:`)
 and Ghost shows it in the transcript as a dim "Stop hook" row. An
 informational notification alone is not.
 
-Trusted command hooks that need a fast classifier can invoke
-`ghostd hook-smol-complete`. It reads `{ "ghost_home": "/absolute/home",
-"prompt": "...", "role": "smol_model" }` from stdin and returns
-`{ "text": "..." }`. `role` is optional and must be `smol_model`, the only role
-it accepts; unset, it defaults there. The command performs one raw completion. It does not
-create a session, expose tools, name a concrete provider model, or override the
-model's default reasoning level.
+Trusted command hooks that need a classifier can invoke
+`ghostd hook-smol-complete` (the name predates harnesses). It reads
+`{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin and returns
+`{ "text": "..." }`: one headless run of the ghost's preferred eligible
+harness, in the order a turn would pick, in a scratch directory with no
+persona, conversation, or Ghost tools; a harness that fails hands the prompt
+to the next. An older `role` field is ignored.
 
 ## Status
 
 Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
 Event rows contain `{ event, count }`; hook rows contain
-`{ event, source, name, description }`, where `source` is `config` for a
-`hooks.json` command and `builtin` for an in-process registration made by a
-library embedder. Commands, source paths, arguments, prompts, injected context,
-and errors never cross that route.
+`{ event, name, description }`. Commands, source paths, arguments, prompts,
+injected context, and errors never cross that route.
 
 ## Editing
 
@@ -213,24 +213,3 @@ admitted `hooks.json` as one object and its absolute path. `PUT
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
 `session_stop` changes apply at the next boundary.
-
-## In-process API
-
-Library users can construct a `GhostHookRunner`, register an async factory, and
-pass it to `SessionHost({ hooks })`:
-
-```ts
-const hooks = new GhostHookRunner();
-await hooks.register((api) => {
-  api.on("before_prompt", async () => ({
-    additionalContext: "Remember the advisory from the prior reply.",
-  }));
-  api.on("session_stop", async (event) => {
-    if (event.stop_hook_active) return;
-    return { decision: "block", reason: "Run one final verification pass." };
-  });
-});
-```
-
-Factories and handlers are awaited. Handlers run sequentially with a 30-second
-default budget.

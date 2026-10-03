@@ -23,13 +23,9 @@ Item {
     required property var activities
     required property string failure
     required property bool busy
-    required property string sourceEntryId
     required property int rowIndex
 
-    signal branchRequested(string entryId)
-
     readonly property bool mine: root.speaker === "user"
-    readonly property bool commandOutput: root.speaker === "command"
     readonly property bool hookNotice: root.speaker === "hook"
     readonly property string displayBody: {
         const raw = root.hookNotice
@@ -42,7 +38,7 @@ Item {
             ? String(raw).replace(/\r\n/gu, "\n").replace(/\n$/u, "")
             : raw;
     }
-    readonly property bool plainBody: root.mine || root.commandOutput || root.hookNotice
+    readonly property bool plainBody: root.mine || root.hookNotice
     readonly property int contentInset: root.mine ? 12 : 0
 
     /**
@@ -97,7 +93,7 @@ Item {
         // Omarchy accent is blue in most themes, and reading copy is not a web
         // page.
         linkColor: Theme.ghostAmber
-        font.family: root.commandOutput ? Theme.fontFamilyMono : Theme.fontFamily
+        font.family: Theme.fontFamily
         font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
         lineHeight: Theme.lineHeight
         wrapMode: Text.Wrap
@@ -118,8 +114,8 @@ Item {
      * about — the orb narrated that while it happened, and then it stopped
      * being interesting — so a settled turn keeps only the calls a reader still
      * needs: the ones that failed, because a silent failure is how you get a
-     * confidently wrong answer, and `ask`, whose card carries the re-answer
-     * branch. Everything else is one click away, never in the reading column.
+     * confidently wrong answer. Everything else is one click away, never in
+     * the reading column.
      */
     property bool toolsOpen: false
     // A JS array handed to a ListModel role comes back out as a nested
@@ -134,7 +130,7 @@ Item {
         return list;
     }
     readonly property var loudActivities: root.allActivities.filter(item =>
-        item.status === "failed" || item.name === "ask")
+        item.status === "failed")
     readonly property var shownActivities: root.toolsOpen
         ? root.allActivities
         : root.loudActivities
@@ -142,8 +138,8 @@ Item {
         root.allActivities.length - root.loudActivities.length
 
     /**
-     * What the row has to show: text, and the actions it earns — a reply to
-     * copy or edit, or a trail it is holding back, which is all a turn spent
+     * What the row has to show: text, and the actions a reply earns — its text
+     * to copy, or a trail it is holding back, which is all a turn spent
      * entirely on tool calls has.
      *
      * Asked of the row rather than of the items that show it. An item's
@@ -154,13 +150,8 @@ Item {
      * streaming reply — would never open again.
      */
     readonly property bool hasBody: root.displayBody !== ""
-    readonly property bool hasActions: !root.busy && !root.hookNotice && (root.mine
-        ? (root.hasBody && root.sourceEntryId !== "")
-        : (root.hasBody || root.quietToolCount > 0))
-    // The user's capsule is the one a blank line would paint inside. Plain
-    // text has no markdown layout of its own, so the edit pencil can sit on
-    // the last line instead of claiming a row beneath.
-    readonly property bool actionsBeside: root.mine && root.hasBody && root.hasActions
+    readonly property bool hasActions: !root.busy && !root.hookNotice && !root.mine
+        && (root.hasBody || root.quietToolCount > 0)
 
     implicitHeight: card.implicitHeight
 
@@ -227,14 +218,8 @@ Item {
         // bubble; what it does not claim is a 130-column line on a maximised
         // HUD. The measure only bites past that width.
         width: root.mine
-            // Beside the prompt they add a strip of width, not a blank line
-            // of height — the empty band the capsule used to paint under the
-            // words.
             ? Math.min(parent.width * 0.82,
-                Math.max(tailText.implicitWidth
-                    + (root.actionsBeside
-                        ? messageActions.implicitWidth + Theme.gap : 0)
-                    + root.contentInset * 2, 72))
+                Math.max(tailText.implicitWidth + root.contentInset * 2, 72))
             : Math.min(parent.width, Theme.readingMeasure)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
@@ -306,8 +291,7 @@ Item {
                 Column {
                     id: bodyView
 
-                    width: parent.width - (root.actionsBeside
-                        ? messageActions.implicitWidth + Theme.gap : 0)
+                    width: parent.width
                     visible: root.hasBody
                     spacing: Theme.markdownBlockGap
 
@@ -338,29 +322,20 @@ Item {
                 // Markdown owns its own layout — a code fence, a table, a list
                 // — so a cursor taken from a hidden TextEdit cannot say where
                 // the last line ends, and overlaying the controls landed on
-                // the words. A row beneath is right for that. Plain text has
-                // no such layout, and a row beneath is the blank line inside
-                // the user's capsule; those sit on the last line instead.
+                // the words. A row beneath is right for that.
                 Row {
                     id: messageActions
                     objectName: "messageActions"
 
                     visible: root.hasActions
                     spacing: Theme.gap
-                    x: root.mine
-                        ? message.width - width - Theme.gap / 2
-                        : Theme.gap / 2
-                    y: {
-                        if (!root.hasBody) return 0;
-                        if (root.actionsBeside)
-                            return Math.max(0, (bodyView.implicitHeight - height) / 2);
-                        return bodyView.implicitHeight + Theme.gap / 2;
-                    }
+                    x: Theme.gap / 2
+                    y: root.hasBody ? bodyView.implicitHeight + Theme.gap / 2 : 0
 
                     Item {
                         id: copyAction
 
-                        visible: !root.mine && root.hasBody
+                        visible: root.hasBody
                         opacity: messageHover.hovered ? 1 : 0
                         width: 16
                         height: 16
@@ -384,47 +359,6 @@ Item {
                         }
                     }
 
-                    Item {
-                        id: editAction
-
-                        visible: root.mine && root.sourceEntryId !== ""
-                        // A running turn owns the conversation. On hover it
-                        // stays dimmed, so the click can answer above the
-                        // composer instead of vanishing under the pointer.
-                        opacity: messageHover.hovered
-                            ? (Ghostd.streaming ? 0.4 : 1) : 0
-                        width: 16
-                        height: 16
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Edit message"
-
-                        PencilGlyph {
-                            width: parent.width
-                            height: parent.height
-                            y: -1
-                            size: editAction.width
-                            tint: editArea.containsMouse
-                                ? Theme.ghostAmberBright : Theme.foregroundFaint
-                        }
-
-                        MouseArea {
-                            id: editArea
-                            anchors.fill: parent
-                            anchors.margins: -Theme.gap / 2
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            // The HUD owns what happens next: editing copies
-                            // the thread into a new conversation and hands
-                            // this message's text to the composer, which may
-                            // already hold something worth asking about first.
-                            onClicked: root.branchRequested(root.sourceEntryId)
-                        }
-                    }
-
-                    // No sibling navigator: an edit starts its own
-                    // conversation, so the way back to the other answer is
-                    // the sidebar, where every other thread is reached.
-
                     // The trail, for when something did need checking after
                     // all. A count rather than a glyph: it is the only thing
                     // here that has to say how much it is hiding.
@@ -432,7 +366,7 @@ Item {
                         id: trailToggle
                         objectName: "trailToggle"
 
-                        visible: !root.mine && root.quietToolCount > 0
+                        visible: root.quietToolCount > 0
                         // Hover-revealed like its neighbours, with two cases
                         // that must stay painted: an open trail keeps its own
                         // way shut, and a turn that spent itself entirely on

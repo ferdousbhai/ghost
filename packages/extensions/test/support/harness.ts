@@ -1,10 +1,7 @@
 /**
- * A scripted stand-in for the daemon's extension runtime.
- *
- * The tests drive tool calls and lifecycle events directly against the
- * registered handlers. No model is contacted and no session is created: the
- * spike already proved the wiring against a real agent loop, and what needs
- * testing here is our logic, deterministically.
+ * A scripted stand-in for the daemon's tool registry: tests call registered
+ * tools directly. No harness is spawned; what needs testing here is our
+ * logic, deterministically.
  */
 import type {
   AnyGhostToolDefinition,
@@ -15,7 +12,6 @@ import type {
 } from "../../src/extension-api.js";
 
 type AnyTool = AnyGhostToolDefinition;
-type AnyHandler = (event: any, ctx: GhostToolContext) => unknown;
 
 export interface Harness {
   readonly tools: Map<string, AnyTool>;
@@ -25,7 +21,6 @@ export interface Harness {
     params?: Record<string, unknown>,
     signal?: AbortSignal,
   ): Promise<GhostToolResult<any>>;
-  beforeAgentStart(incomingSystemPrompt?: string): Promise<string | undefined>;
 }
 
 function fakeContext(cwd: string): GhostToolContext {
@@ -38,17 +33,11 @@ export async function loadExtension(
   cwd: string,
 ): Promise<Harness> {
   const tools = new Map<string, AnyTool>();
-  const handlers = new Map<string, AnyHandler[]>();
   const ctx = fakeContext(cwd);
 
   const api = {
     registerTool(tool: AnyTool) {
       tools.set(tool.name, tool);
-    },
-    on(event: string, handler: AnyHandler) {
-      const existing = handlers.get(event) ?? [];
-      existing.push(handler);
-      handlers.set(event, existing);
     },
   } as unknown as GhostExtensionAPI;
 
@@ -61,26 +50,6 @@ export async function loadExtension(
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
       return tool.execute(`call-${name}`, params, signal, ctx);
-    },
-    async beforeAgentStart(incomingSystemPrompt = "You are pi, a coding agent.") {
-      let systemPrompt: string | undefined;
-      for (const handler of handlers.get("before_agent_start") ?? []) {
-        const result = (await handler(
-          {
-            type: "before_agent_start",
-            prompt: "hello",
-            systemPrompt: [systemPrompt ?? incomingSystemPrompt],
-            systemPromptOptions: {},
-          },
-          ctx,
-        )) as { systemPrompt?: string | string[] } | undefined;
-        if (result?.systemPrompt !== undefined) {
-          systemPrompt = Array.isArray(result.systemPrompt)
-            ? result.systemPrompt.join("\n\n")
-            : result.systemPrompt;
-        }
-      }
-      return systemPrompt;
     },
   };
 }

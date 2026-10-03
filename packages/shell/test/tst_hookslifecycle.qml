@@ -224,7 +224,7 @@ TestCase {
         const epoch = Ghostd.hooksEpoch;
 
         Ghostd.activeGhost = "moaning-myrtle";
-        Ghostd.currentSessionId = "pi:thread-2";
+        Ghostd.currentSessionId = "thread-2";
 
         compare(Ghostd.hooksEpoch, epoch);
         compare(Ghostd.activeHooks[0].name, "Machine global");

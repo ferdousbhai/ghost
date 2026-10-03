@@ -60,7 +60,6 @@ TestCase {
         activities: []
         failure: ""
         busy: !tc.settled
-        sourceEntryId: ""
         rowIndex: 0
     }
 
@@ -73,7 +72,6 @@ TestCase {
         activities: []
         failure: ""
         busy: true
-        sourceEntryId: ""
         rowIndex: 0
     }
 

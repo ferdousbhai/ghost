@@ -1,10 +1,8 @@
 import type { GhostExtensionFactory } from "../extension-api.js";
 import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
 import { createDesktopExtension, DESKTOP_TOOLS, type DesktopExtensionOptions } from "./desktop.js";
-import { createPersonaExtension, type PersonaExtensionOptions } from "./persona.js";
 
-export type GhostExtensionSetOptions = PersonaExtensionOptions
-  & DesktopExtensionOptions
+export type GhostExtensionSetOptions = DesktopExtensionOptions
   & BrowserExtensionOptions;
 
 export function ghostToolNames(): string[] {
@@ -17,11 +15,9 @@ export function ghostToolNames(): string[] {
 export function createGhostExtension(
   options: GhostExtensionSetOptions,
 ): GhostExtensionFactory {
-  const persona = createPersonaExtension(options);
   const desktop = createDesktopExtension(options);
   const browser = createBrowserExtension(options);
   return async (pi) => {
-    await persona(pi);
     await desktop(pi);
     await browser(pi);
   };

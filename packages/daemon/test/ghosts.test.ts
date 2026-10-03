@@ -320,10 +320,8 @@ describe("GhostRegistry.get", () => {
 });
 
 describe("ghostPaths", () => {
-  it("separates visible identity config from machine-bound runtime state", () => {
+  it("puts settings and conversations inside the ghost home", () => {
     const paths = ghostPaths("/tmp/ghosts/casper");
-    expect(paths.agentDir).toBe("/tmp/ghosts/casper/.pi");
-    expect(paths.settingsRuntimeDir).toBe("/tmp/ghosts/casper/.pi/runtime");
     expect(paths.settingsFile).toBe("/tmp/ghosts/casper/settings.yml");
     expect(paths.sessionDir).toBe("/tmp/ghosts/casper/sessions");
   });

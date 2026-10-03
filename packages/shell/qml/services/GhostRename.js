@@ -5,9 +5,6 @@
 // second, lossy rename when the daemon refuses the request.
 
 var ownerKeys = [
-    "greetingGhost",
-    "loginGhost",
-    "commandsGhost",
     "mcpGhost",
     "activeGhost",
     "characterGhost"
@@ -20,9 +17,7 @@ function cloneMap(value) {
 function snapshot(state) {
     var copy = {
         ghosts: Array.isArray(state.ghosts) ? state.ghosts.slice() : [],
-        sessionIds: cloneMap(state.sessionIds),
-        commandExchanges: cloneMap(state.commandExchanges),
-        commandTurnKey: String(state.commandTurnKey || "")
+        sessionIds: cloneMap(state.sessionIds)
     };
     for (var key of ownerKeys) copy[key] = String(state[key] || "");
     return copy;
@@ -55,24 +50,10 @@ function rekeyMap(value, from, to) {
     return next;
 }
 
-function rekeyCommandExchanges(value, from, to) {
-    var prefix = from + "\n";
-    var next = {};
-    for (var key of Object.keys(value || {})) {
-        var moved = key.startsWith(prefix) ? to + key.slice(from.length) : key;
-        next[moved] = value[key];
-    }
-    return next;
-}
-
 function move(state, from, to) {
     var next = snapshot(state);
     next.ghosts = renamedGhosts(next.ghosts, from, to);
     next.sessionIds = rekeyMap(next.sessionIds, from, to);
-    next.commandExchanges = rekeyCommandExchanges(next.commandExchanges, from, to);
-    var commandPrefix = from + "\n";
-    if (next.commandTurnKey.startsWith(commandPrefix))
-        next.commandTurnKey = to + next.commandTurnKey.slice(from.length);
     for (var key of ownerKeys) {
         if (next[key] === from) next[key] = to;
     }

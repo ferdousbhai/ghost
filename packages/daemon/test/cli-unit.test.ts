@@ -10,13 +10,12 @@ import { renderSkillText } from "../src/cli/skill.js";
 import type { CliFetch } from "../src/cli/types.js";
 import { runCli } from "./helpers/cli.js";
 
-function session(id: string, runtime: SessionSummary["runtime"] = "pi"): SessionSummary {
+function session(id: string): SessionSummary {
   return {
-    id: `${runtime}:${id}`,
-    conversationId: id,
-    runtime,
+    id,
     title: null,
     preview: null,
+    harness: "claude",
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     messageCount: 0,
@@ -32,37 +31,6 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-function askDaemon(questions: Array<Record<string, unknown>>): {
-  fetch: CliFetch;
-  paths: string[];
-  posted(): unknown;
-} {
-  const paths: string[] = [];
-  let posted: unknown;
-  const fetch: CliFetch = async (input, init) => {
-    const url = new URL(input);
-    paths.push(url.pathname);
-    if (url.pathname === "/api/ghosts/casper/sessions") {
-      return jsonResponse({ sessions: [session("conv")] });
-    }
-    if (url.pathname.endsWith("/ask") && init?.method === "GET") {
-      return jsonResponse({
-        ask: {
-          id: "ask-1",
-          createdAt: "2026-08-29T00:00:00.000Z",
-          questions,
-        },
-      });
-    }
-    if (url.pathname.endsWith("/ask") && init?.method === "POST") {
-      posted = JSON.parse(String(init.body));
-      return jsonResponse({ accepted: true });
-    }
-    return jsonResponse({ error: { message: "unexpected request" } }, 500);
-  };
-  return { fetch, paths, posted: () => posted };
-}
-
 function sseResponse(events: unknown[]): Response {
   return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), {
     status: 200,
@@ -71,7 +39,7 @@ function sseResponse(events: unknown[]): Response {
 }
 
 describe("a ghost's own shell addresses its conversation", () => {
-  const env = { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "pi:conv-mine" };
+  const env = { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "conv-mine" };
   const sessions = [session("conv-other"), session("conv-mine")];
 
   it("reads $GHOST_SESSION in place of -s", async () => {
@@ -80,12 +48,14 @@ describe("a ghost's own shell addresses its conversation", () => {
       const path = new URL(input).pathname;
       paths.push(path);
       if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
-      if (path.endsWith("/ask")) return jsonResponse({ ask: null });
+      if (path.endsWith("/transcript")) {
+        return jsonResponse({ id: "conv-mine", title: null, harness: null, messages: [], total: 0, truncated: false, historyTruncated: false });
+      }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };
-    const result = await runCli(["ask", "--json"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    const result = await runCli(["show", "--json"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result.code).toBe(0);
-    expect(paths).toContain(`/api/ghosts/casper/sessions/${encodeURIComponent("pi:conv-mine")}/ask`);
+    expect(paths).toContain("/api/ghosts/casper/sessions/conv-mine/transcript");
   });
 
   it("turns a follow-up to an idle conversation into its next turn", async () => {
@@ -134,10 +104,10 @@ describe("ghost help <topic>", () => {
 
   it("wakes the shell's own conversation in the restart recipe", async () => {
     const result = await runCli(["help", "self"], {
-      env: { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "pi:conv-mine", PATH: "/nonexistent" },
+      env: { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "conv-mine", PATH: "/nonexistent" },
       home: "/tmp/ghost-cli-unit",
     });
-    expect(result.stdout).toContain("ghost say --ghost casper --session pi:conv-mine");
+    expect(result.stdout).toContain("ghost say --ghost casper --session conv-mine");
   });
 });
 
@@ -178,8 +148,10 @@ describe("CLI output and addressing helpers", () => {
 
   it("resolves exact and unique public/raw prefixes and refuses ambiguity", () => {
     const rows = [session("alpha"), session("alpine")];
-    expect(resolveSessionPrefix(rows, "pi:alpha").conversationId).toBe("alpha");
-    expect(resolveSessionPrefix(rows, "alph").conversationId).toBe("alpha");
+    expect(resolveSessionPrefix(rows, "alpha").id).toBe("alpha");
+    // `pi:` is how ids were written before Ghost had more than one harness.
+    expect(resolveSessionPrefix(rows, "pi:alpha").id).toBe("alpha");
+    expect(resolveSessionPrefix(rows, "alph").id).toBe("alpha");
     expect(() => resolveSessionPrefix(rows, "al")).toThrow(ArgsError);
   });
 
@@ -220,52 +192,6 @@ describe("ghost skill", () => {
 });
 
 describe("CLI API adaptation", () => {
-  it("shapes a single ask answer as an option or free text", async () => {
-    const question = {
-      id: "choice",
-      question: "Pick one",
-      options: [{ label: "Alpha" }, { label: "Beta" }],
-    };
-    for (const [input, result] of [
-      ["2", { id: "choice", selectedOptions: ["Beta"] }],
-      ["Alpha", { id: "choice", selectedOptions: ["Alpha"] }],
-      ["Something else", { id: "choice", selectedOptions: [], customInput: "Something else" }],
-    ] as const) {
-      const daemon = askDaemon([question]);
-      const response = await runCli([
-        "ask", "answer", input, "-g", "casper", "-s", "conv", "--json",
-      ], {
-        env: { GHOSTD_PORT: "7718" },
-        home: "/tmp/ghost-cli-unit",
-        fetch: daemon.fetch,
-      });
-      expect(response.code, input).toBe(0);
-      expect(daemon.posted()).toEqual({
-        askId: "ask-1",
-        kind: "submit",
-        results: [result],
-      });
-      expect(daemon.paths).not.toContain("/api/ghosts");
-    }
-  });
-
-  it("refuses to shape one answer across multiple questions", async () => {
-    const daemon = askDaemon([
-      { id: "one", question: "One?", options: [{ label: "Yes" }] },
-      { id: "two", question: "Two?", options: [{ label: "No" }] },
-    ]);
-    const response = await runCli([
-      "ask", "answer", "Yes", "-g", "casper", "-s", "conv", "--json",
-    ], {
-      env: { GHOSTD_PORT: "7718" },
-      home: "/tmp/ghost-cli-unit",
-      fetch: daemon.fetch,
-    });
-    expect(response.code).toBe(2);
-    expect(response.stderr).toContain("supports one question");
-    expect(daemon.posted()).toBeUndefined();
-  });
-
   it("still prints against a daemon too old to answer /api/status", async () => {
     const paths: string[] = [];
     const fetch: CliFetch = async (input) => {

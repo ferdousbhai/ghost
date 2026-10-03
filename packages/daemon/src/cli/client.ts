@@ -1,6 +1,6 @@
 import { defaultApiTokenPath, readApiToken } from "../api-token.js";
 import { loadConfig } from "../config.js";
-import { SSE_KEEPALIVE_INTERVAL_MS } from "../pi-messages.js";
+import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
 

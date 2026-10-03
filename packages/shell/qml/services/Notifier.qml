@@ -44,10 +44,6 @@ Singleton {
         root.drain();
     }
 
-    function askWaiting(ghost: string, sessionId: string, title: string, ask: var): void {
-        root.send(ghost, sessionId, title, NotificationText.askBody(ask), "normal");
-    }
-
     function turnFinished(ghost: string, sessionId: string, title: string, text: string): void {
         root.send(ghost, sessionId, title, text.trim() === "" ? "Finished its turn" : text, "normal");
     }

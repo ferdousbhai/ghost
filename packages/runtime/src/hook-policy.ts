@@ -8,9 +8,9 @@ export interface GhostHookEventBase {
   ghost_home?: string;
   storage?: { kind: "backend"; ghost_id: string; session_id: string };
   cwd: string;
-  runtime: "pi";
   conversation_id: string;
-  conversation_runtime: "pi";
+  /** The harness the conversation's latest stretch ran on, when one has run. */
+  harness?: string;
 }
 
 export interface GhostBeforePromptEvent extends GhostHookEventBase {
@@ -30,10 +30,7 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   turn_id: number;
   last_assistant_message?: unknown;
   stop_hook_active: boolean;
-  /**
-   * The runtime's native transcript on disk: the pi session file. `messages`
-   * still carries only the current pass.
-   */
+  /** The conversation log on disk; `messages` carries only the current pass. */
   transcript_path?: string;
 }
 

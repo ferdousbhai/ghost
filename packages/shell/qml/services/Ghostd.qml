@@ -17,7 +17,6 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import "CommandTranscript.js" as CommandTranscript
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
@@ -430,23 +429,6 @@ Singleton {
 
     property bool establishedConnection: false
 
-    // Effective commands are conversation-scoped: an extension can register
-    // them while a session is built, so a ghost-level cache would quietly show
-    // the wrong palette after switching conversations.
-    property var commands: []
-    property bool commandsLoading: false
-    property string commandsError: ""
-    property string commandsGhost: ""
-    property string commandsSessionId: ""
-
-    // Exact resources admitted to one principal conversation. Paths are
-    // owner-only, so this state is never reused by the remote viewer.
-    property var sessionResources: null
-    property bool sessionResourcesLoading: false
-    property string sessionResourcesError: ""
-    property string sessionResourcesGhost: ""
-    property string sessionResourcesSessionId: ""
-
     // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
     // here. GET
     // is sanitized; secret-bearing values are write-only through mutations.
@@ -458,7 +440,7 @@ Singleton {
     property string mcpNotice: ""
     property string mcpGhost: ""
 
-    // A ghost owns many conversations (pi sessions). The daemon persists them;
+    // A ghost owns many conversations. The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
     // starts a fresh one on demand. This fixes #26 — a restart no longer loses
     // history, because a conversation lives in the daemon keyed by session id.
@@ -467,64 +449,31 @@ Singleton {
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
     property string deletingSessionId: ""
-    /** Why the last branch refused, or "". Kept apart from `sessionsError`:
-        that one renders in the conversation list, and a branch is asked for
-        from a message, half a window away from it. */
-    property string branchError: ""
+    /** The agent CLI carrying the open conversation's latest stretch, from its listing row; "" when unknown. */
+    readonly property string currentHarness: {
+        const row = root.sessions.find(session => session && session.id === root.currentSessionId);
+        return row && typeof row.harness === "string" ? row.harness : "";
+    }
     property bool hudVisible: false
     property bool hudChatFocused: false
 
-    // The ghost's opening line for an empty chat. Pure upside: the HUD paints
-    // its own static invitation the instant the card appears and only swaps to
-    // this if and when it arrives, so a slow, absent, or failed greeting costs
-    // the owner nothing. Every failure path therefore leaves it "".
-    property string greeting: ""
-    property string greetingGhost: ""
-
     property alias transcript: transcriptModel
-    property var commandExchanges: ({})
     property int hydratedRowCount: 0
     /** True when the open conversation's stored history has an unavailable prefix. */
     property bool transcriptHistoryTruncated: false
-    property string commandTurnKey: ""
-    property int commandTurnIndex: -1
-    property int commandTurnAnchor: 0
     property bool streaming: false
     property string activity: ""
-    property var pendingAsk: null
-    property bool askSubmitting: false
-    property string askError: ""
-    property var steeringQueue: []
     property var followUpQueue: []
     property bool queueSubmitting: false
     property string queueError: ""
 
     signal turnFinished(string ghost, string text, string sessionId, string title)
     signal turnFailed(string ghost, string message, string sessionId, string title)
-    signal askWaiting(string ghost, var ask, string sessionId, string title)
-    /** Text for the composer: a queued message the daemon refused, or a branch's draft. */
+    /** Text for the composer: a queued message the daemon refused. */
     signal composerDraft(string text)
-    /** setChatModel's PUT/DELETE answered 200. */
-    signal modelWritten()
     signal mcpMutationFinished(string action, string server, bool ok)
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
-
-    property var providers: []
-    property string loginId: ""
-    property var loginState: ({})
-    property string loginGhost: ""
-    /** The daemon route that currently owns loginId. During an optimistic ghost
-        rename this remains the old name until the rename XHR succeeds. */
-    property string loginRouteGhost: ""
-    /** No login request may cross the daemon's atomic rename publication. */
-    property bool loginRoutePaused: false
-    /** Non-empty while a login request is in flight or has failed to reach ghostd. */
-    property string loginError: ""
-
-    property var currentModel: null
-    property string modelSource: "none"
-
 
     // The XHR must be held by a property. A request whose only reference is the
     // closure it installed on itself is eligible for collection mid-flight.
@@ -540,38 +489,6 @@ Singleton {
     property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
     property var renameSessionRequest: null
-    /** Login requests have distinct owners so a poll cannot evict an input or
-        provider fetch from the GC root, and every one can be retired on close. */
-    property var providersRequest: null
-    property var loginStartRequest: null
-    property var loginPollRequest: null
-    property var loginInputRequest: null
-    property int loginGeneration: 0
-    /** Test seam; production always constructs the native QML XHR. */
-    property var loginRequestFactory: null
-    property var tokenReloadOverride: null
-    readonly property bool loginPolling: loginPoll.running
-    property var modelRequest: null
-    property int modelGeneration: 0
-    /** A PUT/DELETE of the chat model; its own slot, so a concurrent read cannot drop its answer. */
-    property var modelWriteRequest: null
-    readonly property bool modelWriting: root.modelWriteRequest !== null
-    /** The model picker's last failure: listing models, or binding one. */
-    property string modelError: ""
-    /** pi's live list of models this ghost's credentials reach. */
-    property var availableModels: []
-    property var availableModelsRequest: null
-    /** Test seam; production always constructs the native QML XHR. */
-    property var modelRequestFactory: null
-
-    /**
-     * Nothing can answer yet: no model resolved and none reachable. An unbound
-     * ghost with signed-in providers still answers on pi's default, so a null
-     * `currentModel` alone is not enough (`adoptModelSelection` fetches the
-     * reachable list for exactly this). The HUD's first-run surfaces all read
-     * this rather than repeating the comparison.
-     */
-    readonly property bool noModel: root.currentModel === null && root.availableModels.length === 0
     property var sessionsRequest: null
     property var eventsRequest: null
     property string eventsGhost: ""
@@ -592,13 +509,8 @@ Singleton {
     property var hooksRequestFactory: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
-    property var commandsRequest: null
-    property var sessionResourcesRequest: null
-    /** Test seam; production constructs the native resource-snapshot XHR. */
-    property var sessionResourcesRequestFactory: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
-    property var greetingRequest: null
     property var transcriptRequestFactory: null
     readonly property int transcriptPageLimit: 1000
     readonly property int transcriptMaxPages: 10
@@ -609,10 +521,8 @@ Singleton {
     property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
     property var readSessionRequests: ({})
-    property var branchRequest: null
-    property var branchRequestFactory: null
 
-    property var sessionIds: ({})     // ghost name -> runtime-qualified active id
+    property var sessionIds: ({})     // ghost name -> active conversation id
     property var turnStates: ({})
     property var liveConversationKeys: []
     readonly property bool anyStreaming: root.liveConversationKeys.length > 0
@@ -677,28 +587,6 @@ Singleton {
         onTriggered: root.connectConversationEvents(root.activeGhost)
     }
 
-    // A login is interactive and multi-step; the daemon models it as a pollable
-    // session. We poll once a second while one is running and stop the moment
-    // it settles.
-    Timer {
-        id: loginPoll
-        interval: 1000
-        repeat: true
-        onTriggered: root.pollLogin()
-    }
-
-    // Ghost's ask tool pauses the provider turn while the HTTP SSE stream stays
-    // open. The dialog itself is a separate, reconnectable resource, so poll
-    // only during the short gap between seeing the ask tool call and receiving
-    // its payload.
-    Timer {
-        id: askPoll
-        interval: 200
-        repeat: true
-        running: root.anyStreaming
-        onTriggered: root.pollPendingAsks()
-    }
-
     Timer {
         id: queuePoll
         interval: 350
@@ -722,24 +610,11 @@ Singleton {
     }
 
     function retireClientRequests(): void {
-        root.cancelLogin();
         root.cancelAllTranscriptLoads();
         root.retireRemoteRequests();
         root.retireHooksRequest();
     }
-    onActiveGhostChanged: {
-        root.modelGeneration += 1;
-        root.modelRequest = null;
-        root.modelWriteRequest = null;
-        root.availableModelsRequest = null;
-        root.availableModels = [];
-        root.modelError = "";
-        // A rename moves loginGhost before activeGhost, preserving a live flow.
-        // Any other selection change makes the old ghost's requests stale.
-        if (root.loginGhost === "" || root.loginGhost !== root.activeGhost)
-            root.cancelLogin();
-        root.connectConversationEvents(root.activeGhost);
-    }
+    onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
     function token(): string {
         if (root.apiToken === "") {
@@ -996,9 +871,7 @@ Singleton {
                         root.activeGhost = root.ghosts[0].name;
                     if (root.activeGhost !== "") {
                         root.connectConversationEvents(root.activeGhost);
-                        root.fetchCurrentModel();
                         root.fetchSessions(root.activeGhost);
-                        root.fetchGreeting();
                         root.refreshCurrentTranscript();
                     }
                 } catch (error) {
@@ -1040,7 +913,6 @@ Singleton {
                     return ghost && ghost.name === createdName;
                 })) root.ghosts = root.ghosts.concat([created]);
                 root.switchGhost(createdName);
-                root.branchError = "";
                 // The roster, not the POST echo, is the authoritative listing.
                 root.refresh();
             } else {
@@ -1108,12 +980,6 @@ Singleton {
         const next = to.trim();
         if (from === "" || next === "" || next === from) return false;
         if (root.renamingGhost !== "" || root.deletingGhost !== "") return false;
-        // A start has no login id to recover after the route moves. Established
-        // flows are safe to rebind; this short window must settle first.
-        if (root.loginStartRequest !== null && root.loginRouteGhost === from) {
-            root.ghostRenameError = "Wait for the provider login to start before renaming this ghost.";
-            return false;
-        }
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -1124,7 +990,6 @@ Singleton {
         root.renamingGhost = from;
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
-        root.pauseLoginRoute(from);
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
         const xhr = root.newRequest(root.renameGhostRequestFactory);
@@ -1145,7 +1010,6 @@ Singleton {
                     settled = next;
                 }
                 if (settled !== next) root.applyGhostRename(next, settled);
-                root.moveLoginRoute(from, settled);
                 root.refresh();
             } else {
                 if (root.renameGhostSnapshot) {
@@ -1157,7 +1021,6 @@ Singleton {
                 root.ghostRenameError = detail !== ""
                     ? detail
                     : root.describeError(xhr, "PUT ghost name");
-                root.resumeLoginRoute(from);
             }
         };
         root.dispatch(xhr, "PUT",
@@ -1171,11 +1034,6 @@ Singleton {
         return {
             ghosts: root.ghosts,
             sessionIds: root.sessionIds,
-            commandExchanges: root.commandExchanges,
-            commandTurnKey: root.commandTurnKey,
-            greetingGhost: root.greetingGhost,
-            loginGhost: root.loginGhost,
-            commandsGhost: root.commandsGhost,
             mcpGhost: root.mcpGhost,
             activeGhost: root.activeGhost,
             characterGhost: root.characterGhost
@@ -1185,11 +1043,6 @@ Singleton {
     function installGhostRenameState(state: var): void {
         root.ghosts = state.ghosts;
         root.sessionIds = state.sessionIds;
-        root.commandExchanges = state.commandExchanges;
-        root.commandTurnKey = state.commandTurnKey;
-        root.greetingGhost = state.greetingGhost;
-        root.loginGhost = state.loginGhost;
-        root.commandsGhost = state.commandsGhost;
         root.mcpGhost = state.mcpGhost;
         root.activeGhost = state.activeGhost;
         root.characterGhost = state.characterGhost;
@@ -1220,7 +1073,6 @@ Singleton {
     /** Drop every trace of a ghost that is no longer there. */
     function forgetGhost(name: string): void {
         delete root.sessionIds[name];
-        root.dropCommandTranscripts(name, "");
         const kept = ({});
         for (const key of Object.keys(root.turnStates)) {
             const state = root.turnStates[key];
@@ -1240,12 +1092,7 @@ Singleton {
     function clearGhostScopedState(): void {
         root.sessions = [];
         root.sessionsError = "";
-        root.clearModelState();
-        // The greeting is this ghost's own voice, so it never carries over.
-        root.clearGreeting();
         root.clearCharacter();
-        root.clearCommands();
-        root.clearSessionResources();
         root.clearMcp();
     }
 
@@ -1256,9 +1103,7 @@ Singleton {
 
     function finishSelectGhost(name: string): void {
         if (!root.switchGhost(name)) return;
-        root.fetchCurrentModel();
         root.fetchSessions(name);
-        root.fetchGreeting();
     }
 
     /**
@@ -1294,37 +1139,15 @@ Singleton {
         return JSON.stringify([ghost, sessionId]);
     }
 
-    // The one runtime's prefix, beside the parse that already hardcodes it.
-    function conversationActionId(conversationId: string): string {
-        return "pi:" + conversationId;
+    /** A conversation id the daemon accepts: 1–128 of `[A-Za-z0-9._-]`, not led by a dot. */
+    function validConversationId(id: var): bool {
+        return typeof id === "string" && /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u.test(id);
     }
 
-    function parseConversationActionId(id: string): var {
-        const piPrefix = "pi:";
-        if (id.indexOf(piPrefix) === 0 && id.length > piPrefix.length) return {
-            id: id,
-            runtime: "pi",
-            conversationId: id.slice(piPrefix.length)
-        };
-        return null;
-    }
-
-    function conversationIdentity(id: string): var {
-        const row = root.sessions.find(function (session) {
-            return session && session.id === id;
-        });
-        if (row && row.runtime === "pi"
-                && typeof row.conversationId === "string" && row.conversationId !== "")
-            return { id: id, runtime: row.runtime, conversationId: row.conversationId };
-        return root.parseConversationActionId(id);
-    }
-
-    function transcriptMatchesIdentity(body: var, state: var): bool {
-        return body && state
-            && body.id === state.sessionId
-            && body.conversationId === state.conversationId
-            && body.runtime === state.runtime
-            && Array.isArray(body.messages);
+    /** A fresh HUD-minted conversation id. */
+    function mintConversationId(): string {
+        return "hud-" + Date.now().toString(36)
+            + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
     }
 
     function cancelTranscriptLoad(state: var): void {
@@ -1353,8 +1176,7 @@ Singleton {
             text: String(row.text || ""),
             toolActivity: Array.isArray(row.toolActivity) ? row.toolActivity.slice() : [],
             error: String(row.error || ""),
-            pending: row.pending === true,
-            entryId: String(row.entryId || "")
+            pending: row.pending === true
         };
     }
 
@@ -1365,32 +1187,22 @@ Singleton {
         return rows;
     }
 
-    function newTurnState(ghost: string, sessionId: string,
-            conversationId: string, runtime: string): var {
+    function newTurnState(ghost: string, sessionId: string): var {
         return {
             key: root.conversationKey(ghost, sessionId),
             ghost: ghost,
             sessionId: sessionId,
-            conversationId: conversationId,
-            runtime: runtime,
             published: false,
             title: "",
             rows: [],
             hydratedRowCount: 0,
             historyTruncated: false,
-            commandTurnKey: "",
-            commandTurnIndex: -1,
-            commandTurnAnchor: 0,
             streaming: false,
             request: null,
             lastStreamActivity: 0,
             activity: "",
             limitNotice: "",
             lastError: "",
-            pendingAsk: null,
-            askSubmitting: false,
-            askError: "",
-            steeringQueue: [],
             followUpQueue: [],
             queueSubmitting: false,
             queueError: "",
@@ -1401,8 +1213,6 @@ Singleton {
             consumed: 0,
             frameBuffer: "",
             presentationDirty: false,
-            askRequest: null,
-            askSubmitRequest: null,
             queueRequest: null,
             queueStatusRequest: null,
             transcriptRequest: null,
@@ -1411,19 +1221,12 @@ Singleton {
         };
     }
 
-    function ensureTurnState(ghost: string, sessionId: string,
-            conversationId: var, runtime: var): var {
-        if (ghost === "" || sessionId === "") return null;
+    function ensureTurnState(ghost: string, sessionId: string): var {
+        if (ghost === "" || !root.validConversationId(sessionId)) return null;
         const key = root.conversationKey(ghost, sessionId);
         let state = root.turnStates[key];
         if (!state) {
-            const identity = typeof conversationId === "string" && conversationId !== ""
-                ? { id: sessionId, conversationId: conversationId, runtime: runtime || "pi" }
-                : root.conversationIdentity(sessionId);
-            if (!identity || identity.id !== root.conversationActionId(
-                    identity.conversationId)) return null;
-            state = root.newTurnState(ghost, sessionId,
-                identity.conversationId, identity.runtime);
+            state = root.newTurnState(ghost, sessionId);
             const next = Object.assign({}, root.turnStates);
             next[key] = state;
             root.turnStates = next;
@@ -1450,16 +1253,9 @@ Singleton {
         state.rows = root.visibleTranscriptRows();
         state.hydratedRowCount = root.hydratedRowCount;
         state.historyTruncated = root.transcriptHistoryTruncated;
-        state.commandTurnKey = root.commandTurnKey;
-        state.commandTurnIndex = root.commandTurnIndex;
-        state.commandTurnAnchor = root.commandTurnAnchor;
         state.streaming = root.streaming;
         state.request = root.request;
         state.activity = root.activity;
-        state.pendingAsk = root.pendingAsk;
-        state.askSubmitting = root.askSubmitting;
-        state.askError = root.askError;
-        state.steeringQueue = root.steeringQueue.slice();
         state.followUpQueue = root.followUpQueue.slice();
         state.queueSubmitting = root.queueSubmitting;
         state.queueError = root.queueError;
@@ -1480,17 +1276,10 @@ Singleton {
     function projectTurnProjection(state: var): void {
         root.hydratedRowCount = state.hydratedRowCount;
         root.transcriptHistoryTruncated = state.historyTruncated === true;
-        root.commandTurnKey = state.commandTurnKey;
-        root.commandTurnIndex = state.commandTurnIndex;
-        root.commandTurnAnchor = state.commandTurnAnchor;
         root.streaming = state.streaming;
         root.request = state.request;
         root.activity = state.activity;
         root.lastError = state.lastError;
-        root.pendingAsk = state.pendingAsk;
-        root.askSubmitting = state.askSubmitting;
-        root.askError = state.askError;
-        root.steeringQueue = state.steeringQueue;
         root.followUpQueue = state.followUpQueue;
         root.queueSubmitting = state.queueSubmitting;
         root.queueError = state.queueError;
@@ -1505,7 +1294,7 @@ Singleton {
 
     function clearTurnProjection(): void {
         transcriptModel.clear();
-        const empty = root.newTurnState("", "", "", "pi");
+        const empty = root.newTurnState("", "");
         // A daemon-level error (fail()) outlives a conversation switch; a
         // conversation's own error comes back with its state.
         empty.lastError = root.lastError;
@@ -1575,34 +1364,12 @@ Singleton {
         }
     }
 
-    function pollPendingAsks(): void {
-        for (const key of root.liveConversationKeys) {
-            const state = root.turnStates[key];
-            if (state && state.activity === "ask" && state.pendingAsk === null
-                    && !state.askSubmitting)
-                root.fetchPendingAskFor(state);
-        }
-    }
-
     function pollQueues(): void {
         for (const key of root.liveConversationKeys) {
             const state = root.turnStates[key];
-            if (state && state.pendingAsk === null) root.fetchQueueFor(state);
+            if (state) root.fetchQueueFor(state);
         }
     }
-
-    function clearModelState(): void {
-        root.currentModel = null;
-        root.modelSource = "none";
-    }
-
-
-    function clearGreeting(): void {
-        root.greeting = "";
-        root.greetingGhost = "";
-    }
-
-
 
     function clearCharacter(): void {
         const read = root.characterRequest;
@@ -1710,197 +1477,6 @@ Singleton {
     }
 
 
-    function clearCommands(): void {
-        if (root.commandsRequest && root.commandsRequest.readyState !== 4)
-            root.commandsRequest.abort();
-        root.commandsRequest = null;
-        root.commands = [];
-        root.commandsLoading = false;
-        root.commandsError = "";
-        root.commandsGhost = "";
-        root.commandsSessionId = "";
-    }
-
-    function clearSessionResources(): void {
-        const request = root.sessionResourcesRequest;
-        root.sessionResourcesRequest = null;
-        root.sessionResources = null;
-        root.sessionResourcesLoading = false;
-        root.sessionResourcesError = "";
-        root.sessionResourcesGhost = "";
-        root.sessionResourcesSessionId = "";
-        if (request && request.readyState !== 4) request.abort();
-    }
-
-    function validSessionResourceRow(row: var, mcp: bool): bool {
-        const sources = mcp ? ["ghost"] : ["machine", "ghost"];
-        const statuses = mcp
-            ? ["admitted", "shadowed", "skipped", "disabled"]
-            : ["admitted", "shadowed", "skipped"];
-        if (!row || typeof row !== "object" || Array.isArray(row)
-                || typeof row.name !== "string" || row.name === ""
-                || typeof row.path !== "string"
-                || sources.indexOf(row.source) < 0
-                || typeof row.precedence !== "number" || !Number.isFinite(row.precedence)
-                || statuses.indexOf(row.status) < 0
-                || (row.description !== undefined && typeof row.description !== "string")
-                || (row.reason !== undefined && typeof row.reason !== "string")
-                || (row.shadowedBy !== undefined && typeof row.shadowedBy !== "string"))
-            return false;
-        return !mcp || typeof row.enabled === "boolean";
-    }
-
-    function validSessionResourceDiagnostic(row: var): bool {
-        return row && typeof row === "object" && !Array.isArray(row)
-            && ["machine", "ghost"].indexOf(row.source) >= 0
-            && typeof row.reason === "string"
-            && (row.path === undefined || typeof row.path === "string")
-            && (row.shadowedBy === undefined || typeof row.shadowedBy === "string");
-    }
-
-    function applySessionResources(body: var, ghost: string, sessionId: string): bool {
-        const identity = root.conversationIdentity(sessionId);
-        if (!body || typeof body !== "object" || Array.isArray(body)
-                || body.runtime !== "pi"
-                || !identity
-                || !Array.isArray(body.skills)
-                || !body.skills.every(function (row) {
-                    return root.validSessionResourceRow(row, false);
-                })
-                || !Array.isArray(body.mcpServers)
-                || !body.mcpServers.every(function (row) {
-                    return root.validSessionResourceRow(row, true);
-                })
-                || !Array.isArray(body.diagnostics)
-                || !body.diagnostics.every(function (row) {
-                    return root.validSessionResourceDiagnostic(row);
-                })
-                || !Array.isArray(body.mcpDiagnostics)
-                || !body.mcpDiagnostics.every(function (row) {
-                    return root.validSessionResourceDiagnostic(row);
-                })
-            )
-            return false;
-        root.sessionResources = body;
-        root.sessionResourcesGhost = ghost;
-        root.sessionResourcesSessionId = sessionId;
-        return true;
-    }
-
-    function fetchSessionResources(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearSessionResources();
-            return;
-        }
-        // Do not mint a conversation just to inspect skills/MCP. That used to
-        // persist a header-only transcript on every ghost select and HUD open.
-        const sessionId = root.currentSessionId !== ""
-            ? root.currentSessionId
-            : (root.sessionIds[ghost] || "");
-        if (sessionId === "") {
-            root.clearSessionResources();
-            return;
-        }
-        if (!force && root.sessionResourcesGhost === ghost
-                && root.sessionResourcesSessionId === sessionId) return;
-        const previous = root.sessionResourcesRequest;
-        root.sessionResourcesRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-
-        const xhr = root.newRequest(root.sessionResourcesRequestFactory);
-        root.sessionResourcesRequest = xhr;
-        root.sessionResources = null;
-        root.sessionResourcesLoading = true;
-        root.sessionResourcesError = "";
-        root.sessionResourcesGhost = ghost;
-        root.sessionResourcesSessionId = sessionId;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.sessionResourcesRequest) return;
-            root.sessionResourcesRequest = null;
-            root.sessionResourcesLoading = false;
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applySessionResources(JSON.parse(xhr.responseText), ghost, sessionId))
-                        throw new Error("invalid resource snapshot");
-                    root.sessionResourcesError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.sessionResources = null;
-                    root.sessionResourcesError = "ghostd sent a malformed resource snapshot";
-                }
-            } else {
-                root.sessionResources = null;
-                root.sessionResourcesError = root.describeError(xhr, "GET session resources");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/resources", ({}), null);
-    }
-
-    /**
-     * Discover Ghost's effective slash commands for the active conversation.
-     * A blank composer still needs the catalog; that inspect uses a throwaway
-     * id and must not mint the current conversation.
-     */
-    function fetchCommands(force: bool): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") {
-            root.clearCommands();
-            return;
-        }
-        const liveId = root.currentSessionId !== ""
-            ? root.currentSessionId
-            : (root.sessionIds[ghost] || "");
-        const inspecting = liveId === "";
-        const sessionId = inspecting ? root.conversationActionId("inspect") : liveId;
-        if (!force && root.commandsGhost === ghost
-                && root.commandsSessionId === sessionId) return;
-        if (root.commandsRequest && root.commandsRequest.readyState !== 4)
-            root.commandsRequest.abort();
-        const xhr = new XMLHttpRequest();
-        root.commandsRequest = xhr;
-        root.commands = [];
-        root.commandsLoading = true;
-        root.commandsError = "";
-        root.commandsGhost = ghost;
-        root.commandsSessionId = sessionId;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.commandsRequest) return;
-            if (ghost !== root.activeGhost) return;
-            if (inspecting && root.currentSessionId !== "") {
-                root.commandsLoading = false;
-                return;
-            }
-            if (!inspecting && sessionId !== root.currentSessionId) return;
-            root.commandsLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    const list = body && Array.isArray(body.commands) ? body.commands : null;
-                    if (list === null) throw new Error("missing commands");
-                    root.commands = list.filter(function (command) {
-                        return command && typeof command === "object"
-                            && typeof command.name === "string"
-                            && command.name.trim() !== "";
-                    });
-                    root.commandsError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.commands = [];
-                    root.commandsError = "ghostd sent a malformed command catalog";
-                }
-            } else {
-                root.commands = [];
-                root.commandsError = root.describeError(xhr, "GET commands");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/commands", ({}), null);
-    }
-
-
     function clearMcp(): void {
         if (root.mcpRequest && root.mcpRequest.readyState !== 4)
             root.mcpRequest.abort();
@@ -1995,7 +1571,6 @@ Singleton {
                     root.mcpNotice = action === "delete" ? "Server deleted."
                         : (action === "toggle" ? "Server state updated."
                             : (action === "add" ? "Server added." : "Server updated."));
-                    root.clearSessionResources();
                     root.reachable = true;
                     root.mcpMutationFinished(action, server, true);
                 } catch (error) {
@@ -2035,43 +1610,6 @@ Singleton {
         if (name === "") return;
         root.mutateMcp("DELETE", "/" + encodeURIComponent(name), null,
             "delete", name);
-    }
-
-
-    /**
-     * Ask the active ghost for its opening line.
-     *
-     * Fired from the roster/selection refresh the HUD's open path already runs,
-     * so the HUD needs no plumbing beyond reading `greeting`. The
-     * `greetingGhost` latch keeps that from becoming a per-poll request: one
-     * fetch per ghost selection, cleared by clearGreeting() when the empty chat
-     * genuinely comes back (new/deleted conversation, ghost switch).
-     *
-     * A greeting the daemon could not produce is a 200 with `greeting: null`,
-     * and everything else — non-200, malformed body, unreachable — is treated
-     * the same way: leave the properties empty and let the static line stand.
-     */
-    function fetchGreeting(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "" || ghost === root.greetingGhost) return;
-        if (root.greetingRequest && root.greetingRequest.readyState !== 4) return;
-        root.greetingGhost = ghost;
-        const xhr = new XMLHttpRequest();
-        root.greetingRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.greetingRequest) return;
-            // A greeting for a ghost the owner has since left is not theirs.
-            if (ghost !== root.activeGhost || xhr.status !== 200) return;
-            try {
-                const body = JSON.parse(xhr.responseText);
-                root.greeting = typeof body.greeting === "string" ? body.greeting.trim() : "";
-            } catch (error) {
-                root.greeting = "";
-            }
-        };
-        root.dispatch(xhr, "POST",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/greeting",
-            ({ "Content-Type": "application/json" }), JSON.stringify({}));
     }
 
 
@@ -2129,11 +1667,8 @@ Singleton {
             if (!line) continue;
             try {
                 const event = JSON.parse(line.slice(5).trim());
-                if (event.type === "conversation-updated" && typeof event.id === "string"
-                        && event.runtime === "pi"
-                        && typeof event.conversationId === "string"
-                        && event.id === root.conversationActionId(
-                            event.conversationId)
+                if (event.type === "conversation-updated"
+                        && root.validConversationId(event.id)
                         && ghost === root.activeGhost) {
                     root.fetchSessions(ghost);
                 }
@@ -2166,14 +1701,7 @@ Singleton {
     }
 
     function validSessionRows(list: var): var {
-        return list.filter(function (session) {
-            return session && typeof session.id === "string"
-                && session.runtime === "pi"
-                && typeof session.conversationId === "string"
-                && session.conversationId !== ""
-                && session.id === root.conversationActionId(
-                    session.conversationId);
-        });
+        return list.filter(session => session && root.validConversationId(session.id));
     }
 
     function fetchSessions(ghost: string): void {
@@ -2272,18 +1800,11 @@ Singleton {
             root.captureActiveTurn(previous);
             root.cancelTranscriptLoad(previous);
         }
-        const conversationId = "hud-" + Date.now().toString(36)
-            + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-        const id = root.conversationActionId(conversationId);
+        const id = root.mintConversationId();
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
-        root.ensureTurnState(ghost, id, conversationId, "pi");
+        root.ensureTurnState(ghost, id);
         root.showTurnState(ghost, id);
-        root.clearCommands();
-        root.clearSessionResources();
-        // A blank chat is back on screen, so it earns a fresh opening line.
-        root.clearGreeting();
-        root.fetchGreeting();
         root.ensureLocalSessionRow(ghost, id, 0);
     }
 
@@ -2302,15 +1823,13 @@ Singleton {
             root.sessions = root.orderSessions(root.sessions);
             return;
         }
-        const identity = root.conversationIdentity(id);
-        if (!identity) return;
+        if (!root.validConversationId(id)) return;
         const now = new Date().toISOString();
         root.sessions = root.orderSessions(root.sessions.concat([{
             id: id,
-            conversationId: identity.conversationId,
-            runtime: identity.runtime,
             title: null,
             preview: null,
+            harness: null,
             createdAt: now,
             updatedAt: now,
             messageCount: messageCount,
@@ -2334,7 +1853,6 @@ Singleton {
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
             if (xhr.status === 200) {
-                root.dropCommandTranscripts(ghost, id);
                 const key = root.conversationKey(ghost, id);
                 const kept = Object.assign({}, root.turnStates);
                 root.cancelTranscriptLoad(kept[key]);
@@ -2349,10 +1867,6 @@ Singleton {
                         root.sessionIds[ghost] = "";
                         root.currentSessionId = "";
                         root.clearTurnProjection();
-                        root.clearCommands();
-                        root.clearSessionResources();
-                                        root.clearGreeting();
-                        root.fetchGreeting();
                     }
                     root.sessionsError = "";
                     root.fetchSessions(ghost);
@@ -2474,8 +1988,7 @@ Singleton {
         for (let index = 0; index < list.length; index++) {
             const session = list[index];
             if (!session) continue;
-            // Only HUD drafts collapse. A fork rewound to empty is a real
-            // listed conversation and must not disappear when a draft exists.
+            // Only HUD drafts collapse; a listed conversation never does.
             if (!(session.localOnly === true && root.isUnstartedSession(session))) {
                 kept.push(session);
                 continue;
@@ -2503,12 +2016,7 @@ Singleton {
         });
     }
 
-    /**
-     * Make one conversation the ghost's active one, clearing everything the
-     * last one owned. Shared with branching, which lands the user in the copy
-     * it just made: without this the source's queues, its pending ask and its
-     * errors would follow them into a conversation that never had them.
-     */
+    /** Make one conversation the ghost's active one, clearing everything the last one owned. */
     function adoptConversation(ghost: string, id: string): void {
         const previous = root.activeTurnState(false);
         if (previous) {
@@ -2518,11 +2026,6 @@ Singleton {
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
-        root.clearCommands();
-        root.clearSessionResources();
-        // A conversation with its own history needs no opening line; a greeting
-        // would be answering a question nobody just asked.
-        root.clearGreeting();
     }
 
     /**
@@ -2567,7 +2070,7 @@ Singleton {
         // The daemon creates a new conversation lazily inside its first turn.
         // The completion path marks it again after the persisted row arrives.
         if (local && local.localOnly === true) return;
-        const key = root.commandTranscriptKey(ghost, id);
+        const key = root.conversationKey(ghost, id);
         const xhr = new XMLHttpRequest();
         const held = Object.assign({}, root.readSessionRequests);
         held[key] = xhr;
@@ -2671,7 +2174,7 @@ Singleton {
             }
             try {
                 const body = JSON.parse(xhr.responseText);
-                if (!root.transcriptMatchesIdentity(body, state))
+                if (!body || body.id !== state.sessionId || !Array.isArray(body.messages))
                     throw new Error("transcript identity mismatch");
                 state.published = true;
                 if (typeof body.total !== "number" || !Number.isFinite(body.total)
@@ -2729,25 +2232,14 @@ Singleton {
     }
 
     /**
-     * Replace the transcript view with a conversation's stored messages.
-     *
-     * Older storage projections may give one turn several consecutive assistant
-     * messages, while the live stream renders the whole turn as one row. They
-     * are therefore regrouped before the split, or a restored answer scatters
-     * across several rows and an announcement is severed from the tool call
-     * it captions.
-     *
-     * A text-less row survives when it still carries tool activity. That is the
-     * only thing standing between an unanswered `ask` and a dead conversation:
-     * its message is a lone `toolCall` part, so dropping the row takes the
-     * card's re-answer branch with it and the question can never be answered.
+     * Replace the transcript view with a conversation's stored messages,
+     * regrouped by TurnBlocks.rows into the rows the live stream would have made.
      */
     function rehydrateTurn(state: var, messages: var): void {
         state.activity = "";
         state.limitNotice = "";
-        const storedRows = TurnBlocks.rows(messages);
-        state.hydratedRowCount = storedRows.length;
-        const rows = CommandTranscript.merge(storedRows, root.commandExchangesFor(state));
+        const rows = TurnBlocks.rows(messages);
+        state.hydratedRowCount = rows.length;
         const hydrated = [];
         for (const row of rows) {
             hydrated.push({
@@ -2757,73 +2249,11 @@ Singleton {
                 toolActivity: row.role === "assistant"
                     ? root.messageTools({ content: row.parts }) : [],
                 error: row.error || "",
-                pending: false,
-                entryId: row.entryId
+                pending: false
             });
         }
         root.replaceTurnRows(state, hydrated);
         root.projectTurnFields(state);
-    }
-
-    function commandTranscriptKey(ghost: string, sessionId: string): string {
-        return ghost + "\n" + sessionId;
-    }
-
-    function dropCommandTranscripts(ghost: string, sessionId: string): void {
-        const prefix = ghost + "\n";
-        const exact = root.commandTranscriptKey(ghost, sessionId);
-        const next = ({});
-        for (const key of Object.keys(root.commandExchanges)) {
-            if (sessionId !== "" ? key === exact : key.startsWith(prefix)) continue;
-            next[key] = root.commandExchanges[key];
-        }
-        root.commandExchanges = next;
-    }
-
-    function commandExchangesFor(state: var): var {
-        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
-        return Array.isArray(root.commandExchanges[key]) ? root.commandExchanges[key] : [];
-    }
-
-    function receiveCommandOutputFor(state: var, event: var): void {
-        if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
-        const key = root.commandTranscriptKey(state.ghost, state.sessionId);
-        if (key === "\n") return;
-        let exchanges = Array.isArray(root.commandExchanges[key])
-            ? root.commandExchanges[key].slice() : [];
-        let previous = null;
-        if (state.commandTurnKey === key && state.commandTurnIndex >= 0
-                && state.commandTurnIndex < exchanges.length)
-            previous = exchanges[state.commandTurnIndex];
-        else {
-            state.commandTurnKey = key;
-            state.commandTurnIndex = exchanges.length;
-        }
-        const promptRow = state.assistantRow > 0
-            ? state.rows[state.assistantRow - 1] : null;
-        const prompt = promptRow && promptRow.role === "user" ? promptRow.text : event.command;
-        const exchange = CommandTranscript.append(
-            previous, event, prompt, state.commandTurnAnchor);
-        if (state.commandTurnIndex === exchanges.length) exchanges.push(exchange);
-        else exchanges[state.commandTurnIndex] = exchange;
-        const next = Object.assign({}, root.commandExchanges);
-        next[key] = exchanges;
-        root.commandExchanges = next;
-
-        root.setTurnRow(state, state.assistantRow, "role", "command");
-        root.setTurnRow(state, state.assistantRow, "text", exchange.output);
-        root.setTurnRow(state, state.assistantRow, "error", CommandTranscript.failure(exchange));
-        root.projectTurnFields(state);
-    }
-
-    /**
-     * How a restored call turned out, however the runtime marked it. The
-     * daemon writes a per-call failure marker on the persisted `toolCall`;
-     * older transcripts carry none, and a call nobody flagged did finish.
-     */
-    function restoredToolStatus(part: var): string {
-        return part.failed === true || part.isError === true
-            || part.status === "failed" ? "failed" : "complete";
     }
 
     function messageTools(message: var): var {
@@ -2836,126 +2266,18 @@ Singleton {
                 id: part.id || ("history-" + Math.random()),
                 name: part.name || "tool",
                 // A failed call stays failed on reload so Bubble keeps it in the reading column.
-                status: root.restoredToolStatus(part),
+                status: part.failed === true ? "failed" : "complete",
                 arguments: part.arguments || ({}),
-                // Per-call, not per-conversation: a transcript can contain
-                // writes on both sides of a persisted `!cd`.
-                cwd: typeof part.cwd === "string" ? part.cwd : "",
+                // A stored call keeps no cwd, so a relative path offers no file chip.
+                cwd: "",
                 summary: "",
                 // What the ghost said it was doing before this call, so a
                 // restored card explains itself the way the live one did.
-                intent: captions[index] || "",
-                askBranch: part.ghostAsk || null,
-                // How the question actually settled, so a restored card can stop
-                // reporting an answer for one that was cancelled or timed out.
-                // "" for a runtime that does not say, which the card reads as
-                // unknown rather than guessing.
-                askSettled: part.ghostAsk && typeof part.ghostAsk.settled === "string"
-                    ? part.ghostAsk.settled : ""
+                intent: captions[index] || ""
             });
         });
         return tools;
     }
-
-    /**
-     * Branch off a user message into a conversation of its own.
-     *
-     * The daemon copies the thread up to (not including) that message into a
-     * brand-new conversation and hands back its id, title, transcript, and the
-     * branched text as a draft. The source thread is left exactly as it was —
-     * a second answer to the same question is a second thread, not an
-     * overwrite of the first, so nothing the ghost already said is spent to
-     * ask again.
-     *
-     * So the shell moves the user *into* the copy the way opening a
-     * conversation from the sidebar would: same active-session bookkeeping,
-     * same rehydrate, plus a re-list because the new row does not exist in the
-     * listing the sidebar is showing.
-     */
-    function branchFrom(entryId: string): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (ghost === "" || sessionId === "" || entryId === "") return;
-        // A running turn owns the tree. Say so rather than swallowing the click.
-        if (root.streaming) {
-            root.branchError = "Wait for this answer to finish before branching.";
-            return;
-        }
-        root.branchError = "";
-        const xhr = root.newRequest(root.branchRequestFactory);
-        root.branchRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.branchRequest) return;
-            // A branch of a conversation the user has since left is not theirs.
-            if (ghost !== root.activeGhost || sessionId !== root.currentSessionId) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    const branched = typeof body.id === "string" ? body.id : "";
-                    if (branched === "" || body.runtime !== "pi"
-                            || typeof body.conversationId !== "string"
-                            || body.conversationId === ""
-                            || branched !== root.conversationActionId(
-                                body.conversationId)
-                            || body.sessionId !== body.conversationId
-                            || !body.transcript
-                            || body.transcript.id !== branched
-                            || body.transcript.conversationId !== body.conversationId
-                            || body.transcript.runtime !== body.runtime
-                            || !Array.isArray(body.transcript.messages)) {
-                        root.branchError = "ghostd branched into no conversation";
-                        return;
-                    }
-                    const state = root.ensureTurnState(
-                        ghost, branched, body.conversationId, body.runtime);
-                    if (!state) {
-                        root.branchError = "ghostd branched into no conversation";
-                        return;
-                    }
-                    root.adoptConversation(ghost, branched);
-                    // POST carries the daemon's default transcript page, which may
-                    // omit a deep branch's tail. Publish only the bounded pager's
-                    // fully validated assembly so branching and reopening have the
-                    // same complete-history semantics.
-                    root.loadConversationTranscript(state, false);
-                    root.branchError = "";
-                    root.sessionsError = "";
-                    root.fetchSessions(ghost);
-                    root.composerDraft(typeof body.draft === "string" ? body.draft : "");
-                } catch (error) {
-                    root.branchError = "ghostd sent malformed branch state";
-                }
-            } else {
-                root.branchError = root.describeError(xhr, "branch conversation");
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/branch",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ action: "fork", entryId: entryId }));
-    }
-
-    function reanswerHistoricalAsk(entryId: string): void {
-        const ghost = root.activeGhost;
-        const sessionId = root.currentSessionId;
-        if (root.streaming || ghost === "" || sessionId === "" || entryId === "") return;
-        const state = root.ensureTurnState(ghost, sessionId);
-        root.captureActiveTurn(state);
-        root.beginTurnFor(state);
-
-        const xhr = new XMLHttpRequest();
-        state.request = xhr;
-        root.projectTurnFields(state);
-        xhr.onreadystatechange = function () {
-            root.readTurnStream(xhr, state.key,
-                "re-answer ask", "the re-answer stream ended mid-turn");
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(sessionId) + "/reanswer",
-            ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify({ entryId: entryId }));
-    }
-
 
     function send(text: string): void {
         const prompt = text.trim();
@@ -2966,23 +2288,12 @@ Singleton {
         if (!state || sessionId === "") return;
         root.ensureLocalSessionRow(ghost, sessionId, 1);
         root.captureActiveTurn(state);
-        // A completed model turn can be visible a tick before its transcript
-        // refresh lands. Count that live pair too, while excluding the
-        // presentation-only command pairs already in the model.
-        const commandAnchor = Math.max(state.hydratedRowCount,
-            state.rows.length - root.commandExchangesFor(state).length * 2);
 
         root.beginTurnFor(state);
         root.appendTurnRow(state, {
-            role: "user", text: prompt, toolActivity: [], error: "", pending: false,
-            entryId: ""
+            role: "user", text: prompt, toolActivity: [], error: "", pending: false
         });
         root.openAssistantRowFor(state);
-        state.commandTurnKey = "";
-        state.commandTurnIndex = -1;
-        state.commandTurnAnchor = commandAnchor;
-        // The conversation has messages now; the opening line has been answered.
-        root.clearGreeting();
 
         const xhr = new XMLHttpRequest();
         state.request = xhr;
@@ -2995,7 +2306,7 @@ Singleton {
         root.dispatch(xhr, "POST",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify(root.buildBody(ghost, prompt, state)));
+            JSON.stringify(root.buildBody(prompt, state)));
     }
 
     function cancel(): void {
@@ -3051,16 +2362,8 @@ Singleton {
         state.presentationDirty = true;
     }
 
-    function resetAskStateFor(state: var): void {
-        state.pendingAsk = null;
-        state.askSubmitting = false;
-        state.askError = "";
-    }
-
     function resetInteractionStateFor(state: var): void {
         state.activity = "";
-        root.resetAskStateFor(state);
-        state.steeringQueue = [];
         state.followUpQueue = [];
         state.queueSubmitting = false;
         state.queueError = "";
@@ -3107,17 +2410,11 @@ Singleton {
 
     // GHOST_HUD_REPLAY is a diagnostic fallback for stateless daemon builds;
     // normal requests send only the new message because ghostd owns history.
-    function buildBody(ghost: string, prompt: string, state: var): var {
+    function buildBody(prompt: string, state: var): var {
         const messages = [];
         if (Quickshell.env("GHOST_HUD_REPLAY")) {
             for (let i = 0; i < state.rows.length - 1; i++) {
                 const row = state.rows[i];
-                const next = state.rows[i + 1];
-                // Presentation-only builtins must not come back as ordinary
-                // user/assistant context when the diagnostic replay mode is on.
-                if (row.role === "command"
-                        || (row.role === "user" && next.role === "command"))
-                    continue;
                 if (row.text === "") continue;
                 messages.push({ role: row.role, content: row.text, timestamp: Date.now() });
             }
@@ -3125,9 +2422,8 @@ Singleton {
             messages.push({ role: "user", content: prompt, timestamp: Date.now() });
         }
         return {
-            model: "ghost/" + ghost,
             context: { messages: messages },
-            options: { sessionId: state.conversationId }
+            options: { sessionId: state.sessionId }
         };
     }
 
@@ -3142,10 +2438,7 @@ Singleton {
             if (ghost === root.activeGhost && root.isCurrentConversationUnstarted()) {
                 root.sessionIds[ghost] = root.currentSessionId;
             } else {
-                const conversationId = "hud-" + Date.now().toString(36)
-                    + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
-                root.sessionIds[ghost] = root.conversationActionId(conversationId);
-                root.ensureTurnState(ghost, root.sessionIds[ghost], conversationId, "pi");
+                root.sessionIds[ghost] = root.mintConversationId();
             }
         }
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
@@ -3183,11 +2476,6 @@ Singleton {
         case "start":
             state.activity = "";
             break;
-        case "command_output":
-            root.receiveCommandOutputFor(state, event);
-            // `/model provider/id` rebinds the ghost; the chip reads the daemon.
-            if (event.command === "/model" && !event.isError) root.fetchCurrentModel();
-            break;
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };
             state.presentationDirty = true;
@@ -3217,34 +2505,12 @@ Singleton {
             // Reasoning stays out of the transcript in v1; the activity line
             // is the only signal that it happened.
             break;
-        case "toolcall_start":
-            state.activity = event.toolName;
-            state.presentationDirty = true;
-            state.toolIdsByContent[event.contentIndex] = event.id;
-            root.updateToolFor(state, event.id, {
-                name: event.toolName,
-                status: "preparing",
-                arguments: ({}),
-                summary: ""
-            });
-            if (event.toolName === "ask") Qt.callLater(function () {
-                root.fetchPendingAskFor(state);
-            });
-            break;
-        case "toolcall_delta":
-            break;
-        case "toolcall_end":
-            state.activity = "";
-            root.updateToolFor(state, event.toolCall.id, {
-                name: event.toolCall.name,
-                status: "queued",
-                arguments: event.toolCall.arguments || ({}),
-                summary: ""
-            });
-            root.resetAskStateFor(state);
-            break;
         case "tool_execution_start":
             state.activity = event.toolName;
+            if (Object.values(state.toolIdsByContent).indexOf(event.id) < 0) {
+                state.toolIdsByContent[root.toolSlot(state)] = event.id;
+                state.presentationDirty = true;
+            }
             const started = {
                 name: event.toolName,
                 status: "running",
@@ -3255,9 +2521,6 @@ Singleton {
             // TurnBlocks recovered from the narration; "" would erase it.
             if (event.intent) started.intent = event.intent;
             root.updateToolFor(state, event.id, started);
-            if (event.toolName === "ask") Qt.callLater(function () {
-                root.fetchPendingAskFor(state);
-            });
             break;
         case "tool_execution_update":
             root.updateToolFor(state, event.id, {
@@ -3273,33 +2536,12 @@ Singleton {
                 status: event.isError ? "failed" : "complete",
                 summary: event.summary || ""
             });
-            // An ask can settle by its timeout as well as by this shell's POST.
-            // The SSE event is authoritative in both cases; do not leave a
-            // stale dialog over the resumed assistant response until `done`.
-            if (event.toolName === "ask") {
-                root.resetAskStateFor(state);
-            }
-            break;
-        case "model_fallback":
-            state.activity = event.phase === "applied"
-                ? "switching model · " + event.to
-                : "using fallback · " + event.model;
             break;
         case "limit_reached":
             // The terminal error that follows says "provider failed"; this
             // says what actually happened.
             state.limitNotice = root.limitNoticeText(event);
             state.activity = "limit reached";
-            break;
-        case "branch_changed":
-            if (!root.transcriptMatchesIdentity(event.transcript, state)) {
-                root.endTurnState(state, "ghostd sent mismatched branch state");
-                break;
-            }
-            root.rehydrateTurn(state, event.transcript.messages);
-            root.openAssistantRowFor(state);
-            root.resetAssistantSegmentFor(state);
-            state.activity = "";
             break;
         case "done":
             root.endTurnState(state, "");
@@ -3313,9 +2555,24 @@ Singleton {
                 state.limitNotice || event.errorMessage || ("the ghost stopped: " + event.reason));
             break;
         default:
-            console.warn("ghost: unknown pi-messages event:", event.type);
+            console.warn("ghost: unknown turn event:", event.type);
         }
         root.projectTurnFields(state);
+    }
+
+    /**
+     * Where a starting tool call sits among the turn's text blocks. Tool events
+     * carry no content index, and the daemon closes the open text block before
+     * a call starts, so the call goes after the latest text block and after any
+     * call already placed there: last + 1/2, last + 2/3, … — always below the
+     * next text block's index, which is what TurnBlocks.split orders by.
+     */
+    function toolSlot(state: var): real {
+        const texts = Object.keys(state.blocks).map(Number);
+        const last = texts.length > 0 ? Math.max(...texts) : -1;
+        const placed = Object.keys(state.toolIdsByContent)
+            .filter(key => Number(key) > last).length;
+        return last + (placed + 1) / (placed + 2);
     }
 
     function updateToolFor(state: var, id: string, patch: var): void {
@@ -3336,10 +2593,7 @@ Singleton {
             arguments: ({}),
             cwd: "",
             summary: "",
-            intent: "",
-            // A live ask has not settled yet; the card reads "" as unknown and
-            // says nothing about an outcome rather than inventing one.
-            askSettled: ""
+            intent: ""
         }, patch));
         state.toolActivities = next;
         root.syncToolActivityFor(state);
@@ -3365,9 +2619,6 @@ Singleton {
 
     function flushTurn(state: var, force: bool): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
-        // A builtin has no model blocks. Re-splitting an empty block buffer at
-        // `done` must not erase the command_output row we just rendered.
-        if (state.rows[state.assistantRow].role === "command") return;
         if (!force && !state.presentationDirty) return;
         const turn = TurnBlocks.split(state.blocks, Object.keys(state.toolIdsByContent));
         const row = state.rows[state.assistantRow];
@@ -3387,7 +2638,7 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    /** "pi usage limit reached", from a limit_reached event. */
+    /** "claude usage limit reached", from a limit_reached event. */
     function limitNoticeText(event: var): string {
         return String(event.harness) + " " + String(event.kind || "limit").replace("_", " ") + " reached";
     }
@@ -3446,18 +2697,11 @@ Singleton {
         // The SSE event is the dequeue boundary. Move one matching chip now;
         // the 350ms queue poll remains the authority for unusual duplicates or
         // non-owner queue entries, but the ordinary row never renders twice.
-        const steering = state.steeringQueue.slice();
-        const steerIndex = steering.indexOf(message);
-        if (steerIndex >= 0) {
-            steering.splice(steerIndex, 1);
-            state.steeringQueue = steering;
-        } else {
-            const followUp = state.followUpQueue.slice();
-            const followIndex = followUp.indexOf(message);
-            if (followIndex >= 0) {
-                followUp.splice(followIndex, 1);
-                state.followUpQueue = followUp;
-            }
+        const followUp = state.followUpQueue.slice();
+        const followIndex = followUp.indexOf(message);
+        if (followIndex >= 0) {
+            followUp.splice(followIndex, 1);
+            state.followUpQueue = followUp;
         }
         root.insertTurnBreakFor(state, "user", message);
     }
@@ -3481,8 +2725,8 @@ Singleton {
             && state.toolActivities.length === 0
             && Object.keys(state.blocks).length === 0;
         if (emptyPlaceholder) {
-            // Pi can dequeue a batch of owner messages before starting the
-            // next provider step. Keep those as consecutive rows rather than
+            // The daemon can dequeue a batch of owner messages before the next
+            // harness pass. Keep those as consecutive rows rather than
             // manufacturing a blank assistant row between each pair.
             root.removeTurnRow(state, state.assistantRow);
             state.assistantRow = -1;
@@ -3496,8 +2740,7 @@ Singleton {
         }
         state.activity = "";
         root.appendTurnRow(state, {
-            role: role, text: text, toolActivity: [], error: "", pending: false,
-            entryId: ""
+            role: role, text: text, toolActivity: [], error: "", pending: false
         });
         root.openAssistantRowFor(state);
         root.resetAssistantSegmentFor(state);
@@ -3507,85 +2750,13 @@ Singleton {
     /** Append the pending assistant row the stream writes into. */
     function openAssistantRowFor(state: var): void {
         root.appendTurnRow(state, {
-            role: "assistant", text: "", toolActivity: [], error: "", pending: true,
-            entryId: ""
+            role: "assistant", text: "", toolActivity: [], error: "", pending: true
         });
         state.assistantRow = state.rows.length - 1;
     }
 
-    function receivePendingAskFor(state: var, ask: var): void {
-        const previousId = state.pendingAsk ? state.pendingAsk.id : "";
-        state.pendingAsk = ask;
-        if (ask && ask.id && ask.id !== previousId)
-            root.askWaiting(state.ghost, ask, state.sessionId, root.notificationTitle(state));
-    }
-
-    function fetchPendingAskFor(state: var): void {
-        if (!state.streaming || state.activity !== "ask") return;
-        if (state.askRequest && state.askRequest.readyState !== 4) return;
-        const xhr = new XMLHttpRequest();
-        state.askRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.askRequest || !state.streaming) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.receivePendingAskFor(state, body.ask || null);
-                    state.askError = "";
-                } catch (error) {
-                    state.askError = "ghostd sent a malformed ask interaction";
-                }
-            } else {
-                state.askError = root.describeError(xhr, "GET ask");
-            }
-            root.projectTurnFields(state);
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/ask", ({}), null);
-    }
-
-    function answerAsk(answer: var): void {
-        const state = root.activeTurnState(false);
-        if (!state) return;
-        root.captureActiveTurn(state);
-        const ask = state.pendingAsk;
-        if (!ask || state.askSubmitting) return;
-        state.askSubmitting = true;
-        state.askError = "";
-        const xhr = new XMLHttpRequest();
-        state.askSubmitRequest = xhr;
-        root.projectTurnFields(state);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.askSubmitRequest) return;
-            if (xhr.status === 200) {
-                root.resetAskStateFor(state);
-            } else {
-                state.askSubmitting = false;
-                state.askError = root.describeError(xhr, "POST ask");
-                // A stale interaction may already have advanced. Refresh once
-                // so the card never remains stuck on an answer nobody can take.
-                if (xhr.status === 409) root.fetchPendingAskFor(state);
-            }
-            root.projectTurnFields(state);
-        };
-        const body = Object.assign({ askId: ask.id }, answer);
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/ask",
-            ({ "Content-Type": "application/json" }), JSON.stringify(body));
-    }
-
-    function chatAboutAsk(): void {
-        root.answerAsk({ kind: "chat" });
-    }
-
-    /** Decline the pending question; the ghost's ask settles with no answer. */
-    function dismissAsk(): void {
-        root.answerAsk({ kind: "cancel" });
-    }
-
 
     function applyQueueFor(state: var, body: var): void {
-        state.steeringQueue = Array.isArray(body.steering) ? body.steering : [];
         state.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
         root.projectTurnFields(state);
     }
@@ -3610,7 +2781,8 @@ Singleton {
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", ({}), null);
     }
 
-    function queueMessage(text: string, mode: string): void {
+    /** Queue a follow-up for the running turn; the daemon runs it after the current pass. */
+    function queueMessage(text: string): void {
         const prompt = text.trim();
         const state = root.activeTurnState(false);
         if (!state) return;
@@ -3618,10 +2790,9 @@ Singleton {
         if (prompt === "" || state.queueSubmitting || !state.streaming) return;
         state.queueSubmitting = true;
         state.queueError = "";
-        // Show the chip immediately; the authoritative GET will remove it once
-        // Pi consumes it into the next provider boundary.
-        if (mode === "followUp") state.followUpQueue = state.followUpQueue.concat([prompt]);
-        else state.steeringQueue = state.steeringQueue.concat([prompt]);
+        // Show the chip immediately; the authoritative GET removes it once
+        // the daemon starts the pass that carries it.
+        state.followUpQueue = state.followUpQueue.concat([prompt]);
 
         const xhr = new XMLHttpRequest();
         state.queueRequest = xhr;
@@ -3646,403 +2817,9 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ mode: mode, text: prompt }));
+            JSON.stringify({ mode: "followUp", text: prompt }));
     }
 
-
-    function abortLoginRequest(xhr: var): void {
-        if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") xhr.abort();
-    }
-
-    /** Detach first: Qt may synchronously deliver DONE from abort(). */
-    function abortLoginRequests(): void {
-        const providers = root.providersRequest;
-        const start = root.loginStartRequest;
-        const poll = root.loginPollRequest;
-        const input = root.loginInputRequest;
-        root.providersRequest = null;
-        root.loginStartRequest = null;
-        root.loginPollRequest = null;
-        root.loginInputRequest = null;
-        root.abortLoginRequest(providers);
-        root.abortLoginRequest(start);
-        root.abortLoginRequest(poll);
-        root.abortLoginRequest(input);
-    }
-
-    function providersRequestCurrent(xhr: var, generation: int, ghost: string): bool {
-        return xhr === root.providersRequest && generation === root.loginGeneration
-            && ghost === root.activeGhost;
-    }
-
-    function loginStartRequestCurrent(xhr: var, generation: int,
-            routeGhost: string): bool {
-        return xhr === root.loginStartRequest && generation === root.loginGeneration
-            && routeGhost !== "" && routeGhost === root.loginRouteGhost;
-    }
-
-    /** Whether a poll or input reply still belongs to the running login; the
-        caller compares its own request slot. */
-    function loginStepCurrent(generation: int, routeGhost: string, loginId: string): bool {
-        return generation === root.loginGeneration
-            && routeGhost !== "" && routeGhost === root.loginRouteGhost
-            && loginId !== "" && loginId === root.loginId;
-    }
-
-    function applyProvidersResponse(xhr: var, generation: int, ghost: string): bool {
-        if (xhr.readyState !== 4
-                || !root.providersRequestCurrent(xhr, generation, ghost))
-            return false;
-        root.providersRequest = null;
-        if (xhr.status === 200) {
-            try {
-                const body = JSON.parse(xhr.responseText);
-                root.providers = Array.isArray(body.providers) ? body.providers : [];
-                root.loginError = "";
-            } catch (error) {
-                root.loginError = "ghostd sent a malformed provider list";
-            }
-        } else {
-            root.loginError = root.describeError(xhr, "GET providers");
-        }
-        return true;
-    }
-
-    function fetchProviders(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        if (root.renamingGhost !== "") {
-            root.loginError = "Wait for the ghost rename to finish before starting a login.";
-            return;
-        }
-        const xhr = root.newRequest(root.loginRequestFactory);
-        const previous = root.providersRequest;
-        const generation = root.loginGeneration;
-        root.providersRequest = xhr;
-        root.abortLoginRequest(previous);
-        xhr.onreadystatechange = function () {
-            root.applyProvidersResponse(xhr, generation, ghost);
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/providers", ({}), null,
-            function () { return root.providersRequestCurrent(xhr, generation, ghost); });
-    }
-
-    /** Show a login view; a settled login stops polling and re-reads the model it bound. */
-    function adoptLoginView(view: var): void {
-        root.loginState = view;
-        root.loginError = "";
-        if (!root.isLoginTerminal()) {
-            loginPoll.start();
-            return;
-        }
-        loginPoll.stop();
-        if (view.status === "succeeded") {
-            root.refresh();
-            root.fetchCurrentModel();
-            root.fetchAvailableModels();
-        }
-    }
-
-    function applyLoginStartResponse(xhr: var, generation: int,
-            routeGhost: string): bool {
-        if (xhr.readyState !== 4
-                || !root.loginStartRequestCurrent(xhr, generation, routeGhost))
-            return false;
-        root.loginStartRequest = null;
-        if (xhr.status === 200 || xhr.status === 201) {
-            try {
-                const view = JSON.parse(xhr.responseText);
-                if (!view || typeof view.loginId !== "string" || view.loginId === "")
-                    throw new Error("missing login id");
-                root.loginId = view.loginId;
-                root.adoptLoginView(view);
-            } catch (error) {
-                root.loginError = "ghostd sent a malformed login response";
-            }
-        } else {
-            root.loginError = root.describeError(xhr, "POST login");
-        }
-        return true;
-    }
-
-    function startLogin(providerId: string, authType: string): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        if (root.renamingGhost !== "") {
-            root.loginError = "Wait for the ghost rename to finish before starting a login.";
-            return;
-        }
-        root.cancelLogin();
-        root.loginGhost = ghost;
-        root.loginRouteGhost = ghost;
-        const generation = root.loginGeneration;
-        const routeGhost = root.loginRouteGhost;
-        const xhr = root.newRequest(root.loginRequestFactory);
-        root.loginStartRequest = xhr;
-        xhr.onreadystatechange = function () {
-            root.applyLoginStartResponse(xhr, generation, routeGhost);
-        };
-        root.dispatch(xhr, "POST",
-            "/api/ghosts/" + encodeURIComponent(routeGhost) + "/login",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ providerId: providerId, authType: authType }),
-            function () {
-                return root.loginStartRequestCurrent(xhr, generation, routeGhost);
-            });
-    }
-
-    function applyLoginPollResponse(xhr: var, generation: int,
-            routeGhost: string, loginId: string): bool {
-        if (xhr.readyState !== 4
-                || xhr !== root.loginPollRequest
-                || !root.loginStepCurrent(generation, routeGhost, loginId))
-            return false;
-        root.loginPollRequest = null;
-        if (xhr.status === 200) {
-            try {
-                const view = JSON.parse(xhr.responseText);
-                if (!view || view.loginId !== loginId) throw new Error("mismatched login id");
-                root.adoptLoginView(view);
-            } catch (error) {
-                root.loginError = "ghostd sent a malformed login step";
-            }
-        } else {
-            loginPoll.stop();
-            root.loginError = root.describeError(xhr, "GET login");
-        }
-        return true;
-    }
-
-    function pollLogin(): void {
-        if (root.loginId === "" || root.loginRouteGhost === ""
-                || root.loginRoutePaused) return;
-        // Keep one poll in flight, and never race an authoritative input reply.
-        if (root.loginPollRequest !== null || root.loginInputRequest !== null) return;
-        const routeGhost = root.loginRouteGhost;
-        const loginId = root.loginId;
-        const generation = root.loginGeneration;
-        const xhr = root.newRequest(root.loginRequestFactory);
-        root.loginPollRequest = xhr;
-        xhr.onreadystatechange = function () {
-            root.applyLoginPollResponse(xhr, generation, routeGhost, loginId);
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/"
-            + encodeURIComponent(routeGhost) + "/login/" + encodeURIComponent(loginId),
-            ({}), null, function () {
-                return xhr === root.loginPollRequest
-                    && root.loginStepCurrent(generation, routeGhost, loginId);
-            });
-    }
-
-    function applyLoginInputResponse(xhr: var, generation: int,
-            routeGhost: string, loginId: string): bool {
-        if (xhr.readyState !== 4
-                || xhr !== root.loginInputRequest
-                || !root.loginStepCurrent(generation, routeGhost, loginId))
-            return false;
-        root.loginInputRequest = null;
-        if (xhr.status === 200) {
-            try {
-                const view = JSON.parse(xhr.responseText);
-                if (!view || view.loginId !== loginId) throw new Error("mismatched login id");
-                root.adoptLoginView(view);
-            } catch (error) {
-                root.loginError = "ghostd sent a malformed login step";
-            }
-        } else {
-            root.loginError = root.describeError(xhr, "POST login input");
-        }
-        return true;
-    }
-
-    function submitLoginInput(value: string): bool {
-        if (root.loginId === "" || root.loginRouteGhost === ""
-                || root.loginRoutePaused) return false;
-        if (root.loginInputRequest !== null) return false;
-        const routeGhost = root.loginRouteGhost;
-        const loginId = root.loginId;
-        const generation = root.loginGeneration;
-        const stalePoll = root.loginPollRequest;
-        root.loginPollRequest = null;
-        root.abortLoginRequest(stalePoll);
-        const xhr = root.newRequest(root.loginRequestFactory);
-        root.loginInputRequest = xhr;
-        xhr.onreadystatechange = function () {
-            root.applyLoginInputResponse(xhr, generation, routeGhost, loginId);
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/"
-            + encodeURIComponent(routeGhost) + "/login/"
-            + encodeURIComponent(loginId) + "/input",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ value: value }), function () {
-                return xhr === root.loginInputRequest
-                    && root.loginStepCurrent(generation, routeGhost, loginId);
-            });
-        return true;
-    }
-
-    function openLoginUrl(url: string): void {
-        if (!ExternalLinks.openLoginUrl(url)) root.loginError = "ghostd sent an unsafe login URL";
-    }
-
-    function isLoginTerminal(): bool {
-        const status = root.loginState ? root.loginState.status : "";
-        return status === "succeeded" || status === "failed";
-    }
-
-    /** Stop login traffic for the whole interval in which either daemon route
-        could be wrong. Existing input/poll work is replaced by a later poll. */
-    function pauseLoginRoute(routeGhost: string): void {
-        if (routeGhost === "" || root.loginRouteGhost !== routeGhost) return;
-        loginPoll.stop();
-        root.loginRoutePaused = true;
-        const poll = root.loginPollRequest;
-        const input = root.loginInputRequest;
-        root.loginPollRequest = null;
-        root.loginInputRequest = null;
-        root.abortLoginRequest(poll);
-        root.abortLoginRequest(input);
-    }
-
-    function resumeLoginRoute(routeGhost: string): void {
-        if (root.loginRouteGhost !== routeGhost) return;
-        root.loginRoutePaused = false;
-        if (root.loginId !== "" && !root.isLoginTerminal()) loginPoll.start();
-    }
-
-    /** Publish the daemon's post-rename route. The login id/state survive; the
-        next poll is authoritative after traffic was paused across publication. */
-    function moveLoginRoute(from: string, to: string): void {
-        if (from === to || root.loginRouteGhost !== from) return;
-        const start = root.loginStartRequest;
-        const poll = root.loginPollRequest;
-        const input = root.loginInputRequest;
-        root.loginStartRequest = null;
-        root.loginPollRequest = null;
-        root.loginInputRequest = null;
-        root.loginRouteGhost = to;
-        root.loginRoutePaused = false;
-        root.abortLoginRequest(start);
-        root.abortLoginRequest(poll);
-        root.abortLoginRequest(input);
-        if (root.loginId !== "" && !root.isLoginTerminal()) loginPoll.start();
-    }
-
-    function cancelLogin(): void {
-        loginPoll.stop();
-        root.loginGeneration += 1;
-        root.abortLoginRequests();
-        root.loginId = "";
-        root.loginState = ({});
-        root.loginGhost = "";
-        root.loginRouteGhost = "";
-        root.loginRoutePaused = false;
-        root.loginError = "";
-    }
-
-
-    /** Adopt a `{ current, source }` body; false when it is malformed. */
-    function adoptModelSelection(xhr: var): bool {
-        try {
-            const body = JSON.parse(xhr.responseText);
-            root.currentModel = body.current || null;
-            root.modelSource = body.source || "none";
-        } catch (error) {
-            return false;
-        }
-        // Nothing resolved: whether pi can still answer is the reachable list.
-        if (root.currentModel === null && root.availableModelsRequest === null)
-            root.fetchAvailableModels();
-        return true;
-    }
-
-    function applyCurrentModelResponse(xhr: var, ghost: string, generation: int): bool {
-        if (xhr.readyState !== 4 || xhr !== root.modelRequest
-                || ghost !== root.activeGhost || generation !== root.modelGeneration)
-            return false;
-        root.modelRequest = null;
-        // A malformed or failed read leaves the last known model standing.
-        if (xhr.status === 200) root.adoptModelSelection(xhr);
-        return true;
-    }
-
-    function fetchCurrentModel(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const generation = root.modelGeneration;
-        const xhr = root.newRequest(root.modelRequestFactory);
-        root.modelRequest = xhr;
-        xhr.onreadystatechange = function () {
-            root.applyCurrentModelResponse(xhr, ghost, generation);
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/model", ({}), null);
-    }
-
-    /** Bind the chat model; `modelWritten` reports success. */
-    function setChatModel(provider: string, id: string): void {
-        root.writeChatModel("PUT", JSON.stringify({ provider: provider, id: id }));
-    }
-
-    /** Unset it, handing the choice back to pi; `modelWritten` reports success. */
-    function clearChatModel(): void {
-        root.writeChatModel("DELETE", null);
-    }
-
-    function writeChatModel(method: string, body: var): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const generation = root.modelGeneration;
-        const what = method + " model";
-        const xhr = root.newRequest(root.modelRequestFactory);
-        root.modelWriteRequest = xhr;
-        root.modelError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.modelWriteRequest
-                    || ghost !== root.activeGhost || generation !== root.modelGeneration)
-                return;
-            root.modelWriteRequest = null;
-            if (xhr.status !== 200) {
-                root.modelError = root.describeError(xhr, what);
-            } else if (!root.adoptModelSelection(xhr)) {
-                root.modelError = "ghostd sent a malformed model selection";
-            } else {
-                // A read that left before this write would restore the old model.
-                root.modelRequest = null;
-                root.modelWritten();
-            }
-        };
-        root.dispatch(xhr, method, "/api/ghosts/" + encodeURIComponent(ghost) + "/model",
-            body === null ? ({}) : ({ "Content-Type": "application/json" }), body);
-    }
-
-    function fetchAvailableModels(): void {
-        const ghost = root.activeGhost;
-        if (ghost === "") return;
-        const generation = root.modelGeneration;
-        const xhr = root.newRequest(root.modelRequestFactory);
-        root.availableModelsRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.availableModelsRequest
-                    || ghost !== root.activeGhost || generation !== root.modelGeneration)
-                return;
-            root.availableModelsRequest = null;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    root.availableModels = Array.isArray(body.models) ? body.models : [];
-                    root.modelError = "";
-                } catch (error) {
-                    root.modelError = "ghostd sent a malformed model list";
-                }
-            } else {
-                root.modelError = root.describeError(xhr, "GET models");
-            }
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/models", ({}), null);
-    }
 
     /** The daemon's own presentable message for a failure, or "". */
     function errorDetail(xhr: var): string {

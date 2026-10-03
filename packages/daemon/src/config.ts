@@ -6,7 +6,6 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { DEFAULT_COMPACTION_CONFIG, type CompactionConfig } from "@ghost/runtime/compaction";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
@@ -21,21 +20,8 @@ export interface DaemonConfig {
   port: number;
   host: string;
   ghostsRoot: string;
-  /**
-   * Forbid every network call pi makes on its own behalf (update checks,
-   * provider catalog refresh, telemetry) by setting `PI_OFFLINE`.
-   *
-   * Default OFF, deliberately. Offline is the stronger sovereignty posture,
-   * but it also disables provider catalog refresh, so a ghost can then only
-   * use models declared statically in its own `models.json`. Turning it on
-   * would silently break the zero-cost onboarding path (an OpenRouter
-   * account on a free model) for anyone who had not written their catalog
-   * out by hand. Credential isolation does NOT depend on this flag — that is
-   * env-scrub.ts, which is unconditional.
-   */
+  /** Skip ghostd's own network call, the daily release check. Harnesses keep theirs. */
   offline: boolean;
-  compaction: CompactionConfig;
-  askTimeoutSeconds: number;
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
@@ -52,12 +38,6 @@ export interface DaemonConfigFile {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
-  compaction?: {
-    enabled?: boolean;
-    thresholdTokens?: number;
-    thresholdFraction?: number;
-  };
-  askTimeoutSeconds?: number;
   remote?: RemoteConfigFile;
 }
 
@@ -66,21 +46,12 @@ export interface DaemonConfigOverrides {
   host?: string;
   ghostsRoot?: string;
   offline?: boolean;
-  compaction?: CompactionConfig;
-  askTimeoutSeconds?: number;
   configPath?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
 }
 
 export const DEFAULT_PORT = 7717;
-/**
- * Long enough that reaching it means the user genuinely walked away, short
- * enough that a forgotten question does not hold a conversation open for hours
- * — which is the state that used to leave a ghost holding a question nobody
- * could ever answer.
- */
-export const DEFAULT_ASK_TIMEOUT_SECONDS = 120;
 /**
  * The staged shutdown's two deadlines. They live here rather than beside the
  * shutdown itself because `help-topics.ts` renders the grace period into the
@@ -181,39 +152,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.remote = remote;
   }
-  if (file.compaction !== undefined) {
-    if (file.compaction === null || typeof file.compaction !== "object" || Array.isArray(file.compaction)) {
-      throw new Error(`${path}: "compaction" must be a JSON object.`);
-    }
-    const raw = file.compaction as Record<string, unknown>;
-    const compaction: DaemonConfigFile["compaction"] = {};
-    if (raw.enabled !== undefined) {
-      if (typeof raw.enabled !== "boolean") {
-        throw new Error(`${path}: "compaction.enabled" must be a boolean.`);
-      }
-      compaction.enabled = raw.enabled;
-    }
-    if (raw.thresholdTokens !== undefined) {
-      if (typeof raw.thresholdTokens !== "number" || !Number.isFinite(raw.thresholdTokens) || raw.thresholdTokens <= 0) {
-        throw new Error(`${path}: "compaction.thresholdTokens" must be a positive number.`);
-      }
-      compaction.thresholdTokens = raw.thresholdTokens;
-    }
-    if (raw.thresholdFraction !== undefined) {
-      if (typeof raw.thresholdFraction !== "number" || !(raw.thresholdFraction > 0 && raw.thresholdFraction <= 1)) {
-        throw new Error(`${path}: "compaction.thresholdFraction" must be a number in (0, 1].`);
-      }
-      compaction.thresholdFraction = raw.thresholdFraction;
-    }
-    config.compaction = compaction;
-  }
-  if (file.askTimeoutSeconds !== undefined) {
-    if (typeof file.askTimeoutSeconds !== "number" || !Number.isFinite(file.askTimeoutSeconds)
-      || file.askTimeoutSeconds < 0) {
-      throw new Error(`${path}: "askTimeoutSeconds" must be a non-negative number.`);
-    }
-    config.askTimeoutSeconds = file.askTimeoutSeconds;
-  }
   return config;
 }
 
@@ -221,30 +159,6 @@ function parseBoolean(raw: string, source: string): boolean {
   if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
   if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
   throw new Error(`Invalid boolean from ${source}: ${JSON.stringify(raw)}`);
-}
-
-function parsePositiveNumber(raw: string, source: string): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    throw new Error(`Invalid positive number from ${source}: ${JSON.stringify(raw)}`);
-  }
-  return value;
-}
-
-function parseNonNegativeNumber(raw: string, source: string): number {
-  const value = Number(raw);
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`Invalid non-negative number from ${source}: ${JSON.stringify(raw)}`);
-  }
-  return value;
-}
-
-function parseFraction(raw: string, source: string): number {
-  const value = Number(raw);
-  if (!(value > 0 && value <= 1)) {
-    throw new Error(`Invalid fraction from ${source}: ${JSON.stringify(raw)} (want (0, 1])`);
-  }
-  return value;
 }
 
 function expandHome(path: string, home: string): string {
@@ -265,10 +179,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envHost = env.GHOSTD_HOST?.trim();
   const envRoot = env.GHOSTS_ROOT?.trim();
   const envOffline = env.GHOSTD_OFFLINE?.trim();
-  const envCompaction = env.GHOSTD_COMPACTION?.trim();
-  const envCompactionTokens = env.GHOSTD_COMPACTION_THRESHOLD_TOKENS?.trim();
-  const envCompactionFraction = env.GHOSTD_COMPACTION_THRESHOLD_FRACTION?.trim();
-  const envAskTimeout = env.GHOSTD_ASK_TIMEOUT?.trim();
   const envHooksPath = env.GHOSTD_HOOKS?.trim();
 
   const port = overrides.port
@@ -286,27 +196,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? file?.offline
     ?? false;
 
-  const enabled = overrides.compaction?.enabled
-    ?? (envCompaction ? parseBoolean(envCompaction, "GHOSTD_COMPACTION") : undefined)
-    ?? file?.compaction?.enabled
-    ?? DEFAULT_COMPACTION_CONFIG.enabled;
-  const thresholdTokens = overrides.compaction?.thresholdTokens
-    ?? (envCompactionTokens ? parsePositiveNumber(envCompactionTokens, "GHOSTD_COMPACTION_THRESHOLD_TOKENS") : undefined)
-    ?? file?.compaction?.thresholdTokens;
-  const thresholdFraction = overrides.compaction?.thresholdFraction
-    ?? (envCompactionFraction ? parseFraction(envCompactionFraction, "GHOSTD_COMPACTION_THRESHOLD_FRACTION") : undefined)
-    ?? file?.compaction?.thresholdFraction;
-  const compaction: CompactionConfig = {
-    enabled,
-    ...(thresholdTokens !== undefined ? { thresholdTokens } : {}),
-    ...(thresholdFraction !== undefined ? { thresholdFraction } : {}),
-  };
-
-  const askTimeoutSeconds = overrides.askTimeoutSeconds
-    ?? (envAskTimeout ? parseNonNegativeNumber(envAskTimeout, "GHOSTD_ASK_TIMEOUT") : undefined)
-    ?? file?.askTimeoutSeconds
-    ?? DEFAULT_ASK_TIMEOUT_SECONDS;
-
   const hooksPath = resolve(expandHome(envHooksPath || join(dirname(configPath), "hooks.json"), home));
 
   assertLoopback(host);
@@ -315,8 +204,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
     offline,
-    compaction,
-    askTimeoutSeconds,
     remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
     configPath,
     hooksPath,

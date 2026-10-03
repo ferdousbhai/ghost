@@ -70,7 +70,6 @@ printf '%s\n' \
   $'f\tghost-desktop.js' \
   $'f\tghost.js' \
   $'f\tghostd.js' \
-  $'f\tphoton_rs_bg.wasm' \
   | LC_ALL=C sort > "$temporary/lib.expected"
 require_identical "$temporary/lib.expected" "$temporary/lib.actual" \
   'runtime source does not have the exact v3 library closure'
@@ -97,17 +96,12 @@ for path in bin/ghost bin/ghostd bin/ghost-desktop; do
   }
   grep -Fq 'GHOST_BUN_EXECUTABLE:-/usr/bin/bun' "$runtime_root/$path"
 done
-for path in lib/ghost.js lib/ghostd.js lib/ghost-desktop.js lib/photon_rs_bg.wasm BUNDLED-LICENSES; do
+for path in lib/ghost.js lib/ghostd.js lib/ghost-desktop.js BUNDLED-LICENSES; do
   [[ -f "$runtime_root/$path" && "$(stat -c '%a' "$runtime_root/$path")" == 644 ]] || {
     printf 'runtime data file is missing or unsafe: %s\n' "$path" >&2
     exit 1
   }
 done
-wasm_size="$(stat -c '%s' "$runtime_root/lib/photon_rs_bg.wasm")"
-(( wasm_size > 0 && wasm_size <= 4 * 1024 * 1024 )) || {
-  printf 'runtime Photon WASM has an invalid size: %s\n' "$wasm_size" >&2
-  exit 1
-}
 
 bun_build_version="$(sed -n 's/^bun_build_version=//p' "$manifest")"
 bun_runtime_min="$(sed -n 's/^bun_runtime_min=//p' "$manifest")"

@@ -1,13 +1,10 @@
 import QtQuick
 import "../services"
 
-// The HUD's top line: who is present, which model answers, and how to stop a
-// running turn.
+// The HUD's top line: who is present, which agent CLI is answering the open
+// conversation, and how to stop a running turn.
 Item {
     id: root
-
-    /** The model indicator was clicked. */
-    signal modelsRequested()
 
     implicitHeight: 32
 
@@ -55,58 +52,15 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Theme.pad
 
-        // Current-model indicator: the model's provider/id, a "Default" hint
-        // when the pick is only a fallback, "Default" when pi picks unseen,
-        // and a call to action when nothing can answer.
-        Rectangle {
-            id: modelIndicator
-
-            readonly property bool noneSet: Ghostd.noModel
-
+        // The harness is the daemon's choice, per conversation; it is only
+        // reported here, never picked.
+        Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: Ghostd.activeGhost !== ""
-            implicitWidth: indicatorRow.implicitWidth + Theme.pad * 1.5
-            implicitHeight: 28
-            radius: Theme.radius / 2
-            color: indicatorArea.containsMouse ? Theme.hover : "transparent"
-            border.width: modelIndicator.noneSet ? 1 : 0
-            border.color: modelIndicator.noneSet ? Theme.warn : Theme.border
-
-            Row {
-                id: indicatorRow
-                anchors.centerIn: parent
-                spacing: Theme.gap / 2
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: Ghostd.currentModel
-                        ? (Ghostd.currentModel.provider + "/" + Ghostd.currentModel.id)
-                        // A GUI button is a worse place for a CLI incantation
-                        // than the CLI is: the click itself is the instruction.
-                        : Ghostd.noModel ? "Connect a provider" : "Default"
-                    color: modelIndicator.noneSet ? Theme.warn : Theme.foreground
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                    elide: Text.ElideRight
-                }
-
-                Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    visible: Ghostd.currentModel && Ghostd.modelSource === "none"
-                    text: "· Default"
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
-                }
-            }
-
-            MouseArea {
-                id: indicatorArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.modelsRequested()
-            }
+            visible: Ghostd.currentHarness !== ""
+            text: "via " + Ghostd.currentHarness
+            color: Theme.foregroundDim
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSizeSmall
         }
 
         Text {

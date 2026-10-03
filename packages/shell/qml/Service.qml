@@ -51,17 +51,8 @@ Item {
             Ghostd.send(prompt);
         }
 
-        function login(): void {
-            root.summon(({ login: true }));
-        }
-
         function section(name: string): void {
             root.summon(({ section: name }));
-        }
-
-        function loginTo(provider: string, authType: string): void {
-            root.summon(({ login: true }));
-            if (provider !== "") Ghostd.startLogin(provider, authType === "" ? "oauth" : authType);
         }
 
         function status(): string {
@@ -95,10 +86,6 @@ Item {
 
         function onTurnFailed(ghost: string, message: string, sessionId: string, title: string): void {
             if (!root.viewing(ghost, sessionId)) Notifier.turnFailed(ghost, sessionId, title, message);
-        }
-
-        function onAskWaiting(ghost: string, ask: var, sessionId: string, title: string): void {
-            if (!root.viewing(ghost, sessionId)) Notifier.askWaiting(ghost, sessionId, title, ask);
         }
     }
 

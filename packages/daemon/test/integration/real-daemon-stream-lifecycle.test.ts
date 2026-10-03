@@ -1,25 +1,21 @@
-import { setImmediate } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  SSE_KEEPALIVE_INTERVAL_MS,
-  type PiMessagesEvent,
-} from "../../src/pi-messages.js";
-import {
-  createMockProviderBarrier,
-  type MockStep,
-} from "../helpers/mock-provider.js";
+import { SSE_KEEPALIVE_INTERVAL_MS, type TurnEvent } from "../../src/turn-events.js";
+import type { HarnessEvent } from "../../src/harness-table.js";
+import type { FakeTurn } from "../helpers/fake-harness.js";
 import {
   startRealDaemonHarness,
   within,
-  type JsonResponse,
   type RealDaemonHarness,
   type RealSseClient,
 } from "./harness.js";
 
 let daemon: RealDaemonHarness | null = null;
+const gates: Array<() => void> = [];
 
 afterEach(async () => {
   try {
+    // A turn still waiting on a gate must not outlive its test.
+    for (const release of gates.splice(0)) release();
     await daemon?.close();
     daemon = null;
   } finally {
@@ -27,7 +23,7 @@ afterEach(async () => {
   }
 });
 
-function terminalEvents(events: readonly PiMessagesEvent[]): PiMessagesEvent[] {
+function terminalEvents(events: readonly TurnEvent[]): TurnEvent[] {
   return events.filter((event) => event.type === "done" || event.type === "error");
 }
 
@@ -40,87 +36,87 @@ function expectOneTerminalAtWireEnd(stream: RealSseClient): void {
   expect(stream.frames.slice(terminalFrame + 1)).toEqual([]);
 }
 
-async function waitUntilCommandsAreAccepted(
-  harness: RealDaemonHarness,
-  sessionId: string,
-): Promise<JsonResponse> {
+function text(delta: string): HarnessEvent {
+  return { type: "text", block: "a", delta };
+}
+
+function toolCalls(count: number): HarnessEvent[] {
+  return Array.from({ length: count }, (_, index) => [
+    { type: "tool_start", id: `t${index}`, name: "Bash", args: { command: `step ${index}` } },
+    { type: "tool_end", id: `t${index}`, isError: false, output: `ok ${index}` },
+  ] satisfies HarnessEvent[]).flat();
+}
+
+/** A gate file the scripted harness waits on; set before the daemon starts. */
+let gatePath = "";
+function gated(turn: FakeTurn): FakeTurn {
+  return { ...turn, gate: gatePath };
+}
+
+async function startGated(turns: (gate: (turn: FakeTurn) => FakeTurn) => FakeTurn[]): Promise<{ release(): void }> {
+  // The gate path lives in the fake harness's own directory, so it is known
+  // only after the harness exists; script the turns once it is.
+  daemon = await startRealDaemonHarness({ turns: [] });
+  const gate = daemon.harness.gate("hold");
+  gatePath = gate.path;
+  daemon.harness.setTurns(turns(gated));
+  gates.push(gate.release);
+  return gate;
+}
+
+/** Start a turn, retrying while the conversation is still releasing its busy gate. */
+async function startWhenFree(harness: RealDaemonHarness, sessionId: string, prompt: string): Promise<RealSseClient> {
   return within((async () => {
     for (;;) {
-      const response = await harness.request(
-        "GET",
-        `/api/ghosts/${harness.ghostName}/sessions/${encodeURIComponent(`pi:${sessionId}`)}/commands`,
-      );
-      if (response.status === 200) return response;
-      expect(response.status).toBe(409);
-      await setImmediate();
+      const stream = await harness.startTurn(sessionId, prompt);
+      if (stream.status !== 409) return stream;
+      await stream.completion;
+      await new Promise((resolve) => setTimeout(resolve, 10));
     }
   })(), "the disconnected conversation to release its busy gate");
 }
 
-function browserStep(barrier?: ReturnType<typeof createMockProviderBarrier>): MockStep {
-  return {
-    kind: "tool",
-    name: "ghost_browser",
-    args: { action: "tabs" },
-    ...(barrier ? { barrier } : {}),
-  };
-}
-
 describe("real ghostd streaming lifecycle", () => {
-  it("streams a dequeued steering message and exactly one terminal after a tool-heavy turn", async () => {
-    const dequeueBoundary = createMockProviderBarrier();
-    daemon = await startRealDaemonHarness({
-      script: [
-        browserStep(),
-        browserStep(),
-        browserStep(),
-        browserStep(dequeueBoundary),
-        browserStep(),
-        browserStep(),
-        browserStep(),
-        browserStep(),
-        { kind: "text", text: "The steered tool-heavy turn is complete." },
-      ],
-    });
+  it("runs a steer queued during a tool-heavy pass as a follow-up, with exactly one terminal", async () => {
+    const pass = await startGated((gate) => [
+      gate({ events: [...toolCalls(8), text("The tool-heavy pass is complete.")] }),
+      { events: [text("Kept it concise.")] },
+    ]);
 
-    const stream = await daemon.startTurn("conv-steering", "Run the long integration task.");
+    const stream = await daemon!.startTurn("conv-steering", "Run the long integration task.");
     expect(stream.status).toBe(200);
     expect(stream.headers["content-type"]).toContain("text/event-stream");
     await stream.waitForEvent("start");
-    await within(dequeueBoundary.waitForArrivals(), "the held provider step");
+    await daemon!.waitForLaunches(1);
 
     const steeringText = "Keep the remaining tool work concise.";
-    const queued = await daemon.request<{
-      streaming: boolean;
-      steering: string[];
-    }>(
+    const queued = await daemon!.request<{ streaming: boolean; count: number; followUp: string[] }>(
       "POST",
-      "/api/ghosts/casper/sessions/pi%3Aconv-steering/queue",
+      "/api/ghosts/casper/sessions/conv-steering/queue",
       { mode: "steer", text: steeringText },
     );
     expect(queued.status).toBe(200);
-    expect(queued.body).toMatchObject({ streaming: true, steering: [steeringText] });
+    expect(queued.body).toEqual({ streaming: true, count: 1, followUp: [steeringText] });
 
-    dequeueBoundary.release();
+    pass.release();
     await within(stream.completion, "the steered SSE stream to reach EOF");
 
     const ownerIndex = stream.events.findIndex((event) => event.type === "owner_message");
     expect(stream.events[ownerIndex]).toEqual({ type: "owner_message", text: steeringText });
-    expect(stream.events.slice(0, ownerIndex).filter((event) =>
-      event.type === "tool_execution_end").length).toBeGreaterThanOrEqual(4);
-    expect(stream.events.slice(ownerIndex + 1).some((event) =>
-      event.type === "toolcall_start" || event.type === "text_start")).toBe(true);
-    expect(stream.events.filter((event) => event.type === "tool_execution_end")).toHaveLength(8);
+    expect(stream.events.slice(0, ownerIndex).filter((event) => event.type === "tool_execution_end")).toHaveLength(8);
+    expect(stream.events.slice(ownerIndex + 1).some((event) => event.type === "text_start")).toBe(true);
+    expect(daemon!.harness.calls().map((call) => [call.prompt, call.resume])).toEqual([
+      ["Run the long integration task.", false],
+      [steeringText, true],
+    ]);
     expect(terminalEvents(stream.events)).toEqual([
       expect.objectContaining({ type: "done", reason: "stop" }),
     ]);
     expectOneTerminalAtWireEnd(stream);
   });
 
-  it("turns a real runtime completion with its terminal callback suppressed into an SSE error", async () => {
-    daemon = await startRealDaemonHarness({
-      script: [{ kind: "text", text: "The real runtime completed." }],
-    });
+  it("turns a completion with its terminal event suppressed into an SSE error", async () => {
+    daemon = await startRealDaemonHarness({ turns: [{ events: [text("The harness completed.")] }] });
     const originalAdmitTurn = daemon.host.admitTurn.bind(daemon.host);
     daemon.host.admitTurn = async (ghostName, options) => {
       const admission = await originalAdmitTurn(ghostName, options);
@@ -140,7 +136,7 @@ describe("real ghostd streaming lifecycle", () => {
     const stream = await daemon.startTurn("conv-missing-terminal", "Complete normally.");
     await within(stream.completion, "the missing-terminal SSE stream to reach EOF");
 
-    expect(daemon.provider.requests).toHaveLength(1);
+    expect(daemon.harness.calls()).toHaveLength(1);
     expect(stream.events.some((event) => event.type === "text_end")).toBe(true);
     expect(terminalEvents(stream.events)).toEqual([
       expect.objectContaining({
@@ -153,43 +149,35 @@ describe("real ghostd streaming lifecycle", () => {
   });
 
   it("releases a conversation after its SSE client disconnects mid-turn", async () => {
-    const heldRequest = createMockProviderBarrier();
-    daemon = await startRealDaemonHarness({
-      script: [
-        { kind: "text", text: "This response will be disconnected.", barrier: heldRequest },
-        { kind: "text", text: "The same conversation accepted another turn." },
-      ],
-      provider: { sequential: true },
-    });
+    await startGated((gate) => [
+      gate({ events: [text("This response will be disconnected.")] }),
+      { events: [text("The same conversation accepted another turn.")] },
+    ]);
 
-    const interrupted = await daemon.startTurn("conv-disconnect", "Hold this turn open.");
+    const interrupted = await daemon!.startTurn("conv-disconnect", "Hold this turn open.");
     await interrupted.waitForEvent("start");
-    await within(heldRequest.waitForArrivals(), "the provider request before disconnect");
+    await daemon!.waitForLaunches(1);
     interrupted.disconnect();
     await expect(within(interrupted.completion, "the client socket to close"))
       .resolves.toEqual({ naturalEnd: false });
-    heldRequest.release();
 
-    expect((await waitUntilCommandsAreAccepted(daemon, "conv-disconnect")).status).toBe(200);
-    const subsequent = await daemon.startTurn("conv-disconnect", "Try the conversation again.");
+    // The gate stays shut: only the abort can have ended the held harness.
+    const subsequent = await startWhenFree(daemon!, "conv-disconnect", "Try the conversation again.");
     await within(subsequent.completion, "the subsequent turn to reach EOF");
     expect(terminalEvents(subsequent.events)).toEqual([
       expect.objectContaining({ type: "done", reason: "stop" }),
     ]);
-    expect(daemon.provider.requests).toHaveLength(2);
+    expect(daemon!.harness.calls()).toHaveLength(2);
     expectOneTerminalAtWireEnd(subsequent);
   });
 
-  it("writes keepalive comments across a long silent provider stretch", async () => {
+  it("writes keepalive comments across a long silent harness stretch", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
-    const silentStretch = createMockProviderBarrier();
-    daemon = await startRealDaemonHarness({
-      script: [{ kind: "text", text: "Silence ended.", barrier: silentStretch }],
-    });
+    const silence = await startGated((gate) => [gate({ events: [text("Silence ended.")] })]);
 
-    const stream = await daemon.startTurn("conv-keepalive", "Wait quietly.");
+    const stream = await daemon!.startTurn("conv-keepalive", "Wait quietly.");
     await stream.waitForEvent("start");
-    await within(silentStretch.waitForArrivals(), "the silent provider stretch");
+    await daemon!.waitForLaunches(1);
     const keepalive = stream.waitForFrame(
       (frame) => frame.raw === ": keepalive",
       "the real keepalive comment",
@@ -197,41 +185,37 @@ describe("real ghostd streaming lifecycle", () => {
     await vi.advanceTimersByTimeAsync(SSE_KEEPALIVE_INTERVAL_MS);
     expect(await keepalive).toEqual({ raw: ": keepalive" });
 
-    silentStretch.release();
+    silence.release();
     await within(stream.completion, "the keepalive stream to reach EOF");
     expectOneTerminalAtWireEnd(stream);
   });
 
   it("streams two conversations of the same ghost without a ghost-wide busy gate", async () => {
-    const bothAtProvider = createMockProviderBarrier();
-    daemon = await startRealDaemonHarness({
-      script: [{ kind: "text", text: "Concurrent answer.", barrier: bothAtProvider }],
-    });
+    const both = await startGated((gate) => [gate({ events: [text("Concurrent answer.")] })]);
 
-    const first = await daemon.startTurn("conv-a", "First conversation.");
+    const first = await daemon!.startTurn("conv-a", "First conversation.");
     await first.waitForEvent("start");
-    await within(bothAtProvider.waitForArrivals(1), "the first conversation at the provider");
+    await daemon!.waitForLaunches(1);
 
-    const second = await daemon.startTurn("conv-b", "Second conversation.");
+    const second = await daemon!.startTurn("conv-b", "Second conversation.");
     await second.waitForEvent("start");
-    await within(bothAtProvider.waitForArrivals(2), "both conversations at the provider");
+    await daemon!.waitForLaunches(2);
 
-    bothAtProvider.release();
+    both.release();
     await Promise.all([
       within(first.completion, "the first concurrent stream to reach EOF"),
       within(second.completion, "the second concurrent stream to reach EOF"),
     ]);
 
-    expect(terminalEvents(first.events)).toEqual([
-      expect.objectContaining({ type: "done", reason: "stop" }),
+    for (const stream of [first, second]) {
+      expect(terminalEvents(stream.events)).toEqual([
+        expect.objectContaining({ type: "done", reason: "stop" }),
+      ]);
+      expectOneTerminalAtWireEnd(stream);
+    }
+    expect(daemon!.harness.calls().map((call) => [call.session, call.prompt]).sort()).toEqual([
+      ["conv-a", "First conversation."],
+      ["conv-b", "Second conversation."],
     ]);
-    expect(terminalEvents(second.events)).toEqual([
-      expect.objectContaining({ type: "done", reason: "stop" }),
-    ]);
-    expectOneTerminalAtWireEnd(first);
-    expectOneTerminalAtWireEnd(second);
-    const providerMessages = daemon.provider.requests.map((request) => JSON.stringify(request.messages));
-    expect(providerMessages.some((messages) => messages.includes("First conversation."))).toBe(true);
-    expect(providerMessages.some((messages) => messages.includes("Second conversation."))).toBe(true);
   });
 });

@@ -3,7 +3,7 @@ import QtTest
 import "../qml/components"
 import "../qml/services"
 
-// The copy glyph, the edit pencil and the trail count are controls, not words.
+// The copy glyph and the trail count are controls, not words.
 // They used to be placed on the reply's final text line from a hidden
 // TextEdit's end cursor, which cannot agree with a markdown block that owns its
 // own layout — so they landed on top of the text. They get a row of their own
@@ -46,7 +46,6 @@ TestCase {
         activities: tc.fourCalls
         failure: ""
         busy: false
-        sourceEntryId: "e1"
         rowIndex: 0
     }
 
@@ -59,7 +58,6 @@ TestCase {
         activities: []
         failure: ""
         busy: false
-        sourceEntryId: "e1"
         rowIndex: 1
     }
 
@@ -155,8 +153,7 @@ TestCase {
     }
 
     function test_aUserPromptDoesNotReserveABlankLineForHoverActions(): void {
-        // The edit pencil is hover-only. A row of its own inside the capsule
-        // is the empty band under a one-line prompt.
+        // A prompt has no actions, so its capsule holds only its words.
         prompt.body = "why did you reply 4 times";
         wait(120);
         waitForRendering(prompt);
@@ -191,23 +188,10 @@ TestCase {
         prompt.body = "why did you reply 4 times";
     }
 
-    function test_userActionsStillClearThePrompt(): void {
+    function test_aPromptHasNoActions(): void {
         prompt.body = "why did you reply 4 times";
         wait(120);
-        waitForRendering(prompt);
-        const row = findChild(prompt, "messageActions");
-        const tail = findChild(prompt, "replyTail");
-        verify(row !== null && tail !== null);
-        const at = prompt.mapFromItem(row, 0, 0);
-        const rect = { top: at.y, bottom: at.y + row.height,
-            left: at.x, right: at.x + row.width };
-        const textAt = prompt.mapFromItem(tail, 0, 0);
-        const block = { top: textAt.y, bottom: textAt.y + tail.height,
-            left: textAt.x, right: textAt.x + tail.width };
-        const overlaps = rect.top < block.bottom && rect.bottom > block.top
-            && rect.left < block.right && rect.right > block.left;
-        verify(!overlaps, "user actions overlap the prompt: row "
-            + rect.left + "-" + rect.right + " vs text "
-            + block.left + "-" + block.right);
+        verify(!prompt.hasActions);
+        verify(!findChild(prompt, "messageActions").visible);
     }
 }

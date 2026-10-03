@@ -8,12 +8,10 @@ requires the exact matching runtime version.
 Bun-target bundles under `/usr/lib/ghost/runtime`. The package depends on
 system Bun 1.3.14 or newer at runtime; building and checking the current
 toolchain requires Bun 1.4.0 or newer. It installs no source or `node_modules`
-tree. Ghost, pi, provider, and MCP application code plus required static assets
-remain packaged for offline use.
+tree. Ghost's application code and its MCP support remain packaged for
+offline use; the agent CLIs a ghost's turns run on are the owner's own.
 
-`fd` and `ripgrep` are explicit runtime dependencies because Pi's native
-`find` and `grep` tools invoke them. The
-stable `ghost` release-source machinery lives under `packaging/release/`; its
+The stable `ghost` release-source machinery lives under `packaging/release/`; its
 v3 runtime source carries the same bundles, launchers, and exact bundled-license
 closure.
 
@@ -72,10 +70,8 @@ as the desktop user; the upstream installer then owns its files and updates,
 and Ghost packages none of them. Many are launched through `npx`, which the
 optional `npm` package provides.
 
-Open a new pi session after installing skills. Ghost uses pi's native parser to
-snapshot every valid skill visible under `~/.agents/skills/` and
-`~/.pi/agent/skills/`, following symlinks in those standard machine roots.
-There is no hardcoded skill-name allowlist or integration-specific package path.
+Machine skills are whatever each agent CLI discovers on its own; a ghost's own
+skills live in its home and are linked into each conversation directory.
 
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost-runtime` package uses the

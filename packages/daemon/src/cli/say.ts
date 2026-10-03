@@ -60,8 +60,8 @@ async function turnConversationId(
 ): Promise<string> {
   if (startNew) return newConversationId();
   const sessions = await listSessions(ctx.client, name);
-  if (requestedSession) return resolveSessionPrefix(sessions, requestedSession).conversationId;
-  return latestSession(sessions)?.conversationId ?? newConversationId();
+  if (requestedSession) return resolveSessionPrefix(sessions, requestedSession).id;
+  return latestSession(sessions)?.id ?? newConversationId();
 }
 
 export async function sayCommand(
@@ -94,7 +94,7 @@ export async function sayCommand(
       // A follow-up to an idle conversation is its next turn: this is how a
       // background command wakes the ghost that started it.
       if (!followUp || !(error instanceof CliError) || error.code !== "session_not_streaming") throw error;
-      idleFollowUp = session.conversationId;
+      idleFollowUp = session.id;
     }
   }
   const conversationId = idleFollowUp

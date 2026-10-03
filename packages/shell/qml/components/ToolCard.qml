@@ -30,15 +30,7 @@ Rectangle {
         root.call(), root.completed, root.failed, root.expanded)
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticInput: root.presentation.diagnosticInput
-    readonly property var askBranch: root.call().askBranch || null
     readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
-
-    // A question the ghost is still holding, or one that closed without an
-    // answer. It is not the same event as "read a file", so it stops wearing
-    // the same amber.
-    readonly property bool askAwaiting: root.presentation.askAwaiting
-    readonly property string askPrompt: root.presentation.askPrompt
-    readonly property string askDetail: root.presentation.askDetail
 
     // Native model-tool paths use the cwd captured when that exact call began.
     // Ghost-owned legacy writers still use the selected ghost home. An older
@@ -51,31 +43,24 @@ Rectangle {
                 root.presentation.fileCwd)) : ""
     readonly property bool openable: Workbench.canOpen(root.workbenchPath)
 
-    /** Rose, the failure temperature, rather than the ordinary amber. */
-    readonly property bool cool: root.failed || root.askAwaiting
-
     // #fde68a at 90% — the old card's amber-100 label. On paper that wash is
     // unreadable, so light mode keeps the amber fills and takes a plain ink.
-    // An unanswered question takes the rose ink instead, but only in dark mode
-    // and only for the ask: rose at this weight is thin on paper, and tinting
-    // every failed card's words would make the ordinary retry shout.
-    readonly property color labelColor: {
-        if (Theme.light) return Theme.foregroundBright;
-        return root.askAwaiting ? Theme.ghostRose : Qt.rgba(0.992, 0.902, 0.541, 0.9);
-    }
+    readonly property color labelColor: Theme.light
+        ? Theme.foregroundBright : Qt.rgba(0.992, 0.902, 0.541, 0.9)
     readonly property color detailColor: Theme.light ? Theme.foreground : Theme.foregroundDim
-    readonly property color glyphTint: root.cool ? Theme.ghostRose : Theme.ghostAmberBright
+    // Rose, the failure temperature, rather than the ordinary amber.
+    readonly property color glyphTint: root.failed ? Theme.ghostRose : Theme.ghostAmberBright
 
     // 16 glyph + the trace Row's own spacing: rows under the trace line up
     // under its words.
     readonly property real indent: 16 + Theme.gap / 2
 
-    visible: root.trace !== "" || root.askBranch !== null
+    visible: root.trace !== ""
     implicitHeight: visible ? toolContent.implicitHeight + 12 : 0
     radius: Theme.bubbleRadiusSmall
     color: cardHover.containsMouse ? Theme.amber(0.08) : Theme.amber(0.05)
     border.width: 1
-    border.color: root.cool ? Theme.rose(0.35) : Theme.amber(0.10)
+    border.color: root.failed ? Theme.rose(0.35) : Theme.amber(0.10)
 
     Behavior on color {
         enabled: !Theme.reducedMotion
@@ -150,37 +135,6 @@ Rectangle {
             }
         }
 
-        // The question, quoted under its own rule. It sits on the collapsed
-        // card rather than behind the expand because it is the only thing here
-        // a reader scrolling back has actually lost: the trace says how the
-        // question ended, and this says what was asked. The rule is the
-        // quotation mark — real quote glyphs collide with a question that
-        // already contains a path or a phrase in quotes.
-        Row {
-            visible: root.askPrompt !== ""
-            x: root.indent
-            width: parent.width - x
-            spacing: Theme.gap / 2
-
-            Rectangle {
-                width: 2
-                height: askPromptText.implicitHeight
-                radius: 1
-                color: root.askAwaiting ? Theme.rose(0.5) : Theme.amber(0.4)
-            }
-
-            Text {
-                id: askPromptText
-                width: parent.width - x
-                text: root.askPrompt
-                color: Theme.light ? Theme.foreground : Theme.foregroundBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-                wrapMode: root.expanded ? Text.Wrap : Text.NoWrap
-                elide: root.expanded ? Text.ElideNone : Text.ElideRight
-            }
-        }
-
         // Open-the-file affordance, indented under the trace line rather than
         // beside it: the trace is a full-width elided line, so a sibling in
         // that Row would be the thing that gets elided away.
@@ -236,18 +190,6 @@ Rectangle {
             wrapMode: Text.Wrap
         }
 
-        // Carries its own labels — one line per question and per option set —
-        // so a multi-part ask reads as a list instead of one wrapped sentence.
-        Text {
-            visible: root.expanded && root.askDetail !== ""
-            width: parent.width
-            text: root.askDetail
-            color: root.detailColor
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            wrapMode: Text.Wrap
-        }
-
         Text {
             visible: root.expanded && root.call().name !== undefined && root.call().name !== ""
             width: parent.width
@@ -266,52 +208,6 @@ Rectangle {
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
             wrapMode: Text.Wrap
-        }
-
-        // A chip, not a word: this is the one thing on the card that acts, and
-        // as bare text it read as a stray label rather than something to press.
-        // It borrows the file chip's shape so the card has one affordance
-        // vocabulary, and stays amber even on an unanswered question — rose
-        // here would warn against the very thing it is offering.
-        Rectangle {
-            id: askRow
-
-            visible: root.call().name === "ask" && root.askBranch !== null
-            x: root.indent
-            width: Math.min(parent.width - x, askLabel.implicitWidth + Theme.gap * 1.5)
-            height: visible ? askLabel.implicitHeight + 6 : 0
-            radius: Theme.bubbleRadiusSmall
-            color: askArea.containsMouse ? Theme.amber(0.16) : Theme.amber(0.08)
-            border.width: 1
-            border.color: askArea.containsMouse ? Theme.amber(0.35) : Theme.amber(0.18)
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
-            }
-
-            Text {
-                id: askLabel
-                anchors.centerIn: parent
-                text: root.presentation.askAction
-                color: Theme.ghostAmber
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSmall
-            }
-
-            // Smaller than cardHover and declared after it, so pressing this
-            // answers the question instead of toggling the diagnostics.
-            MouseArea {
-                id: askArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: Ghostd.reanswerHistoricalAsk(root.askBranch.resultEntryId || "")
-            }
-
-            // Re-answering commits a sibling in this conversation (Ghost's
-            // two-phase ask tree, not the branch route); the shell offers no
-            // way to step between those siblings because the daemon has none.
         }
     }
 }

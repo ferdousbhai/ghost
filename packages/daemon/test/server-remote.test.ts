@@ -34,7 +34,7 @@ async function serve(
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
   const homeOperations = new HomeOperationCoordinator(temp.registry);
-  host = new SessionHost({ registry: temp.registry, homeOperations, ownerHome: temp.ownerHome, offline: true });
+  host = new SessionHost({ registry: temp.registry, homeOperations, ownerHome: temp.ownerHome });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
@@ -158,17 +158,6 @@ describe("tailnet identity", () => {
       expect(response.status).toBe(403);
       expect(await response.json()).toMatchObject({ error: { code: "local_only" } });
     }
-  });
-
-  it("keeps local resource paths owner-only even though the route is read-only", async () => {
-    const base = await serve();
-    const response = await fetch(
-      `${base}/api/ghosts/casper/sessions/${encodeURIComponent("pi:resources")}/resources`,
-      { headers: asTailnet("guest@example.com") },
-    );
-
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: { code: "owner_only" } });
   });
 
   it("shows the owner what runs the daemon and refuses a guest the source path", async () => {

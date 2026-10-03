@@ -3,7 +3,7 @@ import { constants } from "node:os";
 import { promisify } from "node:util";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
 import { readHarnessReport } from "../harnesses.js";
-import { classifyLimitMessage } from "../pi-messages.js";
+import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
@@ -82,8 +82,8 @@ const GHOST_MCP_CONFIG = JSON.stringify({ mcpServers: { ghost: { command: "ghost
 
 /**
  * The harness's arguments plus `ghost mcp serve`, for the harnesses whose way
- * to load an MCP server is known, so a run can ask the owner and use the
- * ghost's browser, screen, and desktop. Left alone when the run already
+ * to load an MCP server is known, so a run can use the ghost's browser and
+ * desktop. Left alone when the run already
  * names an MCP config, or (claude) when a `--` would make the flags text.
  */
 export function withGhostTools(id: string, args: readonly string[]): string[] {

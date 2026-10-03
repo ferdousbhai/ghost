@@ -27,9 +27,8 @@ function beforePromptEvent(overrides: Partial<LocalHookEvent<GhostBeforePromptEv
     ghost_name: "casper",
     ghost_home: process.cwd(),
     cwd: process.cwd(),
-    runtime: "pi",
     conversation_id: "session-1",
-    conversation_runtime: "pi",
+    harness: "claude",
     ...overrides,
   };
 }
@@ -46,9 +45,8 @@ function event(overrides: Partial<LocalHookEvent<GhostSessionStopEvent>> = {}): 
     ghost_name: "casper",
     ghost_home: process.cwd(),
     cwd: process.cwd(),
-    runtime: "pi",
     conversation_id: "session-1",
-    conversation_runtime: "pi",
+    harness: "claude",
     ...overrides,
   };
 }

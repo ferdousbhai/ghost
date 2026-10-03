@@ -2,7 +2,6 @@ import { isAbsolute, join, resolve } from "node:path";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
-import { GhostMcpManager } from "./mcp-manager.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   homeOperationsFor,
@@ -34,15 +33,6 @@ export interface McpCatalogSkipped {
 export interface McpCatalogSnapshot {
   servers: McpServerView[];
   skipped: McpCatalogSkipped[];
-}
-
-export interface McpConnectionTest {
-  name: string;
-  ok: boolean;
-  status: "connected" | "failed";
-  toolCount: number;
-  /** Deliberately generic: transport errors can echo secret-bearing config. */
-  message: string;
 }
 
 export interface McpCatalogOptions {
@@ -456,52 +446,5 @@ export class McpCatalog {
       translateWriterError(error, name);
     }
     return this.listLeased(ghostName);
-  }
-
-  /**
-   * Probe one ghost-owned server in an isolated manager. GET never calls
-   * this; it is an explicit POST action and never opens an AgentSession.
-   */
-  async test(ghostName: string, name: string): Promise<McpConnectionTest> {
-    return this.withHomeLease(ghostName, () => this.testLeased(ghostName, name));
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
-  async testLeased(ghostName: string, name: string): Promise<McpConnectionTest> {
-    const home = this.registry.get(ghostName).dir;
-    {
-      const server = (await this.effective(ghostName)).configured
-        .find((candidate) => candidate.name === name);
-      if (!server) {
-        throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-      }
-      validateMutation(name, server.config);
-      const manager = new GhostMcpManager({
-        cwd: home,
-        logger: this.logger.child({ ghost: ghostName }),
-      });
-      try {
-        const expanded = expandMcpServerConfig(server.config as MCPServerConfig);
-        const result = await manager.connectServers({ [name]: normalizeMcpStdioCwd(expanded, home) });
-        const connected = result.connectedServers.includes(name);
-        return {
-          name,
-          ok: connected,
-          status: connected ? "connected" : "failed",
-          toolCount: manager.getTools().filter((tool) => tool.mcpServerName === name).length,
-          message: connected ? "Connection succeeded." : "Connection failed; check the server configuration.",
-        };
-      } catch {
-        return {
-          name,
-          ok: false,
-          status: "failed",
-          toolCount: 0,
-          message: "Connection failed; check the server configuration.",
-        };
-      } finally {
-        await manager.disconnectAll().catch(() => {});
-      }
-    }
   }
 }

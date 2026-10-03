@@ -28,18 +28,18 @@ Item {
         Ghostd.turnStates = ({});
         Ghostd.liveConversationKeys = [];
         Ghostd.activeGhost = "unicode";
-        Ghostd.currentSessionId = "pi:split";
-        Ghostd.sessionIds = ({ unicode: "pi:split" });
-        root.state = Ghostd.ensureTurnState("unicode", "pi:split", "split", "pi");
-        Ghostd.showTurnState("unicode", "pi:split");
+        Ghostd.currentSessionId = "split";
+        Ghostd.sessionIds = ({ unicode: "split" });
+        root.state = Ghostd.ensureTurnState("unicode", "split");
+        Ghostd.showTurnState("unicode", "split");
         Ghostd.beginTurnFor(root.state);
         Ghostd.appendTurnRow(root.state, {
             role: "user", text: "stream unicode", toolActivity: [],
-            error: "", pending: false, entryId: ""
+            error: "", pending: false
         });
         Ghostd.appendTurnRow(root.state, {
             role: "assistant", text: "", toolActivity: [],
-            error: "", pending: true, entryId: ""
+            error: "", pending: true
         });
         root.state.assistantRow = 1;
 

@@ -1,11 +1,9 @@
 /**
  * The Ghost extension seam.
  *
- * Ghost's built-in extensions are written against this surface and nothing
- * else. It is the deliberately small subset of a pi-style extension API that
- * Ghost supports: tool registration and the one prompt hook that replaces the
- * provider-facing system prompt every turn. The daemon adapts it to whichever
- * runtime hosts the session; the extensions never import a runtime package.
+ * Ghost's built-in tools are written against this surface and nothing else:
+ * tool registration. The daemon serves the collected tools to a conversation's
+ * harness over MCP (`ghost mcp serve`); the extensions import no harness.
  *
  * Parameter schemas are TypeBox JSON Schema documents (`typebox` v1), which
  * every runtime and provider consumes as plain JSON.
@@ -31,7 +29,7 @@ export interface GhostToolModel {
 }
 
 /**
- * What a tool execution or hook can see of its session. `cwd` is the session's
+ * What a tool execution can see of its conversation. `cwd` is the session's
  * current working directory, which for a ghost session is the ghost home
  * unless the model has changed it; `model` is absent when the runtime exposes
  * no model instance for that call. `caller` names who acts — the session id
@@ -64,32 +62,10 @@ export interface GhostToolDefinition<
   ): Promise<GhostToolResult<TDetails>>;
 }
 
-export interface GhostBeforeAgentStartEvent {
-  readonly type: "before_agent_start";
-  /** The user prompt that starts this turn. */
-  readonly prompt: string;
-  /** The system prompt sections assembled so far. */
-  readonly systemPrompt: readonly string[];
-}
-
-export interface GhostBeforeAgentStartResult {
-  /** Replaces the whole system prompt; sections are joined by blank lines. */
-  systemPrompt?: string[];
-}
-
-export type GhostBeforeAgentStartHandler = (
-  event: GhostBeforeAgentStartEvent,
-  ctx: GhostToolContext,
-) => Promise<GhostBeforeAgentStartResult | undefined | void>
-  | GhostBeforeAgentStartResult
-  | undefined
-  | void;
-
 export interface GhostExtensionAPI {
   registerTool<TParams extends TSchema>(
     definition: GhostToolDefinition<TParams>,
   ): void;
-  on(event: "before_agent_start", handler: GhostBeforeAgentStartHandler): void;
 }
 
 export type GhostExtensionFactory = (
@@ -101,18 +77,15 @@ export type AnyGhostToolDefinition = GhostToolDefinition<TSchema, unknown>;
 
 export interface CollectedGhostExtension {
   readonly tools: Map<string, AnyGhostToolDefinition>;
-  readonly beforeAgentStart: GhostBeforeAgentStartHandler[];
 }
 
 /**
- * Run a factory against a recording API. Runtimes and tests use this to obtain
- * the registered tools and hooks without a session.
+ * Run a factory against a recording API to obtain its registered tools.
  */
 export async function collectGhostExtension(
   factory: GhostExtensionFactory,
 ): Promise<CollectedGhostExtension> {
   const tools = new Map<string, AnyGhostToolDefinition>();
-  const beforeAgentStart: GhostBeforeAgentStartHandler[] = [];
   const api: GhostExtensionAPI = {
     registerTool(definition) {
       if (tools.has(definition.name)) {
@@ -120,10 +93,7 @@ export async function collectGhostExtension(
       }
       tools.set(definition.name, definition as AnyGhostToolDefinition);
     },
-    on(_event, handler) {
-      beforeAgentStart.push(handler);
-    },
   };
   await factory(api);
-  return { tools, beforeAgentStart };
+  return { tools };
 }

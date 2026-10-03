@@ -16,18 +16,20 @@ rebuilt. An external component is adopted only when it replaces machinery of
 ours outright, never as a second backend beside it. New surface area (a tool,
 a route, a setting, a background loop) needs a constraint that nothing
 existing can meet, named in this file. The first existing thing is always an
-installed CLI plus a skill: Bash and pi's skill discovery already reach every
-CLI on the machine, so a new built-in tool, route, or sidecar op has to beat
-that pair at something neither can do. What Omarchy ships is free to depend
+installed CLI plus a skill: Bash and the harness's skill discovery already
+reach every CLI on the machine, so a new built-in tool, route, or sidecar op
+has to beat that pair at something neither can do. What Omarchy ships is free to depend
 on; the install budget below is for everything else.
 
 Installed size is part of that budget. A dependency is weighed by what it
 adds to the install, not only by the code it saves, and a second
 implementation of something Ghost already has is paid for twice — once in
-branches, once in bytes. Ghost runs on one runtime, pi, for exactly this
-reason: the alternative harness cost 4,000 lines of adapter plus 460MB of
-bundled binaries to do what a ghost already delegates with `claude -p`
-(see [`docs/concepts.md`](docs/concepts.md)).
+branches, once in bytes. Ghost bundles no agent runtime for exactly this
+reason: a conversation turn is a headless run of an agent CLI the owner
+already has (Omarchy installs a dozen), on the owner's own subscription and
+limits, so Ghost owns the persona, the conversation log, and the choice of
+harness, and no model, loop, or credential (see "Harnesses" below and
+[`docs/concepts.md`](docs/concepts.md)).
 
 When a rule here fights the task, the
 answer is to say so and get the owner's decision, not to add a special case.
@@ -45,7 +47,8 @@ Durable state has three scopes:
   owner's XDG Documents directory, which every ghost reads and writes with its
   runtime's native file and search tools.
 - **External:** browser downloads, screenshots, systemd user timers, and
-  provider credentials stay in the machine facility that owns them.
+  each harness's credentials, settings, and own session store stay in the
+  machine facility that owns them.
 
 The Documents directory is resolved like the screenshot directory:
 `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; never a
@@ -56,15 +59,14 @@ prompt only names the directory.
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.
 
-There is no Ghost plan mode, todo store, or plan/todo API. Runtime native
+There is no Ghost plan mode, todo store, or plan/todo API. Harness native
 planning may exist, but durable owner-visible plans and tasks belong in the
 owner's documents. The one owner-visible view of them is the board:
 `board.md` in the documents directory, `##` headings as columns and list items
 as cards, edited by the owner and every harness with file tools and rendered
 read-only by the HUD, the tailnet viewer, and `ghost board` through
 `GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background work
-is the shell's: Ghost keeps no job table (see "Ask, background work, and
-hooks").
+is the shell's: Ghost keeps no job table (see "Background work and hooks").
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -74,14 +76,10 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ~/ghosts/<name>/
   character.md
   skills/<name>/SKILL.md
-  commands/<name>.md
-  rules/  prompts/
-  AGENTS.md            (CLAUDE.md is read only when AGENTS.md is absent)
-  settings.yml
-  models.json
+  AGENTS.md            (the owner's instructions for this ghost)
+  settings.yml         (`harness: <id>` prefers one harness)
   mcp.json
-  sessions/
-  .pi/
+  sessions/<id>/       (one directory per conversation)
 ```
 
 The directory is the atomic lifecycle unit. Rename and deletion hold a
@@ -99,7 +97,7 @@ The checkout a ghost may edit is the clone the daemon was built from
 machine: one daemon powers them all, so a self-edit powers all of them after a
 build and restart. A packaged install has no checkout. No per-ghost setting
 names one; the checkout's own skills, rules, and MCP never enter a session.
-`settings.yml` names no cwd: every conversation starts in the owner home.
+`settings.yml` names no cwd: every conversation runs in its own directory.
 
 ### Character and notes
 
@@ -112,50 +110,39 @@ the owner a draft and waits for confirmation before replacing it.
 There is no ghost-private memory store. A ghost's notes — owner facts,
 decisions, tasks, and its own reflections — are Markdown files under the
 owner's Documents directory itself, written and
-read with the runtime's native file tools, shared by every ghost and readable
+read with the harness's native file tools, shared by every ghost and readable
 by the owner. Nothing there is indexed or injected at session start.
 
-### Declarative resources
+### Ghost-home resources
 
-Visible ghost-home instructions, skills, rules, Markdown commands/prompts, and
-MCP form an immutable session snapshot. A ghost home carries no executable
-extension code; the only hooks are the owner's `hooks.json` commands. Hidden compatibility roots inside a ghost home are not aliases.
-Machine skills under `~/.agents/skills/` and `~/.pi/agent/skills/` enter at
-lowest precedence, then ghost resources. There is no skill-name allowlist and
-no third, per-directory resource root: a conversation's cwd is always the
-owner home, and no project instructions, skills, or MCP are discovered from
-any other tree. A delegated harness run with a project directory as its own
-cwd respects that project's settings. The scanner is
-[`declarative-resources.ts`](packages/daemon/src/declarative-resources.ts).
+`AGENTS.md` in the ghost home is appended to the persona as the owner's
+instructions. `skills/` is linked into each conversation directory as
+`.claude/skills` and `.agents/skills`, where harnesses look for project
+skills; machine skills are whatever each harness discovers itself. `mcp.json`
+rows that are enabled and valid are handed to the harness each turn (see
+"Harnesses"). A ghost home carries no executable extension code; the only
+hooks are the owner's `hooks.json` commands. Nothing is discovered from any
+other tree: a delegated harness run with a project directory as its own cwd
+respects that project's settings.
 
-### Sessions and sidecars
+### Conversations
 
-Conversation public ids are runtime-qualified (`pi:<raw>`); pi is the only
-runtime, and the prefix stays so stored ids keep saying what they are. Raw ids
-remain the runtime resume identity. Transcripts
-are JSONL under `sessions/`. Pins, read timestamps, and crash markers are
-bounded sidecars under `sessions/`. A conversation's own cwd and its per-tool
-cwds are custom entries inside its transcript
-([`session-cwds.ts`](packages/daemon/src/session-cwds.ts)), which pi ignores
-when building context, so a conversation is one file.
-Inspecting commands or resources of a new id does not create a transcript.
-`GET /sessions` omits header-only leftovers and moves idle ones to Trash,
-closing an unhosted leftover first when the daemon still holds it.
-A file is a conversation once a user or assistant message lands, the owner
-names it, or it is a fork (a branch is listed even when rewound to empty).
-Each row carries `preview`, the first user text, so an untitled conversation
-still has a name in the sidebar. The HUD keeps at most one unstarted draft.
-
-Forking copies a Pi conversation before one persisted user entry; it never
-rewinds the source. Deletion moves every Ghost-owned artifact for that public id
-to recoverable Trash. Both use durable markers so an unpublished or partially
-moved artifact stays hidden until recovery completes: a fork stages one
-transcript and publishes it with one rename, and a delete may still move
-several artifacts in a home written before the cwd records moved into the
-transcript. The file naming,
-allowlists, and recovery state machines live beside their focused tests in
-[`session-host.ts`](packages/daemon/src/session-host.ts) and
-[`session-files.ts`](packages/daemon/src/session-files.ts).
+A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
+`[A-Za-z0-9._-]` not starting with `.`; clients mint ids (the HUD `hud-…`,
+the CLI `cli-…`). A leading `pi:`, how ids were written before Ghost had more
+than one harness, is stripped wherever an id is accepted. The directory is
+the harness's working directory and holds Ghost's log, `.conversation.jsonl`
+([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
+object per line — the conversation header, owner and follow-up and hook
+messages, the assistant's text and tool calls (a failed call marked
+`failed`, a failed turn carrying `error`), the owner's `!` commands, title
+records, and `harness` records naming the harness that took over and the
+session id it reported. A torn last line is skipped. The log is the history
+every client reads; each harness's own transcript is its resume state and is
+not read back. A conversation is listed once a message lands or the owner
+names it; each row carries `preview`, the first owner text. Pins and read
+timestamps are bounded sidecars beside the directories. Deletion moves the
+directory to recoverable Trash in one rename; there is no fork.
 
 ### Machine-owned artifacts
 
@@ -167,11 +154,11 @@ allowlists, and recovery state machines live beside their focused tests in
   `ghost-timer-v1-<name-length>-<ghost>-<slug>`. Ghost prompts author persistent
   units; rename/delete retire units owned by that prefix. See
   [`schedules.ts`](packages/daemon/src/schedules.ts).
-- Provider credentials live in pi's own file-backed store, `<ghost>/.pi/auth.json`
-  (mode 0600), written and refreshed by pi's login flows. A custom provider's
-  `apiKey` and an MCP server's headers or env are literal values in the ghost's
-  private `models.json` and `mcp.json`. Ghost keeps no keyring, no account
-  allow-list, and no secret references.
+- Harness credentials are the harness's own, signed in by the owner with that
+  harness; a turn spends the account Omarchy marks active for claude, codex,
+  and grok (`omarchy-agent-account-home`). An MCP server's headers or env are
+  literal values in the ghost's private `mcp.json`. Ghost keeps no keyring, no
+  account allow-list, and no secret references.
 - Finished artifacts go to the destination the owner requested, defaulting to
   the owner's Documents directory when none was named. Ghost keeps no index of
   it.
@@ -184,9 +171,9 @@ ghost home directory, which moves as one unit.
 | State | Daemon restart | Ghost rename | Ghost delete | Rebuild + restart | Snapper rollback of `/` | Package reinstall |
 | --- | --- | --- | --- | --- | --- | --- |
 | `character.md` | survives | moves with the home; the character seed is rewritten to the new name | to Trash with the home | unchanged | unchanged | preserved |
-| Conversations and sidecars under `sessions/` | survives; the JSONL is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| `.pi/` derived state | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
-| `settings.yml`, `models.json`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
+| Conversations and sidecars under `sessions/` | survives; the log is the durable history | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
+| Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | not removed | unchanged | unchanged | preserved |
+| `settings.yml`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
 | Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
@@ -210,104 +197,86 @@ backup: Trash and snapper are undo, not retention.
 
 ## Runtime contract
 
-The session receives the Ghost character and the stable policy sections, whose
-authoritative list and per-section size ceilings are
-[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two of
-them carry contract the rest of this file relies on: the other-harnesses policy
-pins the ghost to the owner home, runs each handoff with the project directory
-as the harness's own cwd so the headless harness respects that project's
-settings, launches each handoff through `ghost delegate`, which refuses a harness
-without room, and ends a limit in a handoff note in the owner's documents; the
-owner-context policy names the Documents directory in one sentence and nothing
-else about it. Owner documents are read only when relevant, with the runtime's
-own file and search tools, never injected automatically at session start.
+Every turn's system prompt is the Ghost character and the stable policy
+sections, whose authoritative list and per-section size ceilings are
+[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts), then the
+ghost home's `AGENTS.md`. Two sections carry contract the rest of this file
+relies on: the other-harnesses policy runs each handoff with the project
+directory as the harness's own cwd so the headless harness respects that
+project's settings, launches each handoff through `ghost delegate`, which
+refuses a harness without room, and ends a limit in a handoff note in the
+owner's documents; the owner-context policy names the Documents directory in
+one sentence and nothing else about it. Owner documents are read only when
+relevant, with the harness's own file and search tools, never injected
+automatically. The prompt is rendered before every turn, so a character the
+ghost rewrote is who it is on the next one.
 
-The operational cwd is always the owner home. A `!cd` affects only that
-shell invocation and never moves the conversation. Ghost home
-remains a separately named private resource root.
-Prompt indexes are session-start snapshots; current data is read through the
-owning tool when needed.
+### Harnesses
 
-### Pi
+A turn is one headless run of an agent CLI, a row of
+[`harness-table.ts`](packages/daemon/src/harness-table.ts): how to launch it
+non-interactively with permissions pre-approved, how to resume, how it takes
+MCP servers, and a parser from its JSON output to text, thinking, tool
+start/end, session, and error events. Rows exist for claude, codex, grok,
+copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
+are tested against output each CLI really printed. That table is the one
+per-harness adapter, and a row is launch flags plus a parser, never a chat
+loop. Everything else — model, auth, tools, permissions, compaction, retries —
+is the harness's own, configured by the owner exactly as when they run it.
 
-The pinned pi dependency has one Ghost patch, making two changes across four
-files (`agent-session.js`, `extensions/loader.{js,d.ts}`, and the consequential
-call-site edits in `resource-loader.js`). Extension loading:
-file-loaded executable extensions return an error, while inline factories keep
-pi's native implementation; this enforces the resource boundary above and
-removes Jiti/Babel and its retained terminal entry points from the bundle.
-Custom-message turns: a custom message that starts a run from idle records the
-same prompt and tool loadout `prompt()` does, because pi 0.86 keeps the system
-prompt in the transcript and its own idle `triggerTurn` path never writes one,
-so a fresh conversation opened by `/skill:name` or a stop-hook continuation
-reached the provider with no system prompt. Drop that hunk once upstream fixes
-it. Revalidate the patch when upgrading pi; it does not change the owner's
-separately installed `pi` CLI.
+The harness runs in the conversation directory with the conversation's
+identity (`GHOST`, `GHOST_SESSION`) in its environment. Ghost writes the
+persona there as `AGENTS.md`, with `CLAUDE.md` and `GEMINI.md` linking to it;
+grok, which reads none of them, gets it as `--rules`. Because the directory is
+the conversation's own, a harness's "continue the most recent session here" is
+the conversation's resume; opencode and muse, whose continue is not
+cwd-scoped, are resumed by the session id they reported. Each turn also
+receives the `ghost` MCP server (`ghost mcp serve -g <ghost> -s <id>`, the
+ghost's browser and desktop tools) and the ghost's enabled `mcp.json` rows,
+`${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
+home, in that harness's own dialect: a `--mcp-config` file, `-c
+mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
+in the conversation directory. A row with an `auth` block is not handed over.
+pi has no MCP client.
 
-Pi sessions use `createAgentSession`, an explicit transcript, Ghost's model
-runtime and credential store, an in-memory settings manager, and an explicit
-resource snapshot. Pi's inherited system prompt, ambient context/config/MCP,
-automatic credential discovery, themes, prompt templates, executable code
-found in the cwd, and native task tool do not enter the session. Ghost keeps Pi's native
-file, search, Bash, steering/follow-up, and branch behavior; Bash is Pi's own
-tool with `GHOST` and `GHOST_SESSION` added to its environment
-(`conversationEnvironment` in
-[`conversation-identity.ts`](packages/daemon/src/conversation-identity.ts)).
-Compaction is
-Pi's trigger with Ghost's answer: when Pi would summarize, Ghost's
-`session_before_compact` handler returns a compaction whose summary is a
-bounded recovery record (owner inputs of the current window, the unconsumed
-tool batch, the prior checkpoint) and no model is called; Pi's retained tail
-is `GHOST_COMPACTION_KEEP_RECENT_TOKENS` in
-[`compaction.ts`](packages/runtime/src/compaction.ts). One checkpoint reminder is steered in before the
-line, `new_context` rolls over on demand with the ghost's own handoff, and
-`history` searches and reads the transcript across windows
-([`context-windows.ts`](packages/runtime/src/context-windows.ts), a port of
-pi-posthorse). Ghost adds
-`ask`, browser,
-desktop (`desktop_look`, `desktop_act`), and MCP tools. Images are pi's read tool: it attaches them
-resized, and tells a model that cannot take one that the image was omitted.
-Ghost adds no second model for pictures. The exact assembly is
-[`SessionHost.create`](packages/daemon/src/session-host.ts) and the seam is
-[`pi-extension-bridge.ts`](packages/daemon/src/pi-extension-bridge.ts).
+Which harness answers is decided per turn
+([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already
+carrying the conversation, then the ghost's `settings.yml` `harness`, then
+Omarchy's default agent, then every other harness Omarchy reports installed
+and eligible (`ghost harnesses`), each only if eligible. A harness that fails
+before producing anything (not signed in, out of quota, not installed) hands
+the prompt to the next; one that fails after answering ends the turn in an
+error. A harness new to a conversation receives the newest
+`HANDOFF_CONTEXT_CHARS` of the log as `<conversation-so-far>`; a continuing one
+receives the owner's `!` commands it has not seen as `<owner-commands>`. The
+owner's `!command` runs in the owner home with the conversation's identity
+and is logged; `!!command` is logged but never handed on.
 
-An MCP row's `env`, `headers`, URL credentials, per-server `cwd`, `${VAR}`
-expansion policy, and `auth`/`oauth` blocks remain in its private configuration;
-the ghost's `mcp.json` is the whole configuration and nothing is copied outside
-the ghost home. Configuration support is not connection support: the MCP manager
-refuses to connect a row with an `auth` block; an `oauth` block is kept but runs
-no OAuth flow. For HTTP/SSE rows,
-`headerPolicy: "origin-locked"` prevents automatic redirects on every SDK fetch
-leg, including notification-stream GETs, so private headers cannot follow a
-redirect to another origin. Without that policy the SDK keeps its normal fetch
-behavior.
+A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
+--follow-up`) runs as the next pass in the same stream, a steer included.
+Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
+and nothing else. Images, attachments, and model choice are the harness's.
 
-### Ask, background work, and hooks
+### Background work and hooks
 
-`ask` is owner input, never tool approval. Its model-facing input and output are
-one to four questions, two to four described options per question,
-`multiSelect`, optional previews and metadata, answers keyed by question text,
-and optional per-question annotations. A pending question is pollable and the first
-valid response wins. The daemon-wide timeout is `DEFAULT_ASK_TIMEOUT_SECONDS`
-in [`config.ts`](packages/daemon/src/config.ts); zero waits forever. A model-facing timeout returns an empty answer map and never
-invents an owner selection.
+There is no `ask` tool: a question to the owner is an ordinary reply.
 
 Background work is shell work: a ghost detaches a command
 (`setsid -f`), logs to a file, and ends it with `ghost say --follow-up`, which
-queues into a live turn or, when the conversation is idle, starts its next
+queues after a live turn or, when the conversation is idle, starts its next
 turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
 table, no jobs API, no jobs strip, and cannot cancel what it did not start;
 the policy text is `BACKGROUND_WORK_POLICY` in
-[`machine-skills.ts`](packages/daemon/src/machine-skills.ts).
+[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts).
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. A ghost that wants a specialist runs the owner's installed `pi`,
 `codex`, `omp`, or `claude -p` from its own Bash as `cd <dir> && ghost delegate
 <harness> -- <args>` (`HARNESS_LIMITS_POLICY` in
-[`machine-skills.ts`](packages/daemon/src/machine-skills.ts)); that harness runs
+[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that harness runs
 with the owner's own settings for it — its full tool set, project discovery,
-auth, and session semantics — untouched by the runtime parity list above.
+auth, and session semantics.
 `ghost delegate` runs `omarchy agent usage update --limits-only <harness>`
 (ignoring its failure), then applies `ghost harnesses`: a harness not listed
 exits 5, one listed ineligible exits 6, and neither runs. Otherwise the harness
@@ -318,23 +287,22 @@ its pipes have been idle for 100ms, so a descendant holding them cannot hang
 the call. The verb exits with the harness's status (128 plus the signal number
 when a signal ended it, 127 when it could not start).
 
-A delegated harness can load the conversation's own tools with `ghost mcp
-serve`, a stdio MCP server that proxies `tools/list` and `tools/call` to the
-`/sessions/:id/tools` routes, bound at start to `-s`, then `$GHOST_SESSION`
-(which `ghost delegate` passes through); an id not listed yet, a new
-conversation whose first turn is still running, binds as given. Each serve
-process sends its own `caller` (the MCP client's name plus a per-process id)
-with every call, which keys the desktop lease. Its `ask` reaches the owner in the
-conversation that launched the run, while that conversation has a live turn
-(the HUD learns of a question from the turn stream). `ghost delegate` adds
+A delegated harness can load the ghost's tools with `ghost mcp serve`, the
+same stdio MCP server every conversation turn gets, which proxies
+`tools/list` and `tools/call` to the `/sessions/:id/tools` routes, bound at
+start to `-s`, then `$GHOST_SESSION` (which `ghost delegate` passes through);
+an id not listed yet, a new conversation whose first turn is still running,
+binds as given. Each serve process sends its own `caller` (the MCP client's
+name plus a per-process id) with every call, which keys the desktop lease.
+`ghost delegate` adds
 it to the two harnesses whose flags for it are known, unless the run already
 names an MCP config: `claude` gets `--allowedTools mcp__ghost --mcp-config
 <ghost server>` after its own arguments (both flags take lists, and a `--`
 in them leaves the run alone), `codex` gets `-c mcp_servers.ghost.command`
 and `.args` overrides ahead of them. That table is a deliberate exception to
-the no-per-harness-adapter rule: two flags per harness, no chat adapter, and
-it replaces a recipe every model had to copy exactly. Other harnesses load
-it themselves (an omp `mcp.json` row); pi has no MCP client.
+the harness table's being the one adapter: two flags per harness, and it
+replaces a recipe every model had to copy exactly. Other harnesses load it
+themselves (an omp `mcp.json` row); pi has no MCP client.
 
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the
@@ -355,10 +323,13 @@ reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
 from a checkout, outside the shipped package: attempts, refusals by kind, exit
 outcomes, unmeasured checks, and limits hit, per harness.
 
-Awaited harness hooks are `before_prompt` and `session_stop`. Their JSON
-protocol, failure behavior, and settings are defined in
+Awaited Ghost hooks are `before_prompt` and `session_stop`, run by ghostd
+around each harness pass, above whatever hooks the harness has of its own.
+Their JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
 Ghost sets `stop_hook_active` on later passes and does not impose a host bound.
+`ghostd hook-smol-complete` gives a hook one completion from the ghost's
+preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 A ghost keeps its notes in the
 owner's documents with its file tools during ordinary turns. Ghost runs no
 background memory pass of its own.
@@ -386,7 +357,7 @@ Route parsing, validation, status codes, and reverse states are executable in
 [`server.ts`](packages/daemon/src/server.ts) and
 [`server.test.ts`](packages/daemon/test/server.test.ts). Stable route families:
 
-Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
+Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 
 | Route | Contract |
 |---|---|
@@ -400,26 +371,16 @@ Rows beginning `/sessions/` or `/login/` are relative to `/api/ghosts/:name`.
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|PUT\|DELETE /api/ghosts/:name/model` | Read, set, or unset `roles.chat_model` as `provider/id`; pi validates at turn time. `DELETE` is the way out of a binding (`ghost model --none`). `/model provider/id` in a conversation is the `PUT`, `/model default` the `DELETE`. |
-| `GET /api/ghosts/:name/models` | pi's live `getAvailable` for this ghost's credentials, asked per provider (15 s each) so one failing provider drops out — `502` only when every failure leaves nothing — as `{provider, id, name}` rows limited to ids `PUT` accepts; what the HUD picker and `ghost model --list` choose from. |
-| `GET /api/ghosts/:name/providers` | Login-capable Pi providers and their sign-in state. |
-| `POST /api/ghosts/:name/login` and `GET\|POST /login/:id[/input]` | Start, poll, and answer a provider login. A home rename fails a login still in flight, since pi's credential file is bound to the old path. |
-| `DELETE /api/ghosts/:name/providers/:provider` | Sign out of one provider. |
-| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, enablement, reconnect, and isolated test. A server added through this API starts disabled unless its row says `enabled: true`. |
-| `POST /api/ghosts/:name/greeting` | `{ greeting: string|null, onboarding }`; generation failure is a null greeting, not a 5xx. |
-| `POST /api/ghosts/:name/messages` | One turn as the pi-messages SSE protocol. |
+| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
+| `POST /api/ghosts/:name/greeting` | `{ greeting: null, onboarding }`: whether the character is still the seed. Ghost generates no greeting. |
+| `POST /api/ghosts/:name/messages` | One turn as the turn wire below. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Runtime-qualified conversation summaries with `preview`. Omits header-only leftovers and trashes idle ones. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/commands` | Effective pi slash-command catalog. A missing transcript returns the ghost-level catalog without creating one. |
-| `GET /sessions/:id/resources` | Owner-only immutable skill/MCP admission snapshot, including source, precedence, shadowing, skips. An idle snapshot may be inspected without creating a transcript. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from pi's JSONL. `historyTruncated` marks an unavailable prefix; a message's optional `contentTruncated: true` marks bounded stored text. |
-| `GET\|POST /sessions/:id/ask` | Inspect or resolve one pending owner question. |
-| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the conversation's own tools (`ask` and the Ghost tools, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`: the same definitions pi runs in-session, validated against the same schema; a tool's failure is `isError` with its message. A call emits `tool_execution_start`/`tool_execution_end` (intent "Called by a delegated run") into the conversation's live owner-turn stream (a model turn or an owner `!` command) when one is open; it is not written to the transcript. With no live turn, `ask` fails at once (`isError`), since the owner would never see it. |
-| `GET\|POST /sessions/:id/queue` | Inspect/enqueue steering or follow-up text into a live turn. A steer reaches the model mid-turn; a follow-up runs after the current result as a continuation of the same stream, and each exchange is journalled. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
-| `POST /sessions/:id/branch` | Fork before one persisted Pi user entry. |
-| `POST /sessions/:id/reanswer` | Reopen an historical ask result and resume that branch. |
-| `DELETE /sessions/:id` | Move every Ghost-owned conversation artifact to Trash. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated, historyTruncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
+| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
+| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, count, followUp }`) or enqueue text into a live turn; it runs as the next pass of the same stream, a `steer` included. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
+| `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | Effective owner/guest identity. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
@@ -428,26 +389,26 @@ There are intentionally no `/plan`, `/todo`, `/live`, or `/collab` session
 routes: Ghost ships no live-voice controller and no collaboration host, and
 remote access is the tailnet viewer alone.
 
-### pi-messages wire
+### Turn wire
 
 The event union is the contract; clients must ignore unknown future event
-types. See [`pi-messages.ts`](packages/daemon/src/pi-messages.ts) and its
-conformance tests. A turn emits `start`, ordered text/thinking/tool/command/
-queue/branch events, and exactly one terminal `done` or `error`. A quota
-refusal is a typed `limit_reached` event (harness, kind) sent before that `error`; the classifier is `classifyLimitMessage`. Tool execution
-events include the call id, tool name, captured cwd, and safe summary; private
-reasoning is never restored through the transcript API. A standalone slash
-command emits `start`, `command_output`, then zero-usage `done` and is not
-persisted as an assistant answer.
+types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
+emits `start`, then ordered `text_*`, `thinking_*` (only when the daemon is
+told to include thinking), `tool_execution_*`, `owner_message` (a queued
+follow-up starting its pass), and `session_stop_continued` events, and exactly
+one terminal `done` or `error`. A quota refusal is a typed `limit_reached`
+event (harness, kind) sent before that `error`; the classifier is
+`classifyLimitMessage`. Tool events carry the call id, tool name, the
+conversation directory, and a bounded output summary. An owner `!command` is
+one `bash` tool card, then `done`.
 
 ### `ghost` CLI
 
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
-HUD reaches is a named verb there (ghost list, rename, character, greeting,
-sessions and their title/pin/read/fork/delete/reanswer, ask,
-resources, commands, model, MCP, hooks, remote, status, skill), so a
+HUD reaches is a named verb there (ghost list, rename, character, sessions
+and their title/pin/read/delete, MCP, hooks, remote, status, skill), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
 `self`, `harnesses`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
@@ -479,61 +440,31 @@ refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
 eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
 `-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
-owner's `!` commands in a conversation, carry both variables. Signing in is a provider
-account, not a model, so it is the top-level `ghost login <provider>`,
-`ghost logout <provider>`, and `ghost login --list`: thin clients of the
-`/login`, `/providers`, and account routes above, where the daemon owns the
-whole flow and the CLI holds no secret, only rendering each polled `LoginView`
-and posting the answer the owner types. There are no plan or todo commands.
+owner's `!` commands in a conversation, carry both variables. Signing in is
+the harness's own (`claude`, `codex login`, …); Ghost has no login or model
+commands. There are no plan or todo commands.
 
-## Models and credentials
+## Limits and credentials
 
-`models.json` owns provider policy and roles; pi's
-`.pi/auth.json` owns login credentials. Credential values never enter logs or
-API responses. Inherited provider/auth environment variables
-are scrubbed before Pi runtime construction, process-wide and once. A harness a
-ghost delegates to from Bash (`claude -p`, `codex`, `pi`) inherits that same
-scrubbed environment — Ghost captures no reviewed environment of its own any
-more, so a delegated harness reads its credentials from its own configuration
-exactly as it does when the owner runs it by hand. The implementation and its
-tests in [`env-scrub.ts`](packages/daemon/src/env-scrub.ts) are normative.
+Ghost has no model, provider, or credential of its own: each harness reads its
+sign-in from its own configuration exactly as when the owner runs it by hand,
+and its environment is the daemon's own, unscrubbed. Credential values never
+enter logs or API responses.
 
-Roles are `chat_model` and `smol_model`, one binding each.
-Ghost keeps no fallback chain of its own: retry and model fallback are the
-runtime's, surfaced as `retry_fallback_applied`/`model_fallback` events.
-`chat_model` unset leaves the choice to the
-first declared provider's first model, else Pi's catalog default — Pi's live
-view of what this ghost's own credentials reach. Ghost keeps no model list of
-its own (`GET /models` relays pi's live answer) and no local-runner detection — a local endpoint is an ordinary
-provider entry in `models.json`. A first sign-in binds the chat role from the
-models pi reports as available to that credential right then, preferring one
-that costs nothing so the zero-cost onboarding path cannot start billing;
-dynamically-priced aggregator routers are excluded because a catalogue may list
-them at zero (`bindDefaultChatModelIfUnset`). A role naming a provider Ghost no
-longer has is dropped when `models.json` is read, so a home written before a
-runtime was removed heals instead of failing every turn on a binding nothing
-can honour. Ghost records no model name of its own: a free default is whatever
-pi reports as free at sign-in time, never a constant that can be delisted.
-`smol_model` serves titles, greetings, and command-hook completions. Unset, it
-follows the driver: the chat provider's small tier, then the cheapest usable
-model anywhere. A negative price is pi's dynamic-router sentinel, not a bargain,
-on every cost key. The rule is
-[`resolveSmolModel`](packages/runtime/src/smol.ts). An explicit unusable binding fails loudly rather than silently
-switching models.
-
-Ghosts run unthrottled. Provider, runtime, and context limits surface as typed
-errors and use configured runtime retry/fallback behavior; Ghost adds no turn,
-hosted-session, concurrency, or spend cap. The one deliberate exception is the
+Ghosts run unthrottled. Harness limits surface as typed errors, and the
+harness's own retry and fallback behavior applies; Ghost's one contribution is
+the per-turn order of eligible harnesses above, judged from Omarchy's usage
+records. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
+one deliberate exception is the
 desktop lease (ghost-desktop's [`lease.ts`](https://github.com/ferdousbhai/ghost-desktop/blob/master/src/lease.ts)): there is one
 pointer and one focus, so every `desktop_act` call claims the desktop for its
 caller, and another caller's call fails `busy` naming the holder until the
 holder has been idle 15 s. The lease is a file under
 `$XDG_RUNTIME_DIR/ghost-desktop/`, shared by every `ghost-desktop` process of
 the user, so a ghost and a separately launched MCP client (Claude Code) take
-turns too. A caller is a call's `_meta.caller` — ghostd sends the
-conversation, `ghost mcp serve` its client and process — else the connecting
-client plus that server process. `desktop_look` never claims and reports a
-foreign holder as `heldBy`.
+turns too. A caller is a call's `_meta.caller` — `ghost mcp serve` sends its
+client and process — else the connecting client plus that server process.
+`desktop_look` never claims and reports a foreign holder as `heldBy`.
 
 ## Package boundaries
 
@@ -547,33 +478,13 @@ relay WebSocket protocol, and MCP over stdio with `ghost-desktop`'s PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
 
-`packages/runtime` (`@ghost/runtime`) is the policy both session hosts run:
-this daemon, and hosted SummonGhost, which vendors a packed copy
-(`scripts/pack-ghost-runtime.mjs` there; its `SOURCE.json` names the commit).
-It owns no host I/O, credentials, session loop, or persistence: each module
-takes what it needs from its host as arguments or an adapter, and pi stays the
-executor. It owns persona (character limits, seed detection, first-meeting
-text, system-prompt assembly); declarative resources (types, admission,
-precedence, prompt rendering, explicit skill invocation), with the host
-supplying pi's frontmatter parser and admitted file bytes while the daemon keeps
-its no-symlink scan and budgets; machine-skill roots and the normalization of
-pi's discovery, with the host supplying file access and pi's loader; the skill
-resource view; owner-shell `!`/`!!` parsing; matching an owner pass to persisted
-entries, the host keeping admission and settlement; command-hook admission,
-status, aggregation, and stop continuation, the daemon supplying the process
-runner; MCP config policy and the client lifecycle, only the daemon building
-stdio/HTTP/SSE transports or reading the process environment (an MCP `isError`
-reply is `McpToolCallError.outcome` `"server_error"`, a lost transport
-`"uncertain"`, so a durable host never replays a call that may have run); the
-untrusted-content fence; smol ranking, title, and greeting prompts and output
-acceptance; model routing; the ask broker and tool; compaction settings; and the
-context-window extension, the daemon supplying JSONL history traversal. The
-daemon and extensions take it as a workspace package, and a daemon module over
-it adds only host I/O.
-
-An `ask` tool makes its pi tool batch sequential: earlier calls finish before
-the question opens, later ones wait for its answer, and several questions in one
-response open in order. Other batches keep pi's execution policy.
+`packages/runtime` (`@ghost/runtime`) is portable policy with no host I/O:
+persona (character limits, seed detection, first-meeting text, system-prompt
+assembly), command-hook admission, status, aggregation, and stop
+continuation, MCP config and catalog policy, the browser session policy, and
+the untrusted-content fence. Hosted SummonGhost vendors its own packed copy of
+an earlier version (its `SOURCE.json` names the commit) and owns that copy;
+the modules it alone used left this repository with pi.
 
 The **relay extension** is a separate product in its own repository,
 [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension),
@@ -606,9 +517,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   ghost-home parsing, prompt construction, pure tools, browser/desktop clients,
   and the `extension-api.ts` seam. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
-  authentication, sessions, runtime adapters, models, MCP, hooks, lifecycle,
-  HTTP, and the `ghost`
-  CLI. Bun is the production runtime.
+  authentication, conversations, the harness table, MCP, hooks, lifecycle,
+  HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring `service`
   (the daemon connection and
@@ -630,12 +540,12 @@ not the daemon, protocols, or graphical-session lifecycle.
   `omarchy plugin add` git checkout: the window and the daemon are one product
   and must be the same version, and a second channel cannot hold that lock.
   Desktop toasts belong to the shell service, not stop hooks. Completed turns,
-  terminal failures, and pending questions notify unless their conversation is
+  and terminal failures notify unless their conversation is
   being viewed in the focused chat panel. Cancellation is quiet. Toasts use
-  the conversation title and a reply/error/question excerpt, replace live toasts
+  the conversation title and a reply/error excerpt, replace live toasts
   per ghost and conversation using the notification server’s IDs, and open that
   conversation through a summon payload
-  `{ "ghost": "name", "sessionId": "pi:id", "section": "chat" }`, carried in
+  `{ "ghost": "name", "sessionId": "id", "section": "chat" }`, carried in
   Omarchy’s `omarchy-exec-argv` notification hint.
   It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
@@ -668,11 +578,11 @@ not the daemon, protocols, or graphical-session lifecycle.
   [`build-runtime.sh`](packages/daemon/scripts/build-runtime.sh), so the
   package still ships it. What Ghost relies on is its README's host contract:
   the two tool names, `_meta.caller` in, and `_meta.code` out on a failure.
-  ghostd spawns one per daemon on first use
-  ([`desktop.ts`](packages/extensions/src/extensions/desktop.ts)): unlike an
-  owner's MCP server its tools keep their names and its errors reach the model
-  word for word, because they carry the remedy; its text is fenced as
-  untrusted. No `ghost-desktop` on PATH means no desktop tools.
+  ghostd spawns one per daemon on first use and serves its tools through
+  `ghost mcp serve`
+  ([`desktop.ts`](packages/extensions/src/extensions/desktop.ts)): its errors
+  reach the model word for word, because they carry the remedy; its text is
+  fenced as untrusted. No `ghost-desktop` on PATH means no desktop tools.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
@@ -688,15 +598,16 @@ Protocols implemented by a sidecar have one detailed document:
 - Never start a test daemon against `~/ghosts`, the live port 7717, or the live
   Quickshell bus. Tests use scratch homes and the shell preview's private
   HOME/XDG/dbus/Hyprland.
-- One daemon process owns a session. A conversation rejects conflicting owners;
-  queued steering/follow-ups into its live turn are the explicit exception.
-- Home rename/delete, MCP mutation, model refresh, fork, and conversation
-  deletion use explicit leases and publish only durable state.
+- One daemon process owns a conversation, and one turn runs in it at a time;
+  queued follow-ups into its live turn are the explicit exception.
+- Home rename/delete, MCP mutation, and conversation deletion use explicit
+  leases and publish only durable state.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.
-- Browser/session/process teardown tracks exact captured owners and PIDs. No
-  cleanup may kill by pattern or remove a broad directory.
+- Browser/session/process teardown tracks exact captured owners and PIDs: a
+  turn's harness is the process group ghostd spawned. No cleanup may kill by
+  pattern or remove a broad directory.
 - Logs redact secrets and private payloads. Journal identity fields are `GHOST`
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,

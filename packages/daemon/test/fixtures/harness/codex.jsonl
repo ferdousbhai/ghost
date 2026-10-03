@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"01a100ae-d51b-7942-aa9d-bfbe6c5be6d5"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (/home/owner/.codex/config.toml): `features.suppress_unstable_features_warning` is ignored."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.\n  user (/home/owner/.codex/config.toml): `features.suppress_unstable_features_warning` is ignored."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"ZEPHYR: I’ll run the command now.\n"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/bash -lc 'echo ghost-probe-42'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/bash -lc 'echo ghost-probe-42'","aggregated_output":"ghost-probe-42\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"ZEPHYR: My name is Zephyr."}}
+{"type":"item.completed","item":{"id":"item_5","type":"agent_message","text":"ZEPHYR: The command printed `ghost-probe-42`, and my name is Zephyr."}}
+{"type":"turn.completed","usage":{"input_tokens":54832,"cached_input_tokens":36224,"cache_write_input_tokens":0,"output_tokens":142,"reasoning_output_tokens":48}}

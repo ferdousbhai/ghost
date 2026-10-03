@@ -29,14 +29,14 @@ ${plainRows(commands)}
 
 Common flags:
   -g, --ghost <name>       Select a ghost
-  -s, --session <id>       Select by public/raw id or unique prefix
+  -s, --session <id>       Select by id or unique prefix
       --json               Emit API JSON (streams use one object per line)
   -q, --quiet              Suppress secondary output
   -h, --help               Show command help
   -v, --version            Show the ghost package version
 
-ghostd runs the machine (tokens, remote access, providers, sessions, and native
-worker ownership); ghost talks to a ghost.
+ghostd runs the machine (tokens, remote access, and conversations, each turn a
+headless run of an installed agent CLI); ghost talks to a ghost.
 `;
 }
 

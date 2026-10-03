@@ -1,6 +1,6 @@
 /**
  * The ghost's own `settings.yml`: a plain YAML mapping read from the visible
- * home only. Ghost reads a handful of dotted keys from it; nothing ambient
+ * home only. Ghost reads one key from it, `harness`; nothing ambient
  * (environment overlays, machine-wide files) is consulted.
  */
 import { parse as parseYaml } from "yaml";
@@ -10,9 +10,6 @@ import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from ".
 
 export interface GhostSettings {
   getString(path: string): string | undefined;
-  getStringList(path: string): string[] | undefined;
-  getNumber(path: string): number | undefined;
-  getBoolean(path: string): boolean | undefined;
 }
 
 function ghostSettingsFrom(document: unknown): GhostSettings {
@@ -29,19 +26,6 @@ function ghostSettingsFrom(document: unknown): GhostSettings {
     getString: (path) => {
       const value = get(path);
       return typeof value === "string" ? value : undefined;
-    },
-    getStringList: (path) => {
-      const value = get(path);
-      return Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : undefined;
-    },
-    getNumber: (path) => {
-      const value = get(path);
-      return typeof value === "number" ? value : undefined;
-    },
-    // Only a real YAML boolean counts; "true" as a quoted string does not.
-    getBoolean: (path) => {
-      const value = get(path);
-      return typeof value === "boolean" ? value : undefined;
     },
   };
 }

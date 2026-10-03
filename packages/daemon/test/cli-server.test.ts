@@ -6,11 +6,11 @@ import type { SessionHost } from "../src/session-host.js";
 import { runCli } from "./helpers/cli.js";
 import { startTestDaemon, type TempGhosts } from "./helpers/fixtures.js";
 import { fetchNoReuse } from "./helpers/http-fetch.js";
-import type { MockProvider } from "./helpers/mock-provider.js";
+import type { FakeHarness } from "./helpers/fake-harness.js";
 
 const API_TOKEN = "a".repeat(64);
 let temp: TempGhosts;
-let provider: MockProvider;
+let harness: FakeHarness;
 let host: SessionHost;
 let listening: ListeningServer | null;
 let tokenFile: string;
@@ -21,13 +21,13 @@ beforeEach(async () => {
     ghost: "casper",
     openSession: "conv-1",
   });
-  ({ temp, provider, host, listening, tokenFile, env } = fixture);
+  ({ temp, harness, host, listening, tokenFile, env } = fixture);
 });
 
 afterEach(async () => {
   await listening?.close();
   await host.disposeAll();
-  await provider.close();
+  harness.cleanup();
   temp.cleanup();
 });
 
@@ -56,7 +56,7 @@ describe("ghost CLI against a real daemon server", () => {
     const defaultSessions = await cli(["sessions", "--json"]);
     expect(defaultSessions).toMatchObject({ code: 0 });
     expect(JSON.parse(defaultSessions.stdout).sessions).toEqual([
-      expect.objectContaining({ conversationId: "conv-1" }),
+      expect.objectContaining({ id: "conv-1", harness: "fake" }),
     ]);
   });
 
@@ -64,7 +64,7 @@ describe("ghost CLI against a real daemon server", () => {
     const sessions = await cli(["sessions", "-g", "casper", "--json"]);
     expect(sessions.code).toBe(0);
     expect(JSON.parse(sessions.stdout).sessions).toEqual([
-      expect.objectContaining({ conversationId: "conv-1" }),
+      expect.objectContaining({ id: "conv-1", harness: "fake" }),
     ]);
 
     const status = await cli(["status", "--json"]);
@@ -75,11 +75,6 @@ describe("ghost CLI against a real daemon server", () => {
       version: expect.any(String),
     });
   });
-
-  it("reports no ask", async () => {
-    expect(JSON.parse((await cli(["ask", "-g", "casper", "-s", "conv", "--json"])).stdout)).toEqual({ ask: null });
-  });
-
 
   it("reaches ghost admin and conversation state through named verbs", async () => {
     const shown = await cli(["character", "-g", "casper"]);
@@ -93,8 +88,6 @@ describe("ghost CLI against a real daemon server", () => {
     const read = await cli(["read", "-g", "casper", "-s", "conv", "--json"]);
     expect(read.code).toBe(0);
     expect(JSON.parse(read.stdout)).toMatchObject({ ok: true });
-    expect(JSON.parse((await cli(["resources", "-g", "casper", "-s", "conv", "--json"])).stdout))
-      .toHaveProperty("skills");
     expect(await cli(["remote"])).toMatchObject({ code: 5 });
     expect(await cli(["browser"])).toMatchObject({ code: 0, stdout: "off\n" });
     expect(await cli(["browser", "allow"])).toMatchObject({ code: 2 });

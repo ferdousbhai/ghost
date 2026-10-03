@@ -47,7 +47,7 @@ async function serve(apiToken: string | null = TOKEN): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  host = new SessionHost({ registry: temp.registry, offline: true });
+  host = new SessionHost({ registry: temp.registry });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
