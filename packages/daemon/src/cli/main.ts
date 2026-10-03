@@ -18,6 +18,8 @@ import {
   browserCommand,
   remoteCommand,
   renameCommand,
+  harnessCommand,
+  switchCommand,
 } from "./admin.js";
 import { CliError, DaemonClient, EXIT_CODE, EXIT_CODES } from "./client.js";
 import { DELEGATE_ARGS, delegateCommand } from "./delegate.js";
@@ -60,6 +62,7 @@ const CLI_ARGS: ArgsSpec = {
     "exit-on-first",
     "keep",
     "no-turn",
+    "none",
   ],
   value: ["ghost", "session", "message", "limit", "offset", "q", "harness"],
 };
@@ -240,6 +243,22 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost harnesses --json",
     positionals: [0, 0],
     run: harnessesCommand,
+  },
+  {
+    verb: "harness",
+    usage: "harness [<agent>|--none] [-g <name>] [--json] [-q]",
+    summary: "Show the agents a ghost can run on, or set the one it prefers (--none: automatic).",
+    example: "ghost harness claude",
+    positionals: [0, 1],
+    run: harnessCommand,
+  },
+  {
+    verb: "switch",
+    usage: "switch <agent> [-g <name>] [-s <id>] [--json] [-q]",
+    summary: "Run a conversation's next turn on another agent, handing it the conversation so far.",
+    example: "ghost switch codex",
+    positionals: [1, 1],
+    run: switchCommand,
   },
   {
     verb: "delegate",

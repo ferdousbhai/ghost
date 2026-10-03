@@ -32,8 +32,35 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
-/** The agent CLI the mock claims carried each turn it answers. */
-const MOCK_HARNESS = "claude";
+/**
+ * The agent CLIs the mock pretends are installed, in Omarchy's order; codex
+ * has no room in its usage windows. A turn runs on the conversation's chosen
+ * agent, then the ghost's default, then Omarchy's.
+ */
+const MOCK_HARNESSES = [
+  {
+    id: "claude", eligible: true, reason: null,
+    usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
+      windows: [{ label: "5h", percent: 42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
+  },
+  {
+    id: "codex", eligible: false, reason: "weekly window is full",
+    usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
+      windows: [{ label: "weekly", percent: 100, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
+  },
+  { id: "pi", eligible: true, reason: null, usage: null },
+];
+const OMARCHY_DEFAULT_HARNESS = "claude";
+/** ghost name -> its own default agent; absent means automatic. */
+const ghostDefaultHarness = new Map();
+/** turnKey -> the agent picked for a conversation the mock has not stored yet. */
+const draftHarness = new Map();
+const knownHarness = (id) => MOCK_HARNESSES.some((h) => h.id === id);
+const harnessSnapshot = (name) => ({
+  harnesses: MOCK_HARNESSES,
+  ghostDefault: ghostDefaultHarness.get(name) ?? null,
+  omarchyDefault: OMARCHY_DEFAULT_HARNESS,
+});
 const OWNS_GHOSTS_ROOT = !process.env.GHOSTS_ROOT;
 const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
@@ -430,7 +457,9 @@ function recordTurn(name, id, exchanges) {
     append(s, { role: "user", content: prompt, timestamp: now });
     append(s, { role: "assistant", content: [{ type: "text", text: reply }], timestamp: now });
   }
-  s.harness = MOCK_HARNESS;
+  s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
+    ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
+  draftHarness.delete(turnKey(name, id));
   s.updatedAt = new Date(now).toISOString();
   // Titling after the first turn: derive a title from the prompt.
   if (!s.title) s.title = exchanges[0]?.prompt.slice(0, 40) || "New conversation";
@@ -894,6 +923,7 @@ const mockServer = createServer(async (req, res) => {
     ghosts.splice(ghosts.indexOf(ghost), 1);
     sessionStore.delete(name);
     writtenCharacter.delete(name);
+    ghostDefaultHarness.delete(name);
     mcpStore.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
@@ -916,7 +946,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, writtenCharacter, mcpStore]) {
+    for (const store of [sessionStore, writtenCharacter, mcpStore, ghostDefaultHarness]) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);
@@ -1000,6 +1030,37 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
     await readBody(req).catch(() => ({}));
     return json(res, 200, { greeting: null, onboarding: ONBOARDING.has(name) });
+  }
+  if (parts[3] === "harness" && parts.length === 4 && req.method === "GET") {
+    return json(res, 200, harnessSnapshot(name));
+  }
+  if (parts[3] === "harness" && parts.length === 4 && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const harness = body?.harness;
+    if (harness !== null && !knownHarness(harness)) {
+      return json(res, 400, { error: { message: `no installed agent called ${harness}`, code: "unknown_harness" } });
+    }
+    if (harness === null) ghostDefaultHarness.delete(name);
+    else ghostDefaultHarness.set(name, harness);
+    return json(res, 200, harnessSnapshot(name));
+  }
+  // A conversation's next turn runs on the picked agent; a draft the HUD
+  // minted is not stored yet, so its pick waits for its first turn.
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "harness" && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    if (!knownHarness(body?.harness)) {
+      return json(res, 400, { error: { message: `no installed agent called ${body?.harness}`, code: "unknown_harness" } });
+    }
+    const s = ghostSessions(name).get(conversation);
+    if (s) {
+      s.harness = body.harness;
+      publishConversationUpdated(name, s.id, s.updatedAt);
+    } else {
+      draftHarness.set(turnKey(name, conversation), body.harness);
+    }
+    return json(res, 200, { id: conversation, harness: body.harness });
   }
   if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
     const list = [...ghostSessions(name).values()]

@@ -87,6 +87,26 @@ try {
     "id", "title", "preview", "harness", "createdAt", "updatedAt", "messageCount", "pinned", "unread",
   ]);
 
+  const harnessUrl = `http://127.0.0.1:${port}/api/ghosts/casper/harness`;
+  const putJson = (url, body) => fetch(url, {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+  });
+  const harnessChoice = await (await fetch(harnessUrl)).json();
+  assert.deepEqual(Object.keys(harnessChoice), ["harnesses", "ghostDefault", "omarchyDefault"]);
+  assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "eligible", "reason", "usage"]);
+  assert.ok(harnessChoice.harnesses.some((h) => h.eligible === false && typeof h.reason === "string"));
+  assert.equal(harnessChoice.ghostDefault, null);
+  assert.equal((await (await putJson(harnessUrl, { harness: "pi" })).json()).ghostDefault, "pi");
+  assert.equal((await (await putJson(harnessUrl, { harness: null })).json()).ghostDefault, null);
+  const unknownHarness = await putJson(harnessUrl, { harness: "nope" });
+  assert.equal(unknownHarness.status, 400);
+  assert.equal((await unknownHarness.json()).error.code, "unknown_harness");
+  const sessionHarness = await putJson(
+    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/hud-draft-probe/harness`, { harness: "pi" },
+  );
+  assert.equal(sessionHarness.status, 200);
+  assert.deepEqual(await sessionHarness.json(), { id: "hud-draft-probe", harness: "pi" });
+
   const transcriptResponse = await fetch(
     `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/transcript`,
   );

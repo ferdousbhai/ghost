@@ -21,7 +21,7 @@ export const HARNESS_LIMITS_POLICY = [
     + "to a headless sub-agent run from the project directory, never do it yourself. Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs are yours to run "
     + "from Bash (`claude -p`, `codex`, `pi`, `omp`). Start each handoff in its project directory with "
     + "`cd <dir> && ghost delegate <harness> -- <args>`, so the headless harness respects that project's settings; "
-    + "it refuses a harness without room. `ghost help harnesses` has the handoff note. Never spend a window you were not asked "
+    + "it refuses a harness without room. `ghost help harnesses` has the handoff note and how to change your own agent. Never spend a window you were not asked "
     + "to spend.",
 ].join("\n");
 

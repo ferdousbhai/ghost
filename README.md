@@ -25,6 +25,7 @@ ghost say "What should I focus on today?"
 ghost sessions
 ghost show -s cli-abc
 ghost harnesses
+ghost switch claude
 ```
 
 Start with [docs/getting-started.md](docs/getting-started.md); the mental model

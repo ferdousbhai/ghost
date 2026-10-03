@@ -578,6 +578,31 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, pinned });
   };
 
+  /** `{ harness }`: an agent id, or (for the ghost default) null for automatic. */
+  const readHarnessBody = async (request: IncomingMessage, nullable: boolean): Promise<string | null> => {
+    const { harness } = await readJsonObjectBody(request, maxBodyBytes) as { harness?: unknown };
+    if (typeof harness === "string" && harness !== "") return harness;
+    if (nullable && harness === null) return null;
+    throw new GhostError("invalid_request", nullable ? '"harness" must be an agent id or null.' : '"harness" must be an agent id.', 400);
+  };
+
+  const handleGhostHarness = async (
+    ghostName: string,
+    method: string,
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> => {
+    if (method === "GET") {
+      jsonResponse(response, 200, await options.host.listHarnesses(ghostName));
+      return;
+    }
+    if (method !== "PUT") {
+      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+      return;
+    }
+    jsonResponse(response, 200, await options.host.setGhostHarness(ghostName, await readHarnessBody(request, true)));
+  };
+
   const handleMarkSessionRead = async (
     ghostName: string,
     conversationId: string,
@@ -1186,6 +1211,18 @@ export function createDaemonServer(options: ServerOptions): Server {
           if (method === "GET") return await handleReadCharacter(ghostName, response);
           if (method === "PUT") return await handleWriteCharacter(ghostName, request, response);
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+          return;
+        }
+        if (segments.length === 4 && segments[3] === "harness") {
+          return await handleGhostHarness(ghostName, method, request, response);
+        }
+        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "harness") {
+          if (method !== "PUT") {
+            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+            return;
+          }
+          const conversationId = decodeConversationId(segments[4] ?? "");
+          jsonResponse(response, 200, await options.host.chooseHarness(ghostName, conversationId, await readHarnessBody(request, false) as string));
           return;
         }
         if (segments.length === 4 && segments[3] === "messages") {

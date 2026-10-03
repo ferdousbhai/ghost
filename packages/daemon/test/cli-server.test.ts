@@ -94,6 +94,21 @@ describe("ghost CLI against a real daemon server", () => {
     expect(await cli(["delete", "-g", "casper", "-s", "conv"])).toMatchObject({ code: 2 });
   });
 
+  it("shows and sets the agent a ghost prefers, and switches a conversation", async () => {
+    const shown = await cli(["harness", "-g", "casper"]);
+    expect(shown).toMatchObject({ code: 0 });
+    expect(shown.stdout).toBe("casper runs on automatic\n  fake\n");
+    expect(await cli(["harness", "fake", "-g", "casper", "-q"])).toMatchObject({ code: 0 });
+    expect((await cli(["harness", "-g", "casper"])).stdout).toContain("casper runs on fake");
+    expect(await cli(["harness", "--none", "-g", "casper", "-q"])).toMatchObject({ code: 0 });
+    expect(await cli(["harness", "fake", "--none", "-g", "casper"])).toMatchObject({ code: 2 });
+    expect(await cli(["harness", "nope", "-g", "casper"])).not.toMatchObject({ code: 0 });
+
+    // From a ghost's own shell, the conversation is $GHOST_SESSION.
+    const switched = await cli(["switch", "fake"], { env: { ...env, GHOST: "casper", GHOST_SESSION: "conv-1" } });
+    expect(switched).toMatchObject({ code: 0, stdout: "Conversation conv-1 now runs on fake.\n" });
+  });
+
   it("keeps destructive removal behind --yes", async () => {
     const result = await cli(["rm", "casper"]);
     expect(result.code).toBe(2);

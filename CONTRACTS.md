@@ -241,7 +241,8 @@ pi has no MCP client.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already
-carrying the conversation, then the ghost's `settings.yml` `harness`, then
+carrying the conversation (or the one the owner or ghost switched it to),
+then the ghost's `settings.yml` `harness`, then
 Omarchy's default agent, then every other harness Omarchy reports installed
 and eligible (`ghost harnesses`), each only if eligible. A harness that fails
 before producing anything (not signed in, out of quota, not installed) hands
@@ -374,6 +375,8 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
+| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
+| `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/greeting` | `{ greeting: null, onboarding }`: whether the character is still the seed. Ghost generates no greeting. |
 | `POST /api/ghosts/:name/messages` | One turn as the turn wire below. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
@@ -410,7 +413,9 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches is a named verb there (ghost list, rename, character, sessions
-and their title/pin/read/delete, MCP, hooks, remote, status, skill), so a
+and their title/pin/read/delete, the agent a ghost prefers (`ghost harness`)
+and a conversation runs on (`ghost switch`), MCP, hooks, remote, status,
+skill), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
 `self`, `harnesses`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),

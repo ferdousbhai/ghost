@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { loadGhostSettings } from "../src/ghost-settings.js";
+import { loadGhostSettings, writeGhostSetting } from "../src/ghost-settings.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { MAX_PRIVATE_FILE_BYTES } from "../src/private-file.js";
 
@@ -49,5 +49,20 @@ describe("loadGhostSettings", () => {
     const paths = ghostPaths(home);
     writeFileSync(paths.settingsFile, `# ${"x".repeat(MAX_PRIVATE_FILE_BYTES)}\n`, "utf8");
     expect(() => loadGhostSettings(home!)).toThrow(/byte limit/);
+  });
+
+  it("writes one key, keeping the owner's other keys and comments, and leaves no `{}` behind", async () => {
+    home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
+    const { settingsFile } = ghostPaths(home);
+    await writeGhostSetting(home, "harness", null);
+    expect(existsSync(settingsFile)).toBe(false);
+    await writeGhostSetting(home, "harness", "codex");
+    expect(readFileSync(settingsFile, "utf8")).toBe("harness: codex\n");
+    await writeGhostSetting(home, "harness", null);
+    expect(readFileSync(settingsFile, "utf8")).toBe("");
+    writeFileSync(settingsFile, "# mine\nother: 1\n");
+    await writeGhostSetting(home, "harness", "pi");
+    expect(readFileSync(settingsFile, "utf8")).toBe("# mine\nother: 1\nharness: pi\n");
+    expect(loadGhostSettings(home).getString("harness")).toBe("pi");
   });
 });

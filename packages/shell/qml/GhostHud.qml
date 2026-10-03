@@ -295,6 +295,7 @@ FloatingWindow {
             HudHeader {
                 Layout.fillWidth: true
                 z: 20
+                onRefocused: composer.take()
             }
 
             // One pane per entry of `hud.sections`, in the same order.

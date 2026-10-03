@@ -449,11 +449,28 @@ Singleton {
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
     property string deletingSessionId: ""
-    /** The agent CLI carrying the open conversation's latest stretch, from its listing row; "" when unknown. */
+    /** The agent CLI carrying the open conversation: the owner's unconfirmed
+        pick, else its listing row; "" when unknown (a draft runs on whatever
+        the daemon picks). */
     readonly property string currentHarness: {
+        const pending = root.pendingHarnesses[root.conversationKey(root.activeGhost, root.currentSessionId)];
+        if (typeof pending === "string") return pending;
         const row = root.sessions.find(session => session && session.id === root.currentSessionId);
         return row && typeof row.harness === "string" ? row.harness : "";
     }
+
+    // The agent picker: GET /harness for the active ghost, the ghost's default
+    // (PUT /harness), and one conversation's next agent (PUT .../harness).
+    /** `{ harnesses: [{ id, eligible, reason }], ghostDefault, omarchyDefault }`, or null until read. */
+    property var harnessChoice: null
+    property string harnessError: ""
+    /** conversationKey -> the agent the owner picked, until a listing reports it. */
+    property var pendingHarnesses: ({})
+    property var harnessRequest: null
+    property var harnessMutation: null
+    property var harnessSessionRequest: null
+    /** Test seam; production constructs native XHRs. */
+    property var harnessRequestFactory: null
     property bool hudVisible: false
     property bool hudChatFocused: false
 
@@ -1094,6 +1111,144 @@ Singleton {
         root.sessionsError = "";
         root.clearCharacter();
         root.clearMcp();
+        root.clearHarnessChoice();
+    }
+
+    function clearHarnessChoice(): void {
+        for (const name of ["harnessRequest", "harnessMutation"]) {
+            const request = root[name];
+            root[name] = null;
+            if (request && request.readyState !== 4) request.abort();
+        }
+        root.harnessChoice = null;
+        root.harnessError = "";
+    }
+
+    /** The daemon's harness choice, or null when the body is not one. */
+    function harnessChoiceFrom(body: var): var {
+        if (!body || typeof body !== "object" || !Array.isArray(body.harnesses)) return null;
+        const name = value => typeof value === "string" && value !== "" ? value : null;
+        return {
+            harnesses: body.harnesses.filter(h => h && name(h.id) !== null).map(h => ({
+                id: h.id,
+                eligible: h.eligible !== false,
+                reason: typeof h.reason === "string" ? h.reason : ""
+            })),
+            ghostDefault: name(body.ghostDefault),
+            omarchyDefault: name(body.omarchyDefault)
+        };
+    }
+
+    /** Adopt a GET/PUT /harness reply for `ghost`; false when it is not one. */
+    function adoptHarnessChoice(xhr: var, ghost: string, what: string): bool {
+        if (ghost !== root.activeGhost) return false;
+        if (xhr.status !== 200) {
+            root.harnessError = root.describeError(xhr, what);
+            return false;
+        }
+        let choice = null;
+        try {
+            choice = root.harnessChoiceFrom(JSON.parse(xhr.responseText));
+        } catch (error) {
+            choice = null;
+        }
+        if (choice === null) {
+            root.harnessError = "ghostd sent a malformed agent list";
+            return false;
+        }
+        root.harnessChoice = choice;
+        root.harnessError = "";
+        root.reachable = true;
+        return true;
+    }
+
+    function fetchHarnesses(): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || root.harnessMutation !== null) return;
+        const previous = root.harnessRequest;
+        root.harnessRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const xhr = root.newRequest(root.harnessRequestFactory);
+        root.harnessRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.harnessRequest) return;
+            root.harnessRequest = null;
+            root.adoptHarnessChoice(xhr, ghost, "GET agents");
+        };
+        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+            ({}), null, function () { return root.harnessRequest === xhr; });
+    }
+
+    /** Set the ghost's own default agent; null hands the choice back to Omarchy's default. */
+    function setGhostHarness(harness: var): void {
+        const ghost = root.activeGhost;
+        const next = typeof harness === "string" && harness !== "" ? harness : null;
+        if (ghost === "" || root.harnessMutation !== null) return;
+        const previous = root.harnessRequest;
+        root.harnessRequest = null;
+        if (previous && previous.readyState !== 4) previous.abort();
+        const before = root.harnessChoice;
+        if (before) root.harnessChoice = Object.assign({}, before, { ghostDefault: next });
+        root.harnessError = "";
+        const xhr = root.newRequest(root.harnessRequestFactory);
+        root.harnessMutation = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.harnessMutation) return;
+            root.harnessMutation = null;
+            if (!root.adoptHarnessChoice(xhr, ghost, "PUT default agent")
+                    && ghost === root.activeGhost && before) root.harnessChoice = before;
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ harness: next }),
+            function () { return root.harnessMutation === xhr; });
+    }
+
+    /** A pick is settled once the daemon's listing reports that agent for it. */
+    function settlePendingHarnesses(ghost: string, listed: var): void {
+        for (const session of listed) {
+            const key = root.conversationKey(ghost, session.id);
+            const pending = root.pendingHarnesses[key];
+            if (typeof pending === "string" && session.harness === pending)
+                root.setPendingHarness(key, undefined);
+        }
+    }
+
+    function setPendingHarness(key: string, harness: var): void {
+        const next = Object.assign({}, root.pendingHarnesses);
+        if (typeof harness === "string") next[key] = harness;
+        else delete next[key];
+        root.pendingHarnesses = next;
+    }
+
+    /**
+     * Run the open conversation's next turn on `harness`. A brand-new draft is
+     * minted first so it has an id to carry the choice; the label shows the
+     * pick at once, and until a listing reports it.
+     */
+    function chooseHarness(harness: string): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || harness === "") return;
+        if (root.currentSessionId === "") root.finishNewConversation();
+        const id = root.currentSessionId;
+        if (id === "") return;
+        const key = root.conversationKey(ghost, id);
+        const before = root.pendingHarnesses[key];
+        root.setPendingHarness(key, harness);
+        root.harnessError = "";
+        const xhr = root.newRequest(root.harnessRequestFactory);
+        root.harnessSessionRequest = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr !== root.harnessSessionRequest) return;
+            root.harnessSessionRequest = null;
+            if (xhr.status === 200) return;
+            if (root.pendingHarnesses[key] === harness) root.setPendingHarness(key, before);
+            if (ghost === root.activeGhost)
+                root.harnessError = root.describeError(xhr, "PUT conversation agent");
+        };
+        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/harness",
+            ({ "Content-Type": "application/json" }), JSON.stringify({ harness: harness }),
+            function () { return root.harnessSessionRequest === xhr; });
     }
 
     function selectGhost(name: string): void {
@@ -1729,6 +1884,7 @@ Singleton {
                         }
                     }
                     root.sessions = root.mergeSessionListing(g, valid);
+                    root.settlePendingHarnesses(g, valid);
                     root.sessionsError = "";
                     const current = root.sessions.find(function (session) {
                         return session && session.id === root.currentSessionId;

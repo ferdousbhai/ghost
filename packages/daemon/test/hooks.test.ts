@@ -281,7 +281,9 @@ describe("GhostHookRunner", () => {
             hooks: [{
               type: "command",
               command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`,
-              timeout: mode === "timeout" ? 0.2 : 5,
+              // Long enough for the command to start and record its pids under
+              // a loaded suite; shorter raced it and killed it first.
+              timeout: mode === "timeout" ? 2 : 5,
             }],
           }],
         },

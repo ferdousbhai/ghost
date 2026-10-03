@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { resolveGhost, resolveTarget } from "./common.js";
+import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -119,5 +119,46 @@ export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
     const status = result as { enabled: boolean; url?: string | null; problem?: string | null };
     return `${status.enabled ? "on" : "off"}${status.url ? ` ${status.url}` : ""}${status.problem ? ` (${status.problem})` : ""}\n`;
   });
+  return 0;
+}
+
+interface HarnessChoicesBody {
+  harnesses: Array<{ id: string; eligible: boolean; reason: string | null }>;
+  ghostDefault: string | null;
+  omarchyDefault: string | null;
+}
+
+function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
+  const preferred = body.ghostDefault
+    ?? (body.omarchyDefault ? `automatic (Omarchy default: ${body.omarchyDefault})` : "automatic");
+  const rows = body.harnesses.map((harness) =>
+    `  ${harness.id}${harness.eligible ? "" : ` (no room: ${harness.reason})`}`);
+  return `${name} runs on ${preferred}\n${rows.join("\n")}\n`;
+}
+
+/** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
+export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const id = parsed.positionals[0];
+  if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
+  const body = id || flagBoolean(parsed, "none")
+    ? (await ctx.client.request("PUT", ghostPath(name, "/harness"), { harness: id ?? null })).body
+    : (await ctx.client.request("GET", ghostPath(name, "/harness"))).body;
+  emit(ctx, body, (result) => harnessChoicesText(name, result as HarnessChoicesBody));
+  return 0;
+}
+
+/** `ghost switch <id>`: run this conversation's next turn on another agent. */
+export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const id = parsed.positionals[0];
+  if (!id) throw new ArgsError("ghost switch needs the agent to switch to");
+  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  // A conversation not listed yet (no message landed) is addressed as given.
+  const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const path = requested
+    ? sessionPath(name, requested)
+    : (await resolveTarget(ctx.client, ctx, parsed)).path;
+  const body = (await ctx.client.request("PUT", `${path}/harness`, { harness: id })).body as { id: string; harness: string };
+  emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
 }

@@ -39,9 +39,9 @@ import {
   type TranscriptMessage,
 } from "./conversation-log.js";
 import { closeBrowserSession, resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
-import { loadGhostSettings } from "./ghost-settings.js";
+import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, readCharacterFile, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
+import { omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   ACCOUNT_HOME_ENV,
@@ -108,6 +108,8 @@ export interface SessionHostOptions {
    * Omarchy's eligibility report. A test supplies its own list and rows.
    */
   eligibleHarnesses?: () => Promise<readonly string[]>;
+  /** Omarchy's installed agents with their usage, for the agent picker. */
+  harnessReport?: () => Promise<HarnessReport>;
   harnessRows?: (id: string) => HarnessRow | null;
   /** Omarchy's default agent; production asks `omarchy-default-agent`. */
   defaultHarness?: () => Promise<string | null>;
@@ -189,6 +191,15 @@ export interface ConversationUpdatedEvent {
 
 export type ConversationEventListener = (event: ConversationUpdatedEvent) => void;
 
+/** The agents a ghost can run on, as the picker shows them. */
+export interface HarnessChoices {
+  harnesses: Harness[];
+  /** The ghost's `settings.yml` `harness`, or null for automatic. */
+  ghostDefault: string | null;
+  /** Omarchy's default agent, the next preference after the ghost's own. */
+  omarchyDefault: string | null;
+}
+
 export interface GreetingResult {
   greeting: string | null;
   onboarding: boolean;
@@ -247,6 +258,7 @@ export class SessionHost {
   private readonly hooks: GhostHookRunner;
   private readonly homeOperations: HomeOperationCoordinator;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
+  private readonly harnessReport: () => Promise<HarnessReport>;
   private readonly defaultHarness: () => Promise<string | null>;
   private readonly rowOf: (id: string) => HarnessRow | null;
   private readonly env: NodeJS.ProcessEnv;
@@ -256,7 +268,7 @@ export class SessionHost {
   private readonly reservedGhosts = new Set<string>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private readonly tools = new Map<string, Promise<CollectedGhostExtension>>();
-  private harnessReport?: { at: number; ids: Promise<readonly string[]> };
+  private eligibleCache?: { at: number; ids: Promise<readonly string[]> };
   private shuttingDown = false;
 
   constructor(options: SessionHostOptions) {
@@ -276,6 +288,7 @@ export class SessionHost {
     this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.env = options.env ?? process.env;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
+    this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
     this.rowOf = options.harnessRows ?? harnessRow;
     this.homeOperations.registerMoveParticipant({
@@ -424,14 +437,14 @@ export class SessionHost {
   /** Installed harnesses Omarchy's usage records say have room, in Omarchy's order. */
   private omarchyEligible(): Promise<readonly string[]> {
     const now = Date.now();
-    if (this.harnessReport && now - this.harnessReport.at < HARNESS_REPORT_TTL_MS) return this.harnessReport.ids;
-    const ids = readHarnessReport(this.env, this.ownerHome)
+    if (this.eligibleCache && now - this.eligibleCache.at < HARNESS_REPORT_TTL_MS) return this.eligibleCache.ids;
+    const ids = this.harnessReport()
       .then((report) => report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id))
       .catch((error: unknown) => {
         this.logger.warn("harness report unavailable; trying every supported harness", { error: errorMessage(error) });
         return SUPPORTED_HARNESSES;
       });
-    this.harnessReport = { at: now, ids };
+    this.eligibleCache = { at: now, ids };
     return ids;
   }
 
@@ -443,6 +456,60 @@ export class SessionHost {
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
     const eligible = (await this.eligibleHarnesses()).filter((id) => this.rowOf(id) !== null);
     return orderHarnesses(eligible, [current, loadGhostSettings(ghost.dir).getString("harness") ?? null, await this.defaultHarness()]);
+  }
+
+  // ── Agent choice ──────────────────────────────────────────────────────
+
+  private requireRow(id: string): void {
+    if (!this.rowOf(id)) {
+      throw new GhostError("unknown_harness", `Ghost cannot run on ${JSON.stringify(id)}; it has no row for that agent.`, 400);
+    }
+  }
+
+  /** Installed agents Ghost can run on, with Omarchy's usage, and both defaults. */
+  async listHarnesses(ghostName: string): Promise<HarnessChoices> {
+    const ghost = this.registry.get(ghostName);
+    const [report, omarchyDefault] = await Promise.all([this.harnessReport(), this.defaultHarness()]);
+    return {
+      harnesses: report.harnesses.filter((harness) => this.rowOf(harness.id) !== null),
+      ghostDefault: loadGhostSettings(ghost.dir).getString("harness") ?? null,
+      omarchyDefault,
+    };
+  }
+
+  /** The ghost's preferred agent, ahead of Omarchy's default; null is automatic. */
+  async setGhostHarness(ghostName: string, id: string | null): Promise<HarnessChoices> {
+    if (id !== null) this.requireRow(id);
+    await this.homeOperations.withLease(ghostName, async () => {
+      await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
+    });
+    return this.listHarnesses(ghostName);
+  }
+
+  /**
+   * Run this conversation's next turn on `id`. The agent takes over the way
+   * a fallback does: it is handed the conversation so far, then kept.
+   */
+  async chooseHarness(ghostName: string, sessionId: string, id: string): Promise<{ id: string; harness: string }> {
+    this.requireRow(id);
+    // A turn only runs on an agent with room, so a choice it would pass over
+    // is refused here rather than silently ignored.
+    const listed = (await this.harnessReport()).harnesses.find((harness) => harness.id === id);
+    if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
+    if (!listed.eligible) throw new GhostError("harness_no_room", `${id} has no room: ${listed.reason ?? "its usage is spent"}.`, 409);
+    const ghost = this.registry.get(ghostName);
+    const conversation = requireConversationId(sessionId);
+    await this.homeOperations.withLease(ghost.name, async () => {
+      const { sessionDir } = ghostPaths(ghost.dir);
+      const entries = await readLog(sessionDir, conversation);
+      if (entries !== null && logState(entries).harness === id) return;
+      await appendLog(sessionDir, conversation, [
+        ...(entries === null ? [newConversationEntry(conversation, new Date())] : []),
+        { type: "harness", at: new Date().toISOString(), harness: id, session: null, dir: conversationDir(sessionDir, conversation) },
+      ]);
+    });
+    this.announce(ghost.name, conversation);
+    return { id: conversation, harness: id };
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────

@@ -14,10 +14,11 @@ of — this page.
   there is no generic Arch/Hyprland support promise.
 - **Bun 1.3.14+** at runtime, plus the rest of the package's dependencies —
   pacman installs them with the package.
-- **An agent CLI you are signed into** — Omarchy installs Claude Code, Codex,
-  Grok, Copilot, OpenCode, pi, and others; sign into at least one the way you
-  normally would (`claude`, `codex login`, …). A ghost's turns run on it, on
-  your own subscription.
+- **An agent CLI** — Omarchy installs Claude Code, Codex, Grok, Copilot,
+  OpenCode, pi, and others, and a ghost's turns run on them, on your own
+  subscriptions. With none yet, OpenCode answers on its free models with no
+  sign-in; sign into any other the way you normally would (`claude`,
+  `codex login`, …) and it joins in.
 
 ## 1. Install the package
 
@@ -128,11 +129,19 @@ picks, per turn, the one already carrying the conversation, then the ghost's
 ghost harnesses          # which agents are installed and which have room
 ```
 
-To prefer one for a ghost, put it in that ghost's `settings.yml`:
+In the HUD, the agent's name beside the conversation title opens a picker:
+choose an agent for this conversation, make one the ghost's default, or set it
+back to automatic. From the terminal, or by asking the ghost, which runs the
+same commands:
 
-```yaml
-harness: codex
+```sh
+ghost harness            # the agents, and which this ghost prefers
+ghost harness codex      # prefer codex for this ghost (--none: automatic)
+ghost switch claude      # run this conversation's next turn on claude
 ```
+
+A switched conversation's new agent is handed the conversation so far. The
+preference lives in the ghost's `settings.yml` as `harness: codex`.
 
 An agent that cannot take a turn — not signed in, out of quota — hands it to
 the next, which is given the conversation so far. The model, sign-in, tools,

@@ -114,7 +114,10 @@ the ghost's `harness` setting, then Omarchy's default agent, then any other
 installed harness Omarchy's usage records say has room. A harness that cannot
 start the turn (not signed in, out of quota) hands it to the next, which is
 given the conversation so far from the log. That is how a ghost spends the
-owner's subscriptions and limits rather than a per-token API key of its own.
+owner's subscriptions and limits rather than a per-token API key of its own;
+with none yet, OpenCode's free models answer. The owner (or the ghost, asked)
+can switch a conversation to another agent or set the ghost's preferred one,
+from the HUD's agent picker or `ghost switch` / `ghost harness`.
 
 The session receives the Ghost-owned context: the character and the stable
 policy sections, listed in `prompt-budget.test.ts`. The shape they share is

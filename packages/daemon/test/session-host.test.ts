@@ -346,6 +346,59 @@ describe("owner commands and hooks", () => {
   });
 });
 
+describe("choosing the agent", () => {
+  it("lists the agents with both defaults, and sets and clears the ghost's own", async () => {
+    const first = harness(replies("from first"), "first");
+    const second = harness(replies("from second"), "second");
+    const sessions = host({ harnesses: [first, second], defaultHarness: async () => "first" });
+    const settings = join(temp.root, "casper", "settings.yml");
+    writeFileSync(settings, "# the owner's note\nother: kept\n");
+
+    expect(await sessions.listHarnesses("casper")).toMatchObject({
+      harnesses: [{ id: "first", eligible: true }, { id: "second", eligible: true }],
+      ghostDefault: null,
+      omarchyDefault: "first",
+    });
+    expect((await sessions.setGhostHarness("casper", "second")).ghostDefault).toBe("second");
+    expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\nharness: second\n");
+    expect(text(await turn(sessions, "hi"))).toBe("from second");
+
+    expect((await sessions.setGhostHarness("casper", null)).ghostDefault).toBeNull();
+    expect(readFileSync(settings, "utf8")).toBe("# the owner's note\nother: kept\n");
+    await expect(sessions.setGhostHarness("casper", "nope")).rejects.toMatchObject({ code: "unknown_harness" });
+  });
+
+  it("switches one conversation, handing the new agent the conversation so far", async () => {
+    const first = harness(replies("I am Casper.", "unused"), "first");
+    const second = harness(replies("Still Casper."), "second");
+    const sessions = host({ harnesses: [first, second] });
+    await turn(sessions, "Who are you?");
+    await sessions.chooseHarness("casper", "c1", "second");
+    expect(text(await turn(sessions, "And now?"))).toBe("Still Casper.");
+
+    const [call] = second.calls();
+    expect(call?.resume).toBe(false);
+    expect(call?.prompt).toContain("Owner: Who are you?\n\nYou: I am Casper.");
+    expect((await sessions.listSessions("casper"))[0]?.harness).toBe("second");
+    await expect(sessions.chooseHarness("casper", "c1", "nope")).rejects.toMatchObject({ code: "unknown_harness" });
+    // A new conversation can be pointed at an agent before its first turn.
+    await sessions.chooseHarness("casper", "c2", "first");
+    await turn(sessions, "hello", "c2");
+    expect(first.calls().map((c) => c.prompt)).toContain("hello");
+  });
+  it("refuses to switch to an agent a turn would pass over", async () => {
+    const fake = harness(replies("x"));
+    const sessions = host({
+      harnesses: [fake],
+      harnessReport: async () => ({
+        harnesses: [{ id: "fake", eligible: false, reason: "Weekly at 95%", usage: null }],
+        refresh: "omarchy agent usage update",
+      }),
+    });
+    await expect(sessions.chooseHarness("casper", "c1", "fake")).rejects.toMatchObject({ code: "harness_no_room", message: "fake has no room: Weekly at 95%." });
+  });
+});
+
 describe("conversation metadata", () => {
   it("lists, titles, pins, reads, and trashes a conversation", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });

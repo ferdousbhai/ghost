@@ -9,6 +9,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HarnessEvent, HarnessRow } from "../../src/harness-table.js";
+import type { HarnessReport } from "../../src/harnesses.js";
 
 /** One turn of the fake harness, in the order turns are launched. */
 export interface FakeTurn {
@@ -109,12 +110,17 @@ export function fakeHarness(turns: readonly FakeTurn[], id = "fake"): FakeHarnes
 /** SessionHost options that make `harnesses` the only harnesses on the machine. */
 export function onlyHarnesses(...harnesses: FakeHarness[]): {
   eligibleHarnesses: () => Promise<readonly string[]>;
+  harnessReport: () => Promise<HarnessReport>;
   harnessRows: (id: string) => HarnessRow | null;
   defaultHarness: () => Promise<string | null>;
 } {
   const rows = new Map(harnesses.map((harness) => [harness.id, harness.row]));
   return {
     eligibleHarnesses: async () => harnesses.map((harness) => harness.id),
+    harnessReport: async () => ({
+      harnesses: harnesses.map((harness) => ({ id: harness.id, eligible: true, reason: null, usage: null })),
+      refresh: "omarchy agent usage update",
+    }),
     harnessRows: (id) => rows.get(id) ?? null,
     defaultHarness: async () => null,
   };

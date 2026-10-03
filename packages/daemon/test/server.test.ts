@@ -918,6 +918,23 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     }
   ).sessions;
 
+  it("lists agents, sets and clears the ghost's preference, and switches a conversation", async () => {
+    const base = await serve();
+    const ghostHarness = (init?: RequestInit) => fetch(`${base}/api/ghosts/casper/harness`, init);
+    const put = (body: unknown): RequestInit => ({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    expect(await (await ghostHarness()).json()).toMatchObject({ harnesses: [{ id: "fake", eligible: true }], ghostDefault: null });
+    expect(await (await ghostHarness(put({ harness: "fake" }))).json()).toMatchObject({ ghostDefault: "fake" });
+    expect(await (await ghostHarness(put({ harness: null }))).json()).toMatchObject({ ghostDefault: null });
+    expect((await ghostHarness(put({ harness: "nope" }))).status).toBe(400);
+    expect((await ghostHarness(put({}))).status).toBe(400);
+    expect((await ghostHarness({ method: "DELETE" })).status).toBe(405);
+
+    const switched = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/harness`, put({ harness: "fake" }));
+    expect(await switched.json()).toEqual({ id: "conv-1", harness: "fake" });
+    expect((await fetch(`${base}/api/ghosts/casper/sessions/conv-1/harness`, put({ harness: null }))).status).toBe(400);
+  });
+
   it("pins a conversation, lists it first, and unpins it again", async () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
