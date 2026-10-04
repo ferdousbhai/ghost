@@ -45,7 +45,6 @@ import {
   authorizeRelayUpgrade,
   encodeServerFrame,
   parseClientFrame,
-  RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
 } from "./relay-protocol.js";
 import { relayToken } from "./token-store.js";
@@ -78,7 +77,6 @@ export interface RelayHubOptions {
   helloTimeoutMs?: number;
   closeTimeoutMs?: number;
   incarnation?: string;
-  publicUrl?: string;
 }
 
 export interface RelayPairing {
@@ -89,14 +87,9 @@ export interface RelayPairing {
 export interface RelayStatus {
   connected: boolean;
   peer: string | null;
-  since: string | null;
   /** An unpaired browser waiting for the owner's Allow, or null. */
   pairing: RelayPairing | null;
-  protocol: number;
-  path: string;
-  url: string | null;
   pending: number;
-  tokenPath: string | null;
 }
 
 interface PendingPairing {
@@ -137,7 +130,6 @@ function asFailure(value: string): BrowserFailure {
 }
 
 export class RelayHub implements RelayTransport {
-  readonly tokenPath: string | null;
 
   #token: string | undefined;
   readonly #logger: Logger;
@@ -153,12 +145,10 @@ export class RelayHub implements RelayTransport {
   #socket: WebSocket | undefined;
   #negotiatedSocket: WebSocket | undefined;
   #peer: string | undefined;
-  #since: Date | undefined;
   #nextId = 1;
   #pingTimer: NodeJS.Timeout | undefined;
   #helloTimer: NodeJS.Timeout | undefined;
   #alive = true;
-  #publicUrl: string | undefined;
   #pairing: PendingPairing | undefined;
   #closed = false;
   #closePromise: Promise<void> | undefined;
@@ -168,14 +158,12 @@ export class RelayHub implements RelayTransport {
     // `createDaemonServer` does, including in tests; minting a secret into the
     // developer's real home as a side effect of building an object is not.
     this.#token = options.token;
-    this.tokenPath = options.token ? null : relayToken.defaultPath();
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? RELAY_CLOSE_TIMEOUT_MS;
     this.#pairingTimeoutMs = options.pairingTimeoutMs ?? RELAY_PAIRING_TIMEOUT_MS;
     this.#incarnation = options.incarnation ?? randomUUID();
-    this.#publicUrl = options.publicUrl;
     // ws applies maxPayload while assembling fragmented messages, before the
     // complete string reaches #onFrame.
     this.#wss = new WebSocketServer({ noServer: true, maxPayload: MAX_RELAY_MESSAGE_BYTES });
@@ -261,23 +249,14 @@ export class RelayHub implements RelayTransport {
   }
 
 
-  setPublicUrl(url: string): void {
-    this.#publicUrl = url;
-  }
-
   status(): RelayStatus {
     return {
       connected: this.connected,
       peer: this.#peer ?? null,
-      since: this.#since?.toISOString() ?? null,
       pairing: this.#pairing
         ? { code: this.#pairing.code, since: this.#pairing.since.toISOString() }
         : null,
-      protocol: RELAY_PROTOCOL_VERSION,
-      path: RELAY_PATH,
-      url: this.#publicUrl ?? null,
       pending: this.#pending.size,
-      tokenPath: this.tokenPath,
     };
   }
 
@@ -345,7 +324,6 @@ export class RelayHub implements RelayTransport {
       this.#socket = undefined;
       this.#negotiatedSocket = undefined;
       this.#peer = undefined;
-      this.#since = undefined;
       this.#stopHelloDeadline();
       try {
         unnegotiated.terminate();
@@ -475,7 +453,6 @@ export class RelayHub implements RelayTransport {
     this.#socket = ws;
     this.#negotiatedSocket = undefined;
     this.#peer = undefined;
-    this.#since = undefined;
     this.#alive = true;
 
     ws.on("message", (data, isBinary) => {
@@ -506,7 +483,6 @@ export class RelayHub implements RelayTransport {
       this.#socket = undefined;
       this.#negotiatedSocket = undefined;
       this.#peer = undefined;
-      this.#since = undefined;
       this.#stopHelloDeadline();
       this.#stopPinging();
       this.#failPending(
@@ -552,7 +528,6 @@ export class RelayHub implements RelayTransport {
           return;
         }
         this.#negotiatedSocket = ws;
-        this.#since = new Date();
         this.#stopHelloDeadline();
         this.#peer = [frame.browser, frame.agent].filter(Boolean).join(" via ") || "a browser";
         this.#logger.info("relay connected", { peer: this.#peer });
@@ -663,7 +638,6 @@ export class RelayHub implements RelayTransport {
     const socket = this.#socket;
     this.#negotiatedSocket = undefined;
     this.#peer = undefined;
-    this.#since = undefined;
     await Promise.allSettled(
       [...this.#clients].map((client) => closeRelaySocket(client, this.#closeTimeoutMs)),
     );

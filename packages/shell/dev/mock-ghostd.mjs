@@ -112,13 +112,8 @@ function relaySnapshot() {
     enabled: true,
     connected: false,
     peer: null,
-    since: null,
     pairing: relayPairingCode === "" ? null : { code: relayPairingCode, since: new Date().toISOString() },
-    protocol: 4,
-    path: "/relay",
-    url: null,
     pending: 0,
-    tokenPath: null,
   };
 }
 

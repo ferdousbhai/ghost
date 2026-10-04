@@ -1399,7 +1399,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   return server;
 }
 
-export function relayHubOf(server: Server): RelayHub | undefined {
+function relayHubOf(server: Server): RelayHub | undefined {
   return serverState.get(server)?.relay ?? undefined;
 }
 
@@ -1418,8 +1418,6 @@ export async function startDaemonServer(
   });
   const bound = server.address() as AddressInfo;
   const relay = relayHubOf(server);
-  // The port is only known now, and the extension has to be told which one.
-  relay?.setPublicUrl(`ws://${address}:${bound.port}/relay`);
   return {
     server,
     port: bound.port,

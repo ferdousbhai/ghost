@@ -8,14 +8,15 @@
  * status payload is the one place a token could accidentally be published to an
  * unauthenticated route.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { createDaemonServer, relayHubOf, startDaemonServer, type ListeningServer } from "../src/server.js";
+import { createDaemonServer, startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RelayHub } from "../src/relay.js";
 import {
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
@@ -59,14 +60,13 @@ async function serve(relay: RelayHub | null | undefined): Promise<string> {
 }
 
 describe("GET /api/relay/status", () => {
-  it("reports where to dial and that nothing is connected yet", async () => {
+  it("reports that nothing is connected yet", async () => {
     const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
     const body = await (await fetch(`${base}/api/relay/status`)).json() as Record<string, unknown>;
-    expect(body).toMatchObject({ enabled: true, connected: false, protocol: 4, path: "/relay" });
-    expect(body.url).toBe(`ws://127.0.0.1:${listening?.port}/relay`);
+    expect(body).toEqual({ enabled: true, connected: false, peer: null, pairing: null, pending: 0 });
   });
 
-  it("never returns the token, only where it lives", async () => {
+  it("never returns the token", async () => {
     const base = await serve(new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 }));
     const text = await (await fetch(`${base}/api/relay/status`)).text();
     expect(text).not.toContain(TOKEN);
@@ -280,22 +280,26 @@ describe("the upgrade shares the port with the API", () => {
 });
 
 describe("building a server does not mint a secret", () => {
-  it("leaves the token file alone until something tries to pair", () => {
-    const registry = new GhostRegistry("/nonexistent-ghosts-root");
-    const sessionHost = new SessionHost({ registry });
-    // The default path: a hub built here must not create it. `tokenPath` is
-    // computed, not created.
-    const server = createDaemonServer({ registry, host: sessionHost, apiToken: null });
-    const hub = relayHubOf(server);
-    expect(hub?.tokenPath).toMatch(/relay-token$/);
-    server.close();
+  it("leaves the token file alone until something tries to pair", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ghost-relay-unminted-"));
+    const tokenFile = join(dir, "relay-token");
+    vi.stubEnv("GHOSTD_RELAY_TOKEN_FILE", tokenFile);
+    try {
+      const registry = new GhostRegistry("/nonexistent-ghosts-root");
+      const sessionHost = new SessionHost({ registry });
+      const server = createDaemonServer({ registry, host: sessionHost, apiToken: null });
+      expect(existsSync(tokenFile)).toBe(false);
+      server.close();
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("hands its own hub back so a backend can be wired to it", async () => {
     const relay = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 });
     await serve(relay);
     expect(listening?.relay).toBe(relay);
-    expect(relayHubOf(listening!.server)).toBe(relay);
   });
 
   it("still starts, and still 404s, with the relay switched off", async () => {

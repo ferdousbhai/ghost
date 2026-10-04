@@ -286,8 +286,7 @@ describe("pairing", () => {
     await connectExtension();
     expect(hub.connected).toBe(true);
     expect(hub.peer).toBe("Chromium/141 via fake-extension/1");
-    expect(hub.status()).toMatchObject({ connected: true, protocol: RELAY_PROTOCOL_VERSION });
-    expect(hub.status().since).toBeTypeOf("string");
+    expect(hub.status()).toMatchObject({ connected: true, peer: "Chromium/141 via fake-extension/1" });
   });
 
   it("refuses the wrong token before a socket exists", async () => {
@@ -320,7 +319,7 @@ describe("pairing", () => {
     });
 
     expect(hub.connected).toBe(false);
-    expect(hub.status()).toMatchObject({ connected: false, peer: null, since: null });
+    expect(hub.status()).toMatchObject({ connected: false, peer: null });
     expect(await hub.request("read", {}, { timeoutMs: 3_000 })).toMatchObject({
       ok: false,
       failure: "browser_unavailable",
@@ -363,7 +362,7 @@ describe("pairing", () => {
 
     expect(await closed).toEqual({ code: 1008, reason: "relay hello timed out" });
     expect(hub.connected).toBe(false);
-    expect(hub.status()).toMatchObject({ peer: null, since: null });
+    expect(hub.status()).toMatchObject({ peer: null });
   });
 
   it("takes a new connection once the first has gone", async () => {
@@ -614,7 +613,7 @@ describe("shutdown", () => {
 
     const elapsed = Date.now() - started;
     expect(elapsed).toBeLessThan(1_000);
-    expect(hub.status()).toMatchObject({ connected: false, peer: null, since: null });
+    expect(hub.status()).toMatchObject({ connected: false, peer: null });
   });
 
   it("force-terminates a relay socket whose close handshake never settles", async () => {
