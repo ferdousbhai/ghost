@@ -173,98 +173,59 @@ function publishConversationUpdated(name, id, updatedAt = new Date().toISOString
   }
 }
 
-// Raw values stay only in the mock's in-memory store. `mcpSnapshot` mirrors the
-// real daemon's sanitized GET response, including names/counts but never the
-// argument, environment, header, OAuth, or URL-query values themselves.
+// The mock stores only what ghostd's GET /mcp returns: each server's
+// sanitized view (sanitizeMcpServerConfig in the daemon's
+// mcp-catalog-policy.ts), with key names and counts but never argument,
+// environment, header, or URL-query values. The daemon's redaction is not
+// repeated here; a write keeps the minimal view `mcpView` derives.
 const mcpStore = new Map();
 
 function ghostMcp(name) {
   if (!mcpStore.has(name)) {
     mcpStore.set(name, new Map([
       ["local-files", {
-        type: "stdio",
-        command: "npx",
-        args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp/demo"],
-        env: { MCP_DEMO_TOKEN: "never-return-this-value" },
-        envPolicy: "literal",
-        cwd: "/tmp/demo",
+        enabled: true,
+        config: {
+          type: "stdio",
+          command: "npx",
+          cwd: "/tmp/demo",
+          envPolicy: "literal",
+          argumentCount: 3,
+          environment: { keys: ["MCP_DEMO_TOKEN"], configured: true },
+        },
       }],
       ["project-api", {
-        type: "http",
-        url: "https://example.com/mcp?token=never-return-this-query",
-        headers: { Authorization: "Bearer never-return-this-header" },
-        headerPolicy: "origin-locked",
+        enabled: true,
+        config: {
+          type: "http",
+          url: "https://example.com/mcp?token=%5Bconfigured%5D",
+          headerPolicy: "origin-locked",
+          headers: { keys: ["Authorization"], configured: true },
+        },
       }],
-      ["legacy-events", {
-        type: "sse",
-        url: "https://example.com/events",
-        enabled: false,
-      }],
+      ["legacy-events", { enabled: false, config: { type: "sse", url: "https://example.com/events" } }],
     ]));
   }
   return mcpStore.get(name);
 }
 
-function configuredKeys(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const keys = Object.keys(value).sort();
-  return keys.length > 0 ? { keys, configured: true } : undefined;
-}
-
-function sanitizeRemoteUrl(value) {
-  const lower = value.toLowerCase();
-  if (value.includes("${")
-    || (!lower.startsWith("http://") && !lower.startsWith("https://"))) {
-    return "[configured]";
-  }
-  try {
-    const url = new URL(value);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) {
-      return "[configured]";
-    }
-    url.username = "";
-    url.password = "";
-    url.hash = "";
-    for (const key of new Set(url.searchParams.keys())) {
-      url.searchParams.delete(key);
-      url.searchParams.append(key, "[configured]");
-    }
-    return url.toString();
-  } catch {
-    return "[configured]";
-  }
-}
-
-function sanitizeMcpConfig(config) {
-  const type = config?.type === "http" || config?.type === "sse" ? config.type : "stdio";
-  if (type === "http" || type === "sse") {
-    const headers = configuredKeys(config.headers);
-    return {
-      type,
-      url: sanitizeRemoteUrl(config.url),
-      ...(config.headerPolicy === "origin-locked" ? { headerPolicy: config.headerPolicy } : {}),
-      ...(headers ? { headers } : {}),
-    };
-  }
-  const environment = configuredKeys(config.env);
-  return {
-    type: "stdio",
-    command: String(config.command || ""),
-    ...(typeof config.cwd === "string" ? { cwd: config.cwd } : {}),
-    ...(config.envPolicy === "literal" ? { envPolicy: config.envPolicy } : {}),
-    argumentCount: Array.isArray(config.args) ? config.args.length : 0,
-    ...(environment ? { environment } : {}),
-  };
+/** A written config as a minimal sanitized view: no value of it is kept. */
+function mcpView(config) {
+  const keys = (value) => (value && typeof value === "object"
+    ? { keys: Object.keys(value).sort(), configured: true } : undefined);
+  return config.type === "http" || config.type === "sse"
+    ? { type: config.type, url: config.url.replace(/[?#].*$/u, ""), headers: keys(config.headers) }
+    : { type: "stdio", command: config.command, argumentCount: config.args?.length ?? 0, environment: keys(config.env) };
 }
 
 function mcpSnapshot(name) {
   return {
-    servers: [...ghostMcp(name)].map(([serverName, config]) => ({
+    servers: [...ghostMcp(name)].map(([serverName, server]) => ({
       name: serverName,
-      enabled: config.enabled !== false,
+      enabled: server.enabled,
       source: "canonical",
       path: "mcp.json",
-      config: sanitizeMcpConfig(config),
+      config: server.config,
     })).sort((a, b) => a.name.localeCompare(b.name)),
     skipped: [],
   };
@@ -951,7 +912,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     // Like ghostd: a newly added server starts disabled unless the row says otherwise.
-    ghostMcp(name).set(serverName, { enabled: false, ...structuredClone(body.config) });
+    ghostMcp(name).set(serverName, { enabled: body.config.enabled === true, config: mcpView(body.config) });
     return json(res, 201, mcpSnapshot(name));
   }
   if (parts[3] === "mcp" && parts.length >= 5) {
@@ -969,7 +930,8 @@ const mockServer = createServer(async (req, res) => {
           error: { message: "MCP server configuration is invalid", code: "invalid_mcp_server" },
         });
       }
-      servers.set(serverName, structuredClone(body.config));
+      // Like ghostd: the written config replaces the row, `enabled` included.
+      servers.set(serverName, { enabled: body.config.enabled !== false, config: mcpView(body.config) });
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {
@@ -979,7 +941,7 @@ const mockServer = createServer(async (req, res) => {
           error: { message: '"enabled" must be a boolean', code: "invalid_request" },
         });
       }
-      servers.set(serverName, { ...servers.get(serverName), enabled: body.enabled });
+      servers.get(serverName).enabled = body.enabled;
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 5 && req.method === "DELETE") {

@@ -4,7 +4,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 node test/fixtures/mock-ghostd-parity-probe.mjs
-node test/fixtures/mock-mcp-url-sanitizer-probe.mjs
 node test/fixtures/transcript-role-probe.mjs
 
 for candidate in "${QMLTESTRUNNER:-}" /usr/lib/qt6/bin/qmltestrunner /usr/lib/qt6/qmltestrunner qmltestrunner6; do
