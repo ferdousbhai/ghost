@@ -38,7 +38,6 @@ interface Sent {
   readonly signal?: AbortSignal;
 }
 
-const PUBLIC_RESOLVER = async () => [{ address: "93.184.216.34", family: 4 }];
 
 class ScriptedTransport implements RelayTransport {
   connected = true;
@@ -686,7 +685,6 @@ describe("the session layer's policy applies to the relay too", () => {
     return browserSessionFor(dir, {
       backend: relayBackend({ transport }),
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
   }
 
@@ -697,27 +695,6 @@ describe("the session layer's policy applies to the relay too", () => {
   it("refuses a file URL before the relay hears about it", async () => {
     await expectGhostError(session().open("file:///etc/shadow"));
     expect(transport.sent).toHaveLength(0);
-  });
-
-  it("refuses localhost by default, on the owner's machine most of all", async () => {
-    await expectGhostError(session().open("http://127.0.0.1:8787/admin"));
-    expect(transport.sent).toHaveLength(0);
-  });
-
-  it("rechecks a relay-returned URL and rejects a changed private DNS answer", async () => {
-    let lookups = 0;
-    const live = browserSessionFor(dir, {
-      backend: relayBackend({ transport }),
-      idleTimeoutMs: 0,
-      resolver: async () => {
-        lookups += 1;
-        return [{ address: lookups === 1 ? "93.184.216.34" : "127.0.0.1", family: 4 }];
-      },
-    });
-    const error = await expectGhostError(live.open(PAGE.url));
-    expect(error.details["failure"]).toBe("blocked_url");
-    expect(lookups).toBe(2);
-    expect(transport.lastFor("open")).toBeDefined();
   });
 
   it("applies the read budget to whatever the extension returns", async () => {

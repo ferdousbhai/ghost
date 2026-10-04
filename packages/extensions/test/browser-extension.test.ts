@@ -52,16 +52,12 @@ import {
   MAX_BROWSER_OBSERVATION_ITEMS,
   MAX_BROWSER_OBSERVATION_STRING_BYTES,
 } from "@ghost/runtime/browser-observation";
-import type {
-  BrowserDnsResolver,
-  BrowserPolicyClock,
-} from "../src/extensions/browser-policy.js";
+import type { BrowserClock } from "@ghost/runtime/browser-session";
 import {
   browserSessionFor,
   closeAllBrowserSessions,
   closeBrowserSession,
   DEFAULT_ACTION_TIMEOUT_MS,
-  DEFAULT_ACTING_BUDGET,
   DEFAULT_IDLE_TIMEOUT_MS,
   GhostBrowserSession,
   MAX_BROWSER_MATCH_HREF_CHARS,
@@ -74,10 +70,6 @@ import { relayBackend } from "@ghost/runtime/browser-relay-backend";
 import { DEFAULT_SCREENSHOT_RETENTION, MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText, type Harness } from "./support/harness.js";
-
-const PUBLIC_RESOLVER: BrowserDnsResolver = async () => [
-  { address: "93.184.216.34", family: 4 },
-];
 
 interface FakeCall {
   readonly name: string;
@@ -308,7 +300,7 @@ function targetKey(target: BackendTarget): string {
 }
 
 
-class ManualBrowserClock implements BrowserPolicyClock {
+class ManualBrowserClock implements BrowserClock {
   #nextId = 1;
   readonly #callbacks = new Map<number, () => void>();
 
@@ -357,7 +349,6 @@ function extension(overrides: Record<string, unknown> = {}) {
     ...overrides,
     browser: {
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
       ...((overrides.browser as Record<string, unknown> | undefined) ?? {}),
     },
   });
@@ -426,27 +417,10 @@ describe("url policy through the tool", () => {
     expect(backend.calls).toHaveLength(0);
   });
 
-  it("refuses localhost by default and allows only creator configuration to widen it", async () => {
+  it("opens an address on the owner's machine like any other", async () => {
     const harness = await browserHarness();
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, {
-        action: "open",
-        url: "http://127.0.0.1:8787/admin",
-        allow_local: true,
-      }),
-    );
-    expect(error.details.failure).toBe("blocked_url");
-
-    await closeAllBrowserSessions();
-    backend = new FakeBackend();
-    const localHarness = await browserHarness({
-      browser: { idleTimeoutMs: 0, allowLocal: true },
-    });
     const text = resultText(
-      await localHarness.call(GHOST_BROWSER, {
-        action: "open",
-        url: "http://127.0.0.1:8787/admin",
-      }),
+      await harness.call(GHOST_BROWSER, { action: "open", url: "http://127.0.0.1:8787/admin" }),
     );
     expect(text).toContain("http://127.0.0.1:8787/admin");
   });
@@ -456,30 +430,6 @@ describe("url policy through the tool", () => {
     const error = await expectGhostError(harness.call(GHOST_BROWSER, { action: "open" }));
     expect(error.code).toBe("invalid_format");
   });
-
-  it("blocks a name that resolves to a private address before opening it", async () => {
-    const harness = await browserHarness({
-      browser: {
-        idleTimeoutMs: 0,
-        resolver: async () => [{ address: "127.0.0.1", family: 4 }],
-      },
-    });
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "open", url: "https://rebind.example" }),
-    );
-    expect(error.details.failure).toBe("blocked_url");
-    expect(backend.calls).toHaveLength(0);
-  });
-
-  it("rechecks where a click actually landed, and refuses to keep reading it", async () => {
-    const harness = await openWithMatches();
-    backend.navigateOnClick.set("a.next", "http://127.0.0.1/admin");
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "click", selector: "a.next" }),
-    );
-    expect(error.details.failure).toBe("blocked_url");
-  });
-
 });
 
 
@@ -801,119 +751,14 @@ describe("prompt-injection guardrail", () => {
     expect(description).toMatch(/injection-warning/);
     expect(description).toMatch(/ignore your previous instructions/i);
     expect(description).toMatch(/report .* to the owner/i);
-    const schema = harness.tools.get(GHOST_BROWSER)?.parameters as {
-      properties: Record<string, unknown>;
-    };
-    expect(schema.properties.allow_cross_domain).toBeDefined();
   });
 
-  it("acts freely on the owner-opened domain, across subdomain hops", async () => {
-    const harness = await hopVia("https://app.example.com/dashboard");
-    // Now on app.example.com — a different host, same registrable domain.
+  it("acts as the owner on whatever page it reached, as the owner's own browser does", async () => {
+    const harness = await hopVia("https://elsewhere.test/pay");
     backend.findResults = [CONFIRM_BUTTON];
     await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
     await expect(harness.call(GHOST_BROWSER, { action: "click", ref: "e1" })).resolves
       .toBeDefined();
-  });
-
-  it("still reads, finds, and screenshots after an injected cross-domain hop", async () => {
-    const harness = await hopVia("https://attacker.test/");
-    backend.pageText = "attacker-controlled text";
-    backend.findResults = [CONFIRM_BUTTON];
-    await expect(harness.call(GHOST_BROWSER, { action: "read" })).resolves.toBeDefined();
-    await expect(harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" })).resolves
-      .toBeDefined();
-    await expect(harness.call(GHOST_BROWSER, { action: "screenshot" })).resolves.toBeDefined();
-  });
-
-  it("refuses to act after an injected cross-domain hop, with an actionable error", async () => {
-    const harness = await hopVia("https://attacker.test/pay");
-    backend.findResults = [CONFIRM_BUTTON];
-    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
-
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "click", ref: "e1" }),
-    );
-    expect(error.code).toBe("forbidden");
-    expect(error.details.failure).toBe("blocked_action");
-    expect(error.message).toMatch(/allow_cross_domain/);
-    expect(error.message).toMatch(/attacker\.test/);
-  });
-
-  it("gates uploading a file on an off-origin page", async () => {
-    // Handing local paths to a form is the sharpest consequential action here:
-    // the backend passes them straight to the owner's signed-in browser, and the
-    // session layer does not vet the paths. The origin gate is its only bound.
-    const harness = await hopVia("https://attacker.test/pay");
-    backend.findResults = [CONFIRM_BUTTON];
-    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
-
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, {
-        action: "upload",
-        ref: "e1",
-        paths: ["/home/owner/.ssh/id_ed25519"],
-      }),
-    );
-    expect(error.details.failure).toBe("blocked_action");
-    expect(backend.calls.some((call) => call.name === "upload")).toBe(false);
-  });
-
-  it("lets the owner widen scope with allow_cross_domain", async () => {
-    const harness = await hopVia("https://attacker.test/pay");
-    backend.findResults = [CONFIRM_BUTTON];
-    await harness.call(GHOST_BROWSER, { action: "find", query: "Confirm" });
-
-    await expect(
-      harness.call(GHOST_BROWSER, {
-        action: "click",
-        ref: "e1",
-        allow_cross_domain: true,
-      }),
-    ).resolves.toBeDefined();
-  });
-
-  it("also gates typing and submitting on an off-origin page", async () => {
-    const harness = await hopVia("https://attacker.test/pay");
-    backend.findResults = [
-      { ...SEARCH_BOX, ref: "e1" },
-    ];
-    await harness.call(GHOST_BROWSER, { action: "find", query: "q" });
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, {
-        action: "type",
-        ref: "e1",
-        text: "secret",
-        submit: true,
-      }),
-    );
-    expect(error.details.failure).toBe("blocked_action");
-  });
-
-  it("enforces a per-open budget of consequential actions", async () => {
-    const harness = await loadExtension(
-      createBrowserExtension({
-        backend: () => backend,
-        browser: { idleTimeoutMs: 0, actingBudget: 2, resolver: PUBLIC_RESOLVER },
-      }),
-      fixture.dir,
-    );
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-
-    // Two same-domain, non-navigating clicks are within budget.
-    await harness.call(GHOST_BROWSER, { action: "click", selector: "button.a" });
-    await harness.call(GHOST_BROWSER, { action: "click", selector: "button.b" });
-
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "click", selector: "button.c" }),
-    );
-    expect(error.code).toBe("limit_exceeded");
-    expect(error.details.failure).toBe("action_budget");
-
-    // A fresh owner-directed open refills the budget.
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    await expect(harness.call(GHOST_BROWSER, { action: "click", selector: "button.c" }))
-      .resolves.toBeDefined();
   });
 });
 
@@ -1150,27 +995,6 @@ describe("navigation, input, and scripting actions", () => {
   });
 });
 
-describe("javascript is gated by the provenance guardrail", () => {
-  it("refuses to run script after an injected cross-domain hop", async () => {
-    const harness = await hopVia("https://attacker.test/");
-    const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "javascript", code: "1+1" }),
-    );
-    expect(error.details.failure).toBe("blocked_action");
-  });
-
-  it("lets the owner widen scope for a script with allow_cross_domain", async () => {
-    const harness = await hopVia("https://attacker.test/");
-    await expect(
-      harness.call(GHOST_BROWSER, {
-        action: "javascript",
-        code: "1+1",
-        allow_cross_domain: true,
-      }),
-    ).resolves.toBeDefined();
-  });
-});
-
 describe("console, network, and tabs", () => {
   let backend: FakeBackend;
 
@@ -1179,7 +1003,7 @@ describe("console, network, and tabs", () => {
     return loadExtension(
       createBrowserExtension({
         backend: () => backend,
-        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
+        browser: { idleTimeoutMs: 0 },
       }),
       fixture.dir,
     );
@@ -1509,7 +1333,7 @@ describe("timeouts", () => {
     const harness = await loadExtension(
       createBrowserExtension({
         backend: () => backend,
-        browser: { idleTimeoutMs: 20, resolver: PUBLIC_RESOLVER },
+        browser: { idleTimeoutMs: 20 },
       }),
       fixture.dir,
     );
@@ -1530,7 +1354,6 @@ describe("serialized browser lifecycle", () => {
       homeDir: fixture.dir,
       backend: () => backend,
       idleTimeoutMs: 25,
-      resolver: PUBLIC_RESOLVER,
       clock,
     });
     await session.open("https://example.com");
@@ -1553,7 +1376,6 @@ describe("serialized browser lifecycle", () => {
       homeDir: fixture.dir,
       backend: () => backend,
       idleTimeoutMs: 25,
-      resolver: PUBLIC_RESOLVER,
       clock,
     });
     await session.open("https://example.com");
@@ -1585,7 +1407,6 @@ describe("serialized browser lifecycle", () => {
       homeDir: fixture.dir,
       backend: () => backend,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     await session.open("https://example.com");
     const reading = session.read();
@@ -1609,7 +1430,6 @@ describe("serialized browser lifecycle", () => {
       backend: () => backend,
       idleTimeoutMs: 0,
       closeTimeoutMs: 10,
-      resolver: PUBLIC_RESOLVER,
     });
     await session.open("https://example.com");
     const error = await expectGhostError(session.close());
@@ -1626,7 +1446,7 @@ describe("the backend is a choice, and policy sits above it", () => {
     return loadExtension(
       createBrowserExtension({
         backend: () => backend,
-        browser: { idleTimeoutMs: 0, resolver: PUBLIC_RESOLVER },
+        browser: { idleTimeoutMs: 0 },
       }),
       fixture.dir,
     );
@@ -1692,32 +1512,16 @@ describe("the backend is a choice, and policy sits above it", () => {
 
 
 describe("the process-wide browser session registry", () => {
-  it("reuses a session for omitted and explicitly-defaulted options", () => {
+  it("keeps one session per home: the first caller's options stand", () => {
     const first = browserSessionFor(fixture.dir, { backend: SHARED_BACKEND });
-    const omitted = browserSessionFor(fixture.dir, { backend: SHARED_BACKEND });
-    const explicitDefaults = browserSessionFor(fixture.dir, {
+    expect(browserSessionFor(fixture.dir, {
       backend: SHARED_BACKEND,
-      idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS,
-      actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS,
-      actingBudget: DEFAULT_ACTING_BUDGET,
-      allowActionsOffOrigin: false,
-    });
-
-    expect(omitted).toBe(first);
-    expect(explicitDefaults).toBe(first);
-  });
-
-  it("reuses an identical custom backend factory", () => {
-    const backend = new FakeBackend();
-    const factory = () => backend;
-    const first = browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 });
-
-    expect(browserSessionFor(fixture.dir, { backend: factory, idleTimeoutMs: 0 })).toBe(first);
+      idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS + 1,
+      actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS + 1,
+    })).toBe(first);
   });
 
   it("reuses the session no matter which factory object asked for it", () => {
-    // There is one backend, so which factory produced it is not a setting the
-    // owner chose and must not read as a configuration conflict.
     const first = browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 });
 
     expect(
@@ -1733,7 +1537,6 @@ describe("the process-wide browser session registry", () => {
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     await session.open("https://example.com");
     const first = closeAllBrowserSessions();
@@ -1742,14 +1545,12 @@ describe("the process-wide browser session registry", () => {
     expect(() => browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).toThrowError(/shutdown is still in progress/i);
     blocked.resolve();
     await Promise.all([first, second]);
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).not.toBe(session);
   });
 
@@ -1760,12 +1561,10 @@ describe("the process-wide browser session registry", () => {
     const first = browserSessionFor(fixture.dir, {
       backend: () => firstBackend,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     const other = browserSessionFor(otherHome, {
       backend: () => otherBackend,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     await first.open("https://example.com");
     await other.open("https://example.com");
@@ -1777,12 +1576,10 @@ describe("the process-wide browser session registry", () => {
     expect(browserSessionFor(otherHome, {
       backend: () => otherBackend,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).toBe(other);
     expect(browserSessionFor(fixture.dir, {
       backend: () => firstBackend,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).not.toBe(first);
     await closeBrowserSession(otherHome);
   });
@@ -1796,7 +1593,6 @@ describe("the process-wide browser session registry", () => {
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     await session.open("https://example.com");
 
@@ -1808,7 +1604,6 @@ describe("the process-wide browser session registry", () => {
     expect(() => browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).toThrowError(/still closing/i);
     expect(() => browserSessionFor(otherHome, {
       backend: SHARED_BACKEND,
@@ -1826,7 +1621,6 @@ describe("the process-wide browser session registry", () => {
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     });
     await session.open("https://example.com");
     vi.spyOn(failingBackend, "close")
@@ -1836,7 +1630,6 @@ describe("the process-wide browser session registry", () => {
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).toBe(session);
 
     await closeBrowserSession(fixture.dir);
@@ -1844,28 +1637,6 @@ describe("the process-wide browser session registry", () => {
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
       idleTimeoutMs: 0,
-      resolver: PUBLIC_RESOLVER,
     })).not.toBe(session);
-  });
-
-  it.each([
-    ["idleTimeoutMs", { idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS + 1 }],
-    ["actionTimeoutMs", { actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS + 1 }],
-    ["allowLocal", { allowLocal: true }],
-    ["dnsTimeoutMs", { dnsTimeoutMs: 123 }],
-    ["closeTimeoutMs", { closeTimeoutMs: 456 }],
-    ["actingBudget", { actingBudget: DEFAULT_ACTING_BUDGET + 1 }],
-    ["allowActionsOffOrigin", { allowActionsOffOrigin: true }],
-  ] as const)("throws rather than discarding a changed %s", (name, changed) => {
-    browserSessionFor(fixture.dir, { backend: SHARED_BACKEND });
-
-    try {
-      browserSessionFor(fixture.dir, { backend: SHARED_BACKEND, ...changed });
-      throw new Error("expected a browser session configuration conflict");
-    } catch (error) {
-      expect(error).toBeInstanceOf(GhostError);
-      expect((error as GhostError).code).toBe("conflict");
-      expect((error as GhostError).details.changedOptions).toEqual([name]);
-    }
   });
 });

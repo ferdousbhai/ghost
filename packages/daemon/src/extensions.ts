@@ -44,13 +44,7 @@ export interface GhostExtensionOptions {
  */
 const NO_RELAY_BACKEND = relayBackend({});
 
-/**
- * A factory is minted per resolver call. That is safe because
- * `browserSessionFor`'s changed-settings check deliberately never compares the
- * backend factory: there is one relay, and which factory object wrapped it is
- * not a setting the owner chose, so a later resolver call's factory still
- * matches the cached session.
- */
+/** A factory is minted per call; the ghost's first session keeps the one it was built with. */
 function browserBackend(transport: RelayTransport | undefined): BrowserBackendFactory {
   return transport === undefined ? NO_RELAY_BACKEND : relayBackend({ transport });
 }

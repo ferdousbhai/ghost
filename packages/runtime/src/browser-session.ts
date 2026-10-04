@@ -7,7 +7,6 @@
  */
 import { GhostError } from "./errors.js";
 import {
-  browserAbortError,
   GhostBrowserError,
   withTimeout,
   type BackendBackResult,
@@ -27,14 +26,7 @@ import {
   projectJavascriptResult,
   projectNetworkEntries,
 } from "./browser-observation.js";
-import {
-  checkActingScope,
-  checkNetworkUrl,
-  DEFAULT_DNS_TIMEOUT_MS,
-  type BrowserDnsResolver,
-  type BrowserPolicyClock,
-  systemBrowserPolicyClock,
-} from "./browser-policy.js";
+import { checkUrl } from "./browser-policy.js";
 import { assertScreenshotBytesWithinLimit } from "./screenshot-limits.js";
 
 /**
@@ -60,14 +52,16 @@ const MAX_BROWSER_REF_CHARS = 128;
 
 const BROWSER_REF_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
-/**
- * How many consequential actions (click/type) may fire between two explicit
- * `open()`s. An injected page that hijacks the ghost cannot issue an `open()` on
- * the owner's behalf, so bounding actions per owner-directed navigation caps
- * how much a single hijack can do before the transcript shows another deliberate
- * step. Generous by design — a normal form fill is one or two actions.
- */
-export const DEFAULT_ACTING_BUDGET = 12;
+/** Timers the session schedules its idle close with; tests substitute their own. */
+export interface BrowserClock {
+  readonly setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
+  readonly clearTimeout: (timer: ReturnType<typeof setTimeout>) => void;
+}
+
+export const systemBrowserClock: BrowserClock = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (timer) => clearTimeout(timer),
+};
 
 export interface BrowserSessionOptions {
   /** The host's screenshot storage. */
@@ -76,25 +70,8 @@ export interface BrowserSessionOptions {
   readonly backend: BrowserBackendFactory;
   readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
-  readonly allowLocal?: boolean;
-  readonly dnsTimeoutMs?: number;
-  /** DNS answered from the browser's own network; without one, opens fail closed. */
-  readonly resolver?: BrowserDnsResolver;
-  readonly clock?: BrowserPolicyClock;
+  readonly clock?: BrowserClock;
   readonly closeTimeoutMs?: number;
-  /**
-   * Consequential actions allowed per owner-directed `open()`. See
-   * {@link DEFAULT_ACTING_BUDGET}. Zero or negative disables the budget (the
-   * domain-scope guardrail still applies).
-   */
-  readonly actingBudget?: number;
-  /**
-   * Per-ghost-workspace escape hatch: let consequential actions run off the
-   * opened origin's registrable domain by default, for an owner who is running
-   * a deliberate multi-site workflow. Off by default; the per-call
-   * `allowCrossDomain` is the usual, more legible way to widen scope.
-   */
-  readonly allowActionsOffOrigin?: boolean;
 }
 
 export interface BrowserOperationOptions {
@@ -138,7 +115,6 @@ export interface BatchStep {
   readonly selector?: string;
   readonly text?: string;
   readonly submit?: boolean;
-  readonly allowCrossDomain?: boolean;
   readonly maxChars?: number;
   readonly limit?: number;
   readonly deltaX?: number;
@@ -226,41 +202,23 @@ export class GhostBrowserSession {
   #activeAbort: AbortController | undefined;
   #idleTimer: ReturnType<typeof setTimeout> | undefined;
   #refs = new Map<string, PageElementMatch>();
-  #originUrl: string | undefined;
-  #originHops = 0;
-  #actingRemaining: number;
 
   readonly #idleTimeoutMs: number;
   readonly #actionTimeoutMs: number;
-  readonly #allowLocal: boolean;
-  readonly #dnsTimeoutMs: number;
-  readonly #resolver: BrowserDnsResolver | undefined;
-  readonly #clock: BrowserPolicyClock;
+  readonly #clock: BrowserClock;
   readonly #closeTimeoutMs: number;
-  readonly #actingBudget: number;
-  readonly #allowActionsOffOrigin: boolean;
 
   constructor(options: BrowserSessionOptions) {
     this.#screenshots = options.screenshots;
     this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
-    this.#allowLocal = options.allowLocal ?? false;
-    this.#dnsTimeoutMs = options.dnsTimeoutMs ?? DEFAULT_DNS_TIMEOUT_MS;
-    this.#resolver = options.resolver;
-    this.#clock = options.clock ?? systemBrowserPolicyClock;
+    this.#clock = options.clock ?? systemBrowserClock;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_BROWSER_CLOSE_TIMEOUT_MS;
-    this.#actingBudget = options.actingBudget ?? DEFAULT_ACTING_BUDGET;
-    this.#allowActionsOffOrigin = options.allowActionsOffOrigin ?? false;
-    this.#actingRemaining = this.#actingBudget;
     this.backend = options.backend();
   }
 
   get running(): boolean {
     return this.backend.running;
-  }
-
-  get originUrl(): string | undefined {
-    return this.#originUrl;
   }
 
 
@@ -321,37 +279,15 @@ export class GhostBrowserSession {
     this.#idleTimer.unref?.();
   }
 
-  async #requireAllowedUrl(
-    url: string,
-    options: { timeoutMs: number; signal?: AbortSignal },
-  ): Promise<string> {
-    let checked: Awaited<ReturnType<typeof checkNetworkUrl>>;
-    try {
-      checked = await checkNetworkUrl(url, {
-        allowLocal: this.#allowLocal,
-        resolver: this.#resolver,
-        clock: this.#clock,
-        timeoutMs: Math.min(options.timeoutMs, this.#dnsTimeoutMs),
-        ...(options.signal === undefined ? {} : { signal: options.signal }),
-      });
-    } catch (error) {
-      if ((error as Error).name === "AbortError") throw browserAbortError(`verifying ${url}`);
-      throw error;
-    }
+  /** A bare host reads as https; only http(s) and about:blank open. */
+  #requireAllowedUrl(url: string): string {
+    const checked = checkUrl(url);
     if (!checked.ok) {
       throw new GhostBrowserError("blocked_url", checked.rejection.reason, {
         url: checked.rejection.url,
       });
     }
     return checked.url;
-  }
-
-  async #validatePage<T extends PageSummary>(
-    page: T,
-    options: { timeoutMs?: number; signal?: AbortSignal },
-  ): Promise<T> {
-    await this.#requireAllowedUrl(page.url, this.#timeout(options));
-    return page;
   }
 
   #invalidateRefs(): void {
@@ -386,45 +322,12 @@ export class GhostBrowserSession {
     );
   }
 
-  /**
-   * The prompt-injection gate for consequential actions. Refuses to click, type,
-   * or submit on a page off the owner-opened origin's registrable domain, and
-   * spends one unit of the per-open acting budget. Reads never call this.
-   *
-   * Fails closed, before the backend ever hears about the action, with a
-   * structured `GhostBrowserError` that names how the owner can widen scope.
-   */
-  #gateActing(currentUrl: string, allowCrossDomain: boolean): void {
-    const scope = checkActingScope(this.#originUrl, currentUrl, this.#originHops, {
-      allowCrossDomain: allowCrossDomain || this.#allowActionsOffOrigin,
-    });
-    if (!scope.ok) {
-      throw new GhostBrowserError("blocked_action", scope.reason, scope.details);
-    }
-    if (this.#actingBudget > 0 && this.#actingRemaining <= 0) {
-      throw new GhostBrowserError(
-        "action_budget",
-        `That is more than ${this.#actingBudget} consequential actions since the `
-        + "last page you opened. This bounds how far a single hijacked page can "
-        + "push the browser. If the owner asked for this, re-open the page you "
-        + "mean to act on with action \"open\" (which resets the budget) and "
-        + "continue from there.",
-        {
-          failure: "action_budget",
-          budget: this.#actingBudget,
-          originUrl: this.#originUrl,
-        },
-      );
-    }
-    if (this.#actingBudget > 0) this.#actingRemaining -= 1;
-  }
-
   async #requirePage(
     options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<PageSummary> {
     const operation = this.#timeout(options);
     const page = await this.backend.current(operation);
-    if (page) return this.#validatePage(page, operation);
+    if (page) return page;
     throw new GhostBrowserError(
       "no_page",
       "No page is loaded. Use action \"open\" with a URL first.",
@@ -441,18 +344,9 @@ export class GhostBrowserSession {
     options: BrowserOperationOptions,
   ): Promise<PageSummary> {
     const operation = this.#timeout(options);
-    const checked = await this.#requireAllowedUrl(url, operation);
+    const checked = this.#requireAllowedUrl(url);
     this.#invalidateRefs();
-    const page = await this.#validatePage(
-      await this.backend.open(checked, operation),
-      operation,
-    );
-    // This navigation came from the owner: re-anchor the trusted origin to
-    // where it actually landed, reset the hop count, and refill the budget.
-    this.#originUrl = page.url;
-    this.#originHops = 0;
-    this.#actingRemaining = this.#actingBudget;
-    return page;
+    return this.backend.open(checked, operation);
   }
 
   read(options: BrowserOperationOptions & { maxChars?: number } = {}) {
@@ -468,7 +362,7 @@ export class GhostBrowserSession {
       : DEFAULT_READ_BUDGET_CHARS;
     const operation = this.#timeout(options);
     await this.#requirePage(operation);
-    const result = await this.#validatePage(await this.backend.read(operation), operation);
+    const result = await this.backend.read(operation);
     return {
       url: result.url,
       title: result.title,
@@ -500,12 +394,11 @@ export class GhostBrowserSession {
       ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
       : DEFAULT_FIND_LIMIT;
     const operation = this.#timeout(options);
-    const page = await this.#requirePage(operation);
+    await this.#requirePage(operation);
     const backendMatches = await this.backend.find(trimmed, {
       ...operation,
       limit,
     });
-    await this.#validatePage(page, operation);
     if (!Array.isArray(backendMatches)) {
       throw new GhostBrowserError(
         "browser_unavailable",
@@ -528,35 +421,25 @@ export class GhostBrowserSession {
     };
   }
 
-  click(target: BackendTarget & BrowserOperationOptions & { allowCrossDomain?: boolean }) {
+  click(target: BackendTarget & BrowserOperationOptions) {
     return this.#serial(() => this.#clickImpl(target));
   }
 
   async #clickImpl(
-    target: BackendTarget & BrowserOperationOptions & { allowCrossDomain?: boolean },
+    target: BackendTarget & BrowserOperationOptions,
   ): Promise<PageSummary> {
     const operation = this.#timeout(target);
     const checked = this.#checkTarget(target);
     const before = await this.#requirePage(operation);
-    // Clicking is consequential: gate it against the trusted origin first.
-    this.#gateActing(before.url, target.allowCrossDomain === true);
-    const page = await this.#validatePage(
-      await this.backend.click(checked, operation),
-      operation,
-    );
-    // A click that navigated invalidates every ref minted on the old page and
-    // counts as one more hop the page — not the owner — drove.
-    if (page.url !== before.url) {
-      this.#invalidateRefs();
-      this.#originHops += 1;
-    }
+    const page = await this.backend.click(checked, operation);
+    // A click that navigated invalidates every ref minted on the old page.
+    if (page.url !== before.url) this.#invalidateRefs();
     return page;
   }
 
   type(input: BackendTarget & {
     text: string;
     submit?: boolean;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions) {
     return this.#serial(() => this.#typeImpl(input));
   }
@@ -564,27 +447,18 @@ export class GhostBrowserSession {
   async #typeImpl(input: BackendTarget & {
     text: string;
     submit?: boolean;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions): Promise<SessionTypeResult> {
     const operation = this.#timeout(input);
     const checked = this.#checkTarget(input);
-    const before = await this.#requirePage(operation);
-    // Typing into and submitting someone's form is consequential too.
-    this.#gateActing(before.url, input.allowCrossDomain === true);
+    await this.#requirePage(operation);
     // Submitting is a separate, explicit act: filling a field is reversible,
     // pressing Enter on someone's form is not.
     const submit = input.submit === true;
-    const page = await this.#validatePage(
-      await this.backend.type(
-        { ...checked, text: input.text, submit },
-        operation,
-      ),
+    const page = await this.backend.type(
+      { ...checked, text: input.text, submit },
       operation,
     );
-    if (submit) {
-      this.#invalidateRefs();
-      if (page.url !== before.url) this.#originHops += 1;
-    }
+    if (submit) this.#invalidateRefs();
     return { ...page, submitted: submit };
   }
 
@@ -597,10 +471,10 @@ export class GhostBrowserSession {
   ): Promise<SessionScreenshotResult> {
     const operation = this.#timeout(options);
     await this.#requirePage(operation);
-    const capture = await this.#validatePage(await this.backend.screenshot({
+    const capture = await this.backend.screenshot({
       ...operation,
       fullPage: options.fullPage === true,
-    }), operation);
+    });
     if (!(capture.bytes instanceof Uint8Array)) {
       throw new GhostError(
         "invalid_format",
@@ -620,10 +494,7 @@ export class GhostBrowserSession {
   async #backImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
     const operation = this.#timeout(options);
     await this.#requirePage(operation);
-    const page = await this.#validatePage(await this.backend.back(operation), operation);
-    // Going back steps toward the origin, so it undoes a hop rather than adding
-    // one. Observing only — no gate — but the hop count has to stay honest.
-    if (page.moved && this.#originHops > 0) this.#originHops -= 1;
+    const page = await this.backend.back(operation);
     this.#invalidateRefs();
     return page;
   }
@@ -635,10 +506,7 @@ export class GhostBrowserSession {
   async #forwardImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
     const operation = this.#timeout(options);
     await this.#requirePage(operation);
-    const page = await this.#validatePage(await this.backend.forward(operation), operation);
-    // Forward is the inverse of back: it re-takes a step the page — not the
-    // owner — had walked, so it re-adds a hop rather than undoing one.
-    if (page.moved) this.#originHops += 1;
+    const page = await this.backend.forward(operation);
     this.#invalidateRefs();
     return page;
   }
@@ -672,17 +540,13 @@ export class GhostBrowserSession {
         "Scroll needs both x and y when a wheel anchor is provided.",
       );
     }
-    // Scrolling only moves the viewport; it is observing, never gated.
-    const page = await this.#validatePage(
-      await this.backend.scroll(
-        {
-          deltaX: input.deltaX,
-          deltaY: input.deltaY,
-          ...(input.x === undefined ? {} : { x: input.x }),
-          ...(input.y === undefined ? {} : { y: input.y }),
-        },
-        operation,
-      ),
+    const page = await this.backend.scroll(
+      {
+        deltaX: input.deltaX,
+        deltaY: input.deltaY,
+        ...(input.x === undefined ? {} : { x: input.x }),
+        ...(input.y === undefined ? {} : { y: input.y }),
+      },
       operation,
     );
     return page;
@@ -694,7 +558,6 @@ export class GhostBrowserSession {
     toX: number;
     toY: number;
     steps?: number;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions) {
     return this.#serial(() => this.#dragImpl(input));
   }
@@ -705,7 +568,6 @@ export class GhostBrowserSession {
     toX: number;
     toY: number;
     steps?: number;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions): Promise<PageSummary> {
     const operation = this.#timeout(input);
     requireFiniteNumbers("Drag", {
@@ -725,24 +587,18 @@ export class GhostBrowserSession {
       );
     }
     const before = await this.#requirePage(operation);
-    // Dragging can reorder, move, or drop things: consequential, so it is gated.
-    this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.#validatePage(
-      await this.backend.drag(
-        {
-          fromX: input.fromX,
-          fromY: input.fromY,
-          toX: input.toX,
-          toY: input.toY,
-          ...(input.steps === undefined ? {} : { steps: input.steps }),
-        },
-        operation,
-      ),
+    const page = await this.backend.drag(
+      {
+        fromX: input.fromX,
+        fromY: input.fromY,
+        toX: input.toX,
+        toY: input.toY,
+        ...(input.steps === undefined ? {} : { steps: input.steps }),
+      },
       operation,
     );
     if (page.url !== before.url) {
       this.#invalidateRefs();
-      this.#originHops += 1;
     }
     return page;
   }
@@ -751,7 +607,6 @@ export class GhostBrowserSession {
     key: string;
     modifiers?: readonly string[];
     text?: string;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions) {
     return this.#serial(() => this.#keyImpl(input));
   }
@@ -760,7 +615,6 @@ export class GhostBrowserSession {
     key: string;
     modifiers?: readonly string[];
     text?: string;
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions): Promise<PageSummary> {
     const operation = this.#timeout(input);
     const key = input.key.trim();
@@ -768,45 +622,36 @@ export class GhostBrowserSession {
       throw new GhostBrowserError("invalid_input", "A key press needs a key name.");
     }
     const before = await this.#requirePage(operation);
-    // Pressing keys drives the focused control: consequential, so it is gated.
-    this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.#validatePage(
-      await this.backend.key(
-        {
-          key,
-          ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
-          ...(input.text === undefined ? {} : { text: input.text }),
-        },
-        operation,
-      ),
+    const page = await this.backend.key(
+      {
+        key,
+        ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
+        ...(input.text === undefined ? {} : { text: input.text }),
+      },
       operation,
     );
     if (page.url !== before.url) {
       this.#invalidateRefs();
-      this.#originHops += 1;
     }
     return page;
   }
 
   javascript(
     code: string,
-    options: BrowserOperationOptions & { allowCrossDomain?: boolean } = {},
+    options: BrowserOperationOptions = {},
   ) {
     return this.#serial(() => this.#javascriptImpl(code, options));
   }
 
   async #javascriptImpl(
     code: string,
-    options: BrowserOperationOptions & { allowCrossDomain?: boolean },
+    options: BrowserOperationOptions,
   ): Promise<BoundedJavascriptResult> {
     const operation = this.#timeout(options);
     if (code.trim() === "") {
       throw new GhostBrowserError("invalid_input", "There is no code to run.");
     }
-    const before = await this.#requirePage(operation);
-    // Running script is the sharpest consequential action: gate it exactly like a
-    // click, and spend a unit of the acting budget.
-    this.#gateActing(before.url, options.allowCrossDomain === true);
+    await this.#requirePage(operation);
     const result = projectJavascriptResult(
       await this.backend.javascript(code, operation),
     );
@@ -850,31 +695,20 @@ export class GhostBrowserSession {
 
   upload(input: BackendTarget & {
     paths: readonly string[];
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions) {
     return this.#serial(() => this.#uploadImpl(input));
   }
 
   async #uploadImpl(input: BackendTarget & {
     paths: readonly string[];
-    allowCrossDomain?: boolean;
   } & BrowserOperationOptions): Promise<PageSummary> {
     const operation = this.#timeout(input);
     if (input.paths.length === 0) {
       throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
     }
     const checked = this.#checkTarget(input);
-    const before = await this.#requirePage(operation);
-    // Handing a file to a form is consequential — gate it against the origin.
-    this.#gateActing(before.url, input.allowCrossDomain === true);
-    const page = await this.#validatePage(
-      await this.backend.upload(
-        { ...checked, paths: [...input.paths] },
-        operation,
-      ),
-      operation,
-    );
-    return page;
+    await this.#requirePage(operation);
+    return this.backend.upload({ ...checked, paths: [...input.paths] }, operation);
   }
 
   resize(input: { width: number; height: number } & BrowserOperationOptions) {
@@ -898,11 +732,8 @@ export class GhostBrowserSession {
         "Resize width and height must be integers from 100 through 10000.",
       );
     }
-    const result = await this.#validatePage(
-      await this.backend.resize(
-        { width: input.width, height: input.height },
-        operation,
-      ),
+    const result = await this.backend.resize(
+      { width: input.width, height: input.height },
       operation,
     );
     return result;
@@ -924,190 +755,175 @@ export class GhostBrowserSession {
     const operation = this.#timeout(input);
     let url: string | undefined;
     if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
-      url = await this.#requireAllowedUrl(input.url, operation);
+      url = this.#requireAllowedUrl(input.url);
     }
     const result = await this.backend.tabs(
-      {
-        op: input.op,
-        ...(input.id === undefined ? {} : { id: input.id }),
-        ...(url === undefined ? {} : { url }),
-      },
-      operation,
-    );
-    for (const tab of result.tabs) await this.#validatePage(tab, operation);
-    if (result.page) await this.#validatePage(result.page, operation);
-    // Switching or creating a tab lands the ghost on a different page; the refs
-    // minted on the old one no longer mean anything.
-    this.#invalidateRefs();
-    if (input.op === "create" && result.page) {
-      this.#originUrl = result.page.url;
-      this.#originHops = 0;
-      this.#actingRemaining = this.#actingBudget;
-    }
-    return result;
+    {
+      op: input.op,
+      ...(input.id === undefined ? {} : { id: input.id }),
+      ...(url === undefined ? {} : { url }),
+    },
+    operation,
+  );
+  // Switching or creating a tab lands the ghost on a different page; the refs
+  // minted on the old one no longer mean anything.
+  this.#invalidateRefs();
+  if (input.op === "create" && result.page) {
   }
+  return result;
+}
 
-  batch(steps: readonly BatchStep[], options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#batchImpl(steps, options));
-  }
+batch(steps: readonly BatchStep[], options: BrowserOperationOptions = {}) {
+  return this.#serial(() => this.#batchImpl(steps, options));
+}
 
-  /**
-   * Run a sequence of steps as one queue slot, so nothing else interleaves
-   * between them — the whole point of batching over separate tool calls. Each
-   * step reuses the same non-serialized impls the public methods do, so the
-   * guardrails (URL policy, provenance gate, acting budget, ref checks) apply
-   * identically. A step that fails stops the batch and is reported, rather than
-   * throwing the whole thing away.
-   */
-  async #batchImpl(
-    steps: readonly BatchStep[],
-    options: BrowserOperationOptions,
-  ): Promise<BatchResult> {
-    const results: BatchStepResult[] = [];
-    for (const step of steps) {
-      try {
-        const summary = await this.#runStep(step, options);
-        results.push({ action: step.action, ok: true, summary });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const failure = error instanceof GhostBrowserError ? error.failure : "navigation_failed";
-        results.push({ action: step.action, ok: false, summary: message, failure });
-        return { steps: results, stopped: true };
-      }
-    }
-    return { steps: results, stopped: false };
-  }
-
-  async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
-    const t = options;
-    switch (step.action) {
-      case "open": {
-        const page = await this.#openImpl(step.url ?? "", t);
-        return `open → ${page.url}`;
-      }
-      case "read": {
-        const r = await this.#readImpl({ ...t, ...(step.maxChars === undefined ? {} : { maxChars: step.maxChars }) });
-        return `read ${r.text.length} of ${r.totalLength} chars`;
-      }
-      case "find": {
-        const result = await this.#findImpl(step.query ?? "", {
-          ...t,
-          ...(step.limit === undefined ? {} : { limit: step.limit }),
-        });
-        return `find "${step.query ?? ""}" → ${result.matches.length} match(es)`;
-      }
-      case "click": {
-        const page = await this.#clickImpl({
-          ...t,
-          ...(step.ref === undefined ? {} : { ref: step.ref }),
-          ...(step.selector === undefined ? {} : { selector: step.selector }),
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return `click → ${page.url}`;
-      }
-      case "type": {
-        const page = await this.#typeImpl({
-          text: step.text ?? "",
-          ...t,
-          ...(step.ref === undefined ? {} : { ref: step.ref }),
-          ...(step.selector === undefined ? {} : { selector: step.selector }),
-          ...(step.submit === undefined ? {} : { submit: step.submit }),
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return `type → ${page.submitted ? "submitted" : "filled"}`;
-      }
-      case "scroll": {
-        await this.#scrollImpl({
-          deltaX: step.deltaX ?? 0,
-          deltaY: step.deltaY ?? 0,
-          ...t,
-          ...(step.x === undefined ? {} : { x: step.x }),
-          ...(step.y === undefined ? {} : { y: step.y }),
-        });
-        return "scroll";
-      }
-      case "drag": {
-        await this.#dragImpl({
-          fromX: step.fromX ?? 0,
-          fromY: step.fromY ?? 0,
-          toX: step.toX ?? 0,
-          toY: step.toY ?? 0,
-          ...t,
-          ...(step.steps === undefined ? {} : { steps: step.steps }),
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return "drag";
-      }
-      case "key": {
-        await this.#keyImpl({
-          key: step.key ?? "",
-          ...t,
-          ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
-          ...(step.text === undefined ? {} : { text: step.text }),
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return `key ${step.key ?? ""}`;
-      }
-      case "javascript": {
-        const r = await this.#javascriptImpl(step.code ?? "", {
-          ...t,
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return `javascript → ${r.type}`;
-      }
-      case "back": {
-        const page = await this.#backImpl(t);
-        return page.moved ? `back → ${page.url}` : "back → nowhere";
-      }
-      case "forward": {
-        const page = await this.#forwardImpl(t);
-        return page.moved ? `forward → ${page.url}` : "forward → nowhere";
-      }
-      case "upload": {
-        const page = await this.#uploadImpl({
-          paths: step.paths ?? [],
-          ...t,
-          ...(step.ref === undefined ? {} : { ref: step.ref }),
-          ...(step.selector === undefined ? {} : { selector: step.selector }),
-          ...(step.allowCrossDomain === undefined ? {} : { allowCrossDomain: step.allowCrossDomain }),
-        });
-        return `upload → ${page.url}`;
-      }
-      default:
-        throw new GhostBrowserError(
-          "invalid_input",
-          `Batch does not support the step "${step.action}". Batchable steps are `
-          + "open, read, find, click, type, scroll, drag, key, javascript, back, "
-          + "forward, and upload.",
-        );
+/**
+ * Run a sequence of steps as one queue slot, so nothing else interleaves
+ * between them — the whole point of batching over separate tool calls. Each
+ * step reuses the same non-serialized impls the public methods do, so the
+ * guardrails (URL policy, provenance gate, acting budget, ref checks) apply
+ * identically. A step that fails stops the batch and is reported, rather than
+ * throwing the whole thing away.
+ */
+async #batchImpl(
+  steps: readonly BatchStep[],
+  options: BrowserOperationOptions,
+): Promise<BatchResult> {
+  const results: BatchStepResult[] = [];
+  for (const step of steps) {
+    try {
+      const summary = await this.#runStep(step, options);
+      results.push({ action: step.action, ok: true, summary });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const failure = error instanceof GhostBrowserError ? error.failure : "navigation_failed";
+      results.push({ action: step.action, ok: false, summary: message, failure });
+      return { steps: results, stopped: true };
     }
   }
+  return { steps: results, stopped: false };
+}
 
-  close(options: BrowserOperationOptions = {}): Promise<boolean> {
-    // Wake a cooperative backend so the terminal close can take its queue slot.
-    // The close itself remains serialized and therefore never races an action.
-    this.#activeAbort?.abort();
-    const timeoutMs = Math.min(
-      options.timeoutMs ?? this.#closeTimeoutMs,
-      this.#closeTimeoutMs,
-    );
-    return withTimeout(
-      this.#serial(() => this.#closeImpl({ ...options, timeoutMs })),
-      timeoutMs,
-      "waiting for browser actions to stop and close",
-      options.signal,
-    );
+async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
+  const t = options;
+  switch (step.action) {
+    case "open": {
+      const page = await this.#openImpl(step.url ?? "", t);
+      return `open → ${page.url}`;
+    }
+    case "read": {
+      const r = await this.#readImpl({ ...t, ...(step.maxChars === undefined ? {} : { maxChars: step.maxChars }) });
+      return `read ${r.text.length} of ${r.totalLength} chars`;
+    }
+    case "find": {
+      const result = await this.#findImpl(step.query ?? "", {
+        ...t,
+        ...(step.limit === undefined ? {} : { limit: step.limit }),
+      });
+      return `find "${step.query ?? ""}" → ${result.matches.length} match(es)`;
+    }
+    case "click": {
+      const page = await this.#clickImpl({
+        ...t,
+        ...(step.ref === undefined ? {} : { ref: step.ref }),
+        ...(step.selector === undefined ? {} : { selector: step.selector }),
+      });
+      return `click → ${page.url}`;
+    }
+    case "type": {
+      const page = await this.#typeImpl({
+        text: step.text ?? "",
+        ...t,
+        ...(step.ref === undefined ? {} : { ref: step.ref }),
+        ...(step.selector === undefined ? {} : { selector: step.selector }),
+        ...(step.submit === undefined ? {} : { submit: step.submit }),
+      });
+      return `type → ${page.submitted ? "submitted" : "filled"}`;
+    }
+    case "scroll": {
+      await this.#scrollImpl({
+        deltaX: step.deltaX ?? 0,
+        deltaY: step.deltaY ?? 0,
+        ...t,
+        ...(step.x === undefined ? {} : { x: step.x }),
+        ...(step.y === undefined ? {} : { y: step.y }),
+      });
+      return "scroll";
+    }
+    case "drag": {
+      await this.#dragImpl({
+        fromX: step.fromX ?? 0,
+        fromY: step.fromY ?? 0,
+        toX: step.toX ?? 0,
+        toY: step.toY ?? 0,
+        ...t,
+        ...(step.steps === undefined ? {} : { steps: step.steps }),
+      });
+      return "drag";
+    }
+    case "key": {
+      await this.#keyImpl({
+        key: step.key ?? "",
+        ...t,
+        ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
+        ...(step.text === undefined ? {} : { text: step.text }),
+      });
+      return `key ${step.key ?? ""}`;
+    }
+    case "javascript": {
+      const r = await this.#javascriptImpl(step.code ?? "", {
+        ...t,
+      });
+      return `javascript → ${r.type}`;
+    }
+    case "back": {
+      const page = await this.#backImpl(t);
+      return page.moved ? `back → ${page.url}` : "back → nowhere";
+    }
+    case "forward": {
+      const page = await this.#forwardImpl(t);
+      return page.moved ? `forward → ${page.url}` : "forward → nowhere";
+    }
+    case "upload": {
+      const page = await this.#uploadImpl({
+        paths: step.paths ?? [],
+        ...t,
+        ...(step.ref === undefined ? {} : { ref: step.ref }),
+        ...(step.selector === undefined ? {} : { selector: step.selector }),
+      });
+      return `upload → ${page.url}`;
+    }
+    default:
+      throw new GhostBrowserError(
+        "invalid_input",
+        `Batch does not support the step "${step.action}". Batchable steps are `
+        + "open, read, find, click, type, scroll, drag, key, javascript, back, "
+        + "forward, and upload.",
+      );
   }
+}
 
-  // close() has already clamped the timeout and wrapped the whole queued wait
-  // in withTimeout, so this only forwards the operation to the backend.
-  async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
-    this.#clearIdleTimer();
-    this.#invalidateRefs();
-    // A fresh browser has no trusted origin until the next open().
-    this.#originUrl = undefined;
-    this.#originHops = 0;
-    this.#actingRemaining = this.#actingBudget;
-    return this.backend.close(this.#timeout(options));
-  }
+close(options: BrowserOperationOptions = {}): Promise<boolean> {
+  // Wake a cooperative backend so the terminal close can take its queue slot.
+  // The close itself remains serialized and therefore never races an action.
+  this.#activeAbort?.abort();
+  const timeoutMs = Math.min(
+    options.timeoutMs ?? this.#closeTimeoutMs,
+    this.#closeTimeoutMs,
+  );
+  return withTimeout(
+    this.#serial(() => this.#closeImpl({ ...options, timeoutMs })),
+    timeoutMs,
+    "waiting for browser actions to stop and close",
+    options.signal,
+  );
+}
+
+// close() has already clamped the timeout and wrapped the whole queued wait
+// in withTimeout, so this only forwards the operation to the backend.
+async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
+  this.#clearIdleTimer();
+  this.#invalidateRefs();
+  return this.backend.close(this.#timeout(options));
+}
 }
