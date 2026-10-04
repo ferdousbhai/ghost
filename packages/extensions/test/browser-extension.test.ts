@@ -1212,41 +1212,6 @@ describe("console, network, and tabs", () => {
   });
 });
 
-describe("batch runs a sequence inside one queue slot", () => {
-  it("runs each step and reports them", async () => {
-    const harness = await browserHarness();
-    backend.pageText = "hello";
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const result = await harness.call(GHOST_BROWSER, {
-      action: "batch",
-      batch: [
-        { action: "read" },
-        { action: "scroll", delta_y: 100 },
-      ],
-    });
-    expect(result.details).toMatchObject({ stopped: false });
-    expect(resultText(result)).toMatch(/1\. ok read/);
-    expect(resultText(result)).toMatch(/2\. ok scroll/);
-  });
-
-  it("stops at the first failed step and reports it", async () => {
-    const harness = await browserHarness();
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const result = await harness.call(GHOST_BROWSER, {
-      action: "batch",
-      batch: [
-        { action: "scroll", delta_y: 10 },
-        { action: "click", ref: "e404" },
-        { action: "scroll", delta_y: 20 },
-      ],
-    });
-    expect(result.details).toMatchObject({ stopped: true });
-    const steps = (result.details as { steps: { ok: boolean }[] }).steps;
-    expect(steps).toHaveLength(2);
-    expect(steps[1]?.ok).toBe(false);
-  });
-});
-
 describe("screenshot returns a real image", () => {
   it("returns an image block, keeping the saved path in details", async () => {
     const harness = await browserHarness();

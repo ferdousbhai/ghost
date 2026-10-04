@@ -52,7 +52,6 @@ export const BROWSER_ACTIONS = [
   "tab_open",
   "tab_close",
   "tab_switch",
-  "batch",
 ] as const;
 
 export interface BrowserExtensionOptions extends GhostExtensionOptions {
@@ -205,38 +204,6 @@ export function createBrowserExtension(
         tab_id: Type.Optional(Type.String({
           description: "For tab_close, tab_switch: a tab id from tabs.",
         })),
-        batch: Type.Optional(Type.Array(
-          Type.Object({
-            action: stringEnum(
-              [
-                "open", "read", "find", "click", "type", "scroll", "drag", "key",
-                "javascript", "back", "forward", "upload",
-              ] as const,
-              { description: "Which step to run." },
-            ),
-            url: Type.Optional(Type.String()),
-            query: Type.Optional(Type.String()),
-            ref: Type.Optional(Type.String()),
-            selector: Type.Optional(Type.String()),
-            text: Type.Optional(Type.String()),
-            submit: Type.Optional(Type.Boolean()),
-            code: Type.Optional(Type.String()),
-            key: Type.Optional(Type.String()),
-            modifiers: Type.Optional(Type.Array(Type.String())),
-            delta_x: Type.Optional(Type.Number()),
-            delta_y: Type.Optional(Type.Number()),
-            from_x: Type.Optional(Type.Number()),
-            from_y: Type.Optional(Type.Number()),
-            to_x: Type.Optional(Type.Number()),
-            to_y: Type.Optional(Type.Number()),
-            paths: Type.Optional(Type.Array(Type.String())),
-          }),
-          {
-            description:
-              "For batch: steps run in order as one uninterrupted sequence, each with "
-              + "the fields its action takes above; a failing step stops the batch.",
-          },
-        )),
         timeout_ms: Type.Optional(Type.Integer({
           description: "Milliseconds this action may take, default 30000.",
           minimum: MIN_TIMEOUT_MS,
@@ -632,45 +599,6 @@ export function createBrowserExtension(
             return textResult(
               `Switched to tab ${params.tab_id}${result.page ? ` at ${result.page.url}` : ""}.`,
               { action: "tab_switch", ...result, tabs: [...result.tabs] },
-            );
-          }
-
-          case "batch": {
-            if (!params.batch || params.batch.length === 0) {
-              throw new GhostBrowserError(
-                "invalid_input",
-                "action \"batch\" needs a non-empty list of steps.",
-              );
-            }
-            const steps = params.batch.map((step) => ({
-              action: step.action,
-              ...(step.url === undefined ? {} : { url: step.url }),
-              ...(step.query === undefined ? {} : { query: step.query }),
-              ...(step.ref === undefined ? {} : { ref: step.ref }),
-              ...(step.selector === undefined ? {} : { selector: step.selector }),
-              ...(step.text === undefined ? {} : { text: step.text }),
-              ...(step.submit === undefined ? {} : { submit: step.submit }),
-              ...(step.code === undefined ? {} : { code: step.code }),
-              ...(step.key === undefined ? {} : { key: step.key }),
-              ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
-              ...(step.delta_x === undefined ? {} : { deltaX: step.delta_x }),
-              ...(step.delta_y === undefined ? {} : { deltaY: step.delta_y }),
-              ...(step.from_x === undefined ? {} : { fromX: step.from_x }),
-              ...(step.from_y === undefined ? {} : { fromY: step.from_y }),
-              ...(step.to_x === undefined ? {} : { toX: step.to_x }),
-              ...(step.to_y === undefined ? {} : { toY: step.to_y }),
-              ...(step.paths === undefined ? {} : { paths: step.paths }),
-            }));
-            const result = await session.batch(steps, operation);
-            const lines = result.steps.map(
-              (step, index) => `${index + 1}. ${step.ok ? "ok" : "FAILED"} ${step.action}: ${step.summary}`,
-            );
-            return textResult(
-              (result.stopped
-                ? `Batch stopped after a failed step (${result.steps.length} run):\n`
-                : `Batch completed ${result.steps.length} step(s):\n`)
-              + lines.join("\n"),
-              { action: "batch", ...result, steps: [...result.steps] },
             );
           }
 
