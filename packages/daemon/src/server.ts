@@ -35,7 +35,6 @@ import {
   SSE_HEADERS,
   SSE_KEEPALIVE_COMMENT,
   SSE_KEEPALIVE_INTERVAL_MS,
-  zeroUsage,
   type TurnEvent,
 } from "./turn-events.js";
 import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
@@ -847,7 +846,6 @@ export function createDaemonServer(options: ServerOptions): Server {
         emit({
           type: "error",
           reason: "error",
-          usage: zeroUsage(),
           errorMessage: "The turn ended without a terminal event.",
         });
       }
@@ -859,7 +857,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       emit({
         type: "error",
         reason: "error",
-        usage: zeroUsage(),
         errorMessage: error instanceof Error ? error.message : String(error),
       });
     } finally {

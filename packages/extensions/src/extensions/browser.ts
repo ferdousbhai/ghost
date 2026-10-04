@@ -19,7 +19,6 @@ import { RELAY_RECOVERY_HINT } from "./browser-relay-backend.js";
 import { readScreenshotFile, resolveScreenshotDirectory } from "./screenshot-retention.js";
 import {
   resolveHome,
-  resolveToolCapabilities,
   textResult,
   untrustedTextResult,
   type CwdContext,
@@ -389,30 +388,21 @@ export function createBrowserExtension(
               ...operation,
             });
             const details = { action: "screenshot", ...shot };
-            // A model that can see gets the pixels — a description of a screenshot
-            // is strictly lossier. A model that cannot gets the path, since an
-            // image block in a tool result is silently dropped for text-only
-            // models. Either way the saved path stays in details.
-            if (resolveToolCapabilities(options, ctx).vision) {
-              let data: string | undefined;
-              try {
-                data = (await readScreenshotFile(resolveScreenshotDirectory(), shot.path)).toString("base64");
-              } catch {
-                data = undefined;
-              }
-              if (data !== undefined) {
-                return {
-                  content: [
-                    {
-                      type: "text" as const,
-                      text:
-                        `Screenshot of ${shot.url} saved to ${shot.path}.`,
-                    },
-                    { type: "image" as const, data, mimeType: "image/png" },
-                  ],
-                  details,
-                };
-              }
+            // The pixels, not a description of them; the saved path stays in details.
+            let data: string | undefined;
+            try {
+              data = (await readScreenshotFile(resolveScreenshotDirectory(), shot.path)).toString("base64");
+            } catch {
+              data = undefined;
+            }
+            if (data !== undefined) {
+              return {
+                content: [
+                  { type: "text" as const, text: `Screenshot of ${shot.url} saved to ${shot.path}.` },
+                  { type: "image" as const, data, mimeType: "image/png" },
+                ],
+                details,
+              };
             }
             return textResult(
               `Saved a screenshot of ${shot.url} to ${shot.path}`,

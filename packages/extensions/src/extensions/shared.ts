@@ -12,33 +12,9 @@ export interface GhostExtensionOptions {
    * or a process-global env var — both are shared across those sessions.
    */
   readonly home?: GhostHome | string;
-  readonly capabilities?: GhostToolCapabilitiesSource;
 }
 
 export type CwdContext = Pick<GhostToolContext, "cwd">;
-
-export interface GhostToolCapabilities {
-  readonly vision: boolean;
-}
-
-export type GhostToolCapabilitiesResolver = (
-  context: GhostToolContext,
-) => GhostToolCapabilities;
-
-export type GhostToolCapabilitiesSource =
-  | GhostToolCapabilities
-  | GhostToolCapabilitiesResolver;
-
-const NO_TOOL_CAPABILITIES: GhostToolCapabilities = { vision: false };
-
-export function resolveToolCapabilities(
-  options: GhostExtensionOptions,
-  context: GhostToolContext,
-): GhostToolCapabilities {
-  const source = options.capabilities;
-  if (typeof source === "function") return source(context);
-  return source ?? NO_TOOL_CAPABILITIES;
-}
 
 export function resolveHome(
   options: GhostExtensionOptions,

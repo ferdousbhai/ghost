@@ -6,10 +6,7 @@ import {
   openGhostHome,
   relayBackend,
   type BrowserBackendFactory,
-  type CharacterFile,
   type GhostExtensionFactory,
-  type GhostToolCapabilitiesSource,
-  type GhostToolCapabilitiesResolver,
   type RelayTransport,
 } from "@ghost/extensions";
 
@@ -38,12 +35,6 @@ export interface GhostExtensionOptions {
    * tool reporting that no browser is reachable.
    */
   relayTransport?: RelayTransport;
-  /**
-   * Extra system-prompt sections, appended after the persona's derived ones.
-   * Fixed for the session's lifetime — the persona extension reads them into
-   * the session-start prompt and reuses that prompt for later turns.
-   */
-  extraSections?: readonly string[];
 }
 
 /**
@@ -70,10 +61,6 @@ export interface ResolvedGhostExtensions {
   toolNames: string[];
 }
 
-export const piToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
-  vision: context.model?.input?.includes("image") ?? false,
-});
-
 /**
  * Build the extension set for one session. `homeDir` pins Ghost-owned files to
  * the ghost home, apart from the conversation cwd, which is always the owner
@@ -83,55 +70,14 @@ export const piToolCapabilities: GhostToolCapabilitiesResolver = (context) => ({
 export function resolveGhostExtensions(
   options: GhostExtensionOptions,
   homeDir: string | undefined,
-  capabilities: GhostToolCapabilitiesSource,
 ): ResolvedGhostExtensions {
   const extensionOptions = {
     ...(homeDir === undefined ? {} : { home: homeDir }),
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     backend: browserBackend(options.relayTransport),
-    ...(options.extraSections === undefined ? {} : { extraSections: options.extraSections }),
-    capabilities,
   };
   return {
     ghost: createGhostExtension(extensionOptions),
     toolNames: ghostToolNames(),
   };
-}
-
-/**
- * What the persona prompt is assembled from, read once outside any session.
- *
- * The greeting generator needs the same material the persona extension derives
- * at session start, but it has no `AgentSession` to derive it inside of.
- *
- * Derived, never stored, exactly as it is in a session.
- */
-export interface GhostHomeDigest {
-  character: string | null;
-}
-
-export type GhostHomeDigestInput = "character";
-
-/** Injectable input readers for deterministic failure and isolation tests. */
-export interface GhostHomeDigestReaders {
-  readonly character?: () => Promise<CharacterFile | null>;
-}
-
-export interface GhostHomeDigestReadOptions {
-  readonly readers?: GhostHomeDigestReaders;
-  readonly onUnavailable?: (input: GhostHomeDigestInput) => void;
-}
-
-export async function readGhostHomeDigest(
-  homeDir: string,
-  options: GhostHomeDigestReadOptions = {},
-): Promise<GhostHomeDigest> {
-  const home = openGhostHome(homeDir);
-  const [characterResult] = await Promise.allSettled([
-    Promise.resolve().then(() =>
-      options.readers?.character ? options.readers.character() : home.readCharacter()),
-  ]);
-  if (characterResult.status === "rejected") options.onUnavailable?.("character");
-  const character = characterResult.status === "fulfilled" ? characterResult.value : null;
-  return { character: character?.body ?? null };
 }

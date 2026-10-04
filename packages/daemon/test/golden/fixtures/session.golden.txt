@@ -74,7 +74,7 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"Written down.","type":"text_delta"}
 {"content":"Written down.","contentIndex":0,"type":"text_end"}
-{"reason":"stop","type":"done","usage":{"cacheRead":0,"cacheWrite":0,"cost":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0,"total":0},"input":0,"output":0,"totalTokens":0}}
+{"reason":"stop","type":"done"}
 
 ------------------------------------------------------------------------------
 [turn 2: owner prompt]
@@ -144,7 +144,7 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"That you want short answers.","type":"text_delta"}
 {"content":"That you want short answers.","contentIndex":0,"type":"text_end"}
-{"reason":"stop","type":"done","usage":{"cacheRead":0,"cacheWrite":0,"cost":{"cacheRead":0,"cacheWrite":0,"input":0,"output":0,"total":0},"input":0,"output":0,"totalTokens":0}}
+{"reason":"stop","type":"done"}
 
 ------------------------------------------------------------------------------
 [conversation listing]

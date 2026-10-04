@@ -64,7 +64,7 @@ import {
 } from "./prompt-policy.js";
 import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 import { expandMcpServerConfig, normalizeMcpStdioCwd, readEffectiveMcp } from "./mcp-catalog.js";
-import { classifyLimitMessage, zeroUsage, type TurnEvent } from "./turn-events.js";
+import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
 import { readPinState, writePins } from "./pins.js";
 import { readReadState, writeReads } from "./reads.js";
 import type { RunningSource } from "./running-source.js";
@@ -356,7 +356,6 @@ export class SessionHost {
       character,
       homeDir: ghost.dir,
       extraSections: [
-        ...(this.extensionOptions.extraSections ?? []),
         OMARCHY_COMPUTER_USE_POLICY,
         OWNER_DELIVERABLE_POLICY,
         HARNESS_LIMITS_POLICY,
@@ -571,7 +570,7 @@ export class SessionHost {
     if (stream.signal?.aborted) controller.abort();
     const blocks = { next: 0 };
     const onHook: HookObserver = (name, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name });
-    let terminal: TurnEvent = { type: "done", reason: "stop", usage: zeroUsage() };
+    let terminal: TurnEvent = { type: "done", reason: "stop" };
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
@@ -605,11 +604,11 @@ export class SessionHost {
         next = followUp === undefined ? undefined : { text: followUp, origin: "follow_up" };
       }
       if (controller.signal.aborted && terminal.type === "done") {
-        terminal = { type: "error", reason: "aborted", usage: zeroUsage(), errorMessage: "Turn aborted." };
+        terminal = { type: "error", reason: "aborted", errorMessage: "Turn aborted." };
       }
     } catch (error) {
       this.logger.error("turn failed", { ghost: ghost.name, conversation: id, error: errorMessage(error) });
-      terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", usage: zeroUsage(), errorMessage: errorMessage(error) };
+      terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
     } finally {
       stream.signal?.removeEventListener("abort", abort);
       this.live.delete(key);
@@ -637,7 +636,6 @@ export class SessionHost {
       return {
         type: "error",
         reason: "error",
-        usage: zeroUsage(),
         errorMessage: "No agent CLI is installed with room to run. `ghost harnesses` shows why.",
       };
     }
@@ -689,7 +687,7 @@ export class SessionHost {
   private failure(stream: AdmittedTurnOptions, harness: string, message: string, aborted: boolean): TerminalError {
     const kind = aborted ? null : classifyLimitMessage(message);
     if (kind) stream.emit({ type: "limit_reached", harness, kind, message });
-    return { type: "error", reason: aborted ? "aborted" : "error", usage: zeroUsage(), errorMessage: message };
+    return { type: "error", reason: aborted ? "aborted" : "error", errorMessage: message };
   }
 
   private async runPass(
@@ -882,8 +880,8 @@ export class SessionHost {
     stream.emit({ type: "tool_execution_end", id: toolId, toolName: "bash", isError: exit.code !== 0, summary: tail(output) ?? `Exit ${exit.code ?? exit.signal}` });
     await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "command", at: new Date().toISOString(), command, output, exitCode: exit.code, excluded }]);
     stream.emit(stream.signal?.aborted
-      ? { type: "error", reason: "aborted", usage: zeroUsage(), errorMessage: "Command aborted." }
-      : { type: "done", reason: "stop", usage: zeroUsage() });
+      ? { type: "error", reason: "aborted", errorMessage: "Command aborted." }
+      : { type: "done", reason: "stop" });
   }
 
   queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
@@ -908,7 +906,7 @@ export class SessionHost {
   private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
     let tools = this.tools.get(ghost.dir);
     if (!tools) {
-      const extensions = resolveGhostExtensions({ ghostName: ghost.name, ...this.extensionOptions }, ghost.dir, { vision: true });
+      const extensions = resolveGhostExtensions({ ghostName: ghost.name, ...this.extensionOptions }, ghost.dir);
       tools = collectGhostExtension(extensions.ghost);
       tools.catch(() => this.tools.delete(ghost.dir));
       this.tools.set(ghost.dir, tools);
@@ -937,7 +935,6 @@ export class SessionHost {
       const result = await tool.execute(`mcp-${Date.now().toString(36)}`, (args ?? {}) as never, signal, {
         cwd: id ? conversationDir(ghostPaths(ghost.dir).sessionDir, id) : this.ownerHome,
         caller: caller ?? (id ? `conversation ${id}` : "a delegated run"),
-        model: { provider: "mcp", id: "harness", input: ["text", "image"] },
       });
       return { content: result.content as SessionToolResult["content"], isError: false };
     } catch (error) {

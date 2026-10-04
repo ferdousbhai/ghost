@@ -4,22 +4,6 @@
  */
 import { requireConversationId } from "./conversation-log.js";
 
-/** Token and cost accounting for one provider step, as pi reports it. */
-export interface Usage {
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  totalTokens: number;
-  cost: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-    total: number;
-  };
-}
-
 export type TurnEvent =
   | { type: "start" }
   | {
@@ -62,13 +46,11 @@ export type TurnEvent =
   | {
       type: "done";
       reason: "stop";
-      usage: Usage;
     }
   | LimitReachedEvent
   | {
       type: "error";
       reason: string;
-      usage: Usage;
       errorMessage?: string;
     };
 
@@ -110,17 +92,6 @@ export const SSE_HEADERS: Readonly<Record<string, string>> = {
   // Local only, but a proxy in front of the daemon must not buffer the turn.
   "x-accel-buffering": "no",
 };
-
-export function zeroUsage(): Usage {
-  return {
-    input: 0,
-    output: 0,
-    cacheRead: 0,
-    cacheWrite: 0,
-    totalTokens: 0,
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-  };
-}
 
 export interface TurnRequest {
   sessionId: string | null;

@@ -51,7 +51,4 @@ export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
 export {
   textResult,
   untrustedTextResult,
-  type GhostToolCapabilities,
-  type GhostToolCapabilitiesResolver,
-  type GhostToolCapabilitiesSource,
 } from "./shared.js";

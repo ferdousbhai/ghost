@@ -20,25 +20,15 @@ export interface GhostToolResult<TDetails = unknown> {
   details: TDetails;
 }
 
-/** The model the session is bound to, as far as a tool needs to know. */
-export interface GhostToolModel {
-  readonly provider: string;
-  readonly id: string;
-  /** Input modalities the model accepts; `"image"` enables vision paths. */
-  readonly input?: readonly string[];
-}
-
 /**
  * What a tool execution can see of its conversation. `cwd` is the session's
  * current working directory, which for a ghost session is the ghost home
- * unless the model has changed it; `model` is absent when the runtime exposes
- * no model instance for that call. `caller` names who acts — the session id
+ * unless the model has changed it. `caller` names who acts — the session id
  * in-session, a delegated run's own id over `ghost mcp serve` — and keys the
  * desktop lease.
  */
 export interface GhostToolContext {
   readonly cwd: string;
-  readonly model?: GhostToolModel | undefined;
   readonly caller?: string | undefined;
 }
 

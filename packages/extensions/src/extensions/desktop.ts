@@ -4,7 +4,7 @@ import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
 import { GhostError, type GhostErrorCode } from "../errors.js";
-import { resolveToolCapabilities, untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
+import { untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
 
 export const DESKTOP_LOOK = "desktop_look";
 export const DESKTOP_ACT = "desktop_act";
@@ -97,7 +97,7 @@ const ERROR_CODES: Record<string, GhostErrorCode> = {
   invalid: "invalid_format",
 };
 
-async function toolResult(result: CallToolResult, vision: boolean): Promise<GhostToolResult<{ images: number }>> {
+async function toolResult(result: CallToolResult): Promise<GhostToolResult<{ images: number }>> {
   const content = Array.isArray(result.content) ? result.content : [];
   const text = content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
   if (result.isError) {
@@ -106,14 +106,8 @@ async function toolResult(result: CallToolResult, vision: boolean): Promise<Ghos
   }
   const images = content.flatMap((part) => (part.type === "image" ? [{ type: "image" as const, data: part.data, mimeType: part.mimeType }] : []));
   // Titles, on-screen text, and control names are the desktop's words, not the owner's.
-  const fenced = await untrustedTextResult(
-    images.length && !vision
-      ? `${text}\nYour model cannot see images, so the ${images.length > 1 ? "frames are" : "screenshot is"} not attached; read the window with ui instead.`
-      : text,
-    { images: images.length },
-    "desktop",
-  );
-  return vision ? { ...fenced, content: [...fenced.content, ...images] } : fenced;
+  const fenced = await untrustedTextResult(text, { images: images.length }, "desktop");
+  return { ...fenced, content: [...fenced.content, ...images] };
 }
 
 /**
@@ -134,7 +128,7 @@ export function createDesktopExtension(options: DesktopExtensionOptions = {}): G
         parameters: tool.inputSchema as unknown as TSchema,
         execute: async (_toolCallId, params, signal, ctx) => {
           const result = await desktop.callTool(tool.name, (params ?? {}) as Record<string, unknown>, ctx.caller, signal);
-          return toolResult(result, resolveToolCapabilities(options, ctx).vision);
+          return toolResult(result);
         },
       });
     }

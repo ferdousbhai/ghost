@@ -1424,21 +1424,14 @@ describe("batch runs a sequence inside one queue slot", () => {
   });
 });
 
-describe("screenshot returns a real image to a vision model", () => {
+describe("screenshot returns a real image", () => {
   it("returns an image block, keeping the saved path in details", async () => {
-    const harness = await browserHarness({ capabilities: { vision: true } });
+    const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
     const image = result.content.find((part: { type: string }) => part.type === "image");
     expect(image).toMatchObject({ type: "image", mimeType: "image/png" });
     expect((result.details as { path: string }).path.endsWith(".png")).toBe(true);
-  });
-
-  it("falls back to a path for a model without vision", async () => {
-    const harness = await browserHarness();
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    const result = await harness.call(GHOST_BROWSER, { action: "screenshot" });
-    expect(result.content.every((part: { type: string }) => part.type === "text")).toBe(true);
   });
 });
 

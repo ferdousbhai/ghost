@@ -5,7 +5,6 @@ import {
   parseTurnRequest,
   TurnRequestError,
   textFromParts,
-  zeroUsage,
   type TurnEvent,
 } from "../src/turn-events.js";
 import { parseSseStream } from "./helpers/fixtures.js";
@@ -16,7 +15,7 @@ describe("SSE framing", () => {
       { type: "start" },
       { type: "text_start", contentIndex: 0 },
       { type: "text_delta", contentIndex: 0, delta: "hi\n\nthere" },
-      { type: "done", reason: "stop", usage: zeroUsage() },
+      { type: "done", reason: "stop" },
     ];
     // Keepalive comments and a trailing [DONE] must be invisible.
     const body = `: keepalive\n\n${events.map(encodeSseEvent).join("")}data: [DONE]\n\n`;

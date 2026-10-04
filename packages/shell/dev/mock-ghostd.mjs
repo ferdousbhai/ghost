@@ -587,15 +587,6 @@ const readBody = (req) =>
     req.on("error", reject);
   });
 
-const usageFor = (text) => ({
-  input: 812,
-  output: text.length >> 2,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 812 + (text.length >> 2),
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-});
-
 /** A finished tool call: the start/end pair the daemon brackets every call with. */
 function* toolCall(id, toolName, args, intent, summary) {
   yield { type: "tool_execution_start", id, toolName, arguments: args, cwd: SESSION_CWD, intent };
@@ -627,7 +618,7 @@ function* ownerCommand(command) {
   };
   yield { type: "tool_execution_update", id, toolName: "bash", summary: `mock output of ${command}` };
   yield { type: "tool_execution_end", id, toolName: "bash", isError: false, summary: `mock output of ${command}` };
-  yield { type: "done", reason: "stop", usage: usageFor("") };
+  yield { type: "done", reason: "stop" };
 }
 
 /**
@@ -744,11 +735,10 @@ async function streamTurn(req, res, name, body) {
       return;
     }
     if (!flag("--omit-terminal")) {
-      const usage = usageFor(reply);
       failed = flag("--fail");
       res.write(`data: ${JSON.stringify(failed
-        ? { type: "error", reason: "error", usage, errorMessage: "mock-ghostd --fail" }
-        : { type: "done", reason: "stop", usage })}\n\n`);
+        ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
+        : { type: "done", reason: "stop" })}\n\n`);
     }
     res.end();
   } finally {
