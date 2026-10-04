@@ -22,9 +22,10 @@ describe("ghost help topics", () => {
     expect(text).toContain("systemctl --user list-timers");
   });
 
-  it("self: the loop, the upstream nudge, the restart unit, the HUD restart, history, and undo", () => {
+  it("self: the loop, a clean checkout, the upstream nudge, the restart unit, the HUD restart, history, and undo", () => {
     const text = renderHelpTopic("self", INPUT);
     expect(text).toContain("branch from upstream master");
+    expect(text).toContain("Never end a turn with the checkout dirty");
     expect(text).toContain("consider offering it upstream");
     expect(text).toContain("`CONTRIBUTING.md` in the checkout");
     expect(text).toContain("ask before you push");

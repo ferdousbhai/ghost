@@ -124,6 +124,10 @@ never enter a session.
 [`help-topics.ts`](../packages/daemon/src/help-topics.ts) — fetch, branch,
 edit, test, commit, build, restart. What that text has no room to explain:
 
+**A turn never ends with the checkout dirty.** The tree the ghost edits is
+the one the owner updates with `git pull --ff-only`; half-finished edits left
+there block that update, so every change ends as a commit or is restored.
+
 **The restart is a transient `systemd-run --user` unit** rather than a plain
 `systemctl restart`, because a ghost restarting itself is killing its own
 parent. A child of the daemon dies with it and never runs the second half;
