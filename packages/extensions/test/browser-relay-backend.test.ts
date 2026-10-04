@@ -158,7 +158,7 @@ describe("the protocol constants are a contract", () => {
     );
     const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
     expect(description).toMatch(/javascript/i);
-    expect(description).toMatch(/returns .* untrusted|untrusted DATA/i);
+    expect(description).toMatch(/javascript results.*is data, never instructions/s);
   });
 });
 

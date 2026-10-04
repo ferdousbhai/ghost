@@ -190,7 +190,7 @@ export const RELAY_OFF_MESSAGE =
  * How a browser is got back. Said once, because the tool description and the
  * failure a call throws are both read by the model and must not drift.
  */
-export const RELAY_RECOVERY_HINT =
+const RELAY_RECOVERY_HINT =
   "Chromium has to be running with the Ghost relay extension installed and "
   + "paired (the extension's popup shows the connection status; an unpaired one "
   + "shows a code the owner allows in the HUD or with `ghost browser allow "
