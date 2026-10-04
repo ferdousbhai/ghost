@@ -76,7 +76,6 @@ The default root is `~/ghosts`; each direct child is one ghost:
 ~/ghosts/<name>/
   character.md
   skills/<name>/SKILL.md
-  AGENTS.md            (the owner's instructions for this ghost)
   settings.yml         (`harness: <id>` prefers one harness)
   mcp.json
   sessions/<id>/       (one directory per conversation)
@@ -115,8 +114,8 @@ by the owner. Nothing there is indexed or injected at session start.
 
 ### Ghost-home resources
 
-`AGENTS.md` in the ghost home is appended to the persona as the owner's
-instructions. `skills/` is linked into each conversation directory as
+`character.md` is the one persona file, the owner's instructions for this
+ghost included; there is no ghost-home `AGENTS.md`. `skills/` is linked into each conversation directory as
 `.claude/skills` and `.agents/skills`, where harnesses look for project
 skills; machine skills are whatever each harness discovers itself. `mcp.json`
 rows that are enabled and valid are handed to the harness each turn (see
@@ -198,8 +197,7 @@ backup: Trash and snapper are undo, not retention.
 
 Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
-[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts), then the
-ghost home's `AGENTS.md`. Two sections carry contract the rest of this file
+[`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two sections carry contract the rest of this file
 relies on: the other-harnesses policy runs each handoff with the project
 directory as the harness's own cwd so the headless harness respects that
 project's settings, launches each handoff through `ghost delegate`, which

@@ -9,7 +9,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -323,18 +323,12 @@ export class SessionHost {
   // ── Persona and harness configuration ─────────────────────────────────
 
   /**
-   * The ghost's whole system prompt: its character, the stable policy
-   * sections, and the owner's ghost-home `AGENTS.md`. Rendered before every
-   * turn, so a character the ghost rewrote is who it is on the next one.
+   * The ghost's whole system prompt: its character and the stable policy
+   * sections. Rendered before every turn, so a character the ghost (or the
+   * owner) rewrote is who it is on the next one.
    */
   async renderPersona(ghost: Ghost): Promise<string> {
     const character = await openGhostHome(ghost.dir).readCharacter();
-    let instructions: string | null = null;
-    try {
-      instructions = (await readFile(join(ghost.dir, "AGENTS.md"), "utf8")).trim() || null;
-    } catch {
-      // The owner wrote no ghost-home instructions.
-    }
     return buildGhostSystemPrompt({
       ghostName: ghost.name,
       character,
@@ -348,7 +342,6 @@ export class SessionHost {
         renderOwnerContextPolicy(resolveDocumentsDirectory(this.env, this.ownerHome)),
         renderScheduledWorkPolicy(ghost.name, this.scheduleUnitDir, this.scheduleCliPath),
         renderSelfMaintenancePolicy({ ghostName: ghost.name, running: this.runningSource }),
-        ...(instructions ? [`## Owner instructions\n\n${instructions}`] : []),
         ...(isSeededCharacter(ghost.name, character?.body ?? null) ? [FIRST_MEETING_SECTION] : []),
       ],
     });
