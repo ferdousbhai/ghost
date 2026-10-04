@@ -1,8 +1,10 @@
 # `@ghost/daemon`
 
 `ghostd` is Ghost's owner-local control plane. It owns ghost lifecycle,
-conversation sessions, the pi runtime, models and credentials, MCP, hooks,
-authenticated HTTP/SSE, and the `ghost` terminal client.
+conversations, the choice of harness for each turn, MCP configuration, hooks,
+authenticated HTTP/SSE, and the `ghost` terminal client. Each turn is a
+headless run of an agent CLI the owner already has; the harness brings its own
+model, credentials, and tool loop.
 
 The stable storage and API contract is in
 [`CONTRACTS.md`](../../CONTRACTS.md). This README is only a code map and local
@@ -12,15 +14,18 @@ development guide.
 
 - [`main.ts`](src/main.ts) — daemon composition and process lifecycle
 - [`server.ts`](src/server.ts) — authentication, routes, and wire validation
-- [`session-host.ts`](src/session-host.ts) — pi session lifecycle and runtime
-  orchestration
-- [`pi-extension-bridge.ts`](src/pi-extension-bridge.ts) — the extension
-  adapter
-- [`models.ts`](src/models.ts), [`model-selection.ts`](src/model-selection.ts) —
-  roles and chat-model selection
-- [`mcp-manager.ts`](src/mcp-manager.ts) — the ghost's MCP servers
-- [`hooks.ts`](src/hooks.ts) — awaited harness hooks
-- [`context-windows.ts`](src/context-windows.ts) — pi context rollover and `history`
+- [`session-host.ts`](src/session-host.ts) — turns, harness choice and
+  fallback, conversation metadata, ghost lifecycle
+- [`harness-table.ts`](src/harness-table.ts) — one row per agent CLI: launch
+  flags and output parser; [`harness-process.ts`](src/harness-process.ts) runs
+  one; [`harnesses.ts`](src/harnesses.ts) judges eligibility from Omarchy's
+  usage records
+- [`conversation-log.ts`](src/conversation-log.ts) — the history every client
+  reads
+- [`prompt-policy.ts`](src/prompt-policy.ts) — the stable system-prompt
+  policy sections
+- [`mcp-catalog.ts`](src/mcp-catalog.ts) — the ghost's `mcp.json`
+- [`hooks.ts`](src/hooks.ts) — the owner's command hooks around each pass
 - [`cli/main.ts`](src/cli/main.ts) — `ghost` HTTP client commands
 
 Detailed external protocols have one home:
@@ -60,12 +65,6 @@ ghost smoke --no-turn --json
 ```
 
 ## Runtime notes
-
-pi uses Ghost's explicit transcript, model runtime, prompt, declarative
-snapshot, and MCP sources. The daemon scrubs ambient provider credentials before
-pi construction, once and process-wide; a harness the ghost delegates to from
-Bash (`claude -p`, `codex`, `pi`) inherits that same scrubbed environment and
-reads its credentials from its own configuration, as it does by hand.
 
 The `ghost` CLI edits nothing directly. It discovers the daemon token, calls
 the authenticated HTTP API, and renders the same conversations as the HUD. Run `ghost help` or `ghost skill` for the current command catalog.
