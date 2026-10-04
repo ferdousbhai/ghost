@@ -3,7 +3,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
-import { GhostError, type GhostErrorCode } from "../errors.js";
+import { GhostError, type GhostErrorCode } from "@ghost/runtime/errors";
 import { untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
 
 export const DESKTOP_LOOK = "desktop_look";

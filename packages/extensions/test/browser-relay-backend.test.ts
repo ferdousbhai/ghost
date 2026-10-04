@@ -14,8 +14,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { GhostError } from "../src/errors.js";
-import type { BrowserFailure } from "../src/extensions/browser-backend.js";
+import { GhostError } from "@ghost/runtime/errors";
+import type { BrowserFailure } from "@ghost/runtime/browser-backend";
 import {
   RelayBrowserBackend,
   relayBackend,
@@ -24,7 +24,7 @@ import {
   type RelayOp,
   type RelayReply,
   type RelayTransport,
-} from "../src/extensions/browser-relay-backend.js";
+} from "@ghost/runtime/browser-relay-backend";
 import {
   browserSessionFor,
   closeAllBrowserSessions,

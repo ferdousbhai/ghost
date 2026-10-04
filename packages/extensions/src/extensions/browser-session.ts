@@ -15,8 +15,8 @@ import {
   type BrowserScreenshotStore,
   type BrowserSessionOptions as SharedBrowserSessionOptions,
 } from "@ghost/runtime/browser-session";
-import { GhostError } from "../errors.js";
-import type { BrowserBackendFactory } from "./browser-backend.js";
+import { GhostError } from "@ghost/runtime/errors";
+import type { BrowserBackendFactory } from "@ghost/runtime/browser-backend";
 import {
   DEFAULT_DNS_TIMEOUT_MS,
   defaultBrowserDnsResolver,

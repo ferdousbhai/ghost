@@ -5,7 +5,7 @@ import {
   GhostBrowserError,
   type BrowserBackendFactory,
   type PageElementMatch,
-} from "./browser-backend.js";
+} from "@ghost/runtime/browser-backend";
 import {
   browserSessionFor,
   DEFAULT_FIND_LIMIT,
@@ -15,7 +15,7 @@ import {
   type BrowserSessionOptions,
   type GhostBrowserSession,
 } from "./browser-session.js";
-import { RELAY_RECOVERY_HINT } from "./browser-relay-backend.js";
+import { RELAY_RECOVERY_HINT } from "@ghost/runtime/browser-relay-backend";
 import { readScreenshotFile, resolveScreenshotDirectory } from "./screenshot-retention.js";
 import {
   resolveHome,
@@ -737,4 +737,4 @@ export type {
   BrowserBackendFactory,
   GhostBrowserBackend,
   PageElementMatch,
-} from "./browser-backend.js";
+} from "@ghost/runtime/browser-backend";

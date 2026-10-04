@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, rm, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, resolve } from "node:path";
-import { GhostError } from "../errors.js";
+import { GhostError } from "@ghost/runtime/errors";
 import {
   descriptorPath,
   openConfinedDirectory,
@@ -217,23 +217,6 @@ export async function withScreenshotDirectory<T>(
   });
   try {
     return await withDescriptorLock(directory, () => action(directory, logicalDir));
-  } finally {
-    await directory.close();
-  }
-}
-
-/** The pathname form of `pruneScreenshotFiles`, used only by its tests. */
-export async function pruneScreenshotDirectoryPath(
-  dir: string,
-  retention: number,
-  matches: (name: string) => boolean,
-): Promise<string[]> {
-  const directory = await openDirectoryNoFollow(dir, "Screenshots path");
-  try {
-    return await withDescriptorLock(
-      directory,
-      () => pruneScreenshotFiles(directory, retention, matches),
-    );
   } finally {
     await directory.close();
   }

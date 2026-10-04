@@ -125,9 +125,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function defaultHookName(event: GhostHookEvent["type"], kind: "command" | "extension"): string {
-  const trigger = event === "before_prompt" ? "Before-prompt" : "Session-stop";
-  return `${trigger} ${kind} hook`;
+function defaultHookName(event: GhostHookEvent["type"]): string {
+  return `${event === "before_prompt" ? "Before-prompt" : "Session-stop"} command hook`;
 }
 
 function defaultHookDescription(event: GhostHookEvent["type"]): string {
@@ -184,7 +183,7 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
         if (typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) {
           throw new Error(`${path}: ${label}.timeout must be a number in (0, 600].`);
         }
-        const name = displayText(raw.name, defaultHookName(eventName, "command"), `${path}: ${label}.name`, 80);
+        const name = displayText(raw.name, defaultHookName(eventName), `${path}: ${label}.name`, 80);
         const description = displayText(
           raw.description,
           defaultHookDescription(eventName),

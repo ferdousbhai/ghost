@@ -1,4 +1,4 @@
-export { isGhostError } from "./errors.js";
+export { isGhostError } from "@ghost/runtime/errors";
 
 export {
   MAX_CHARACTER_BODY_LENGTH,
