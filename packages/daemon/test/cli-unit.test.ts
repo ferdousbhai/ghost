@@ -149,8 +149,6 @@ describe("CLI output and addressing helpers", () => {
   it("resolves exact and unique public/raw prefixes and refuses ambiguity", () => {
     const rows = [session("alpha"), session("alpine")];
     expect(resolveSessionPrefix(rows, "alpha").id).toBe("alpha");
-    // `pi:` is how ids were written before Ghost had more than one harness.
-    expect(resolveSessionPrefix(rows, "pi:alpha").id).toBe("alpha");
     expect(resolveSessionPrefix(rows, "alph").id).toBe("alpha");
     expect(() => resolveSessionPrefix(rows, "al")).toThrow(ArgsError);
   });

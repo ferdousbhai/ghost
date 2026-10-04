@@ -378,8 +378,7 @@ export class SessionHost {
     }];
     try {
       for (const server of (await readEffectiveMcp(ghost.dir)).servers) {
-        // A row with an `auth` block needs a flow no harness runs for it.
-        if (server.errors.length > 0 || server.name === GHOST_MCP_SERVER || (server.config as MCPServerConfig).auth) continue;
+        if (server.errors.length > 0 || server.name === GHOST_MCP_SERVER) continue;
         const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig), ghost.dir);
         servers.push({ name: server.name, config });
       }

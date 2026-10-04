@@ -1,4 +1,4 @@
-import { expandEnvVarsDeep, isRecord, type MCPAuthConfig, type MCPHttpServerConfig, type MCPRequestIdFormat, type MCPServerConfig, type MCPSseServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
+import { expandEnvVarsDeep, isRecord, type MCPHttpServerConfig, type MCPServerConfig, type MCPSseServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
 export type McpTransport = "stdio" | "http" | "sse";
 
 export interface McpConfiguredKeysView {
@@ -6,23 +6,8 @@ export interface McpConfiguredKeysView {
   configured: true;
 }
 
-export interface McpAuthView {
-  type: MCPAuthConfig["type"];
-  configured: boolean;
-}
-
-export interface McpOAuthView {
-  configured: boolean;
-  clientIdConfigured: boolean;
-  clientSecretConfigured: boolean;
-}
-
 interface McpServerConfigViewBase {
   type: McpTransport;
-  timeout?: number;
-  requestIdFormat?: MCPRequestIdFormat;
-  auth?: McpAuthView;
-  oauth?: McpOAuthView;
 }
 
 export interface McpStdioServerConfigView extends McpServerConfigViewBase {
@@ -105,37 +90,12 @@ function sanitizeRemoteUrl(value: string): string {
   }
 }
 
-function sanitizeAuth(auth: MCPServerConfig["auth"]): McpAuthView | undefined {
-  if (!auth) return undefined;
-  return { type: auth.type, configured: Boolean(auth.credentialId) };
-}
-
-function sanitizeOAuth(oauth: MCPServerConfig["oauth"]): McpOAuthView | undefined {
-  if (!oauth) return undefined;
-  return {
-    configured: Object.keys(oauth).length > 0,
-    clientIdConfigured: Boolean(oauth.clientId),
-    clientSecretConfigured: Boolean(oauth.clientSecret),
-  };
-}
-
 export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfigView {
   const type = config.type ?? "stdio";
-  const auth = sanitizeAuth(config.auth);
-  const oauth = sanitizeOAuth(config.oauth);
-  const shared = {
-    ...(typeof config.timeout === "number" ? { timeout: config.timeout } : {}),
-    ...(config.requestIdFormat === "string" || config.requestIdFormat === "number"
-      ? { requestIdFormat: config.requestIdFormat }
-      : {}),
-    ...(auth ? { auth } : {}),
-    ...(oauth ? { oauth } : {}),
-  };
   if (type === "http" || type === "sse") {
     const remote = config as MCPHttpServerConfig | MCPSseServerConfig;
     const headers = configuredKeys(remote.headers);
     return {
-      ...shared,
       type,
       url: sanitizeRemoteUrl(remote.url),
       ...(remote.headerPolicy === "origin-locked"
@@ -147,7 +107,6 @@ export function sanitizeMcpServerConfig(config: MCPServerConfig): McpServerConfi
   const stdio = config as MCPStdioServerConfig;
   const environment = configuredKeys(stdio.env);
   return {
-    ...shared,
     type: "stdio",
     command: stdio.command,
     ...(typeof stdio.cwd === "string" ? { cwd: stdio.cwd } : {}),

@@ -1,7 +1,7 @@
 [Unit]
 Description=Ghost daemon (ghostd)
 Documentation=https://github.com/ferdousbhai/ghost
-# The desktop helper inherits the compositor environment from the user manager,
+# ghost-desktop inherits the compositor environment from the user manager,
 # and the browser relay dials in from the owner's own Chromium session. Keep the
 # daemon in the graphical session so it cannot start early with a permanently
 # incomplete WAYLAND_DISPLAY/Hyprland environment.
@@ -12,6 +12,8 @@ After=graphical-session.target network.target
 Type=simple
 WorkingDirectory=%h
 ExecStart=/usr/bin/ghostd
+# The daemon writes `<N>`-prefixed lines to stderr; this names them for `journalctl -t ghostd`.
+SyslogIdentifier=ghostd
 Restart=on-failure
 RestartSec=2
 # ghostd stages a 5s graceful drain and a 2s forced settle. Keep a final
@@ -20,11 +22,8 @@ TimeoutStopSec=10s
 KillMode=mixed
 SendSIGKILL=yes
 
-# The daemon scrubs every provider/cloud credential from its environment before
-# constructing pi (env-scrub.ts), once and process-wide. Do NOT put credential
-# values in this unit or an EnvironmentFile: pi's credentials belong in its own
-# file-backed store, <ghost>/.pi/auth.json, and a harness the ghost delegates to
-# from Bash reads its own configuration.
+# Do NOT put credential values in this unit or an EnvironmentFile: each harness
+# reads its own sign-in from its own configuration.
 Environment=GHOSTD_HOST=127.0.0.1
 
 # systemd's default PATH is /usr/local/bin:/usr/bin, and the login PATH the

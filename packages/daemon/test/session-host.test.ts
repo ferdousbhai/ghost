@@ -429,12 +429,6 @@ describe("conversation metadata", () => {
     expect(await sessions.listSessions("casper")).toEqual([]);
   });
 
-  it("accepts a legacy `pi:` id as the bare id", async () => {
-    const sessions = host({ harnesses: [harness(replies("hi"))] });
-    await turn(sessions, "hello", "pi:c1");
-    expect((await sessions.listSessions("casper"))[0]?.id).toBe("c1");
-  });
-
   it("skips a torn last log line", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "hello");

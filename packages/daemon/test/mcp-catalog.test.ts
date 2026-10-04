@@ -150,7 +150,7 @@ describe("McpCatalog ghost-only discovery", () => {
     expect(snapshot.servers.some((server) => server.name === "ambient")).toBe(false);
   });
 
-  it("redacts header, environment, argument, OAuth, auth, userinfo, and query values", async () => {
+  it("redacts header, environment, argument, userinfo, and query values", async () => {
     const { catalog, home } = setup();
     writeJson(home, "mcp.json", {
       mcpServers: {
@@ -159,8 +159,6 @@ describe("McpCatalog ghost-only discovery", () => {
           url: "https://owner:url-password@example.com/mcp?api_key=url-secret&region=eu#url-fragment-secret",
           headers: { Authorization: "Bearer header-secret", "X-Api-Key": "header-key-secret" },
           headerPolicy: "origin-locked",
-          auth: { type: "oauth", credentialId: "credential-secret", clientSecret: "auth-secret" },
-          oauth: { clientId: "public-client", clientSecret: "oauth-secret" },
         },
         local: {
           type: "stdio",
@@ -182,10 +180,6 @@ describe("McpCatalog ghost-only discovery", () => {
       "url-fragment-secret",
       "header-secret",
       "header-key-secret",
-      "credential-secret",
-      "auth-secret",
-      "public-client",
-      "oauth-secret",
       "argument-secret",
       "environment-secret",
       "also-not-returned",
@@ -197,12 +191,6 @@ describe("McpCatalog ghost-only discovery", () => {
       url: "https://example.com/mcp?api_key=%5Bconfigured%5D&region=%5Bconfigured%5D",
       headerPolicy: "origin-locked",
       headers: { keys: ["Authorization", "X-Api-Key"], configured: true },
-      auth: { type: "oauth", configured: true },
-      oauth: {
-        configured: true,
-        clientIdConfigured: true,
-        clientSecretConfigured: true,
-      },
     });
     expect(snapshot.servers.find((server) => server.name === "local")?.config).toEqual({
       type: "stdio",
@@ -316,10 +304,7 @@ describe("McpCatalog ghost-only discovery", () => {
       bad_env_policy: { type: "stdio", command: "never", envPolicy: sentinel },
       bad_cwd: { type: "stdio", command: "never", cwd: bad },
       bad_enabled: { type: "stdio", command: "never", enabled: bad },
-      bad_timeout: { type: "stdio", command: "never", timeout: bad },
-      bad_request_id: { type: "stdio", command: "never", requestIdFormat: sentinel },
-      bad_auth: { type: "stdio", command: "never", auth: { type: "oauth", clientSecret: bad } },
-      bad_oauth: { type: "stdio", command: "never", oauth: { callbackPort: bad } },
+      former_auth: { type: "stdio", command: "never", auth: { type: "oauth", clientSecret: bad } },
       bad_url: { type: "http", url: bad },
       bad_headers: { type: "http", url: "https://valid.example", headers: { token: bad } },
       bad_header_policy: {

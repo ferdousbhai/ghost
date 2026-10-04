@@ -1,28 +1,6 @@
 /** Pure MCP row policy; hosts supply environment and storage. */
-export interface MCPAuthConfig {
-  type: "oauth" | "apikey";
-  credentialId?: string;
-  tokenUrl?: string;
-  clientId?: string;
-  clientSecret?: string;
-  resource?: string;
-}
-
-export type MCPRequestIdFormat = "string" | "number";
-
 interface MCPServerConfigBase {
   enabled?: boolean;
-  timeout?: number;
-  requestIdFormat?: MCPRequestIdFormat;
-  auth?: MCPAuthConfig;
-  oauth?: {
-    clientId?: string;
-    clientSecret?: string;
-    redirectUri?: string;
-    callbackPort?: number;
-    callbackPath?: string;
-    prompt?: string;
-  };
 }
 
 export interface MCPStdioServerConfig extends MCPServerConfigBase {
@@ -104,13 +82,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-const MCP_BASE_FIELDS = new Set([
-  "enabled",
-  "timeout",
-  "requestIdFormat",
-  "auth",
-  "oauth",
-]);
+const MCP_BASE_FIELDS = new Set(["enabled"]);
 const MCP_STDIO_FIELDS = new Set([
   ...MCP_BASE_FIELDS,
   "type",
@@ -126,22 +98,6 @@ const MCP_REMOTE_FIELDS = new Set([
   "url",
   "headers",
   "headerPolicy",
-]);
-const MCP_AUTH_FIELDS = new Set([
-  "type",
-  "credentialId",
-  "tokenUrl",
-  "clientId",
-  "clientSecret",
-  "resource",
-]);
-const MCP_OAUTH_FIELDS = new Set([
-  "clientId",
-  "clientSecret",
-  "redirectUri",
-  "callbackPort",
-  "callbackPath",
-  "prompt",
 ]);
 
 function hasOnlyFields(value: Record<string, unknown>, allowed: ReadonlySet<string>): boolean {
@@ -168,40 +124,6 @@ function ownedMcpValidationErrors(value: unknown): string[] {
   }
   if (value.enabled !== undefined && typeof value.enabled !== "boolean") {
     return ['MCP server "enabled" must be a boolean.'];
-  }
-  if (value.timeout !== undefined
-    && (typeof value.timeout !== "number"
-      || !Number.isFinite(value.timeout)
-      || value.timeout < 0)) {
-    return ['MCP server "timeout" must be a finite non-negative number.'];
-  }
-  if (value.requestIdFormat !== undefined
-    && value.requestIdFormat !== "string"
-    && value.requestIdFormat !== "number") {
-    return ['MCP server "requestIdFormat" must be "string" or "number".'];
-  }
-  if (value.auth !== undefined) {
-    if (!isRecord(value.auth)
-      || !hasOnlyFields(value.auth, MCP_AUTH_FIELDS)
-      || (value.auth.type !== "oauth" && value.auth.type !== "apikey")
-      || Object.entries(value.auth).some(([key, entry]) =>
-        key !== "type" && typeof entry !== "string")) {
-      return ["MCP server auth configuration is invalid."];
-    }
-  }
-  if (value.oauth !== undefined) {
-    if (!isRecord(value.oauth) || !hasOnlyFields(value.oauth, MCP_OAUTH_FIELDS)) {
-      return ["MCP server OAuth configuration is invalid."];
-    }
-    for (const [key, entry] of Object.entries(value.oauth)) {
-      if (key === "callbackPort") {
-        if (typeof entry !== "number" || !Number.isSafeInteger(entry) || entry < 1 || entry > 65_535) {
-          return ["MCP server OAuth callbackPort is invalid."];
-        }
-      } else if (typeof entry !== "string") {
-        return ["MCP server OAuth configuration is invalid."];
-      }
-    }
   }
   if (type === "stdio") {
     if (typeof value.command !== "string" || value.command.length === 0) {

@@ -14,27 +14,19 @@ TestCase {
             command: "mcp-local",
             argumentCount: 2,
             environment: { keys: ["API_TOKEN"], configured: true },
-            timeout: 20,
-            requestIdFormat: "string",
             cwd: "packages/local-server",
-            envPolicy: "literal",
-            auth: { type: "apikey", configured: true }
+            envPolicy: "literal"
         }
     })
     readonly property var remoteServer: ({
         name: "remote",
         enabled: true,
-        source: "legacy",
+        source: "canonical",
         config: {
             type: "http",
             url: "https://example.com/mcp?token=%5Bconfigured%5D",
             headers: { keys: ["Authorization"], configured: true },
-            headerPolicy: "origin-locked",
-            oauth: {
-                configured: true,
-                clientIdConfigured: true,
-                clientSecretConfigured: true
-            }
+            headerPolicy: "origin-locked"
         }
     })
 
@@ -44,34 +36,21 @@ TestCase {
         compare(Mcp.configuredKeys(remoteServer.config.headers).join(","), "Authorization");
     }
 
-    // An auth block without a credential still withholds its client settings,
-    // so it is named; an oauth block that reports nothing configured is not.
     function test_hiddenPartsMatchHasHiddenValues(): void {
-        const authOnly = { config: { type: "http", url: "https://example.com/mcp",
-            auth: { type: "oauth", configured: false } } };
-        verify(Mcp.hasHiddenValues(authOnly));
-        compare(Mcp.hiddenParts(authOnly).join(" · "), "authentication");
-
-        const emptyOauth = { config: { type: "http", url: "https://example.com/mcp",
-            oauth: { configured: false } } };
-        verify(!Mcp.hasHiddenValues(emptyOauth));
-        compare(Mcp.hiddenParts(emptyOauth).length, 0);
+        const plain = { config: { type: "http", url: "https://example.com/mcp" } };
+        verify(!Mcp.hasHiddenValues(plain));
+        compare(Mcp.hiddenParts(plain).length, 0);
 
         compare(Mcp.hiddenParts(remoteServer).join(" · "),
-            "headers: Authorization · OAuth client settings · URL query values");
+            "headers: Authorization · URL query values");
     }
 
     function test_replacementTemplateContainsOnlySafeFields(): void {
         const local = JSON.parse(Mcp.template(localServer, "stdio"));
         compare(local.command, "mcp-local");
         compare(local.enabled, false);
-        compare(local.timeout, 20);
-        compare(local.requestIdFormat, "string");
         compare(local.cwd, "packages/local-server");
         compare(local.envPolicy, "literal");
-        compare(local.auth.type, "apikey");
-        compare(Object.keys(local.auth).join(","), "type");
-        verify(local.auth.credentialId === undefined);
         verify(local.args === undefined);
         verify(local.env === undefined);
 
@@ -79,7 +58,6 @@ TestCase {
         compare(remote.url, "https://example.com/mcp");
         compare(remote.headerPolicy, "origin-locked");
         verify(remote.headers === undefined);
-        verify(remote.oauth === undefined);
     }
 
     function test_validatesTransportAndRequiredFields(): void {
@@ -103,7 +81,7 @@ TestCase {
         compare(Mcp.filtered([localServer, remoteServer], "api_token")[0].name, "local");
         compare(Mcp.filtered([localServer, remoteServer], "packages/local")[0].name, "local");
         compare(Mcp.filtered([localServer, remoteServer], "origin-locked")[0].name, "remote");
-        compare(Mcp.filtered([localServer, remoteServer], "legacy")[0].name, "remote");
+        compare(Mcp.filtered([localServer, remoteServer], "origin-locked")[0].name, "remote");
         compare(Mcp.filtered([localServer, remoteServer], "missing").length, 0);
     }
 }

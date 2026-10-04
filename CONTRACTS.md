@@ -129,8 +129,7 @@ respects that project's settings.
 
 A conversation is one directory, `sessions/<id>/`, with `<id>` 1–128 of
 `[A-Za-z0-9._-]` not starting with `.`; clients mint ids (the HUD `hud-…`,
-the CLI `cli-…`). A leading `pi:`, how ids were written before Ghost had more
-than one harness, is stripped wherever an id is accepted. The directory is
+the CLI `cli-…`). The directory is
 the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 ([`conversation-log.ts`](packages/daemon/src/conversation-log.ts)): one JSON
 object per line — the conversation header, owner and follow-up and hook
@@ -236,8 +235,10 @@ ghost's browser and desktop tools) and the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
 mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
-in the conversation directory. A row with an `auth` block is not handed over.
-pi has no MCP client.
+in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
+or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
+expansion switches; any other field makes it invalid, since no harness dialect
+carries it. pi has no MCP client.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already

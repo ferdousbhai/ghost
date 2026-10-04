@@ -13,14 +13,12 @@ import {
   type DaemonConfigOverrides,
 } from "./config.js";
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
-import { GhostRegistry, ghostPaths } from "./ghosts.js";
+import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookCompleteCommand } from "./hook-complete.js";
-import { createJournalSink } from "./journal.js";
-import { importPiConversations } from "./pi-import.js";
-import { createLogger, stderrSink, type Logger, type LogLevel } from "./log.js";
+import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { createRelayHub } from "./relay.js";
 import { relayTokenCommand } from "./relay-token.js";
@@ -321,8 +319,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 0;
   }
 
-  const journalSink = createJournalSink();
-  const logger = createLogger(parsed.logLevel, journalSink ?? stderrSink);
+  const logger = createLogger(parsed.logLevel, stderrLogSink());
   let config: DaemonConfig;
   try {
     config = loadConfig(parsed.overrides);
@@ -392,11 +389,7 @@ async function serveDaemon(
   updates?.start();
   registry.ensureRoot();
   try {
-    await Promise.all(registry.list().map(async (ghost) => {
-      await ensureGhostHomeLayout(ghost.dir);
-      const imported = await importPiConversations(ghostPaths(ghost.dir).sessionDir, logger);
-      if (imported > 0) logger.info("imported pi conversations", { ghost: ghost.name, imported });
-    }));
+    await Promise.all(registry.list().map((ghost) => ensureGhostHomeLayout(ghost.dir)));
   } catch (error) {
     logger.error("could not ensure a ghost home layout", {
       error: (error as Error).message,

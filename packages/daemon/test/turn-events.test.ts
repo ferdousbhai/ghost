@@ -47,9 +47,8 @@ describe("parseTurnRequest", () => {
     });
     const atLimit = "a".repeat(128);
     expect(parseTurnRequest(request(atLimit)).sessionId).toBe(atLimit);
-    expect(parseTurnRequest(request("pi:conv-1")).sessionId).toBe("conv-1");
     expect(parseTurnRequest(request("")).sessionId).toBeNull();
-    for (const invalid of ["a".repeat(129), ".hidden", "../up", "a/b", "\u{1f47b}"]) {
+    for (const invalid of ["a".repeat(129), ".hidden", "../up", "a/b", "pi:conv-1", "\u{1f47b}"]) {
       expect(() => parseTurnRequest(request(invalid))).toThrow(expect.objectContaining({
         code: "invalid_conversation_id",
       }));

@@ -48,9 +48,7 @@ export function isValidConversationId(id: string): boolean {
 }
 
 export function requireConversationId(id: string): string {
-  // `pi:` is how ids were written before Ghost had more than one harness.
-  const bare = id.startsWith("pi:") ? id.slice(3) : id;
-  if (isValidConversationId(bare)) return bare;
+  if (isValidConversationId(id)) return id;
   throw new GhostError("invalid_conversation_id", "Conversation ids are 1-128 letters, digits, '.', '_' or '-'.", 400);
 }
 

@@ -1,22 +1,17 @@
 /**
  * MCP server configuration as Ghost stores it: the `mcp.json` row shape, its
- * validation, `${VAR}` expansion, and the locked read-modify-write of the
- * file. The shape is the one Oh My Pi established (MIT, can1357/oh-my-pi
- * `src/mcp/{types,config,config-writer}.ts`), kept so existing homes keep
- * loading; the implementation is Ghost's.
+ * validation, `${VAR}` expansion, and the serialized read-modify-write of the
+ * file. The `mcpServers` shape is the Claude Code dialect most harnesses read.
  */
-import { mkdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
   PrivateReadError,
   readPrivateFileText,
-  recoverPrivateJsonAtomicCas,
   type PrivateReadProbe,
   writePrivateJsonAtomic,
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
-import { acquireWriterLock, releaseWriterLock } from "./writer-lock.js";
 import { validateServerName, validateServerConfig, type MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
 
 export { validateServerName };
@@ -50,29 +45,8 @@ export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile
   await writePrivateJsonAtomic(filePath, config);
 }
 
+/** One daemon owns every ghost home, so serializing per file in-process is the whole lock. */
 const fileLocks = new Map<string, Promise<unknown>>();
-const MCP_WRITER_LOCK_WAIT_MS = 500;
-const MCP_WRITER_LOCK_POLL_MS = 10;
-
-function acquireMCPWriterLock(filePath: string): () => void {
-  mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
-  const lockPath = `${filePath}.lock`;
-  const lease = acquireWriterLock(lockPath, {
-    waitMs: MCP_WRITER_LOCK_WAIT_MS,
-    pollMs: MCP_WRITER_LOCK_POLL_MS,
-  });
-  return () => releaseWriterLock(lease);
-}
-
-async function withAsyncMCPConfigWriteLock<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
-  const release = acquireMCPWriterLock(filePath);
-  try {
-    recoverPrivateJsonAtomicCas(filePath);
-    return await operation();
-  } finally {
-    release();
-  }
-}
 
 export interface MCPConfigMutationOptions {
   readProbe?: PrivateReadProbe;
@@ -89,13 +63,13 @@ async function putServer(
   if (nameError) throw new Error(nameError);
   const errors = validateServerConfig(name, config);
   if (errors.length > 0) throw new Error(`Invalid server config: ${errors.join("; ")}`);
-  return serializeByKey(fileLocks, filePath, () => withAsyncMCPConfigWriteLock(filePath, async () => {
+  return serializeByKey(fileLocks, filePath, async () => {
     const existing = readMCPConfigFile(filePath, options.readProbe);
     if (mustBeNew && Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" already exists in ${filePath}`);
     }
     await writeMCPConfigFile(filePath, { ...existing, mcpServers: { ...existing.mcpServers, [name]: config } });
-  }));
+  });
 }
 
 export function addMCPServer(
@@ -121,7 +95,7 @@ export function removeMCPServer(
   name: string,
   options: MCPConfigMutationOptions = {},
 ): Promise<void> {
-  return serializeByKey(fileLocks, filePath, () => withAsyncMCPConfigWriteLock(filePath, async () => {
+  return serializeByKey(fileLocks, filePath, async () => {
     const existing = readMCPConfigFile(filePath, options.readProbe);
     if (!Object.hasOwn(existing.mcpServers ?? {}, name)) {
       throw new Error(`Server "${name}" not found in ${filePath}`);
@@ -129,5 +103,5 @@ export function removeMCPServer(
     const remaining = { ...existing.mcpServers };
     delete remaining[name];
     await writeMCPConfigFile(filePath, { ...existing, mcpServers: remaining });
-  }));
+  });
 }

@@ -25,10 +25,7 @@ function remoteUrlIsRedacted(url) {
         || value.indexOf("%5Bconfigured%5D") >= 0;
 }
 
-// What the sanitized view withholds, one phrase per kind. An auth block counts
-// whether or not it names a credential: its token URL, client id and secret,
-// and resource are withheld either way. An oauth block reports `configured`
-// exactly when it holds anything.
+// What the sanitized view withholds, one phrase per kind.
 function hiddenParts(server) {
     const config = server && server.config ? server.config : {};
     const parts = [];
@@ -39,8 +36,6 @@ function hiddenParts(server) {
     if (env.length > 0) parts.push("environment: " + env.join(", "));
     const headers = configuredKeys(config.headers);
     if (headers.length > 0) parts.push("headers: " + headers.join(", "));
-    if (config.auth) parts.push("authentication");
-    if (config.oauth && config.oauth.configured === true) parts.push("OAuth client settings");
     if (remoteUrlIsRedacted(config.url)) parts.push("URL query values");
     return parts;
 }
@@ -68,9 +63,6 @@ function replacementConfig(server, requestedType) {
     if (type === "stdio") config.command = transport(server) === "stdio"
         ? text(source.command) : "";
     else config.url = transport(server) === type ? safeRemoteUrl(source.url) : "";
-    if (typeof source.timeout === "number") config.timeout = source.timeout;
-    if (source.requestIdFormat === "string" || source.requestIdFormat === "number")
-        config.requestIdFormat = source.requestIdFormat;
     // These fields are policy/placement metadata, not configured values. The daemon
     // exposes them verbatim in its sanitized view, so replacement
     // editing must carry them forward instead of quietly changing semantics.
@@ -80,10 +72,6 @@ function replacementConfig(server, requestedType) {
     } else if (source.headerPolicy === "origin-locked") {
         config.headerPolicy = source.headerPolicy;
     }
-    // Authentication credentials remain hidden and must be re-entered, but
-    // their non-secret mechanism is still safe replacement metadata.
-    if (source.auth && (source.auth.type === "oauth" || source.auth.type === "apikey"))
-        config.auth = { type: source.auth.type };
     return config;
 }
 
@@ -147,7 +135,6 @@ function searchableText(server) {
         text(config.cwd),
         text(config.envPolicy),
         text(config.headerPolicy),
-        text(config.auth ? config.auth.type : ""),
         configuredKeys(config.environment).join(" "),
         configuredKeys(config.headers).join(" ")
     ].join(" ").toLowerCase();

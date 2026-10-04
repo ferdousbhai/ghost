@@ -1320,14 +1320,6 @@ describe("routing and transport", () => {
     }
   });
 
-  it("reads a legacy pi: id as the bare conversation id", async () => {
-    const base = await serve();
-    await postTurn(base, TURN_BODY);
-    const response = await fetch(`${base}/api/ghosts/casper/sessions/${encodeURIComponent("pi:conv-1")}/transcript`);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ id: "conv-1", total: 2 });
-  });
-
   it("decodes valid ghost names and conversation ids", async () => {
     const base = await serve();
     expect((await fetch(`${base}/api/ghosts/casp%65r/sessions`)).status).toBe(200);

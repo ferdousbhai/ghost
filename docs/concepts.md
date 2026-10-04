@@ -137,11 +137,7 @@ deletes all of it; the cost is one row per harness — launch flags and an
 output parser, tested against real output — and features that were pi's
 alone: mid-turn steering (a follow-up now runs after the current pass), the
 structured `ask` (a question is an ordinary reply), forks, and model choice
-inside Ghost (it is the harness's). Conversations written by the pi runtime
-are imported into conversation logs at the first start
-([`pi-import.ts`](../packages/daemon/src/pi-import.ts)), the original
-transcript kept beside each one, and continue on whichever harness answers
-next.
+inside Ghost (it is the harness's).
 
 ## Extending a ghost
 

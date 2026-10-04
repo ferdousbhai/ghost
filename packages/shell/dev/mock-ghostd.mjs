@@ -242,22 +242,9 @@ function sanitizeRemoteUrl(value) {
 
 function sanitizeMcpConfig(config) {
   const type = config?.type === "http" || config?.type === "sse" ? config.type : "stdio";
-  const shared = {};
-  if (typeof config?.timeout === "number") shared.timeout = config.timeout;
-  if (config?.requestIdFormat === "string" || config?.requestIdFormat === "number")
-    shared.requestIdFormat = config.requestIdFormat;
-  if (config?.auth) shared.auth = { type: config.auth.type || "oauth", configured: Boolean(config.auth.credentialId) };
-  if (config?.oauth) {
-    shared.oauth = {
-      configured: Object.keys(config.oauth).length > 0,
-      clientIdConfigured: Boolean(config.oauth.clientId),
-      clientSecretConfigured: Boolean(config.oauth.clientSecret),
-    };
-  }
   if (type === "http" || type === "sse") {
     const headers = configuredKeys(config.headers);
     return {
-      ...shared,
       type,
       url: sanitizeRemoteUrl(config.url),
       ...(config.headerPolicy === "origin-locked" ? { headerPolicy: config.headerPolicy } : {}),
@@ -266,7 +253,6 @@ function sanitizeMcpConfig(config) {
   }
   const environment = configuredKeys(config.env);
   return {
-    ...shared,
     type: "stdio",
     command: String(config.command || ""),
     ...(typeof config.cwd === "string" ? { cwd: config.cwd } : {}),

@@ -149,8 +149,9 @@ systemctl --user status ghostd
 ghost status
 ```
 
-The daemon logs to journald under `SYSLOG_IDENTIFIER=ghostd`, so `-t ghostd`
-catches it whichever unit or launcher started it. `ghost status` prints the
+The daemon logs to stderr with journald priority prefixes, and the unit's
+`SyslogIdentifier=ghostd` (or, without it, the `ghostd` executable's name)
+makes `-t ghostd` catch it. `ghost status` prints the
 daemon's version, its commit, and the root of the checkout it is running from,
 or reports a packaged install when there is no checkout behind it.
 
