@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
 import { REMOTE_MANIFEST } from "../src/remote-viewer.js";
@@ -33,12 +32,10 @@ async function serve(
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   seedGhost(temp.root, { name: "casper" });
-  const homeOperations = new HomeOperationCoordinator(temp.registry);
-  host = new SessionHost({ registry: temp.registry, homeOperations, ownerHome: temp.ownerHome });
+  host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome });
   listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    homeOperations,
     port: 0,
     apiToken: TOKEN,
     remote: remote === null ? null : new RemoteAccess({ selfLogin: async () => "Owner@Example.com", ...remote }),

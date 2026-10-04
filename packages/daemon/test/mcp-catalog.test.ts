@@ -16,7 +16,6 @@ import {
   McpCatalog,
   normalizeMcpStdioCwd,
 } from "../src/mcp-catalog.js";
-import { homeOperationsFor } from "../src/home-operations.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 interface McpUrlSanitizerVector {
@@ -506,13 +505,8 @@ describe("McpCatalog mutations", () => {
     expect(GhostError).toBeDefined();
   });
 
-  it("serializes concurrent canonical writes under the home lease without losing siblings", async () => {
-    const { catalog: unleased, home } = setup();
-    const lease = homeOperationsFor(temp!.registry);
-    const catalog = {
-      addLeased: (ghost: string, name: string, config: unknown) =>
-        lease.withLease(ghost, () => unleased.addLeased(ghost, name, config)),
-    };
+  it("serializes concurrent canonical writes without losing siblings", async () => {
+    const { catalog, home } = setup();
 
     await Promise.all([
       catalog.addLeased("casper", "alpha", { type: "stdio", command: "alpha-server" }),

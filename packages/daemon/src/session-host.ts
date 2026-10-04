@@ -52,7 +52,6 @@ import {
   type HarnessRow,
 } from "./harness-table.js";
 import { GhostHookRunner, type HookObserver } from "./hooks.js";
-import { homeOperationsFor, type HomeOperationCoordinator } from "./home-operations.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   BACKGROUND_WORK_POLICY,
@@ -102,7 +101,6 @@ export interface SessionHostOptions {
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   hooks?: GhostHookRunner;
-  homeOperations?: HomeOperationCoordinator;
   /**
    * The harnesses a turn may run on, in Omarchy's order; production reads
    * Omarchy's eligibility report. A test supplies its own list and rows.
@@ -248,7 +246,6 @@ export class SessionHost {
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
   private readonly hooks: GhostHookRunner;
-  private readonly homeOperations: HomeOperationCoordinator;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
   private readonly harnessReport: () => Promise<HarnessReport>;
   private readonly defaultHarness: () => Promise<string | null>;
@@ -258,6 +255,8 @@ export class SessionHost {
   private readonly admissions = new Set<string>();
   private readonly deleting = new Set<string>();
   private readonly reservedGhosts = new Set<string>();
+  /** File work in flight per ghost, which a delete or rename waits out. */
+  private readonly leases = new Map<string, { count: number; drained?: () => void }>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private readonly tools = new Map<string, Promise<CollectedGhostExtension>>();
   private eligibleCache?: { at: number; ids: Promise<readonly string[]> };
@@ -277,20 +276,11 @@ export class SessionHost {
     this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
-    this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.env = options.env ?? process.env;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
     this.rowOf = options.harnessRows ?? harnessRow;
-    this.homeOperations.registerMoveParticipant({
-      preclaim: (ghostName) => {
-        if (this.ghostBusy(ghostName)) {
-          throw new GhostError("ghost_busy", "Wait for this ghost's conversations to finish before moving it.", 409);
-        }
-      },
-      reserve: () => ({ drained: Promise.resolve(), release: () => {} }),
-    });
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -470,7 +460,7 @@ export class SessionHost {
   /** The ghost's preferred agent, ahead of Omarchy's default; null is automatic. */
   async setGhostHarness(ghostName: string, id: string | null): Promise<HarnessChoices> {
     if (id !== null) this.requireRow(id);
-    await this.homeOperations.withLease(ghostName, async () => {
+    await this.withGhost(ghostName, async () => {
       await writeGhostSetting(this.registry.get(ghostName).dir, "harness", id);
     });
     return this.listHarnesses(ghostName);
@@ -489,7 +479,7 @@ export class SessionHost {
     if (!listed.eligible) throw new GhostError("harness_no_room", `${id} has no room: ${listed.reason ?? "its usage is spent"}.`, 409);
     const ghost = this.registry.get(ghostName);
     const conversation = requireConversationId(sessionId);
-    await this.homeOperations.withLease(ghost.name, async () => {
+    await this.withGhost(ghost.name, async () => {
       const { sessionDir } = ghostPaths(ghost.dir);
       const entries = await readLog(sessionDir, conversation);
       if (entries !== null && logState(entries).harness === id) return;
@@ -529,7 +519,7 @@ export class SessionHost {
         if (started || released) throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
         started = true;
         try {
-          await this.homeOperations.withLease(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, stream));
+          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, stream));
         } finally {
           release();
           this.announce(ghost.name, id);
@@ -945,7 +935,7 @@ export class SessionHost {
   }
 
   listSessions(ghostName: string): Promise<SessionSummary[]> {
-    return this.homeOperations.withLease(ghostName, () => this.listSessionsLeased(ghostName));
+    return this.withGhost(ghostName, () => this.listSessionsLeased(ghostName));
   }
 
   private async listSessionsLeased(ghostName: string): Promise<SessionSummary[]> {
@@ -1026,7 +1016,7 @@ export class SessionHost {
     sessionId: string | null | undefined,
     options: { limit?: number; offset?: number } = {},
   ): Promise<Transcript> {
-    return this.homeOperations.withLease(ghostName, () => this.readTranscriptLeased(ghostName, sessionId, options));
+    return this.withGhost(ghostName, () => this.readTranscriptLeased(ghostName, sessionId, options));
   }
 
   private async readTranscriptLeased(
@@ -1089,13 +1079,40 @@ export class SessionHost {
     return this.registry.create(name);
   }
 
-  private reserve(names: readonly string[], operation: string): void {
+  /**
+   * Run file work under a ghost's home. A move in progress refuses it, and a
+   * move waits for whatever was already running.
+   */
+  async withGhost<T>(ghostName: string, operation: () => T | Promise<T>): Promise<T> {
+    if (this.reservedGhosts.has(ghostName)) {
+      throw new GhostError("ghost_busy", "Wait for this ghost's home move to finish before changing its files.", 409);
+    }
+    const lease = this.leases.get(ghostName) ?? { count: 0 };
+    lease.count += 1;
+    this.leases.set(ghostName, lease);
+    try {
+      return await operation();
+    } finally {
+      lease.count -= 1;
+      if (lease.count === 0) {
+        this.leases.delete(ghostName);
+        lease.drained?.();
+      }
+    }
+  }
+
+  /** Claim names for a move, refusing a running conversation and waiting out file work. */
+  private async reserve(names: readonly string[], operation: string): Promise<void> {
     for (const name of names) {
       if (this.reservedGhosts.has(name) || this.ghostBusy(name)) {
         throw new GhostError("ghost_busy", `Wait for this ghost's conversations to finish before ${operation}.`, 409);
       }
     }
     for (const name of names) this.reservedGhosts.add(name);
+    await Promise.all(names.map((name) => {
+      const lease = this.leases.get(name);
+      return lease ? new Promise<void>((resolve) => { lease.drained = resolve; }) : undefined;
+    }));
   }
 
   /** Release what the daemon holds under a home that is about to move. */
@@ -1125,7 +1142,7 @@ export class SessionHost {
 
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {
     const ghost = this.registry.get(ghostName);
-    this.reserve([ghost.name], "deleting it");
+    await this.reserve([ghost.name], "deleting it");
     try {
       await this.quiesce(ghost, "deleted");
       const trashed = this.registry.trash(ghost.name);
@@ -1144,7 +1161,7 @@ export class SessionHost {
     if (existsSync(join(this.registry.root, nextName))) {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(nextName)} already exists.`, 409);
     }
-    this.reserve([ghost.name, nextName], "renaming it");
+    await this.reserve([ghost.name, nextName], "renaming it");
     try {
       await this.quiesce(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);

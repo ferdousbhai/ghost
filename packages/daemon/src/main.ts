@@ -16,7 +16,6 @@ import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js"
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
-import { HomeOperationCoordinator } from "./home-operations.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -402,10 +401,8 @@ async function serveDaemon(
   // is off — there is no second browser to fall back to, so `ghost_browser`
   // then reports that none is reachable.
   const relay = createRelayHub({ logger });
-  const homeOperations = new HomeOperationCoordinator(registry);
   const host = new SessionHost({
     registry,
-    homeOperations,
     ownerHome,
     scheduleUnitDir,
     scheduleRuntimeUnitDir,
@@ -424,7 +421,6 @@ async function serveDaemon(
     listening = await startDaemonServer({
       registry,
       host,
-      homeOperations,
       mcp,
       hooks,
       runningSource,

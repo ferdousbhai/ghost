@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
-import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import {
@@ -33,14 +32,12 @@ let temp: TempGhosts | null = null;
 let harness: FakeHarness | null = null;
 let host: SessionHost | null = null;
 let listening: ListeningServer | null = null;
-let homeOperations: HomeOperationCoordinator | null = null;
 const gates: Array<() => void> = [];
 
 afterEach(async () => {
   for (const release of gates.splice(0)) release();
   await listening?.close();
   listening = null;
-  homeOperations = null;
   await host?.disposeAll();
   host = null;
   harness?.cleanup();
@@ -64,10 +61,8 @@ async function serve(
   temp.registry.ensureRoot();
   harness = fakeHarness(turns);
   seedGhost(temp.root, { name: "casper" });
-  homeOperations = new HomeOperationCoordinator(temp.registry);
   host = new SessionHost({
     registry: temp.registry,
-    homeOperations,
     ownerHome: temp.ownerHome,
     scheduleCommandRunner: serverOptions.scheduleCommandRunner
       ?? (async () => ({ stdout: "", stderr: "", code: 0 })),
@@ -83,7 +78,6 @@ async function serve(
     registry: temp.registry,
     host,
     mcp,
-    homeOperations,
     port: 0,
     relay: null,
     // Routing and streaming are the subject here; auth has its own file.
@@ -118,10 +112,11 @@ async function waitForLaunches(count: number): Promise<void> {
   }
 }
 
-async function waitForHomeMove(): Promise<void> {
+/** Until a move holds casper's home: its file routes then answer ghost_busy. */
+async function waitForHomeMove(base: string): Promise<void> {
   const deadline = Date.now() + 3_000;
-  while (homeOperations?.moveReservationCount !== 1) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for the home-operation gate");
+  while ((await fetch(`${base}/api/ghosts/casper/character`)).status !== 409) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the move to hold the home");
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
@@ -533,7 +528,7 @@ describe("ghost MCP routes", () => {
       await readEntered.promise;
       expect(resolvedHome).toBe(originalHome);
       const moving = requestHomeMove(base, move);
-      await waitForHomeMove();
+      await waitForHomeMove(base);
 
       releaseRead.resolve();
       const listResponse = await listing;

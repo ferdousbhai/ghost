@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { HomeOperationCoordinator } from "../src/home-operations.js";
 import { McpCatalog } from "../src/mcp-catalog.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
@@ -36,10 +35,11 @@ afterEach(async () => {
   temp = null;
 });
 
-async function waitForMove(coordinator: HomeOperationCoordinator): Promise<void> {
+/** Until the move holds the home: its file routes then answer ghost_busy. */
+async function waitForMove(base: string): Promise<void> {
   const deadline = Date.now() + 3_000;
-  while (coordinator.moveReservationCount !== 1) {
-    if (Date.now() > deadline) throw new Error("timed out waiting for the home-operation gate");
+  while ((await fetch(`${base}/api/ghosts/casper/character`)).status !== 409) {
+    if (Date.now() > deadline) throw new Error("timed out waiting for the move to hold the home");
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
 }
@@ -54,109 +54,12 @@ function jsonRequest(url: string, method: string, body?: unknown): Promise<Respo
   });
 }
 
-describe("path-bound mutations during whole-home moves", () => {
-  it("synchronously reserves participants and awaits their drain before a move", async () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    seedGhost(temp.root, { name: "casper" });
-    const coordinator = new HomeOperationCoordinator(temp.registry);
-    const participantDrained = deferred<void>();
-    const homeDrained = coordinator.acquire("casper");
-    let participantReserved = false;
-    let participantReleased = false;
-    coordinator.registerMoveParticipant({
-      reserve: (ghostName) => {
-        expect(ghostName).toBe("casper");
-        participantReserved = true;
-        return {
-          drained: participantDrained.promise,
-          release: () => {
-            participantReleased = true;
-          },
-        };
-      },
-    });
-
-    let moveSettled = false;
-    const move = coordinator.reserveMove("casper").then((release) => {
-      moveSettled = true;
-      return release;
-    });
-    expect(participantReserved).toBe(true);
-    expect(moveSettled).toBe(false);
-
-    homeDrained();
-    await Promise.resolve();
-    expect(moveSettled).toBe(false);
-    participantDrained.resolve();
-    const releaseMove = await move;
-    expect(moveSettled).toBe(true);
-    expect(participantReleased).toBe(false);
-    releaseMove();
-    expect(participantReleased).toBe(true);
-    expect(coordinator.moveReservationCount).toBe(0);
-  });
-
-  it("unwinds earlier participant reservations when a later participant refuses", async () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    seedGhost(temp.root, { name: "casper" });
-    const coordinator = new HomeOperationCoordinator(temp.registry);
-    let released = false;
-    coordinator.registerMoveParticipant({
-      reserve: () => ({
-        drained: Promise.resolve(),
-        release: () => {
-          released = true;
-        },
-      }),
-    });
-    coordinator.registerMoveParticipant({
-      reserve: () => {
-        throw new Error("participant refused");
-      },
-    });
-
-    await expect(coordinator.reserveMove("casper")).rejects.toThrow("participant refused");
-    expect(released).toBe(true);
-    expect(coordinator.moveReservationCount).toBe(0);
-  });
-
-  it("runs every owner preclaim before reserving or changing move state", async () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    seedGhost(temp.root, { name: "casper" });
-    const coordinator = new HomeOperationCoordinator(temp.registry);
-    const order: string[] = [];
-    coordinator.registerMoveParticipant({
-      preclaim: () => order.push("preclaim-one"),
-      reserve: () => {
-        order.push("reserve-one");
-        return { drained: Promise.resolve(), release: () => {} };
-      },
-    });
-    coordinator.registerMoveParticipant({
-      preclaim: () => {
-        order.push("preclaim-two");
-        throw new Error("owner busy");
-      },
-      reserve: () => {
-        order.push("reserve-two");
-        return { drained: Promise.resolve(), release: () => {} };
-      },
-    });
-
-    await expect(coordinator.reserveMove("casper")).rejects.toThrow("owner busy");
-    expect(order).toEqual(["preclaim-one", "preclaim-two"]);
-    expect(coordinator.moveReservationCount).toBe(0);
-  });
-
+describe("file work during whole-home moves", () => {
   it("drains a deferred MCP writer before delete without recreating the old home", async () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     seedGhost(temp.root, { name: "casper" });
     host = makeSessionHost(temp);
-    const coordinator = new HomeOperationCoordinator(temp.registry);
     const writerStarted = deferred<void>();
     const finishWriter = deferred<void>();
     let writerCalls = 0;
@@ -183,7 +86,6 @@ describe("path-bound mutations during whole-home moves", () => {
       registry: temp.registry,
       host,
       mcp,
-      homeOperations: coordinator,
       port: 0,
       relay: null,
       apiToken: null,
@@ -196,7 +98,7 @@ describe("path-bound mutations during whole-home moves", () => {
     await writerStarted.promise;
 
     const deletion = fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
-    await waitForMove(coordinator);
+    await waitForMove(base);
     const blocked = await jsonRequest(`${base}/api/ghosts/casper/mcp`, "POST", {
       name: "bravo",
       config: { type: "stdio", command: "bravo-server" },
@@ -215,7 +117,6 @@ describe("path-bound mutations during whole-home moves", () => {
       mcpServers: Record<string, unknown>;
     };
     expect(Object.keys(moved.mcpServers)).toEqual(["alpha"]);
-    expect(coordinator.moveReservationCount).toBe(0);
 
     temp.registry.create("casper");
     const replacement = await jsonRequest(`${base}/api/ghosts/casper/mcp`, "POST", {

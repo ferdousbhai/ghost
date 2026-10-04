@@ -12,10 +12,6 @@ import type {
   McpCatalog,
   McpCatalogSnapshot,
 } from "./mcp-catalog.js";
-import {
-  homeOperationsFor,
-  type HomeOperationCoordinator,
-} from "./home-operations.js";
 import { MAX_CHARACTER_BODY_LENGTH, openGhostHome,
   resolveDocumentsDirectory,
 } from "@ghost/extensions";
@@ -45,7 +41,6 @@ import type { SessionHost } from "./session-host.js";
 export interface ServerOptions {
   registry: GhostRegistry;
   host: SessionHost;
-  homeOperations?: HomeOperationCoordinator;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
   /** The last update check's answer, for `GET /api/status`; omitted or null means none known. */
@@ -324,7 +319,6 @@ function resolveApiToken(
 export function createDaemonServer(options: ServerOptions): Server {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
-  const homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
   const liveStreams = new Set<ServerResponse>();
   // `undefined` means "decide for me"; `null` means "no relay on this server".
   const relay = options.relay === undefined
@@ -472,15 +466,9 @@ export function createDaemonServer(options: ServerOptions): Server {
       );
       return;
     }
-    let releaseHomeMove: (() => void) | undefined;
-    try {
-      releaseHomeMove = await homeOperations.reserveMove(ghostName);
-      const { trash } = await options.host.deleteGhost(ghostName);
-      logger.info("ghost deleted", { ghost: ghostName, trash });
-      jsonResponse(response, 200, { ok: true, trash });
-    } finally {
-      releaseHomeMove?.();
-    }
+    const { trash } = await options.host.deleteGhost(ghostName);
+    logger.info("ghost deleted", { ghost: ghostName, trash });
+    jsonResponse(response, 200, { ok: true, trash });
   };
 
   const handleListSessions = async (
@@ -537,7 +525,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     ghostName: string,
     response: ServerResponse,
   ): Promise<void> => {
-    const character = await homeOperations.withLease(ghostName, async () => {
+    const character = await options.host.withGhost(ghostName, async () => {
       const ghost = options.registry.get(ghostName);
       try {
         return await openGhostHome(ghost.dir).readCharacter({ enforceLimit: false });
@@ -562,7 +550,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", '"body" must be a string.');
       return;
     }
-    await homeOperations.withLease(ghostName, async () => {
+    await options.host.withGhost(ghostName, async () => {
       const ghost = options.registry.get(ghostName);
       try {
         await openGhostHome(ghost.dir).writeCharacter({ body: text });
@@ -681,7 +669,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const mcpSnapshot = (
     ghostName: string,
     extra: Record<string, unknown> = {},
-  ): Promise<Record<string, unknown>> => homeOperations.withLease(
+  ): Promise<Record<string, unknown>> => options.host.withGhost(
     ghostName,
     () => mcpSnapshotLeased(ghostName, extra),
   );
@@ -689,7 +677,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   const mutateMcp = async (
     ghostName: string,
     mutation: () => Promise<McpCatalogSnapshot>,
-  ): Promise<Record<string, unknown>> => homeOperations.withLease(ghostName, async () => ({ ...(await mutation()) }));
+  ): Promise<Record<string, unknown>> => options.host.withGhost(ghostName, async () => ({ ...(await mutation()) }));
 
   const handleMcpCollection = async (
     ghostName: string,
@@ -787,21 +775,9 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
     assertValidGhostName(name);
-    if (name === ghostName) {
-      const renamed = await options.host.renameGhost(ghostName, name);
-      logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
-      jsonResponse(response, 200, { ok: true, name: renamed.name });
-      return;
-    }
-    let releaseHomeMove: (() => void) | undefined;
-    try {
-      releaseHomeMove = await homeOperations.reserveMove(ghostName);
-      const renamed = await options.host.renameGhost(ghostName, name);
-      logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
-      jsonResponse(response, 200, { ok: true, name: renamed.name });
-    } finally {
-      releaseHomeMove?.();
-    }
+    const renamed = await options.host.renameGhost(ghostName, name);
+    logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
+    jsonResponse(response, 200, { ok: true, name: renamed.name });
   };
 
   const handleTranscript = async (

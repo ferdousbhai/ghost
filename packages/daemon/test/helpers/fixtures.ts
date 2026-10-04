@@ -7,7 +7,6 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { GhostRegistry, ghostPaths } from "../../src/ghosts.js";
-import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
 import type { TurnEvent } from "../../src/turn-events.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
@@ -110,17 +109,14 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
   temp.registry.ensureRoot();
   const harness = fakeHarness(options.turns ?? replies("hello"));
   seedGhost(temp.root, { name: ghost });
-  const homeOperations = new HomeOperationCoordinator(temp.registry);
   const host = new SessionHost({
     registry: temp.registry,
-    homeOperations,
     ownerHome: temp.ownerHome,
     ...onlyHarnesses(harness),
   });
   const listening = await startDaemonServer({
     registry: temp.registry,
     host,
-    homeOperations,
     mcp: new McpCatalog({ registry: temp.registry }),
     apiToken,
     relay: null,

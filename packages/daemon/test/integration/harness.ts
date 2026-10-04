@@ -19,7 +19,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GhostRegistry } from "../../src/ghosts.js";
-import { HomeOperationCoordinator } from "../../src/home-operations.js";
 import { McpCatalog } from "../../src/mcp-catalog.js";
 import { startDaemonServer, type ListeningServer } from "../../src/server.js";
 import { SessionHost } from "../../src/session-host.js";
@@ -288,10 +287,8 @@ export async function startRealDaemonHarness(
     harness = fake;
     const ghostName = options.ghostName ?? "casper";
     const ghostHome = seedGhost(ghostsRoot, { name: ghostName });
-    const homeOperations = new HomeOperationCoordinator(registry);
     host = new SessionHost({
       registry,
-      homeOperations,
       ownerHome: disposableHome,
       env: { ...process.env },
       ...onlyHarnesses(fake),
@@ -300,7 +297,6 @@ export async function startRealDaemonHarness(
     listening = await startDaemonServer({
       registry,
       host,
-      homeOperations,
       mcp,
       port: 0,
       apiToken: API_TOKEN,

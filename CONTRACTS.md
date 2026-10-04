@@ -82,13 +82,14 @@ The default root is `~/ghosts`; each direct child is one ghost:
   sessions/<id>/       (one directory per conversation)
 ```
 
-The directory is the atomic lifecycle unit. Rename and deletion hold a
-filesystem-identity lease and move the whole home on the same filesystem.
+The directory is the atomic lifecycle unit. Rename and deletion refuse a
+ghost with a conversation running, wait out file work already in flight,
+refuse new work until they finish, and move the whole home on the same
+filesystem.
 Deletion goes to freedesktop Trash, with a recoverable `.trash/` fallback for
 `EXDEV`; Ghost never recursively removes a home. Machine credentials, owner
 documents, screenshots, downloads, and timers are not moved with it.
 The lifecycle implementation and crash recovery are in
-[`home-operations.ts`](packages/daemon/src/home-operations.ts),
 [`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
