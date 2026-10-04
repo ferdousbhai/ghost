@@ -19,18 +19,15 @@ import {
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
-  OWNER_DELIVERABLE_POLICY,
-  OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "../src/prompt-policy.js";
-import { renderScheduledWorkPolicy } from "../src/schedules.js";
+import { SCHEDULED_WORK_POLICY } from "../src/schedules.js";
 import { renderSelfMaintenancePolicy } from "../src/self-maintenance.js";
 import type { RunningSource } from "../src/running-source.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
 const HOME_DIR = "/home/owner/ghosts/casper";
-const UNIT_DIR = "/home/owner/.config/systemd/user";
 const CHECKOUT = "/home/owner/src/ghost";
 const DOCUMENTS = "/home/owner/Documents";
 const RUNNING: RunningSource = {
@@ -61,12 +58,10 @@ function renderStablePolicy(): Record<string, string> {
   return {
     "Character file": promptSection("## Character file"),
     "Computer use": OMARCHY_COMPUTER_USE_POLICY,
-    "Finished work": OWNER_DELIVERABLE_POLICY,
     "Other harnesses": HARNESS_LIMITS_POLICY,
     "Background work": BACKGROUND_WORK_POLICY,
-    Hooks: OWNER_HOOKS_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
-    "Scheduled work": renderScheduledWorkPolicy(GHOST_NAME, UNIT_DIR),
+    "Scheduled work": SCHEDULED_WORK_POLICY,
     "Self-maintenance": renderSelfMaintenancePolicy({
       ghostName: GHOST_NAME,
       running: RUNNING,
@@ -77,19 +72,17 @@ function renderStablePolicy(): Record<string, string> {
 
 /** The exact rendered size of each section when its ceiling was last set. */
 const CEILINGS: Record<string, number> = {
-  "Character file": 561,
-  "Computer use": 386,
-  "Finished work": 176,
-  "Other harnesses": 764,
-  "Background work": 596,
-  Hooks: 376,
-  "Owner context": 880,
-  "Scheduled work": 324,
-  "Self-maintenance": 578,
+  "Character file": 560,
+  "Computer use": 301,
+  "Other harnesses": 273,
+  "Background work": 216,
+  "Owner context": 722,
+  "Scheduled work": 221,
+  "Self-maintenance": 390,
   "First meeting": 317,
 };
 
-const TOTAL_CEILING = 4958;
+const TOTAL_CEILING = 3000;
 
 function measureStablePolicy(): Record<string, number> {
   return Object.fromEntries(

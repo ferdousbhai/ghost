@@ -120,10 +120,10 @@ can switch a conversation to another agent or set the ghost's preferred one,
 from the HUD's harness picker or `ghost switch` / `ghost harness`.
 
 The session receives the Ghost-owned context: the character and the stable
-policy sections, listed in `prompt-budget.test.ts`. The shape they share is
-that each one tells the ghost what it may do without asking — delegate from
-Bash through `ghost delegate`, which checks Omarchy's usage windows, hand off through documents on a
-limit, restart itself, read the owner's Documents when relevant.
+policy sections, listed in `prompt-budget.test.ts`. Each says only what the
+ghost cannot learn elsewhere, every turn; a procedure it needs now and then
+(timers, background jobs, handoffs, its own restart) is a `ghost help` topic
+the section points at.
 
 ### Why no runtime of its own
 

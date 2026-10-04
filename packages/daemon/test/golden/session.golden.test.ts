@@ -91,8 +91,7 @@ describe("golden: session", () => {
       expect(call, `turn ${turn} must reach the harness`).toBeDefined();
       const persona = call!.agents ?? "";
       expect(persona).toContain(CHARACTER.trim());
-      expect(persona).toContain(scheduleUnitDir);
-      expect(persona).toContain("ghost-timer-v1-6-casper-<slug>");
+      expect(persona).toContain("`ghost help timers`");
 
       sections.push({ title: `turn ${turn}: owner prompt`, body: prompt });
       sections.push({ title: `turn ${turn}: persona (AGENTS.md)`, body: normalizer.text(persona.trimEnd()) });

@@ -5,7 +5,7 @@ const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", 
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });
@@ -47,10 +47,19 @@ describe("ghost help topics", () => {
     expect(text).not.toContain("your latest conversation");
   });
 
+  it("background: the detached recipe that wakes the conversation", () => {
+    const text = renderHelpTopic("background", INPUT);
+    expect(text).toContain("setsid -f bash -c");
+    expect(text).toContain("ghost say --follow-up");
+    expect(text).toContain("`$GHOST` and `$GHOST_SESSION`");
+    expect(text).toContain("end when this turn's headless run does");
+  });
+
   it("harnesses: the delegate launch path, its refusals, and the handoff note", () => {
     const text = renderHelpTopic("harnesses", INPUT);
     expect(text).toContain("Your turns run in this conversation's own directory");
-    expect(text).toContain("you are the orchestrator");
+    expect(text).toContain("only when it needs those; otherwise do it yourself");
+    expect(text).not.toContain("orchestrator");
     expect(text).toContain("cd <project-dir> && ghost delegate <harness> -- <args>");
     expect(text).toContain("respects that project's settings");
     expect(text).toContain("refuses it (exit 6)");

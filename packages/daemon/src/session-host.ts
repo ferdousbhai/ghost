@@ -58,8 +58,6 @@ import {
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,
   OMARCHY_COMPUTER_USE_POLICY,
-  OWNER_DELIVERABLE_POLICY,
-  OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
@@ -70,7 +68,7 @@ import { readReadState, writeReads } from "./reads.js";
 import type { RunningSource } from "./running-source.js";
 import {
   ghostCliPath,
-  renderScheduledWorkPolicy,
+  SCHEDULED_WORK_POLICY,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
 } from "./schedules.js";
@@ -335,12 +333,10 @@ export class SessionHost {
       homeDir: ghost.dir,
       extraSections: [
         OMARCHY_COMPUTER_USE_POLICY,
-        OWNER_DELIVERABLE_POLICY,
         HARNESS_LIMITS_POLICY,
         BACKGROUND_WORK_POLICY,
-        OWNER_HOOKS_POLICY,
         renderOwnerContextPolicy(resolveDocumentsDirectory(this.env, this.ownerHome)),
-        renderScheduledWorkPolicy(ghost.name, this.scheduleUnitDir, this.scheduleCliPath),
+        SCHEDULED_WORK_POLICY,
         renderSelfMaintenancePolicy({ ghostName: ghost.name, running: this.runningSource }),
         ...(isSeededCharacter(ghost.name, character?.body ?? null) ? [FIRST_MEETING_SECTION] : []),
       ],

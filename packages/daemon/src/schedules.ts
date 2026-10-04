@@ -97,19 +97,10 @@ export function ghostCliPath(env: NodeJS.ProcessEnv = process.env): string {
   return "/usr/bin/ghost";
 }
 
-/** The exact runtime policy rendered from schedule ownership, not a second copy. */
-export function renderScheduledWorkPolicy(
-  ghostName: string,
-  unitDir: string,
-  cliPath = "/usr/bin/ghost",
-): string {
-  if (!isAbsolute(unitDir)) throw new TypeError("schedule unit directory must be absolute");
-  if (!isAbsolute(cliPath)) throw new TypeError("ghost CLI path must be absolute");
-  return [
-    "## Scheduled work",
-    `Clock work is a systemd user timer written through Bash, both units in ${JSON.stringify(resolve(unitDir))} named \`${scheduleUnitPrefix(ghostName)}<slug>\`; Ghost has no scheduler. Read \`ghost help timers\` before writing one. Timers fire only while the owner is logged in, so promise no check-ins while they are away.`,
-  ].join("\n");
-}
+export const SCHEDULED_WORK_POLICY = [
+  "## Scheduled work",
+  "Clock work is a systemd user timer you write from Bash; Ghost has no scheduler. Read `ghost help timers` first. Timers fire only while the owner is logged in, so promise no check-ins while they are away.",
+].join("\n");
 
 /**
  * The units belonging to one ghost. A name must start with that ghost's exact

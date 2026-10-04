@@ -198,12 +198,11 @@ backup: Trash and snapper are undo, not retention.
 Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
 [`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two sections carry contract the rest of this file
-relies on: the other-harnesses policy runs each handoff with the project
-directory as the harness's own cwd so the headless harness respects that
-project's settings, launches each handoff through `ghost delegate`, which
-refuses a harness without room, and ends a limit in a handoff note in the
-owner's documents; the owner-context policy names the Documents directory in
-one sentence and nothing else about it. Owner documents are read only when
+relies on: the other-harnesses policy sends a task to an agent run in its
+project (`ghost delegate`, which refuses a harness without room) only when it
+needs that project's instructions, settings, or MCP servers; the owner-context
+policy names the Documents directory as where finished work, notes, and the
+board live. Owner documents are read only when
 relevant, with the harness's own file and search tools, never injected
 automatically. The prompt is rendered before every turn, so a character the
 ghost rewrote is who it is on the next one.
@@ -269,8 +268,9 @@ queues after a live turn or, when the conversation is idle, starts its next
 turn. `GHOST` and `GHOST_SESSION` are in the Bash environment so
 the CLI addresses the right conversation without flags. Ghost keeps no job
 table, no jobs API, no jobs strip, and cannot cancel what it did not start;
-the policy text is `BACKGROUND_WORK_POLICY` in
-[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts).
+the policy (`BACKGROUND_WORK_POLICY` in
+[`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)) points at the recipe,
+`ghost help background`.
 
 There is no Ghost-owned delegation system: no worker scopes, `/tasks` API, or
 job control. A ghost that wants a specialist runs the owner's installed `pi`,

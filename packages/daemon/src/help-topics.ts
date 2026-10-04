@@ -8,7 +8,7 @@
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -84,7 +84,7 @@ function self(input: HelpTopicInput): string[] {
 function harnesses(): string[] {
   return [
     "# Other harnesses",
-    "Your turns run in this conversation's own directory, which holds only Ghost's files; no project's instructions or MCP load into them. For coding or project-specific tasks you are the orchestrator: hand the work to a headless sub-agent, never do it yourself.",
+    "Your turns run in this conversation's own directory, which holds only Ghost's files; no project's instructions, settings, or MCP servers load into them. Hand a task to an agent run in the project only when it needs those; otherwise do it yourself.",
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
     "Run each handoff with the project directory as its cwd, `cd <project-dir> && ghost delegate <harness> -- <args>` (e.g. `ghost delegate claude -- -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "`claude -p` edits files only with `--permission-mode acceptEdits` and runs commands (tests) only with `--allowedTools Bash`; put the task right after `-p`, since `--allowedTools`, `--add-dir`, and other list flags would swallow a task after them.",
@@ -96,8 +96,20 @@ function harnesses(): string[] {
   ];
 }
 
+function background(): string[] {
+  return [
+    "# Background work",
+    "Your harness's own background jobs end when this turn's headless run does. Work that must outlive the turn runs detached, logs to a file, and wakes you when it ends:",
+    "```sh",
+    "setsid -f bash -c 'cmd > /tmp/job.log 2>&1; ghost say --follow-up -q \"Background job finished (exit $?), log /tmp/job.log\" >/dev/null 2>&1'",
+    "```",
+    "`$GHOST` and `$GHOST_SESSION` are set in your shell, so `ghost` verbs address this conversation without `-g`/`-s`. `--follow-up` runs after your current turn, or starts your next one when the conversation is idle.",
+    "Nothing else watches the job: read its log, and keep its PID if you may need to stop it.",
+  ];
+}
+
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = topic === "timers" ? timers(input) : topic === "self" ? self(input) : harnesses();
+  const lines = { timers: () => timers(input), self: () => self(input), harnesses, background }[topic]();
   return `${lines.join("\n")}\n`;
 }
