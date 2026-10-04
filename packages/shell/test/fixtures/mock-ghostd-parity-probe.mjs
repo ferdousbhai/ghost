@@ -87,7 +87,31 @@ try {
     "id", "title", "preview", "harness", "createdAt", "updatedAt", "messageCount", "pinned", "unread",
   ]);
 
-  const harnessUrl = `http://127.0.0.1:${port}/api/ghosts/casper/harness`;
+  // Pinning lifts a conversation above newer ones, and unpinning puts it back.
+  const pinUrl = (id) => `http://127.0.0.1:${port}/api/ghosts/casper/sessions/${id}/pin`;
+  const listedIds = async () => (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
+    .sessions.map((session) => session.id);
+  assert.deepEqual(await listedIds(), ["sess-casper-2", "sess-casper-1"]);
+  const pinned = await fetch(pinUrl("sess-casper-1"), {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ pinned: true }),
+  });
+  assert.deepEqual(await pinned.json(), { ok: true, pinned: true });
+  assert.deepEqual(await listedIds(), ["sess-casper-1", "sess-casper-2"]);
+  await fetch(pinUrl("sess-casper-1"), { method: "PUT", body: JSON.stringify({ pinned: false }) });
+  assert.deepEqual(await listedIds(), ["sess-casper-2", "sess-casper-1"]);
+  const badPin = await fetch(pinUrl("sess-casper-1"), { method: "PUT", body: JSON.stringify({ pinned: "yes" }) });
+  assert.equal(badPin.status, 400);
+  assert.equal((await badPin.json()).error.code, "invalid_request");
+
+  const status = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
+  assert.deepEqual(Object.keys(status), ["version", "source", "update"]);
+  assert.deepEqual(Object.keys(status.source), ["commit", "root"]);
+
+  const board = await (await fetch(`http://127.0.0.1:${port}/api/board`)).json();
+  assert.deepEqual(Object.keys(board), ["path", "exists", "modified", "title", "columns", "truncated"]);
+  assert.ok(board.columns.every((column) => column.cards.every((card) => Array.isArray(card.notes))));
+
+  const harnessUrl =`http://127.0.0.1:${port}/api/ghosts/casper/harness`;
   const putJson = (url, body) => fetch(url, {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
   });
@@ -117,6 +141,7 @@ try {
   ]);
   for (const message of transcriptBody.messages) {
     assert.equal(typeof message.entryId, "string");
+    assert.ok(Array.isArray(message.content), "content is a part list, as transcriptMessages sends it");
   }
   const transcript = JSON.stringify(transcriptBody);
   assert.ok(transcript.includes(join(homedir(), "project-brief.md")));

@@ -284,6 +284,9 @@ function append(s, message) {
   s.messages.push({ ...message, entryId: `entry-${++entrySeq}` });
 }
 
+/** Message content as the daemon's transcript sends it: an ordered part list, never a bare string. */
+const textParts = (text) => [{ type: "text", text }];
+
 function seedSession(fields, messages) {
   const s = { ...fields, messages: [] };
   for (const message of messages) append(s, message);
@@ -304,9 +307,9 @@ function ghostSessions(name) {
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
     }, [
-      { role: "user", content: "hello, who lives here?", timestamp: now - 7_200_000 },
+      { role: "user", content: textParts("hello, who lives here?"), timestamp: now - 7_200_000 },
       { role: "assistant", content: [{ type: "text", text: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.` }], timestamp: now - 7_195_000 },
-      { role: "user", content: "open the current project brief and tell me what's left", timestamp: now - 3_608_000 },
+      { role: "user", content: textParts("open the current project brief and tell me what's left"), timestamp: now - 3_608_000 },
       {
         role: "assistant",
         timestamp: now - 3_607_000,
@@ -332,7 +335,7 @@ function ghostSessions(name) {
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
     }, [
-      { role: "user", content: "quick question about memory", timestamp: now - 600_000 },
+      { role: "user", content: textParts("quick question about memory"), timestamp: now - 600_000 },
       { role: "assistant", content: [], errorMessage: "codex usage limit reached", timestamp: now - 595_000 },
     ]);
     sessionStore.set(name, new Map([[titled.id, titled], [untitled.id, untitled]]));
@@ -367,17 +370,15 @@ const transcriptOf = (s, params) => {
 const firstLine = (text) => String(text).split("\n")[0].slice(0, 120);
 
 const sessionSummary = (s) => {
-  const first = s.messages.find((m) => m.role === "user" && typeof m.content === "string");
+  const first = s.messages.find((m) => m.role === "user");
   return {
     id: s.id,
     title: s.title ?? null,
-    preview: first ? firstLine(first.content) : null,
+    preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
     harness: s.harness ?? null,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     messageCount: s.messages.length,
-    // Pin state is in the listing shape; the pin route itself is not mocked, so
-    // nothing here ever flips it and the listing order is plain newest-first.
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
   };
@@ -395,7 +396,7 @@ function recordTurn(name, id, exchanges) {
     store.set(id, s);
   }
   for (const { prompt, reply } of exchanges) {
-    append(s, { role: "user", content: prompt, timestamp: now });
+    append(s, { role: "user", content: textParts(prompt), timestamp: now });
     append(s, { role: "assistant", content: [{ type: "text", text: reply }], timestamp: now });
   }
   s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
@@ -422,6 +423,23 @@ const json = (res, status, body) => {
 // The daemon's hooks.json, kept as one document the way ghostd does, with
 // its status projection derived from it. The loader's shape check is the
 // small subset a pane edit can plausibly trip, worded the way ghostd words it.
+/** `GET /api/status`; `--update` makes it report a newer release. */
+const MOCK_VERSION = "0.0.0-mock";
+const MOCK_UPDATE = { latest: "0.0.1", command: "ghost update", url: "https://github.com/ferdousbhai/ghost/releases" };
+
+/** `GET /api/board`: readBoard's shape for a small Documents/board.md. */
+const MOCK_BOARD = {
+  path: join(homedir(), "Documents", "board.md"),
+  exists: true,
+  modified: new Date().toISOString(),
+  title: "Board",
+  columns: [
+    { title: "Doing", cards: [{ text: "Draft the project brief", done: false, notes: ["owner reviews Friday"] }] },
+    { title: "Done", cards: [{ text: "Set up the ghost", done: true, notes: [] }, { text: "A plain card", notes: [] }] },
+  ],
+  truncated: false,
+};
+
 const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
 const HOOK_EVENTS = ["before_prompt", "session_stop"];
 let hooksDocument = {
@@ -762,6 +780,17 @@ const mockServer = createServer(async (req, res) => {
     return svg(res, REMOTE_QR_SVG);
   }
 
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "status" && req.method === "GET") {
+    return json(res, 200, {
+      version: MOCK_VERSION,
+      source: { commit: null, root: null },
+      update: flag("--update") ? MOCK_UPDATE : null,
+    });
+  }
+  if (parts.length === 2 && parts[0] === "api" && parts[1] === "board" && req.method === "GET") {
+    return json(res, 200, MOCK_BOARD);
+  }
+
   if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
 
   if (parts.length === 2 && req.method === "GET") return json(res, 200, ghosts);
@@ -983,7 +1012,8 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
     const list = [...ghostSessions(name).values()]
       .map(sessionSummary)
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+      .sort((a, b) => (a.pinned === b.pinned
+        ? Date.parse(b.updatedAt) - Date.parse(a.updatedAt) : (a.pinned ? -1 : 1)));
     return json(res, 200, { sessions: list });
   }
   if (parts[3] === "sessions" && parts.length === 5 && req.method === "DELETE") {
@@ -994,6 +1024,20 @@ const mockServer = createServer(async (req, res) => {
     return deleted
       ? json(res, 200, { ok: true })
       : json(res, 404, { error: { message: "no such session", code: "not_found" } });
+  }
+  // Idempotent like the daemon's: the HUD sends the state it wants.
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "pin" && req.method === "PUT") {
+    const body = await readBody(req).catch(() => ({}));
+    if (typeof body?.pinned !== "boolean") {
+      return json(res, 400, { error: { message: '"pinned" must be a boolean.', code: "invalid_request" } });
+    }
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const s = ghostSessions(name).get(conversation);
+    if (!s) return json(res, 404, { error: { message: "no such session", code: "not_found" } });
+    s.pinned = body.pinned;
+    publishConversationUpdated(name, s.id, s.updatedAt);
+    return json(res, 200, { ok: true, pinned: s.pinned });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "read" && req.method === "PUT") {
     await readBody(req).catch(() => ({}));
