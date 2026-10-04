@@ -27,7 +27,6 @@ import { startDaemonServer, type ListeningServer } from "./server.js";
 import { UpdateChecker } from "./update-check.js";
 import { SessionHost } from "./session-host.js";
 import {
-  resolveScheduleRuntimeUnitDirectory,
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
 
@@ -345,7 +344,6 @@ async function serveDaemon(
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
   const scheduleUnitDir = resolveScheduleUnitDirectory(ownerHome);
-  const scheduleRuntimeUnitDir = resolveScheduleRuntimeUnitDirectory();
   // What is running: the source checkout behind this process, if it has one.
   const runningSource = resolveRunningSource(
     DAEMON_VERSION,
@@ -375,7 +373,6 @@ async function serveDaemon(
     registry,
     ownerHome,
     scheduleUnitDir,
-    scheduleRuntimeUnitDir,
     runningSource,
     logger,
     hooks,

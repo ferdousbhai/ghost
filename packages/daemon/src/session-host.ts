@@ -10,7 +10,7 @@ import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import {
   buildGhostSystemPrompt,
@@ -93,7 +93,6 @@ export interface SessionHostOptions {
   ownerHome?: string;
   scheduleUnitDir?: string;
   scheduleCliPath?: string;
-  scheduleRuntimeUnitDir?: string;
   runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
   /** Test seam for retiring the process-wide browser entry before a home move. */
@@ -239,7 +238,6 @@ export class SessionHost {
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
   private readonly scheduleCliPath: string;
-  private readonly scheduleRuntimeUnitDir: string;
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly browserSessionClose: (homeDir: string) => Promise<void>;
@@ -267,9 +265,6 @@ export class SessionHost {
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     this.scheduleUnitDir = resolve(options.scheduleUnitDir ?? resolveScheduleUnitDirectory(this.ownerHome, {}));
     this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
-    const runtimeUnitDir = options.scheduleRuntimeUnitDir ?? join(this.ownerHome, ".runtime", "systemd", "user");
-    if (!isAbsolute(runtimeUnitDir)) throw new TypeError("scheduleRuntimeUnitDir must be absolute");
-    this.scheduleRuntimeUnitDir = resolve(runtimeUnitDir);
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.browserSessionClose = options.browserSessionClose ?? closeBrowserSession;
@@ -1125,7 +1120,6 @@ export class SessionHost {
     try {
       await sweepGhostSchedules(ghost.name, {
         unitDir: this.scheduleUnitDir,
-        runtimeUnitDir: this.scheduleRuntimeUnitDir,
         ...(this.scheduleCommandRunner ? { run: this.scheduleCommandRunner } : {}),
         logger: this.logger,
       });

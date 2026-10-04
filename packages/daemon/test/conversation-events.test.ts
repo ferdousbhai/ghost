@@ -30,7 +30,6 @@ async function setup(): Promise<string> {
     registry: temp.registry,
     ownerHome: temp.ownerHome,
     scheduleUnitDir: join(temp.ownerHome, ".config", "systemd", "user"),
-    scheduleRuntimeUnitDir: join(temp.ownerHome, ".runtime", "systemd", "user"),
     scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(harness),
   });
