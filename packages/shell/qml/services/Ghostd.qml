@@ -475,13 +475,11 @@ Singleton {
     property bool hudChatFocused: false
 
     property alias transcript: transcriptModel
-    property int hydratedRowCount: 0
     /** True when the open conversation's stored history has an unavailable prefix. */
     property bool transcriptHistoryTruncated: false
     property bool streaming: false
     property string activity: ""
     property var followUpQueue: []
-    property bool queueSubmitting: false
     property string queueError: ""
 
     signal turnFinished(string ghost, string text, string sessionId, string title)
@@ -492,9 +490,9 @@ Singleton {
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
 
-    // The XHR must be held by a property. A request whose only reference is the
-    // closure it installed on itself is eligible for collection mid-flight.
-    property var request: null
+    // An XHR must be held by a property (a turn's lives on its state). A request
+    // whose only reference is the closure it installed on itself is eligible for
+    // collection mid-flight.
     property var listRequest: null
     property int listGeneration: 0
     property var createGhostRequest: null
@@ -543,13 +541,8 @@ Singleton {
     property var turnStates: ({})
     property var liveConversationKeys: []
     readonly property bool anyStreaming: root.liveConversationKeys.length > 0
-    property var blocks: ({})         // contentIndex -> { kind, text }
     property var toolActivities: []   // stateful cards for the current assistant row
-    property var toolIdsByContent: ({})
     property int assistantRow: -1
-    property int consumed: 0
-    property string frameBuffer: ""
-    property bool presentationDirty: false
 
     ListModel { id: transcriptModel }
 
@@ -1405,21 +1398,13 @@ Singleton {
         const listed = root.sessions.find(session => session.id === state.sessionId);
         if (listed) state.title = listed.title || "";
         state.rows = root.visibleTranscriptRows();
-        state.hydratedRowCount = root.hydratedRowCount;
         state.historyTruncated = root.transcriptHistoryTruncated;
         state.streaming = root.streaming;
-        state.request = root.request;
         state.activity = root.activity;
         state.followUpQueue = root.followUpQueue.slice();
-        state.queueSubmitting = root.queueSubmitting;
         state.queueError = root.queueError;
-        state.blocks = root.blocks;
         state.toolActivities = root.toolActivities.slice();
-        state.toolIdsByContent = root.toolIdsByContent;
         state.assistantRow = root.assistantRow;
-        state.consumed = root.consumed;
-        state.frameBuffer = root.frameBuffer;
-        state.presentationDirty = root.presentationDirty;
     }
 
     function projectTurnFields(state: var): void {
@@ -1428,22 +1413,14 @@ Singleton {
     }
 
     function projectTurnProjection(state: var): void {
-        root.hydratedRowCount = state.hydratedRowCount;
         root.transcriptHistoryTruncated = state.historyTruncated === true;
         root.streaming = state.streaming;
-        root.request = state.request;
         root.activity = state.activity;
         root.lastError = state.lastError;
         root.followUpQueue = state.followUpQueue;
-        root.queueSubmitting = state.queueSubmitting;
         root.queueError = state.queueError;
-        root.blocks = state.blocks;
         root.toolActivities = state.toolActivities;
-        root.toolIdsByContent = state.toolIdsByContent;
         root.assistantRow = state.assistantRow;
-        root.consumed = state.consumed;
-        root.frameBuffer = state.frameBuffer;
-        root.presentationDirty = state.presentationDirty;
     }
 
     function clearTurnProjection(): void {
