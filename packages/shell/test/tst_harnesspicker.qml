@@ -4,7 +4,7 @@ import "../qml/components"
 import "../qml/services"
 import "FakeXhr.js" as FakeXhr
 
-// The header's agent picker: which agent runs the open conversation's next
+// The header's harness picker: which harness runs the open conversation's next
 // turn, and the ghost's own default (GET/PUT /harness, PUT .../harness).
 TestCase {
     id: tc
@@ -97,7 +97,7 @@ TestCase {
         tc.click(header, "harnessLabel");
         tc.requests[0].complete(500, { error: { code: "internal", message: "boom" } });
         compare(Ghostd.harnessChoice, null);
-        compare(Ghostd.harnessError, "GET agents → 500: boom");
+        compare(Ghostd.harnessError, "GET harnesses → 500: boom");
         verify(findChild(header, "harnessError").visible);
     }
 
@@ -128,7 +128,7 @@ TestCase {
         Ghostd.chooseHarness("pi");
         tc.requests[1].complete(400, { error: { code: "unknown_harness", message: "no agent pi" } });
         compare(Ghostd.currentHarness, "claude");
-        compare(Ghostd.harnessError, "PUT conversation agent → 400: no agent pi");
+        compare(Ghostd.harnessError, "PUT conversation harness → 400: no agent pi");
     }
 
     function test_aDraftCarriesItsPickBeforeItIsListed(): void {
@@ -136,7 +136,7 @@ TestCase {
         Ghostd.sessions = [];
         Ghostd.currentSessionId = "";
         const header = createTemporaryObject(headerComponent, tc);
-        compare(findChild(header, "harnessLabel").text, "agent: automatic ▾");
+        compare(findChild(header, "harnessLabel").text, "harness: automatic ▾");
         tc.click(header, "harnessLabel");
         tc.requests[0].complete(200, tc.choice());
         tc.click(header, "harnessChoose-pi");

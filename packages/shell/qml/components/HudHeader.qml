@@ -8,7 +8,7 @@ import "../services"
 Item {
     id: root
 
-    /** The agent picker is up. */
+    /** The harness picker is up. */
     property bool pickerOpen: false
 
     /** The picker closed; the keyboard has nowhere to be. */
@@ -100,19 +100,19 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         spacing: Theme.pad
 
-        // The agent the open conversation runs on, and the way to change it.
+        // The harness the open conversation runs on, and the way to change it.
         // Quiet text until clicked; the picker below holds the choices.
         Text {
             id: harnessLabel
             objectName: "harnessLabel"
             anchors.verticalCenter: parent.verticalCenter
             visible: Ghostd.activeGhost !== ""
-            text: (Ghostd.currentHarness !== "" ? "via " + Ghostd.currentHarness : "agent: automatic") + " ▾"
+            text: (Ghostd.currentHarness !== "" ? "via " + Ghostd.currentHarness : "harness: automatic") + " ▾"
             color: harnessArea.containsMouse || root.pickerOpen ? Theme.foreground : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall
             Accessible.role: Accessible.Button
-            Accessible.name: "Choose agent"
+            Accessible.name: "Choose harness"
 
             MouseArea {
                 id: harnessArea
@@ -133,7 +133,7 @@ Item {
         }
     }
 
-    // The agent picker. Each row's name picks the agent for this
+    // The harness picker. Each row's name picks the harness for this
     // conversation's next turn; its "default" toggles the ghost's own default,
     // and "automatic" clears that back to Omarchy's machine default.
     Rectangle {

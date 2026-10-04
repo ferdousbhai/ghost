@@ -1173,7 +1173,7 @@ Singleton {
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.harnessRequest) return;
             root.harnessRequest = null;
-            root.adoptHarnessChoice(xhr, ghost, "GET agents");
+            root.adoptHarnessChoice(xhr, ghost, "GET harnesses");
         };
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
             ({}), null, function () { return root.harnessRequest === xhr; });
@@ -1195,7 +1195,7 @@ Singleton {
         xhr.onreadystatechange = function () {
             if (xhr.readyState !== 4 || xhr !== root.harnessMutation) return;
             root.harnessMutation = null;
-            if (!root.adoptHarnessChoice(xhr, ghost, "PUT default agent")
+            if (!root.adoptHarnessChoice(xhr, ghost, "PUT default harness")
                     && ghost === root.activeGhost && before) root.harnessChoice = before;
         };
         root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
@@ -1243,7 +1243,7 @@ Singleton {
             if (xhr.status === 200) return;
             if (root.pendingHarnesses[key] === harness) root.setPendingHarness(key, before);
             if (ghost === root.activeGhost)
-                root.harnessError = root.describeError(xhr, "PUT conversation agent");
+                root.harnessError = root.describeError(xhr, "PUT conversation harness");
         };
         root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(id) + "/harness",

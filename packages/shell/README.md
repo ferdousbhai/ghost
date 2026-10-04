@@ -44,9 +44,9 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
   never reads ghost homes or the owner's documents directly.
 - While streaming, Enter queues a follow-up that runs after the current pass,
   and Shift+Enter inserts a newline.
-- The header names the agent CLI (harness) answering the open conversation
-  ("via claude", "agent: automatic" for a fresh draft). Clicking it lists the
-  installed agents from `GET /harness` (ineligible ones dimmed with the usage
+- The header names the harness (agent CLI) answering the open conversation
+  ("via claude", "harness: automatic" for a fresh draft). Clicking it lists the
+  installed harnesses from `GET /harness` (ineligible ones dimmed with the usage
   window that is full): a name runs this conversation's next turn on it, and
   each row's "default" sets or clears the ghost's own default, with
   "automatic" falling back to Omarchy's. Nothing in the shell picks a model or
