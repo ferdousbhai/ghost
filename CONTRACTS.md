@@ -222,13 +222,7 @@ copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
 are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. Everything else — model, auth, tools, permissions, compaction, retries —
-is the harness's own, configured by the owner exactly as when they run it. One
-deliberate exception: claude, codex, grok, pi, crush, muse, and agy run at low
-reasoning effort, each by its own per-run flag, because a ghost is a
-conversation and the owner's own effort setting is tuned for coding. The rest
-keep the owner's: copilot's `auto` model refuses an effort, opencode's variants
-are provider-specific, cursor-agent sets effort only inside a model name, and
-omp is unverified.
+is the harness's own, configured by the owner exactly as when they run it.
 
 The harness runs in the conversation directory with the conversation's
 identity (`GHOST`, `GHOST_SESSION`) in its environment. Ghost writes the

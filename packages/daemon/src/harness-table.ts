@@ -373,6 +373,11 @@ function writeJson(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
 }
 
+// Rows that can set reasoning effort per run ask for low: a ghost is a
+// conversation, and the owner's own setting is tuned for coding. Copilot's
+// `auto` model refuses an effort, opencode's variants are provider-specific,
+// and cursor-agent sets effort only inside a model name, so those keep the
+// owner's.
 const ROWS: readonly HarnessRow[] = [
   {
     id: "claude",
