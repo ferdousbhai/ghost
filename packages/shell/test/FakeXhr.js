@@ -3,14 +3,15 @@
 /**
  * The fake `XMLHttpRequest` every Ghostd request test drives.
  *
- * Tests install it through one of Ghostd's `*RequestFactory` seams, drive the
+ * Tests install it through Ghostd's `requestFactory` seam, drive the
  * exchange by hand, and read back what the service sent. Ten test files each
  * carried their own copy, which had drifted apart — one could not deliver a
  * string body, two forgot `status = 0` on abort, and the abort flag was
  * `aborted` in some and `abortCount` in others. Sharing one fake means every
  * suite tests against the same request contract.
  *
- * `make` appends to `bucket` so a test can assert on the requests in order.
+ * `make` appends to `bucket` so a test can assert on the requests in order;
+ * a function `bucket(method, url)` instead names the array as the request opens.
  */
 function make(bucket) {
     const xhr = {
@@ -29,6 +30,7 @@ function make(bucket) {
             this.method = method;
             this.url = url;
             this.readyState = 1;
+            if (typeof bucket === "function") bucket(method, url).push(this);
         },
         setRequestHeader: function (name, value) {
             this.headers[name] = value;
@@ -54,6 +56,15 @@ function make(bucket) {
             if (typeof this.onreadystatechange === "function") this.onreadystatechange();
         }
     };
-    bucket.push(xhr);
+    if (typeof bucket !== "function") bucket.push(xhr);
     return xhr;
+}
+
+/**
+ * A `requestFactory` recording in `bucket` the requests whose URL matches
+ * `pattern`. Every other request the singleton opens meanwhile (the event
+ * stream, a roster refresh) stays unanswered and out of the test's way.
+ */
+function factory(bucket, pattern) {
+    return () => make((method, url) => pattern.test(url) ? bucket : []);
 }

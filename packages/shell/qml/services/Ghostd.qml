@@ -12,8 +12,9 @@ pragma Singleton
 // visits could otherwise drive a ghost with a form post (issue #485). So every
 // /api route but relay/status wants `Authorization: Bearer <token>`, where the
 // token is a 0600 file the daemon mints at startup. We can read a file; a web
-// page cannot. Nothing here opens a request directly — `dispatch()` does, so
-// the header and the rotation retry exist in one place rather than fourteen.
+// page cannot. Nothing here opens a request directly — `request()` (or, for
+// the two event streams, `dispatch()`) does, so the header and the rotation
+// retry exist in one place.
 import Quickshell
 import Quickshell.Io
 import QtQuick
@@ -67,23 +68,12 @@ Singleton {
 
     /** What the daemon knows about newer releases; nothing else in /api/status is read here. */
     function fetchDaemonStatus(): void {
-        if (root.statusRequest && root.statusRequest.readyState !== 4) return;
-        const xhr = root.newRequest(root.statusRequestFactory);
-        root.statusRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.statusRequest) return;
-            root.statusRequest = null;
+        if (root.statusRequest) return;
+        root.request(root, "statusRequest", "GET", "/api/status", null, function (xhr, body) {
             if (xhr.status !== 200) return;
-            try {
-                const body = JSON.parse(xhr.responseText);
-                root.updateAvailable = root.validUpdate(body.update) ? body.update : null;
-                root.reachable = true;
-            } catch (error) {
-                root.updateAvailable = null;
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/status", ({}), null,
-            function () { return root.statusRequest === xhr; });
+            root.updateAvailable = body && root.validUpdate(body.update) ? body.update : null;
+            if (body) root.reachable = true;
+        });
     }
 
     // Remote access is daemon-global rather than ghost- or conversation-scoped,
@@ -110,18 +100,14 @@ Singleton {
     }
 
     function clearRemoteQr(): void {
-        const request = root.remoteQrRequest;
-        root.remoteQrRequest = null;
+        root.retire(root, "remoteQrRequest");
         root.remoteQrSource = "";
-        if (request && request.readyState !== 4) request.abort();
     }
 
     function retireRemoteRequests(): void {
-        const request = root.remoteRequest;
-        root.remoteRequest = null;
+        root.retire(root, "remoteRequest");
         root.remoteLoading = false;
         root.remoteMutating = false;
-        if (request && request.readyState !== 4) request.abort();
         root.clearRemoteQr();
     }
 
@@ -137,103 +123,54 @@ Singleton {
             root.clearRemoteQr();
             return;
         }
-        if (root.remoteQrRequest && root.remoteQrRequest.readyState !== 4) return;
-        const xhr = root.newRequest(root.remoteRequestFactory);
-        root.remoteQrRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.remoteQrRequest) return;
-            root.remoteQrRequest = null;
+        if (root.remoteQrRequest) return;
+        root.request(root, "remoteQrRequest", "GET", "/api/remote/qr.svg", null, function (xhr) {
             if (root.remoteUrl !== expectedUrl) return;
-            if (xhr.status === 200) {
-                const svg = String(xhr.responseText || "");
-                if (svg.indexOf("<svg") < 0) {
-                    root.remoteError = "ghostd sent malformed remote-access QR code";
-                    return;
-                }
-                root.remoteQrSource = "data:image/svg+xml;charset=utf-8,"
-                    + encodeURIComponent(svg);
-            } else {
+            const svg = String(xhr.responseText || "");
+            if (xhr.status !== 200)
                 root.remoteError = root.describeError(xhr, "GET remote-access QR code");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/remote/qr.svg", ({}), null,
-            function () { return root.remoteQrRequest === xhr; });
+            else if (svg.indexOf("<svg") < 0)
+                root.remoteError = "ghostd sent malformed remote-access QR code";
+            else
+                root.remoteQrSource = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svg);
+        });
+    }
+
+    function adoptRemoteReply(xhr: var, body: var, what: string): void {
+        if (xhr.status !== 200) root.remoteError = root.describeError(xhr, what);
+        else if (!root.applyRemoteStatus(body)) root.remoteError = "ghostd sent malformed remote-access status";
+        else root.reachable = true;
     }
 
     function refreshRemote(): void {
-        if (root.remoteMutating) return;
-        if (root.remoteRequest && root.remoteRequest.readyState !== 4) return;
-        const xhr = root.newRequest(root.remoteRequestFactory);
-        root.remoteRequest = xhr;
+        if (root.remoteMutating || root.remoteRequest) return;
         root.remoteLoading = true;
         root.remoteError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
-            root.remoteRequest = null;
+        root.request(root, "remoteRequest", "GET", "/api/remote", null, function (xhr, body) {
             root.remoteLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
-                        throw new Error("invalid remote status");
-                    root.reachable = true;
-                } catch (error) {
-                    root.remoteError = "ghostd sent malformed remote-access status";
-                }
-            } else {
-                root.remoteError = root.describeError(xhr, "GET remote access");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/remote", ({}), null,
-            function () { return root.remoteRequest === xhr; });
+            root.adoptRemoteReply(xhr, body, "GET remote access");
+        });
     }
 
     function setRemoteEnabled(enabled: bool): void {
         if (root.remoteMutating || typeof enabled !== "boolean") return;
-        const previous = root.remoteRequest;
-        root.remoteRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const xhr = root.newRequest(root.remoteRequestFactory);
-        root.remoteRequest = xhr;
+        root.retire(root, "remoteRequest");
         root.remoteLoading = false;
         root.remoteMutating = true;
         root.remoteError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.remoteRequest) return;
-            root.remoteRequest = null;
-            root.remoteMutating = false;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyRemoteStatus(JSON.parse(xhr.responseText)))
-                        throw new Error("invalid remote status");
-                    root.reachable = true;
-                } catch (error) {
-                    root.remoteError = "ghostd sent malformed remote-access status";
-                }
-            } else {
-                root.remoteError = root.describeError(xhr, "POST remote access");
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/remote",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ enabled: enabled }),
-            function () { return root.remoteRequest === xhr; });
+        root.request(root, "remoteRequest", "POST", "/api/remote", { enabled: enabled },
+            function (xhr, body) {
+                root.remoteMutating = false;
+                root.adoptRemoteReply(xhr, body, "POST remote access");
+            });
     }
 
     // Hook status and configuration are daemon-global, independent of any
     // ghost or conversation.
 
-    /** Retire ownership before abort because test/native XHR may finish inline. */
     function retireHooksRequest(): void {
-        const request = root.hooksRequest;
-        root.hooksRequest = null;
+        root.retire(root, "hooksRequest");
         root.hooksLoading = false;
-        if (request && request.readyState !== 4) request.abort();
-    }
-
-    function retireHookConfigRequest(): void {
-        const request = root.hookConfigRequest;
-        root.hookConfigRequest = null;
-        if (request && request.readyState !== 4) request.abort();
     }
 
     /** Take the daemon's `{ path, document }` as the current hooks.json; false when the body is not that. */
@@ -256,7 +193,7 @@ Singleton {
         root.hooksLoaded = false;
         root.hooksStale = false;
         root.hooksError = "";
-        root.retireHookConfigRequest();
+        root.retire(root, "hookConfigRequest");
         root.hookConfig = null;
         root.hookConfigPath = "";
         root.hookConfigLoaded = false;
@@ -273,60 +210,41 @@ Singleton {
 
     function fetchHooks(force: bool): void {
         if (!force && (root.hooksLoaded || root.hooksLoading)) return;
-        if (root.hooksRequest && root.hooksRequest.readyState !== 4) {
+        if (root.hooksRequest) {
             if (!force) return;
             root.retireHooksRequest();
         }
-        const xhr = root.newRequest(root.hooksRequestFactory);
         const epoch = root.hooksEpoch;
-        root.hooksRequest = xhr;
         root.hooksLoading = true;
         root.hooksStale = false;
         root.hooksError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
-                    || xhr !== root.hooksRequest) return;
-            root.hooksRequest = null;
+        root.request(root, "hooksRequest", "GET", "/api/hooks", null, function (xhr, body) {
             root.hooksLoading = false;
-            if (xhr.status === 200) {
-                try {
-                    const status = HookStatus.normalize(JSON.parse(xhr.responseText));
-                    if (status === null) throw new Error("invalid hook status");
-                    root.activeHooks = status.hooks;
-                    root.activeHookCount = status.total;
-                    root.hooksLoaded = true;
-                    root.hooksStale = false;
-                    root.hooksError = "";
-                    root.reachable = true;
-                } catch (error) {
-                    root.hooksStale = root.hooksLoaded;
-                    root.hooksError = "ghostd sent malformed hook status";
-                }
+            const status = xhr.status === 200 ? HookStatus.normalize(body) : null;
+            if (status !== null) {
+                root.activeHooks = status.hooks;
+                root.activeHookCount = status.total;
+                root.hooksLoaded = true;
+                root.hooksStale = false;
+                root.hooksError = "";
+                root.reachable = true;
             } else if (xhr.status === 0) {
                 root.failHooksTransport(epoch);
-                return;
             } else {
                 root.hooksStale = root.hooksLoaded;
-                root.hooksError = root.describeError(xhr, "GET hooks");
+                root.hooksError = xhr.status === 200 ? "ghostd sent malformed hook status"
+                    : root.describeError(xhr, "GET hooks");
             }
-        };
-        root.dispatch(xhr, "GET", "/api/hooks", ({}), null, function () {
-            return epoch === root.hooksEpoch && root.hooksRequest === xhr;
-        });
+        }, () => epoch === root.hooksEpoch);
     }
 
     /** Read the owner's hooks.json through the daemon. A 404 means the daemon has no file to edit. */
     function fetchHookConfig(force: bool): void {
         if (!force && (root.hookConfigLoaded || root.hookConfigLoading)) return;
-        root.retireHookConfigRequest();
-        const xhr = root.newRequest(root.hooksRequestFactory);
+        root.retire(root, "hookConfigRequest");
         const epoch = root.hooksEpoch;
-        root.hookConfigRequest = xhr;
         root.hookConfigError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || epoch !== root.hooksEpoch
-                    || xhr !== root.hookConfigRequest) return;
-            root.hookConfigRequest = null;
+        root.request(root, "hookConfigRequest", "GET", "/api/hooks/config", null, function (xhr) {
             if (xhr.status === 200) {
                 if (!root.adoptHookConfig(xhr)) return;
                 root.hookConfigLoaded = true;
@@ -340,10 +258,7 @@ Singleton {
             } else {
                 root.hookConfigError = root.describeError(xhr, "GET hooks config");
             }
-        };
-        root.dispatch(xhr, "GET", "/api/hooks/config", ({}), null, function () {
-            return epoch === root.hooksEpoch && root.hookConfigRequest === xhr;
-        });
+        }, () => epoch === root.hooksEpoch);
     }
 
     /**
@@ -353,29 +268,17 @@ Singleton {
      */
     function writeHookConfig(document: var): void {
         if (root.hookConfigBusy || !root.hookConfigAvailable) return;
-        const xhr = root.newRequest(root.hooksRequestFactory);
         const epoch = root.hooksEpoch;
-        root.hookConfigMutation = xhr;
         root.hookConfigError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.hookConfigMutation) return;
-            root.hookConfigMutation = null;
+        root.request(root, "hookConfigMutation", "PUT", "/api/hooks/config", document, function (xhr) {
             if (epoch !== root.hooksEpoch) return;
-            let ok = false;
-            if (xhr.status === 200) {
-                ok = root.adoptHookConfig(xhr);
-            } else if (xhr.status === 400) {
-                // The loader's message names the field; that is the whole story.
-                const detail = root.errorDetail(xhr);
-                root.hookConfigError = detail !== "" ? detail : root.describeError(xhr, "PUT hooks config");
-            } else {
-                root.hookConfigError = root.describeError(xhr, "PUT hooks config");
-            }
+            const ok = xhr.status === 200 && root.adoptHookConfig(xhr);
+            // A 400 is the loader's message naming the field; that is the whole story.
+            if (xhr.status === 400) root.hookConfigError = root.refusal(xhr, "PUT hooks config");
+            else if (xhr.status !== 200) root.hookConfigError = root.describeError(xhr, "PUT hooks config");
             root.hookConfigWriteFinished(ok);
             if (ok) root.fetchHooks(true);
-        };
-        root.dispatch(xhr, "PUT", "/api/hooks/config", ({ "Content-Type": "application/json" }),
-            JSON.stringify(document), function () { return xhr === root.hookConfigMutation; });
+        });
     }
 
     // The persona file, edited through the daemon rather than by a direct
@@ -469,8 +372,6 @@ Singleton {
     property var harnessRequest: null
     property var harnessMutation: null
     property var harnessSessionRequest: null
-    /** Test seam; production constructs native XHRs. */
-    property var harnessRequestFactory: null
     property bool hudVisible: false
     property bool hudChatFocused: false
 
@@ -490,18 +391,11 @@ Singleton {
     signal characterWriteFinished(bool ok)
     signal hookConfigWriteFinished(bool ok)
 
-    // An XHR must be held by a property (a turn's lives on its state). A request
-    // whose only reference is the closure it installed on itself is eligible for
-    // collection mid-flight.
+    // An XHR must be held by a property (see request()).
     property var listRequest: null
-    property int listGeneration: 0
     property var createGhostRequest: null
-    property int createGhostGeneration: 0
-    /** Test seam; production always constructs the native QML XHR. */
-    property var ghostRequestFactory: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
-    property var renameGhostRequestFactory: null
     property var renameGhostSnapshot: null
     property var renameSessionRequest: null
     property var sessionsRequest: null
@@ -511,30 +405,24 @@ Singleton {
     property string eventsFrameBuffer: ""
     property var characterRequest: null
     property var characterWriteRequest: null
-    /** Test seam; production constructs native character XHRs. */
-    property var characterRequestFactory: null
     property var remoteRequest: null
     property var statusRequest: null
-    /** Test seam; production constructs the native XHR. */
-    property var statusRequestFactory: null
     property var remoteQrRequest: null
-    /** Test seam; production constructs native QML XHRs. */
-    property var remoteRequestFactory: null
     property var hooksRequest: null
-    property var hooksRequestFactory: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
     property var mcpRequest: null
     property var mcpMutationRequest: null
-    property var transcriptRequestFactory: null
+    /** Test seam: when set, every request is `requestFactory()` instead of a native XHR. */
+    property var requestFactory: null
     readonly property int transcriptPageLimit: 1000
     readonly property int transcriptMaxPages: 10
     /** The shell's own patience for a silent stream — three of the daemon's
         15s SSE keepalives missed means that response is no longer live. */
     readonly property int streamSilenceMs: 45000
     property var deleteSessionRequest: null
-    property var deleteSessionRequestFactory: null
     property var pinSessionRequest: null
+    /** conversationKey -> its in-flight mark-read request. */
     property var readSessionRequests: ({})
 
     property var sessionIds: ({})     // ghost name -> active conversation id
@@ -682,9 +570,44 @@ Singleton {
         root.deliver(xhr, method, url, headers, body);
     }
 
-    /** A request from a test's `*RequestFactory` seam, else a native XHR. */
-    function newRequest(factory: var): var {
-        return typeof factory === "function" ? factory() : new XMLHttpRequest();
+    function newRequest(): var {
+        return typeof root.requestFactory === "function" ? root.requestFactory() : new XMLHttpRequest();
+    }
+
+    /**
+     * Send one request, held in `owner[slot]` while in flight: an XHR whose
+     * only reference is its own closure can be collected mid-flight. The reply
+     * lands only while the slot still holds this request; the slot is emptied
+     * at DONE, and `done(xhr, body)` runs unless `alive()` (optional) has
+     * turned false. `body` is the parsed JSON reply, or undefined. A non-null
+     * `payload` is sent as JSON. Retiring the slot (see retire) drops the reply.
+     */
+    function request(owner: var, slot: string, method: string, path: string, payload: var,
+            done: var, alive: var): void {
+        const xhr = root.newRequest();
+        owner[slot] = xhr;
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || owner[slot] !== xhr) return;
+            owner[slot] = null;
+            if (typeof alive === "function" && !alive()) return;
+            let body;
+            try {
+                body = JSON.parse(xhr.responseText);
+            } catch (error) {
+                body = undefined;
+            }
+            done(xhr, body);
+        };
+        const json = payload !== null && payload !== undefined;
+        root.dispatch(xhr, method, path, json ? ({ "Content-Type": "application/json" }) : ({}),
+            json ? JSON.stringify(payload) : null, () => owner[slot] === xhr);
+    }
+
+    /** Empty `owner[slot]` before aborting its request: Qt may deliver DONE inside abort(). */
+    function retire(owner: var, slot: string): void {
+        const xhr = owner[slot];
+        owner[slot] = null;
+        if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
     function deliver(xhr: var, method: string, url: string, headers: var, body: var): void {
@@ -703,7 +626,6 @@ Singleton {
     property string boardError: ""
     property bool boardLoading: false
     property var boardRequest: null
-    property var boardRequestFactory: null
 
     /** The daemon's Board, or null when the body is not one. */
     function boardFrom(body: var): var {
@@ -735,34 +657,20 @@ Singleton {
     }
 
     function refreshBoard(): void {
-        if (root.boardRequest && root.boardRequest.readyState !== 4) return;
-        const xhr = root.newRequest(root.boardRequestFactory);
-        root.boardRequest = xhr;
+        if (root.boardRequest) return;
         root.boardLoading = true;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.boardRequest) return;
-            root.boardRequest = null;
+        root.request(root, "boardRequest", "GET", "/api/board", null, function (xhr, body) {
             root.boardLoading = false;
-            if (xhr.status === 200) {
-                let parsed = null;
-                try {
-                    parsed = root.boardFrom(JSON.parse(xhr.responseText));
-                } catch (error) {
-                    parsed = null;
-                }
-                if (parsed === null) {
-                    root.boardError = "ghostd sent a malformed board";
-                } else {
-                    root.board = parsed;
-                    root.boardError = "";
-                    root.reachable = true;
-                }
+            const parsed = xhr.status === 200 ? root.boardFrom(body) : null;
+            if (parsed !== null) {
+                root.board = parsed;
+                root.boardError = "";
+                root.reachable = true;
             } else {
-                root.boardError = root.describeError(xhr, "GET board");
+                root.boardError = xhr.status === 200 ? "ghostd sent a malformed board"
+                    : root.describeError(xhr, "GET board");
             }
-        };
-        root.dispatch(xhr, "GET", "/api/board", ({}), null,
-            function () { return root.boardRequest === xhr; });
+        });
     }
 
     // The browser relay's pairing prompt is daemon-global as well. GhostHud
@@ -773,7 +681,6 @@ Singleton {
     property bool relayResolving: false
     property string relayError: ""
     property var relayRequest: null
-    property var relayRequestFactory: null
 
     /** The pending pairing from a relay status body, or null. */
     function relayPairingFrom(body: var): var {
@@ -788,152 +695,75 @@ Singleton {
     }
 
     function refreshRelay(): void {
-        if (root.relayResolving) return;
-        if (root.relayRequest && root.relayRequest.readyState !== 4) return;
-        const xhr = root.newRequest(root.relayRequestFactory);
-        root.relayRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.relayRequest) return;
-            root.relayRequest = null;
-            let pairing = null;
-            if (xhr.status === 200) {
-                try {
-                    pairing = root.relayPairingFrom(JSON.parse(xhr.responseText));
-                } catch (error) {
-                    pairing = null;
-                }
-            }
-            root.relayPairing = pairing;
-        };
-        root.dispatch(xhr, "GET", "/api/relay/status", ({}), null,
-            function () { return root.relayRequest === xhr; });
+        if (root.relayResolving || root.relayRequest) return;
+        root.request(root, "relayRequest", "GET", "/api/relay/status", null, function (xhr, body) {
+            root.relayPairing = xhr.status === 200 ? root.relayPairingFrom(body) : null;
+        });
     }
 
     /** Answer the pairing whose code the owner can see. */
     function resolveRelayPairing(code: string, allow: bool): void {
         if (root.relayResolving || typeof code !== "string" || code === ""
                 || typeof allow !== "boolean") return;
-        const previous = root.relayRequest;
-        root.relayRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const xhr = root.newRequest(root.relayRequestFactory);
-        root.relayRequest = xhr;
+        root.retire(root, "relayRequest");
         root.relayResolving = true;
         root.relayError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.relayRequest) return;
-            root.relayRequest = null;
-            root.relayResolving = false;
-            if (xhr.status === 200) {
-                let pairing = null;
-                try {
-                    pairing = root.relayPairingFrom(JSON.parse(xhr.responseText));
-                } catch (error) {
-                    pairing = null;
-                }
-                root.relayPairing = pairing;
-            } else if (xhr.status === 404) {
-                // Expired, or answered from the CLI: either way it is gone.
-                root.relayPairing = null;
-            } else {
-                root.relayError = root.describeError(xhr,
-                    (allow ? "allow" : "deny") + " browser pairing");
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/relay/pair",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ code: code, allow: allow }),
-            function () { return root.relayRequest === xhr; });
-    }
-
-    function retireListRequest(): void {
-        root.listGeneration += 1;
-        const request = root.listRequest;
-        root.listRequest = null;
-        if (request && request.readyState !== 4) request.abort();
-    }
-
-    function retireCreateGhostRequest(): void {
-        root.createGhostGeneration += 1;
-        const request = root.createGhostRequest;
-        root.createGhostRequest = null;
-        if (request && request.readyState !== 4) request.abort();
+        root.request(root, "relayRequest", "POST", "/api/relay/pair", { code: code, allow: allow },
+            function (xhr, body) {
+                root.relayResolving = false;
+                // A 404 is expired, or answered from the CLI: either way it is gone.
+                if (xhr.status === 200 || xhr.status === 404)
+                    root.relayPairing = xhr.status === 200 ? root.relayPairingFrom(body) : null;
+                else
+                    root.relayError = root.describeError(xhr, (allow ? "allow" : "deny") + " browser pairing");
+            });
     }
 
     function refresh(): void {
         root.fetchHooks(false);
         root.fetchDaemonStatus();
-        root.retireListRequest();
-        const generation = root.listGeneration;
-        const xhr = root.newRequest(root.ghostRequestFactory);
-        root.listRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.listRequest
-                    || generation !== root.listGeneration) return;
-            root.listRequest = null;
-            if (xhr.status === 200) {
-                try {
-                    const list = JSON.parse(xhr.responseText);
-                    root.ghosts = Array.isArray(list) ? list : [];
-                    root.reachable = true;
-                    root.lastError = "";
-                    if (root.activeGhost === "" && root.ghosts.length > 0)
-                        root.activeGhost = root.ghosts[0].name;
-                    if (root.activeGhost !== "") {
-                        root.connectConversationEvents(root.activeGhost);
-                        root.fetchSessions(root.activeGhost);
-                        root.refreshCurrentTranscript();
-                    }
-                } catch (error) {
-                    root.fail("ghostd sent a malformed ghost list: " + error);
-                }
-            } else {
+        root.retire(root, "listRequest");
+        root.request(root, "listRequest", "GET", "/api/ghosts", null, function (xhr, list) {
+            if (xhr.status !== 200) {
                 root.fail(xhr.status === 0
                     ? "ghostd is not answering on " + root.baseUrl
                     : "GET /api/ghosts → " + xhr.status);
+                return;
             }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts", ({}), null, function () {
-            return xhr === root.listRequest && generation === root.listGeneration;
+            if (list === undefined) {
+                root.fail("ghostd sent a malformed ghost list");
+                return;
+            }
+            root.ghosts = Array.isArray(list) ? list : [];
+            root.reachable = true;
+            root.lastError = "";
+            if (root.activeGhost === "" && root.ghosts.length > 0)
+                root.activeGhost = root.ghosts[0].name;
+            if (root.activeGhost !== "") {
+                root.connectConversationEvents(root.activeGhost);
+                root.fetchSessions(root.activeGhost);
+                root.refreshCurrentTranscript();
+            }
         });
     }
 
     function createGhost(name: string): void {
         const trimmed = name.trim();
         if (trimmed === "") return;
-        root.retireCreateGhostRequest();
-        const generation = root.createGhostGeneration;
-        const xhr = root.newRequest(root.ghostRequestFactory);
-        root.createGhostRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.createGhostRequest
-                    || generation !== root.createGhostGeneration) return;
-            root.createGhostRequest = null;
-            if (xhr.status === 200 || xhr.status === 201) {
-                let created = null;
-                let createdName = trimmed;
-                try {
-                    created = JSON.parse(xhr.responseText);
-                    if (created && typeof created.name === "string" && created.name !== "")
-                        createdName = created.name;
-                } catch (error) {
-                    created = null;
+        root.retire(root, "createGhostRequest");
+        root.request(root, "createGhostRequest", "POST", "/api/ghosts", { name: trimmed },
+            function (xhr, created) {
+                if (xhr.status !== 200 && xhr.status !== 201) {
+                    root.fail(root.describeError(xhr, "POST /api/ghosts"));
+                    return;
                 }
-                if (created && !root.ghosts.some(function (ghost) {
-                    return ghost && ghost.name === createdName;
-                })) root.ghosts = root.ghosts.concat([created]);
+                const createdName = created && typeof created.name === "string"
+                    && created.name !== "" ? created.name : trimmed;
+                if (created && !root.ghosts.some(ghost => ghost && ghost.name === createdName))
+                    root.ghosts = root.ghosts.concat([created]);
                 root.switchGhost(createdName);
                 // The roster, not the POST echo, is the authoritative listing.
                 root.refresh();
-            } else {
-                root.fail(root.describeError(xhr, "POST /api/ghosts"));
-            }
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ name: trimmed }), function () {
-                return xhr === root.createGhostRequest
-                    && generation === root.createGhostGeneration;
             });
     }
 
@@ -952,27 +782,19 @@ Singleton {
         if (name === "" || root.deletingGhost !== "") return;
         root.deletingGhost = name;
         root.ghostDeleteError = "";
-        const xhr = root.newRequest(root.ghostRequestFactory);
-        root.deleteGhostRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.deleteGhostRequest) return;
-            root.deleteGhostRequest = null;
-            root.deletingGhost = "";
-            if (xhr.status === 200) {
+        root.request(root, "deleteGhostRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(name)
+            + "?confirm=" + encodeURIComponent(name), null, function (xhr) {
+                root.deletingGhost = "";
+                if (xhr.status !== 200) {
+                    root.ghostDeleteError = root.refusal(xhr, "DELETE ghost");
+                    return;
+                }
                 root.ghostDeleteError = "";
                 root.forgetGhost(name);
                 // activeGhost is "" now if this was the active one, so the
                 // listing picks the next ghost the way the first one does.
                 root.refresh();
-            } else {
-                const detail = root.errorDetail(xhr);
-                root.ghostDeleteError = detail !== ""
-                    ? detail
-                    : root.describeError(xhr, "DELETE ghost");
-            }
-        };
-        root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(name)
-            + "?confirm=" + encodeURIComponent(name), ({}), null);
+            });
     }
 
     /**
@@ -1002,41 +824,26 @@ Singleton {
         root.renameGhostSnapshot = transaction.before;
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
-        const xhr = root.newRequest(root.renameGhostRequestFactory);
-        root.renameGhostRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.renameGhostRequest) return;
-            root.renameGhostRequest = null;
-            root.renamingGhost = "";
-            if (xhr.status === 200) {
-                root.renameGhostSnapshot = null;
-                root.ghostRenameError = "";
-                // The daemon has the last word on the name it actually wrote.
-                let settled = next;
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (typeof body.name === "string" && body.name !== "") settled = body.name;
-                } catch (error) {
-                    settled = next;
+        root.request(root, "renameGhostRequest", "PUT", "/api/ghosts/" + encodeURIComponent(from) + "/name",
+            { name: next }, function (xhr, body) {
+                root.renamingGhost = "";
+                if (xhr.status === 200) {
+                    root.renameGhostSnapshot = null;
+                    root.ghostRenameError = "";
+                    // The daemon has the last word on the name it actually wrote.
+                    const settled = body && typeof body.name === "string" && body.name !== ""
+                        ? body.name : next;
+                    if (settled !== next) root.applyGhostRename(next, settled);
+                    root.refresh();
+                    return;
                 }
-                if (settled !== next) root.applyGhostRename(next, settled);
-                root.refresh();
-            } else {
                 if (root.renameGhostSnapshot) {
                     root.moveTurnStates(next, from);
                     root.installGhostRenameState(root.renameGhostSnapshot);
                 }
                 root.renameGhostSnapshot = null;
-                const detail = root.errorDetail(xhr);
-                root.ghostRenameError = detail !== ""
-                    ? detail
-                    : root.describeError(xhr, "PUT ghost name");
-            }
-        };
-        root.dispatch(xhr, "PUT",
-            "/api/ghosts/" + encodeURIComponent(from) + "/name",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ name: next }));
+                root.ghostRenameError = root.refusal(xhr, "PUT ghost name");
+            });
         return true;
     }
 
@@ -1108,11 +915,8 @@ Singleton {
     }
 
     function clearHarnessChoice(): void {
-        for (const name of ["harnessRequest", "harnessMutation"]) {
-            const request = root[name];
-            root[name] = null;
-            if (request && request.readyState !== 4) request.abort();
-        }
+        root.retire(root, "harnessRequest");
+        root.retire(root, "harnessMutation");
         root.harnessChoice = null;
         root.harnessError = "";
     }
@@ -1133,20 +937,12 @@ Singleton {
     }
 
     /** Adopt a GET/PUT /harness reply for `ghost`; false when it is not one. */
-    function adoptHarnessChoice(xhr: var, ghost: string, what: string): bool {
+    function adoptHarnessChoice(xhr: var, body: var, ghost: string, what: string): bool {
         if (ghost !== root.activeGhost) return false;
-        if (xhr.status !== 200) {
-            root.harnessError = root.describeError(xhr, what);
-            return false;
-        }
-        let choice = null;
-        try {
-            choice = root.harnessChoiceFrom(JSON.parse(xhr.responseText));
-        } catch (error) {
-            choice = null;
-        }
+        const choice = xhr.status === 200 ? root.harnessChoiceFrom(body) : null;
         if (choice === null) {
-            root.harnessError = "ghostd sent a malformed agent list";
+            root.harnessError = xhr.status === 200 ? "ghostd sent a malformed agent list"
+                : root.describeError(xhr, what);
             return false;
         }
         root.harnessChoice = choice;
@@ -1158,18 +954,9 @@ Singleton {
     function fetchHarnesses(): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.harnessMutation !== null) return;
-        const previous = root.harnessRequest;
-        root.harnessRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
-        const xhr = root.newRequest(root.harnessRequestFactory);
-        root.harnessRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.harnessRequest) return;
-            root.harnessRequest = null;
-            root.adoptHarnessChoice(xhr, ghost, "GET harnesses");
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
-            ({}), null, function () { return root.harnessRequest === xhr; });
+        root.retire(root, "harnessRequest");
+        root.request(root, "harnessRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+            null, (xhr, body) => root.adoptHarnessChoice(xhr, body, ghost, "GET harnesses"));
     }
 
     /** Set the ghost's own default agent; null hands the choice back to Omarchy's default. */
@@ -1177,23 +964,15 @@ Singleton {
         const ghost = root.activeGhost;
         const next = typeof harness === "string" && harness !== "" ? harness : null;
         if (ghost === "" || root.harnessMutation !== null) return;
-        const previous = root.harnessRequest;
-        root.harnessRequest = null;
-        if (previous && previous.readyState !== 4) previous.abort();
+        root.retire(root, "harnessRequest");
         const before = root.harnessChoice;
         if (before) root.harnessChoice = Object.assign({}, before, { ghostDefault: next });
         root.harnessError = "";
-        const xhr = root.newRequest(root.harnessRequestFactory);
-        root.harnessMutation = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.harnessMutation) return;
-            root.harnessMutation = null;
-            if (!root.adoptHarnessChoice(xhr, ghost, "PUT default harness")
-                    && ghost === root.activeGhost && before) root.harnessChoice = before;
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
-            ({ "Content-Type": "application/json" }), JSON.stringify({ harness: next }),
-            function () { return root.harnessMutation === xhr; });
+        root.request(root, "harnessMutation", "PUT", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+            { harness: next }, function (xhr, body) {
+                if (!root.adoptHarnessChoice(xhr, body, ghost, "PUT default harness")
+                        && ghost === root.activeGhost && before) root.harnessChoice = before;
+            });
     }
 
     /** A pick is settled once the daemon's listing reports that agent for it. */
@@ -1228,20 +1007,13 @@ Singleton {
         const before = root.pendingHarnesses[key];
         root.setPendingHarness(key, harness);
         root.harnessError = "";
-        const xhr = root.newRequest(root.harnessRequestFactory);
-        root.harnessSessionRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.harnessSessionRequest) return;
-            root.harnessSessionRequest = null;
-            if (xhr.status === 200) return;
-            if (root.pendingHarnesses[key] === harness) root.setPendingHarness(key, before);
-            if (ghost === root.activeGhost)
-                root.harnessError = root.describeError(xhr, "PUT conversation harness");
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/harness",
-            ({ "Content-Type": "application/json" }), JSON.stringify({ harness: harness }),
-            function () { return root.harnessSessionRequest === xhr; });
+        root.request(root, "harnessSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/harness", { harness: harness }, function (xhr) {
+                if (xhr.status === 200) return;
+                if (root.pendingHarnesses[key] === harness) root.setPendingHarness(key, before);
+                if (ghost === root.activeGhost)
+                    root.harnessError = root.describeError(xhr, "PUT conversation harness");
+            });
     }
 
     function selectGhost(name: string): void {
@@ -1300,12 +1072,9 @@ Singleton {
 
     function cancelTranscriptLoad(state: var): void {
         if (!state) return;
-        const xhr = state.transcriptRequest;
         state.transcriptGeneration = Number(state.transcriptGeneration || 0) + 1;
-        state.transcriptRequest = null;
         state.transcriptLoad = null;
-        // Retire ownership before abort because Qt may synchronously deliver DONE.
-        if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") xhr.abort();
+        root.retire(state, "transcriptRequest");
     }
 
     function cancelAllTranscriptLoads(): void {
@@ -1503,19 +1272,14 @@ Singleton {
     }
 
     function clearCharacter(): void {
-        const read = root.characterRequest;
-        const write = root.characterWriteRequest;
-        // Retire ownership before abort because Qt may synchronously deliver DONE.
-        root.characterRequest = null;
-        root.characterWriteRequest = null;
+        root.retire(root, "characterRequest");
+        root.retire(root, "characterWriteRequest");
         root.characterBody = "";
         root.characterLimit = 0;
         root.characterLoading = false;
         root.characterSaving = false;
         root.characterError = "";
         root.characterGhost = "";
-        if (read && read.readyState !== 4) read.abort();
-        if (write && write.readyState !== 4) write.abort();
     }
 
     /**
@@ -1529,39 +1293,28 @@ Singleton {
             return;
         }
         if (!force && root.characterGhost === ghost) return;
-        if (root.characterRequest && root.characterRequest.readyState !== 4) {
+        if (root.characterRequest) {
             if (!force) return;
-            root.characterRequest.abort();
+            root.retire(root, "characterRequest");
         }
-
-        const xhr = root.newRequest(root.characterRequestFactory);
-        root.characterRequest = xhr;
         root.characterLoading = true;
         root.characterError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.characterRequest) return;
-            root.characterRequest = null;
-            root.characterLoading = false;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (typeof body.body !== "string" || !(body.limit > 0))
-                        throw new Error("invalid character");
+        root.request(root, "characterRequest", "GET",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", null, function (xhr, body) {
+                root.characterLoading = false;
+                if (ghost !== root.activeGhost) return;
+                if (xhr.status !== 200) {
+                    root.characterError = root.describeError(xhr, "GET character");
+                } else if (!body || typeof body.body !== "string" || !(body.limit > 0)) {
+                    root.characterError = "ghostd sent a malformed character file";
+                } else {
                     root.characterBody = body.body;
                     root.characterLimit = body.limit;
                     root.characterGhost = ghost;
                     root.characterError = "";
                     root.reachable = true;
-                } catch (error) {
-                    root.characterError = "ghostd sent a malformed character file";
                 }
-            } else {
-                root.characterError = root.describeError(xhr, "GET character");
-            }
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", ({}), null);
+            });
     }
 
     /**
@@ -1573,48 +1326,32 @@ Singleton {
     function writeCharacter(body: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.characterSaving) return;
-        const xhr = root.newRequest(root.characterRequestFactory);
-        root.characterWriteRequest = xhr;
         root.characterSaving = true;
         root.characterError = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.characterWriteRequest) return;
-            root.characterWriteRequest = null;
-            root.characterSaving = false;
-            if (ghost !== root.activeGhost) return;
-            let ok = false;
-            if (xhr.status === 200) {
-                try {
-                    const result = JSON.parse(xhr.responseText);
-                    if (!result || result.ok !== true) throw new Error("not ok");
-                    ok = true;
+        root.request(root, "characterWriteRequest", "PUT",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", { body: body }, function (xhr, result) {
+                root.characterSaving = false;
+                if (ghost !== root.activeGhost) return;
+                const ok = xhr.status === 200 && !!result && result.ok === true;
+                if (ok) {
                     root.characterBody = body;
                     if (result.limit > 0) root.characterLimit = result.limit;
                     root.characterGhost = ghost;
                     root.reachable = true;
-                } catch (error) {
-                    root.characterError = "ghostd sent a malformed character result";
+                } else {
+                    root.characterError = xhr.status === 200 ? "ghostd sent a malformed character result"
+                        : root.describeError(xhr, "PUT character");
                 }
-            } else {
-                root.characterError = root.describeError(xhr, "PUT character");
-            }
-            root.characterWriteFinished(ok);
-            // The file on disk is the truth; re-read what the daemon stored.
-            if (ok) root.fetchCharacter(true);
-        };
-        root.dispatch(xhr, "PUT",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/character",
-            ({ "Content-Type": "application/json" }), JSON.stringify({ body: body }));
+                root.characterWriteFinished(ok);
+                // The file on disk is the truth; re-read what the daemon stored.
+                if (ok) root.fetchCharacter(true);
+            });
     }
 
 
     function clearMcp(): void {
-        if (root.mcpRequest && root.mcpRequest.readyState !== 4)
-            root.mcpRequest.abort();
-        if (root.mcpMutationRequest && root.mcpMutationRequest.readyState !== 4)
-            root.mcpMutationRequest.abort();
-        root.mcpRequest = null;
-        root.mcpMutationRequest = null;
+        root.retire(root, "mcpRequest");
+        root.retire(root, "mcpMutationRequest");
         root.mcpServers = [];
         root.mcpSkipped = [];
         root.mcpLoading = false;
@@ -1624,6 +1361,7 @@ Singleton {
         root.mcpGhost = "";
     }
 
+    /** Adopt a `{ servers, skipped }` catalog for `ghost`; false when the body is not one. */
     function applyMcpSnapshot(body: var, ghost: string): bool {
         if (!body || !Array.isArray(body.servers) || !Array.isArray(body.skipped))
             return false;
@@ -1636,6 +1374,8 @@ Singleton {
             return entry && typeof entry === "object";
         });
         root.mcpGhost = ghost;
+        root.mcpError = "";
+        root.reachable = true;
         return true;
     }
 
@@ -1646,76 +1386,51 @@ Singleton {
             return;
         }
         if (!force && root.mcpGhost === ghost) return;
-        if (root.mcpRequest && root.mcpRequest.readyState !== 4) {
+        if (root.mcpRequest) {
             if (!force) return;
-            root.mcpRequest.abort();
+            root.retire(root, "mcpRequest");
         }
-
-        const xhr = new XMLHttpRequest();
-        root.mcpRequest = xhr;
         root.mcpLoading = true;
         root.mcpError = "";
         root.mcpNotice = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.mcpRequest) return;
-            root.mcpLoading = false;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    if (!root.applyMcpSnapshot(JSON.parse(xhr.responseText), ghost))
-                        throw new Error("missing catalog");
-                    root.mcpError = "";
-                    root.reachable = true;
-                } catch (error) {
+        root.request(root, "mcpRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/mcp",
+            null, function (xhr, body) {
+                root.mcpLoading = false;
+                if (ghost !== root.activeGhost) return;
+                if (xhr.status !== 200) {
+                    root.mcpError = root.describeError(xhr, "GET MCP servers");
+                } else if (!root.applyMcpSnapshot(body, ghost)) {
                     root.mcpServers = [];
                     root.mcpSkipped = [];
                     root.mcpError = "ghostd sent a malformed MCP catalog";
                 }
-            } else {
-                root.mcpError = root.describeError(xhr, "GET MCP servers");
-            }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/mcp", ({}), null);
+            });
     }
 
     function mutateMcp(method: string, suffix: string, body: var,
             action: string, server: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.mcpMutating) return;
-        if (root.mcpRequest && root.mcpRequest.readyState !== 4)
-            root.mcpRequest.abort();
-        const xhr = new XMLHttpRequest();
-        root.mcpMutationRequest = xhr;
+        root.retire(root, "mcpRequest");
+        root.mcpLoading = false;
         root.mcpMutating = true;
         root.mcpError = "";
         root.mcpNotice = "";
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.mcpMutationRequest) return;
-            root.mcpMutating = false;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                try {
-                    if (!root.applyMcpSnapshot(JSON.parse(xhr.responseText), ghost))
-                        throw new Error("missing catalog");
-                    root.mcpError = "";
+        root.request(root, "mcpMutationRequest", method, "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/mcp" + suffix, body, function (xhr, catalog) {
+                root.mcpMutating = false;
+                if (ghost !== root.activeGhost) return;
+                const answered = xhr.status === 200 || xhr.status === 201;
+                const ok = answered && root.applyMcpSnapshot(catalog, ghost);
+                if (ok)
                     root.mcpNotice = action === "delete" ? "Server deleted."
                         : (action === "toggle" ? "Server state updated."
                             : (action === "add" ? "Server added." : "Server updated."));
-                    root.reachable = true;
-                    root.mcpMutationFinished(action, server, true);
-                } catch (error) {
-                    root.mcpError = "ghostd sent a malformed MCP catalog";
-                    root.mcpMutationFinished(action, server, false);
-                }
-            } else {
-                root.mcpError = root.describeError(xhr, method + " MCP server");
-                root.mcpMutationFinished(action, server, false);
-            }
-        };
-        const headers = body === null ? ({}) : ({ "Content-Type": "application/json" });
-        root.dispatch(xhr, method, "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/mcp" + suffix, headers, body === null ? null : JSON.stringify(body));
+                else
+                    root.mcpError = answered ? "ghostd sent a malformed MCP catalog"
+                        : root.describeError(xhr, method + " MCP server");
+                root.mcpMutationFinished(action, server, ok);
+            });
     }
 
     function addMcpServer(name: string, config: var): void {
@@ -1758,7 +1473,7 @@ Singleton {
         root.eventsConsumed = 0;
         root.eventsFrameBuffer = "";
         if (ghost === "") return;
-        const xhr = new XMLHttpRequest();
+        const xhr = root.newRequest();
         root.eventsRequest = xhr;
         xhr.onreadystatechange = function () {
             root.readConversationEvents(xhr, ghost);
@@ -1841,42 +1556,28 @@ Singleton {
             root.sessions = [];
             return;
         }
-        const xhr = new XMLHttpRequest();
-        root.sessionsRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.sessionsRequest) return;
-            // A reply for a ghost the user has since switched away from is stale.
-            if (g !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    if (!body || !Array.isArray(body.sessions)) throw new Error("missing sessions");
-                    const valid = root.validSessionRows(body.sessions);
-                    for (const session of valid) {
-                        const state = root.turnStates[root.conversationKey(g, session.id)];
-                        if (state) {
-                            state.title = session.title || "";
-                        }
-                    }
-                    root.sessions = root.mergeSessionListing(g, valid);
-                    root.settlePendingHarnesses(g, valid);
-                    root.sessionsError = "";
-                    const current = root.sessions.find(function (session) {
-                        return session && session.id === root.currentSessionId;
-                    });
-                    if (root.hudVisible && current && current.unread === true)
-                        root.markConversationRead(g, current.id);
-                } catch (error) {
+        root.request(root, "sessionsRequest", "GET",
+            "/api/ghosts/" + encodeURIComponent(g) + "/sessions", null, function (xhr, body) {
+                // A reply for a ghost the user has since switched away from is stale.
+                if (g !== root.activeGhost) return;
+                if (xhr.status !== 200 || !body || !Array.isArray(body.sessions)) {
                     root.sessions = [];
-                    root.sessionsError = "ghostd sent a malformed session list";
+                    root.sessionsError = xhr.status === 200 ? "ghostd sent a malformed session list"
+                        : root.describeError(xhr, "GET sessions");
+                    return;
                 }
-            } else {
-                root.sessions = [];
-                root.sessionsError = root.describeError(xhr, "GET sessions");
-            }
-        };
-        root.dispatch(xhr, "GET",
-            "/api/ghosts/" + encodeURIComponent(g) + "/sessions", ({}), null);
+                const valid = root.validSessionRows(body.sessions);
+                for (const session of valid) {
+                    const state = root.turnStates[root.conversationKey(g, session.id)];
+                    if (state) state.title = session.title || "";
+                }
+                root.sessions = root.mergeSessionListing(g, valid);
+                root.settlePendingHarnesses(g, valid);
+                root.sessionsError = "";
+                const current = root.sessions.find(session => session && session.id === root.currentSessionId);
+                if (root.hudVisible && current && current.unread === true)
+                    root.markConversationRead(g, current.id);
+            });
     }
 
     /**
@@ -1977,40 +1678,32 @@ Singleton {
         }
         root.deletingSessionId = id;
         root.sessionsError = "";
-        const xhr = root.newRequest(root.deleteSessionRequestFactory);
-        root.deleteSessionRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.deleteSessionRequest) return;
-            if (xhr.status === 200) {
-                const key = root.conversationKey(ghost, id);
-                const kept = Object.assign({}, root.turnStates);
-                root.cancelTranscriptLoad(kept[key]);
-                delete kept[key];
-                root.turnStates = kept;
-                root.updateLiveConversationKeys();
-                if (ghost === root.activeGhost) {
-                    root.sessions = root.sessions.filter(function (session) {
-                        return session.id !== id;
-                    });
-                    if (root.currentSessionId === id) {
-                        root.sessionIds[ghost] = "";
-                        root.currentSessionId = "";
-                        root.clearTurnProjection();
+        root.request(root, "deleteSessionRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id), null, function (xhr) {
+                if (xhr.status === 200) {
+                    const key = root.conversationKey(ghost, id);
+                    const kept = Object.assign({}, root.turnStates);
+                    root.cancelTranscriptLoad(kept[key]);
+                    delete kept[key];
+                    root.turnStates = kept;
+                    root.updateLiveConversationKeys();
+                    if (ghost === root.activeGhost) {
+                        root.sessions = root.sessions.filter(session => session.id !== id);
+                        if (root.currentSessionId === id) {
+                            root.sessionIds[ghost] = "";
+                            root.currentSessionId = "";
+                            root.clearTurnProjection();
+                        }
+                        root.sessionsError = "";
+                        root.fetchSessions(ghost);
                     }
-                    root.sessionsError = "";
-                    root.fetchSessions(ghost);
-                }
-            } else {
-                if (ghost === root.activeGhost) {
+                } else if (ghost === root.activeGhost) {
                     root.sessionsError = root.describeError(xhr, "DELETE conversation");
                 }
-            }
-            // The dialog observes this field to settle. Publish the outcome
-            // first so a failure cannot look like a successful dismissal.
-            root.deletingSessionId = "";
-        };
-        root.dispatch(xhr, "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id), ({}), null);
+                // The dialog observes this field to settle. Publish the outcome
+                // first so a failure cannot look like a successful dismissal.
+                root.deletingSessionId = "";
+            });
     }
 
     /**
@@ -2034,21 +1727,13 @@ Singleton {
             return session && session.id === id;
         });
         if (local && local.localOnly === true) return;
-        const xhr = new XMLHttpRequest();
-        root.pinSessionRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.pinSessionRequest) return;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status !== 200) {
+        root.request(root, "pinSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/pin", { pinned: pinned }, function (xhr) {
+                if (ghost !== root.activeGhost || xhr.status === 200) return;
                 root.sessionsError = root.describeError(xhr, "PUT pin conversation");
                 // The optimistic reorder is now a lie; take the server's truth.
                 root.fetchSessions(ghost);
-            }
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/pin",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ pinned: pinned }));
+            });
     }
 
     /**
@@ -2074,33 +1759,18 @@ Singleton {
         if (previous === next) return;
         root.sessionsError = "";
         root.applySessionTitle(id, next);
-        const xhr = new XMLHttpRequest();
-        root.renameSessionRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== root.renameSessionRequest) return;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status === 200) {
-                try {
-                    const body = JSON.parse(xhr.responseText);
-                    // The daemon has the last word on the title it wrote.
-                    if (body.title === null || typeof body.title === "string")
-                        root.applySessionTitle(id, body.title || null);
-                } catch (error) {
-                    // The write landed; only the echo was unreadable, and the
-                    // optimistic row already says what was sent.
+        root.request(root, "renameSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(id) + "/title", { title: next }, function (xhr, body) {
+                if (ghost !== root.activeGhost) return;
+                if (xhr.status !== 200) {
+                    root.applySessionTitle(id, previous);
+                    root.sessionsError = root.refusal(xhr, "PUT conversation title");
+                } else if (body && (body.title === null || typeof body.title === "string")) {
+                    // The daemon has the last word on the title it wrote; an
+                    // unreadable echo leaves the optimistic row, which says what was sent.
+                    root.applySessionTitle(id, body.title || null);
                 }
-                return;
-            }
-            root.applySessionTitle(id, previous);
-            const detail = root.errorDetail(xhr);
-            root.sessionsError = detail !== ""
-                ? detail
-                : root.describeError(xhr, "PUT conversation title");
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/title",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ title: next }));
+            });
     }
 
     function applySessionTitle(id: string, title: var): void {
@@ -2199,22 +1869,11 @@ Singleton {
         // The daemon creates a new conversation lazily inside its first turn.
         // The completion path marks it again after the persisted row arrives.
         if (local && local.localOnly === true) return;
-        const key = root.conversationKey(ghost, id);
-        const xhr = new XMLHttpRequest();
-        const held = Object.assign({}, root.readSessionRequests);
-        held[key] = xhr;
-        root.readSessionRequests = held;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || root.readSessionRequests[key] !== xhr) return;
-            const remaining = Object.assign({}, root.readSessionRequests);
-            delete remaining[key];
-            root.readSessionRequests = remaining;
-            if (ghost !== root.activeGhost) return;
-            if (xhr.status !== 200) root.fetchSessions(ghost);
-        };
-        root.dispatch(xhr, "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/read",
-            ({ "Content-Type": "application/json" }), JSON.stringify({}));
+        root.request(root.readSessionRequests, root.conversationKey(ghost, id), "PUT",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/" + encodeURIComponent(id) + "/read",
+            {}, function (xhr) {
+                if (ghost === root.activeGhost && xhr.status !== 200) root.fetchSessions(ghost);
+            });
     }
 
     function markCurrentConversationRead(): void {
@@ -2226,10 +1885,9 @@ Singleton {
         root.loadConversationTranscript(root.activeTurnState(false), false);
     }
 
-    function transcriptLoadIsCurrent(state: var, load: var, xhr: var): bool {
+    function transcriptLoadIsCurrent(state: var, load: var): bool {
         return !!state && !!load && state.transcriptLoad === load
-            && state.transcriptGeneration === load.generation
-            && state.transcriptRequest === xhr && !state.streaming;
+            && state.transcriptGeneration === load.generation && !state.streaming;
     }
 
     /**
@@ -2258,7 +1916,6 @@ Singleton {
     function failTranscriptLoad(state: var, load: var, message: string, unreachable: bool): void {
         if (!state || state.transcriptLoad !== load
                 || state.transcriptGeneration !== load.generation) return;
-        state.transcriptRequest = null;
         state.transcriptLoad = null;
         if (!root.isActiveTurn(state)) return;
         root.sessionsError = message;
@@ -2266,9 +1923,7 @@ Singleton {
     }
 
     function completeTranscriptLoad(state: var, load: var): void {
-        if (!state || state.transcriptLoad !== load
-                || state.transcriptGeneration !== load.generation || state.streaming) return;
-        state.transcriptRequest = null;
+        if (!root.transcriptLoadIsCurrent(state, load)) return;
         state.transcriptLoad = null;
         state.historyTruncated = load.historyTruncated === true;
         root.rehydrateTurn(state, load.messages);
@@ -2277,19 +1932,17 @@ Singleton {
     }
 
     function requestTranscriptPage(state: var, load: var): void {
-        if (!state || state.transcriptLoad !== load
-                || state.transcriptGeneration !== load.generation || state.streaming) return;
+        if (!root.transcriptLoadIsCurrent(state, load)) return;
         if (load.pageCount >= root.transcriptMaxPages) {
             root.failTranscriptLoad(state, load,
                 "Transcript is too large to load safely", false);
             return;
         }
         const requestedOffset = load.nextOffset;
-        const xhr = root.newRequest(root.transcriptRequestFactory);
         load.pageCount += 1;
-        state.transcriptRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || !root.transcriptLoadIsCurrent(state, load, xhr)) return;
+        root.request(state, "transcriptRequest", "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/transcript"
+            + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset, null, function (xhr, body) {
             if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
                 load.messages = [];
                 load.historyTruncated = false;
@@ -2302,7 +1955,6 @@ Singleton {
                 return;
             }
             try {
-                const body = JSON.parse(xhr.responseText);
                 if (!body || body.id !== state.sessionId || !Array.isArray(body.messages))
                     throw new Error("transcript identity mismatch");
                 if (typeof body.total !== "number" || !Number.isFinite(body.total)
@@ -2350,13 +2002,7 @@ Singleton {
                 root.failTranscriptLoad(state, load,
                     "ghostd sent an inconsistent transcript page", false);
             }
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/transcript"
-            + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset,
-            ({}), null, function () {
-                return root.transcriptLoadIsCurrent(state, load, xhr);
-            });
+        }, () => root.transcriptLoadIsCurrent(state, load));
     }
 
     /**
@@ -2423,7 +2069,7 @@ Singleton {
         });
         root.openAssistantRowFor(state);
 
-        const xhr = new XMLHttpRequest();
+        const xhr = root.newRequest();
         state.request = xhr;
         root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
@@ -2875,23 +2521,15 @@ Singleton {
     }
 
     function fetchQueueFor(state: var): void {
-        if (!state.streaming) return;
-        if (state.queueStatusRequest && state.queueStatusRequest.readyState !== 4) return;
-        const xhr = new XMLHttpRequest();
-        state.queueStatusRequest = xhr;
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.queueStatusRequest || !state.streaming) return;
-            if (xhr.status === 200) {
-                try {
-                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
-                } catch (error) {
-                    state.queueError = "ghostd sent malformed queue state";
+        if (!state.streaming || state.queueStatusRequest) return;
+        root.request(state, "queueStatusRequest", "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", null, function (xhr, body) {
+                if (xhr.status === 200) {
+                    if (body) root.applyQueueFor(state, body);
+                    else state.queueError = "ghostd sent malformed queue state";
                 }
-            }
-            root.projectTurnFields(state);
-        };
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", ({}), null);
+                root.projectTurnFields(state);
+            }, () => state.streaming);
     }
 
     /** Queue a follow-up for the running turn; the daemon runs it after the current pass. */
@@ -2906,31 +2544,23 @@ Singleton {
         // Show the chip immediately; the authoritative GET removes it once
         // the daemon starts the pass that carries it.
         state.followUpQueue = state.followUpQueue.concat([prompt]);
-
-        const xhr = new XMLHttpRequest();
-        state.queueRequest = xhr;
-        root.projectTurnFields(state);
-        xhr.onreadystatechange = function () {
-            if (xhr.readyState !== 4 || xhr !== state.queueRequest) return;
-            state.queueSubmitting = false;
-            if (xhr.status === 200) {
-                try {
-                    root.applyQueueFor(state, JSON.parse(xhr.responseText));
+        root.request(state, "queueRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", { text: prompt },
+            function (xhr, body) {
+                state.queueSubmitting = false;
+                if (xhr.status !== 200) {
+                    state.queueError = root.describeError(xhr, "POST queue");
+                    root.fetchQueueFor(state);
+                    root.composerDraft(prompt);
+                } else if (body) {
+                    root.applyQueueFor(state, body);
                     state.queueError = "";
-                } catch (error) {
+                } else {
                     state.queueError = "ghostd sent malformed queue state";
                 }
-            } else {
-                state.queueError = root.describeError(xhr, "POST queue");
-                root.fetchQueueFor(state);
-                root.composerDraft(prompt);
-            }
-            root.projectTurnFields(state);
-        };
-        root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue",
-            ({ "Content-Type": "application/json" }),
-            JSON.stringify({ text: prompt }));
+                root.projectTurnFields(state);
+            });
+        root.projectTurnFields(state);
     }
 
 
@@ -2945,6 +2575,11 @@ Singleton {
         } catch (error) {
             return "";
         }
+    }
+
+    /** A refusal as the daemon words it, else as describeError would. */
+    function refusal(xhr: var, what: string): string {
+        return root.errorDetail(xhr) || root.describeError(xhr, what);
     }
 
     function describeError(xhr: var, what: string): string {

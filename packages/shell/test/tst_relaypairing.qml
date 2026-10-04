@@ -13,7 +13,7 @@ TestCase {
 
     function init(): void {
         tc.requests = [];
-        Ghostd.relayRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/relay\//);
         Ghostd.relayPairing = null;
         Ghostd.relayResolving = false;
         Ghostd.relayError = "";
@@ -21,7 +21,7 @@ TestCase {
     }
 
     function cleanup(): void {
-        Ghostd.relayRequestFactory = null;
+        Ghostd.requestFactory = null;
     }
 
     function test_pairing_parses_only_a_six_digit_code(): void {

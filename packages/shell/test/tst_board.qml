@@ -12,14 +12,14 @@ TestCase {
 
     function init(): void {
         tc.requests = [];
-        Ghostd.boardRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/board$/);
         Ghostd.board = null;
         Ghostd.boardError = "";
         Ghostd.boardRequest = null;
     }
 
     function cleanup(): void {
-        Ghostd.boardRequestFactory = null;
+        Ghostd.requestFactory = null;
     }
 
     function test_parses_a_board_and_rejects_a_malformed_one(): void {

@@ -10,10 +10,10 @@ TestCase {
     property var requests: []
 
     function init(): void {
-        Ghostd.retireListRequest();
-        Ghostd.retireCreateGhostRequest();
+        Ghostd.retire(Ghostd, "listRequest");
+        Ghostd.retire(Ghostd, "createGhostRequest");
         requests = [];
-        Ghostd.ghostRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/ghosts$/);
         Ghostd.apiToken = "test-token";
         Ghostd.ghosts = [{ name: "existing", dir: "/tmp/ghosts/existing" }];
         Ghostd.activeGhost = "";
@@ -21,9 +21,9 @@ TestCase {
     }
 
     function cleanup(): void {
-        Ghostd.retireListRequest();
-        Ghostd.retireCreateGhostRequest();
-        Ghostd.ghostRequestFactory = null;
+        Ghostd.retire(Ghostd, "listRequest");
+        Ghostd.retire(Ghostd, "createGhostRequest");
+        Ghostd.requestFactory = null;
         requests = [];
     }
 
@@ -31,14 +31,12 @@ TestCase {
         Ghostd.refresh();
         compare(requests.length, 1);
         const listing = requests[0];
-        const listGeneration = Ghostd.listGeneration;
 
         Ghostd.createGhost("new-ghost");
         compare(requests.length, 2);
         const create = requests[1];
         compare(Ghostd.listRequest, listing);
         compare(Ghostd.createGhostRequest, create);
-        compare(Ghostd.listGeneration, listGeneration);
         compare(listing.method, "GET");
         compare(create.method, "POST");
         compare(JSON.parse(create.body), { name: "new-ghost" });
@@ -67,7 +65,7 @@ TestCase {
         compare(requests.length, 2);
         compare(requests[1].method, "GET");
         verify(requests[1].url.endsWith("/api/ghosts"));
-        Ghostd.retireListRequest();
+        Ghostd.retire(Ghostd, "listRequest");
     }
 
     function test_newerListRetiresAndIgnoresOlderCompletion(): void {

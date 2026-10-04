@@ -48,7 +48,7 @@ TestCase {
     function init(): void {
         Ghostd.retireHooksRequest();
         tc.requests = [];
-        Ghostd.hooksRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/hooks/);
         Ghostd.hookConfig = {
             hooks: {
                 session_stop: [{ hooks: [{ type: "command", command: "/bin/hostile" }] }]
@@ -71,7 +71,7 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.retireHooksRequest();
-        Ghostd.hooksRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.hookConfig = null;
         Ghostd.hookConfigLoaded = false;
         Ghostd.hookConfigError = "";

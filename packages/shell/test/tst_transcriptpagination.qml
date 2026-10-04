@@ -66,18 +66,15 @@ TestCase {
         requests = [];
         deleteRequests = [];
         deleteSettlementError = "";
-        Ghostd.transcriptRequestFactory = function () {
-            return FakeXhr.make(requests);
-        };
-        Ghostd.deleteSessionRequestFactory = function () {
-            return FakeXhr.make(deleteRequests);
+        Ghostd.requestFactory = function () {
+            return FakeXhr.make((method, url) => url.indexOf("/transcript") >= 0 ? tc.requests
+                : (method === "DELETE" ? tc.deleteRequests : []));
         };
     }
 
     function cleanup(): void {
         Ghostd.cancelAllTranscriptLoads();
-        Ghostd.transcriptRequestFactory = null;
-        Ghostd.deleteSessionRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.turnStates = ({});
         Ghostd.currentSessionId = "";
         Ghostd.clearTurnProjection();

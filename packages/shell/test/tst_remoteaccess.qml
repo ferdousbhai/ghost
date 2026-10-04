@@ -54,13 +54,13 @@ TestCase {
     function init(): void {
         Ghostd.clearRemote();
         requests = [];
-        Ghostd.remoteRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/remote/);
         Ghostd.apiToken = "test-token";
     }
 
     function cleanup(): void {
         Ghostd.clearRemote();
-        Ghostd.remoteRequestFactory = null;
+        Ghostd.requestFactory = null;
     }
 
     function test_offStateRendersSwitchOffAndNoQr(): void {

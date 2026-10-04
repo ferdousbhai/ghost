@@ -37,7 +37,7 @@ TestCase {
 
     function init(): void {
         tc.requests = [];
-        Ghostd.harnessRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/harness$/);
         Ghostd.apiToken = "test-token";
         Ghostd.activeGhost = "casper";
         Ghostd.clearHarnessChoice();
@@ -49,7 +49,7 @@ TestCase {
     }
 
     function cleanup(): void {
-        Ghostd.harnessRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.clearHarnessChoice();
         Ghostd.harnessSessionRequest = null;
         Ghostd.pendingHarnesses = ({});

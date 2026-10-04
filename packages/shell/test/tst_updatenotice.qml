@@ -15,12 +15,12 @@ TestCase {
         tc.requests = [];
         Ghostd.updateAvailable = null;
         Ghostd.statusRequest = null;
-        Ghostd.statusRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/status$/);
         Ghostd.apiToken = "test-token";
     }
 
     function cleanup(): void {
-        Ghostd.statusRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.updateAvailable = null;
     }
 

@@ -33,11 +33,11 @@ TestCase {
         Ghostd.apiToken = "test-token";
         requests = [];
         writeSpy.clear();
-        Ghostd.characterRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/character$/);
     }
 
     function cleanup(): void {
-        Ghostd.characterRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.clearCharacter();
         Ghostd.activeGhost = "";
     }

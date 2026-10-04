@@ -31,7 +31,7 @@ TestCase {
 
     function init(): void {
         requests = [];
-        Ghostd.hooksRequestFactory = function () { return FakeXhr.make(tc.requests); };
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/hooks/);
         Ghostd.beginHooksConnectionEpoch();
         // The catalog is the only daemon connection this file asserts on, but
         // every connection on the shared singleton drives one `reachable` latch,
@@ -53,7 +53,7 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.retireHooksRequest();
-        Ghostd.hooksRequestFactory = null;
+        Ghostd.requestFactory = null;
         Ghostd.beginHooksConnectionEpoch();
     }
 
