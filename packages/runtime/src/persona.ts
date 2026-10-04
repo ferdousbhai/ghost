@@ -48,7 +48,6 @@ export interface GhostSystemPromptInput {
   readonly character: CharacterFile | null;
   /** Host-supplied location; persona content is never rewritten. */
   readonly characterPath: string;
-  readonly characterStorage: "disk" | "backend storage";
   readonly extraSections?: readonly string[];
 }
 
@@ -66,7 +65,7 @@ function characterPolicySection(input: GhostSystemPromptInput): string[] {
   const characterPath = input.characterPath;
   return [
     "## Character file",
-    `${JSON.stringify(characterPath)} is your persona, read from ${input.characterStorage} at the start of every `
+    `${JSON.stringify(characterPath)} is your persona, read from disk at the start of every `
       + "session: what you write there is who you are next time. Read or replace it whole with "
       + "the runtime's file tools. Title in the leading Markdown heading, first person, at most "
       + `${MAX_CHARACTER_BODY_LENGTH.toLocaleString("en-US")} characters, durable identity only: `

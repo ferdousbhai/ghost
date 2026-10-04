@@ -296,7 +296,7 @@ export async function startRealDaemonHarness(
       env: { ...process.env },
       ...onlyHarnesses(fake),
     });
-    const mcp = new McpCatalog({ registry, homeOperations });
+    const mcp = new McpCatalog({ registry });
     listening = await startDaemonServer({
       registry,
       host,

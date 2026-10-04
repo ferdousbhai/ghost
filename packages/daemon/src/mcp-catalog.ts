@@ -3,10 +3,6 @@ import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
 import { silentLogger, type Logger } from "./log.js";
-import {
-  homeOperationsFor,
-  type HomeOperationCoordinator,
-} from "./home-operations.js";
 import { isRecord, mcpServerValidationErrors } from "@ghost/runtime/mcp-config-policy";
 import {
   PrivateReadError,
@@ -14,14 +10,13 @@ import {
   type PrivateReadProbe,
 } from "./private-file.js";
 
-export type McpConfigSource = "canonical" | "legacy";
 import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "@ghost/runtime/mcp-catalog-policy";
 import type { McpServerConfigView } from "@ghost/runtime/mcp-catalog-policy";
 export interface McpServerView {
   name: string;
   enabled: boolean;
-  source: McpConfigSource;
-  path: "mcp.json" | ".omp/mcp.json" | ".omp/.mcp.json";
+  source: "canonical";
+  path: "mcp.json";
   config: McpServerConfigView;
 }
 
@@ -37,7 +32,6 @@ export interface McpCatalogSnapshot {
 
 export interface McpCatalogOptions {
   registry: GhostRegistry;
-  homeOperations?: HomeOperationCoordinator;
   logger?: Logger;
   /** Test seam after home resolution and before catalog bytes are read. */
   readProbe?: (home: string) => void | Promise<void>;
@@ -60,7 +54,7 @@ const defaultWriter: McpCatalogWriter = {
 };
 
 export interface McpFileSource {
-  kind: McpConfigSource;
+  kind: McpServerView["source"];
   absolutePath: string;
   relativePath: McpServerView["path"];
 }
@@ -79,8 +73,7 @@ export interface EffectiveMcpDisabled {
 
 export interface EffectiveMcpRead {
   claimedNames: string[];
-  /** Optional because released Pi snapshots predate disabled-row diagnostics. */
-  disabled?: EffectiveMcpDisabled[];
+  disabled: EffectiveMcpDisabled[];
   servers: EffectiveMcpServer[];
   skipped: McpCatalogSkipped[];
 }
@@ -253,14 +246,14 @@ function translateWriterError(error: unknown, name: string): never {
 }
 
 /**
- * CRUD and sanitized discovery for the MCP files owned by one ghost.
+ * CRUD and sanitized discovery for the ghost's `mcp.json`. Every method
+ * expects the caller to hold the ghost home's identity lease.
  *
  * No method discovers MCP configuration outside the ghost home. That negative
  * guarantee is the sovereignty boundary of this class.
  */
 export class McpCatalog {
   private readonly registry: GhostRegistry;
-  private readonly homeOperations: HomeOperationCoordinator;
   private readonly writer: McpCatalogWriter;
   private readonly logger: Logger;
   private readonly readProbe: NonNullable<McpCatalogOptions["readProbe"]>;
@@ -268,21 +261,10 @@ export class McpCatalog {
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
-    this.homeOperations = options.homeOperations ?? homeOperationsFor(options.registry);
     this.writer = { ...defaultWriter, ...options.writer };
     this.logger = options.logger ?? silentLogger;
     this.readProbe = options.readProbe ?? (() => {});
     this.privateReadProbe = options.privateReadProbe;
-  }
-
-  private withHomeLease<T>(ghostName: string, operation: () => Promise<T>): Promise<T> {
-    return this.homeOperations.withLease(ghostName, operation);
-  }
-
-  private sources(
-    ghostName: string,
-  ): [McpFileSource] {
-    return [ghostMcpSource(this.registry.get(ghostName).dir)];
   }
 
   private async effective(ghostName: string): Promise<ParsedMcpInputs> {
@@ -291,11 +273,6 @@ export class McpCatalog {
     return readGhostMcpFile(home, this.privateReadProbe);
   }
 
-  async list(ghostName: string): Promise<McpCatalogSnapshot> {
-    return this.withHomeLease(ghostName, () => this.listLeased(ghostName));
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
   async listLeased(ghostName: string): Promise<McpCatalogSnapshot> {
     const { effective, configured } = await this.effective(ghostName);
     const servers: McpServerView[] = [];
@@ -329,53 +306,21 @@ export class McpCatalog {
     }
   }
 
-  async add(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
-    validateMutation(name, config);
-    return this.withHomeLease(ghostName, () => this.addValidatedLeased(ghostName, name, config));
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
   async addLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    return this.addValidatedLeased(ghostName, name, config);
-  }
-
-  private async addValidatedLeased(
-    ghostName: string,
-    name: string,
-    config: unknown,
-  ): Promise<McpCatalogSnapshot> {
     const { effective } = await this.effective(ghostName);
     if (effective.claimedNames.includes(name)) {
       throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
     }
-    const [canonical] = this.sources(ghostName);
     // A new server costs context the moment it connects, so it starts off
     // unless the row says otherwise; `enable` is the deliberate step.
-    const row = config as Record<string, unknown>;
-    const stored = "enabled" in row ? config : { ...row, enabled: false };
-    await this.writeServer("add", canonical.absolutePath, name, stored);
+    const stored = "enabled" in config ? config : { ...config, enabled: false };
+    await this.writeServer("add", ghostMcpSource(this.registry.get(ghostName).dir).absolutePath, name, stored);
     return this.listLeased(ghostName);
   }
 
-  async update(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
-    validateMutation(name, config);
-    return this.withHomeLease(ghostName, () =>
-      this.updateValidatedLeased(ghostName, name, config)
-    );
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
   async updateLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    return this.updateValidatedLeased(ghostName, name, config);
-  }
-
-  private async updateValidatedLeased(
-    ghostName: string,
-    name: string,
-    config: unknown,
-  ): Promise<McpCatalogSnapshot> {
     const server = (await this.effective(ghostName)).configured
       .find((candidate) => candidate.name === name);
     if (!server) {
@@ -385,32 +330,10 @@ export class McpCatalog {
     return this.listLeased(ghostName);
   }
 
-  async setEnabled(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
+  async setEnabledLeased(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
     if (typeof enabled !== "boolean") {
       throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
     }
-    return this.withHomeLease(ghostName, () =>
-      this.setEnabledValidatedLeased(ghostName, name, enabled)
-    );
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
-  async setEnabledLeased(
-    ghostName: string,
-    name: string,
-    enabled: boolean,
-  ): Promise<McpCatalogSnapshot> {
-    if (typeof enabled !== "boolean") {
-      throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
-    }
-    return this.setEnabledValidatedLeased(ghostName, name, enabled);
-  }
-
-  private async setEnabledValidatedLeased(
-    ghostName: string,
-    name: string,
-    enabled: boolean,
-  ): Promise<McpCatalogSnapshot> {
     const server = (await this.effective(ghostName)).configured
       .find((candidate) => candidate.name === name);
     if (!server) {
@@ -429,11 +352,6 @@ export class McpCatalog {
     return this.listLeased(ghostName);
   }
 
-  async remove(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
-    return this.withHomeLease(ghostName, () => this.removeLeased(ghostName, name));
-  }
-
-  /** The caller already owns this ghost home's identity lease. */
   async removeLeased(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
     const server = (await this.effective(ghostName)).configured
       .find((candidate) => candidate.name === name);

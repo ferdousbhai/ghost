@@ -162,7 +162,6 @@ describe("path-bound mutations during whole-home moves", () => {
     let writerCalls = 0;
     const mcp = new McpCatalog({
       registry: temp.registry,
-      homeOperations: coordinator,
       writer: {
         add: async (path, name, config) => {
           writerCalls += 1;

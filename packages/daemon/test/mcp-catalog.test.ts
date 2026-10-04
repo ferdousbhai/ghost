@@ -16,6 +16,7 @@ import {
   McpCatalog,
   normalizeMcpStdioCwd,
 } from "../src/mcp-catalog.js";
+import { homeOperationsFor } from "../src/home-operations.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 interface McpUrlSanitizerVector {
@@ -133,7 +134,7 @@ describe("McpCatalog ghost-only discovery", () => {
       });
     }
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
 
     expect(snapshot.servers.map((server) => server.name)).toEqual(["disabled", "shared"]);
     expect(snapshot.servers.find((server) => server.name === "shared")).toMatchObject({
@@ -172,7 +173,7 @@ describe("McpCatalog ghost-only discovery", () => {
       },
     });
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
     const serialized = JSON.stringify(snapshot);
 
     for (const secret of [
@@ -225,7 +226,7 @@ describe("McpCatalog ghost-only discovery", () => {
       },
     });
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
     const serialized = JSON.stringify(snapshot);
 
     expect(snapshot.servers[0]?.config).toEqual({
@@ -251,7 +252,7 @@ describe("McpCatalog ghost-only discovery", () => {
       ])),
     });
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
     const serialized = JSON.stringify(snapshot);
     for (const [index, vector] of mcpUrlSanitizerVectors.entries()) {
       expect(
@@ -273,7 +274,7 @@ describe("McpCatalog ghost-only discovery", () => {
         "bad/name": { type: "stdio", command: "bad-name" },
       },
     });
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
 
     expect(snapshot.servers.map((server) => server.name)).toEqual(["good"]);
     expect(snapshot.skipped.map((entry) => entry.path)).toEqual([
@@ -294,7 +295,7 @@ describe("McpCatalog ghost-only discovery", () => {
       ]),
     );
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
 
     expect(snapshot.servers).toEqual([]);
     expect(snapshot.skipped).toEqual([
@@ -335,12 +336,12 @@ describe("McpCatalog ghost-only discovery", () => {
       },
     });
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
     expect(snapshot.servers.map((server) => server.name)).toEqual(["valid"]);
     expect(snapshot.skipped).toHaveLength(Object.keys(malformed).length);
     expect(JSON.stringify(snapshot)).not.toContain(sentinel);
     for (const [index, config] of Object.values(malformed).entries()) {
-      await expect(catalog.add("casper", `mutation-${index}`, config))
+      await expect(catalog.addLeased("casper", `mutation-${index}`, config))
         .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
     }
     expect(readFileSync(join(home, "mcp.json"), "utf8")).toContain(sentinel);
@@ -351,7 +352,7 @@ describe("McpCatalog ghost-only discovery", () => {
     const path = join(home, "mcp.json");
     writeFileSync(path, `{"mcpServers":{},"padding":"${"x".repeat(1_048_576)}"}`, "utf8");
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
     expect(snapshot.servers).toEqual([]);
     expect(snapshot.skipped).toEqual([
       { path: "mcp.json", reason: "MCP config exceeds the 1 MiB limit" },
@@ -368,7 +369,7 @@ describe("McpCatalog ghost-only discovery", () => {
       if (kind === "symlink") symlinkSync(target, path);
       else linkSync(target, path);
 
-      await expect(catalog.list("casper")).resolves.toEqual({
+      await expect(catalog.listLeased("casper")).resolves.toEqual({
         servers: [],
         skipped: [{ path: "mcp.json", reason: "MCP config could not be read or parsed." }],
       });
@@ -399,7 +400,7 @@ describe("McpCatalog ghost-only discovery", () => {
         },
       });
 
-      await expect(catalog.list("casper")).resolves.toEqual({
+      await expect(catalog.listLeased("casper")).resolves.toEqual({
         servers: [],
         skipped: [{ path: "mcp.json", reason: "MCP config could not be read or parsed." }],
       });
@@ -413,7 +414,7 @@ describe("McpCatalog ghost-only discovery", () => {
       mcpServers: { shared: { type: "http", url: "https://legacy.example/mcp" } },
     });
 
-    const snapshot = await catalog.list("casper");
+    const snapshot = await catalog.listLeased("casper");
 
     expect(snapshot.servers).toEqual([]);
     expect(snapshot.skipped).toHaveLength(1);
@@ -428,20 +429,20 @@ describe("McpCatalog mutations", () => {
       mcpServers: { legacy: { type: "stdio", command: "before" } },
     });
 
-    await catalog.add("casper", "smithery:cloudflare.api-v1", {
+    await catalog.addLeased("casper", "smithery:cloudflare.api-v1", {
       type: "http",
       url: "https://example.com/mcp",
       enabled: true,
     });
-    await catalog.update("casper", "legacy", { type: "stdio", command: "after" });
-    await catalog.setEnabled("casper", "legacy", false);
+    await catalog.updateLeased("casper", "legacy", { type: "stdio", command: "after" });
+    await catalog.setEnabledLeased("casper", "legacy", false);
 
     expect(readServers(home)).toHaveProperty("smithery:cloudflare.api-v1");
     expect(readServers(home)).toMatchObject({
       legacy: { type: "stdio", command: "after", enabled: false },
     });
 
-    const afterRemove = await catalog.remove("casper", "smithery:cloudflare.api-v1");
+    const afterRemove = await catalog.removeLeased("casper", "smithery:cloudflare.api-v1");
     expect(afterRemove.servers.map((server) => server.name)).toEqual(["legacy"]);
     expect(readServers(home)).not.toHaveProperty("smithery:cloudflare.api-v1");
   });
@@ -450,14 +451,14 @@ describe("McpCatalog mutations", () => {
     const { catalog, home } = setup();
     const names = ["__proto__", "constructor", "toString"];
     for (const name of names) {
-      await catalog.add("casper", name, {
+      await catalog.addLeased("casper", name, {
         type: "stdio",
         command: `${name}-before`,
         enabled: true,
       });
     }
 
-    const listedByName = new Map((await catalog.list("casper")).servers.map((server) => [
+    const listedByName = new Map((await catalog.listLeased("casper")).servers.map((server) => [
       server.name,
       server,
     ]));
@@ -473,12 +474,12 @@ describe("McpCatalog mutations", () => {
     const storedBefore = readServers(home);
     for (const name of names) expect(Object.hasOwn(storedBefore, name)).toBe(true);
 
-    await catalog.update("casper", "__proto__", {
+    await catalog.updateLeased("casper", "__proto__", {
       type: "stdio",
       command: "proto-after",
     });
-    await catalog.setEnabled("casper", "constructor", false);
-    const afterRemove = await catalog.remove("casper", "toString");
+    await catalog.setEnabledLeased("casper", "constructor", false);
+    const afterRemove = await catalog.removeLeased("casper", "toString");
 
     const remainingByName = new Map(afterRemove.servers.map((server) => [server.name, server]));
     expect(remainingByName.get("__proto__")).toMatchObject({
@@ -504,36 +505,41 @@ describe("McpCatalog mutations", () => {
   it("uses structured errors for invalid names/configs, duplicates, and unknown servers", async () => {
     const { catalog } = setup();
 
-    await expect(catalog.add("casper", "bad/name", { type: "stdio", command: "x" }))
+    await expect(catalog.addLeased("casper", "bad/name", { type: "stdio", command: "x" }))
       .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
-    await expect(catalog.add("casper", "missing-command", { type: "stdio" }))
+    await expect(catalog.addLeased("casper", "missing-command", { type: "stdio" }))
       .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
-    await catalog.add("casper", "known", { type: "stdio", command: "one" });
-    await expect(catalog.add("casper", "known", { type: "stdio", command: "two" }))
+    await catalog.addLeased("casper", "known", { type: "stdio", command: "one" });
+    await expect(catalog.addLeased("casper", "known", { type: "stdio", command: "two" }))
       .rejects.toMatchObject({ code: "mcp_server_exists", status: 409 });
-    await expect(catalog.update("casper", "missing", { type: "stdio", command: "x" }))
+    await expect(catalog.updateLeased("casper", "missing", { type: "stdio", command: "x" }))
       .rejects.toMatchObject({ code: "mcp_server_not_found", status: 404 });
-    await expect(catalog.remove("casper", "missing"))
+    await expect(catalog.removeLeased("casper", "missing"))
       .rejects.toMatchObject({ code: "mcp_server_not_found", status: 404 });
-    await expect(catalog.setEnabled("casper", "known", "yes" as unknown as boolean))
+    await expect(catalog.setEnabledLeased("casper", "known", "yes" as unknown as boolean))
       .rejects.toMatchObject({ code: "invalid_request", status: 400 });
     expect(GhostError).toBeDefined();
   });
 
-  it("serializes concurrent canonical writes without losing siblings", async () => {
-    const { catalog, home } = setup();
+  it("serializes concurrent canonical writes under the home lease without losing siblings", async () => {
+    const { catalog: unleased, home } = setup();
+    const lease = homeOperationsFor(temp!.registry);
+    const catalog = {
+      addLeased: (ghost: string, name: string, config: unknown) =>
+        lease.withLease(ghost, () => unleased.addLeased(ghost, name, config)),
+    };
 
     await Promise.all([
-      catalog.add("casper", "alpha", { type: "stdio", command: "alpha-server" }),
-      catalog.add("casper", "bravo", { type: "stdio", command: "bravo-server" }),
-      catalog.add("casper", "charlie", { type: "http", url: "https://charlie.example/mcp" }),
+      catalog.addLeased("casper", "alpha", { type: "stdio", command: "alpha-server" }),
+      catalog.addLeased("casper", "bravo", { type: "stdio", command: "bravo-server" }),
+      catalog.addLeased("casper", "charlie", { type: "http", url: "https://charlie.example/mcp" }),
     ]);
 
     expect(Object.keys(readServers(home)).sort()).toEqual(["alpha", "bravo", "charlie"]);
 
     const sameName = await Promise.allSettled([
-      catalog.add("casper", "delta", { type: "stdio", command: "first" }),
-      catalog.add("casper", "delta", { type: "stdio", command: "second" }),
+      catalog.addLeased("casper", "delta", { type: "stdio", command: "first" }),
+      catalog.addLeased("casper", "delta", { type: "stdio", command: "second" }),
     ]);
     expect(sameName.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(sameName.filter((result) => result.status === "rejected")).toHaveLength(1);

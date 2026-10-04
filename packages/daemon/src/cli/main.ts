@@ -12,7 +12,6 @@ import {
 } from "./args.js";
 import {
   characterCommand,
-  deleteSessionCommand,
   readCommand,
   boardCommand,
   browserCommand,
@@ -178,14 +177,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost character set ./casper.md",
     positionals: [0, 2],
     run: characterCommand,
-  },
-  {
-    verb: "delete",
-    usage: "delete --yes [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Move a conversation and its sidecars to Trash.",
-    example: "ghost delete --yes -s cli-abc",
-    positionals: [0, 0],
-    run: deleteSessionCommand,
   },
   {
     verb: "read",

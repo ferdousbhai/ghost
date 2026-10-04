@@ -75,7 +75,6 @@ async function serve(
   });
   const mcp = new McpCatalog({
     registry: temp.registry,
-    homeOperations,
     ...(serverOptions.mcpReadProbe === undefined
       ? {}
       : { readProbe: serverOptions.mcpReadProbe }),

@@ -91,7 +91,6 @@ describe("ghost CLI against a real daemon server", () => {
     expect(await cli(["remote"])).toMatchObject({ code: 5 });
     expect(await cli(["browser"])).toMatchObject({ code: 0, stdout: "off\n" });
     expect(await cli(["browser", "allow"])).toMatchObject({ code: 2 });
-    expect(await cli(["delete", "-g", "casper", "-s", "conv"])).toMatchObject({ code: 2 });
   });
 
   it("shows and sets the agent a ghost prefers, and switches a conversation", async () => {

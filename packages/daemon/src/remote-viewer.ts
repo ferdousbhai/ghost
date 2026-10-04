@@ -100,7 +100,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 
   async function send(prompt) {
     streaming = true;
-    const conversationId = session ? session.replace(/^pi:/, "") : "remote";
+    const conversationId = session || "remote";
     const r = await fetch("/api/ghosts/" + seg(ghost) + "/messages", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({

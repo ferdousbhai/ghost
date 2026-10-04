@@ -32,15 +32,6 @@ export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): 
 }
 
 
-/** `ghost delete --yes -s <id>`: move one conversation and its sidecars to Trash. */
-export async function deleteSessionCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  if (!flagBoolean(parsed, "yes")) throw new ArgsError("ghost delete moves a conversation to Trash; pass --yes");
-  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
-  const body = (await ctx.client.request("DELETE", path)).body;
-  emit(ctx, body, () => `Moved ${session.id} to Trash.\n`);
-  return 0;
-}
-
 /** `ghost read -s <id>`: mark a conversation read, as opening it in the HUD does. */
 export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
@@ -49,10 +40,7 @@ export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promi
   return 0;
 }
 
-
-
-
-/** `ghost remote [status|on|off]`: the Tailscale Serve viewer. */
+/** `ghost board`: the owner's board, read through the daemon. */
 export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const body = (await ctx.client.request("GET", "/api/board")).body;
   emit(ctx, body, (result) => {
