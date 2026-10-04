@@ -7,7 +7,6 @@ import {
   descriptorPath,
   openConfinedDirectory,
   openConfinedFile,
-  openDirectoryNoFollow,
   withDescriptorLock,
 } from "../linux-fs.js";
 import { expandHome, resolveUserDirectory } from "../xdg-user-dirs.js";

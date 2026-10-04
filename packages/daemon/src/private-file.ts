@@ -12,7 +12,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  chmodSync,
   closeSync,
   constants,
   fstatSync,
@@ -21,10 +20,7 @@ import {
   linkSync,
   openSync,
   readSync,
-  renameSync,
-  rmSync,
   unlinkSync,
-  writeFileSync,
   type BigIntStats,
 } from "node:fs";
 
