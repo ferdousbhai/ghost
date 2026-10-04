@@ -135,8 +135,8 @@ try {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      context: { messages: [{ role: "user", content: "probe tool trace" }] },
-      options: { sessionId: "mock-trace-probe" },
+      prompt: "probe tool trace",
+      sessionId: "mock-trace-probe",
     }),
   });
   assert.equal(turnResponse.status, 200);

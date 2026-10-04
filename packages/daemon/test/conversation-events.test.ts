@@ -45,8 +45,8 @@ async function setup(): Promise<string> {
 
 const TURN_BODY = {
   model: "ghost/casper",
-  context: { messages: [{ role: "user", content: "Who are you?" }] },
-  options: { sessionId: "conv-1" },
+  prompt: "Who are you?",
+  sessionId: "conv-1",
 };
 
 async function postTurn(base: string): Promise<void> {

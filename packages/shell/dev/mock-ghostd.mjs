@@ -683,8 +683,8 @@ async function pump(res, events, stream) {
 }
 
 async function streamTurn(req, res, name, body) {
-  const prompt = extractPrompt(body);
-  const sessionId = body.options.sessionId;
+  const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : "(no prompt)";
+  const sessionId = body.sessionId;
   const stream = openStream(req, res);
   const key = turnKey(name, sessionId);
   const turn = { streaming: true, followUp: [] };
@@ -730,16 +730,6 @@ async function streamTurn(req, res, name, body) {
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
   // no reply, so nothing is recorded.
   if (!failed) recordTurn(name, sessionId, exchanges);
-}
-
-function extractPrompt(body) {
-  const messages = body?.context?.messages;
-  const last = Array.isArray(messages) ? messages.at(-1) : undefined;
-  if (typeof last?.content === "string") return last.content;
-  if (Array.isArray(last?.content)) {
-    return last.content.filter((p) => p?.type === "text").map((p) => p.text).join(" ");
-  }
-  return "(no prompt)";
 }
 
 const mockServer = createServer(async (req, res) => {
@@ -930,9 +920,9 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts[3] === "messages" && req.method === "POST") {
     const body = await readBody(req).catch(() => ({}));
-    const sessionId = body?.options?.sessionId;
+    const sessionId = body?.sessionId;
     if (!validConversationId(sessionId)) {
-      return json(res, 400, { error: { message: "options.sessionId is not a conversation id", code: "invalid_conversation_id" } });
+      return json(res, 400, { error: { message: "sessionId is not a conversation id", code: "invalid_conversation_id" } });
     }
     if (answering.has(turnKey(name, sessionId))) {
       return json(res, 409, {

@@ -104,8 +104,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const r = await fetch("/api/ghosts/" + seg(ghost) + "/messages", {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        context: { messages: [{ role: "user", content: [{ type: "text", text: prompt }] }] },
-        options: { sessionId: conversationId },
+        prompt,
+        sessionId: conversationId,
       }),
     });
     if (!r.ok) { streaming = false; throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText); }

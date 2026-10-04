@@ -98,8 +98,8 @@ export async function sayCommand(
   let finalText = "";
   let terminal: "done" | "error" | undefined;
   await ctx.client.stream(`/api/ghosts/${encodeURIComponent(name)}/messages`, {
-    context: { messages: [{ role: "user", content: [{ type: "text", text }] }] },
-    options: { sessionId: conversationId },
+    prompt: text,
+    sessionId: conversationId,
   }, (unknownEvent) => {
     const event = unknownEvent as StreamEvent;
     if (event.type === "limit_reached") {

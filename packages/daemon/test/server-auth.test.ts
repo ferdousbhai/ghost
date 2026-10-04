@@ -168,7 +168,7 @@ describe("the content type of a mutating request", () => {
       // Even holding the token, this shape must not be reachable: it is the
       // one a cross-site form post can produce without a preflight.
       headers: { ...auth, "content-type": "text/plain;charset=UTF-8" },
-      body: JSON.stringify({ model: "ghost/casper", context: { messages: [] } }),
+      body: JSON.stringify({ prompt: "hello" }),
     });
     expect(response.status).toBe(415);
     const body = await response.json() as { error: { code: string } };

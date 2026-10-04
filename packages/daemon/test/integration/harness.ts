@@ -360,8 +360,8 @@ export async function startRealDaemonHarness(
       const path = `/api/ghosts/${encodeURIComponent(ghostName)}/messages`;
       const payload = JSON.stringify({
         model: `ghost/${ghostName}`,
-        context: { messages: [{ role: "user", content: [{ type: "text", text: prompt }] }] },
-        options: { sessionId },
+        prompt,
+        sessionId,
       });
       return within(new Promise<RealSseClient>((resolve, reject) => {
         const outgoing = httpRequest({

@@ -50,8 +50,8 @@ describe("SSE turn lifecycle", () => {
           method: "POST",
           headers: { "content-type": "application/json", accept: "text/event-stream" },
           body: JSON.stringify({
-            context: { messages: [{ role: "user", content: "hello" }] },
-            options: { sessionId: "silent-turn" },
+            prompt: "hello",
+            sessionId: "silent-turn",
           }),
           signal: opening.signal,
         },
@@ -95,8 +95,8 @@ describe("SSE turn lifecycle", () => {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream" },
         body: JSON.stringify({
-          context: { messages: [{ role: "user", content: "hello" }] },
-          options: { sessionId: "missing-terminal" },
+          prompt: "hello",
+          sessionId: "missing-terminal",
         }),
       },
     );

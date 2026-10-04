@@ -104,64 +104,17 @@ export class TurnRequestError extends Error {
   }
 }
 
-export function textFromParts(parts: unknown): string {
-  if (typeof parts === "string") return parts;
-  if (!Array.isArray(parts)) return "";
-  const texts: string[] = [];
-  for (const part of parts) {
-    if (!part || typeof part !== "object") continue;
-    const candidate = part as { type?: unknown; text?: unknown };
-    if (candidate.type === "text" && typeof candidate.text === "string") {
-      texts.push(candidate.text);
-    }
-  }
-  return texts.join("\n");
-}
-
-/**
- * Parse a turn request body.
- *
- * Deliberately narrow: a client-supplied `systemPrompt`, `tools`, or `model`
- * is IGNORED — the ghost assembles its own persona and tools, and the harness
- * owns its model. History is ignored too: the conversation log is the
- * authority, so only the newest user message is taken from `context.messages`.
- */
+/** Parse a turn request body, `{ prompt, sessionId? }`. */
 export function parseTurnRequest(body: unknown): TurnRequest {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
     throw new TurnRequestError("invalid_request", "Request body must be a JSON object.");
   }
-  const request = body as { context?: unknown; options?: unknown };
-  const context = request.context;
-  if (context === null || typeof context !== "object" || Array.isArray(context)) {
-    throw new TurnRequestError("invalid_request", "\"context\" must be an object.");
+  const { prompt, sessionId } = body as { prompt?: unknown; sessionId?: unknown };
+  if (typeof prompt !== "string" || prompt.trim() === "") {
+    throw new TurnRequestError("invalid_request", "\"prompt\" must be non-empty text.");
   }
-  const messages = (context as { messages?: unknown }).messages;
-  if (!Array.isArray(messages) || messages.length === 0) {
-    throw new TurnRequestError(
-      "invalid_request",
-      "\"context.messages\" must be a non-empty array.",
-    );
-  }
-  let prompt = "";
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (!message || typeof message !== "object") continue;
-    if ((message as { role?: unknown }).role !== "user") continue;
-    prompt = textFromParts((message as { content?: unknown }).content).trim();
-    if (prompt) break;
-  }
-  if (!prompt) {
-    throw new TurnRequestError(
-      "invalid_request",
-      "\"context.messages\" must end with a user message carrying text.",
-    );
-  }
-  const options = request.options;
-  const sessionId = options && typeof options === "object"
-    ? (options as { sessionId?: unknown }).sessionId
-    : undefined;
   return {
     sessionId: typeof sessionId === "string" && sessionId ? requireConversationId(sessionId) : null,
-    prompt,
+    prompt: prompt.trim(),
   };
 }

@@ -60,8 +60,8 @@ describe("ghost say", () => {
     expect(result.stdout).toBe("hello there\n");
     expect(result.stderr).toContain("⚙ bash: pwd");
     expect(fake.request()).toMatchObject({
-      context: { messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }] },
-      options: { sessionId: expect.stringMatching(/^cli-[a-z0-9]+-[a-f0-9]{8}$/) },
+      prompt: "hello",
+      sessionId: expect.stringMatching(/^cli-[a-z0-9]+-[a-f0-9]{8}$/),
     });
   });
 
@@ -83,7 +83,7 @@ describe("ghost say", () => {
       stdin: "from stdin",
     });
     expect(result.code).toBe(0);
-    expect(fake.request()).toMatchObject({ context: { messages: [{ content: [{ text: "from stdin" }] }] } });
+    expect(fake.request()).toMatchObject({ prompt: "from stdin" });
   });
 
   it("returns one for an error event", async () => {

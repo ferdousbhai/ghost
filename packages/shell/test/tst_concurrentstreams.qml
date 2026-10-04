@@ -212,7 +212,7 @@ TestCase {
         const first = Ghostd.ensureTurnState("casper", "hud-abc");
         const second = Ghostd.ensureTurnState("casper", "other");
         verify(first !== second);
-        compare(Ghostd.buildBody("continue", first).options.sessionId, "hud-abc");
+        compare(Ghostd.buildBody("continue", first).sessionId, "hud-abc");
         verify(!("model" in Ghostd.buildBody("continue", first)));
         compare(Ghostd.ensureTurnState("casper", ".hidden"), null);
         compare(Ghostd.ensureTurnState("casper", "pi:old"), null);

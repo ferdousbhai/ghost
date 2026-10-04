@@ -142,14 +142,14 @@ async function postTurn(
 
 const TURN_BODY = {
   model: "ghost/casper",
-  context: { messages: [{ role: "user", content: [{ type: "text", text: "Who are you?" }] }] },
-  options: { sessionId: "conv-1" },
+  prompt: "Who are you?",
+  sessionId: "conv-1",
 };
 
 const turnBody = (sessionId: string, prompt = "Who are you?") => ({
   ...TURN_BODY,
-  context: { messages: [{ role: "user", content: prompt }] },
-  options: { sessionId },
+  prompt,
+  sessionId,
 });
 
 /** A runner built without a hooks.json: nothing to read, nothing to replace. */
@@ -722,7 +722,7 @@ describe("POST /api/ghosts/:name/messages", () => {
   it("keeps separate conversations in separate directories", async () => {
     const base = await serve(replies("one", "two"));
     await postTurn(base, TURN_BODY);
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
+    await postTurn(base, { ...TURN_BODY, sessionId: "conv-2" });
     const { sessions } = await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as {
       sessions: unknown[];
     };
@@ -752,7 +752,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const response = await fetch(`${base}/api/ghosts/casper/messages`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ context: { messages: [] } }),
+      body: JSON.stringify({ prompt: "" }),
     });
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
@@ -921,7 +921,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     const base = await serve();
     await postTurn(base, TURN_BODY);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await postTurn(base, { ...TURN_BODY, options: { sessionId: "conv-2" } });
+    await postTurn(base, { ...TURN_BODY, sessionId: "conv-2" });
     expect((await listSessions(base)).map((session) => [session.id, session.pinned]))
       .toEqual([["conv-2", false], ["conv-1", false]]);
 

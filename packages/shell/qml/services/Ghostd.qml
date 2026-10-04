@@ -2538,16 +2538,13 @@ Singleton {
 
     /** Only the new message: ghostd owns the history. */
     function buildBody(prompt: string, state: var): var {
-        return {
-            context: { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
-            options: { sessionId: state.sessionId }
-        };
+        return { prompt: prompt, sessionId: state.sessionId };
     }
 
     /**
      * The active session id for a ghost, minting one on first use. A conversation
      * is created lazily by the daemon on the first turn; until then it lives only
-     * as this id, which `options.sessionId` carries into the POST. Reuses the
+     * as this id, which `sessionId` carries into the POST. Reuses the
      * current unstarted draft so New and Send cannot mint a second blank chat.
      */
     function ensureSession(ghost: string): string {

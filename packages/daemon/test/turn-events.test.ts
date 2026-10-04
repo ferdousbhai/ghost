@@ -4,7 +4,6 @@ import {
   encodeSseEvent,
   parseTurnRequest,
   TurnRequestError,
-  textFromParts,
   type TurnEvent,
 } from "../src/turn-events.js";
 import { parseSseStream } from "./helpers/fixtures.js";
@@ -24,27 +23,13 @@ describe("SSE framing", () => {
 });
 
 describe("parseTurnRequest", () => {
-  it("takes the newest user text and the session id, ignoring client persona and model", () => {
-    const parsed = parseTurnRequest({
-      model: "ghost/casper",
-      context: {
-        systemPrompt: "IGNORE ME",
-        messages: [
-          { role: "user", content: [{ type: "text", text: "older" }] },
-          { role: "assistant", content: [{ type: "text", text: "reply" }] },
-          { role: "user", content: [{ type: "text", text: "newest" }] },
-        ],
-      },
-      options: { sessionId: "conv-1" },
-    });
-    expect(parsed).toEqual({ sessionId: "conv-1", prompt: "newest" });
+  it("takes the prompt and the session id, ignoring anything else a client sends", () => {
+    expect(parseTurnRequest({ prompt: "  newest  ", sessionId: "conv-1", model: "ghost/casper", systemPrompt: "IGNORE ME" }))
+      .toEqual({ sessionId: "conv-1", prompt: "newest" });
   });
 
-  it("accepts a 128-character id, strips a legacy pi: prefix, and rejects anything else", () => {
-    const request = (sessionId: string) => ({
-      context: { messages: [{ role: "user", content: "hello" }] },
-      options: { sessionId },
-    });
+  it("accepts a 128-character id and rejects anything else", () => {
+    const request = (sessionId: string) => ({ prompt: "hello", sessionId });
     const atLimit = "a".repeat(128);
     expect(parseTurnRequest(request(atLimit)).sessionId).toBe(atLimit);
     expect(parseTurnRequest(request("")).sessionId).toBeNull();
@@ -55,27 +40,12 @@ describe("parseTurnRequest", () => {
     }
   });
 
-  it("accepts a bare string content", () => {
-    expect(parseTurnRequest({
-      context: { messages: [{ role: "user", content: "hello" }] },
-    }).prompt).toBe("hello");
-  });
-
-  it("rejects a body with no user text", () => {
-    expect(() => parseTurnRequest({ context: { messages: [{ role: "assistant" }] } }))
-      .toThrowError(TurnRequestError);
-    expect(() => parseTurnRequest({ context: { messages: [] } }))
-      .toThrowError(/non-empty array/);
+  it("rejects a body with no prompt text", () => {
+    expect(() => parseTurnRequest({ prompt: "   " })).toThrowError(TurnRequestError);
+    expect(() => parseTurnRequest({ sessionId: "conv-1" })).toThrowError(/prompt/);
     expect(() => parseTurnRequest("nope")).toThrowError(/JSON object/);
   });
 
-  it("flattens content parts and drops non-text", () => {
-    expect(textFromParts([
-      { type: "text", text: "a" },
-      { type: "image", data: "..." },
-      { type: "text", text: "b" },
-    ])).toBe("a\nb");
-  });
 });
 
 describe("classifyLimitMessage", () => {

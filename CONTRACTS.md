@@ -378,7 +378,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
-| `POST /api/ghosts/:name/messages` | One turn as the turn wire below. |
+| `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |

@@ -74,7 +74,7 @@ describe("a ghost's own shell addresses its conversation", () => {
     const result = await runCli(["say", "--follow-up", "-q", "job finished"], { env, home: "/tmp/ghost-cli-unit", fetch });
     expect(result).toMatchObject({ code: 0, stdout: "Noted.\n" });
     const turn = calls.find((call) => call.path === "/api/ghosts/casper/messages");
-    expect(turn?.body).toMatchObject({ options: { sessionId: "conv-mine" } });
+    expect(turn?.body).toMatchObject({ sessionId: "conv-mine" });
   });
 
   it("still fails a follow-up on any other conflict", async () => {
