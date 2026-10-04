@@ -381,7 +381,7 @@ const ROWS: readonly HarnessRow[] = [
       argv: [
         "claude", "-p", turn.prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-        "--permission-mode", "bypassPermissions",
+        "--permission-mode", "bypassPermissions", "--effort", "low",
         ...(turn.resume ? ["--continue"] : []),
         ...(turn.mcp.length > 0 ? ["--mcp-config", ".ghost-mcp.json"] : []),
       ],
@@ -395,6 +395,7 @@ const ROWS: readonly HarnessRow[] = [
       argv: [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
+        "-c", 'model_reasoning_effort="low"',
         ...turn.mcp.flatMap(({ name, config }) => {
           const key = `mcp_servers.${tomlKey(name)}`;
           if (config.type === "http" || config.type === "sse") {

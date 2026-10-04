@@ -92,6 +92,7 @@ describe("launch lines", () => {
     const launch = harnessRow("claude")?.launch({ ...TURN, resume: true });
     expect(launch?.argv.slice(0, 3)).toEqual(["claude", "-p", "-hello"]);
     expect(launch?.argv).toContain("--continue");
+    expect(launch?.argv).toEqual(expect.arrayContaining(["--effort", "low"]));
     expect(launch?.argv.slice(-2)).toEqual(["--mcp-config", ".ghost-mcp.json"]);
     expect(JSON.parse(launch?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({
       mcpServers: { ghost: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } },
@@ -102,6 +103,7 @@ describe("launch lines", () => {
     const argv = harnessRow("codex")?.launch({ ...TURN, resume: true }).argv ?? [];
     expect(argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "--last"]);
     expect(argv).toContain('mcp_servers.ghost.command="/usr/bin/ghost"');
+    expect(argv).toEqual(expect.arrayContaining(["-c", 'model_reasoning_effort="low"']));
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
   });
 
