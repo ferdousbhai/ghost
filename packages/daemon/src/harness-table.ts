@@ -417,7 +417,7 @@ const ROWS: readonly HarnessRow[] = [
       argv: [
         "grok", "-p", turn.prompt,
         "--output-format", "streaming-messages-json", "--include-partial-messages",
-        "--always-approve", "--rules", turn.persona,
+        "--always-approve", "--rules", turn.persona, "--reasoning-effort", "low",
         ...(turn.resume ? ["--continue"] : []),
       ],
       files: turn.mcp.length > 0 ? { ".grok/config.toml": `${mcpServersToml(turn.mcp)}\n` } : {},
@@ -462,7 +462,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "pi",
     // pi has no MCP client; its own tools and extensions are the owner's.
     launch: (turn) => ({
-      argv: ["pi", "-p", "--mode", "json", ...(turn.resume ? ["--continue"] : []), turn.prompt],
+      argv: ["pi", "-p", "--mode", "json", "--thinking", "low", ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),
     parser: piParser,
   },
@@ -501,7 +501,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "crush",
     // Crush keeps its sessions in the directory it runs in.
     launch: (turn) => ({
-      argv: ["crush", "run", "-q", ...(turn.resume ? ["--continue"] : []), turn.prompt],
+      argv: ["crush", "run", "-q", "--reasoning-effort", "low", ...(turn.resume ? ["--continue"] : []), turn.prompt],
       files: turn.mcp.length > 0
         ? { "crush.json": writeJson({ mcp: Object.fromEntries(turn.mcp.map(({ name, config }) => [name,
             config.type === "http" || config.type === "sse"
@@ -516,7 +516,7 @@ const ROWS: readonly HarnessRow[] = [
     // `muse exec` starts fresh unless named; the first turn reports its session.
     launch: (turn) => ({
       argv: [
-        "muse", "exec", "--json", "--yolo",
+        "muse", "exec", "--json", "--yolo", "--reasoning-effort", "low",
         ...(turn.resume && turn.sessionId ? ["--session-id", turn.sessionId] : []),
         turn.prompt,
       ],

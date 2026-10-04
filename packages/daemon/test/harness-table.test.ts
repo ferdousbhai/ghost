@@ -88,11 +88,24 @@ describe("parsers over recorded output", () => {
 });
 
 describe("launch lines", () => {
+  it("asks for low reasoning effort where a run can set it", () => {
+    const flags: Record<string, string[]> = {
+      claude: ["--effort", "low"],
+      codex: ["-c", 'model_reasoning_effort="low"'],
+      grok: ["--reasoning-effort", "low"],
+      pi: ["--thinking", "low"],
+      crush: ["--reasoning-effort", "low"],
+      muse: ["--reasoning-effort", "low"],
+    };
+    for (const [id, pair] of Object.entries(flags)) {
+      expect(harnessRow(id)?.launch(TURN).argv, id).toEqual(expect.arrayContaining(pair));
+    }
+  });
+
   it("claude takes the prompt right after -p, so its list flags cannot swallow it", () => {
     const launch = harnessRow("claude")?.launch({ ...TURN, resume: true });
     expect(launch?.argv.slice(0, 3)).toEqual(["claude", "-p", "-hello"]);
     expect(launch?.argv).toContain("--continue");
-    expect(launch?.argv).toEqual(expect.arrayContaining(["--effort", "low"]));
     expect(launch?.argv.slice(-2)).toEqual(["--mcp-config", ".ghost-mcp.json"]);
     expect(JSON.parse(launch?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({
       mcpServers: { ghost: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } },
@@ -103,7 +116,6 @@ describe("launch lines", () => {
     const argv = harnessRow("codex")?.launch({ ...TURN, resume: true }).argv ?? [];
     expect(argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "--last"]);
     expect(argv).toContain('mcp_servers.ghost.command="/usr/bin/ghost"');
-    expect(argv).toEqual(expect.arrayContaining(["-c", 'model_reasoning_effort="low"']));
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
   });
 
