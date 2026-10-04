@@ -14,14 +14,7 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import {
-  apiTokenCommand,
-  API_TOKEN_PATTERN,
-  defaultApiTokenPath,
-  readApiToken,
-  readOrCreateApiToken,
-  rotateApiToken,
-} from "../src/api-token.js";
+import { apiToken, TOKEN_PATTERN } from "../src/token-store.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -267,40 +260,26 @@ describe("the API token store", () => {
   });
 
   it("sits beside the relay token under XDG state", () => {
-    expect(defaultApiTokenPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
+    expect(apiToken.defaultPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
       .toBe("/xdg/state/ghost/api-token");
-    expect(defaultApiTokenPath({}, "/home/x"))
+    expect(apiToken.defaultPath({}, "/home/x"))
       .toBe("/home/x/.local/state/ghost/api-token");
-    expect(defaultApiTokenPath({ GHOSTD_API_TOKEN_FILE: "/tmp/t" }, "/home/x")).toBe("/tmp/t");
+    expect(apiToken.defaultPath({ GHOSTD_API_TOKEN_FILE: "/tmp/t" }, "/home/x")).toBe("/tmp/t");
   });
 
   it("mints once and reads back the same token forever after", () => {
     const path = join(dir, "state", "api-token");
-    const first = readOrCreateApiToken({ path });
+    const first = apiToken.readOrCreate({ path });
     expect(first.created).toBe(true);
-    expect(first.token).toMatch(API_TOKEN_PATTERN);
-    const second = readOrCreateApiToken({ path });
+    expect(first.token).toMatch(TOKEN_PATTERN);
+    const second = apiToken.readOrCreate({ path });
     expect(second.created).toBe(false);
     expect(second.token).toBe(first.token);
-    expect(readApiToken({ path })).toBe(first.token);
-  });
-
-  it("writes it 0600, because everything else on this box runs as the same user", async () => {
-    const path = join(dir, "api-token");
-    readOrCreateApiToken({ path });
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
-  });
-
-  it("rotates to something new, invalidating whatever a client holds", () => {
-    const path = join(dir, "api-token");
-    const before = readOrCreateApiToken({ path }).token;
-    const after = rotateApiToken({ path }).token;
-    expect(after).not.toBe(before);
-    expect(readApiToken({ path })).toBe(after);
+    expect(apiToken.read({ path })).toBe(first.token);
   });
 
   it("does not share a file with the relay token — one leak must not be two", () => {
-    expect(defaultApiTokenPath({}, "/home/x")).not.toBe(
+    expect(apiToken.defaultPath({}, "/home/x")).not.toBe(
       join("/home/x", ".local", "state", "ghost", "relay-token"),
     );
   });
@@ -323,7 +302,7 @@ describe("ghostd api-token", () => {
 
   const path = () => join(dir, "api-token");
   const run = (argv: string[]) =>
-    apiTokenCommand(argv, {
+    apiToken.command(argv, {
       path: path(),
       stdout: (text) => out.push(text),
       stderr: (text) => err.push(text),
@@ -332,7 +311,7 @@ describe("ghostd api-token", () => {
   it("mints, prints, and says where it lives", async () => {
     expect(run([])).toBe(0);
     const text = out.join("");
-    expect(text.split("\n")[0]).toMatch(API_TOKEN_PATTERN);
+    expect(text.split("\n")[0]).toMatch(TOKEN_PATTERN);
     expect(text).toMatch(/Local API clients read this file/);
     expect(text).toContain(path());
     expect((await stat(path())).mode & 0o777).toBe(0o600);
@@ -340,7 +319,7 @@ describe("ghostd api-token", () => {
 
   it("prints only the token under --quiet, so it can be piped into curl", () => {
     expect(run(["--quiet"])).toBe(0);
-    expect(out.join("").trim()).toMatch(API_TOKEN_PATTERN);
+    expect(out.join("").trim()).toMatch(TOKEN_PATTERN);
     expect(out.join("")).not.toMatch(/Stored at/);
   });
 
@@ -350,10 +329,10 @@ describe("ghostd api-token", () => {
     out.length = 0;
     expect(run(["--rotate"])).toBe(0);
     const after = out.join("").split("\n")[0];
-    expect(after).toMatch(API_TOKEN_PATTERN);
+    expect(after).toMatch(TOKEN_PATTERN);
     expect(after).not.toBe(before);
     expect(out.join("")).toMatch(/no longer works/);
-    expect(readApiToken({ path: path() })).toBe(after);
+    expect(apiToken.read({ path: path() })).toBe(after);
     expect((await stat(path())).mode & 0o777).toBe(0o600);
   });
 

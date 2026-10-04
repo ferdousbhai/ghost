@@ -6,7 +6,7 @@
  * bytes — so they are tested from bytes, with no socket, no browser, and no
  * daemon anywhere in sight.
  */
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -21,15 +21,7 @@ import {
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "../src/relay-protocol.js";
-import {
-  defaultRelayTokenPath,
-  readOrCreateRelayToken,
-  readRelayToken,
-  RELAY_TOKEN_PATTERN,
-  relayTokenCommand,
-  relayTokenMatches,
-  rotateRelayToken,
-} from "../src/relay-token.js";
+import { relayToken, tokenMatches } from "../src/token-store.js";
 
 const TOKEN = "a".repeat(64);
 
@@ -220,15 +212,15 @@ describe("who may open a relay socket", () => {
 
 describe("constant-time token comparison", () => {
   it("matches only an exact token", () => {
-    expect(relayTokenMatches(TOKEN, TOKEN)).toBe(true);
-    expect(relayTokenMatches(TOKEN, TOKEN.slice(0, 63))).toBe(false);
-    expect(relayTokenMatches(TOKEN, `${TOKEN}x`)).toBe(false);
-    expect(relayTokenMatches(TOKEN, "b".repeat(64))).toBe(false);
+    expect(tokenMatches(TOKEN, TOKEN)).toBe(true);
+    expect(tokenMatches(TOKEN, TOKEN.slice(0, 63))).toBe(false);
+    expect(tokenMatches(TOKEN, `${TOKEN}x`)).toBe(false);
+    expect(tokenMatches(TOKEN, "b".repeat(64))).toBe(false);
   });
 
   it("never matches an empty token, however empty the stored one is", () => {
-    expect(relayTokenMatches("", "")).toBe(false);
-    expect(relayTokenMatches(TOKEN, "")).toBe(false);
+    expect(tokenMatches("", "")).toBe(false);
+    expect(tokenMatches(TOKEN, "")).toBe(false);
   });
 });
 
@@ -245,104 +237,30 @@ describe("the token store", () => {
   });
 
   it("lives under XDG state, not config — it is not something to hand-edit", () => {
-    expect(defaultRelayTokenPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
+    expect(relayToken.defaultPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
       .toBe("/xdg/state/ghost/relay-token");
-    expect(defaultRelayTokenPath({}, "/home/x"))
+    expect(relayToken.defaultPath({}, "/home/x"))
       .toBe("/home/x/.local/state/ghost/relay-token");
     // A relative XDG_STATE_HOME is not a state home.
-    expect(defaultRelayTokenPath({ XDG_STATE_HOME: "relative" }, "/home/x"))
+    expect(relayToken.defaultPath({ XDG_STATE_HOME: "relative" }, "/home/x"))
       .toBe("/home/x/.local/state/ghost/relay-token");
-  });
-
-  it("mints once and reads back the same token forever after", () => {
-    const path = join(dir, "state", "relay-token");
-    const first = readOrCreateRelayToken({ path });
-    expect(first.created).toBe(true);
-    expect(first.token).toMatch(RELAY_TOKEN_PATTERN);
-
-    const second = readOrCreateRelayToken({ path });
-    expect(second.created).toBe(false);
-    expect(second.token).toBe(first.token);
-    expect(readRelayToken({ path })).toBe(first.token);
-  });
-
-  it("writes it 0600, because everything else on this box runs as the same user", async () => {
-    const path = join(dir, "relay-token");
-    readOrCreateRelayToken({ path });
-    expect((await stat(path)).mode & 0o777).toBe(0o600);
-    expect((await readFile(path, "utf8")).trim()).toMatch(RELAY_TOKEN_PATTERN);
-  });
-
-  it("keeps separate token files independent and reports a missing file", () => {
-    const path = join(dir, "relay-token");
-    readOrCreateRelayToken({ path });
-    const other = readOrCreateRelayToken({ path: join(dir, "other") });
-    expect(other.token).not.toBe(readRelayToken({ path }));
-    expect(readRelayToken({ path: join(dir, "nothing-here") })).toBeUndefined();
-  });
-
-  it("rotates to something new, invalidating whatever the extension stored", () => {
-    const path = join(dir, "relay-token");
-    const before = readOrCreateRelayToken({ path }).token;
-    const after = rotateRelayToken({ path }).token;
-    expect(after).not.toBe(before);
-    expect(readRelayToken({ path })).toBe(after);
   });
 
   it("honours GHOSTD_RELAY_TOKEN_FILE so a test never touches the real one", () => {
-    expect(defaultRelayTokenPath({ GHOSTD_RELAY_TOKEN_FILE: "/tmp/t" }, "/home/x")).toBe("/tmp/t");
+    expect(relayToken.defaultPath({ GHOSTD_RELAY_TOKEN_FILE: "/tmp/t" }, "/home/x")).toBe("/tmp/t");
   });
 });
 
 describe("ghostd relay-token", () => {
-  let dir: string;
-  let out: string[];
-  let err: string[];
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "ghost-relay-cli-"));
-    out = [];
-    err = [];
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  const run = (argv: string[]) =>
-    relayTokenCommand(argv, {
-      path: join(dir, "relay-token"),
-      stdout: (text) => out.push(text),
-      stderr: (text) => err.push(text),
-    });
-
-  it("prints the token and says where it lives", () => {
-    expect(run([])).toBe(0);
-    const text = out.join("");
-    expect(text.split("\n")[0]).toMatch(RELAY_TOKEN_PATTERN);
-    expect(text).toMatch(/popup to pair it/);
-    expect(text).toContain(join(dir, "relay-token"));
-  });
-
-  it("prints only the token under --quiet, so it can be piped", () => {
-    expect(run(["--quiet"])).toBe(0);
-    expect(out.join("").trim()).toMatch(RELAY_TOKEN_PATTERN);
-    expect(out.join("")).not.toMatch(/popup/);
-  });
-
-  it("is stable across calls but changes under --rotate", () => {
-    run(["--quiet"]);
-    const first = out.join("").trim();
-    out = [];
-    run(["--quiet"]);
-    expect(out.join("").trim()).toBe(first);
-    out = [];
-    expect(run(["--rotate", "--quiet"])).toBe(0);
-    expect(out.join("").trim()).not.toBe(first);
-  });
-
-  it("refuses an option it does not know rather than guessing", () => {
-    expect(run(["--yolo"])).toBe(2);
-    expect(err.join("")).toMatch(/unknown option --yolo/);
+  it("says what the token is for", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "ghost-relay-cli-"));
+    const out: string[] = [];
+    try {
+      expect(relayToken.command([], { path: join(dir, "relay-token"), stdout: (text) => out.push(text) })).toBe(0);
+      expect(out.join("")).toMatch(/popup to pair it/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
+

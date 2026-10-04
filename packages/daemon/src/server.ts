@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { apiTokenMatches, readOrCreateApiToken } from "./api-token.js";
+import { apiToken as apiTokenStore, tokenMatches } from "./token-store.js";
 import { assertLoopback } from "./config.js";
 import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
 import type { RemoteServe } from "./remote-serve.js";
@@ -281,7 +281,7 @@ function resolveApiToken(
     return null;
   }
   if (configured !== undefined) return configured;
-  const minted = readOrCreateApiToken();
+  const minted = apiTokenStore.readOrCreate();
   // The path, never the token: `ghostd api-token` is the only way to see it.
   logger.info(minted.created ? "minted the API token" : "API token loaded", {
     path: minted.path,
@@ -328,7 +328,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       return null;
     }
     const presented = bearerToken(request.headers.authorization);
-    const tokenOk = presented !== "" && apiTokenMatches(apiToken, presented);
+    const tokenOk = presented !== "" && tokenMatches(apiToken, presented);
     const identity = tokenOk ? undefined : (await remote?.identify(request)) ?? undefined;
     if (!tokenOk && !identity) {
       response.setHeader("www-authenticate", "Bearer");

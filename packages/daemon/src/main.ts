@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
+import { apiToken, relayToken } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { apiTokenCommand } from "./api-token.js";
 import { RemoteAccess } from "./tailscale-identity.js";
 import {
   DEFAULT_SHUTDOWN_FORCE_MS,
@@ -21,7 +21,6 @@ import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { createRelayHub } from "./relay.js";
-import { relayTokenCommand } from "./relay-token.js";
 import { resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
@@ -298,8 +297,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state, and remote touches config and Tailscale Serve.
-  if (argv[0] === "relay-token") return relayTokenCommand(argv.slice(1));
-  if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
+  if (argv[0] === "relay-token") return relayToken.command(argv.slice(1));
+  if (argv[0] === "api-token") return apiToken.command(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "hook-smol-complete") return hookCompleteCommand(argv.slice(1));
 

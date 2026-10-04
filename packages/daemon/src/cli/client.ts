@@ -1,4 +1,4 @@
-import { defaultApiTokenPath, readApiToken } from "../api-token.js";
+import { apiToken } from "../token-store.js";
 import { loadConfig } from "../config.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import { describeErrorBody } from "./output.js";
@@ -108,8 +108,8 @@ export class DaemonClient {
     }
     const host = config.host === "::1" ? "[::1]" : config.host;
     this.baseUrl = `http://${host}:${config.port}`;
-    this.tokenPath = defaultApiTokenPath(runtime.env, runtime.home);
-    this.#tokenValue = readApiToken({ env: runtime.env, home: runtime.home });
+    this.tokenPath = apiToken.defaultPath(runtime.env, runtime.home);
+    this.#tokenValue = apiToken.read({ env: runtime.env, home: runtime.home });
   }
 
   async #fetch(
@@ -141,7 +141,7 @@ export class DaemonClient {
     }
     if (response.status === 401 && retry) {
       await response.body?.cancel().catch(() => undefined);
-      this.#tokenValue = readApiToken({ env: this.#runtime.env, home: this.#runtime.home });
+      this.#tokenValue = apiToken.read({ env: this.#runtime.env, home: this.#runtime.home });
       return this.#fetch(path, init, false, timeoutMs);
     }
     return response;

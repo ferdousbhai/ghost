@@ -409,3 +409,20 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
 
   return { filename: spec.filename, defaultPath, read, readOrCreate, rotate, command };
 }
+
+/** The HTTP API's bearer token. Local API clients read the file directly. */
+export const apiToken = createTokenStore({
+  filename: "api-token",
+  envVar: "GHOSTD_API_TOKEN_FILE",
+  command: "api-token",
+  purpose: "Local API clients read this file directly; this printout is for"
+    + " debugging and scripts.",
+});
+
+/** The relay's pairing token, pasted into the relay extension's popup. */
+export const relayToken = createTokenStore({
+  filename: "relay-token",
+  envVar: "GHOSTD_RELAY_TOKEN_FILE",
+  command: "relay-token",
+  purpose: "Paste this into the Ghost relay extension's popup to pair it.",
+});

@@ -48,7 +48,7 @@ import {
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
 } from "./relay-protocol.js";
-import { defaultRelayTokenPath, readOrCreateRelayToken } from "./relay-token.js";
+import { relayToken } from "./token-store.js";
 
 export const RELAY_PING_INTERVAL_MS = 20_000;
 export const RELAY_HELLO_TIMEOUT_MS = 5_000;
@@ -168,7 +168,7 @@ export class RelayHub implements RelayTransport {
     // `createDaemonServer` does, including in tests; minting a secret into the
     // developer's real home as a side effect of building an object is not.
     this.#token = options.token;
-    this.tokenPath = options.token ? null : defaultRelayTokenPath();
+    this.tokenPath = options.token ? null : relayToken.defaultPath();
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
     this.#helloTimeoutMs = options.helloTimeoutMs ?? RELAY_HELLO_TIMEOUT_MS;
@@ -365,7 +365,7 @@ export class RelayHub implements RelayTransport {
    * disk at all.
    */
   #tokenOrMint(): string {
-    if (this.#token === undefined) this.#token = readOrCreateRelayToken().token;
+    if (this.#token === undefined) this.#token = relayToken.readOrCreate().token;
     return this.#token;
   }
 

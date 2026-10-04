@@ -9,7 +9,7 @@ import {
   type RelayOp,
 } from "@ghost/extensions";
 import type { IncomingHttpHeaders } from "node:http";
-import { relayTokenMatches } from "./relay-token.js";
+import { tokenMatches } from "./token-store.js";
 
 export {
   RELAY_OPS,
@@ -273,7 +273,7 @@ export function authorizeRelayUpgrade(
     }
     return { ok: true, subprotocol: RELAY_SUBPROTOCOL, pairing: code };
   }
-  if (!relayTokenMatches(expectedToken, presented)) {
+  if (!tokenMatches(expectedToken, presented)) {
     return {
       ok: false,
       status: 401,
