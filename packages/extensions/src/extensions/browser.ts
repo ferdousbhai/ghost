@@ -117,11 +117,9 @@ export function createBrowserExtension(
       parameters: Type.Object({
         action: stringEnum(BROWSER_ACTIONS, {
           description:
-            "open: go to a URL. read: the page as text. find: elements by text or CSS "
-            + "selector, as refs. click, type: act on a ref or selector. screenshot: "
-            + "save a PNG, get its path. back. tab_close: one ghost-created tab. close: "
-            + "this ghost's whole browser workspace and its tabs; the owner's browser "
-            + "stays open.",
+            "close: this ghost's whole browser workspace and its tabs; the owner's "
+            + "browser stays open. tab_close: one ghost-created tab. screenshot: save a "
+            + "PNG, get its path.",
         }),
         url: Type.Optional(Type.String({
           description: "For open: an https URL or a bare domain.",
@@ -131,13 +129,13 @@ export function createBrowserExtension(
           description: "For find: visible text or a CSS selector (selector tried first).",
         })),
         ref: Type.Optional(Type.String({
-          description: "For click, type: a ref from the last find, such as e3.",
+          description: "For click, type, upload: a ref from the last find, such as e3.",
         })),
         selector: Type.Optional(Type.String({
-          description: "For click, type: a CSS selector instead of a ref.",
+          description: "For click, type, upload: a CSS selector instead of a ref.",
         })),
         text: Type.Optional(Type.String({
-          description: "For type: the field's new text.",
+          description: "For type: the field's new text. For key: the character a printable key inserts.",
         })),
         submit: Type.Optional(Type.Boolean({
           description: "For type: press Enter after typing. Off by default; submitting is not reversible.",
@@ -165,13 +163,11 @@ export function createBrowserExtension(
           description: "For scroll: vertical pixels, positive down.",
         })),
         x: Type.Optional(Type.Number({
-          description: "For scroll: x the wheel is over, default centre.",
+          description: "For scroll: where the wheel is, default centre. For drag: the start, viewport pixels.",
         })),
         y: Type.Optional(Type.Number({
-          description: "For scroll: y the wheel is over, default centre.",
+          description: "For scroll, drag: as x.",
         })),
-        from_x: Type.Optional(Type.Number({ description: "For drag: start x, viewport pixels." })),
-        from_y: Type.Optional(Type.Number({ description: "For drag: start y." })),
         to_x: Type.Optional(Type.Number({ description: "For drag: end x." })),
         to_y: Type.Optional(Type.Number({ description: "For drag: end y." })),
         drag_steps: Type.Optional(Type.Integer({
@@ -185,11 +181,8 @@ export function createBrowserExtension(
         modifiers: Type.Optional(Type.Array(Type.String(), {
           description: "For key: held modifiers among Control, Alt, Shift, Meta.",
         })),
-        key_text: Type.Optional(Type.String({
-          description: "For key: the character to insert when the key is printable.",
-        })),
         paths: Type.Optional(Type.Array(Type.String(), {
-          description: "For upload: absolute local paths for the file input at ref or selector.",
+          description: "For upload: absolute local paths for the file input.",
         })),
         width: Type.Optional(Type.Integer({
           description: "For resize: window width.",
@@ -390,24 +383,24 @@ export function createBrowserExtension(
 
           case "drag": {
             if (
-              params.from_x === undefined || params.from_y === undefined
+              params.x === undefined || params.y === undefined
               || params.to_x === undefined || params.to_y === undefined
             ) {
               throw new GhostBrowserError(
                 "invalid_input",
-                "action \"drag\" needs from_x, from_y, to_x, and to_y.",
+                "action \"drag\" needs x, y, to_x, and to_y.",
               );
             }
             const page = await session.drag({
-              fromX: params.from_x,
-              fromY: params.from_y,
+              fromX: params.x,
+              fromY: params.y,
               toX: params.to_x,
               toY: params.to_y,
               ...(params.drag_steps === undefined ? {} : { steps: params.drag_steps }),
               ...operation,
             });
             return textResult(
-              `Dragged from (${params.from_x}, ${params.from_y}) to (${params.to_x}, ${params.to_y}).`,
+              `Dragged from (${params.x}, ${params.y}) to (${params.to_x}, ${params.to_y}).`,
               { action: "drag", ...page },
             );
           }
@@ -419,7 +412,7 @@ export function createBrowserExtension(
             const page = await session.key({
               key: params.key,
               ...(params.modifiers === undefined ? {} : { modifiers: params.modifiers }),
-              ...(params.key_text === undefined ? {} : { text: params.key_text }),
+              ...(params.text === undefined ? {} : { text: params.text }),
               ...operation,
             });
             const chord = [...(params.modifiers ?? []), params.key].join("+");

@@ -908,8 +908,8 @@ describe("navigation, input, and scripting actions", () => {
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     await harness.call(GHOST_BROWSER, {
       action: "drag",
-      from_x: 10,
-      from_y: 20,
+      x: 10,
+      y: 20,
       to_x: 30,
       to_y: 40,
     });
@@ -921,7 +921,7 @@ describe("navigation, input, and scripting actions", () => {
     const harness = await browserHarness();
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     const error = await expectGhostError(
-      harness.call(GHOST_BROWSER, { action: "drag", from_x: 1, from_y: 2 }),
+      harness.call(GHOST_BROWSER, { action: "drag", x: 1, y: 2 }),
     );
     expect(error.code).toBe("invalid_format");
   });
@@ -936,6 +936,14 @@ describe("navigation, input, and scripting actions", () => {
     });
     const pressed = backend.calls.findLast((call) => call.name === "key");
     expect(pressed?.args[0]).toMatchObject({ key: "a", modifiers: ["Control"] });
+  });
+
+  it("hands a printable key its character through text", async () => {
+    const harness = await browserHarness();
+    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
+    await harness.call(GHOST_BROWSER, { action: "key", key: "KeyA", text: "a" });
+    const pressed = backend.calls.findLast((call) => call.name === "key");
+    expect(pressed?.args[0]).toMatchObject({ key: "KeyA", text: "a" });
   });
 
   it("runs javascript and returns its value, framed as untrusted", async () => {
@@ -1465,8 +1473,8 @@ describe("the backend is a choice, and policy sits above it", () => {
       .rejects.toThrowError(/finite numeric/);
     await expect(harness.call(GHOST_BROWSER, {
       action: "drag",
-      from_x: 0,
-      from_y: 0,
+      x: 0,
+      y: 0,
       to_x: Number.POSITIVE_INFINITY,
       to_y: 1,
     })).rejects.toThrowError(/finite numeric/);
