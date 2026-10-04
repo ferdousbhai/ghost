@@ -109,15 +109,11 @@ permissions, compaction, and retries, all configured by the owner exactly as
 when they run it by hand. Ghost brings the character, the conversation log,
 the owner's hooks, and the choice of harness.
 
-The choice is per turn: the harness already carrying the conversation, then
-the ghost's `harness` setting, then Omarchy's default agent, then any other
-installed harness Omarchy's usage records say has room. A harness that cannot
-start the turn (not signed in, out of quota) hands it to the next, which is
-given the conversation so far from the log. That is how a ghost spends the
-owner's subscriptions and limits rather than a per-token API key of its own;
-with none yet, OpenCode's free models answer. The owner (or the ghost, asked)
-can switch a conversation to another agent or set the ghost's preferred one,
-from the HUD's harness picker or `ghost switch` / `ghost harness`.
+The choice is per turn, and a harness that cannot start (not signed in, out
+of quota) hands the turn to the next with the conversation so far; the order
+is in [`CONTRACTS.md`](../CONTRACTS.md) under "Harnesses". That is how a ghost
+spends the owner's subscriptions and limits rather than a per-token API key
+of its own; with none yet, OpenCode's free models answer.
 
 The session receives the Ghost-owned context: the character and the stable
 policy sections, listed in `prompt-budget.test.ts`. Each says only what the
