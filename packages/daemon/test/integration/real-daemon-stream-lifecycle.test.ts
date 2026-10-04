@@ -77,37 +77,37 @@ async function startWhenFree(harness: RealDaemonHarness, sessionId: string, prom
 }
 
 describe("real ghostd streaming lifecycle", () => {
-  it("runs a steer queued during a tool-heavy pass as a follow-up, with exactly one terminal", async () => {
+  it("runs a follow-up queued during a tool-heavy pass as a follow-up, with exactly one terminal", async () => {
     const pass = await startGated((gate) => [
       gate({ events: [...toolCalls(8), text("The tool-heavy pass is complete.")] }),
       { events: [text("Kept it concise.")] },
     ]);
 
-    const stream = await daemon!.startTurn("conv-steering", "Run the long integration task.");
+    const stream = await daemon!.startTurn("conv-follow-up", "Run the long integration task.");
     expect(stream.status).toBe(200);
     expect(stream.headers["content-type"]).toContain("text/event-stream");
     await stream.waitForEvent("start");
     await daemon!.waitForLaunches(1);
 
-    const steeringText = "Keep the remaining tool work concise.";
+    const followUpText = "Keep the remaining tool work concise.";
     const queued = await daemon!.request<{ streaming: boolean; count: number; followUp: string[] }>(
       "POST",
-      "/api/ghosts/casper/sessions/conv-steering/queue",
-      { mode: "steer", text: steeringText },
+      "/api/ghosts/casper/sessions/conv-follow-up/queue",
+      { text: followUpText },
     );
     expect(queued.status).toBe(200);
-    expect(queued.body).toEqual({ streaming: true, count: 1, followUp: [steeringText] });
+    expect(queued.body).toEqual({ streaming: true, count: 1, followUp: [followUpText] });
 
     pass.release();
-    await within(stream.completion, "the steered SSE stream to reach EOF");
+    await within(stream.completion, "the followed-up SSE stream to reach EOF");
 
     const ownerIndex = stream.events.findIndex((event) => event.type === "owner_message");
-    expect(stream.events[ownerIndex]).toEqual({ type: "owner_message", text: steeringText });
+    expect(stream.events[ownerIndex]).toEqual({ type: "owner_message", text: followUpText });
     expect(stream.events.slice(0, ownerIndex).filter((event) => event.type === "tool_execution_end")).toHaveLength(8);
     expect(stream.events.slice(ownerIndex + 1).some((event) => event.type === "text_start")).toBe(true);
     expect(daemon!.harness.calls().map((call) => [call.prompt, call.resume])).toEqual([
       ["Run the long integration task.", false],
-      [steeringText, true],
+      [followUpText, true],
     ]);
     expect(terminalEvents(stream.events)).toEqual([
       expect.objectContaining({ type: "done", reason: "stop" }),

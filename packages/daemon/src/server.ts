@@ -535,20 +535,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
   };
 
-  const handleGreeting = async (
-    ghostName: string,
-    request: IncomingMessage,
-    response: ServerResponse,
-  ): Promise<void> => {
-    try {
-      await readJsonBody(request, maxBodyBytes);
-    } catch (error) {
-      // Greeting has no request fields; only a size violation is meaningful.
-      if (error instanceof TurnRequestError && error.code === "payload_too_large") throw error;
-    }
-    jsonResponse(response, 200, await options.host.greeting(ghostName));
-  };
-
   const handleDeleteSession = async (
     ghostName: string,
     conversationId: string,
@@ -967,11 +953,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { mode, text } = body as { mode?: unknown; text?: unknown };
-    if (mode !== "steer" && mode !== "followUp") {
-      errorResponse(response, 400, "invalid_request", '"mode" must be "steer" or "followUp".');
-      return;
-    }
+    const { text } = body as { text?: unknown };
     if (typeof text !== "string" || text.trim() === "") {
       errorResponse(response, 400, "invalid_request", '"text" must be a non-empty string.');
       return;
@@ -982,7 +964,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       await options.host.queueMessage(
         ghostName,
         conversationId,
-        mode,
         text.trim(),
       ),
     );
@@ -1245,13 +1226,6 @@ export function createDaemonServer(options: ServerOptions): Server {
             return;
           }
           return await handleRenameGhost(ghostName, request, response);
-        }
-        if (segments.length === 4 && segments[3] === "greeting") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleGreeting(ghostName, request, response);
         }
         if (segments.length === 4 && segments[3] === "sessions") {
           if (method !== "GET") {

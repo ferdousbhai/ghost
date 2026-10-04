@@ -218,7 +218,7 @@ describe("queued follow-ups and aborts", () => {
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
     expect(sessions.queuedMessages("casper", "c1").streaming).toBe(true);
-    await sessions.queueMessage("casper", "c1", "steer", "two");
+    await sessions.queueMessage("casper", "c1", "two");
     gate.release();
     await running;
 
@@ -230,7 +230,7 @@ describe("queued follow-ups and aborts", () => {
 
   it("refuses a queued message when nothing is streaming", async () => {
     const sessions = host({ harnesses: [harness(replies("x"))] });
-    await expect(sessions.queueMessage("casper", "c1", "followUp", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
+    await expect(sessions.queueMessage("casper", "c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
   });
 
   it("kills the harness on abort and ends the turn aborted", async () => {
@@ -330,7 +330,7 @@ describe("owner commands and hooks", () => {
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    await sessions.queueMessage("casper", "c1", "followUp", "two");
+    await sessions.queueMessage("casper", "c1", "two");
     gate.release();
     await running;
 
@@ -347,7 +347,7 @@ describe("owner commands and hooks", () => {
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
     await waitFor(() => existsSync(stop.started));
-    await sessions.queueMessage("casper", "c1", "followUp", "two");
+    await sessions.queueMessage("casper", "c1", "two");
     writeFileSync(stop.go, "");
     await running;
 

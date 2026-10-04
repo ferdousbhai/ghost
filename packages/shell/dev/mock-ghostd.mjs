@@ -1027,10 +1027,6 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 200, mcpSnapshot(name));
     }
   }
-  if (parts[3] === "greeting" && parts.length === 4 && req.method === "POST") {
-    await readBody(req).catch(() => ({}));
-    return json(res, 200, { greeting: null, onboarding: ONBOARDING.has(name) });
-  }
   if (parts[3] === "harness" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, harnessSnapshot(name));
   }
@@ -1119,11 +1115,6 @@ const mockServer = createServer(async (req, res) => {
     if (req.method === "POST") {
       const body = await readBody(req).catch(() => ({}));
       const text = typeof body?.text === "string" ? body.text.trim() : "";
-      if (body?.mode !== "steer" && body?.mode !== "followUp") {
-        return json(res, 400, {
-          error: { message: 'mode must be "steer" or "followUp"', code: "invalid_request" },
-        });
-      }
       if (text === "") {
         return json(res, 400, {
           error: { message: "text must not be empty", code: "invalid_request" },
@@ -1134,7 +1125,6 @@ const mockServer = createServer(async (req, res) => {
           error: { message: "this conversation is not streaming", code: "session_not_streaming" },
         });
       }
-      // A steer is accepted but runs as a follow-up after the current pass.
       turn.followUp.push(text);
       return json(res, 200, snapshot());
     }

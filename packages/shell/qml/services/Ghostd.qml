@@ -2980,7 +2980,7 @@ Singleton {
         root.dispatch(xhr, "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue",
             ({ "Content-Type": "application/json" }),
-            JSON.stringify({ mode: "followUp", text: prompt }));
+            JSON.stringify({ text: prompt }));
     }
 
 

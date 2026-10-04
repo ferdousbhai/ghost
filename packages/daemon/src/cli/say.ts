@@ -68,12 +68,9 @@ export async function sayCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
-  const steering = flagBoolean(parsed, "steer");
   const followUp = flagBoolean(parsed, "follow-up");
   const startNew = flagBoolean(parsed, "new");
-  if ([steering, followUp, startNew].filter(Boolean).length > 1) {
-    throw new ArgsError("--new, --steer, and --follow-up are mutually exclusive");
-  }
+  if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
   const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
@@ -81,19 +78,16 @@ export async function sayCommand(
 
   // The conversation an idle --follow-up turns into a fresh turn of.
   let idleFollowUp: string | undefined;
-  if (steering || followUp) {
+  if (followUp) {
     const { session, path } = await resolveTarget(ctx.client, ctx, parsed);
     try {
-      const response = await ctx.client.request("POST", `${path}/queue`, {
-        mode: steering ? "steer" : "followUp",
-        text,
-      });
+      const response = await ctx.client.request("POST", `${path}/queue`, { text });
       emit(ctx, response.body);
       return 0;
     } catch (error) {
       // A follow-up to an idle conversation is its next turn: this is how a
       // background command wakes the ghost that started it.
-      if (!followUp || !(error instanceof CliError) || error.code !== "session_not_streaming") throw error;
+      if (!(error instanceof CliError) || error.code !== "session_not_streaming") throw error;
       idleFollowUp = session.id;
     }
   }

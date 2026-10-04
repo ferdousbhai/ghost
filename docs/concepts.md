@@ -30,7 +30,7 @@ when it is used ([`ghosts.ts`](../packages/daemon/src/ghosts.ts),
   ghost carries a first-meeting section that asks it to learn about the owner
   in the gaps and to show a character draft before writing one. Writing the
   file removes that section on the next conversation, so onboarding ends by
-  itself ([`greeting.ts`](../packages/daemon/src/greeting.ts)).
+  itself ([`persona.ts`](../packages/runtime/src/persona.ts)).
 - Notes are not in the home: a ghost's facts, decisions, and reflections are
   Markdown files under the owner's Documents directory, shared with every
   ghost and the owner.
@@ -46,7 +46,7 @@ owner documents, screenshots, downloads, or timers.
 Everything durable belongs to exactly one of three scopes. Choosing the wrong
 one is the most common modelling mistake in this system, so the boundary is
 enforced in the system prompt as well as in code
-([`machine-skills.ts`](../packages/daemon/src/machine-skills.ts)).
+([`prompt-policy.ts`](../packages/daemon/src/prompt-policy.ts)).
 
 | Scope | Holds | Owned by |
 |---|---|---|

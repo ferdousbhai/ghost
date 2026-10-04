@@ -40,7 +40,7 @@ import {
 } from "./conversation-log.js";
 import { closeBrowserSession, resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
-import { assertValidGhostName, GhostError, ghostPaths, readCharacterFile, type Ghost, type GhostRegistry } from "./ghosts.js";
+import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
@@ -154,7 +154,6 @@ export interface QueuedMessages {
   followUp: readonly string[];
 }
 
-export type QueueMode = "steer" | "followUp";
 
 export interface SessionSummary {
   id: string;
@@ -198,11 +197,6 @@ export interface HarnessChoices {
   ghostDefault: string | null;
   /** Omarchy's default agent, the next preference after the ghost's own. */
   omarchyDefault: string | null;
-}
-
-export interface GreetingResult {
-  greeting: string | null;
-  onboarding: boolean;
 }
 
 interface LiveTurn {
@@ -898,11 +892,8 @@ export class SessionHost {
     return { streaming: turn !== undefined, count: turn?.followUps.length ?? 0, followUp: [...(turn?.followUps ?? [])] };
   }
 
-  /**
-   * Queue text for after the current pass. A harness takes no input mid-run,
-   * so a steer is a follow-up too: it runs as soon as the current pass ends.
-   */
-  async queueMessage(ghostName: string, sessionId: string | null | undefined, _mode: QueueMode, text: string): Promise<QueuedMessages> {
+  /** Queue text for after the current pass; a harness takes no input mid-run. */
+  async queueMessage(ghostName: string, sessionId: string | null | undefined, text: string): Promise<QueuedMessages> {
     this.registry.get(ghostName);
     const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
     if (!turn) {
@@ -1095,18 +1086,6 @@ export class SessionHost {
     } finally {
       this.deleting.delete(key);
     }
-  }
-
-  /** The owner's first-meeting state; Ghost generates no greeting of its own. */
-  async greeting(ghostName: string): Promise<GreetingResult> {
-    const ghost = this.registry.get(ghostName);
-    let onboarding = false;
-    try {
-      onboarding = isSeededCharacter(ghost.name, readCharacterFile(ghost.dir));
-    } catch {
-      // An unreadable character is not evidence of a new ghost.
-    }
-    return { greeting: null, onboarding };
   }
 
   // ── Ghost lifecycle ───────────────────────────────────────────────────

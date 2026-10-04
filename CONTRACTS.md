@@ -254,7 +254,7 @@ owner's `!command` runs in the owner home with the conversation's identity
 and is logged; `!!command` is logged but never handed on.
 
 A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
---follow-up`) runs as the next pass in the same stream, a steer included. A
+--follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation.
 Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
@@ -377,14 +377,13 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
-| `POST /api/ghosts/:name/greeting` | `{ greeting: null, onboarding }`: whether the character is still the seed. Ghost generates no greeting. |
 | `POST /api/ghosts/:name/messages` | One turn as the turn wire below. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated, historyTruncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
-| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, count, followUp }`) or enqueue text into a live turn; it runs as the next pass of the same stream, a `steer` included. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
+| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, count, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | Effective owner/guest identity. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |

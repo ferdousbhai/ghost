@@ -798,12 +798,12 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     body: JSON.stringify(body),
   });
 
-  it("queues a steer during a live turn and runs it as the next pass of the same stream", async () => {
+  it("queues a follow-up during a live turn and runs it as the next pass of the same stream", async () => {
     const { base, release } = await serveHeld(replies("Kept it understated."));
     const turn = postTurn(base, turnBody("conv-queue", "Set the type."));
     await waitForLaunches(1);
 
-    const queued = await enqueue(base, "conv-queue", { mode: "steer", text: "Keep the result understated." });
+    const queued = await enqueue(base, "conv-queue", { text: "Keep the result understated." });
     expect(queued.status).toBe(200);
     expect(await queued.json()).toEqual({
       streaming: true,
@@ -812,7 +812,7 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     });
     expect(await (await fetch(queueUrl(base, "conv-queue"))).json()).toMatchObject({ streaming: true, count: 1 });
 
-    for (const body of [{ mode: "later", text: "x" }, { mode: "followUp", text: "   " }, { mode: "steer" }]) {
+    for (const body of [{ text: "   " }, {}]) {
       const response = await enqueue(base, "conv-queue", body);
       expect(response.status, JSON.stringify(body)).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: "invalid_request" } });
@@ -828,7 +828,7 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
 
     expect(await (await fetch(queueUrl(base, "conv-queue"))).json())
       .toEqual({ streaming: false, count: 0, followUp: [] });
-    const tooLate = await enqueue(base, "conv-queue", { mode: "followUp", text: "Too late" });
+    const tooLate = await enqueue(base, "conv-queue", { text: "Too late" });
     expect(tooLate.status).toBe(409);
     expect(await tooLate.json()).toMatchObject({ error: { code: "session_not_streaming" } });
     expect((await fetch(queueUrl(base, "conv-queue"), { method: "DELETE" })).status).toBe(405);

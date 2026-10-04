@@ -136,22 +136,6 @@ export function ghostPaths(dir: string): {
 }
 
 /**
- * The character file's raw bytes, or null when the ghost has none.
- *
- * Raw rather than parsed on purpose: both callers are asking "has the owner
- * been here yet", which is a question about the file as written, not about the
- * persona it parses into.
- */
-export function readCharacterFile(dir: string): string | null {
-  try {
-    return readFileSync(ghostPaths(dir).characterFile, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-/**
  * Re-render the daemon-authored seed under its new name. Anything that differs
  * from the seed is owner-authored character and remains byte-for-byte.
  */
