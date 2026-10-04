@@ -31,7 +31,6 @@ import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
 import { sessionActionCommand, sessionsCommand, showCommand } from "./sessions.js";
-import { renderSkillText, skillCommand } from "./skill.js";
 import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
@@ -237,7 +236,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "harness",
     usage: "harness [<agent>|--none] [-g <name>] [--json] [-q]",
-    summary: "Show the agents a ghost can run on, or set the one it prefers (--none: automatic).",
+    summary: "Show or set the agent a ghost prefers (--none: automatic).",
     example: "ghost harness claude",
     positionals: [0, 1],
     run: harnessCommand,
@@ -266,14 +265,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost smoke --no-turn --json",
     positionals: [0, 0],
     run: smokeCommand,
-  },
-  {
-    verb: "skill",
-    usage: "skill [--json] [-q]",
-    summary: "Print the agent-oriented command reference.",
-    example: "ghost skill",
-    positionals: [0, 0],
-    run: (parsed, ctx) => skillCommand(parsed, ctx, renderSkillText(COMMANDS, EXIT_CODES)),
   },
   {
     verb: "help",

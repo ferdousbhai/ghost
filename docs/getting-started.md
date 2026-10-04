@@ -135,7 +135,7 @@ default for new conversations and "automatic" sets that back. From the terminal,
 same commands:
 
 ```sh
-ghost harness            # the agents, and which this ghost prefers
+ghost harness            # which agent this ghost prefers
 ghost harness codex      # prefer codex for this ghost (--none: automatic)
 ghost switch claude      # run this conversation's next turn on claude
 ```
@@ -195,8 +195,7 @@ it does immediately, and the reverse.
 
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
-codes. `ghost skill` prints this command reference as an installable agent
-skill, so another agent on this machine can drive the same client.
+codes.
 
 ## 8. Where everything lives
 

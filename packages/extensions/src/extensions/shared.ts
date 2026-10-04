@@ -53,7 +53,7 @@ export async function untrustedTextResult<TDetails extends object>(
   details: TDetails,
   source: string,
 ): Promise<GhostToolResult<TDetails & InjectionFlagDetails>> {
-  const detection = await detectInjection(text, { source });
+  const detection = detectInjection(text);
   const fenced = fenceUntrusted(text, { source });
   const protectedText = detection.flagged
     ? `${INJECTION_WARNING}\n${fenced}`

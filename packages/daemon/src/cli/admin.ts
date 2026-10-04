@@ -111,17 +111,15 @@ export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
 }
 
 interface HarnessChoicesBody {
-  harnesses: Array<{ id: string; eligible: boolean; reason: string | null }>;
   ghostDefault: string | null;
   omarchyDefault: string | null;
 }
 
+/** The preference only; `ghost harnesses` lists the agents and their room. */
 function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
   const preferred = body.ghostDefault
     ?? (body.omarchyDefault ? `automatic (Omarchy default: ${body.omarchyDefault})` : "automatic");
-  const rows = body.harnesses.map((harness) =>
-    `  ${harness.id}${harness.eligible ? "" : ` (no room: ${harness.reason})`}`);
-  return `${name} runs on ${preferred}\n${rows.join("\n")}\n`;
+  return `${name} runs on ${preferred}\n`;
 }
 
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */

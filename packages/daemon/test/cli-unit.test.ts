@@ -6,7 +6,6 @@ import { EXIT_CODES } from "../src/cli/client.js";
 import { latestSession, resolveSessionPrefix } from "../src/cli/common.js";
 import { COMMANDS } from "../src/cli/main.js";
 import { relativeTime } from "../src/cli/output.js";
-import { renderSkillText } from "../src/cli/skill.js";
 import type { CliFetch } from "../src/cli/types.js";
 import { runCli } from "./helpers/cli.js";
 
@@ -178,14 +177,6 @@ describe("ghost help", () => {
     const codes = await runCli(["help", "exit-codes"]);
     expect(codes.code).toBe(0);
     for (const { code } of EXIT_CODES) expect(codes.stdout).toContain(`  ${code}  `);
-  });
-});
-
-describe("ghost skill", () => {
-  it("mentions every command and stays concise", () => {
-    const skill = renderSkillText(COMMANDS, EXIT_CODES);
-    for (const command of COMMANDS) expect(skill).toContain(`ghost ${command.verb}`);
-    expect(skill.split("\n").length).toBeLessThan(120);
   });
 });
 

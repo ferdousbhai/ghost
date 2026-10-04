@@ -96,7 +96,7 @@ describe("ghost CLI against a real daemon server", () => {
   it("shows and sets the agent a ghost prefers, and switches a conversation", async () => {
     const shown = await cli(["harness", "-g", "casper"]);
     expect(shown).toMatchObject({ code: 0 });
-    expect(shown.stdout).toBe("casper runs on automatic\n  fake\n");
+    expect(shown.stdout).toBe("casper runs on automatic\n");
     expect(await cli(["harness", "fake", "-g", "casper", "-q"])).toMatchObject({ code: 0 });
     expect((await cli(["harness", "-g", "casper"])).stdout).toContain("casper runs on fake");
     expect(await cli(["harness", "--none", "-g", "casper", "-q"])).toMatchObject({ code: 0 });

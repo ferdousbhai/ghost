@@ -50,20 +50,3 @@ export function renderExitCodes(exitCodes: readonly ExitCodeDocumentation[]): st
     .map(({ code, meaning }) => `  ${String(code).padStart(width)}  ${meaning}`)
     .join("\n")}\n`;
 }
-
-export function markdownCommandTable(commands: readonly CommandDocumentation[]): string {
-  return [
-    "| command | purpose | example |",
-    "|---|---|---|",
-    ...commands.map((command) =>
-      `| \`ghost ${command.verb}\` | ${command.summary} | \`${command.example}\` |`),
-  ].join("\n");
-}
-
-export function markdownExitCodeTable(exitCodes: readonly ExitCodeDocumentation[]): string {
-  return [
-    "| code | meaning |",
-    "|---:|---|",
-    ...exitCodes.map(({ code, meaning }) => `| ${code} | ${meaning} |`),
-  ].join("\n");
-}

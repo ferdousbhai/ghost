@@ -91,7 +91,7 @@ function harnesses(): string[] {
     "`ghost delegate` refreshes that harness's usage, refuses it (exit 6) when a window is nearly spent or a weekly one is ahead of pace, or (exit 5) when it is not installed, else runs it here, streams its output, and exits with its status. `ghost harnesses` lists which have room. Every attempt is recorded for the owner.",
     "`ghost delegate` gives claude and codex runs your own tools through `ghost mcp serve`, so they can use your browser and desktop.",
     "When the owner named the harness (\"have codex do it\"), pass `--owner-named` before it: `ghost delegate --owner-named codex -- exec \"<task>\"`. The receipts record who picked.",
-    "Your own turns run on one of these agents too. `ghost harness` lists them and which this ghost prefers; `ghost harness <agent>` sets that preference (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
+    "Your own turns run on one of these agents too. `ghost harness` shows which this ghost prefers; `ghost harness <agent>` sets it (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
   ];
 }

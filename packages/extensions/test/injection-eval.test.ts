@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  HeuristicInjectionDetector,
+  detectInjection,
   INJECTION_REASONS,
   type InjectionDetection,
 } from "../src/untrusted.js";
@@ -360,7 +360,7 @@ function summarizeEvaluation(
 
 describe("prompt-injection detection evaluation", () => {
   it("keeps heuristic recall and false-positive rate within measured bounds", () => {
-    const detector = new HeuristicInjectionDetector();
+    const detector = { detect: detectInjection };
     const injectionResults = INJECTION_SAMPLES.map((sample) =>
       detector.detect(sample.text)
     );
@@ -368,7 +368,7 @@ describe("prompt-injection detection evaluation", () => {
       detector.detect(sample.text)
     );
     const { recall, fpr } = summarizeEvaluation(
-      "HeuristicInjectionDetector evaluation",
+      "detectInjection evaluation",
       injectionResults,
       benignResults,
     );
