@@ -96,6 +96,7 @@ describe("launch lines", () => {
       pi: ["--thinking", "low"],
       crush: ["--reasoning-effort", "low"],
       muse: ["--reasoning-effort", "low"],
+      agy: ["--effort", "low"],
     };
     for (const [id, pair] of Object.entries(flags)) {
       expect(harnessRow(id)?.launch(TURN).argv, id).toEqual(expect.arrayContaining(pair));

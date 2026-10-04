@@ -477,7 +477,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "agy",
     launch: (turn) => ({
       argv: [
-        "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions",
+        "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", "low",
         ...(turn.resume ? ["--continue"] : []),
       ],
       files: turn.mcp.length > 0 ? { ".gemini/settings.json": writeJson(mcpServersJson(turn.mcp)) } : {},
