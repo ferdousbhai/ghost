@@ -166,9 +166,9 @@ GHOSTS_ROOT=/tmp/ghost-canary/ghosts \
   bun ~/src/ghost/packages/daemon/dist/main.js --port 7799
 ```
 
-Point the client at it with `GHOSTD_PORT=7799 ghost status`. Two daemons cannot
-share a ghosts root: the second one fails on the home reservation rather than
-corrupting the first.
+Point the client at it with `GHOSTD_PORT=7799 ghost status`. Nothing stops two
+daemons sharing a ghosts root; only the single `ghostd.service` unit keeps one,
+so give a canary its own root.
 
 Never port 7717. Never `~/ghosts`. The live daemon holds both, and a canary that
 touches either is not a canary.

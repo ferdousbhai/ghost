@@ -90,7 +90,6 @@ Deletion goes to freedesktop Trash, with a recoverable `.trash/` fallback for
 `EXDEV`; Ghost never recursively removes a home. Machine credentials, owner
 documents, screenshots, downloads, and timers are not moved with it.
 The lifecycle implementation and crash recovery are in
-[`home-reservation.ts`](packages/daemon/src/home-reservation.ts), and
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
 The checkout a ghost may edit is the clone the daemon was built from

@@ -15,7 +15,6 @@ import {
 import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
-import { acquireHomeReservation, HomeReservationBusyError, type HomeReservation } from "./home-reservation.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
@@ -75,10 +74,6 @@ export interface ParsedArgs {
   logLevel: LogLevel;
   help: boolean;
   version: boolean;
-}
-
-export interface MainRuntime {
-  afterHomeReservationAcquired?: () => Promise<void>;
 }
 
 export interface StagedShutdownOptions {
@@ -293,7 +288,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { overrides, logLevel, help, version };
 }
 
-export async function main(argv: string[] = process.argv.slice(2), runtime: MainRuntime = {}): Promise<number> {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state, and remote touches config and Tailscale Serve.
   if (argv[0] === "relay-token") return relayToken.command(argv.slice(1));
@@ -338,32 +333,7 @@ export async function main(argv: string[] = process.argv.slice(2), runtime: Main
     return 1;
   }
 
-  let homeReservation: HomeReservation;
-  try {
-    homeReservation = await acquireHomeReservation(config.ghostsRoot);
-  } catch (error) {
-    const detail =
-      error instanceof HomeReservationBusyError
-        ? "another ghostd is running"
-        : (error as Error).message;
-    logger.error("could not reserve the ghost home", {
-      ghostsRoot: config.ghostsRoot,
-      error: detail,
-    });
-    return 1;
-  }
-
-  try {
-    await runtime.afterHomeReservationAcquired?.();
-    return await serveDaemon(
-      { ...config, ghostsRoot: homeReservation.ghostsRoot },
-      logger,
-      hooks,
-      hooksPath,
-    );
-  } finally {
-    await homeReservation.close();
-  }
+  return await serveDaemon(config, logger, hooks, hooksPath);
 }
 
 async function serveDaemon(

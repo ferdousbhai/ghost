@@ -45,7 +45,7 @@ export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile
   await writePrivateJsonAtomic(filePath, config);
 }
 
-/** One daemon owns every ghost home, so serializing per file in-process is the whole lock. */
+/** The single ghostd systemd unit keeps one daemon on every ghost home, so serializing per file in-process is the whole lock. */
 const fileLocks = new Map<string, Promise<unknown>>();
 
 export interface MCPConfigMutationOptions {
