@@ -2650,6 +2650,13 @@ Singleton {
         case "owner_message":
             root.receiveOwnerMessageFor(state, event.text || "");
             break;
+        case "hook_start":
+            // ActivityLine shows the name of the hook the turn is waiting on.
+            state.activity = "hook:" + (event.name || "");
+            break;
+        case "hook_end":
+            state.activity = "";
+            break;
         case "session_stop_continued":
             root.receiveSessionStopContinuedFor(state, event.reason || "");
             break;

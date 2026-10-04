@@ -278,12 +278,23 @@ describe("owner commands and hooks", () => {
     writeFileSync(script, `#!/bin/bash\nif [ -e ${marker} ]; then echo '{}'; else touch ${marker}; echo '{"decision":"block","reason":"verify it"}'; fi\n`);
     chmodSync(script, 0o755);
     const hooksPath = join(scratch.path, "hooks.json");
-    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [{ type: "command", command: script }] }] } }));
+    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [{ type: "command", command: script, name: "Review" }] }] } }));
     const fake = harness(replies("done", "verified"));
     const sessions = host({ harnesses: [fake], hooks: GhostHookRunner.fromConfig(hooksPath) });
     const events = await turn(sessions, "do it");
 
-    expect(events).toContainEqual({ type: "session_stop_continued", reason: "verify it" });
+    // Each run of the hook is bracketed by its name, so a client can say what
+    // the turn is waiting on between the reply and the terminal event.
+    const hookEvents = events.filter((event) => event.type === "hook_start" || event.type === "hook_end"
+      || event.type === "session_stop_continued" || event.type === "done");
+    expect(hookEvents).toEqual([
+      { type: "hook_start", name: "Review" },
+      { type: "hook_end", name: "Review" },
+      { type: "session_stop_continued", reason: "verify it" },
+      { type: "hook_start", name: "Review" },
+      { type: "hook_end", name: "Review" },
+      expect.objectContaining({ type: "done" }),
+    ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
     expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
   });

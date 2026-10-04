@@ -51,7 +51,7 @@ import {
   type HarnessMcpServer,
   type HarnessRow,
 } from "./harness-table.js";
-import { GhostHookRunner } from "./hooks.js";
+import { GhostHookRunner, type HookObserver } from "./hooks.js";
 import { homeOperationsFor, type HomeOperationCoordinator } from "./home-operations.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
@@ -576,6 +576,7 @@ export class SessionHost {
     stream.signal?.addEventListener("abort", abort, { once: true });
     if (stream.signal?.aborted) controller.abort();
     const blocks = { next: 0 };
+    const onHook: HookObserver = (name, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name });
     let terminal: TurnEvent = { type: "done", reason: "stop", usage: zeroUsage() };
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
@@ -587,7 +588,7 @@ export class SessionHost {
         await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         if (origin !== "hook") {
-          const context = await this.beforePrompt(ghost, id, text, turnId, controller.signal);
+          const context = await this.beforePrompt(ghost, id, text, turnId, controller.signal, onHook);
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;
         }
         const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, controller.signal);
@@ -599,7 +600,7 @@ export class SessionHost {
         // is not asked while one waits, and loses to one sent while it ran.
         const continuation: string | null = turn.followUps.length > 0
           ? null
-          : await this.sessionStop(ghost, id, text, turnId, origin === "hook", controller.signal);
+          : await this.sessionStop(ghost, id, text, turnId, origin === "hook", controller.signal, onHook);
         if (continuation && turn.followUps.length === 0) {
           stream.emit({ type: "session_stop_continued", reason: continuation });
           next = { text: continuation, origin: "hook" };
@@ -799,7 +800,14 @@ export class SessionHost {
     return { content, error, aborted: false, produced };
   }
 
-  private async beforePrompt(ghost: Ghost, id: string, prompt: string, turnId: number, signal: AbortSignal): Promise<string | null> {
+  private async beforePrompt(
+    ghost: Ghost,
+    id: string,
+    prompt: string,
+    turnId: number,
+    signal: AbortSignal,
+    onHook: HookObserver,
+  ): Promise<string | null> {
     if (!this.hooks.hasHandlers("before_prompt")) return null;
     const { sessionDir } = ghostPaths(ghost.dir);
     const harness = logState((await readLog(sessionDir, id)) ?? []).harness;
@@ -815,7 +823,7 @@ export class SessionHost {
       cwd: conversationDir(sessionDir, id),
       conversation_id: id,
       ...(harness ? { harness } : {}),
-    });
+    }, onHook);
     return result?.additionalContext || null;
   }
 
@@ -826,6 +834,7 @@ export class SessionHost {
     turnId: number,
     active: boolean,
     signal: AbortSignal,
+    onHook: HookObserver,
   ): Promise<string | null> {
     if (!this.hooks.hasHandlers("session_stop") || signal.aborted) return null;
     const { sessionDir } = ghostPaths(ghost.dir);
@@ -849,7 +858,7 @@ export class SessionHost {
       cwd: conversationDir(sessionDir, id),
       conversation_id: id,
       harness,
-    });
+    }, onHook);
     return ghostSessionStopContinuation(result) ?? null;
   }
 

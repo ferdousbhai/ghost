@@ -39,13 +39,15 @@ Item {
         : root.stateLine(Ghostd.activity)
 
     /**
-     * The runtime's own word for a turn that is not inside a tool call. A tool
+     * The runtime's own word for a turn that is not inside a tool call, or the
+     * name of the owner hook it is waiting on. A tool
      * name arriving here is not repeated — {@link toolLine} already said it,
      * with the arguments that make it mean something.
      */
     function stateLine(activity: string): string {
         if (activity === "thinking") return "Thinking";
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
+        if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         return "Working";
     }
 

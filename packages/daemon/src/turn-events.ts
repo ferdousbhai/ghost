@@ -30,6 +30,8 @@ export type TurnEvent =
       type: "session_stop_continued";
       reason: string;
     }
+  | { type: "hook_start"; name: string }
+  | { type: "hook_end"; name: string }
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }

@@ -400,8 +400,9 @@ The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `text_*`, `thinking_*` (only when the daemon is
 told to include thinking), `tool_execution_*`, `owner_message` (a queued
-follow-up starting its pass), and `session_stop_continued` events, and exactly
-one terminal `done` or `error`. A quota refusal is a typed `limit_reached`
+follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
+running, by its `name`), and `session_stop_continued` events, and exactly one
+terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id, tool name, the
 conversation directory, and a bounded output summary. An owner `!command` is

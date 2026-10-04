@@ -49,6 +49,23 @@ TestCase {
         compare(line.phrase, "Working");
     }
 
+    // After the reply, a turn can still be waiting on an owner hook; the line
+    // names it rather than a bare "Working", and lets go when it returns.
+    function test_aRunningHookIsNamed(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        Ghostd.streaming = true;
+        const state = { activity: "" };
+
+        Ghostd.handleTurnEvent(state, { type: "hook_start", name: "Deciding whether to keep going" });
+        Ghostd.activity = state.activity;
+        compare(line.phrase, "Deciding whether to keep going");
+
+        Ghostd.handleTurnEvent(state, { type: "hook_end", name: "Deciding whether to keep going" });
+        Ghostd.activity = state.activity;
+        compare(line.phrase, "Working");
+    }
+
     // A turn's own tool events clear `activity` between every lifecycle step,
     // which is what used to make the copy flicker. The call itself is the
     // steady thing, so it holds the line for the whole of its run.
