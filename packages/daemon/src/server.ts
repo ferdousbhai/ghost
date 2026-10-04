@@ -200,6 +200,39 @@ function decodeConversationId(segment: string): string {
   return requireConversationId(decodePathSegment(segment));
 }
 
+interface Route<C> {
+  readonly methods: readonly string[];
+  readonly path: readonly string[];
+  readonly handle: (context: C) => unknown;
+}
+
+/** `"GET PUT"`, `"api/ghosts/:ghost/character"`: a `:name` segment is a parameter. */
+function route<C>(methods: string, pattern: string, handle: (context: C) => unknown): Route<C> {
+  return { methods: methods.split(" "), path: pattern === "" ? [] : pattern.split("/"), handle };
+}
+
+/** The route for this path and method; a path with no route for the method is a 405. */
+function matchRoute<C>(
+  routes: readonly Route<C>[],
+  segments: readonly string[],
+  method: string,
+): { route: Route<C>; params: Record<string, string> } | 404 | 405 {
+  let pathMatched = false;
+  for (const candidate of routes) {
+    if (candidate.path.length !== segments.length) continue;
+    const params: Record<string, string> = {};
+    const matches = candidate.path.every((part, index) => {
+      const segment = segments[index] as string;
+      if (part.startsWith(":")) params[part.slice(1)] = segment;
+      return part.startsWith(":") || part === segment;
+    });
+    if (!matches) continue;
+    pathMatched = true;
+    if (candidate.methods.includes(method)) return { route: candidate, params };
+  }
+  return pathMatched ? 405 : 404;
+}
+
 function bearerToken(header: string | string[] | undefined): string {
   if (typeof header !== "string") return "";
   const match = /^ *bearer +(\S+) *$/i.exec(header);
@@ -355,6 +388,17 @@ export function createDaemonServer(options: ServerOptions): Server {
     return { identity };
   };
 
+  interface RequestContext {
+    method: string;
+    request: IncomingMessage;
+    response: ServerResponse;
+    url: URL;
+    admission: { identity: TailscaleIdentity | undefined };
+    params: Record<string, string>;
+  }
+  const ghostOf = (params: Record<string, string>) => decodePathSegment(params.ghost ?? "");
+  const conversationOf = (params: Record<string, string>) => decodeConversationId(params.id ?? "");
+
   const handleListGhosts = (response: ServerResponse): void => {
     jsonResponse(response, 200, options.registry.list());
   };
@@ -379,10 +423,6 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     if (method === "GET") {
       jsonResponse(response, 200, { path: config.path, document: config.document });
-      return;
-    }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
     const document = await readJsonBody(request, maxBodyBytes);
@@ -580,10 +620,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, await options.host.listHarnesses(ghostName));
       return;
     }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
     jsonResponse(response, 200, await options.host.setGhostHarness(ghostName, await readHarnessBody(request, true)));
   };
 
@@ -670,10 +706,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, await mcpSnapshot(ghostName));
       return;
     }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
     const body = await readJsonObjectBody(request, maxBodyBytes);
     const { name, config } = body as { name?: unknown; config?: unknown };
     if (typeof name !== "string") {
@@ -707,10 +739,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       jsonResponse(response, 200, snapshot);
       return;
     }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
     const body = await readJsonObjectBody(request, maxBodyBytes);
     const snapshot = await mutateMcp(
       ghostName,
@@ -722,17 +750,12 @@ export function createDaemonServer(options: ServerOptions): Server {
   const handleMcpEnabled = async (
     ghostName: string,
     serverName: string,
-    method: string,
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
     const mcp = options.mcp;
     if (!mcp) {
       errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
-      return;
-    }
-    if (method !== "PUT") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
@@ -891,23 +914,19 @@ export function createDaemonServer(options: ServerOptions): Server {
 
   /** `ghost mcp serve`'s backend: list this conversation's tools, or run one. */
   const handleSessionTools = async (
-    ghostName: string,
-    conversationId: string,
+    { params, request, response, admission }: RequestContext,
     toolName: string | undefined,
-    method: string,
-    request: IncomingMessage,
-    response: ServerResponse,
   ): Promise<void> => {
-    if (toolName === undefined) {
-      if (method !== "GET") {
-        errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-        return;
-      }
-      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversationId) });
+    // Running a tool acts on this desktop directly; a tailnet caller, even
+    // the owner, acts only through the ghost.
+    if (admission.identity) {
+      errorResponse(response, 403, "local_only", "Ghost tools run only for the machine-local token.");
       return;
     }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
+    const ghostName = ghostOf(params);
+    const conversationId = conversationOf(params);
+    if (toolName === undefined) {
+      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversationId) });
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);
@@ -940,10 +959,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       ));
       return;
     }
-    if (method !== "POST") {
-      errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-      return;
-    }
     const body = await readJsonObjectBody(request, maxBodyBytes);
     const { text } = body as { text?: unknown };
     if (typeof text !== "string" || text.trim() === "") {
@@ -960,6 +975,129 @@ export function createDaemonServer(options: ServerOptions): Server {
       ),
     );
   };
+
+  const routes: Route<RequestContext>[] = [
+    route("GET", "", ({ response }) => {
+      response.writeHead(200, {
+        "content-type": "text/html; charset=utf-8",
+        "content-security-policy": REMOTE_VIEWER_CSP,
+        "cache-control": "no-store",
+      });
+      response.end(REMOTE_VIEWER_HTML);
+    }),
+    route("GET", "manifest.webmanifest", ({ response }) => {
+      const manifest = JSON.stringify(REMOTE_MANIFEST);
+      response.writeHead(200, {
+        "content-type": "application/manifest+json; charset=utf-8",
+        "content-length": Buffer.byteLength(manifest),
+        "cache-control": "no-store",
+      });
+      response.end(manifest);
+    }),
+    route("GET", "api/remote/whoami", ({ response, admission }) => {
+      const identity = admission.identity;
+      jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
+    }),
+    route("GET", "api/remote/qr.svg", async ({ response }) => {
+      const url = remoteServe ? (await remoteServe.status()).url : null;
+      if (!remoteServe || !url) {
+        errorResponse(response, 404, "not_found", "Remote access is off.");
+        return;
+      }
+      const svg = await remoteServe.qrSvg(url);
+      response.writeHead(200, {
+        "content-type": "image/svg+xml; charset=utf-8",
+        "content-length": Buffer.byteLength(svg),
+        "cache-control": "no-store",
+      });
+      response.end(svg);
+    }),
+    route("GET POST", "api/remote", async ({ method, request, response }) => {
+      if (!remoteServe) {
+        errorResponse(response, 404, "not_found", "Remote access is not available.");
+        return;
+      }
+      if (method === "GET") {
+        jsonResponse(response, 200, await remoteServe.status());
+        return;
+      }
+      const body = await readJsonObjectBody(request, maxBodyBytes);
+      if (typeof (body as { enabled?: unknown }).enabled !== "boolean") {
+        errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
+        return;
+      }
+      jsonResponse(response, 200, await remoteServe.setEnabled((body as { enabled: boolean }).enabled));
+    }),
+    // The one `/api` path exempt from the bearer token and the origin check, so
+    // anything it returns is readable by anything that can reach the port.
+    route("GET", "api/relay/status", ({ response }) => {
+      jsonResponse(response, 200, relay
+        ? { enabled: true, ...relay.status() }
+        : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
+    }),
+    route("POST", "api/relay/pair", async ({ request, response }) => {
+      if (!relay) {
+        errorResponse(response, 404, "not_found", "The relay is off (GHOSTD_RELAY).");
+        return;
+      }
+      const body = await readJsonObjectBody(request, maxBodyBytes) as { code?: unknown; allow?: unknown };
+      if (typeof body.code !== "string" || typeof body.allow !== "boolean") {
+        errorResponse(response, 400, "invalid_request", '"code" must be the pairing code shown in the browser and "allow" a boolean.');
+        return;
+      }
+      const outcome = relay.resolvePairing(body.code.trim(), body.allow);
+      if (outcome === "unknown") {
+        errorResponse(response, 404, "pairing_not_found", "No browser is waiting to pair with that code.");
+        return;
+      }
+      jsonResponse(response, 200, { ok: true, outcome, ...relay.status() });
+    }),
+    route("GET PUT", "api/hooks/config", ({ method, request, response }) => handleHookConfig(method, request, response)),
+    route("GET", "api/hooks", ({ response }) => {
+      jsonResponse(response, 200, publicHookStatus(options.hooks?.status() ?? { active: false, total: 0, events: [], hooks: [] }));
+    }),
+    // The owner's board.md, parsed. Guests may read it: it is the one owner
+    // document meant to be looked at, and it is read-only here.
+    route("GET", "api/board", async ({ response }) => {
+      jsonResponse(response, 200, await readBoard(resolveDocumentsDirectory(process.env, homedir())));
+    }),
+    route("GET", "api/status", ({ response, admission }) => {
+      // `root` is a filesystem path, so the whole row is the owner's alone.
+      if (admission.identity?.role === "guest") {
+        errorResponse(response, 403, "owner_only", "Daemon source paths are visible only to the owner.");
+        return;
+      }
+      jsonResponse(response, 200, {
+        version: options.runningSource?.version ?? null,
+        source: { commit: options.runningSource?.commit ?? null, root: options.runningSource?.root ?? null },
+        update: options.update?.() ?? null,
+      });
+    }),
+    route("GET", "api/ghosts", ({ response }) => handleListGhosts(response)),
+    route("POST", "api/ghosts", ({ request, response }) => handleCreateGhost(request, response)),
+    route("DELETE", "api/ghosts/:ghost", ({ params, url, response }) => handleDeleteGhost(ghostOf(params), url, response)),
+    route("GET", "api/ghosts/:ghost/character", ({ params, response }) => handleReadCharacter(ghostOf(params), response)),
+    route("PUT", "api/ghosts/:ghost/character", ({ params, request, response }) => handleWriteCharacter(ghostOf(params), request, response)),
+    route("GET PUT", "api/ghosts/:ghost/harness", ({ params, method, request, response }) => handleGhostHarness(ghostOf(params), method, request, response)),
+    route("POST", "api/ghosts/:ghost/messages", ({ params, request, response }) => handleMessages(ghostOf(params), request, response)),
+    route("GET", "api/ghosts/:ghost/events", ({ params, request, response }) => handleConversationEvents(ghostOf(params), request, response)),
+    route("PUT", "api/ghosts/:ghost/name", ({ params, request, response }) => handleRenameGhost(ghostOf(params), request, response)),
+    route("GET", "api/ghosts/:ghost/sessions", ({ params, response }) => handleListSessions(ghostOf(params), response)),
+    route("DELETE", "api/ghosts/:ghost/sessions/:id", ({ params, response }) => handleDeleteSession(ghostOf(params), conversationOf(params), response)),
+    route("PUT", "api/ghosts/:ghost/sessions/:id/harness", async ({ params, request, response }) => {
+      jsonResponse(response, 200, await options.host.chooseHarness(ghostOf(params), conversationOf(params), await readHarnessBody(request, false) as string));
+    }),
+    route("PUT", "api/ghosts/:ghost/sessions/:id/pin", ({ params, request, response }) => handleSetSessionPin(ghostOf(params), conversationOf(params), request, response)),
+    route("PUT", "api/ghosts/:ghost/sessions/:id/read", ({ params, request, response }) => handleMarkSessionRead(ghostOf(params), conversationOf(params), request, response)),
+    route("PUT", "api/ghosts/:ghost/sessions/:id/title", ({ params, request, response }) => handleRenameSession(ghostOf(params), conversationOf(params), request, response)),
+    route("GET", "api/ghosts/:ghost/sessions/:id/transcript", ({ params, url, response }) => handleTranscript(ghostOf(params), conversationOf(params), url, response)),
+    route("GET", "api/ghosts/:ghost/sessions/:id/tools", (context) => handleSessionTools(context, undefined)),
+    route("POST", "api/ghosts/:ghost/sessions/:id/tools/:tool", (context) => handleSessionTools(context, context.params.tool)),
+    route("GET POST", "api/ghosts/:ghost/sessions/:id/queue", ({ params, method, request, response }) => handleQueue(ghostOf(params), conversationOf(params), method, request, response)),
+    route("GET POST", "api/ghosts/:ghost/mcp", ({ params, method, request, response }) => handleMcpCollection(ghostOf(params), method, request, response)),
+    route("PUT DELETE", "api/ghosts/:ghost/mcp/:server", ({ params, method, request, response }) => handleMcpServer(ghostOf(params), decodePathSegment(params.server ?? ""), method, request, response)),
+    route("PUT", "api/ghosts/:ghost/mcp/:server/enabled", ({ params, request, response }) => handleMcpEnabled(ghostOf(params), decodePathSegment(params.server ?? ""), request, response)),
+  ];
 
   const server = createServer((request, response) => {
     // Nothing a request carries may take the process down. A throw anywhere
@@ -987,351 +1125,16 @@ export function createDaemonServer(options: ServerOptions): Server {
       if (!admission) return;
 
       try {
-        if (segments.length === 0) {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          response.writeHead(200, {
-            "content-type": "text/html; charset=utf-8",
-            "content-security-policy": REMOTE_VIEWER_CSP,
-            "cache-control": "no-store",
-          });
-          response.end(REMOTE_VIEWER_HTML);
-          return;
-        }
-        if (segments.length === 1 && segments[0] === "manifest.webmanifest") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const manifest = JSON.stringify(REMOTE_MANIFEST);
-          response.writeHead(200, {
-            "content-type": "application/manifest+json; charset=utf-8",
-            "content-length": Buffer.byteLength(manifest),
-            "cache-control": "no-store",
-          });
-          response.end(manifest);
-          return;
-        }
-        if (segments[0] !== "api") {
+        const matched = matchRoute(routes, segments, method);
+        if (matched === 404) {
           errorResponse(response, 404, "not_found", "Not found.");
           return;
         }
-        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "whoami") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const identity = admission.identity;
-          jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
-          return;
-        }
-        if (segments.length === 3 && segments[1] === "remote" && segments[2] === "qr.svg") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const url = remoteServe ? (await remoteServe.status()).url : null;
-          if (!remoteServe || !url) {
-            errorResponse(response, 404, "not_found", "Remote access is off.");
-            return;
-          }
-          const svg = await remoteServe.qrSvg(url);
-          response.writeHead(200, {
-            "content-type": "image/svg+xml; charset=utf-8",
-            "content-length": Buffer.byteLength(svg),
-            "cache-control": "no-store",
-          });
-          response.end(svg);
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "remote") {
-          if (!remoteServe) {
-            errorResponse(response, 404, "not_found", "Remote access is not available.");
-            return;
-          }
-          if (method === "GET") {
-            jsonResponse(response, 200, await remoteServe.status());
-            return;
-          }
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const body = await readJsonObjectBody(request, maxBodyBytes);
-          if (typeof (body as { enabled?: unknown }).enabled !== "boolean") {
-            errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
-            return;
-          }
-          jsonResponse(response, 200, await remoteServe.setEnabled((body as { enabled: boolean }).enabled));
-          return;
-        }
-        if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          // Never the token itself, only where it lives. This route is the one
-          // `/api` path exempt from the bearer token and the origin check, so
-          // anything it returns is readable by anything that can reach the port.
-          jsonResponse(response, 200, relay
-            ? { enabled: true, ...relay.status() }
-            : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
-          return;
-        }
-        if (segments[1] === "relay" && segments[2] === "pair" && segments.length === 3) {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          if (!relay) {
-            errorResponse(response, 404, "not_found", "The relay is off (GHOSTD_RELAY).");
-            return;
-          }
-          const body = await readJsonObjectBody(request, maxBodyBytes) as {
-            code?: unknown;
-            allow?: unknown;
-          };
-          if (typeof body.code !== "string" || typeof body.allow !== "boolean") {
-            errorResponse(
-              response,
-              400,
-              "invalid_request",
-              '"code" must be the pairing code shown in the browser and "allow" a boolean.',
-            );
-            return;
-          }
-          const outcome = relay.resolvePairing(body.code.trim(), body.allow);
-          if (outcome === "unknown") {
-            errorResponse(
-              response,
-              404,
-              "pairing_not_found",
-              "No browser is waiting to pair with that code.",
-            );
-            return;
-          }
-          jsonResponse(response, 200, { ok: true, outcome, ...relay.status() });
-          return;
-        }
-        if (segments.length === 3 && segments[1] === "hooks" && segments[2] === "config") {
-          return await handleHookConfig(method, request, response);
-        }
-        if (segments.length === 2 && segments[1] === "hooks") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          jsonResponse(response, 200, publicHookStatus(options.hooks?.status() ?? {
-            active: false,
-            total: 0,
-            events: [],
-            hooks: [],
-          }));
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "board") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          // The owner's board.md, parsed. Guests may read it: it is the one
-          // owner document meant to be looked at, and it is read-only here.
-          jsonResponse(response, 200, await readBoard(resolveDocumentsDirectory(process.env, homedir())));
-          return;
-        }
-        if (segments.length === 2 && segments[1] === "status") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          // `root` is a filesystem path, so the whole row is the owner's alone.
-          if (admission.identity?.role === "guest") {
-            errorResponse(
-              response,
-              403,
-              "owner_only",
-              "Daemon source paths are visible only to the owner.",
-            );
-            return;
-          }
-          jsonResponse(response, 200, {
-            version: options.runningSource?.version ?? null,
-            source: {
-              commit: options.runningSource?.commit ?? null,
-              root: options.runningSource?.root ?? null,
-            },
-            update: options.update?.() ?? null,
-          });
-          return;
-        }
-        if (segments[1] !== "ghosts") {
-          errorResponse(response, 404, "not_found", "Not found.");
-          return;
-        }
-        if (segments.length === 2) {
-          if (method === "GET") return handleListGhosts(response);
-          if (method === "POST") return await handleCreateGhost(request, response);
+        if (matched === 405) {
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
-        const ghostName = decodePathSegment(segments[2] ?? "");
-        if (segments.length === 3 && method === "DELETE") {
-          return await handleDeleteGhost(ghostName, url, response);
-        }
-        if (segments.length === 4 && segments[3] === "character") {
-          if (method === "GET") return await handleReadCharacter(ghostName, response);
-          if (method === "PUT") return await handleWriteCharacter(ghostName, request, response);
-          errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-          return;
-        }
-        if (segments.length === 4 && segments[3] === "harness") {
-          return await handleGhostHarness(ghostName, method, request, response);
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "harness") {
-          if (method !== "PUT") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          const conversationId = decodeConversationId(segments[4] ?? "");
-          jsonResponse(response, 200, await options.host.chooseHarness(ghostName, conversationId, await readHarnessBody(request, false) as string));
-          return;
-        }
-        if (segments.length === 4 && segments[3] === "messages") {
-          if (method !== "POST") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleMessages(ghostName, request, response);
-        }
-        if (segments.length === 4 && segments[3] === "events") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return handleConversationEvents(ghostName, request, response);
-        }
-        if (segments.length === 4 && segments[3] === "name") {
-          if (method !== "PUT") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleRenameGhost(ghostName, request, response);
-        }
-        if (segments.length === 4 && segments[3] === "sessions") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleListSessions(ghostName, response);
-        }
-        if (segments.length === 5 && segments[3] === "sessions") {
-          if (method !== "DELETE") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleDeleteSession(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "pin") {
-          if (method !== "PUT") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleSetSessionPin(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "read") {
-          if (method !== "PUT") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleMarkSessionRead(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "title") {
-          if (method !== "PUT") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleRenameSession(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "transcript") {
-          if (method !== "GET") {
-            errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
-            return;
-          }
-          return await handleTranscript(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            url,
-            response,
-          );
-        }
-        if ((segments.length === 6 || segments.length === 7) && segments[3] === "sessions" && segments[5] === "tools") {
-          // Running a tool acts on this desktop directly; a tailnet caller,
-          // even the owner, acts only through the ghost.
-          if (admission.identity) {
-            errorResponse(response, 403, "local_only", "Ghost tools run only for the machine-local token.");
-            return;
-          }
-          return await handleSessionTools(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            segments[6],
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "sessions" && segments[5] === "queue") {
-          return await handleQueue(
-            ghostName,
-            decodeConversationId(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 4 && segments[3] === "mcp") {
-          return await handleMcpCollection(ghostName, method, request, response);
-        }
-        if (segments.length === 5 && segments[3] === "mcp") {
-          return await handleMcpServer(
-            ghostName,
-            decodePathSegment(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        if (segments.length === 6 && segments[3] === "mcp" && segments[5] === "enabled") {
-          return await handleMcpEnabled(
-            ghostName,
-            decodePathSegment(segments[4] ?? ""),
-            method,
-            request,
-            response,
-          );
-        }
-        errorResponse(response, 404, "not_found", "Not found.");
+        await matched.route.handle({ method, request, response, url, admission, params: matched.params });
       } catch (error) {
         if (response.headersSent) {
           logger.error("request failed after headers were sent", {

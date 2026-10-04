@@ -1285,7 +1285,8 @@ describe("routing and transport", () => {
     const base = await serve();
     expect((await fetch(`${base}/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/other`)).status).toBe(404);
-    expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(404);
+    expect((await fetch(`${base}/api/ghosts/casper`)).status).toBe(405);
+    expect((await fetch(`${base}/api/ghosts/casper/nothing`)).status).toBe(404);
     expect((await fetch(`${base}/api/ghosts/casper/sessions`, { method: "POST" })).status)
       .toBe(405);
     expect((await fetch(`${base}/api/ghosts/casper/messages`)).status).toBe(405);
