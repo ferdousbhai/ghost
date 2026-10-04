@@ -182,7 +182,6 @@ export interface TranscriptMessage {
   content: unknown;
   timestamp?: number;
   entryId: string;
-  parentId: string | null;
   contentTruncated?: true;
   errorMessage?: string;
 }
@@ -195,7 +194,6 @@ function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
 /** The renderable messages, in order; harness and title records are not messages. */
 export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMessage[] {
   const messages: TranscriptMessage[] = [];
-  let parentId: string | null = null;
   entries.forEach((entry, index) => {
     const entryId = `e${index}`;
     let message: TranscriptMessage | null = null;
@@ -205,7 +203,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         content: [{ type: "text", text: entry.text }],
         timestamp: Date.parse(entry.at),
         entryId,
-        parentId,
         ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
       };
     } else if (entry.type === "assistant") {
@@ -214,7 +211,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         content: entry.content,
         timestamp: Date.parse(entry.at),
         entryId,
-        parentId,
         ...(entry.error ? { errorMessage: entry.error } : {}),
       };
     } else if (entry.type === "command" && !entry.excluded) {
@@ -223,13 +219,9 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         content: [{ type: "text", text: commandText(entry) }],
         timestamp: Date.parse(entry.at),
         entryId,
-        parentId,
       };
     }
-    if (message) {
-      messages.push(message);
-      parentId = entryId;
-    }
+    if (message) messages.push(message);
   });
   return messages;
 }

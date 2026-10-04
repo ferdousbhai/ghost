@@ -117,7 +117,6 @@ try {
   ]);
   for (const message of transcriptBody.messages) {
     assert.equal(typeof message.entryId, "string");
-    assert.ok("parentId" in message);
   }
   const transcript = JSON.stringify(transcriptBody);
   assert.ok(transcript.includes(join(homedir(), "project-brief.md")));

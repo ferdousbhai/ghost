@@ -179,7 +179,6 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
         }
       ],
       "entryId": "#1",
-      "parentId": "<none>",
       "role": "user",
       "timestamp": "<time>"
     },
@@ -200,7 +199,6 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
         }
       ],
       "entryId": "#2",
-      "parentId": "#1",
       "role": "assistant",
       "timestamp": "<time>"
     },
@@ -212,7 +210,6 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
         }
       ],
       "entryId": "#3",
-      "parentId": "#2",
       "role": "user",
       "timestamp": "<time>"
     },
@@ -224,7 +221,6 @@ Read `ghost help self` before editing, restarting, or updating yourself. `ghost 
         }
       ],
       "entryId": "#4",
-      "parentId": "#3",
       "role": "assistant",
       "timestamp": "<time>"
     }

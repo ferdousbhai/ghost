@@ -21,9 +21,9 @@ TestCase {
 
     function test_liveSummaryBecomesOutcome(): void {
         const activity = {
-            name: "ghost_notes_grep",
+            name: "grep",
             status: "complete",
-            arguments: { query: "launch" },
+            arguments: { pattern: "launch" },
             intent: "Find the launch plan",
             summary: "Found the plan in roadmap.md"
         };
@@ -32,25 +32,13 @@ TestCase {
 
     function test_restoredCallUsesHumanFallback(): void {
         const activity = {
-            name: "ghost_notes_read",
+            name: "read",
             status: "complete",
             arguments: { path: "projects/roadmap.md" },
             intent: "",
             summary: ""
         };
         compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
-    }
-
-    function test_legacyNoteCallStaysInGhostHome(): void {
-        const activity = {
-            name: "ghost_notes_write",
-            status: "complete",
-            arguments: { path: "projects/roadmap.md" },
-            intent: "",
-            summary: ""
-        };
-        compare(ToolTrace.fileTarget(activity), "docs/projects/roadmap.md");
-        compare(ToolTrace.fileBase(activity), "ghost");
     }
 
     function test_nativeWriterUsesItsCapturedCwd(): void {
@@ -63,7 +51,6 @@ TestCase {
             summary: ""
         };
         const view = ToolTrace.view(activity, true, false, false);
-        compare(view.fileBase, "cwd");
         compare(view.fileCwd, "/home/owner/projects/one");
         compare(
             Workbench.absoluteFrom(view.fileTarget, view.fileCwd),
@@ -85,6 +72,13 @@ TestCase {
             "/home/owner/code/project/same.md");
         compare(Workbench.absoluteFrom("../shared.md", "/home/owner/code/project"),
             "/home/owner/code/shared.md");
+    }
+
+    function test_ghostToolsReadTheSameUnderAnyHarnessNamespace(): void {
+        for (const name of ["desktop_look", "mcp__ghost__desktop_look", "ghost.desktop_look"]) {
+            const look = { name: name, status: "completed", arguments: { image: true }, intent: "", summary: "" };
+            compare(ToolTrace.text(look, true, false, false), "Checked what’s on screen", name);
+        }
     }
 
     function test_desktopToolsSayWhatTheyDid(): void {
@@ -129,7 +123,6 @@ TestCase {
         compare(trace("edit", { path: "notes.md" }), "Editing notes.md");
         compare(ToolTrace.fileTarget({ name: "edit", arguments: { path: "notes.md" } }),
             "notes.md");
-        compare(ToolTrace.fileBase({ name: "edit", arguments: { path: "notes.md" } }), "cwd");
     }
 
     // Harnesses spell the same tools their own way; Claude Code's are capitalised

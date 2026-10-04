@@ -316,12 +316,11 @@ if (OWNS_GHOSTS_ROOT) {
 /** @type {Map<string, Map<string, { id, title, harness, createdAt, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
-// Persisted messages carry an `entryId` and the `parentId` before it; opaque
-// and monotonic here, as in a real transcript.
+// Persisted messages carry an `entryId`; opaque and monotonic here, as in a
+// real transcript.
 let entrySeq = 0;
 function append(s, message) {
-  const parentId = s.messages.at(-1)?.entryId ?? null;
-  s.messages.push({ ...message, entryId: `entry-${++entrySeq}`, parentId });
+  s.messages.push({ ...message, entryId: `entry-${++entrySeq}` });
 }
 
 function seedSession(fields, messages) {

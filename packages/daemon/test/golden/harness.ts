@@ -68,7 +68,7 @@ const CLOCK_KEYS = new Set([
 
 const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "tookMs", "latencyMs"]);
 
-const ENTRY_ID_KEYS = new Set(["entryId", "parentId", "resultEntryId", "previousTargetId", "nextTargetId"]);
+const ENTRY_ID_KEYS = new Set(["entryId"]);
 
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
 

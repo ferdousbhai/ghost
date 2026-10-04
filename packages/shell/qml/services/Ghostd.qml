@@ -1347,7 +1347,6 @@ Singleton {
             key: root.conversationKey(ghost, sessionId),
             ghost: ghost,
             sessionId: sessionId,
-            published: false,
             title: "",
             rows: [],
             hydratedRowCount: 0,
@@ -1879,7 +1878,6 @@ Singleton {
                     for (const session of valid) {
                         const state = root.turnStates[root.conversationKey(g, session.id)];
                         if (state) {
-                            state.published = true;
                             state.title = session.title || "";
                         }
                     }
@@ -1969,8 +1967,6 @@ Singleton {
      * blank draft, 1 for one just sent. A row already listed keeps its count.
      */
     function ensureLocalSessionRow(ghost: string, id: string, messageCount: int): void {
-        const state = root.turnStates[root.conversationKey(ghost, id)];
-        if (state) state.published = true;
         if (ghost !== root.activeGhost || id === "") return;
         const existing = root.sessions.find(function (session) {
             return session && session.id === id;
@@ -2332,7 +2328,6 @@ Singleton {
                 const body = JSON.parse(xhr.responseText);
                 if (!body || body.id !== state.sessionId || !Array.isArray(body.messages))
                     throw new Error("transcript identity mismatch");
-                state.published = true;
                 if (typeof body.total !== "number" || !Number.isFinite(body.total)
                         || Math.floor(body.total) !== body.total || body.total < 0)
                     throw new Error("invalid transcript total");
@@ -2564,21 +2559,10 @@ Singleton {
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
-    // GHOST_HUD_REPLAY is a diagnostic fallback for stateless daemon builds;
-    // normal requests send only the new message because ghostd owns history.
+    /** Only the new message: ghostd owns the history. */
     function buildBody(prompt: string, state: var): var {
-        const messages = [];
-        if (Quickshell.env("GHOST_HUD_REPLAY")) {
-            for (let i = 0; i < state.rows.length - 1; i++) {
-                const row = state.rows[i];
-                if (row.text === "") continue;
-                messages.push({ role: row.role, content: row.text, timestamp: Date.now() });
-            }
-        } else {
-            messages.push({ role: "user", content: prompt, timestamp: Date.now() });
-        }
         return {
-            context: { messages: messages },
+            context: { messages: [{ role: "user", content: prompt, timestamp: Date.now() }] },
             options: { sessionId: state.sessionId }
         };
     }

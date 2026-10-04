@@ -32,15 +32,11 @@ Rectangle {
     readonly property string diagnosticInput: root.presentation.diagnosticInput
     readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
 
-    // Native model-tool paths use the cwd captured when that exact call began.
-    // Ghost-owned legacy writers still use the selected ghost home. An older
-    // transcript with a relative native path and no cwd offers no chip rather
-    // than silently opening a similarly named file in the wrong directory.
+    // Paths resolve against the cwd captured when that exact call began; a
+    // relative path with no cwd offers no chip rather than silently opening a
+    // similarly named file in the wrong directory.
     readonly property string workbenchPath: root.completed || root.running
-        ? (root.presentation.fileBase === "ghost"
-            ? Workbench.absolute(root.presentation.fileTarget)
-            : Workbench.absoluteFrom(root.presentation.fileTarget,
-                root.presentation.fileCwd)) : ""
+        ? Workbench.absoluteFrom(root.presentation.fileTarget, root.presentation.fileCwd) : ""
     readonly property bool openable: Workbench.canOpen(root.workbenchPath)
 
     // #fde68a at 90% — the old card's amber-100 label. On paper that wash is

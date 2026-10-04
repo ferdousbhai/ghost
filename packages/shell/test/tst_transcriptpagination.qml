@@ -25,8 +25,7 @@ TestCase {
             result.push({
                 role: "user",
                 content: "message-" + index,
-                entryId: "entry-" + index,
-                parentId: index === 0 ? null : "entry-" + (index - 1)
+                entryId: "entry-" + index
             });
         }
         return result;
@@ -162,9 +161,9 @@ TestCase {
         const state = activeState("failed-turn");
         Ghostd.loadConversationTranscript(state, false);
         requests[0].complete(200, page(state, [
-            { role: "user", content: "hi", entryId: "u", parentId: null },
+            { role: "user", content: "hi", entryId: "u" },
             { role: "assistant", content: [], errorMessage: "codex usage limit reached",
-                entryId: "a", parentId: "u" }
+                entryId: "a" }
         ], 2, false, false));
         compare(state.rows.length, 2);
         compare(state.rows[1].error, "codex usage limit reached");

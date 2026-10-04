@@ -33,9 +33,13 @@ function pathArgument(activity) {
     return argument(activity, "path") || argument(activity, "file_path");
 }
 
-/** The tool's name, lowercased: harnesses spell the same tool `Read` or `read`. */
+/**
+ * The tool's name, lowercased: harnesses spell the same tool `Read` or `read`,
+ * and the ghost's own tools `mcp__ghost__desktop_look` (Claude) or
+ * `ghost.desktop_look` (Codex).
+ */
 function toolName(activity) {
-    return String(activity.name || "").toLowerCase();
+    return String(activity.name || "").toLowerCase().replace(/^(?:mcp__ghost__|ghost\.)/, "");
 }
 
 /**
@@ -74,28 +78,6 @@ var VERBS = {
         past: "Looked for files matching", present: "Looking for files matching",
         key: "pattern", quote: true,
         alonePast: "Looked for files", alonePresent: "Looking for files"
-    },
-    ghost_notes_read: {
-        past: "Read", present: "Reading", key: "path",
-        alonePast: "Read a document", alonePresent: "Reading a document"
-    },
-    ghost_notes_write: {
-        past: "Updated", present: "Updating", key: "path",
-        alonePast: "Saved a document", alonePresent: "Saving a document"
-    },
-    ghost_notes_grep: {
-        past: "Looked for", present: "Looking for", key: "query", quote: true,
-        suffix: " in your docs",
-        alonePast: "Searched your docs", alonePresent: "Searching your docs"
-    },
-    ghost_memory_read: {
-        past: "Recalled", present: "Recalling", key: "name",
-        alonePast: "Recalled a memory", alonePresent: "Recalling a memory"
-    },
-    read_memory: {
-        past: "Looked for", present: "Looking for", key: "query", quote: true,
-        suffix: " in memory",
-        alonePast: "Recalled a memory", alonePresent: "Recalling a memory"
     }
 };
 
@@ -110,8 +92,7 @@ function verbTrace(verb, activity, completed) {
 /**
  * The file a call wrote, named the way the tool named it. Writers only — a
  * read changed nothing worth opening. Native file tools resolve relative paths
- * against the cwd captured on that activity; legacy Ghost-owned writers stay
- * relative to the ghost home.
+ * against the cwd captured on that activity.
  */
 function fileTarget(activity) {
     activity = fields(activity);
@@ -119,27 +100,6 @@ function fileTarget(activity) {
     case "write":
     case "edit":
         return pathArgument(activity);
-    // Historical transcripts keep the old tool name and target retired
-    // per-ghost files. They are never shared Documents paths.
-    case "ghost_notes_write": {
-        // A doc path is relative to the docs directory, not to the home.
-        const doc = argument(activity, "path");
-        return doc === "" ? "" : "docs/" + doc;
-    }
-    default:
-        return "";
-    }
-}
-
-/** Which explicit path base the caller must use for {@link fileTarget}. */
-function fileBase(activity) {
-    activity = fields(activity);
-    switch (toolName(activity)) {
-    case "write":
-    case "edit":
-        return "cwd";
-    case "ghost_notes_write":
-        return "ghost";
     default:
         return "";
     }
@@ -159,15 +119,6 @@ function fallback(activity, completed) {
     if (verb) return verbTrace(verb, activity, completed);
 
     switch (name) {
-    case "ghost_notes_list":
-        return completed ? "Looked through your docs" : "Looking through your docs";
-    case "list_memory":
-    case "ghost_memory_list":
-        return completed
-            ? "Looked through remembered details"
-            : "Looking through remembered details";
-    case "write_memory":
-        return completed ? "Saved something to memory" : "Saving something to memory";
     case "desktop_look": {
         const args = activity.arguments || ({});
         if (args.image === true || args.region || args.monitor)
@@ -276,7 +227,6 @@ function view(activity, completed, failed, expanded) {
         diagnosticInput: diagnosticInput,
         hasDiagnostics: hasDiagnostics(activity, diagnosticInput),
         fileTarget: fileTarget(activity),
-        fileBase: fileBase(activity),
         fileCwd: fileCwd(activity)
     };
 }
