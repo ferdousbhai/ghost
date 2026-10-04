@@ -1,6 +1,5 @@
 import {
   RELAY_OPS,
-  RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
@@ -10,17 +9,6 @@ import {
 } from "@ghost/extensions";
 import type { IncomingHttpHeaders } from "node:http";
 import { tokenMatches } from "./token-store.js";
-
-export {
-  RELAY_OPS,
-  RELAY_PATH,
-  RELAY_PROTOCOL_VERSION,
-  RELAY_SUBPROTOCOL,
-  RELAY_TOKEN_SUBPROTOCOL_PREFIX,
-  RELAY_PAIR_SUBPROTOCOL_PREFIX,
-  RELAY_PAIR_CODE_PATTERN,
-  type RelayOp,
-};
 
 const OP_SET = new Set<string>(RELAY_OPS);
 

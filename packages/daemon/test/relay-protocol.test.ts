@@ -14,13 +14,15 @@ import {
   authorizeRelayUpgrade,
   isRelayOp,
   parseClientFrame,
+} from "../src/relay-protocol.js";
+import {
   RELAY_OPS,
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
-} from "../src/relay-protocol.js";
+} from "@ghost/extensions";
 import { relayToken, tokenMatches } from "../src/token-store.js";
 
 const TOKEN = "a".repeat(64);

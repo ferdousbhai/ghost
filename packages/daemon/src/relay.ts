@@ -34,6 +34,7 @@ import { WebSocketServer, type RawData, type WebSocket } from "ws";
 import {
   MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
+  RELAY_PROTOCOL_VERSION,
   type BrowserFailure,
   type RelayOp,
   type RelayReply,
@@ -45,7 +46,6 @@ import {
   authorizeRelayUpgrade,
   encodeServerFrame,
   parseClientFrame,
-  RELAY_PROTOCOL_VERSION,
 } from "./relay-protocol.js";
 import { relayToken } from "./token-store.js";
 

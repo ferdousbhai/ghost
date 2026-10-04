@@ -28,7 +28,7 @@ import {
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
-} from "../src/relay-protocol.js";
+} from "@ghost/extensions";
 
 const TOKEN = "f".repeat(64);
 const INCARNATION = "11111111-1111-4111-8111-111111111111";

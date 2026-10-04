@@ -24,7 +24,7 @@ import {
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
-} from "../src/relay-protocol.js";
+} from "@ghost/extensions";
 import { GhostRegistry } from "../src/ghosts.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, type TempGhosts } from "./helpers/fixtures.js";

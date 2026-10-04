@@ -29,7 +29,7 @@ import {
   RELAY_SUBPROTOCOL,
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
-} from "../src/relay-protocol.js";
+} from "@ghost/extensions";
 
 // The extension lives in its own repository (github.com/ferdousbhai/
 // ghost-chromium-extension). This test reads a checkout of it: an explicit
