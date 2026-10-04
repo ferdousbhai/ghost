@@ -782,174 +782,172 @@ export class GhostBrowserSession {
       url = this.#requireAllowedUrl(input.url);
     }
     const result = await this.backend.tabs(
-    {
-      op: input.op,
-      ...(input.id === undefined ? {} : { id: input.id }),
-      ...(url === undefined ? {} : { url }),
-    },
-    operation,
-  );
-  // Switching or creating a tab lands the ghost on a different page; the refs
-  // minted on the old one no longer mean anything.
-  this.#invalidateRefs();
-  if (input.op === "create" && result.page) {
+      {
+        op: input.op,
+        ...(input.id === undefined ? {} : { id: input.id }),
+        ...(url === undefined ? {} : { url }),
+      },
+      operation,
+    );
+    // Switching or creating a tab lands the ghost on a different page; the refs
+    // minted on the old one no longer mean anything.
+    this.#invalidateRefs();
+    return result;
   }
-  return result;
-}
 
-batch(steps: readonly BatchStep[], options: BrowserOperationOptions = {}) {
-  return this.#serial(() => this.#batchImpl(steps, options));
-}
+  batch(steps: readonly BatchStep[], options: BrowserOperationOptions = {}) {
+    return this.#serial(() => this.#batchImpl(steps, options));
+  }
 
-/**
- * Run a sequence of steps as one queue slot, so nothing else interleaves
- * between them — the whole point of batching over separate tool calls. Each
- * step reuses the same non-serialized impls the public methods do, so the
- * guardrails (URL policy, provenance gate, acting budget, ref checks) apply
- * identically. A step that fails stops the batch and is reported, rather than
- * throwing the whole thing away.
- */
-async #batchImpl(
-  steps: readonly BatchStep[],
-  options: BrowserOperationOptions,
-): Promise<BatchResult> {
-  const results: BatchStepResult[] = [];
-  for (const step of steps) {
-    try {
-      const summary = await this.#runStep(step, options);
-      results.push({ action: step.action, ok: true, summary });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const failure = error instanceof GhostBrowserError ? error.failure : "navigation_failed";
-      results.push({ action: step.action, ok: false, summary: message, failure });
-      return { steps: results, stopped: true };
+  /**
+   * Run a sequence of steps as one queue slot, so nothing else interleaves
+   * between them — the whole point of batching over separate tool calls. Each
+   * step reuses the same non-serialized impls the public methods do, so the
+   * guardrails (URL policy, provenance gate, acting budget, ref checks) apply
+   * identically. A step that fails stops the batch and is reported, rather than
+   * throwing the whole thing away.
+   */
+  async #batchImpl(
+    steps: readonly BatchStep[],
+    options: BrowserOperationOptions,
+  ): Promise<BatchResult> {
+    const results: BatchStepResult[] = [];
+    for (const step of steps) {
+      try {
+        const summary = await this.#runStep(step, options);
+        results.push({ action: step.action, ok: true, summary });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const failure = error instanceof GhostBrowserError ? error.failure : "navigation_failed";
+        results.push({ action: step.action, ok: false, summary: message, failure });
+        return { steps: results, stopped: true };
+      }
+    }
+    return { steps: results, stopped: false };
+  }
+
+  async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
+    const t = options;
+    switch (step.action) {
+      case "open": {
+        const page = await this.#openImpl(step.url ?? "", t);
+        return `open → ${page.url}`;
+      }
+      case "read": {
+        const r = await this.#readImpl({ ...t, ...(step.maxChars === undefined ? {} : { maxChars: step.maxChars }) });
+        return `read ${r.text.length} of ${r.totalLength} chars`;
+      }
+      case "find": {
+        const result = await this.#findImpl(step.query ?? "", {
+          ...t,
+          ...(step.limit === undefined ? {} : { limit: step.limit }),
+        });
+        return `find "${step.query ?? ""}" → ${result.matches.length} match(es)`;
+      }
+      case "click": {
+        const page = await this.#clickImpl({
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+        });
+        return `click → ${page.url}`;
+      }
+      case "type": {
+        const page = await this.#typeImpl({
+          text: step.text ?? "",
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+          ...(step.submit === undefined ? {} : { submit: step.submit }),
+        });
+        return `type → ${page.submitted ? "submitted" : "filled"}`;
+      }
+      case "scroll": {
+        await this.#scrollImpl({
+          deltaX: step.deltaX ?? 0,
+          deltaY: step.deltaY ?? 0,
+          ...t,
+          ...(step.x === undefined ? {} : { x: step.x }),
+          ...(step.y === undefined ? {} : { y: step.y }),
+        });
+        return "scroll";
+      }
+      case "drag": {
+        await this.#dragImpl({
+          fromX: step.fromX ?? 0,
+          fromY: step.fromY ?? 0,
+          toX: step.toX ?? 0,
+          toY: step.toY ?? 0,
+          ...t,
+          ...(step.steps === undefined ? {} : { steps: step.steps }),
+        });
+        return "drag";
+      }
+      case "key": {
+        await this.#keyImpl({
+          key: step.key ?? "",
+          ...t,
+          ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
+          ...(step.text === undefined ? {} : { text: step.text }),
+        });
+        return `key ${step.key ?? ""}`;
+      }
+      case "javascript": {
+        const r = await this.#javascriptImpl(step.code ?? "", {
+          ...t,
+        });
+        return `javascript → ${r.type}`;
+      }
+      case "back": {
+        const page = await this.#backImpl(t);
+        return page.moved ? `back → ${page.url}` : "back → nowhere";
+      }
+      case "forward": {
+        const page = await this.#forwardImpl(t);
+        return page.moved ? `forward → ${page.url}` : "forward → nowhere";
+      }
+      case "upload": {
+        const page = await this.#uploadImpl({
+          paths: step.paths ?? [],
+          ...t,
+          ...(step.ref === undefined ? {} : { ref: step.ref }),
+          ...(step.selector === undefined ? {} : { selector: step.selector }),
+        });
+        return `upload → ${page.url}`;
+      }
+      default:
+        throw new GhostBrowserError(
+          "invalid_input",
+          `Batch does not support the step "${step.action}". Batchable steps are `
+          + "open, read, find, click, type, scroll, drag, key, javascript, back, "
+          + "forward, and upload.",
+        );
     }
   }
-  return { steps: results, stopped: false };
-}
 
-async #runStep(step: BatchStep, options: BrowserOperationOptions): Promise<string> {
-  const t = options;
-  switch (step.action) {
-    case "open": {
-      const page = await this.#openImpl(step.url ?? "", t);
-      return `open → ${page.url}`;
-    }
-    case "read": {
-      const r = await this.#readImpl({ ...t, ...(step.maxChars === undefined ? {} : { maxChars: step.maxChars }) });
-      return `read ${r.text.length} of ${r.totalLength} chars`;
-    }
-    case "find": {
-      const result = await this.#findImpl(step.query ?? "", {
-        ...t,
-        ...(step.limit === undefined ? {} : { limit: step.limit }),
-      });
-      return `find "${step.query ?? ""}" → ${result.matches.length} match(es)`;
-    }
-    case "click": {
-      const page = await this.#clickImpl({
-        ...t,
-        ...(step.ref === undefined ? {} : { ref: step.ref }),
-        ...(step.selector === undefined ? {} : { selector: step.selector }),
-      });
-      return `click → ${page.url}`;
-    }
-    case "type": {
-      const page = await this.#typeImpl({
-        text: step.text ?? "",
-        ...t,
-        ...(step.ref === undefined ? {} : { ref: step.ref }),
-        ...(step.selector === undefined ? {} : { selector: step.selector }),
-        ...(step.submit === undefined ? {} : { submit: step.submit }),
-      });
-      return `type → ${page.submitted ? "submitted" : "filled"}`;
-    }
-    case "scroll": {
-      await this.#scrollImpl({
-        deltaX: step.deltaX ?? 0,
-        deltaY: step.deltaY ?? 0,
-        ...t,
-        ...(step.x === undefined ? {} : { x: step.x }),
-        ...(step.y === undefined ? {} : { y: step.y }),
-      });
-      return "scroll";
-    }
-    case "drag": {
-      await this.#dragImpl({
-        fromX: step.fromX ?? 0,
-        fromY: step.fromY ?? 0,
-        toX: step.toX ?? 0,
-        toY: step.toY ?? 0,
-        ...t,
-        ...(step.steps === undefined ? {} : { steps: step.steps }),
-      });
-      return "drag";
-    }
-    case "key": {
-      await this.#keyImpl({
-        key: step.key ?? "",
-        ...t,
-        ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
-        ...(step.text === undefined ? {} : { text: step.text }),
-      });
-      return `key ${step.key ?? ""}`;
-    }
-    case "javascript": {
-      const r = await this.#javascriptImpl(step.code ?? "", {
-        ...t,
-      });
-      return `javascript → ${r.type}`;
-    }
-    case "back": {
-      const page = await this.#backImpl(t);
-      return page.moved ? `back → ${page.url}` : "back → nowhere";
-    }
-    case "forward": {
-      const page = await this.#forwardImpl(t);
-      return page.moved ? `forward → ${page.url}` : "forward → nowhere";
-    }
-    case "upload": {
-      const page = await this.#uploadImpl({
-        paths: step.paths ?? [],
-        ...t,
-        ...(step.ref === undefined ? {} : { ref: step.ref }),
-        ...(step.selector === undefined ? {} : { selector: step.selector }),
-      });
-      return `upload → ${page.url}`;
-    }
-    default:
-      throw new GhostBrowserError(
-        "invalid_input",
-        `Batch does not support the step "${step.action}". Batchable steps are `
-        + "open, read, find, click, type, scroll, drag, key, javascript, back, "
-        + "forward, and upload.",
-      );
+  close(options: BrowserOperationOptions = {}): Promise<boolean> {
+    // Wake a cooperative backend so the terminal close can take its queue slot.
+    // The close itself remains serialized and therefore never races an action.
+    this.#activeAbort?.abort();
+    const timeoutMs = Math.min(
+      options.timeoutMs ?? this.#closeTimeoutMs,
+      this.#closeTimeoutMs,
+    );
+    return withTimeout(
+      this.#serial(() => this.#closeImpl({ ...options, timeoutMs })),
+      timeoutMs,
+      "waiting for browser actions to stop and close",
+      options.signal,
+    );
   }
-}
 
-close(options: BrowserOperationOptions = {}): Promise<boolean> {
-  // Wake a cooperative backend so the terminal close can take its queue slot.
-  // The close itself remains serialized and therefore never races an action.
-  this.#activeAbort?.abort();
-  const timeoutMs = Math.min(
-    options.timeoutMs ?? this.#closeTimeoutMs,
-    this.#closeTimeoutMs,
-  );
-  return withTimeout(
-    this.#serial(() => this.#closeImpl({ ...options, timeoutMs })),
-    timeoutMs,
-    "waiting for browser actions to stop and close",
-    options.signal,
-  );
-}
-
-// close() has already clamped the timeout and wrapped the whole queued wait
-// in withTimeout, so this only forwards the operation to the backend.
-async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
-  this.#clearIdleTimer();
-  this.#invalidateRefs();
-  return this.backend.close(this.#timeout(options));
-}
+  // close() has already clamped the timeout and wrapped the whole queued wait
+  // in withTimeout, so this only forwards the operation to the backend.
+  async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
+    this.#clearIdleTimer();
+    this.#invalidateRefs();
+    return this.backend.close(this.#timeout(options));
+  }
 }
 
 interface BrowserSessionEntry {
