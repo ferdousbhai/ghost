@@ -19,9 +19,6 @@ export type TurnEvent =
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
-  | { type: "thinking_start"; contentIndex: number }
-  | { type: "thinking_delta"; contentIndex: number; delta: string }
-  | { type: "thinking_end"; contentIndex: number; content: string }
   | {
       type: "tool_execution_start";
       id: string;

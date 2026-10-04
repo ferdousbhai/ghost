@@ -54,7 +54,6 @@ export interface ServerOptions {
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
-  includeThinking?: boolean;
   /**
    * The browser relay. Omitted, one is built from the XDG token file unless
    * `GHOSTD_RELAY=off`; pass `null` to leave the endpoint out entirely.
@@ -882,11 +881,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     });
     try {
       await streamSessionEvents(request, response, (emit, signal) =>
-        admission.run({
-          emit,
-          signal,
-          includeThinking: options.includeThinking,
-        }));
+        admission.run({ emit, signal }));
     } finally {
       // Covers a response failure before the stream callback consumes the
       // admission; ordinary run completion releases it first.

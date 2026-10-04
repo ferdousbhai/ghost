@@ -717,18 +717,6 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(text).toBe("I set type for a living.");
   });
 
-  it("never leaks reasoning onto the wire", async () => {
-    const base = await serve([{
-      events: [
-        { type: "thinking", block: "r", delta: "private reasoning" },
-        { type: "text", block: "a", delta: "Answer." },
-      ],
-    }]);
-    const { events, raw } = await postTurn(base, TURN_BODY);
-    expect(events.some((event) => event.type.startsWith("thinking"))).toBe(false);
-    expect(raw).not.toContain("private reasoning");
-  });
-
   it("ignores a caller-supplied turn id header", async () => {
     const base = await serve();
     const response = await postTurn(base, TURN_BODY, { "x-ghost-turn-id": "turn-abc.1" });

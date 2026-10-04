@@ -2660,14 +2660,6 @@ Singleton {
         case "session_stop_continued":
             root.receiveSessionStopContinuedFor(state, event.reason || "");
             break;
-        case "thinking_start":
-            state.activity = "thinking";
-            break;
-        case "thinking_delta":
-        case "thinking_end":
-            // Reasoning stays out of the transcript in v1; the activity line
-            // is the only signal that it happened.
-            break;
         case "tool_execution_start":
             state.activity = event.toolName;
             if (Object.values(state.toolIdsByContent).indexOf(event.id) < 0) {

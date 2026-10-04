@@ -215,8 +215,8 @@ ghost rewrote is who it is on the next one.
 A turn is one headless run of an agent CLI, a row of
 [`harness-table.ts`](packages/daemon/src/harness-table.ts): how to launch it
 non-interactively with permissions pre-approved, how to resume, how it takes
-MCP servers, and a parser from its JSON output to text, thinking, tool
-start/end, session, and error events. Rows exist for claude, codex, grok,
+MCP servers, and a parser from its JSON output to text, tool start/end,
+session, and error events; reasoning stays inside the harness. Rows exist for claude, codex, grok,
 copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
 are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
@@ -398,8 +398,7 @@ remote access is the tailnet viewer alone.
 
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
-emits `start`, then ordered `text_*`, `thinking_*` (only when the daemon is
-told to include thinking), `tool_execution_*`, `owner_message` (a queued
+emits `start`, then ordered `text_*`, `tool_execution_*`, `owner_message` (a queued
 follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name`), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`

@@ -39,7 +39,6 @@ export interface HarnessLaunch {
 /** What a turn's output says, normalized across harnesses. */
 export type HarnessEvent =
   | { readonly type: "text"; readonly block: string; readonly delta: string }
-  | { readonly type: "thinking"; readonly block: string; readonly delta: string }
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
@@ -154,8 +153,6 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
         if (delta.type === "text_delta" && typeof delta.text === "string") {
           streamed.add(message);
           out.push({ type: "text", block, delta: delta.text });
-        } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
-          out.push({ type: "thinking", block, delta: delta.thinking });
         }
       }
       return out;
@@ -220,8 +217,6 @@ function codexParser(): (line: string) => HarnessEvent[] {
     switch (item.type) {
       case "agent_message":
         return done ? [{ type: "text", block: id, delta: str(item.text) }] : [];
-      case "reasoning":
-        return done ? [{ type: "thinking", block: id, delta: str(item.text) }] : [];
       case "command_execution":
         return done
           ? [{ type: "tool_end", id, isError: item.exit_code !== 0, output: outputText(item.aggregated_output) }]
@@ -254,7 +249,6 @@ function piParser(): (line: string) => HarnessEvent[] {
       const update = record(event.assistantMessageEvent);
       const block = `${message}:${String(update.contentIndex ?? 0)}`;
       if (update.type === "text_delta") return [{ type: "text", block, delta: str(update.delta) }];
-      if (update.type === "thinking_delta") return [{ type: "thinking", block, delta: str(update.delta) }];
     }
     if (event.type === "tool_execution_start") {
       return [{ type: "tool_start", id: str(event.toolCallId), name: str(event.toolName), args: event.args ?? {} }];
@@ -285,7 +279,6 @@ function opencodeParser(): (line: string) => HarnessEvent[] {
     }
     const part = record(event.part);
     if (event.type === "text") out.push({ type: "text", block: str(part.id), delta: str(part.text) });
-    if (event.type === "reasoning") out.push({ type: "thinking", block: str(part.id), delta: str(part.text) });
     if (event.type === "tool_use") {
       const state = record(part.state);
       const id = str(part.callID) || str(part.id);
@@ -311,8 +304,6 @@ function copilotParser(): (line: string) => HarnessEvent[] {
     switch (event.type) {
       case "assistant.message_delta":
         return [{ type: "text", block: str(data.messageId), delta: str(data.deltaContent) }];
-      case "assistant.reasoning_delta":
-        return [{ type: "thinking", block: str(data.reasoningId), delta: str(data.deltaContent) }];
       case "tool.execution_start":
         return [{ type: "tool_start", id: str(data.toolCallId), name: str(data.toolName), args: data.arguments ?? {} }];
       case "tool.execution_complete":

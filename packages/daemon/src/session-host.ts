@@ -122,13 +122,11 @@ export interface RunTurnOptions {
   prompt: string;
   emit: (event: TurnEvent) => void;
   signal?: AbortSignal;
-  includeThinking?: boolean;
 }
 
 export interface AdmittedTurnOptions {
   emit: (event: TurnEvent) => void;
   signal?: AbortSignal;
-  includeThinking?: boolean;
 }
 
 export interface TurnAdmission {
@@ -708,35 +706,28 @@ export class SessionHost {
     const content: AssistantPart[] = [];
     const textParts = new Map<string, number>();
     const tools = new Map<string, { name: string; part: number }>();
-    let open: { key: string; index: number; text: string; thinking: boolean } | null = null;
+    let open: { key: string; index: number; text: string } | null = null;
     let error: string | null = null;
     let produced = false;
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
-      stream.emit(open.thinking
-        ? { type: "thinking_end", contentIndex: open.index, content: open.text }
-        : { type: "text_end", contentIndex: open.index, content: open.text });
+      stream.emit({ type: "text_end", contentIndex: open.index, content: open.text });
       open = null;
     };
     const onEvent = (event: HarnessEvent): void => {
       switch (event.type) {
-        case "text":
-        case "thinking": {
-          const thinking = event.type === "thinking";
-          if (event.delta === "" || (thinking && !stream.includeThinking)) return;
+        case "text": {
+          if (event.delta === "") return;
           produced = true;
-          const key = `${event.type}:${event.block}`;
+          const key = event.block;
           if (open?.key !== key) {
             closeBlock();
-            open = { key, index: blocks.next++, text: "", thinking };
-            stream.emit(thinking ? { type: "thinking_start", contentIndex: open.index } : { type: "text_start", contentIndex: open.index });
+            open = { key, index: blocks.next++, text: "" };
+            stream.emit({ type: "text_start", contentIndex: open.index });
           }
           open.text += event.delta;
-          stream.emit(thinking
-            ? { type: "thinking_delta", contentIndex: open.index, delta: event.delta }
-            : { type: "text_delta", contentIndex: open.index, delta: event.delta });
-          if (thinking) return;
+          stream.emit({ type: "text_delta", contentIndex: open.index, delta: event.delta });
           const at = textParts.get(key);
           if (at === undefined) {
             textParts.set(key, content.length);
