@@ -18,8 +18,8 @@ import {
   characterBodyTooLong,
   MAX_CHARACTER_BODY_LENGTH,
   type CharacterFile,
-} from "@ghost/runtime/persona";
-import { GhostError } from "@ghost/runtime/errors";
+} from "./persona.js";
+import { GhostError } from "./errors.js";
 import {
   descriptorPath,
   openConfinedDirectory,

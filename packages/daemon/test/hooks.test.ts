@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostHookRunner, type LocalHookEvent } from "../src/hooks.js";
-import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent } from "@ghost/runtime/hook-policy";
+import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent } from "../src/hook-policy.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];

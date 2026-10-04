@@ -19,8 +19,8 @@ import {
   resolveDocumentsDirectory,
   type CollectedGhostExtension,
 } from "@ghost/extensions";
-import { ghostSessionStopContinuation } from "@ghost/runtime/hook-policy";
-import { FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/runtime/persona";
+import { ghostSessionStopContinuation } from "./hook-policy.js";
+import { FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
 import {
   appendLog,
   conversationDir,
@@ -62,7 +62,7 @@ import {
   OWNER_HOOKS_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
+import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { expandMcpServerConfig, normalizeMcpStdioCwd, readEffectiveMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
 import { readPinState, writePins } from "./pins.js";

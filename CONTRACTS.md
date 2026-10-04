@@ -477,8 +477,8 @@ client and process — else the connecting client plus that server process.
 ## Package boundaries
 
 Ghost is two sides of one product plus two separate products. **ghost-core**
-is everything a second interface could reuse: `packages/runtime`,
-`packages/daemon`, and `packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
+is everything a second interface could reuse: `packages/daemon` and
+`packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
 `packages/shell` (published as `@ghost/omarchy`; the directory name is
 historical) and `ghost-desktop`, its own repository. The sides meet only at named
 seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
@@ -486,13 +486,11 @@ relay WebSocket protocol, and MCP over stdio with `ghost-desktop`'s PATH
 spawn — and core never imports the Omarchy side:
 `scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
 
-`packages/runtime` (`@ghost/runtime`) is portable policy with no host I/O:
-persona (character limits, seed detection, first-meeting text, system-prompt
-assembly), command-hook admission, status, aggregation, and stop
-continuation, MCP config and catalog policy, the browser session policy, and
-the untrusted-content fence. Hosted SummonGhost vendors its own packed copy of
-an earlier version (its `SOURCE.json` names the commit) and owns that copy;
-the modules it alone used left this repository with pi.
+`packages/extensions` holds the persona and system-prompt assembly, the
+ghost's tools (browser session, relay backend, desktop bridge), and the
+untrusted-content fence; the daemon holds hook and MCP config policy.
+Hosted SummonGhost vendors its own packed copy of the former
+`@ghost/runtime` package (its `SOURCE.json` names the commit) and owns it.
 
 The **relay extension** is a separate product in its own repository,
 [ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension),

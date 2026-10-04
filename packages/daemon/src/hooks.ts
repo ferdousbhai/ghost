@@ -9,7 +9,7 @@ import {
   type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
   type GhostSessionStopResult,
-} from "@ghost/runtime/hook-policy";
+} from "./hook-policy.js";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";

@@ -1,4 +1,4 @@
-export { isGhostError } from "@ghost/runtime/errors";
+export { isGhostError } from "./errors.js";
 
 export {
   MAX_CHARACTER_BODY_LENGTH,
@@ -12,12 +12,14 @@ export {
   openRegularFileNoFollow,
 } from "./linux-fs.js";
 
-export type { CharacterFile } from "@ghost/runtime/persona";
-
 export {
   buildGhostSystemPrompt,
+  FIRST_MEETING_SECTION,
+  isSeededCharacter,
+  SEEDED_CHARACTER,
+  type CharacterFile,
   type GhostSystemPromptInput,
-} from "./prompt.js";
+} from "./persona.js";
 
 export {
   collectGhostExtension,

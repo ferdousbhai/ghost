@@ -25,7 +25,7 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 Ghost no longer depends on Oh My Pi. Two pieces of Ghost's own code were
 ported from it under the MIT license: the `mcp.json` configuration shape
-(`packages/runtime/src/mcp-config-policy.ts`), and the daemon side of the browser
+(`packages/daemon/src/mcp-config-policy.ts`), and the daemon side of the browser
 relay (`packages/daemon/src/relay.ts`) from its `browser-relay` package. (The
 Chromium extension, also ported from that package, carries the same notice in
 its own repository.) The first is from Oh My Pi commit

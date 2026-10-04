@@ -9,7 +9,7 @@
  * continue is cwd-scoped. A harness whose continue is not names its session
  * in its output, and the host hands that id back (`sessionFrom`).
  */
-import type { MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
+import type { MCPServerConfig } from "./mcp-config-policy.js";
 
 export interface HarnessMcpServer {
   readonly name: string;

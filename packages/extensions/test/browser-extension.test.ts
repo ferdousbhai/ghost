@@ -45,14 +45,14 @@ import type {
   NetworkEntry,
   PageElementMatch,
   PageSummary,
-} from "@ghost/runtime/browser-backend";
-import { withAbort, withTimeout } from "@ghost/runtime/browser-backend";
+} from "../src/extensions/browser-backend.js";
+import { withAbort, withTimeout } from "../src/extensions/browser-backend.js";
 import {
   MAX_BROWSER_OBSERVATION_BYTES,
   MAX_BROWSER_OBSERVATION_ITEMS,
   MAX_BROWSER_OBSERVATION_STRING_BYTES,
-} from "@ghost/runtime/browser-observation";
-import type { BrowserClock } from "@ghost/runtime/browser-session";
+} from "../src/extensions/browser-observation.js";
+import type { BrowserClock } from "../src/extensions/browser-session.js";
 import {
   browserSessionFor,
   closeAllBrowserSessions,
@@ -64,9 +64,9 @@ import {
   MAX_BROWSER_MATCH_TEXT_CHARS,
   MAX_FIND_QUERY_CHARS,
 } from "../src/extensions/browser-session.js";
-import { GhostError } from "@ghost/runtime/errors";
-import { GhostBrowserError } from "@ghost/runtime/browser-backend";
-import { relayBackend } from "@ghost/runtime/browser-relay-backend";
+import { GhostError } from "../src/errors.js";
+import { GhostBrowserError } from "../src/extensions/browser-backend.js";
+import { relayBackend } from "../src/extensions/browser-relay-backend.js";
 import { DEFAULT_SCREENSHOT_RETENTION, MAX_SCREENSHOT_BYTES } from "../src/extensions/screenshot-retention.js";
 import { createGhostFixture, createTempDir, type GhostFixture } from "./support/fixture.js";
 import { loadExtension, resultText, type Harness } from "./support/harness.js";

@@ -1,4 +1,4 @@
-/** Bounded, model-facing projections of browser observations, shared by local and hosted Ghost. */
+/** Bounded, model-facing projections of browser observations. */
 export interface BackendJavascriptResult {
   readonly value: unknown;
   readonly type: string;

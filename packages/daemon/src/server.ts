@@ -26,7 +26,7 @@ import {
   type GhostRegistry,
 } from "./ghosts.js";
 import type { GhostHookRunner } from "./hooks.js";
-import type { GhostHookCommandConfig, GhostHookStatus } from "@ghost/runtime/hook-policy";
+import type { GhostHookCommandConfig, GhostHookStatus } from "./hook-policy.js";
 import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,

@@ -4,7 +4,7 @@ import {
   GHOST_BROWSER,
 } from "../src/extensions/browser.js";
 import { createGhostExtension } from "../src/extensions/index.js";
-import { relayBackend } from "@ghost/runtime/browser-relay-backend";
+import { relayBackend } from "../src/extensions/browser-relay-backend.js";
 import { loadExtension } from "./support/harness.js";
 
 interface JsonSchema {

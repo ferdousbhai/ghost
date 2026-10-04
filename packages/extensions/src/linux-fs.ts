@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { mkdir, open, type FileHandle } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { dlopen, FFIType } from "bun:ffi";
-import { GhostError } from "@ghost/runtime/errors";
+import { GhostError } from "./errors.js";
 
 const DIRECTORY_FLAGS = constants.O_RDONLY
   | constants.O_DIRECTORY

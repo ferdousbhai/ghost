@@ -12,7 +12,7 @@ import {
   writePrivateJsonAtomic,
 } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
-import { validateServerName, validateServerConfig, type MCPServerConfig } from "@ghost/runtime/mcp-config-policy";
+import { validateServerName, validateServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
 
 export { validateServerName };
 

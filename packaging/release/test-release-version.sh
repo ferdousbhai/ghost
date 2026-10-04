@@ -18,7 +18,6 @@ manifests=(
   package.json
   packages/daemon/package.json
   packages/extensions/package.json
-  packages/runtime/package.json
   packages/shell/package.json
   packages/shell/qml/manifest.json
 )

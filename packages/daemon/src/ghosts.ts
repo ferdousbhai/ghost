@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
-import { SEEDED_CHARACTER } from "@ghost/runtime/persona";
+import { SEEDED_CHARACTER } from "@ghost/extensions";
 import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";

@@ -30,7 +30,7 @@ when it is used ([`ghosts.ts`](../packages/daemon/src/ghosts.ts),
   ghost carries a first-meeting section that asks it to learn about the owner
   in the gaps and to show a character draft before writing one. Writing the
   file removes that section on the next conversation, so onboarding ends by
-  itself ([`persona.ts`](../packages/runtime/src/persona.ts)).
+  itself ([`persona.ts`](../packages/extensions/src/persona.ts)).
 - Notes are not in the home: a ghost's facts, decisions, and reflections are
   Markdown files under the owner's Documents directory, shared with every
   ghost and the owner.

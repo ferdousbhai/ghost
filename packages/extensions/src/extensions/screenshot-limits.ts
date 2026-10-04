@@ -1,4 +1,4 @@
-import { GhostError } from "./errors.js";
+import { GhostError } from "../errors.js";
 
 export const MAX_SCREENSHOT_BYTES = 8 * 1024 * 1024;
 

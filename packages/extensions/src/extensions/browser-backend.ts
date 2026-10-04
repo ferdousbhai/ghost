@@ -4,7 +4,7 @@
  * backend that has to stub one fails at runtime, not at compile time.
  */
 import type { BackendJavascriptResult, ConsoleEntry, NetworkEntry } from "./browser-observation.js";
-import { GhostError } from "./errors.js";
+import { GhostError } from "../errors.js";
 
 export type BrowserFailure =
   | "browser_unavailable"

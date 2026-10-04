@@ -1,3 +1,5 @@
+import { join } from "node:path";
+
 export const CHARACTER_FILENAME = "character.md";
 export const MAX_CHARACTER_BODY_LENGTH = 20_000;
 export interface CharacterFile { readonly body: string }
@@ -46,8 +48,8 @@ export const FIRST_MEETING_SECTION = firstMeetingSection();
 export interface GhostSystemPromptInput {
   readonly ghostName: string;
   readonly character: CharacterFile | null;
-  /** Host-supplied location; persona content is never rewritten. */
-  readonly characterPath: string;
+  /** The ghost home; the prompt names its character file by absolute path. */
+  readonly homeDir: string;
   readonly extraSections?: readonly string[];
 }
 
@@ -62,7 +64,7 @@ function characterSection(input: GhostSystemPromptInput): string {
 }
 
 function characterPolicySection(input: GhostSystemPromptInput): string[] {
-  const characterPath = input.characterPath;
+  const characterPath = join(input.homeDir, CHARACTER_FILENAME);
   return [
     "## Character file",
     `${JSON.stringify(characterPath)} is your persona, read from disk at the start of every `

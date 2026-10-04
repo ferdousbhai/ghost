@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { checkUrl } from "@ghost/runtime/browser-policy";
+import { checkUrl } from "../src/extensions/browser-policy.js";
 
 function reason(input: string): string {
   const result = checkUrl(input);

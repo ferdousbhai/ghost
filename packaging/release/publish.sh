@@ -48,14 +48,14 @@ if (( ! dry_run )) && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; the
   printf 'tag %s already exists\n' "$tag" >&2
   exit 1
 fi
-# The version lives in six manifests; a release starts by making them agree.
+# The version lives in five manifests; a release starts by making them agree.
 current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
 if [[ "$current" != "$version" ]]; then
   [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || {
     printf 'not a release version: %s\n' "$version" >&2
     exit 1
   }
-  for manifest in package.json packages/daemon/package.json packages/extensions/package.json packages/runtime/package.json \
+  for manifest in package.json packages/daemon/package.json packages/extensions/package.json \
       packages/shell/package.json packages/shell/qml/manifest.json; do
     sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$manifest"
   done

@@ -1,17 +1,17 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
-import type { MCPServerConfig, MCPStdioServerConfig } from "@ghost/runtime/mcp-config-policy";
+import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
 import { silentLogger, type Logger } from "./log.js";
-import { isRecord, mcpServerValidationErrors } from "@ghost/runtime/mcp-config-policy";
+import { isRecord, mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
   PrivateReadError,
   readPrivateFileText,
   type PrivateReadProbe,
 } from "./private-file.js";
 
-import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "@ghost/runtime/mcp-catalog-policy";
-import type { McpServerConfigView } from "@ghost/runtime/mcp-catalog-policy";
+import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
+import type { McpServerConfigView } from "./mcp-catalog-policy.js";
 export interface McpServerView {
   name: string;
   enabled: boolean;
@@ -103,7 +103,7 @@ export function normalizeMcpStdioCwd(
   };
 }
 
-/** Local environment adapter for the portable expansion policy. */
+/** Expand a row against this process's environment. */
 export function expandMcpServerConfig(config: MCPServerConfig): MCPServerConfig {
   return expandMcpServerConfigWithEnvironment(config, process.env);
 }

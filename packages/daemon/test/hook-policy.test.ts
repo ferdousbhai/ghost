@@ -3,7 +3,7 @@ import {
   ghostSessionStopContinuation, hookStatus, parseCommandResult, parseHooksDocument,
   runBeforePromptHooks, runSessionStopHooks,
   type CommandResult, type GhostBeforePromptEvent, type GhostSessionStopEvent,
-} from "@ghost/runtime/hook-policy";
+} from "../src/hook-policy.js";
 
 const path = "/owner/hooks.json";
 const config = {

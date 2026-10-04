@@ -44,16 +44,15 @@ The common defect here is a change that works on the path you tested and is miss
 
 ## Code index
 
-- `packages/runtime/src/` — portable persona, hook, MCP-config, and browser policy; no host I/O
 - `packages/daemon/src/server.ts` — HTTP API and authentication boundary
 - `packages/daemon/src/session-host.ts` — turns, harness choice and fallback, conversation metadata, ghost lifecycle
 - `packages/daemon/src/harness-table.ts` — one row per agent CLI: launch flags and output parser; `harness-process.ts` runs one; `conversation-log.ts` is the history every client reads
 - `packages/daemon/src/prompt-policy.ts` — the stable system-prompt policy sections
 - `packages/daemon/src/hooks.ts` — the owner's command hooks around each pass
-- `packages/extensions/src/` — the ghost's own tools (the `extension-api.ts` seam), served to harnesses over `ghost mcp serve`, and ghost-home file operations
+- `packages/extensions/src/` — the persona and system prompt (`persona.ts`), the ghost's own tools (the `extension-api.ts` seam), served to harnesses over `ghost mcp serve`, and ghost-home file operations
 - `packages/shell/qml/` — Quickshell HUD and desktop UI
 - `packages/extensions/src/extensions/desktop.ts` — ghostd's bridge to [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop), the computer-use MCP server in its own repo
-- ghost-core is `packages/{daemon,extensions,runtime}`; ghost-omarchy is `packages/shell` plus the ghost-desktop repo; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
+- ghost-core is `packages/{daemon,extensions}`; ghost-omarchy is `packages/shell` plus the ghost-desktop repo; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
 - `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` — the owner command-hook protocol
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.

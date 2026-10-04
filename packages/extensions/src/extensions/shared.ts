@@ -1,5 +1,5 @@
 import type { GhostToolContext, GhostToolResult } from "../extension-api.js";
-import { GhostError } from "@ghost/runtime/errors";
+import { GhostError } from "../errors.js";
 import { GhostHome, openGhostHome } from "../home.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
 

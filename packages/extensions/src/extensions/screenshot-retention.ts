@@ -2,7 +2,7 @@ import { constants } from "node:fs";
 import { lstat, open, readdir, rm, type FileHandle } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, extname, resolve } from "node:path";
-import { GhostError } from "@ghost/runtime/errors";
+import { GhostError } from "../errors.js";
 import {
   descriptorPath,
   openConfinedDirectory,
@@ -65,13 +65,13 @@ import {
   assertScreenshotBytesWithinLimit,
   MAX_SCREENSHOT_BYTES,
   screenshotLimitError,
-} from "@ghost/runtime/screenshot-limits";
+} from "./screenshot-limits.js";
 
 export {
   assertScreenshotBase64WithinLimit,
   assertScreenshotBytesWithinLimit,
   MAX_SCREENSHOT_BYTES,
-} from "@ghost/runtime/screenshot-limits";
+} from "./screenshot-limits.js";
 
 const MAX_SCREENSHOT_COLLISIONS = 10_000;
 const CREATE_SCREENSHOT_FLAGS = constants.O_WRONLY
