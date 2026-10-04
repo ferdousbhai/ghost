@@ -150,16 +150,8 @@ function fallback(activity, completed) {
         const steps = (activity.arguments || ({})).steps;
         const only = Array.isArray(steps) && steps.length === 1
             ? String((steps[0] && steps[0].do) || "") : "";
-        if (only === "workspace")
-            return completed ? "Switched workspaces" : "Switching workspaces";
-        if (only === "focus")
-            return completed ? "Focused a window" : "Focusing a window";
         if (only === "type")
             return completed ? "Typed on the desktop" : "Typing on the desktop";
-        if (only === "notify")
-            return completed ? "Sent a notification" : "Sending a notification";
-        if (only === "launch")
-            return completed ? "Opened an app" : "Opening an app";
         return completed ? "Worked on the desktop" : "Working on the desktop";
     }
     default:

@@ -86,8 +86,8 @@ TestCase {
         compare(ToolTrace.text(look, true, false, false), "Checked what’s on screen");
         const ui = { name: "desktop_look", status: "running", arguments: { window: "firefox", ui: true }, intent: "", summary: "" };
         compare(ToolTrace.text(ui, false, false, false), "Looking through a window");
-        const one = { name: "desktop_act", status: "completed", arguments: { steps: [{ do: "launch", command: "foot" }] }, intent: "", summary: "" };
-        compare(ToolTrace.text(one, true, false, false), "Opened an app");
+        const one = { name: "desktop_act", status: "completed", arguments: { steps: [{ do: "type", text: "hi" }] }, intent: "", summary: "" };
+        compare(ToolTrace.text(one, true, false, false), "Typed on the desktop");
         const many = { name: "desktop_act", status: "running", arguments: { steps: [{ do: "click" }, { do: "type" }] }, intent: "", summary: "" };
         compare(ToolTrace.text(many, false, false, false), "Working on the desktop");
     }
