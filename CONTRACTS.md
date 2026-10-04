@@ -331,7 +331,9 @@ Awaited Ghost hooks are `before_prompt` and `session_stop`, run by ghostd
 around each harness pass, above whatever hooks the harness has of its own.
 Their JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
-Ghost sets `stop_hook_active` on later passes and does not impose a host bound.
+Ghost sets `stop_hook_active` on hook continuation passes and does not impose
+a host bound; `owner_prompt` and `turn_id` identify one owner request across
+its continuations.
 `ghostd hook-smol-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 A ghost keeps its notes in the

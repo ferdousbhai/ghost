@@ -16,7 +16,7 @@ export interface GhostHookEventBase {
 export interface GhostBeforePromptEvent extends GhostHookEventBase {
   type: "before_prompt";
   prompt: string;
-  turn_id: number;
+  turn_id: string;
 }
 
 export interface GhostBeforePromptResult {
@@ -27,7 +27,7 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   type: "session_stop";
   owner_prompt: string;
   messages: unknown[];
-  turn_id: number;
+  turn_id: string;
   last_assistant_message?: unknown;
   stop_hook_active: boolean;
   /** The conversation log on disk; `messages` carries only the current pass. */

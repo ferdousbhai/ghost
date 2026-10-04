@@ -7,6 +7,7 @@
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
 import { execFile } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { lstat, mkdir, readdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -556,10 +557,14 @@ export class SessionHost {
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
-      let turnId = 0;
+      let turnId = randomUUID();
+      let ownerPrompt = prompt;
       while (next && !controller.signal.aborted) {
-        turnId += 1;
         const { text, origin }: Pass = next;
+        if (origin === "follow_up") {
+          turnId = randomUUID();
+          ownerPrompt = text;
+        }
         await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         if (origin !== "hook") {
@@ -575,7 +580,7 @@ export class SessionHost {
         // is not asked while one waits, and loses to one sent while it ran.
         const continuation: string | null = turn.followUps.length > 0
           ? null
-          : await this.sessionStop(ghost, id, text, turnId, origin === "hook", controller.signal, onHook);
+          : await this.sessionStop(ghost, id, ownerPrompt, turnId, origin === "hook", controller.signal, onHook);
         if (continuation && turn.followUps.length === 0) {
           stream.emit({ type: "session_stop_continued", reason: continuation });
           next = { text: continuation, origin: "hook" };
@@ -771,7 +776,7 @@ export class SessionHost {
     ghost: Ghost,
     id: string,
     prompt: string,
-    turnId: number,
+    turnId: string,
     signal: AbortSignal,
     onHook: HookObserver,
   ): Promise<string | null> {
@@ -798,7 +803,7 @@ export class SessionHost {
     ghost: Ghost,
     id: string,
     ownerPrompt: string,
-    turnId: number,
+    turnId: string,
     active: boolean,
     signal: AbortSignal,
     onHook: HookObserver,

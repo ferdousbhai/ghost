@@ -3,9 +3,10 @@
  * (persona, cwd, env, resume, MCP), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
-import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
@@ -248,6 +249,48 @@ describe("queued follow-ups and aborts", () => {
 });
 
 describe("owner commands and hooks", () => {
+  function recordingStopHook(gated = false): {
+    hooks: GhostHookRunner;
+    started: string;
+    go: string;
+    inputs: () => GhostHookEvent[];
+  } {
+    const scratch = tempDir();
+    cleanups.push(scratch.cleanup);
+    const script = join(scratch.path, "hook.mjs");
+    const observed = join(scratch.path, "inputs.jsonl");
+    const started = join(scratch.path, "started");
+    const seen = join(scratch.path, "seen");
+    const go = join(scratch.path, "go");
+    writeFileSync(script, `
+      import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+      import { setTimeout } from "node:timers/promises";
+      let input = "";
+      for await (const chunk of process.stdin) input += chunk;
+      const event = JSON.parse(input);
+      appendFileSync(${JSON.stringify(observed)}, JSON.stringify(event) + "\\n");
+      if (event.type === "session_stop") {
+        writeFileSync(${JSON.stringify(started)}, "");
+        if (${gated}) while (!existsSync(${JSON.stringify(go)})) await setTimeout(20);
+        const block = ${gated} ? !existsSync(${JSON.stringify(seen)}) : !event.stop_hook_active;
+        writeFileSync(${JSON.stringify(seen)}, "");
+        process.stdout.write(JSON.stringify(block ? { decision: "block", reason: "verify it" } : {}));
+      } else process.stdout.write("{}");
+    `);
+    const hooksPath = join(scratch.path, "hooks.json");
+    const hook = { type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(script)}`, name: "Review" };
+    writeFileSync(hooksPath, JSON.stringify({ hooks: {
+      before_prompt: [{ hooks: [hook] }],
+      session_stop: [{ hooks: [hook] }],
+    } }));
+    return {
+      hooks: GhostHookRunner.fromConfig(hooksPath),
+      started,
+      go,
+      inputs: () => readFileSync(observed, "utf8").trim().split("\n").map((line) => JSON.parse(line)),
+    };
+  }
+
   it("runs `!command` in the owner home and hands its output to the next turn", async () => {
     const fake = harness(replies("seen"));
     const sessions = host({ harnesses: [fake] });
@@ -271,16 +314,9 @@ describe("owner commands and hooks", () => {
   });
 
   it("continues the turn while a session_stop hook asks it to", async () => {
-    const scratch = tempDir();
-    cleanups.push(scratch.cleanup);
-    const script = join(scratch.path, "stop.sh");
-    const marker = join(scratch.path, "seen");
-    writeFileSync(script, `#!/bin/bash\nif [ -e ${marker} ]; then echo '{}'; else touch ${marker}; echo '{"decision":"block","reason":"verify it"}'; fi\n`);
-    chmodSync(script, 0o755);
-    const hooksPath = join(scratch.path, "hooks.json");
-    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [{ type: "command", command: script, name: "Review" }] }] } }));
+    const stop = recordingStopHook();
     const fake = harness(replies("done", "verified"));
-    const sessions = host({ harnesses: [fake], hooks: GhostHookRunner.fromConfig(hooksPath) });
+    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
     const events = await turn(sessions, "do it");
 
     // Each run of the hook is bracketed by its name, so a client can say what
@@ -290,6 +326,8 @@ describe("owner commands and hooks", () => {
     expect(hookEvents).toEqual([
       { type: "hook_start", name: "Review" },
       { type: "hook_end", name: "Review" },
+      { type: "hook_start", name: "Review" },
+      { type: "hook_end", name: "Review" },
       { type: "session_stop_continued", reason: "verify it" },
       { type: "hook_start", name: "Review" },
       { type: "hook_end", name: "Review" },
@@ -297,31 +335,30 @@ describe("owner commands and hooks", () => {
     ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
     expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
+    const [before, first, continued] = stop.inputs();
+    expect(before).toMatchObject({ type: "before_prompt", prompt: "do it", turn_id: expect.any(String) });
+    expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: false });
+    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: true });
   });
 
-  /** A stop hook that blocks the first time it is asked, once `go` exists. */
-  function blockOnceStopHook(): { hooks: GhostHookRunner; started: string; go: string } {
-    const scratch = tempDir();
-    cleanups.push(scratch.cleanup);
-    const started = join(scratch.path, "started");
-    const seen = join(scratch.path, "seen");
-    const go = join(scratch.path, "go");
-    const script = join(scratch.path, "stop.sh");
-    writeFileSync(script, [
-      "#!/bin/bash",
-      `touch ${started}`,
-      `while [ ! -e ${go} ]; do sleep 0.02; done`,
-      `if [ -e ${seen} ]; then echo '{}'; else touch ${seen}; echo '{"decision":"block","reason":"verify it"}'; fi`,
-      "",
-    ].join("\n"));
-    chmodSync(script, 0o755);
-    const hooksPath = join(scratch.path, "hooks.json");
-    writeFileSync(hooksPath, JSON.stringify({ hooks: { session_stop: [{ hooks: [{ type: "command", command: script }] }] } }));
-    return { hooks: GhostHookRunner.fromConfig(hooksPath), started, go };
-  }
+  it("gives repeated identical owner requests distinct hook identities", async () => {
+    const stop = recordingStopHook();
+    const fake = harness(replies("done", "verified", "done again", "verified again"));
+    const sessions = host({ harnesses: [fake], hooks: stop.hooks });
+    await turn(sessions, "do it");
+    await turn(sessions, "do it");
+    const inputs = stop.inputs();
+    expect(inputs).toHaveLength(6);
+    const first = inputs[0]?.turn_id;
+    const second = inputs[3]?.turn_id;
+    expect(first).toEqual(expect.any(String));
+    expect(second).toEqual(expect.any(String));
+    expect(second).not.toBe(first);
+    expect(inputs.map((input) => input.turn_id)).toEqual([first, first, first, second, second, second]);
+  });
 
   it("does not ask the stop hook while the owner's follow-up waits", async () => {
-    const stop = blockOnceStopHook();
+    const stop = recordingStopHook(true);
     writeFileSync(stop.go, "");
     const fake = harness([]);
     const gate = fake.gate("first");
@@ -338,10 +375,15 @@ describe("owner commands and hooks", () => {
     expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two", "Stop hook feedback:\nverify it"]);
     expect(events.findIndex((event) => event.type === "owner_message"))
       .toBeLessThan(events.findIndex((event) => event.type === "session_stop_continued"));
+    const [before, followUp, reviewed, continued] = stop.inputs();
+    expect(followUp?.turn_id).not.toBe(before?.turn_id);
+    expect(followUp).toMatchObject({ type: "before_prompt", prompt: "two", turn_id: expect.any(String) });
+    expect(reviewed).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: false });
+    expect(continued).toMatchObject({ type: "session_stop", owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: true });
   });
 
   it("lets a follow-up sent while the stop hook runs win over its continuation", async () => {
-    const stop = blockOnceStopHook();
+    const stop = recordingStopHook(true);
     const fake = harness(replies("first", "second"));
     const sessions = host({ harnesses: [fake], hooks: stop.hooks });
     const events: TurnEvent[] = [];
@@ -354,6 +396,10 @@ describe("owner commands and hooks", () => {
     expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
     expect(events).toContainEqual({ type: "owner_message", text: "two" });
     expect(events.some((event) => event.type === "session_stop_continued")).toBe(false);
+    const [before, first, followUp, reviewed] = stop.inputs();
+    expect(first).toMatchObject({ owner_prompt: "one", turn_id: before?.turn_id });
+    expect(followUp?.turn_id).not.toBe(before?.turn_id);
+    expect(reviewed).toMatchObject({ owner_prompt: "two", turn_id: followUp?.turn_id, stop_hook_active: false });
   });
 });
 

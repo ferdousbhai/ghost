@@ -100,7 +100,7 @@ ghost-home storage root, and the conversation directory:
 {
   "type": "before_prompt",
   "prompt": "Continue.",
-  "turn_id": 4,
+  "turn_id": "95d8e048-e69e-4a0e-95a4-f10ad22f42d7",
   "session_id": "conversation-a",
   "session_file": "/home/me/ghosts/casper/sessions/conversation-a/.conversation.jsonl",
   "ghost_name": "casper",
@@ -137,7 +137,7 @@ contains the same message directly:
     "role": "assistant",
     "content": [{ "type": "text", "text": "The answer." }]
   }],
-  "turn_id": 3,
+  "turn_id": "95d8e048-e69e-4a0e-95a4-f10ad22f42d7",
   "last_assistant_message": {
     "role": "assistant",
     "content": [{ "type": "text", "text": "The answer." }]
@@ -157,9 +157,12 @@ contains the same message directly:
 `harness` is the harness that answered the pass. `messages` exposes only that
 pass, its content Ghost's assistant parts (`text`, and `toolCall` with
 `failed: true` on a call that failed).
-`owner_prompt` is the owner's original request for this turn and does not
-change across continuations (it is how keep-going keys the tally). A blocking
-result is injected the way Codex and Claude Code inject Stop feedback: a
+`owner_prompt` is the owner's request and stays fixed across hook
+continuations. `turn_id` is a string UUID shared by `before_prompt` and every
+`session_stop` for that request. A queued follow-up becomes the new
+`owner_prompt` with a fresh `turn_id`; repeating the same request also gets a
+fresh identity. Before this contract, `turn_id` was a numeric pass counter.
+A blocking result is injected the way Codex and Claude Code inject Stop feedback: a
 user-role prompt whose text is `Stop hook feedback:` plus the reason, so the
 latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 `transcript_path` is the conversation log on disk

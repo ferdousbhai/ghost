@@ -48,14 +48,14 @@ describe("shared hook policy", () => {
 
   it("combines before-prompt contexts and stops at the first real continuation", async () => {
     const commands = parseHooksDocument(config, path);
-    const before: GhostBeforePromptEvent = { ...base, type: "before_prompt", prompt: "Continue", turn_id: 1 };
+    const before: GhostBeforePromptEvent = { ...base, type: "before_prompt", prompt: "Continue", turn_id: "turn-1" };
     const called: string[] = [];
     expect(await runBeforePromptHooks(commands, before, async (hook) => {
       called.push(hook.command);
       return { additionalContext: hook.command };
     })).toEqual({ additionalContext: "first\n\nsecond" });
     expect(called).toEqual(["first", "second"]);
-    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], turn_id: 1, stop_hook_active: false };
+    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], turn_id: "turn-1", stop_hook_active: false };
     called.length = 0;
     expect(await runSessionStopHooks(commands, stop, async (hook) => {
       called.push(hook.command);

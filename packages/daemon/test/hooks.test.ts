@@ -21,7 +21,7 @@ function beforePromptEvent(overrides: Partial<LocalHookEvent<GhostBeforePromptEv
   return {
     type: "before_prompt",
     prompt: "Continue",
-    turn_id: 2,
+    turn_id: "turn-2",
     session_id: "session-1",
     signal: new AbortController().signal,
     ghost_name: "casper",
@@ -38,7 +38,7 @@ function event(overrides: Partial<LocalHookEvent<GhostSessionStopEvent>> = {}): 
     type: "session_stop",
     owner_prompt: "Continue",
     messages: [],
-    turn_id: 1,
+    turn_id: "turn-1",
     session_id: "session-1",
     stop_hook_active: false,
     signal: new AbortController().signal,
