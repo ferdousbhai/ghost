@@ -121,8 +121,8 @@ stop the mock separately.
   `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
   on title (`^Ghost( — .*)?$`), not on class. `SHIFT+SUPER+<n>` moves it between workspaces.
 
-`dev/evidence/ghost-hud.png` is a capture of the HUD (from its earlier
-layer-shell incarnation; the card contents are unchanged).
+`dev/evidence/ghost-hud.png` is a nested-preview capture of the HUD against
+the mock, opened on `casper`.
 
 ## Validation
 
