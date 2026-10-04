@@ -133,14 +133,16 @@ Item {
         }
     }
 
-    // The harness picker. Each row's name picks the harness for this
-    // conversation's next turn; its "default" toggles the ghost's own default,
-    // and "automatic" clears that back to Omarchy's machine default.
+    // The harness picker: a list of harnesses, where a name runs this
+    // conversation's next turn on it, and one footer line saying what new
+    // conversations start on, with the way to change that and the way back.
     Rectangle {
         id: picker
         objectName: "harnessPicker"
 
         readonly property var choice: Ghostd.harnessChoice
+        readonly property string ghostDefault: picker.choice && picker.choice.ghostDefault
+            ? picker.choice.ghostDefault : ""
 
         visible: root.pickerOpen
         focus: root.pickerOpen
@@ -171,27 +173,13 @@ Item {
             width: picker.width - Theme.gap * 2
             spacing: 2
 
-            Item {
-                width: pickerColumn.width
-                height: captionText.implicitHeight + 4
-
-                Text {
-                    id: captionText
-                    text: "NEXT TURN RUNS ON"
-                    color: Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeCaption
-                    font.letterSpacing: 0.5
-                }
-
-                Text {
-                    anchors.right: parent.right
-                    text: "GHOST DEFAULT"
-                    color: Theme.foregroundFaint
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeCaption
-                    font.letterSpacing: 0.5
-                }
+            Text {
+                height: implicitHeight + 4
+                text: "RUN THIS CONVERSATION ON"
+                color: Theme.foregroundFaint
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeCaption
+                font.letterSpacing: 0.5
             }
 
             Text {
@@ -206,52 +194,46 @@ Item {
                 model: picker.choice ? picker.choice.harnesses : []
 
                 delegate: Rectangle {
-                    id: agentRow
+                    id: harnessRow
 
                     required property var modelData
-                    readonly property bool current: agentRow.modelData.id === Ghostd.currentHarness
-                    readonly property bool isDefault: picker.choice !== null
-                        && picker.choice.ghostDefault === agentRow.modelData.id
+                    readonly property bool current: harnessRow.modelData.id === Ghostd.currentHarness
 
-                    objectName: "harnessRow-" + agentRow.modelData.id
                     width: pickerColumn.width
                     height: Theme.controlHeight
-                    color: chooseArea.containsMouse && agentRow.modelData.eligible ? Theme.film(0.07) : "transparent"
+                    color: chooseArea.containsMouse && harnessRow.modelData.eligible ? Theme.film(0.07) : "transparent"
 
                     MouseArea {
                         id: chooseArea
-                        objectName: "harnessChoose-" + agentRow.modelData.id
-                        anchors.left: parent.left
-                        anchors.right: defaultToggle.left
-                        anchors.top: parent.top
-                        anchors.bottom: parent.bottom
-                        enabled: agentRow.modelData.eligible
+                        objectName: "harnessChoose-" + harnessRow.modelData.id
+                        anchors.fill: parent
+                        enabled: harnessRow.modelData.eligible
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.choose(agentRow.modelData.id)
+                        onClicked: root.choose(harnessRow.modelData.id)
                     }
 
                     Row {
                         anchors.left: parent.left
                         anchors.leftMargin: 4
-                        anchors.right: defaultToggle.left
-                        anchors.rightMargin: Theme.gap
+                        anchors.right: parent.right
+                        anchors.rightMargin: 4
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: Theme.gap
 
                         Text {
-                            id: agentName
-                            text: (agentRow.current ? "• " : "  ") + agentRow.modelData.id
-                            color: !agentRow.modelData.eligible ? Theme.foregroundFaint
-                                : (agentRow.current ? Theme.ghostAmberBright : Theme.foreground)
+                            id: harnessName
+                            text: (harnessRow.current ? "• " : "  ") + harnessRow.modelData.id
+                            color: !harnessRow.modelData.eligible ? Theme.foregroundFaint
+                                : (harnessRow.current ? Theme.ghostAmberBright : Theme.foreground)
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
                         }
 
                         Text {
-                            width: Math.max(0, parent.width - agentName.implicitWidth - Theme.gap)
-                            visible: !agentRow.modelData.eligible && agentRow.modelData.reason !== ""
-                            text: agentRow.modelData.reason
+                            width: Math.max(0, parent.width - harnessName.implicitWidth - Theme.gap)
+                            visible: !harnessRow.modelData.eligible && harnessRow.modelData.reason !== ""
+                            text: harnessRow.modelData.reason
                             elide: Text.ElideRight
                             color: Theme.foregroundFaint
                             font.family: Theme.fontFamily
@@ -259,75 +241,60 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
-
-                    Text {
-                        id: defaultToggle
-                        anchors.right: parent.right
-                        anchors.rightMargin: 4
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: agentRow.isDefault ? "✓ default" : "default"
-                        color: agentRow.isDefault ? Theme.ghostAmberBright
-                            : (defaultArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeCaption
-
-                        MouseArea {
-                            id: defaultArea
-                            objectName: "harnessDefault-" + agentRow.modelData.id
-                            anchors.fill: parent
-                            anchors.margins: -4
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Ghostd.setGhostHarness(agentRow.isDefault ? null : agentRow.modelData.id)
-                        }
-                    }
                 }
             }
 
-            // No ghost default: the daemon falls to Omarchy's machine default.
-            Rectangle {
-                id: automaticRow
-                objectName: "harnessAutomatic"
-
-                readonly property bool isDefault: picker.choice !== null && picker.choice.ghostDefault === null
-
+            // What a new conversation starts on: the ghost's own default, else
+            // Omarchy's. "use <current>" makes this conversation's harness the
+            // default; "automatic" hands the choice back to Omarchy.
+            Item {
                 visible: picker.choice !== null
                 width: pickerColumn.width
                 height: Theme.controlHeight
-                color: automaticArea.containsMouse ? Theme.film(0.07) : "transparent"
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 4
-                    anchors.right: automaticMark.left
-                    anchors.rightMargin: Theme.gap
-                    anchors.verticalCenter: parent.verticalCenter
-                    elide: Text.ElideRight
-                    text: "  automatic" + (picker.choice && picker.choice.omarchyDefault
-                        ? "  omarchy: " + picker.choice.omarchyDefault : "")
-                    color: Theme.foregroundDim
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                Rectangle {
+                    anchors.top: parent.top
+                    width: parent.width
+                    height: 1
+                    color: Theme.border
                 }
 
                 Text {
-                    id: automaticMark
-                    anchors.right: parent.right
-                    anchors.rightMargin: 4
+                    objectName: "harnessNewConversations"
+                    anchors.left: parent.left
+                    anchors.leftMargin: 4
+                    anchors.right: defaultActions.left
+                    anchors.rightMargin: Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
-                    text: automaticRow.isDefault ? "✓ default" : "default"
-                    color: automaticRow.isDefault ? Theme.ghostAmberBright
-                        : (automaticArea.containsMouse ? Theme.foreground : Theme.foregroundFaint)
+                    elide: Text.ElideRight
+                    text: "new chats: " + (picker.ghostDefault !== "" ? picker.ghostDefault
+                        : "automatic" + (picker.choice && picker.choice.omarchyDefault
+                            ? " (" + picker.choice.omarchyDefault + ")" : ""))
+                    color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeCaption
                 }
 
-                MouseArea {
-                    id: automaticArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: if (!automaticRow.isDefault) Ghostd.setGhostHarness(null)
+                Row {
+                    id: defaultActions
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Theme.gap
+
+                    PickerAction {
+                        objectName: "harnessMakeDefault"
+                        visible: Ghostd.currentHarness !== "" && Ghostd.currentHarness !== picker.ghostDefault
+                        text: "use " + Ghostd.currentHarness
+                        onActivated: Ghostd.setGhostHarness(Ghostd.currentHarness)
+                    }
+
+                    PickerAction {
+                        objectName: "harnessAutomatic"
+                        visible: picker.ghostDefault !== ""
+                        text: "automatic"
+                        onActivated: Ghostd.setGhostHarness(null)
+                    }
                 }
             }
 
@@ -341,6 +308,26 @@ Item {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeCaption
             }
+        }
+    }
+
+    /** A small text link in the picker footer. */
+    component PickerAction: Text {
+        id: action
+
+        signal activated()
+
+        color: actionArea.containsMouse ? Theme.foreground : Theme.ghostAmber
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeCaption
+
+        MouseArea {
+            id: actionArea
+            anchors.fill: parent
+            anchors.margins: -4
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: action.activated()
         }
     }
 }

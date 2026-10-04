@@ -117,7 +117,7 @@ given the conversation so far from the log. That is how a ghost spends the
 owner's subscriptions and limits rather than a per-token API key of its own;
 with none yet, OpenCode's free models answer. The owner (or the ghost, asked)
 can switch a conversation to another agent or set the ghost's preferred one,
-from the HUD's agent picker or `ghost switch` / `ghost harness`.
+from the HUD's harness picker or `ghost switch` / `ghost harness`.
 
 The session receives the Ghost-owned context: the character and the stable
 policy sections, listed in `prompt-budget.test.ts`. The shape they share is

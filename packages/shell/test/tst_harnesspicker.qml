@@ -5,7 +5,7 @@ import "../qml/services"
 import "FakeXhr.js" as FakeXhr
 
 // The header's harness picker: which harness runs the open conversation's next
-// turn, and the ghost's own default (GET/PUT /harness, PUT .../harness).
+// turn (PUT .../harness), and what new conversations start on (GET/PUT /harness).
 TestCase {
     id: tc
     name: "HarnessPicker"
@@ -151,31 +151,35 @@ TestCase {
         compare(findChild(header, "harnessLabel").text, "via pi ▾");
     }
 
-    function test_settingAndClearingTheGhostDefault(): void {
+    function test_theFooterMakesThisHarnessTheDefaultAndHandsItBack(): void {
         const header = openPicker(null);
-        verify(findChild(header, "harnessAutomatic").isDefault);
+        compare(findChild(header, "harnessNewConversations").text, "new chats: automatic (claude)");
+        verify(!findChild(header, "harnessAutomatic").visible);
 
-        tc.click(header, "harnessDefault-pi");
+        // This conversation runs on claude; "use claude" makes it the ghost's default.
+        compare(findChild(header, "harnessMakeDefault").text, "use claude");
+        tc.click(header, "harnessMakeDefault");
         compare(tc.requests[1].method, "PUT");
         verify(tc.requests[1].url.endsWith("/api/ghosts/casper/harness"));
-        compare(JSON.parse(tc.requests[1].body), { harness: "pi" });
-        compare(Ghostd.harnessChoice.ghostDefault, "pi");
-        tc.requests[1].complete(200, tc.choice({ ghostDefault: "pi" }));
-        compare(Ghostd.harnessChoice.ghostDefault, "pi");
-        verify(!findChild(header, "harnessAutomatic").isDefault);
+        compare(JSON.parse(tc.requests[1].body), { harness: "claude" });
+        tc.requests[1].complete(200, tc.choice({ ghostDefault: "claude" }));
+        compare(findChild(header, "harnessNewConversations").text, "new chats: claude");
+        verify(!findChild(header, "harnessMakeDefault").visible);
 
-        // The same toggle clears it; so does the automatic row.
-        tc.click(header, "harnessDefault-pi");
+        // The way back: "automatic" clears the ghost's default.
+        tc.click(header, "harnessAutomatic");
         compare(JSON.parse(tc.requests[2].body), { harness: null });
         tc.requests[2].complete(200, tc.choice());
-        compare(Ghostd.harnessChoice.ghostDefault, null);
+        compare(findChild(header, "harnessNewConversations").text, "new chats: automatic (claude)");
+        verify(!findChild(header, "harnessAutomatic").visible);
+    }
 
-        Ghostd.setGhostHarness("claude");
-        tc.requests[3].complete(200, tc.choice({ ghostDefault: "claude" }));
-        tc.click(header, "harnessAutomatic");
-        compare(JSON.parse(tc.requests[4].body), { harness: null });
-        tc.requests[4].complete(200, tc.choice());
-        verify(findChild(header, "harnessAutomatic").isDefault);
+    function test_aDraftOffersNoDefaultUntilItHasAHarness(): void {
+        Ghostd.sessionIds = ({ casper: "" });
+        Ghostd.sessions = [];
+        Ghostd.currentSessionId = "";
+        const header = openPicker(null);
+        verify(!findChild(header, "harnessMakeDefault").visible);
     }
 
     function test_aRefusedDefaultPutsTheOldOneBack(): void {

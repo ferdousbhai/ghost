@@ -47,9 +47,10 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
 - The header names the harness (agent CLI) answering the open conversation
   ("via claude", "harness: automatic" for a fresh draft). Clicking it lists the
   installed harnesses from `GET /harness` (ineligible ones dimmed with the usage
-  window that is full): a name runs this conversation's next turn on it, and
-  each row's "default" sets or clears the ghost's own default, with
-  "automatic" falling back to Omarchy's. Nothing in the shell picks a model or
+  window that is full); a name runs this conversation's next turn on it. One
+  footer line says what new conversations start on: "use <harness>" makes this
+  conversation's harness the ghost's default, and "automatic" clears it back to
+  Omarchy's. Nothing in the shell picks a model or
   signs in to a provider.
 - Plans and tasks live in the owner's documents; the shell has no jobs strip,
   plan mode, or progress/todo projection.
