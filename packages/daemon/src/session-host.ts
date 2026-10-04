@@ -1195,8 +1195,4 @@ export class SessionHost {
     this.beginShutdown();
     for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
   }
-
-  forceDisposeAll(): Promise<void> {
-    return this.disposeAll();
-  }
 }

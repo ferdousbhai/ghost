@@ -6,8 +6,6 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RemoteAccess } from "./tailscale-identity.js";
 import {
-  DEFAULT_SHUTDOWN_FORCE_MS,
-  DEFAULT_SHUTDOWN_GRACE_MS,
   loadConfig,
   type DaemonConfig,
   type DaemonConfigOverrides,
@@ -75,66 +73,11 @@ export interface ParsedArgs {
   version: boolean;
 }
 
-export interface StagedShutdownOptions {
-  /** Synchronously stop listener/session admission. */
-  stopAdmission(): void;
-  /** Synchronously signal cancellation to active work. */
-  abortActive(): void;
-  graceful(): Promise<void>;
-  /** Best-effort terminal close after the grace deadline. */
-  force(): void | Promise<void>;
-  graceMs?: number;
-  forceMs?: number;
-  wait?: (delayMs: number) => Promise<void>;
-}
-
-function shutdownWait(delayMs: number): Promise<void> {
-  return new Promise((resolvePromise) => {
-    const timer = setTimeout(resolvePromise, delayMs);
-    timer.unref?.();
-  });
-}
-
-export async function runStagedShutdown(options: StagedShutdownOptions): Promise<"graceful" | "forced"> {
-  const wait = options.wait ?? shutdownWait;
-  options.stopAdmission();
-  options.abortActive();
-  const graceful = Promise.resolve().then(options.graceful);
-  const settled = graceful.then(
-    () => ({ ok: true as const }),
-    (error: unknown) => ({ ok: false as const, error }),
-  );
-  const result = await Promise.race([
-    settled,
-    wait(options.graceMs ?? DEFAULT_SHUTDOWN_GRACE_MS).then(() => null),
-  ]);
-  if (result !== null) {
-    if (!result.ok) {
-      await options.force();
-      throw result.error;
-    }
-    return "graceful";
-  }
-  const forcedCleanup = Promise.resolve().then(options.force);
-  const forcedResult = await Promise.race([
-    settled,
-    wait(options.forceMs ?? DEFAULT_SHUTDOWN_FORCE_MS).then(() => null),
-  ]);
-  // Provider/session disposal retains a hard deadline, but native process
-  // groups do not: returning while one is still owned would orphan it.
-  await forcedCleanup;
-  if (forcedResult !== null && !forcedResult.ok) throw forcedResult.error;
-  return "forced";
-}
-
 export interface ShutdownSignalOptions {
   listening: Pick<ListeningServer, "server" | "relay" | "close">;
-  host: Pick<SessionHost, "beginShutdown" | "disposeAll"> & {
-    forceDisposeAll(): void | Promise<void>;
-  };
+  host: Pick<SessionHost, "beginShutdown" | "disposeAll">;
   browsers: { closeAll(): Promise<void> };
   logger: Pick<Logger, "info" | "warn">;
-  timing?: Pick<StagedShutdownOptions, "graceMs" | "forceMs" | "wait">;
 }
 
 export async function closeDaemonResources(
@@ -159,67 +102,27 @@ export async function closeDaemonResources(
   }
 }
 
+/**
+ * Wait for SIGINT or SIGTERM, then stop accepting work, abort running turns,
+ * and close everything. A second signal finds no handler and ends the
+ * process outright; systemd's `TimeoutStopSec` bounds the whole stop.
+ */
 export async function waitForShutdownSignal(options: ShutdownSignalOptions): Promise<void> {
-  const signalProcess = process as unknown as {
-    listeners(event: "SIGINT" | "SIGTERM"): Array<(...args: unknown[]) => void>;
-    on(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
-    off(event: "SIGINT" | "SIGTERM", listener: (...args: unknown[]) => void): void;
-  };
-  // A CLI-oriented dependency may install eager signal handlers that hard-exit
-  // after its own cleanup. ghostd owns process teardown instead: its
-  // sessions/providers are drained below, under shorter bounded deadlines.
-  const inherited = {
-    SIGINT: signalProcess.listeners("SIGINT"),
-    SIGTERM: signalProcess.listeners("SIGTERM"),
-  };
-  for (const listener of inherited.SIGINT) signalProcess.off("SIGINT", listener);
-  for (const listener of inherited.SIGTERM) signalProcess.off("SIGTERM", listener);
-  await new Promise<void>((resolvePromise) => {
-    let shuttingDown = false;
-    let forcePromise: Promise<void> | undefined;
-    const force = (): Promise<void> => {
-      if (forcePromise) return forcePromise;
-      options.listening.server.closeAllConnections();
-      void options.listening.relay?.close().catch(() => {});
-      forcePromise = Promise.resolve(options.host.forceDisposeAll());
-      return forcePromise;
-    };
-    const shutdown = (signal: "SIGINT" | "SIGTERM") => {
-      if (shuttingDown) {
-        void force().catch(() => {});
-        return;
-      }
-      shuttingDown = true;
-      options.logger.info("shutting down", { signal });
-      void (async () => {
-        try {
-          const result = await runStagedShutdown({
-            stopAdmission: () => {
-              options.listening.server.close();
-              options.listening.server.closeIdleConnections();
-            },
-            abortActive: () => options.host.beginShutdown(),
-            graceful: () => closeDaemonResources(options),
-            force,
-            ...options.timing,
-          });
-          if (result === "forced") options.logger.warn("shutdown grace deadline expired");
-        } catch (error) {
-          options.logger.warn("shutdown was not clean", { error: (error as Error).message });
-        } finally {
-          signalProcess.off("SIGINT", onSigint);
-          signalProcess.off("SIGTERM", onSigterm);
-          for (const listener of inherited.SIGINT) signalProcess.on("SIGINT", listener);
-          for (const listener of inherited.SIGTERM) signalProcess.on("SIGTERM", listener);
-          resolvePromise();
-        }
-      })();
-    };
-    const onSigint = () => shutdown("SIGINT");
-    const onSigterm = () => shutdown("SIGTERM");
-    signalProcess.on("SIGINT", onSigint);
-    signalProcess.on("SIGTERM", onSigterm);
+  const signal = await new Promise<NodeJS.Signals>((resolvePromise) => {
+    process.once("SIGINT", () => resolvePromise("SIGINT"));
+    process.once("SIGTERM", () => resolvePromise("SIGTERM"));
   });
+  process.removeAllListeners("SIGINT");
+  process.removeAllListeners("SIGTERM");
+  options.logger.info("shutting down", { signal });
+  options.listening.server.close();
+  options.listening.server.closeIdleConnections();
+  options.host.beginShutdown();
+  try {
+    await closeDaemonResources(options);
+  } catch (error) {
+    options.logger.warn("shutdown was not clean", { error: (error as Error).message });
+  }
 }
 
 class UsageError extends Error {}

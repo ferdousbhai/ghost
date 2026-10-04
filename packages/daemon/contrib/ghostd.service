@@ -16,8 +16,8 @@ ExecStart=/usr/bin/ghostd
 SyslogIdentifier=ghostd
 Restart=on-failure
 RestartSec=2
-# ghostd stages a 5s graceful drain and a 2s forced settle. Keep a final
-# service-manager boundary for providers or sidecars that ignore cancellation.
+# On SIGTERM ghostd aborts running turns and closes; this is the only deadline,
+# for a harness or sidecar that ignores cancellation.
 TimeoutStopSec=10s
 KillMode=mixed
 SendSIGKILL=yes
