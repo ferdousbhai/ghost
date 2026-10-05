@@ -38,14 +38,11 @@ export interface GhostToolDefinition<
 > {
   /** Tool name as the model calls it. */
   name: string;
-  /** Human-readable label for a UI. */
-  label: string;
   /** Description for the model. */
   description: string;
   /** JSON Schema for the arguments, built with TypeBox. */
   parameters: TParams;
   execute(
-    toolCallId: string,
     params: Static<TParams>,
     signal: AbortSignal | undefined,
     ctx: GhostToolContext,

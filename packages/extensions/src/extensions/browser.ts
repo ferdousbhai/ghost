@@ -100,7 +100,6 @@ export function createBrowserExtension(
   return (pi: GhostExtensionAPI) => {
     pi.registerTool({
       name: GHOST_BROWSER,
-      label: "Browse the web",
       description:
         "The owner's own signed-in Chromium, on their desktop: you act as them in "
         + "their sessions and they can watch or take over. Use it when no CLI does "
@@ -199,7 +198,7 @@ export function createBrowserExtension(
           maximum: MAX_TIMEOUT_MS,
         })),
       }),
-      execute: async (_toolCallId, params, signal, ctx) => {
+      execute: async (params, signal, ctx) => {
         const session = sessionFor(ctx);
         const operation = {
           ...(params.timeout_ms === undefined ? {} : { timeoutMs: params.timeout_ms }),

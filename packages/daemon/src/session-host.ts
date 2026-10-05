@@ -42,7 +42,7 @@ import {
 import { resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   ACCOUNT_HOME_ENV,
@@ -421,7 +421,7 @@ export class SessionHost {
   /** Installed harnesses Omarchy's usage records say have room, in Omarchy's order. */
   private omarchyEligible(): Promise<readonly string[]> {
     return this.cachedReport()
-      .then((report) => report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id))
+      .then(eligibleIds)
       .catch((error: unknown) => {
         this.logger.warn("harness report unavailable; trying every supported harness", { error: errorMessage(error) });
         return SUPPORTED_HARNESSES;
@@ -921,7 +921,7 @@ export class SessionHost {
     return tools;
   }
 
-  async sessionTools(ghostName: string, _sessionId?: string | null): Promise<SessionToolDescriptor[]> {
+  async sessionTools(ghostName: string): Promise<SessionToolDescriptor[]> {
     const tools = await this.ghostTools(this.registry.get(ghostName));
     return [...tools.tools.values()].map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters }));
   }
@@ -939,7 +939,7 @@ export class SessionHost {
     if (!tool) throw new GhostError("tool_not_found", `This ghost has no tool named ${JSON.stringify(name)}.`, 404);
     const id = sessionId ? requireConversationId(sessionId) : null;
     try {
-      const result = await tool.execute(`mcp-${Date.now().toString(36)}`, (args ?? {}) as never, signal, {
+      const result = await tool.execute((args ?? {}) as never, signal, {
         cwd: id ? conversationDir(ghostPaths(ghost.dir).sessionDir, id) : this.ownerHome,
         caller: caller ?? (id ? `conversation ${id}` : "a delegated run"),
       });

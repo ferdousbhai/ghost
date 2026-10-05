@@ -49,7 +49,7 @@ export async function loadExtension(
     async call(name, params = {}, signal) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return tool.execute(`call-${name}`, params, signal, ctx);
+      return tool.execute(params, signal, ctx);
     },
   };
 }

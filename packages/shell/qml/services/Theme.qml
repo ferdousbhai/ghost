@@ -228,10 +228,6 @@ Singleton {
     readonly property color danger: root.pick("red")
     readonly property color ok: root.pick("green")
     readonly property color warn: root.pick("yellow")
-    readonly property color onAccent: {
-        const luma = root.accent.r * 0.299 + root.accent.g * 0.587 + root.accent.b * 0.114;
-        return luma > 0.58 ? "#111111" : "#ffffff";
-    }
 
     // The summon-ghost identity, ported from the Cloudflare app: warm amber
     // for the ghost's presence, actions, and ownership; cold spectral

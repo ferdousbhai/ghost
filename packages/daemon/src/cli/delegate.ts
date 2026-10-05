@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { constants } from "node:os";
 import { promisify } from "node:util";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
-import { readHarnessReport } from "../harnesses.js";
+import { eligibleIds, readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
@@ -124,7 +124,7 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
       // The owner named the harness, or launched it with no ghost involved.
       pick: flagBoolean(parsed, "owner-named") || !env.GHOST?.trim() ? "owner" : "ghost",
       cwd: process.cwd(),
-      eligible: report.harnesses.filter((candidate) => candidate.eligible).map((candidate) => candidate.id),
+      eligible: eligibleIds(report),
       windows: harness?.usage?.windows ?? [],
       status: harness?.usage?.status ?? null,
       outcome,

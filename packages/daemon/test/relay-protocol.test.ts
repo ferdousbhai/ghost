@@ -12,11 +12,9 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   authorizeRelayUpgrade,
-  isRelayOp,
   parseClientFrame,
 } from "../src/relay-protocol.js";
 import {
-  RELAY_OPS,
   RELAY_PATH,
   RELAY_PROTOCOL_VERSION,
   RELAY_SUBPROTOCOL,
@@ -106,11 +104,6 @@ describe("client frames", () => {
     expect(parsed.ok).toBe(false);
     if (parsed.ok) return;
     expect(parsed.reason).toContain(reason);
-  });
-
-  it("knows its own op set and nothing else", () => {
-    for (const op of RELAY_OPS) expect(isRelayOp(op)).toBe(true);
-    for (const op of ["eval", "sendCommand", "attach", ""]) expect(isRelayOp(op)).toBe(false);
   });
 });
 

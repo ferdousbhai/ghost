@@ -72,7 +72,7 @@ async function until<T>(read: () => T | null): Promise<T> {
 
 /** Replace one of the ghost's tools in the host's cache, after it has been loaded once. */
 async function replaceTool(name: string, execute: (...args: never[]) => Promise<unknown>): Promise<void> {
-  await daemon.host.sessionTools("casper", "conv-1");
+  await daemon.host.sessionTools("casper");
   const cache = (daemon.host as unknown as { tools: Map<string, Promise<{ tools: Map<string, Record<string, unknown>> }>> }).tools;
   const { tools } = await cache.values().next().value!;
   tools.set(name, { ...tools.get(name)!, execute });
@@ -89,7 +89,7 @@ describe("ghost mcp serve", () => {
 
   it("stops when the harness ends stdin, aborting a call still in flight", async () => {
     let aborted = false;
-    await replaceTool("ghost_browser", async (_id: never, _params: never, signal: never) => {
+    await replaceTool("ghost_browser", async (_params: never, signal: never) => {
       const abort = signal as AbortSignal | undefined;
       await new Promise<void>((resolve) => {
         if (abort?.aborted) resolve();
@@ -136,7 +136,7 @@ describe("ghost mcp serve", () => {
 
   it("names each serve process as its own caller, so harnesses take turns on the desktop", async () => {
     const callers: Array<string | undefined> = [];
-    await replaceTool("ghost_browser", async (_id: never, _params: never, _signal: never, ctx: never) => {
+    await replaceTool("ghost_browser", async (_params: never, _signal: never, ctx: never) => {
       callers.push((ctx as { caller?: string }).caller);
       return { content: [{ type: "text", text: "ok" }] };
     });

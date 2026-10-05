@@ -1,5 +1,4 @@
 import {
-  RELAY_OPS,
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
@@ -10,12 +9,6 @@ import {
 import type { IncomingHttpHeaders } from "node:http";
 import { tokenMatches } from "./token-store.js";
 import { isRecord } from "@ghost/extensions";
-
-const OP_SET = new Set<string>(RELAY_OPS);
-
-export function isRelayOp(value: unknown): value is RelayOp {
-  return typeof value === "string" && OP_SET.has(value);
-}
 
 
 export interface RelayHelloFrame {

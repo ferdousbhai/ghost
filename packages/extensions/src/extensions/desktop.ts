@@ -117,10 +117,9 @@ export function createDesktopExtension(options: DesktopExtensionOptions = {}): G
     for (const tool of (await desktop.listTools()).filter((listed) => DESKTOP_TOOLS.includes(listed.name))) {
       pi.registerTool({
         name: tool.name,
-        label: tool.name === DESKTOP_LOOK ? "Look at the desktop" : "Act on the desktop",
         description: tool.description ?? tool.name,
         parameters: tool.inputSchema as unknown as TSchema,
-        execute: async (_toolCallId, params, signal, ctx) => {
+        execute: async (params, signal, ctx) => {
           const result = await desktop.callTool(tool.name, (params ?? {}) as Record<string, unknown>, ctx.caller, signal);
           return toolResult(result);
         },

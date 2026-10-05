@@ -846,7 +846,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     const ghostName = ghostOf(params);
     const conversationId = conversationOf(params);
     if (toolName === undefined) {
-      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName, conversationId) });
+      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName) });
       return;
     }
     const body = await readJsonObjectBody(request, maxBodyBytes);

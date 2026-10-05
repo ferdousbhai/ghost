@@ -200,6 +200,11 @@ export async function readHarnessReport(
   return { harnesses, refresh: REFRESH_COMMAND };
 }
 
+/** The ids of the report's harnesses that have room, in Omarchy's order. */
+export function eligibleIds(report: HarnessReport): string[] {
+  return report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id);
+}
+
 /** Omarchy's default agent (`omarchy default agent`), or null when none is chosen. */
 export async function omarchyDefaultAgent(env: NodeJS.ProcessEnv): Promise<string | null> {
   try {

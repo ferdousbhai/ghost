@@ -12,7 +12,7 @@ import {
 } from "node:fs/promises";
 import { constants } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { basename, dirname, join, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   CHARACTER_FILENAME,
   characterBodyTooLong,
@@ -139,12 +139,6 @@ export class GhostHome {
 
   get characterPath(): string {
     return join(this.dir, CHARACTER_FILENAME);
-  }
-
-  relative(absolutePath: string): string {
-    return absolutePath.startsWith(this.dir + sep)
-      ? absolutePath.slice(this.dir.length + 1).split(sep).join("/")
-      : absolutePath;
   }
 
   async ensure(): Promise<void> {

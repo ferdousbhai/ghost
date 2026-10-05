@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadGhostSettings } from "./ghost-settings.js";
 import { isGhostHome } from "./ghosts.js";
-import { omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
+import { eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import { harnessRow, SUPPORTED_HARNESSES, type HarnessRow } from "./harness-table.js";
 
@@ -34,7 +34,7 @@ async function candidates(home: string, env: NodeJS.ProcessEnv, options: HookCom
   const eligible = options.harnesses
     ? await options.harnesses()
     : await readHarnessReport(env, homedir())
-      .then((report) => report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id))
+      .then(eligibleIds)
       .catch(() => SUPPORTED_HARNESSES);
   const preferred = [loadGhostSettings(home).getString("harness") ?? null, options.harnesses ? null : await omarchyDefaultAgent(env)];
   return orderHarnesses(eligible.filter((id) => rows(id) !== null), preferred);

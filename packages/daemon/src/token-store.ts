@@ -60,7 +60,6 @@ export interface TokenStoreSpec {
 }
 
 export interface TokenStore {
-  readonly filename: string;
   defaultPath(env?: NodeJS.ProcessEnv, home?: string): string;
   readOrCreate(options?: TokenStoreOptions): { token: string; path: string; created: boolean };
   read(options?: TokenStoreOptions): string | undefined;
@@ -407,7 +406,7 @@ export function createTokenStore(spec: TokenStoreSpec): TokenStore {
     }
   };
 
-  return { filename: spec.filename, defaultPath, read, readOrCreate, rotate, command };
+  return { defaultPath, read, readOrCreate, rotate, command };
 }
 
 /** The HTTP API's bearer token. Local API clients read the file directly. */
