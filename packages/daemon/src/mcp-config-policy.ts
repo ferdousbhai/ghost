@@ -1,4 +1,5 @@
 /** Pure MCP row policy; hosts supply environment and storage. */
+import { isRecord } from "@ghost/extensions";
 interface MCPServerConfigBase {
   enabled?: boolean;
 }
@@ -78,9 +79,6 @@ export function expandEnvVarsDeep<T>(value: T, environment: Readonly<Record<stri
 }
 
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 const MCP_BASE_FIELDS = new Set(["enabled"]);
 const MCP_STDIO_FIELDS = new Set([

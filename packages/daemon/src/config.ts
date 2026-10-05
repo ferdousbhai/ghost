@@ -5,10 +5,12 @@
 import { readFileSync } from "node:fs";
 import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
+import { xdgBaseDir } from "@ghost/extensions";
+import { isRecord } from "@ghost/extensions";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & {
   enabled: boolean;
@@ -67,9 +69,7 @@ export function assertLoopback(host: string): void {
 }
 
 export function defaultConfigPath(env: NodeJS.ProcessEnv, home: string): string {
-  const xdg = env.XDG_CONFIG_HOME?.trim();
-  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".config");
-  return join(base, "ghost", "config.json");
+  return join(xdgBaseDir(env, "XDG_CONFIG_HOME", home), "ghost", "config.json");
 }
 
 function parsePort(raw: string, source: string): number {
@@ -201,9 +201,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   };
 }
 
-function plainObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 const configWrites = new Map<string, Promise<unknown>>();
 
@@ -213,7 +210,7 @@ export function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>):
     let existing: Record<string, unknown> = {};
     try {
       const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-      if (!plainObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+      if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
       existing = parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
@@ -221,7 +218,7 @@ export function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>):
     const merged: Record<string, unknown> = { ...existing };
     for (const [key, value] of Object.entries(patch)) {
       if (value === undefined) continue;
-      merged[key] = plainObject(value) && plainObject(existing[key]) ? { ...existing[key], ...value } : value;
+      merged[key] = isRecord(value) && isRecord(existing[key]) ? { ...existing[key], ...value } : value;
     }
     await mkdir(dirname(path), { recursive: true, mode: 0o700 });
     await writePrivateJsonAtomic(path, merged);

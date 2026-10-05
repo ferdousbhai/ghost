@@ -41,6 +41,7 @@ import {
   type CommandDocumentation,
 } from "./usage.js";
 import { watchCommand } from "./watch.js";
+import { errorMessage } from "@ghost/extensions";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];
@@ -385,7 +386,7 @@ export async function ghostCli(argv: readonly string[], options: GhostCliOptions
       runtime.stderr.write(`ghost: ${error.message}\n`);
       return error instanceof CliError ? error.exitCode : EXIT_CODE.usage;
     }
-    runtime.stderr.write(`ghost: ${error instanceof Error ? error.message : String(error)}\n`);
+    runtime.stderr.write(`ghost: ${errorMessage(error)}\n`);
     return EXIT_CODE.failure;
   }
 }

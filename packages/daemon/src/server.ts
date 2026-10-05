@@ -37,6 +37,7 @@ import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
 import type { UpdateAvailable } from "./update-check.js";
 import type { SessionHost } from "./session-host.js";
+import { errorMessage } from "@ghost/extensions";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -855,7 +856,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       emit({
         type: "error",
         reason: "error",
-        errorMessage: error instanceof Error ? error.message : String(error),
+        errorMessage: errorMessage(error),
       });
     } finally {
       clearInterval(keepalive);
@@ -1146,7 +1147,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         errorResponse(response, 500, "internal_error", "The daemon failed to handle the request.");
       }
     })().catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       logger.error("request handler failed", { method: request.method ?? "GET", error: message });
       if (!response.headersSent) {
         errorResponse(response, 500, "internal_error", "The daemon could not handle this request.");

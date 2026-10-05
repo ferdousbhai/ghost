@@ -4,8 +4,9 @@
  * HEAD commit. Read straight from the filesystem: no `git` subprocess, and no
  * throw, because an unreadable or missing `.git` only means "unknown".
  */
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isDirectory } from "./ghosts.js";
 
 export interface RunningSource {
   readonly version: string;
@@ -21,14 +22,6 @@ function readTextOrNull(path: string): string | null {
     return readFileSync(path, "utf8");
   } catch {
     return null;
-  }
-}
-
-function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
   }
 }
 

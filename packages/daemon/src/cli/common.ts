@@ -1,10 +1,11 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
 import type { CliContext, CliRuntime, CliStdin } from "./types.js";
+import { xdgBaseDir } from "@ghost/extensions";
 
 export async function stdinText(stdin: CliStdin): Promise<string> {
   if (typeof stdin === "string") return stdin;
@@ -20,9 +21,7 @@ interface CliConfigFile {
 }
 
 export function cliConfigPath(runtime: Pick<CliRuntime, "env" | "home">): string {
-  const configured = runtime.env.XDG_CONFIG_HOME?.trim();
-  const base = configured && isAbsolute(configured) ? configured : join(runtime.home, ".config");
-  return join(base, "ghost", "cli.json");
+  return join(xdgBaseDir(runtime.env, "XDG_CONFIG_HOME", runtime.home), "ghost", "cli.json");
 }
 
 export function readDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): string | undefined {
@@ -89,7 +88,7 @@ export async function resolveGhost(
 export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {
   const response = await client.request<{ sessions: SessionSummary[] }>(
     "GET",
-    `/api/ghosts/${encodeURIComponent(ghost)}/sessions`,
+    ghostPath(ghost, "/sessions"),
   );
   return response.body.sessions;
 }
@@ -141,6 +140,10 @@ export async function resolveTarget(
   return { name, session, path: sessionPath(name, session.id) };
 }
 
+export function ghostPath(ghost: string, suffix = ""): string {
+  return `/api/ghosts/${encodeURIComponent(ghost)}${suffix}`;
+}
+
 export function sessionPath(ghost: string, publicId: string, suffix = ""): string {
-  return `/api/ghosts/${encodeURIComponent(ghost)}/sessions/${encodeURIComponent(publicId)}${suffix}`;
+  return ghostPath(ghost, `/sessions/${encodeURIComponent(publicId)}${suffix}`);
 }

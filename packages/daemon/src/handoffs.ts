@@ -1,8 +1,9 @@
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, join } from "node:path";
 import type { LimitReachedEvent } from "./turn-events.js";
 import type { UsageWindow } from "./harnesses.js";
+import { xdgBaseDir } from "@ghost/extensions";
 
 /** Past this size the log moves to `handoffs.jsonl.1`, replacing the previous one. */
 export const HANDOFF_LOG_LIMIT_BYTES = 1024 * 1024;
@@ -38,9 +39,7 @@ export interface HandoffReceipt {
 }
 
 export function handoffLogPath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
-  const xdg = env.XDG_STATE_HOME?.trim();
-  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "state");
-  return join(base, "ghost", "handoffs.jsonl");
+  return join(xdgBaseDir(env, "XDG_STATE_HOME", home), "ghost", "handoffs.jsonl");
 }
 
 export function appendHandoff(path: string, receipt: HandoffReceipt): void {

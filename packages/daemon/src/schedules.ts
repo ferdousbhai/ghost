@@ -20,7 +20,7 @@
  */
 import { readdir, unlink } from "node:fs/promises";
 import { accessSync, constants } from "node:fs";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { isValidGhostName } from "./ghosts.js";
 import {
   commandRunner,
@@ -28,6 +28,7 @@ import {
   type CommandRunner,
 } from "./tailscale-identity.js";
 import { silentLogger, type Logger } from "./log.js";
+import { xdgBaseDir } from "@ghost/extensions";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
 const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
@@ -71,11 +72,7 @@ export function resolveScheduleUnitDirectory(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   if (!isAbsolute(ownerHome)) throw new TypeError("ownerHome must be absolute");
-  const configHome = env.XDG_CONFIG_HOME?.trim();
-  const base = configHome && isAbsolute(configHome)
-    ? resolve(configHome)
-    : resolve(ownerHome, ".config");
-  return join(base, "systemd", "user");
+  return join(xdgBaseDir(env, "XDG_CONFIG_HOME", ownerHome), "systemd", "user");
 }
 
 /**

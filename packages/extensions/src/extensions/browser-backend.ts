@@ -232,10 +232,6 @@ export interface GhostBrowserBackend {
 export type BrowserBackendFactory = () => GhostBrowserBackend;
 
 
-export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function timeoutError(action: string, timeoutMs: number): GhostBrowserError {
   return new GhostBrowserError(
     "timeout",

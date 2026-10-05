@@ -1,10 +1,9 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
+import { ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 
-const ghostPath = (name: string, suffix = ""): string => `/api/ghosts/${encodeURIComponent(name)}${suffix}`;
 
 /** `ghost rename <new-name>`: move the whole ghost home under the new spelling. */
 export async function renameCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {

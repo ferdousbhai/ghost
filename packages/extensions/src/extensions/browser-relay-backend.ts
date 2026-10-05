@@ -8,11 +8,9 @@
  * of the whole exercise — the pages the ghost sees are the pages the owner is
  * already logged into.
  *
- * The relay protocol reports page URLs but neither the connected peer address
- * nor a cancel operation. The session therefore validates DNS before a request
- * and validates every returned page URL, while prompt cancellation stops local
- * waiting. It cannot peer-pin Chromium's already-delivered request or undo an
- * operation that the extension has begun; callers must not claim otherwise.
+ * The relay protocol has no cancel operation: prompt cancellation stops local
+ * waiting, but cannot undo an operation the extension has begun; callers must
+ * not claim otherwise.
  *
  * Three things shape this file.
  *
@@ -74,6 +72,7 @@ import {
   type PageElementMatch,
   type PageSummary,
 } from "./browser-backend.js";
+import { isRecord } from "../record.js";
 
 /**
  * Bumped when a frame shape changes incompatibly. The extension sends its version
@@ -202,10 +201,6 @@ const RELAY_RECOVERY_HINT =
 export const RELAY_DISCONNECTED_MESSAGE =
   "The browser relay is not connected, so the owner's Chromium cannot be "
   + `driven. ${RELAY_RECOVERY_HINT}`;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readString(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;

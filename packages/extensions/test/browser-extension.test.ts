@@ -18,7 +18,6 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   BROWSER_ACTIONS,
-  browserToolNames,
   createBrowserExtension,
   GHOST_BROWSER,
 } from "../src/extensions/browser.js";
@@ -388,7 +387,6 @@ describe("registration", () => {
   it("registers exactly one tool", async () => {
     const harness = await browserHarness();
     expect(harness.toolNames()).toEqual([GHOST_BROWSER]);
-    expect(browserToolNames()).toEqual([GHOST_BROWSER]);
   });
 
   it("offers a closed action enum with no free-form escape hatch", async () => {

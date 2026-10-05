@@ -21,7 +21,7 @@ import {
   type CollectedGhostExtension,
 } from "@ghost/extensions";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
-import { FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
+import { closeBrowserSession, errorMessage, FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
 import {
   appendLog,
   conversationDir,
@@ -39,7 +39,7 @@ import {
   type AssistantPart,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { closeBrowserSession, resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
+import { resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
@@ -225,10 +225,6 @@ function tail(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   return trimmed.length > TOOL_SUMMARY_MAX ? `…${trimmed.slice(-TOOL_SUMMARY_MAX)}` : trimmed;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function keyOf(ghostName: string, id: string): string {
@@ -917,8 +913,7 @@ export class SessionHost {
   private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
     let tools = this.tools.get(ghost.dir);
     if (!tools) {
-      const extensions = resolveGhostExtensions({ ghostName: ghost.name, ...this.extensionOptions }, ghost.dir);
-      tools = collectGhostExtension(extensions.ghost);
+      tools = collectGhostExtension(resolveGhostExtensions({ ghostName: ghost.name, ...this.extensionOptions }, ghost.dir));
       tools.catch(() => this.tools.delete(ghost.dir));
       this.tools.set(ghost.dir, tools);
     }

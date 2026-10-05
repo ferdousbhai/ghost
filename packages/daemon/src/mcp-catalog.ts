@@ -3,7 +3,8 @@ import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
 import { silentLogger, type Logger } from "./log.js";
-import { isRecord, mcpServerValidationErrors } from "./mcp-config-policy.js";
+import { isRecord } from "@ghost/extensions";
+import { mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
   PrivateReadError,
   readPrivateFileText,
@@ -12,6 +13,7 @@ import {
 
 import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
 import type { McpServerConfigView } from "./mcp-catalog-policy.js";
+import { errorMessage } from "@ghost/extensions";
 export interface McpServerView {
   name: string;
   enabled: boolean;
@@ -232,7 +234,7 @@ export async function readEffectiveMcp(home: string): Promise<EffectiveMcpRead> 
 }
 
 function translateWriterError(error: unknown, name: string): never {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   if (message.includes("already exists")) {
     throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
   }

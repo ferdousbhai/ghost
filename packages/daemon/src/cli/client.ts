@@ -3,6 +3,7 @@ import { loadConfig } from "../config.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
+import { errorMessage } from "@ghost/extensions";
 
 /**
  * A control request is a small JSON round-trip the daemon answers immediately,
@@ -64,7 +65,7 @@ export interface CliResponse<T = unknown> {
 }
 
 function networkError(error: unknown): CliError {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   return new CliError(EXIT_CODE.unreachable, `cannot reach ghostd: ${message}`);
 }
 

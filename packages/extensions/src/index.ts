@@ -1,6 +1,8 @@
-export { isGhostError } from "./errors.js";
+export { errorMessage, isGhostError } from "./errors.js";
+export { isRecord } from "./record.js";
 
 export {
+  CHARACTER_FILENAME,
   MAX_CHARACTER_BODY_LENGTH,
   GhostHome,
   openGhostHome,
@@ -33,7 +35,7 @@ export { fenceUntrusted } from "./untrusted.js";
 
 export { serveMcpTools } from "./mcp-stdio.js";
 
-export { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
+export { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
 
 export {
   browserSessionFor,
@@ -42,7 +44,6 @@ export {
   createBrowserExtension,
   createGhostExtension,
   GHOST_BROWSER,
-  ghostToolNames,
   MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
   RELAY_OPS,

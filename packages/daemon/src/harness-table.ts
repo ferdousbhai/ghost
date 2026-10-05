@@ -12,6 +12,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
+import { isRecord } from "@ghost/extensions";
 
 export interface HarnessMcpServer {
   readonly name: string;
@@ -66,9 +67,7 @@ export interface HarnessRow {
 const MAX_TOOL_OUTPUT = 4_000;
 
 function record(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
+  return isRecord(value) ? value : {};
 }
 
 function str(value: unknown): string {

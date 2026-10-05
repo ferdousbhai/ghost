@@ -1,16 +1,9 @@
 import type { GhostExtensionFactory } from "../extension-api.js";
-import { browserToolNames, createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
-import { createDesktopExtension, DESKTOP_TOOLS, type DesktopExtensionOptions } from "./desktop.js";
+import { createBrowserExtension, type BrowserExtensionOptions } from "./browser.js";
+import { createDesktopExtension, type DesktopExtensionOptions } from "./desktop.js";
 
 export type GhostExtensionSetOptions = DesktopExtensionOptions
   & BrowserExtensionOptions;
-
-export function ghostToolNames(): string[] {
-  return [
-    ...DESKTOP_TOOLS,
-    ...browserToolNames(),
-  ];
-}
 
 export function createGhostExtension(
   options: GhostExtensionSetOptions,

@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
-import { SEEDED_CHARACTER } from "@ghost/extensions";
+import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "@ghost/extensions";
 import { trashPath } from "./trash.js";
 
 export { homeTrashDir } from "./trash.js";
@@ -24,7 +24,6 @@ export interface Ghost {
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
-const GHOST_CHARACTER_FILENAME = "character.md";
 const GHOST_SETTINGS_FILENAME = "settings.yml";
 
 /**
@@ -87,7 +86,7 @@ export function assertValidGhostName(name: string): void {
   }
 }
 
-function isDirectory(path: string): boolean {
+export function isDirectory(path: string): boolean {
   try {
     return statSync(path).isDirectory();
   } catch {
@@ -109,7 +108,7 @@ function isFile(path: string): boolean {
  * runtime state are optional and may be empty.
  */
 export function isGhostHome(dir: string): boolean {
-  return isDirectory(dir) && isFile(join(dir, GHOST_CHARACTER_FILENAME));
+  return isDirectory(dir) && isFile(join(dir, CHARACTER_FILENAME));
 }
 
 function createdAtOf(dir: string): string {
@@ -131,7 +130,7 @@ export function ghostPaths(dir: string): {
     home,
     settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
-    characterFile: join(home, GHOST_CHARACTER_FILENAME),
+    characterFile: join(home, CHARACTER_FILENAME),
   };
 }
 
@@ -249,7 +248,7 @@ export class GhostRegistry {
       throw new GhostError("already_exists", `A ghost named ${JSON.stringify(name)} already exists.`, 409);
     }
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, GHOST_CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
+    writeFileSync(join(dir, CHARACTER_FILENAME), SEEDED_CHARACTER(name), {
       encoding: "utf8",
       // Fail rather than clobber a character.md that appeared between the
       // isGhostHome() check and here.

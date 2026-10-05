@@ -1,11 +1,7 @@
 /**
- * Errors the ghost tools raise.
- *
- * Pi marks tool failures when `execute()` throws rather than from a returned
- * `{ isError: true }` payload. So every
- * failure path here is a `throw`, and the thrown value carries a machine-readable
- * `code` plus a model-facing message, because that message is what the agent
- * reads and reacts to.
+ * Errors the ghost tools raise. Every failure is a `throw` carrying a
+ * machine-readable `code` plus a model-facing message, because that message is
+ * what the agent reads and reacts to.
  */
 
 export type GhostErrorCode =
@@ -34,4 +30,9 @@ export class GhostError extends Error {
 
 export function isGhostError(value: unknown): value is GhostError {
   return value instanceof GhostError;
+}
+
+/** The text of anything thrown. */
+export function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

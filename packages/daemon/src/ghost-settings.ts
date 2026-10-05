@@ -8,7 +8,7 @@ import { existsSync } from "node:fs";
 import { rename, rm, writeFile } from "node:fs/promises";
 import { isMap, parse as parseYaml, parseDocument } from "yaml";
 import { ghostPaths } from "./ghosts.js";
-import { isRecord } from "./mcp-config-policy.js";
+import { isRecord } from "@ghost/extensions";
 import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from "./private-file.js";
 
 export interface GhostSettings {

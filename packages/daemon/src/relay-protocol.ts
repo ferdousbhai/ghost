@@ -9,6 +9,7 @@ import {
 } from "@ghost/extensions";
 import type { IncomingHttpHeaders } from "node:http";
 import { tokenMatches } from "./token-store.js";
+import { isRecord } from "@ghost/extensions";
 
 const OP_SET = new Set<string>(RELAY_OPS);
 
@@ -100,9 +101,6 @@ export type ParsedClientFrame =
   | { readonly ok: true; readonly frame: RelayClientFrame }
   | { readonly ok: false; readonly reason: string };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 /**
  * Parse one text frame from the extension. Frame size is bounded upstream by

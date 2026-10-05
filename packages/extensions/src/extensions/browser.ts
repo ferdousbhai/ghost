@@ -26,10 +26,6 @@ import {
 
 export const GHOST_BROWSER = "ghost_browser";
 
-export function browserToolNames(): string[] {
-  return [GHOST_BROWSER];
-}
-
 export const BROWSER_ACTIONS = [
   "open",
   "read",

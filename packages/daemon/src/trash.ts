@@ -14,7 +14,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { xdgBaseDir } from "@ghost/extensions";
 
 const pad2 = (value: number) => String(value).padStart(2, "0");
 
@@ -28,9 +29,7 @@ export function homeTrashDir(
   env: NodeJS.ProcessEnv = process.env,
   home: string = homedir(),
 ): string {
-  const xdg = env.XDG_DATA_HOME?.trim();
-  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "share");
-  return join(base, "Trash");
+  return join(xdgBaseDir(env, "XDG_DATA_HOME", home), "Trash");
 }
 
 function encodeTrashInfoPath(path: string): string {

@@ -1,4 +1,5 @@
-import { expandEnvVarsDeep, isRecord, type MCPHttpServerConfig, type MCPServerConfig, type MCPSseServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
+import { isRecord } from "@ghost/extensions";
+import { expandEnvVarsDeep, type MCPHttpServerConfig, type MCPServerConfig, type MCPSseServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
 export type McpTransport = "stdio" | "http" | "sse";
 
 export interface McpConfiguredKeysView {

@@ -1,7 +1,8 @@
 import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync, readFileSync } from "node:fs";
-import { delimiter, isAbsolute, join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
+import { xdgBaseDir } from "@ghost/extensions";
 
 const exec = promisify(execFile);
 
@@ -169,9 +170,7 @@ export async function isInstalled(id: string, env: NodeJS.ProcessEnv): Promise<b
 
 /** `$XDG_STATE_HOME/omarchy/agents/usage`, falling back to `~/.local/state`. */
 export function omarchyUsageDirectory(env: NodeJS.ProcessEnv, home: string): string {
-  const xdg = env.XDG_STATE_HOME?.trim();
-  const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "state");
-  return join(base, "omarchy", "agents", "usage");
+  return join(xdgBaseDir(env, "XDG_STATE_HOME", home), "omarchy", "agents", "usage");
 }
 
 function readRecord(directory: string, id: string): unknown {

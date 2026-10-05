@@ -10,7 +10,7 @@ import {
   type DaemonConfig,
   type DaemonConfigOverrides,
 } from "./config.js";
-import { closeAllBrowserSessions, ensureGhostHomeLayout } from "./extensions.js";
+import { closeAllBrowserSessions, openGhostHome } from "@ghost/extensions";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
@@ -27,6 +27,7 @@ import { SessionHost } from "./session-host.js";
 import {
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
+import { errorMessage } from "@ghost/extensions";
 
 const USAGE = `ghostd — your ghost, on your machine
 
@@ -258,7 +259,7 @@ async function serveDaemon(
   updates?.start();
   registry.ensureRoot();
   try {
-    await Promise.all(registry.list().map((ghost) => ensureGhostHomeLayout(ghost.dir)));
+    await Promise.all(registry.list().map((ghost) => openGhostHome(ghost.dir).ensure()));
   } catch (error) {
     logger.error("could not ensure a ghost home layout", {
       error: (error as Error).message,
@@ -351,7 +352,7 @@ if (invokedDirectly) {
       process.exitCode = code;
     },
     (error: unknown) => {
-      process.stderr.write(`ghostd: ${error instanceof Error ? error.message : String(error)}\n`);
+      process.stderr.write(`ghostd: ${errorMessage(error)}\n`);
       process.exitCode = 1;
     },
   );

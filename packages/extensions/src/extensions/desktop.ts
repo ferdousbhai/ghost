@@ -1,6 +1,6 @@
 import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
-import { GhostError, type GhostErrorCode } from "../errors.js";
+import { errorMessage, GhostError, type GhostErrorCode } from "../errors.js";
 import { connectMcpServer, type McpClient, type McpTool, type McpToolResult } from "../mcp-stdio.js";
 import { untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
 
@@ -56,7 +56,7 @@ function spawnedDesktop(): DesktopServer {
       try {
         connected = await connect();
       } catch (error) {
-        throw new GhostError("not_found", `ghost-desktop did not start: ${error instanceof Error ? error.message : String(error)}.`);
+        throw new GhostError("not_found", `ghost-desktop did not start: ${errorMessage(error)}.`);
       }
       try {
         return await connected.request(
@@ -69,7 +69,7 @@ function spawnedDesktop(): DesktopServer {
         // A lost connection says nothing about whether the input happened.
         throw new GhostError(
           "conflict",
-          `ghost-desktop stopped answering (${error instanceof Error ? error.message : String(error)}); the step may have run. Look before retrying.`,
+          `ghost-desktop stopped answering (${errorMessage(error)}); the step may have run. Look before retrying.`,
         );
       }
     },

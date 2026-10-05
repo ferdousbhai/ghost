@@ -1,16 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
-import {
-  latestSession,
-  listSessions,
-  preferredSessionId,
-  resolveGhost,
-  resolveSessionPrefix,
-  resolveTarget,
-  stdinIsTty,
-  stdinText,
-} from "./common.js";
+import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSessionPrefix, resolveTarget, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -97,7 +88,7 @@ export async function sayCommand(
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
   let finalText = "";
   let terminal: "done" | "error" | undefined;
-  await ctx.client.stream(`/api/ghosts/${encodeURIComponent(name)}/messages`, {
+  await ctx.client.stream(ghostPath(name, "/messages"), {
     prompt: text,
     sessionId: conversationId,
   }, (unknownEvent) => {

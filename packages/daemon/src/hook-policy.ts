@@ -1,3 +1,4 @@
+import { isRecord } from "@ghost/extensions";
 const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 
 export interface GhostHookEventBase {
@@ -90,7 +91,7 @@ const BUILTIN_SETTINGS_KEYS = new Set<string>();
 function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: string): void {
   const builtin = parsed.builtin;
   if (builtin === undefined) return;
-  if (!isObject(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
+  if (!isRecord(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
   for (const [key, raw] of Object.entries(builtin)) {
     if (!SETTINGS_KEY.test(key)) {
       throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
@@ -98,7 +99,7 @@ function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: stri
     if (!BUILTIN_SETTINGS_KEYS.has(key)) {
       throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
     }
-    if (!isObject(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
+    if (!isRecord(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
     const [field] = Object.keys(raw);
     if (field !== undefined) {
       throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
@@ -121,9 +122,6 @@ export function ghostSessionStopContinuation(
   return undefined;
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
 
 function defaultHookName(event: GhostHookEvent["type"]): string {
   return `${event === "before_prompt" ? "Before-prompt" : "Session-stop"} command hook`;
@@ -148,7 +146,7 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
 export function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
-  if (!isObject(parsed)) throw new Error(`${path} must contain a JSON object.`);
+  if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
   validateBuiltinHookSettings(parsed, path);
   return parseCommandHooks(parsed, path);
 }
@@ -156,7 +154,7 @@ export function parseHooksDocument(parsed: unknown, path: string): CommandHook[]
 function parseCommandHooks(parsed: Record<string, unknown>, path: string): CommandHook[] {
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
-  if (!isObject(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
+  if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
   const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop"]);
   for (const eventName of Object.keys(hooks)) {
     if (!supported.has(eventName as GhostHookEvent["type"])) {
@@ -170,12 +168,12 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
     if (groups === undefined) continue;
     if (!Array.isArray(groups)) throw new Error(`${path}: "hooks.${eventName}" must be an array.`);
     for (const [groupIndex, group] of groups.entries()) {
-      if (!isObject(group) || !Array.isArray(group.hooks)) {
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
         throw new Error(`${path}: hooks.${eventName}[${groupIndex}].hooks must be an array.`);
       }
       for (const [handlerIndex, raw] of group.hooks.entries()) {
         const label = `hooks.${eventName}[${groupIndex}].hooks[${handlerIndex}]`;
-        if (!isObject(raw) || raw.type !== "command" || typeof raw.command !== "string"
+        if (!isRecord(raw) || raw.type !== "command" || typeof raw.command !== "string"
           || !raw.command.trim() || raw.command.includes("\0")) {
           throw new Error(`${path}: ${label} must be a command hook with a non-empty NUL-free command.`);
         }
@@ -249,7 +247,7 @@ export function parseCommandResult(
   if (!output) return undefined;
   try {
     const parsed = JSON.parse(output);
-    if (!isObject(parsed)) throw new Error("hook output must be a JSON object");
+    if (!isRecord(parsed)) throw new Error("hook output must be a JSON object");
     if (hook.eventName === "before_prompt") {
       if (parsed.decision !== undefined || parsed.continue !== undefined || parsed.reason !== undefined) {
         throw new Error("before_prompt only supports additionalContext");

@@ -1,13 +1,5 @@
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import {
-  cliConfigPath,
-  listGhosts,
-  listSessions,
-  readDefaultGhost,
-  resolveGhost,
-  resolveTarget,
-  writeDefaultGhost,
-} from "./common.js";
+import { cliConfigPath, ghostPath, listGhosts, listSessions, readDefaultGhost, resolveGhost, resolveTarget, writeDefaultGhost } from "./common.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -61,7 +53,7 @@ export async function ghostsCommand(
   const name = parsed.positionals[0] as string;
   const response = await ctx.client.request(
     "DELETE",
-    `/api/ghosts/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`,
+    ghostPath(name, `?confirm=${encodeURIComponent(name)}`),
   );
   emit(ctx, response.body, (body) => {
     const trash = (body as { trash?: unknown })?.trash;

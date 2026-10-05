@@ -3,6 +3,18 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
+const XDG_BASE_DEFAULTS = {
+  XDG_CONFIG_HOME: ".config",
+  XDG_DATA_HOME: ".local/share",
+  XDG_STATE_HOME: ".local/state",
+} as const;
+
+/** An XDG base directory: the variable when it names an absolute path, else its default under `home`. */
+export function xdgBaseDir(env: NodeJS.ProcessEnv, variable: keyof typeof XDG_BASE_DEFAULTS, home: string): string {
+  const value = env[variable]?.trim();
+  return value && isAbsolute(value) ? value : join(home, XDG_BASE_DEFAULTS[variable]);
+}
+
 export function expandHome(path: string, home: string): string {
   if (path === "~") return home;
   if (path.startsWith("~/")) return join(home, path.slice(2));
