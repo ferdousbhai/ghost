@@ -128,6 +128,7 @@ export function newConversationEntry(id: string, now: Date): LogEntry {
 
 export interface LogState {
   readonly createdAt: string | null;
+  /** The owner's title, else one derived from the first owner message. */
   readonly title: string | null;
   readonly preview: string | null;
   readonly messageCount: number;
@@ -149,10 +150,38 @@ function firstLine(text: string): string | null {
   return line.length > PREVIEW_MAX ? line.slice(0, PREVIEW_MAX).trimEnd() : line;
 }
 
+// Openers that say nothing about the subject: greetings and request frames.
+const TITLE_LEAD = /^(?:(?:hey|hi|hello|yo|ok(?:ay)?|so|well|please|pls)\b[\s,!.:-]*|(?:can|could|would|will) you\s+(?:please\s+)?|(?:i(?:'d| would) like (?:you )?to|i (?:want|need) (?:you )?to|help me(?: to)?|let'?s|tell me)\s+)/iu;
+const TITLE_TAIL = new Set("a an the to of and or for with in on at from by about as but if that this my your our so then is are be i me".split(" "));
+const TITLE_WORDS = 7;
+
+/**
+ * A title extracted from the first owner message, with no model: a quoted
+ * name the message gives (`called "Coffee Ideas"`), else its first clause
+ * without greeting or request frame, cut to a few words that do not end on
+ * a filler word. Null when nothing substantive is left (a bare "hey").
+ */
+export function derivedTitle(text: string): string | null {
+  const plain = text.replace(/\[Attachment:[^\]]*\]/gu, " ").trim();
+  const named = plain.match(/\b(?:called|named|titled)\s+["“]([^"”]{2,60})["”]/iu)?.[1]?.replace(/^#+\s*/u, "").trim();
+  if (named) return named;
+  let clause = plain.split(/(?<=[.?!])\s|\n|;|:\s|\s[-–—]\s|,\s(?:and |but |so |then )?(?:i |can |could |please )/iu)[0] ?? "";
+  for (let previous = ""; previous !== clause; ) {
+    previous = clause;
+    clause = clause.replace(TITLE_LEAD, "").trim();
+  }
+  const words = clause.replace(/^(?:for )?me\s+/iu, "").replace(/[?!.,:;]+$/u, "").split(/\s+/u).filter(Boolean).slice(0, TITLE_WORDS);
+  while (words.length > 1 && TITLE_TAIL.has((words.at(-1) as string).toLowerCase().replace(/[^a-z']/gu, ""))) words.pop();
+  if (words.length < 2) return null;
+  const title = words.join(" ").replace(/[,:;]+$/u, "");
+  return title.charAt(0).toUpperCase() + title.slice(1);
+}
+
 export function logState(entries: readonly LogEntry[]): LogState {
   let createdAt: string | null = null;
   let title: string | null = null;
   let preview: string | null = null;
+  let derived: string | null = null;
   let messageCount = 0;
   let harness: string | null = null;
   let harnessSession: string | null = null;
@@ -169,7 +198,10 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
       case "user":
         messageCount += 1;
-        if (preview === null && entry.origin === undefined) preview = firstLine(entry.text);
+        if (preview === null && entry.origin === undefined) {
+          preview = firstLine(entry.text);
+          derived = derivedTitle(entry.text);
+        }
         break;
       case "assistant":
         messageCount += 1;
@@ -193,7 +225,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
     }
   }
-  return { createdAt, title, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
+  return { createdAt, title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
 }
 
 export interface TranscriptMessage {

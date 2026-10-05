@@ -6,6 +6,8 @@ import { requireConversationId } from "./conversation-log.js";
 
 export type TurnEvent =
   | { type: "start" }
+  /** A pass starting on this harness: the first, or the next after one failed. */
+  | { type: "harness"; harness: string }
   | {
       type: "owner_message";
       text: string;

@@ -138,7 +138,9 @@ records, and `harness` records naming the harness that took over and the
 session id it reported. A torn last line is skipped. The log is the history
 every client reads; each harness's own transcript is its resume state and is
 not read back. A conversation is listed once a message lands or the owner
-names it; each row carries `preview`, the first owner text. Pins and read
+names it; each row carries `preview`, the first owner text, and `title`,
+the owner's name for it or else one extracted from that text without a model
+(`derivedTitle`), null when nothing substantive is left. Pins and read
 timestamps are bounded sidecars beside the directories. Deletion moves the
 directory to recoverable Trash in one rename; there is no fork.
 
@@ -398,7 +400,8 @@ remote access is the tailnet viewer alone.
 
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
-emits `start`, then ordered `text_*`, `thinking` (the harness's reasoning, as
+emits `start`, then ordered `harness` (a pass starting on that harness, again
+on each fallback), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `owner_message` (a queued
 follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name`), and `session_stop_continued` events, and exactly one

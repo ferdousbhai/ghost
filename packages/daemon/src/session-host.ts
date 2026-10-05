@@ -643,6 +643,7 @@ export class SessionHost {
         ...(commands ? [`<owner-commands>\n${commands}\n</owner-commands>`] : []),
         prompt,
       ].join("\n\n");
+      stream.emit({ type: "harness", harness });
       const result = await this.runPass(ghost, id, row, {
         prompt: passPrompt,
         resume: !fresh,

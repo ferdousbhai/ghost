@@ -694,6 +694,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     const types = events.map((event) => event.type);
     expect(types).toEqual([
       "start",
+      "harness",
       "tool_execution_start",
       "tool_execution_end",
       "text_start",
@@ -857,7 +858,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
     ]);
     expect(sessions[0]).toMatchObject({
       id: "conv-1",
-      title: null,
+      title: "Who are you",
       preview: "Who are you?",
       harness: "fake",
       messageCount: 2,
@@ -1231,7 +1232,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
       total: number;
       truncated: boolean;
     };
-    expect(transcript).toMatchObject({ id: "conv-1", title: null, harness: "fake", total: 2, truncated: false });
+    expect(transcript).toMatchObject({ id: "conv-1", title: "Who are you", harness: "fake", total: 2, truncated: false });
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "Who are you?" }]],
       ["assistant", [{ type: "text", text: "I set type for a living." }]],

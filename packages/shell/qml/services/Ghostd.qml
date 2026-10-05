@@ -2242,7 +2242,10 @@ Singleton {
     function handleTurnEvent(state: var, event: var): void {
         switch (event.type) {
         case "start":
-            state.activity = "starting";
+            state.activity = "";
+            break;
+        case "harness":
+            state.activity = "starting:" + (event.harness || "");
             break;
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };

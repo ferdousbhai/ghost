@@ -37,8 +37,8 @@ TestCase {
         verify(line !== null);
         Ghostd.streaming = true;
 
-        Ghostd.activity = "starting";
-        verify(line.phrase.startsWith("Starting"));
+        Ghostd.activity = "starting:codex";
+        compare(line.phrase, "Starting codex");
 
         Ghostd.activity = "thinking:";
         compare(line.phrase, "Thinking");

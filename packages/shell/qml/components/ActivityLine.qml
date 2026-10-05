@@ -47,7 +47,7 @@ Item {
     function stateLine(activity: string): string {
         if (activity.startsWith("thinking:")) return root.thoughtLine(activity.slice(9));
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
-        if (activity === "starting") return Ghostd.currentHarness !== "" ? "Starting " + Ghostd.currentHarness : "Starting";
+        if (activity.startsWith("starting:")) return "Starting " + activity.slice(9);
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         return "Working";
     }

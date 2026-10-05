@@ -151,6 +151,10 @@ describe("harness choice", () => {
     expect(text(events)).toBe("here");
     expect(events.at(-1)).toMatchObject({ type: "done" });
     expect((await sessions.listSessions("casper"))[0]?.harness).toBe("second");
+    expect(events.filter((event) => event.type === "harness")).toEqual([
+      { type: "harness", harness: "first" },
+      { type: "harness", harness: "second" },
+    ]);
   });
 
   it("lists the model and effort the carrying harness last reported, and forgets them on a switch", async () => {
@@ -471,7 +475,7 @@ describe("conversation metadata", () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "Plan the zine\nwith details");
     let [row] = await sessions.listSessions("casper");
-    expect(row).toMatchObject({ id: "c1", title: null, preview: "Plan the zine", messageCount: 2, pinned: false, unread: true });
+    expect(row).toMatchObject({ id: "c1", title: "Plan the zine", preview: "Plan the zine", messageCount: 2, pinned: false, unread: true });
 
     await sessions.renameConversation("casper", "c1", "Zine");
     await sessions.setPinned("casper", "c1", true);
