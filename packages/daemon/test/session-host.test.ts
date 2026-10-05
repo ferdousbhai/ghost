@@ -479,6 +479,21 @@ describe("choosing the agent", () => {
     });
     await expect(sessions.chooseHarness("casper", "c1", "fake")).rejects.toMatchObject({ code: "harness_no_room", message: "fake has no room: Weekly at 95%." });
   });
+  it("shares one harness report between the picker, a choice, and a turn", async () => {
+    const fake = harness(replies("x"));
+    let reports = 0;
+    const sessions = host({
+      harnesses: [fake],
+      harnessReport: async () => {
+        reports += 1;
+        return { harnesses: [{ id: "fake", eligible: true, reason: null, usage: null }], refresh: "omarchy agent usage update" };
+      },
+    });
+    await sessions.listHarnesses("casper");
+    await sessions.chooseHarness("casper", "c1", "fake");
+    await turn(sessions, "hello");
+    expect(reports).toBe(1);
+  });
 });
 
 describe("conversation metadata", () => {

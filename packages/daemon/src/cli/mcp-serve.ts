@@ -4,7 +4,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { SessionToolDescriptor, SessionToolResult } from "../session-host.js";
 import { flagString, type ParsedCliArgs } from "./args.js";
-import { CliError, EXIT_CODE } from "./client.js";
 import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import type { CliContext } from "./types.js";
 
@@ -15,14 +14,13 @@ import type { CliContext } from "./types.js";
  * `$GHOST_SESSION`); every call runs in the daemon.
  */
 export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  // A conversation whose first turn is still running is not listed yet, so an
-  // unlisted id (`-s`, or the `$GHOST_SESSION` the daemon set) binds as given;
-  // the daemon checks it on every call.
-  const path = await resolveTarget(ctx.client, ctx, parsed).then((target) => target.path, async (error: unknown) => {
-    const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
-    if (!requested || !(error instanceof CliError && error.exitCode === EXIT_CODE.notFound)) throw error;
-    return sessionPath((await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"))).name, requested);
-  });
+  // An id (`-s`, or the `$GHOST_SESSION` the daemon set) binds as given, without
+  // listing every conversation first on each harness pass; the daemon checks it
+  // on every call.
+  const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const path = requested
+    ? sessionPath((await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"))).name, requested)
+    : (await resolveTarget(ctx.client, ctx, parsed)).path;
   const server = new Server({ name: "ghost", version: "1" }, { capabilities: { tools: {} } });
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const { tools } = (await ctx.client.request<{ tools: SessionToolDescriptor[] }>("GET", `${path}/tools`)).body;

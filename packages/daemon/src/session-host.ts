@@ -263,7 +263,7 @@ export class SessionHost {
   private readonly leases = new Map<string, { count: number; drained?: () => void }>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private readonly tools = new Map<string, Promise<CollectedGhostExtension>>();
-  private eligibleCache?: { at: number; ids: Promise<readonly string[]> };
+  private reportCache?: { at: number; report: Promise<HarnessReport> };
   private shuttingDown = false;
 
   constructor(options: SessionHostOptions) {
@@ -406,18 +406,26 @@ export class SessionHost {
     }
   }
 
+  /** The harness report, shared by turns and the picker for a minute; it takes most of a second. */
+  private cachedReport(): Promise<HarnessReport> {
+    const now = Date.now();
+    if (this.reportCache && now - this.reportCache.at < HARNESS_REPORT_TTL_MS) return this.reportCache.report;
+    const entry = { at: now, report: this.harnessReport() };
+    this.reportCache = entry;
+    entry.report.catch(() => {
+      if (this.reportCache === entry) this.reportCache = undefined;
+    });
+    return entry.report;
+  }
+
   /** Installed harnesses Omarchy's usage records say have room, in Omarchy's order. */
   private omarchyEligible(): Promise<readonly string[]> {
-    const now = Date.now();
-    if (this.eligibleCache && now - this.eligibleCache.at < HARNESS_REPORT_TTL_MS) return this.eligibleCache.ids;
-    const ids = this.harnessReport()
+    return this.cachedReport()
       .then((report) => report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id))
       .catch((error: unknown) => {
         this.logger.warn("harness report unavailable; trying every supported harness", { error: errorMessage(error) });
         return SUPPORTED_HARNESSES;
       });
-    this.eligibleCache = { at: now, ids };
-    return ids;
   }
 
   /**
@@ -441,7 +449,7 @@ export class SessionHost {
   /** Installed agents Ghost can run on, with Omarchy's usage, and both defaults. */
   async listHarnesses(ghostName: string): Promise<HarnessChoices> {
     const ghost = this.registry.get(ghostName);
-    const [report, omarchyDefault] = await Promise.all([this.harnessReport(), this.defaultHarness()]);
+    const [report, omarchyDefault] = await Promise.all([this.cachedReport(), this.defaultHarness()]);
     return {
       harnesses: report.harnesses.flatMap((harness) => {
         const row = this.rowOf(harness.id);
@@ -469,7 +477,7 @@ export class SessionHost {
     this.requireRow(id);
     // A turn only runs on an agent with room, so a choice it would pass over
     // is refused here rather than silently ignored.
-    const listed = (await this.harnessReport()).harnesses.find((harness) => harness.id === id);
+    const listed = (await this.cachedReport()).harnesses.find((harness) => harness.id === id);
     if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
     if (!listed.eligible) throw new GhostError("harness_no_room", `${id} has no room: ${listed.reason ?? "its usage is spent"}.`, 409);
     const ghost = this.registry.get(ghostName);
@@ -536,7 +544,7 @@ export class SessionHost {
 
   private async runAdmitted(ghost: Ghost, id: string, prompt: string, stream: AdmittedTurnOptions): Promise<void> {
     const { sessionDir } = ghostPaths(ghost.dir);
-    if ((await readLog(sessionDir, id)) === null) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
+    if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
     const command = /^(!!?)\s*([\s\S]+)$/u.exec(prompt.trim());
     if (command) {
@@ -617,7 +625,8 @@ export class SessionHost {
     signal: AbortSignal,
   ): Promise<TerminalError | null> {
     const { sessionDir } = ghostPaths(ghost.dir);
-    const candidates = await this.harnessCandidates(ghost, logState((await readLog(sessionDir, id)) ?? []).harness);
+    let entries = (await readLog(sessionDir, id)) ?? [];
+    const candidates = await this.harnessCandidates(ghost, logState(entries).harness);
     if (candidates.length === 0) {
       return {
         type: "error",
@@ -628,7 +637,6 @@ export class SessionHost {
     let lastError = "The turn failed.";
     for (const harness of candidates) {
       const row = this.rowOf(harness) as HarnessRow;
-      const entries = (await readLog(sessionDir, id)) ?? [];
       const bound = logState(entries);
       const dir = conversationDir(sessionDir, id);
       // A harness new to the conversation, or to its directory since a home
@@ -668,6 +676,7 @@ export class SessionHost {
       }
       lastError = result.error;
       this.logger.warn("harness failed before answering; trying the next", { ghost: ghost.name, conversation: id, harness, error: result.error });
+      entries = (await readLog(sessionDir, id)) ?? [];
     }
     const last = candidates.at(-1) as string;
     await appendLog(sessionDir, id, [{ type: "assistant", at: new Date().toISOString(), harness: last, content: [], error: lastError }]);
