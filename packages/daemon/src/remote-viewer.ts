@@ -6,6 +6,7 @@
  * type.
  */
 import { createHash } from "node:crypto";
+import { renderMarkdown } from "./remote-markdown.js";
 
 export const REMOTE_VIEWER_HTML = `<!doctype html>
 <meta charset="utf-8">
@@ -24,6 +25,18 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .user { align-self: flex-end; background: #4a7cff22; }
   .assistant { align-self: flex-start; background: #8883; }
   .tool { font-size: .85em; opacity: .75; font-family: ui-monospace, monospace; }
+  .assistant { white-space: normal; }
+  .assistant > :first-child { margin-top: 0; } .assistant > :last-child { margin-bottom: 0; }
+  .assistant p, .assistant li { white-space: pre-wrap; }
+  .assistant :is(h1, h2, h3, h4, h5, h6) { font-size: 1.05em; margin: .8em 0 .3em; }
+  .assistant :is(ul, ol) { padding-left: 1.4em; }
+  .assistant code { font-family: ui-monospace, monospace; font-size: .9em; background: #8883; padding: 0 .25em; border-radius: .25em; }
+  .assistant pre { overflow-x: auto; background: #8882; padding: .5rem .6rem; border-radius: .4rem; }
+  .assistant pre code { background: none; padding: 0; }
+  .assistant blockquote { margin: .5em 0; padding-left: .7em; border-left: 3px solid #8886; opacity: .85; }
+  .assistant table { border-collapse: collapse; display: block; overflow-x: auto; }
+  .assistant :is(th, td) { border: 1px solid #8885; padding: .2em .5em; text-align: left; }
+  .assistant a { color: #e0a43a; }
   form { display: flex; gap: .5rem; padding: .5rem .75rem; border-top: 1px solid #8884; }
   form textarea { flex: 1; resize: none; min-height: 2.6rem; font: inherit; }
   #status { padding: 0 .75rem .4rem; font-size: .85em; opacity: .7; min-height: 1.2em; }
@@ -49,6 +62,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   const text = (content) => typeof content === "string" ? content
     : (content || []).map((p) => p.type === "text" ? p.text : p.type === "toolCall" ? "\\u2699 " + p.name : "").join("");
   const seg = (id) => encodeURIComponent(id);
+  ${renderMarkdown.toString()}
+  const fill = (el, role, value) => role === "assistant" ? el.replaceChildren(renderMarkdown(value, document)) : (el.textContent = value);
   let ghost = null, session = null, events = null, streaming = false;
 
   function render(messages) {
@@ -58,7 +73,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       if (m.role !== "user" && m.role !== "assistant") continue;
       const el = document.createElement("div");
       el.className = "msg " + m.role;
-      el.textContent = text(m.content);
+      fill(el, m.role, text(m.content));
       log.append(el);
     }
     log.scrollTop = log.scrollHeight;
@@ -110,7 +125,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     });
     if (!r.ok) { streaming = false; throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText); }
     const me = document.createElement("div"); me.className = "msg user"; me.textContent = prompt; $("log").append(me);
-    const reply = document.createElement("div"); reply.className = "msg assistant"; $("log").append(reply);
+    const reply = document.createElement("div"); reply.className = "msg assistant"; $("log").append(reply); let replyText = "";
     const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
     for (;;) {
       const { value, done } = await reader.read();
@@ -122,7 +137,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
         const line = frame.split("\\n").find((l) => l.startsWith("data: "));
         if (!line) continue;
         const ev = JSON.parse(line.slice(6));
-        if (ev.type === "text_delta") reply.textContent += ev.delta;
+        if (ev.type === "text_delta") fill(reply, "assistant", replyText += ev.delta);
         else if (ev.type === "tool_execution_start") { const t = document.createElement("div"); t.className = "msg tool"; t.textContent = "\\u2699 " + ev.toolName; reply.before(t); }
         else if (ev.type === "error") show(ev.errorMessage);
         $("log").scrollTop = $("log").scrollHeight;
