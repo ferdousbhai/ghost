@@ -32,12 +32,13 @@ export interface HookCompleteOptions {
 
 async function candidates(home: string, env: NodeJS.ProcessEnv, options: HookCompleteOptions): Promise<string[]> {
   const rows = options.rows ?? harnessRow;
-  const eligible = options.harnesses
-    ? await options.harnesses()
-    : await readHarnessReport(env, homedir())
-      .then(eligibleIds)
-      .catch(() => SUPPORTED_HARNESSES);
-  const preferred = [loadGhostSettings(home).getString("harness") ?? null, options.harnesses ? null : await omarchyDefaultAgent(env)];
+  const [eligible, omarchyDefault] = await Promise.all([
+    options.harnesses
+      ? options.harnesses()
+      : readHarnessReport(env, homedir()).then(eligibleIds).catch(() => SUPPORTED_HARNESSES),
+    options.harnesses ? null : omarchyDefaultAgent(env),
+  ]);
+  const preferred = [loadGhostSettings(home).getString("harness") ?? null, omarchyDefault];
   return orderHarnesses(eligible.filter((id) => rows(id) !== null), preferred);
 }
 

@@ -405,8 +405,8 @@ The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `text_*`, `thinking` (the harness's reasoning, as
-far as it shows it; never logged), `tool_execution_*`, `owner_message` (a queued
-follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
+far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
+waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name`), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is

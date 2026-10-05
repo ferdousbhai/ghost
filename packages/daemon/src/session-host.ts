@@ -199,6 +199,8 @@ export interface HarnessChoices {
 interface LiveTurn {
   readonly followUps: string[];
   readonly controller: AbortController;
+  /** The turn's own stream, which announces each change to `followUps`. */
+  readonly emit: (event: TurnEvent) => void;
 }
 
 /** One harness pass: what it said and did, and how it ended. */
@@ -548,7 +550,7 @@ export class SessionHost {
     }
     const key = keyOf(ghost.name, id);
     const controller = new AbortController();
-    const turn: LiveTurn = { followUps: [], controller };
+    const turn: LiveTurn = { followUps: [], controller, emit: stream.emit };
     this.live.set(key, turn);
     const abort = () => controller.abort();
     stream.signal?.addEventListener("abort", abort, { once: true });
@@ -589,7 +591,10 @@ export class SessionHost {
           continue;
         }
         const followUp = turn.followUps.shift();
-        if (followUp !== undefined) stream.emit({ type: "owner_message", text: followUp });
+        if (followUp !== undefined) {
+          stream.emit({ type: "queue", followUp: [...turn.followUps] });
+          stream.emit({ type: "owner_message", text: followUp });
+        }
         next = followUp === undefined ? undefined : { text: followUp, origin: "follow_up" };
       }
       if (controller.signal.aborted && terminal.type === "done") {
@@ -911,6 +916,7 @@ export class SessionHost {
       throw new GhostError("session_not_streaming", "This conversation is not currently streaming; send a normal message instead.", 409);
     }
     turn.followUps.push(text);
+    turn.emit({ type: "queue", followUp: [...turn.followUps] });
     return this.queuedMessages(ghostName, sessionId);
   }
 

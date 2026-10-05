@@ -665,7 +665,7 @@ async function streamTurn(req, res, name, body) {
   const sessionId = body.sessionId;
   const stream = openStream(req, res);
   const key = turnKey(name, sessionId);
-  const turn = { streaming: true, followUp: [] };
+  const turn = { streaming: true, followUp: [], res };
   activeTurns.set(key, turn);
   answering.add(key);
   const exchanges = [];
@@ -683,6 +683,7 @@ async function streamTurn(req, res, name, body) {
     // with owner_message, then streams the pass that answers it.
     while (turn.followUp.length > 0) {
       const text = turn.followUp.shift();
+      res.write(`data: ${JSON.stringify({ type: "queue", followUp: turn.followUp })}\n\n`);
       res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
       reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
       if (reply === null) return;
@@ -1090,6 +1091,7 @@ const mockServer = createServer(async (req, res) => {
         });
       }
       turn.followUp.push(text);
+      turn.res.write(`data: ${JSON.stringify({ type: "queue", followUp: turn.followUp })}\n\n`);
       return json(res, 200, snapshot());
     }
   }

@@ -88,6 +88,8 @@ TestCase {
         turn.state.followUpQueue = ["Use the shorter version."];
         Ghostd.handleTurnEvent(turn.state,
             { type: "text_end", contentIndex: 0, content: "First pass" });
+        // The daemon announces the shorter queue, then the message it dequeued.
+        Ghostd.handleTurnEvent(turn.state, { type: "queue", followUp: [] });
         Ghostd.handleTurnEvent(turn.state,
             { type: "owner_message", text: "Use the shorter version." });
 
@@ -103,6 +105,14 @@ TestCase {
         // The active projection mirrors the rows without a transcript reload.
         compare(Ghostd.transcript.count, 4);
         compare(Ghostd.transcript.get(2).text, "Use the shorter version.");
+    }
+
+    function test_aQueueEventReplacesTheChips(): void {
+        const turn = openTurn("queued", null);
+        Ghostd.handleTurnEvent(turn.state, { type: "queue", followUp: ["one", "two"] });
+        compare(turn.state.followUpQueue, ["one", "two"]);
+        Ghostd.handleTurnEvent(turn.state, { type: "queue", followUp: ["two"] });
+        compare(turn.state.followUpQueue, ["two"]);
     }
 
     function test_sessionStopContinuedInsertsHookRowBetweenPasses(): void {

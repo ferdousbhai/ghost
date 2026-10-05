@@ -9,6 +9,8 @@ export type TurnEvent =
   | { type: "start" }
   /** A pass starting on this harness: the first, or the next after one failed. */
   | { type: "harness"; harness: string }
+  /** The follow-ups still waiting, sent whenever one is queued or starts. */
+  | { type: "queue"; followUp: string[] }
   | {
       type: "owner_message";
       text: string;

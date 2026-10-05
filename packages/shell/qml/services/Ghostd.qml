@@ -502,14 +502,6 @@ Singleton {
         onTriggered: root.connectConversationEvents(root.activeGhost)
     }
 
-    Timer {
-        id: queuePoll
-        interval: 350
-        repeat: true
-        running: root.anyStreaming
-        onTriggered: root.pollQueues()
-    }
-
     Component.onCompleted: root.refresh()
     Component.onDestruction: root.retireClientRequests()
 
@@ -1272,13 +1264,6 @@ Singleton {
             const state = root.turnStates[key];
             if (state && now - state.lastStreamActivity >= root.streamSilenceMs)
                 root.expireTurnStream(state);
-        }
-    }
-
-    function pollQueues(): void {
-        for (const key of root.liveConversationKeys) {
-            const state = root.turnStates[key];
-            if (state) root.fetchQueueFor(state);
         }
     }
 
@@ -2266,6 +2251,9 @@ Singleton {
             state.blocks[event.contentIndex] = { kind: "text", text: event.content };
             state.presentationDirty = true;
             break;
+        case "queue":
+            root.applyQueueFor(state, event);
+            break;
         case "owner_message":
             root.receiveOwnerMessageFor(state, event.text || "");
             break;
@@ -2474,15 +2462,7 @@ Singleton {
     function receiveOwnerMessageFor(state: var, text: string): void {
         const message = text.trim();
         if (!state.streaming || message === "") return;
-        // The SSE event is the dequeue boundary. Move one matching chip now;
-        // the 350ms queue poll remains the authority for unusual duplicates or
-        // non-owner queue entries, but the ordinary row never renders twice.
-        const followUp = state.followUpQueue.slice();
-        const followIndex = followUp.indexOf(message);
-        if (followIndex >= 0) {
-            followUp.splice(followIndex, 1);
-            state.followUpQueue = followUp;
-        }
+        // The `queue` event just before this one already took its chip away.
         root.insertTurnBreakFor(state, "user", message);
     }
 
@@ -2563,8 +2543,8 @@ Singleton {
         if (prompt === "" || state.queueSubmitting || !state.streaming) return;
         state.queueSubmitting = true;
         state.queueError = "";
-        // Show the chip immediately; the authoritative GET removes it once
-        // the daemon starts the pass that carries it.
+        // Show the chip immediately; the stream's `queue` event removes it
+        // once the daemon starts the pass that carries it.
         state.followUpQueue = state.followUpQueue.concat([prompt]);
         root.request(state, "queueRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", { text: prompt },

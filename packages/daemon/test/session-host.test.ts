@@ -256,7 +256,12 @@ describe("queued follow-ups and aborts", () => {
     gate.release();
     await running;
 
-    expect(events).toContainEqual({ type: "owner_message", text: "two" });
+    // The stream announces the queue as it grows and as it drains, then the message.
+    expect(events.filter((event) => event.type === "queue" || event.type === "owner_message")).toEqual([
+      { type: "queue", followUp: ["two"] },
+      { type: "queue", followUp: [] },
+      { type: "owner_message", text: "two" },
+    ]);
     expect(text(events)).toBe("firstsecond");
     expect(fake.calls().map((call) => [call.prompt, call.resume])).toEqual([["one", false], ["two", true]]);
     expect(events.filter((event) => event.type === "done" || event.type === "error")).toHaveLength(1);
