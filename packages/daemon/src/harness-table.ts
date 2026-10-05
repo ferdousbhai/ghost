@@ -292,6 +292,28 @@ function piParser(): (line: string) => HarnessEvent[] {
   };
 }
 
+/** A rollout file never moves, so each session's is searched for once. */
+const codexRollouts = new Map<string, string>();
+
+async function codexRollout(root: string, session: string): Promise<string | null> {
+  const key = join(root, session);
+  const known = codexRollouts.get(key);
+  if (known) return known;
+  const newest = async (dir: string) => (await readdir(dir).catch(() => [])).sort().reverse();
+  for (const year of await newest(root)) {
+    for (const month of await newest(join(root, year))) {
+      for (const day of await newest(join(root, year, month))) {
+        const name = (await newest(join(root, year, month, day))).find((file) => file.endsWith(`-${session}.jsonl`));
+        if (!name) continue;
+        const path = join(root, year, month, day, name);
+        codexRollouts.set(key, path);
+        return path;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * The model and effort of a Codex session's latest turn, from its rollout
  * file (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec
@@ -302,28 +324,19 @@ async function codexRanOn(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
-  const root = join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions");
-  const newest = async (dir: string) => (await readdir(dir).catch(() => [])).sort().reverse();
-  for (const year of await newest(root)) {
-    for (const month of await newest(join(root, year))) {
-      for (const day of await newest(join(root, year, month))) {
-        const name = (await newest(join(root, year, month, day))).find((file) => file.endsWith(`-${session}.jsonl`));
-        if (!name) continue;
-        let provider: string | undefined;
-        let ran: Extract<HarnessEvent, { type: "model" }> | null = null;
-        for (const line of (await readFile(join(root, year, month, day, name), "utf8")).split("\n")) {
-          const entry = json(line);
-          const payload = record(entry?.payload);
-          if (entry?.type === "session_meta" && typeof payload.model_provider === "string") provider = payload.model_provider;
-          if (entry?.type === "turn_context" && typeof payload.model === "string") {
-            ran = { type: "model", model: payload.model, ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}) };
-          }
-        }
-        return ran && provider ? { ...ran, provider } : ran;
-      }
+  const rollout = await codexRollout(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions"), session);
+  if (!rollout) return null;
+  let provider: string | undefined;
+  let ran: Extract<HarnessEvent, { type: "model" }> | null = null;
+  for (const line of (await readFile(rollout, "utf8")).split("\n")) {
+    const entry = json(line);
+    const payload = record(entry?.payload);
+    if (entry?.type === "session_meta" && typeof payload.model_provider === "string") provider = payload.model_provider;
+    if (entry?.type === "turn_context" && typeof payload.model === "string") {
+      ran = { type: "model", model: payload.model, ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}) };
     }
   }
-  return null;
+  return ran && provider ? { ...ran, provider } : ran;
 }
 
 /**

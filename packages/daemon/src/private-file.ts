@@ -119,9 +119,14 @@ export async function writePrivateJsonAtomic(path: string, value: unknown): Prom
   if (Buffer.byteLength(rendered, "utf8") > MAX_PRIVATE_FILE_BYTES) {
     throw new RangeError(`${path} would exceed the 1 MiB private-file limit.`);
   }
+  await writePrivateTextAtomic(path, rendered);
+}
+
+/** Replace `path` with `text`, private (0600), through a temporary file and one rename. */
+export async function writePrivateTextAtomic(path: string, text: string): Promise<void> {
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   try {
-    await writeFile(temporary, rendered, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    await writeFile(temporary, text, { encoding: "utf8", flag: "wx", mode: 0o600 });
     await rename(temporary, path);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => {});

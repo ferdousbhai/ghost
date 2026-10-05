@@ -3,13 +3,11 @@
  * home only. Ghost reads and writes one key in it, `harness`; nothing
  * ambient (environment overlays, machine-wide files) is consulted.
  */
-import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { rename, rm, writeFile } from "node:fs/promises";
 import { isMap, parse as parseYaml, parseDocument } from "yaml";
 import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "@ghost/extensions";
-import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText } from "./private-file.js";
+import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
 
 export interface GhostSettings {
   getString(path: string): string | undefined;
@@ -83,12 +81,5 @@ export async function writeGhostSetting(homeDir: string, key: string, value: str
   const text = isMap(document.contents) && document.contents.items.length === 0 && !document.commentBefore
     ? ""
     : document.toString();
-  const temporary = `${settingsFile}.${randomUUID()}.tmp`;
-  try {
-    await writeFile(temporary, text, { mode: 0o600, flag: "wx" });
-    await rename(temporary, settingsFile);
-  } catch (error) {
-    await rm(temporary, { force: true });
-    throw error;
-  }
+  await writePrivateTextAtomic(settingsFile, text);
 }

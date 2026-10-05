@@ -60,10 +60,10 @@ function runCommandHook(
       child = spawn(hook.command, {
         cwd: event.cwd,
         env: process.env,
-        shell: process.platform === "win32" ? true : "/bin/bash",
+        shell: "/bin/bash",
         // A separate POSIX process group lets cancellation own the shell and
         // every descendant which inherited its stdout/stderr pipes.
-        detached: process.platform !== "win32",
+        detached: true,
         stdio: ["pipe", "pipe", "pipe"],
       }) as ChildProcessWithoutNullStreams;
     } catch {
@@ -95,7 +95,7 @@ function runCommandHook(
     };
     const signalTree = (signal: NodeJS.Signals) => {
       try {
-        if (process.platform !== "win32" && child.pid !== undefined) process.kill(-child.pid, signal);
+        if (child.pid !== undefined) process.kill(-child.pid, signal);
         else child.kill(signal);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
