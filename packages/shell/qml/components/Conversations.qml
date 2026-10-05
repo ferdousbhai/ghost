@@ -95,30 +95,30 @@ Item {
      */
     function syncRows(): void {
         const wanted = root.filteredSessions;
-        for (let index = conversationModel.count - 1; index >= 0; index--) {
-            const id = conversationModel.get(index).sessionId;
-            if (!wanted.some(session => session.id === id)) conversationModel.remove(index);
+        const keep = new Set(wanted.map(session => session.id));
+        // The model's ids, mirrored as plain strings: ListModel.get() builds
+        // an object per call, and this runs on every re-list and keystroke.
+        const ids = [];
+        for (let index = 0; index < conversationModel.count; index++) ids.push(conversationModel.get(index).sessionId);
+        for (let index = ids.length - 1; index >= 0; index--) {
+            if (keep.has(ids[index])) continue;
+            conversationModel.remove(index);
+            ids.splice(index, 1);
         }
         for (let target = 0; target < wanted.length; target++) {
             const session = wanted[target];
-            let current = -1;
-            for (let index = target; index < conversationModel.count; index++) {
-                if (conversationModel.get(index).sessionId === session.id) {
-                    current = index;
-                    break;
-                }
+            const row = { sessionId: session.id, sessionData: session };
+            const current = ids.indexOf(session.id, target);
+            if (current < 0) {
+                conversationModel.insert(target, row);
+                ids.splice(target, 0, session.id);
+                continue;
             }
-            if (current < 0) conversationModel.insert(target, {
-                sessionId: session.id,
-                sessionData: session
-            });
-            else {
-                if (current !== target) conversationModel.move(current, target, 1);
-                conversationModel.set(target, {
-                    sessionId: session.id,
-                    sessionData: session
-                });
+            if (current !== target) {
+                conversationModel.move(current, target, 1);
+                ids.splice(target, 0, ids.splice(current, 1)[0]);
             }
+            conversationModel.set(target, row);
         }
     }
 
@@ -426,6 +426,7 @@ Item {
         }
 
         ListView {
+            objectName: "conversationList"
             visible: count > 0
             Layout.fillWidth: true
             Layout.fillHeight: visible
