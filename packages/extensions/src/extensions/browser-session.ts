@@ -228,9 +228,8 @@ export class GhostBrowserSession {
   /**
    * Arm the idle close, if nothing is queued.
    *
-   * Only `#serial` calls this: an `*Impl` body always runs with
+   * Only `#serial` calls this: a verb's body always runs with
    * `#queuedActions >= 1`, so a call from inside one could never arm anything.
-   * Seventeen of them used to, and read as lifecycle bookkeeping.
    */
   #touchIdleTimer(): void {
     this.#clearIdleTimer();
@@ -296,157 +295,129 @@ export class GhostBrowserSession {
     );
   }
 
-
-  open(url: string, options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#openImpl(url, options));
-  }
-
-  async #openImpl(
-    url: string,
-    options: BrowserOperationOptions,
-  ): Promise<PageSummary> {
-    const operation = this.#timeout(options);
-    const checked = this.#requireAllowedUrl(url);
-    this.#invalidateRefs();
-    return this.backend.open(checked, operation);
-  }
-
-  read(options: BrowserOperationOptions & { maxChars?: number } = {}) {
-    return this.#serial(() => this.#readImpl(options));
-  }
-
-  async #readImpl(
-    options: BrowserOperationOptions & { maxChars?: number },
-  ): Promise<SessionReadResult> {
-    const requested = options.maxChars;
-    const maxChars = typeof requested === "number" && Number.isFinite(requested)
-      ? Math.max(MIN_READ_BUDGET_CHARS, Math.min(Math.floor(requested), MAX_READ_BUDGET_CHARS))
-      : DEFAULT_READ_BUDGET_CHARS;
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const result = await this.backend.read(operation);
-    return {
-      url: result.url,
-      title: result.title,
-      text: result.text.slice(0, maxChars),
-      totalLength: result.text.length,
-    };
-  }
-
-  find(query: string, options: BrowserOperationOptions & { limit?: number } = {}) {
-    return this.#serial(() => this.#findImpl(query, options));
-  }
-
-  async #findImpl(
-    query: string,
-    options: BrowserOperationOptions & { limit?: number },
-  ): Promise<SessionFindResult> {
-    const trimmed = query.trim();
-    if (trimmed === "") {
-      throw new GhostBrowserError("invalid_input", "A find needs a query.");
-    }
-    if (trimmed.length > MAX_FIND_QUERY_CHARS) {
-      throw new GhostBrowserError(
-        "invalid_input",
-        `A find query is limited to ${MAX_FIND_QUERY_CHARS} characters.`,
-      );
-    }
-    const requested = options.limit;
-    const limit = typeof requested === "number" && Number.isFinite(requested)
-      ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
-      : DEFAULT_FIND_LIMIT;
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const backendMatches = await this.backend.find(trimmed, {
-      ...operation,
-      limit,
+  open(url: string, options: BrowserOperationOptions = {}): Promise<PageSummary> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      const checked = this.#requireAllowedUrl(url);
+      this.#invalidateRefs();
+      return this.backend.open(checked, operation);
     });
-    if (!Array.isArray(backendMatches)) {
-      throw new GhostBrowserError(
-        "browser_unavailable",
-        "The browser backend returned an invalid find result.",
-      );
-    }
-    const matches: PageElementMatch[] = [];
-    const refs = new Set<string>();
-    for (const value of backendMatches.slice(0, limit) as readonly unknown[]) {
-      const match = projectBrowserMatch(value);
-      if (!match || refs.has(match.ref)) continue;
-      refs.add(match.ref);
-      matches.push(match);
-    }
-    this.#refs = new Map(matches.map((match) => [match.ref, match]));
-    return {
-      matches,
-      total: backendMatches.length,
-      omitted: Math.max(backendMatches.length - matches.length, 0),
-    };
   }
 
-  click(target: BackendTarget & BrowserOperationOptions) {
-    return this.#serial(() => this.#clickImpl(target));
+  read(options: BrowserOperationOptions & { maxChars?: number } = {}): Promise<SessionReadResult> {
+    return this.#serial(async () => {
+      const requested = options.maxChars;
+      const maxChars = typeof requested === "number" && Number.isFinite(requested)
+        ? Math.max(MIN_READ_BUDGET_CHARS, Math.min(Math.floor(requested), MAX_READ_BUDGET_CHARS))
+        : DEFAULT_READ_BUDGET_CHARS;
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const result = await this.backend.read(operation);
+      return {
+        url: result.url,
+        title: result.title,
+        text: result.text.slice(0, maxChars),
+        totalLength: result.text.length,
+      };
+    });
   }
 
-  async #clickImpl(
-    target: BackendTarget & BrowserOperationOptions,
-  ): Promise<PageSummary> {
-    const operation = this.#timeout(target);
-    const checked = this.#checkTarget(target);
-    const before = await this.#requirePage(operation);
-    const page = await this.backend.click(checked, operation);
-    // A click that navigated invalidates every ref minted on the old page.
-    if (page.url !== before.url) this.#invalidateRefs();
-    return page;
+  find(query: string, options: BrowserOperationOptions & { limit?: number } = {}): Promise<SessionFindResult> {
+    return this.#serial(async () => {
+      const trimmed = query.trim();
+      if (trimmed === "") {
+        throw new GhostBrowserError("invalid_input", "A find needs a query.");
+      }
+      if (trimmed.length > MAX_FIND_QUERY_CHARS) {
+        throw new GhostBrowserError(
+          "invalid_input",
+          `A find query is limited to ${MAX_FIND_QUERY_CHARS} characters.`,
+        );
+      }
+      const requested = options.limit;
+      const limit = typeof requested === "number" && Number.isFinite(requested)
+        ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
+        : DEFAULT_FIND_LIMIT;
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const backendMatches = await this.backend.find(trimmed, {
+        ...operation,
+        limit,
+      });
+      if (!Array.isArray(backendMatches)) {
+        throw new GhostBrowserError(
+          "browser_unavailable",
+          "The browser backend returned an invalid find result.",
+        );
+      }
+      const matches: PageElementMatch[] = [];
+      const refs = new Set<string>();
+      for (const value of backendMatches.slice(0, limit) as readonly unknown[]) {
+        const match = projectBrowserMatch(value);
+        if (!match || refs.has(match.ref)) continue;
+        refs.add(match.ref);
+        matches.push(match);
+      }
+      this.#refs = new Map(matches.map((match) => [match.ref, match]));
+      return {
+        matches,
+        total: backendMatches.length,
+        omitted: Math.max(backendMatches.length - matches.length, 0),
+      };
+    });
+  }
+
+  click(target: BackendTarget & BrowserOperationOptions): Promise<PageSummary> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(target);
+      const checked = this.#checkTarget(target);
+      const before = await this.#requirePage(operation);
+      const page = await this.backend.click(checked, operation);
+      // A click that navigated invalidates every ref minted on the old page.
+      if (page.url !== before.url) this.#invalidateRefs();
+      return page;
+    });
   }
 
   type(input: BackendTarget & {
     text: string;
     submit?: boolean;
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#typeImpl(input));
-  }
-
-  async #typeImpl(input: BackendTarget & {
-    text: string;
-    submit?: boolean;
   } & BrowserOperationOptions): Promise<SessionTypeResult> {
-    const operation = this.#timeout(input);
-    const checked = this.#checkTarget(input);
-    await this.#requirePage(operation);
-    // Submitting is a separate, explicit act: filling a field is reversible,
-    // pressing Enter on someone's form is not.
-    const submit = input.submit === true;
-    const page = await this.backend.type(
-      { ...checked, text: input.text, submit },
-      operation,
-    );
-    if (submit) this.#invalidateRefs();
-    return { ...page, submitted: submit };
-  }
-
-  screenshot(options: BrowserOperationOptions & { fullPage?: boolean } = {}) {
-    return this.#serial(() => this.#screenshotImpl(options));
-  }
-
-  async #screenshotImpl(
-    options: BrowserOperationOptions & { fullPage?: boolean },
-  ): Promise<SessionScreenshotResult> {
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const capture = await this.backend.screenshot({
-      ...operation,
-      fullPage: options.fullPage === true,
-    });
-    if (!(capture.bytes instanceof Uint8Array)) {
-      throw new GhostError(
-        "invalid_format",
-        "The browser screenshot backend returned invalid image bytes.",
-        {},
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      const checked = this.#checkTarget(input);
+      await this.#requirePage(operation);
+      // Submitting is a separate, explicit act: filling a field is reversible,
+      // pressing Enter on someone's form is not.
+      const submit = input.submit === true;
+      const page = await this.backend.type(
+        { ...checked, text: input.text, submit },
+        operation,
       );
-    }
-    assertScreenshotBytesWithinLimit(capture.bytes.byteLength, "Browser screenshot");
-    const saved = await this.#saveScreenshot(capture.bytes);
-    return { url: capture.url, title: capture.title, path: saved.path, bytes: saved.bytes };
+      if (submit) this.#invalidateRefs();
+      return { ...page, submitted: submit };
+    });
+  }
+
+  screenshot(options: BrowserOperationOptions & { fullPage?: boolean } = {}): Promise<SessionScreenshotResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const capture = await this.backend.screenshot({
+        ...operation,
+        fullPage: options.fullPage === true,
+      });
+      if (!(capture.bytes instanceof Uint8Array)) {
+        throw new GhostError(
+          "invalid_format",
+          "The browser screenshot backend returned invalid image bytes.",
+          {},
+        );
+      }
+      assertScreenshotBytesWithinLimit(capture.bytes.byteLength, "Browser screenshot");
+      const saved = await this.#saveScreenshot(capture.bytes);
+      return { url: capture.url, title: capture.title, path: saved.path, bytes: saved.bytes };
+    });
   }
 
   #saveScreenshot(bytes: Uint8Array): Promise<{ path: string; bytes: number }> {
@@ -467,28 +438,24 @@ export class GhostBrowserSession {
     });
   }
 
-  back(options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#backImpl(options));
+  back(options: BrowserOperationOptions = {}): Promise<BackendBackResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const page = await this.backend.back(operation);
+      this.#invalidateRefs();
+      return page;
+    });
   }
 
-  async #backImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const page = await this.backend.back(operation);
-    this.#invalidateRefs();
-    return page;
-  }
-
-  forward(options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#forwardImpl(options));
-  }
-
-  async #forwardImpl(options: BrowserOperationOptions): Promise<BackendBackResult> {
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const page = await this.backend.forward(operation);
-    this.#invalidateRefs();
-    return page;
+  forward(options: BrowserOperationOptions = {}): Promise<BackendBackResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const page = await this.backend.forward(operation);
+      this.#invalidateRefs();
+      return page;
+    });
   }
 
   scroll(input: {
@@ -496,40 +463,33 @@ export class GhostBrowserSession {
     deltaY: number;
     x?: number;
     y?: number;
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#scrollImpl(input));
-  }
-
-  async #scrollImpl(input: {
-    deltaX: number;
-    deltaY: number;
-    x?: number;
-    y?: number;
   } & BrowserOperationOptions): Promise<PageSummary> {
-    const operation = this.#timeout(input);
-    await this.#requirePage(operation);
-    requireFiniteNumbers("Scroll", {
-      deltaX: input.deltaX,
-      deltaY: input.deltaY,
-      x: input.x,
-      y: input.y,
-    });
-    if ((input.x === undefined) !== (input.y === undefined)) {
-      throw new GhostBrowserError(
-        "invalid_input",
-        "Scroll needs both x and y when a wheel anchor is provided.",
-      );
-    }
-    const page = await this.backend.scroll(
-      {
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      await this.#requirePage(operation);
+      requireFiniteNumbers("Scroll", {
         deltaX: input.deltaX,
         deltaY: input.deltaY,
-        ...(input.x === undefined ? {} : { x: input.x }),
-        ...(input.y === undefined ? {} : { y: input.y }),
-      },
-      operation,
-    );
-    return page;
+        x: input.x,
+        y: input.y,
+      });
+      if ((input.x === undefined) !== (input.y === undefined)) {
+        throw new GhostBrowserError(
+          "invalid_input",
+          "Scroll needs both x and y when a wheel anchor is provided.",
+        );
+      }
+      const page = await this.backend.scroll(
+        {
+          deltaX: input.deltaX,
+          deltaY: input.deltaY,
+          ...(input.x === undefined ? {} : { x: input.x }),
+          ...(input.y === undefined ? {} : { y: input.y }),
+        },
+        operation,
+      );
+      return page;
+    });
   }
 
   drag(input: {
@@ -538,217 +498,175 @@ export class GhostBrowserSession {
     toX: number;
     toY: number;
     steps?: number;
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#dragImpl(input));
-  }
-
-  async #dragImpl(input: {
-    fromX: number;
-    fromY: number;
-    toX: number;
-    toY: number;
-    steps?: number;
   } & BrowserOperationOptions): Promise<PageSummary> {
-    const operation = this.#timeout(input);
-    requireFiniteNumbers("Drag", {
-      fromX: input.fromX,
-      fromY: input.fromY,
-      toX: input.toX,
-      toY: input.toY,
-      steps: input.steps,
-    });
-    if (
-      input.steps !== undefined
-      && (!Number.isInteger(input.steps) || input.steps < 1 || input.steps > 100)
-    ) {
-      throw new GhostBrowserError(
-        "invalid_input",
-        "Drag steps must be an integer from 1 through 100.",
-      );
-    }
-    const before = await this.#requirePage(operation);
-    const page = await this.backend.drag(
-      {
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      requireFiniteNumbers("Drag", {
         fromX: input.fromX,
         fromY: input.fromY,
         toX: input.toX,
         toY: input.toY,
-        ...(input.steps === undefined ? {} : { steps: input.steps }),
-      },
-      operation,
-    );
-    if (page.url !== before.url) {
-      this.#invalidateRefs();
-    }
-    return page;
+        steps: input.steps,
+      });
+      if (
+        input.steps !== undefined
+        && (!Number.isInteger(input.steps) || input.steps < 1 || input.steps > 100)
+      ) {
+        throw new GhostBrowserError(
+          "invalid_input",
+          "Drag steps must be an integer from 1 through 100.",
+        );
+      }
+      const before = await this.#requirePage(operation);
+      const page = await this.backend.drag(
+        {
+          fromX: input.fromX,
+          fromY: input.fromY,
+          toX: input.toX,
+          toY: input.toY,
+          ...(input.steps === undefined ? {} : { steps: input.steps }),
+        },
+        operation,
+      );
+      if (page.url !== before.url) {
+        this.#invalidateRefs();
+      }
+      return page;
+    });
   }
 
   key(input: {
     key: string;
     modifiers?: readonly string[];
     text?: string;
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#keyImpl(input));
-  }
-
-  async #keyImpl(input: {
-    key: string;
-    modifiers?: readonly string[];
-    text?: string;
   } & BrowserOperationOptions): Promise<PageSummary> {
-    const operation = this.#timeout(input);
-    const key = input.key.trim();
-    if (key === "") {
-      throw new GhostBrowserError("invalid_input", "A key press needs a key name.");
-    }
-    const before = await this.#requirePage(operation);
-    const page = await this.backend.key(
-      {
-        key,
-        ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
-        ...(input.text === undefined ? {} : { text: input.text }),
-      },
-      operation,
-    );
-    if (page.url !== before.url) {
-      this.#invalidateRefs();
-    }
-    return page;
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      const key = input.key.trim();
+      if (key === "") {
+        throw new GhostBrowserError("invalid_input", "A key press needs a key name.");
+      }
+      const before = await this.#requirePage(operation);
+      const page = await this.backend.key(
+        {
+          key,
+          ...(input.modifiers === undefined ? {} : { modifiers: [...input.modifiers] }),
+          ...(input.text === undefined ? {} : { text: input.text }),
+        },
+        operation,
+      );
+      if (page.url !== before.url) {
+        this.#invalidateRefs();
+      }
+      return page;
+    });
   }
 
   javascript(
     code: string,
     options: BrowserOperationOptions = {},
-  ) {
-    return this.#serial(() => this.#javascriptImpl(code, options));
-  }
-
-  async #javascriptImpl(
-    code: string,
-    options: BrowserOperationOptions,
   ): Promise<BoundedJavascriptResult> {
-    const operation = this.#timeout(options);
-    if (code.trim() === "") {
-      throw new GhostBrowserError("invalid_input", "There is no code to run.");
-    }
-    await this.#requirePage(operation);
-    const result = projectJavascriptResult(
-      await this.backend.javascript(code, operation),
-    );
-    await this.#requirePage(operation);
-    // Script can rewrite the page under our refs; the honest move is to drop them.
-    this.#invalidateRefs();
-    return result;
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      if (code.trim() === "") {
+        throw new GhostBrowserError("invalid_input", "There is no code to run.");
+      }
+      await this.#requirePage(operation);
+      const result = projectJavascriptResult(
+        await this.backend.javascript(code, operation),
+      );
+      await this.#requirePage(operation);
+      // Script can rewrite the page under our refs; the honest move is to drop them.
+      this.#invalidateRefs();
+      return result;
+    });
   }
 
-  readConsole(options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#readConsoleImpl(options));
+  readConsole(options: BrowserOperationOptions = {}): Promise<SessionConsoleResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const entries = projectConsoleEntries(
+        await this.backend.readConsole(operation),
+      );
+      await this.#requirePage(operation);
+      return entries;
+    });
   }
 
-  async #readConsoleImpl(
-    options: BrowserOperationOptions,
-  ): Promise<SessionConsoleResult> {
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const entries = projectConsoleEntries(
-      await this.backend.readConsole(operation),
-    );
-    await this.#requirePage(operation);
-    return entries;
-  }
-
-  readNetwork(options: BrowserOperationOptions = {}) {
-    return this.#serial(() => this.#readNetworkImpl(options));
-  }
-
-  async #readNetworkImpl(
-    options: BrowserOperationOptions,
-  ): Promise<SessionNetworkResult> {
-    const operation = this.#timeout(options);
-    await this.#requirePage(operation);
-    const entries = projectNetworkEntries(
-      await this.backend.readNetwork(operation),
-    );
-    await this.#requirePage(operation);
-    return entries;
+  readNetwork(options: BrowserOperationOptions = {}): Promise<SessionNetworkResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(options);
+      await this.#requirePage(operation);
+      const entries = projectNetworkEntries(
+        await this.backend.readNetwork(operation),
+      );
+      await this.#requirePage(operation);
+      return entries;
+    });
   }
 
   upload(input: BackendTarget & {
     paths: readonly string[];
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#uploadImpl(input));
-  }
-
-  async #uploadImpl(input: BackendTarget & {
-    paths: readonly string[];
   } & BrowserOperationOptions): Promise<PageSummary> {
-    const operation = this.#timeout(input);
-    if (input.paths.length === 0) {
-      throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
-    }
-    const checked = this.#checkTarget(input);
-    await this.#requirePage(operation);
-    return this.backend.upload({ ...checked, paths: [...input.paths] }, operation);
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      if (input.paths.length === 0) {
+        throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
+      }
+      const checked = this.#checkTarget(input);
+      await this.#requirePage(operation);
+      return this.backend.upload({ ...checked, paths: [...input.paths] }, operation);
+    });
   }
 
-  resize(input: { width: number; height: number } & BrowserOperationOptions) {
-    return this.#serial(() => this.#resizeImpl(input));
-  }
-
-  async #resizeImpl(input: {
-    width: number;
-    height: number;
-  } & BrowserOperationOptions): Promise<BackendResizeResult> {
-    const operation = this.#timeout(input);
-    await this.#requirePage(operation);
-    requireFiniteNumbers("Resize", { width: input.width, height: input.height });
-    if (
-      !Number.isInteger(input.width) || !Number.isInteger(input.height)
-      || input.width < 100 || input.width > 10_000
-      || input.height < 100 || input.height > 10_000
-    ) {
-      throw new GhostBrowserError(
-        "invalid_input",
-        "Resize width and height must be integers from 100 through 10000.",
+  resize(input: { width: number; height: number } & BrowserOperationOptions): Promise<BackendResizeResult> {
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      await this.#requirePage(operation);
+      requireFiniteNumbers("Resize", { width: input.width, height: input.height });
+      if (
+        !Number.isInteger(input.width) || !Number.isInteger(input.height)
+        || input.width < 100 || input.width > 10_000
+        || input.height < 100 || input.height > 10_000
+      ) {
+        throw new GhostBrowserError(
+          "invalid_input",
+          "Resize width and height must be integers from 100 through 10000.",
+        );
+      }
+      const result = await this.backend.resize(
+        { width: input.width, height: input.height },
+        operation,
       );
-    }
-    const result = await this.backend.resize(
-      { width: input.width, height: input.height },
-      operation,
-    );
-    return result;
+      return result;
+    });
   }
 
   tabs(input: {
     op: BackendTabsInput["op"];
     id?: string;
     url?: string;
-  } & BrowserOperationOptions) {
-    return this.#serial(() => this.#tabsImpl(input));
-  }
-
-  async #tabsImpl(input: {
-    op: BackendTabsInput["op"];
-    id?: string;
-    url?: string;
   } & BrowserOperationOptions): Promise<BackendTabsResult> {
-    const operation = this.#timeout(input);
-    let url: string | undefined;
-    if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
-      url = this.#requireAllowedUrl(input.url);
-    }
-    const result = await this.backend.tabs(
-      {
-        op: input.op,
-        ...(input.id === undefined ? {} : { id: input.id }),
-        ...(url === undefined ? {} : { url }),
-      },
-      operation,
-    );
-    // Switching or creating a tab lands the ghost on a different page; the refs
-    // minted on the old one no longer mean anything.
-    this.#invalidateRefs();
-    return result;
+    return this.#serial(async () => {
+      const operation = this.#timeout(input);
+      let url: string | undefined;
+      if (input.op === "create" && input.url !== undefined && input.url.trim() !== "") {
+        url = this.#requireAllowedUrl(input.url);
+      }
+      const result = await this.backend.tabs(
+        {
+          op: input.op,
+          ...(input.id === undefined ? {} : { id: input.id }),
+          ...(url === undefined ? {} : { url }),
+        },
+        operation,
+      );
+      // Switching or creating a tab lands the ghost on a different page; the refs
+      // minted on the old one no longer mean anything.
+      this.#invalidateRefs();
+      return result;
+    });
   }
 
   close(options: BrowserOperationOptions = {}): Promise<boolean> {
