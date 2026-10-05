@@ -68,14 +68,36 @@ TestCase {
     function test_leavesCodeLinksAndUrls(): void {
         compare(MarkdownCompat.normalize("`_x_` and _y_"), "`_x_` and *y*");
         compare(MarkdownCompat.normalize("``a _b_ c`` _d_"), "``a _b_ c`` *d*");
-        compare(MarkdownCompat.normalize("[_l_](https://e.com/_p_/) _x_"), "[*l*](https://e.com/_p_/) *x*");
-        compare(MarkdownCompat.normalize("<https://e.com/_p_> https://e.com/_q_"), "<https://e.com/_p_> https://e.com/_q_");
+        compare(MarkdownCompat.normalize("[_l_](https://e.com/_p_/) _x_", "#fff"), tc.a("https://e.com/_p_/", "<i>l</i>") + " *x*");
+        compare(MarkdownCompat.normalize("<https://e.com/_p_> https://e.com/_q_", "#fff"),
+            tc.a("https://e.com/_p_", "https://e.com/_p_") + " " + tc.a("https://e.com/_q_", "https://e.com/_q_"));
+        compare(MarkdownCompat.normalize("![_i_](https://e.com/_p_.png)"), "![_i_](https://e.com/_p_.png)");
         compare(MarkdownCompat.normalize("<span title=\"_t_\">x</span>"), "<span title=\"_t_\">x</span>");
     }
 
     function test_leavesFencedCode(): void {
         const fenced = "_a_\n```py\nx = _y_\n~~z~~\n```\n_b_\n~~~\n_c_\n~~~\n_d_";
         compare(MarkdownCompat.normalize(fenced), "*a*\n```py\nx = _y_\n~~z~~\n```\n*b*\n~~~\n_c_\n~~~\n*d*");
+    }
+
+    function a(href, label): string {
+        return '<a href="' + href + '" style="color:#fff; text-decoration:none">' + label + "</a>";
+    }
+
+    // Qt paints markdown links in the application palette's blue, whatever
+    // linkColor says; an inline anchor keeps its own colour.
+    function test_qtIgnoresLinkColorButHonoursAnchorStyle(): void {
+        verify(tc.rendered("[l](https://e.com)").indexOf("#0000ff") >= 0);
+        verify(tc.rendered(MarkdownCompat.normalize("[l](https://e.com)", "#fbbf24")).indexOf("#fbbf24") >= 0);
+    }
+
+    function test_linksBecomeColouredAnchors(): void {
+        compare(MarkdownCompat.normalize("see [the **manual**](https://e.com/m?a=1&b=2).", "#fff"),
+            "see " + tc.a("https://e.com/m?a=1&amp;b=2", "the <b>manual</b>") + ".");
+        compare(MarkdownCompat.normalize("[`a<b>.ts`](file.ts \"t\")", "#fff"), tc.a("file.ts", "<code>a&lt;b&gt;.ts</code>"));
+        compare(MarkdownCompat.normalize("(https://e.com/x).", "#fff"), "(" + tc.a("https://e.com/x", "https://e.com/x") + ").");
+        compare(MarkdownCompat.normalize("`https://e.com` and `[l](u)`", "#fff"), "`https://e.com` and `[l](u)`");
+        compare(MarkdownCompat.normalize("```\nhttps://e.com\n```", "#fff"), "```\nhttps://e.com\n```");
     }
 
     function test_unclosedFenceStaysCode(): void {

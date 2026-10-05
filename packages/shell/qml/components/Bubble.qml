@@ -80,20 +80,17 @@ Item {
     //
     // Qt's markdown renderer owns the parts of the type scale we cannot reach
     // from QML: heading sizes are hard-coded multiples of font.pixelSize (h1
-    // 2.0, h2 1.5, h3 1.2), code spans take the system fixed font rather than
-    // Theme.fontFamilyMono, and links are underlined with no property to undo
-    // it. What is set here is therefore all that Text exposes, and must not
-    // grow a markdown post-processor to reach the rest.
+    // 2.0, h2 1.5, h3 1.2) and code spans take the system fixed font rather
+    // than Theme.fontFamilyMono. What is set here is therefore all that Text
+    // exposes; MarkdownCompat only rewrites what Qt drops or ignores (links
+    // wear the ghost's amber there, never Theme.accent — the inherited Omarchy
+    // accent is blue in most themes, and reading copy is not a web page).
     component BodyBlock: Text {
         id: blockText
 
         textFormat: root.plainBody ? Text.PlainText : Text.MarkdownText
         color: root.hookNotice ? Theme.foregroundDim
             : (root.mine ? Theme.foregroundBright : Theme.foreground)
-        // Links wear the ghost's own amber, never Theme.accent — the inherited
-        // Omarchy accent is blue in most themes, and reading copy is not a web
-        // page.
-        linkColor: Theme.ghostAmber
         font.family: Theme.fontFamily
         font.pixelSize: root.hookNotice ? Theme.fontSizeSmall : Theme.fontSize
         lineHeight: Theme.lineHeight
@@ -307,7 +304,7 @@ Item {
                             required property string markdown
                             objectName: "replyBlock"
                             width: bodyView.width
-                            text: root.plainBody ? markdown : MarkdownCompat.normalize(markdown)
+                            text: root.plainBody ? markdown : MarkdownCompat.normalize(markdown, Theme.ghostAmber)
                         }
                     }
 
@@ -316,7 +313,7 @@ Item {
                         objectName: "replyTail"
                         width: bodyView.width
                         visible: root.liveTail !== ""
-                        text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail)
+                        text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail, Theme.ghostAmber)
                     }
                 }
 

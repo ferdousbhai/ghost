@@ -139,7 +139,7 @@ Item {
         }
 
         // The safe direction of Qt's markdown support: parse and render, never
-        // serialise. Heading sizes, code-span font and link underlines are
+        // serialise. Heading sizes and code-span font are
         // Qt's to decide — the same constraint Bubble.qml documents.
         Text {
             id: preview
@@ -150,10 +150,9 @@ Item {
             visible: root.reading
             // Empty while hidden: a hidden Text still parses and lays out, and
             // source-mode typing should not pay for a second document.
-            text: root.reading ? MarkdownCompat.normalize(field.text) : ""
+            text: root.reading ? MarkdownCompat.normalize(field.text, Theme.ghostAmber) : ""
             textFormat: Text.MarkdownText
             color: Theme.foreground
-            linkColor: Theme.ghostAmber
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
             lineHeight: Theme.lineHeight
