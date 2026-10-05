@@ -30,7 +30,7 @@ import {
   isValidConversationId,
   logPath,
   logState,
-  logUpdatedAt,
+  listedLog,
   newConversationEntry,
   readLog,
   requireConversationId,
@@ -973,13 +973,12 @@ export class SessionHost {
       readPinState(sessionDir),
       readReadState(sessionDir),
     ]);
+    const listed = await Promise.all(ids.map(async (id) => ({ id, log: await listedLog(sessionDir, id) })));
     const rows: SessionSummary[] = [];
-    for (const id of ids) {
-      const entries = await readLog(sessionDir, id);
-      if (!entries) continue;
-      const state = logState(entries);
+    for (const { id, log } of listed) {
+      if (!log) continue;
+      const { state, updatedAt } = log;
       if (state.messageCount === 0 && state.title === null) continue;
-      const updatedAt = (await logUpdatedAt(sessionDir, id)) ?? new Date().toISOString();
       const readAt = reads.reads[id];
       rows.push({
         id,

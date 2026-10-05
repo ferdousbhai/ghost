@@ -7,6 +7,7 @@
  * harness switch read, so it is the one history that outlives any harness.
  */
 import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
 
@@ -311,12 +312,28 @@ export function unseenCommands(entries: readonly LogEntry[]): string | null {
   return commands.length > 0 ? commands.join("\n\n") : null;
 }
 
-export async function logUpdatedAt(sessionDir: string, id: string): Promise<string | null> {
+const listedLogs = new Map<string, { size: number; mtimeMs: number; state: LogState }>();
+
+/**
+ * A log's state and last change, for listing conversations. The log only
+ * grows, so it is parsed again only once its size or mtime moves.
+ */
+export async function listedLog(sessionDir: string, id: string): Promise<{ state: LogState; updatedAt: string } | null> {
+  const file = logPath(sessionDir, id);
+  let info: Stats;
   try {
-    return (await stat(logPath(sessionDir, id))).mtime.toISOString();
+    info = await stat(file);
   } catch {
     return null;
   }
+  let listed = listedLogs.get(file);
+  if (listed?.size !== info.size || listed.mtimeMs !== info.mtimeMs) {
+    const entries = await readLog(sessionDir, id);
+    if (!entries) return null;
+    listed = { size: info.size, mtimeMs: info.mtimeMs, state: logState(entries) };
+    listedLogs.set(file, listed);
+  }
+  return { state: listed.state, updatedAt: info.mtime.toISOString() };
 }
 
 /**
