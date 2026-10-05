@@ -9,6 +9,8 @@
  * continue is cwd-scoped. A harness whose continue is not names its session
  * in its output, and the host hands that id back (`sessionFrom`).
  */
+import { readdir, readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 
 export interface HarnessMcpServer {
@@ -43,14 +45,19 @@ export type HarnessEvent =
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
-  /** The model answering, as the harness names it; `provider` where it says. */
-  | { readonly type: "model"; readonly model: string; readonly provider?: string }
+  /** The model answering, as the harness names it; `provider` and `effort` where it says. */
+  | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
   | { readonly type: "error"; readonly message: string };
 
 export interface HarnessRow {
   readonly id: string;
   /** The reasoning effort its launch asks for, when it sets one. */
   readonly effort?: string;
+  /**
+   * What a pass ran on, read from the session record the harness wrote, for
+   * a harness whose output never says (see CONTRACTS.md, "Harnesses").
+   */
+  ranOn?(session: string, env: Readonly<Record<string, string | undefined>>): Promise<Extract<HarnessEvent, { type: "model" }> | null>;
   launch(input: HarnessTurnInput): HarnessLaunch;
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
@@ -254,13 +261,7 @@ function piParser(): (line: string) => HarnessEvent[] {
     const event = json(line);
     if (!event) return [];
     if (event.type === "session" && typeof event.id === "string") return [{ type: "session", id: event.id }];
-    if (event.type === "message_start") {
-      message += 1;
-      const started = record(event.message);
-      if (started.role === "assistant" && typeof started.model === "string") {
-        return [{ type: "model", model: started.model, ...(typeof started.provider === "string" ? { provider: started.provider } : {}) }];
-      }
-    }
+    if (event.type === "message_start") message += 1;
     if (event.type === "message_update") {
       const update = record(event.assistantMessageEvent);
       const block = `${message}:${String(update.contentIndex ?? 0)}`;
@@ -275,12 +276,55 @@ function piParser(): (line: string) => HarnessEvent[] {
     }
     if (event.type === "message_end") {
       const ended = record(event.message);
-      if (ended.role === "assistant" && ended.stopReason === "error") {
-        return [{ type: "error", message: str(ended.errorMessage) || "The model request failed." }];
+      if (ended.role !== "assistant") return [];
+      const out: HarnessEvent[] = [];
+      if (typeof ended.model === "string") {
+        out.push({
+          type: "model",
+          model: ended.model,
+          ...(typeof ended.provider === "string" ? { provider: ended.provider } : {}),
+          ...(typeof ended.thinkingLevel === "string" ? { effort: ended.thinkingLevel } : {}),
+        });
       }
+      if (ended.stopReason === "error") out.push({ type: "error", message: str(ended.errorMessage) || "The model request failed." });
+      return out;
     }
     return [];
   };
+}
+
+/**
+ * The model and effort of a Codex session's latest turn, from its rollout
+ * file (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec
+ * --json` names neither. A resumed session keeps its first day's file, so the
+ * date directories are searched newest first.
+ */
+async function codexRanOn(
+  session: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
+  const root = join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions");
+  const newest = async (dir: string) => (await readdir(dir).catch(() => [])).sort().reverse();
+  for (const year of await newest(root)) {
+    for (const month of await newest(join(root, year))) {
+      for (const day of await newest(join(root, year, month))) {
+        const name = (await newest(join(root, year, month, day))).find((file) => file.endsWith(`-${session}.jsonl`));
+        if (!name) continue;
+        let provider: string | undefined;
+        let ran: Extract<HarnessEvent, { type: "model" }> | null = null;
+        for (const line of (await readFile(join(root, year, month, day, name), "utf8")).split("\n")) {
+          const entry = json(line);
+          const payload = record(entry?.payload);
+          if (entry?.type === "session_meta" && typeof payload.model_provider === "string") provider = payload.model_provider;
+          if (entry?.type === "turn_context" && typeof payload.model === "string") {
+            ran = { type: "model", model: payload.model, ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}) };
+          }
+        }
+        return ran && provider ? { ...ran, provider } : ran;
+      }
+    }
+  }
+  return null;
 }
 
 /** OpenCode `run --format json`: one event per finished part. */
@@ -429,6 +473,7 @@ const ROWS: readonly HarnessRow[] = [
       ],
     }),
     parser: codexParser,
+    ranOn: codexRanOn,
   },
   {
     id: "grok",

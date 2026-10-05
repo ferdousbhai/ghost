@@ -167,6 +167,22 @@ describe("harness choice", () => {
     expect((await sessions.listSessions("casper"))[0]).toMatchObject({ harness: "second", model: null, provider: null, effort: null });
   });
 
+  it("asks a harness whose output names no model for the session it reported", async () => {
+    const quiet = harness([{ events: [{ type: "session", id: "thread-1" }, { type: "text", block: "r", delta: "hi" }] }], "quiet");
+    const asked: string[] = [];
+    Object.assign(quiet.row, {
+      effort: "low",
+      ranOn: async (session: string) => {
+        asked.push(session);
+        return { type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" };
+      },
+    });
+    const sessions = host({ harnesses: [quiet] });
+    await turn(sessions, "hello");
+    expect(asked).toEqual(["thread-1"]);
+    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ model: "gpt-6.1-sol", provider: "openai", effort: "medium" });
+  });
+
   it("names a quota refusal when no harness is left", async () => {
     const spent = harness([{ exit: 1, stderr: "You've hit your usage limit." }], "only");
     const sessions = host({ harnesses: [spent] });

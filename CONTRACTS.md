@@ -214,12 +214,15 @@ ghost rewrote is who it is on the next one.
 A turn is one headless run of an agent CLI, a row of
 [`harness-table.ts`](packages/daemon/src/harness-table.ts): how to launch it
 non-interactively with permissions pre-approved, how to resume, how it takes
-MCP servers, and a parser from its JSON output to text, tool start/end,
-session, and error events; reasoning stays inside the harness. Rows exist for claude, codex, grok,
+MCP servers, and a parser from its JSON output to text, reasoning, tool
+start/end, session, model, and error events. Rows exist for claude, codex, grok,
 copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
 are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
-loop. Everything else — model, auth, tools, permissions, compaction, retries —
+loop. The one deliberate exception: a harness whose output never names its
+model, provider, or effort has them read after the pass from the session
+record it wrote, found by the session id it reported (`ranOn`; codex's
+rollout file). The owner should always be able to see what answered. Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
 The harness runs in the conversation directory with the conversation's

@@ -3,7 +3,9 @@
  * 2026-10-03 from two-turn probes; personal paths and prompts stripped), and
  * each row's launch line for the flags that carry resume, persona, and MCP.
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { harnessRow, type HarnessEvent, type HarnessTurnInput } from "../src/harness-table.js";
 
@@ -69,13 +71,36 @@ describe("parsers over recorded output", () => {
   });
 
   // Lines trimmed from 2026-10-04 probes; the recorded fixtures predate the fields.
-  it("claude and pi: the model, with pi's provider", () => {
+  it("claude and pi: the model, with pi's provider and thinking level", () => {
     const claude = (harnessRow("claude") ?? { parser: () => () => [] }).parser();
     expect(claude(JSON.stringify({ type: "system", subtype: "init", session_id: "s1", model: "claude-opus-5-5" })))
       .toEqual([{ type: "session", id: "s1" }, { type: "model", model: "claude-opus-5-5" }]);
     const pi = (harnessRow("pi") ?? { parser: () => () => [] }).parser();
-    expect(pi(JSON.stringify({ type: "message_start", message: { role: "assistant", content: [], provider: "openai-codex", model: "gpt-6-astra" } })))
-      .toEqual([{ type: "model", model: "gpt-6-astra", provider: "openai-codex" }]);
+    expect(pi(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], provider: "openai-codex", model: "gpt-6-astra", thinkingLevel: "low", stopReason: "stop" } })))
+      .toEqual([{ type: "model", model: "gpt-6-astra", provider: "openai-codex", effort: "low" }]);
+  });
+
+  // Lines trimmed from a 2026-10-04 codex-cli 0.160.0 rollout file.
+  it("codex: the model, provider, and effort from the session's rollout file, newest day first", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ghost-codex-home-"));
+    try {
+      const write = (day: string, session: string, model: string) => {
+        mkdirSync(join(home, "sessions", day), { recursive: true });
+        writeFileSync(join(home, "sessions", day, `rollout-2026-10-04T23-37-08-${session}.jsonl`), [
+          { type: "session_meta", payload: { id: session, model_provider: "openai" } },
+          { type: "turn_context", payload: { model: "gpt-6-astra", effort: "high" } },
+          { type: "turn_context", payload: { model, effort: "low", summary: "none" } },
+        ].map((line) => JSON.stringify(line)).join("\n"));
+      };
+      write("2026/09/30", "thread-a", "gpt-6.1-sol");
+      write("2026/10/04", "thread-b", "gpt-6-astra");
+      const row = harnessRow("codex");
+      expect(await row?.ranOn?.("thread-a", { CODEX_HOME: home }))
+        .toEqual({ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "low" });
+      expect(await row?.ranOn?.("thread-c", { CODEX_HOME: home })).toBeNull();
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("muse: run output deltas and a tool result", () => {

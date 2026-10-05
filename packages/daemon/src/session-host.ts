@@ -658,7 +658,7 @@ export class SessionHost {
           ...(result.error ? { error: result.error } : {}),
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
-          ...(row.effort ? { effort: row.effort } : {}),
+          ...(result.model?.effort ?? row.effort ? { effort: result.model?.effort ?? row.effort } : {}),
         }]);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
@@ -700,6 +700,7 @@ export class SessionHost {
     let produced = false;
     let thoughtBlock: string | null = null;
     let model: Extract<HarnessEvent, { type: "model" }> | null = null;
+    let session = turn.sessionId;
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
@@ -754,6 +755,7 @@ export class SessionHost {
           model = event;
           return;
         case "session":
+          session = event.id;
           writes.push(appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: row.id, session: event.id, dir }]));
           return;
         case "error":
@@ -762,10 +764,11 @@ export class SessionHost {
       }
     };
 
+    const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await this.accountEnv(row.id)) };
     const exit = await runHarness({
       launch,
       cwd: dir,
-      env: { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await this.accountEnv(row.id)) },
+      env,
       parse: row.parser(),
       onEvent,
       signal,
@@ -773,6 +776,7 @@ export class SessionHost {
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
+    if (model === null && session !== null && row.ranOn) model = await row.ranOn(session, env).catch(() => null);
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
     if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
     if (error === null && exit.code !== 0) {
