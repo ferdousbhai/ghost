@@ -44,16 +44,32 @@ TestCase {
         compare(line.phrase, "Thinking");
         Ghostd.activity = "thinking:**Reading the board**\n\nThe owner wants\n\n**Drafting a reply**\n\nShort";
         compare(line.phrase, "Drafting a reply");
-        Ghostd.activity = "thinking:The owner asked about lunch.\nCheck the calendar first";
-        compare(line.phrase, "Check the calendar first");
+        // Unheaded reasoning is prose; it never lands on the line.
+        Ghostd.activity = "thinking:the repo has a clear technical identity: a local omarchy ghost that";
+        compare(line.phrase, "Thinking");
 
         Ghostd.toolActivities = [tool("read", "running", { path: "docs/design.md" })];
         compare(line.phrase, "Reading docs/design.md");
 
-        // The call settles and there is nothing left to name.
+        // The call settles; the line says what was just done until the next
+        // step has a name of its own.
         Ghostd.toolActivities = [tool("read", "complete", { path: "docs/design.md" })];
         Ghostd.activity = "";
+        compare(line.phrase, "Read docs/design.md");
+        Ghostd.toolActivities = [];
         compare(line.phrase, "Working");
+    }
+
+    // Reply text streaming is its own state, not a bare "Working".
+    function test_writingTheReplyIsNamed(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        Ghostd.streaming = true;
+        const state = { activity: "", blocks: {} };
+
+        Ghostd.handleTurnEvent(state, { type: "text_start", contentIndex: 0 });
+        Ghostd.activity = state.activity;
+        compare(line.phrase, "Writing a reply");
     }
 
     // After the reply, a turn can still be waiting on an owner hook; the line

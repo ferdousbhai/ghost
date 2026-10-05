@@ -5,11 +5,12 @@
 // a turn.
 //
 // The ladder, in order: the tool call that is running, rendered by the same
-// ToolTrace the transcript cards use, then the newest line of the harness's
-// reasoning, then the plain state the runtime reported. The ghost's own narration is not repeated here: it streams in the
-// reading column, where the next text overwrites it (TurnBlocks.js). Nothing
-// rotates: a line changes when the work changes, and the ellipsis is what says
-// it is still going.
+// ToolTrace the transcript cards use, then the state the runtime reported (a
+// reasoning heading, a hook, the reply being written), then the call that
+// last settled, in the past tense. The ghost's own narration is not repeated
+// here: it streams in the reading column, where the next text overwrites it
+// (TurnBlocks.js). Nothing rotates: a line changes when the work changes, and
+// the ellipsis is what says it is still going.
 import QtQuick
 import "../services"
 import "ToolTrace.js" as ToolTrace
@@ -35,6 +36,8 @@ Item {
     }
     readonly property string toolLine: root.liveTool
         ? ToolTrace.text(root.liveTool, false, false, false) : ""
+    readonly property var lastTool: Ghostd.toolActivities.length > 0
+        ? Ghostd.toolActivities[Ghostd.toolActivities.length - 1] : null
     readonly property string phrase: root.toolLine !== "" ? root.toolLine
         : root.stateLine(Ghostd.activity)
 
@@ -42,25 +45,28 @@ Item {
      * The runtime's own word for a turn that is not inside a tool call, or the
      * name of the owner hook it is waiting on. A tool
      * name arriving here is not repeated — {@link toolLine} already said it,
-     * with the arguments that make it mean something.
+     * with the arguments that make it mean something. Between calls with no
+     * word of its own, the turn is still digesting the call that last settled.
      */
     function stateLine(activity: string): string {
         if (activity.startsWith("thinking:")) return root.thoughtLine(activity.slice(9));
+        if (activity === "writing") return "Writing a reply";
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
         if (activity.startsWith("starting:")) return "Starting " + activity.slice(9);
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
+        if (root.lastTool)
+            return ToolTrace.text(root.lastTool, true, root.lastTool.status === "failed", false);
         return "Working";
     }
 
     /**
-     * The newest line of the harness's reasoning: a `**heading**` when it
-     * writes summaries that way (codex, claude), else the last line begun.
+     * The newest `**heading**` of the harness's reasoning, when it writes
+     * summaries that way (codex, claude). Unheaded reasoning is prose, not a
+     * status, so it reads as plain "Thinking".
      */
     function thoughtLine(thought: string): string {
         const headings = thought.match(/\*\*([^*\n]+)\*\*/g);
-        if (headings) return headings[headings.length - 1].slice(2, -2).trim();
-        const lines = thought.split("\n").map(line => line.replace(/[*#_`]/g, "").trim()).filter(line => line !== "");
-        return lines.length > 0 ? lines[lines.length - 1] : "Thinking";
+        return headings ? headings[headings.length - 1].slice(2, -2).trim() : "Thinking";
     }
 
     // The web original whispered its phrases in slate-300 at 80%. Light mode has

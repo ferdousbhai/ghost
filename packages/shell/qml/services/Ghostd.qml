@@ -2239,7 +2239,7 @@ Singleton {
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };
             state.presentationDirty = true;
-            state.activity = "";
+            state.activity = "writing";
             break;
         case "text_delta":
             if (!state.blocks[event.contentIndex])
