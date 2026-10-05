@@ -8,7 +8,7 @@ trap cleanup EXIT
 
 runtime="$work/runtime"
 mkdir -p "$runtime/bin" "$runtime/lib" "$runtime/licenses/ghost" \
-  "$runtime/licenses/npm/@modelcontextprotocol/sdk/1.29.0"
+  "$runtime/licenses/npm/yaml/2.9.0"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghostd"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime/bin/ghost-desktop"
@@ -17,7 +17,7 @@ cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost.js"
 cp "$runtime/lib/ghostd.js" "$runtime/lib/ghost-desktop.js"
 cp "$source_root/LICENSE" "$runtime/licenses/ghost/LICENSE"
 cp "$source_root/THIRD_PARTY_NOTICES.md" "$runtime/licenses/ghost/THIRD_PARTY_NOTICES.md"
-cp "$source_root/LICENSE" "$runtime/licenses/npm/@modelcontextprotocol/sdk/1.29.0/LICENSE"
+cp "$source_root/LICENSE" "$runtime/licenses/npm/yaml/2.9.0/LICENSE"
 printf 'fixture\n' > "$runtime/BUNDLED-LICENSES"
 
 for component in runtime ui; do

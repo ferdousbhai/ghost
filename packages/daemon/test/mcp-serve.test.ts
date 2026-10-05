@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { TurnEvent } from "../src/turn-events.js";
 import { startTestDaemon, type TestDaemon } from "./helpers/fixtures.js";
 
+// The MCP SDK, a dev dependency only, is the reference client `ghost mcp serve` answers.
 const CLI = fileURLToPath(new URL("../src/cli/main.ts", import.meta.url));
 let daemon: TestDaemon;
 let client: Client | undefined;

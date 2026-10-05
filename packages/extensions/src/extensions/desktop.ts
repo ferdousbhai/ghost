@@ -1,9 +1,7 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
 import { GhostError, type GhostErrorCode } from "../errors.js";
+import { connectMcpServer, type McpClient, type McpTool, type McpToolResult } from "../mcp-stdio.js";
 import { untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
 
 export const DESKTOP_LOOK = "desktop_look";
@@ -17,8 +15,8 @@ export const DESKTOP_TOOLS: readonly string[] = [DESKTOP_LOOK, DESKTOP_ACT];
 /** The `ghost-desktop` MCP server as the desktop tools use it; a seam for tests. */
 export interface DesktopServer {
   /** The server's tools; empty where ghost-desktop is not installed. */
-  listTools(): Promise<Tool[]>;
-  callTool(name: string, args: Record<string, unknown>, caller: string | undefined, signal?: AbortSignal): Promise<CallToolResult>;
+  listTools(): Promise<McpTool[]>;
+  callTool(name: string, args: Record<string, unknown>, caller: string | undefined, signal?: AbortSignal): Promise<McpToolResult>;
 }
 
 export interface DesktopExtensionOptions extends GhostExtensionOptions {
@@ -32,44 +30,40 @@ export interface DesktopExtensionOptions extends GhostExtensionOptions {
  * server's desktop lease. Its tool list is fixed, so it is read once.
  */
 function spawnedDesktop(): DesktopServer {
-  let client: Promise<Client> | undefined;
+  let client: Promise<McpClient> | undefined;
   const connect = () => {
-    client ??= (async () => {
-      const next = new Client({ name: "ghost", version: "1" }, { capabilities: {} });
-      next.onclose = () => { client = undefined; };
-      await next.connect(new StdioClientTransport({
-        command: process.env.GHOST_DESKTOP || "ghost-desktop",
-        env: process.env as Record<string, string>,
-        stderr: "ignore",
-      }));
-      return next;
-    })();
-    client.catch(() => { client = undefined; });
+    if (!client) {
+      const next = connectMcpServer(process.env.GHOST_DESKTOP || "ghost-desktop", process.env, { name: "ghost", version: "1" });
+      client = next;
+      next.then((connected) => connected.closed, () => {}).then(() => {
+        if (client === next) client = undefined;
+      });
+    }
     return client;
   };
   // A list is kept only once one arrives: a server that failed to start is asked again next session.
-  let tools: Promise<Tool[]> | undefined;
+  let tools: Promise<McpTool[]> | undefined;
   return {
     listTools() {
-      tools ??= connect().then((connected) => connected.listTools()).then((listed) => listed.tools);
+      tools ??= connect().then((connected) => connected.request("tools/list", {})).then((listed) => (listed as { tools: McpTool[] }).tools);
       return tools.catch(() => {
         tools = undefined;
         return [];
       });
     },
     async callTool(name, args, caller, signal) {
-      let connected: Client;
+      let connected: McpClient;
       try {
         connected = await connect();
       } catch (error) {
         throw new GhostError("not_found", `ghost-desktop did not start: ${error instanceof Error ? error.message : String(error)}.`);
       }
       try {
-        return await connected.callTool(
+        return await connected.request(
+          "tools/call",
           { name, arguments: args, ...(caller ? { _meta: { caller } } : {}) },
-          undefined,
-          { timeout: DESKTOP_TIMEOUT_MS, ...(signal ? { signal } : {}) },
-        ) as CallToolResult;
+          { timeoutMs: DESKTOP_TIMEOUT_MS, signal },
+        ) as McpToolResult;
       } catch (error) {
         if (signal?.aborted) throw error;
         // A lost connection says nothing about whether the input happened.
@@ -97,14 +91,14 @@ const ERROR_CODES: Record<string, GhostErrorCode> = {
   invalid: "invalid_format",
 };
 
-async function toolResult(result: CallToolResult): Promise<GhostToolResult<{ images: number }>> {
+async function toolResult(result: McpToolResult): Promise<GhostToolResult<{ images: number }>> {
   const content = Array.isArray(result.content) ? result.content : [];
-  const text = content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("\n");
+  const text = content.flatMap((part) => ("text" in part && part.type === "text" ? [part.text] : [])).join("\n");
   if (result.isError) {
     const code = result._meta?.code;
     throw new GhostError((typeof code === "string" && ERROR_CODES[code]) || "conflict", text);
   }
-  const images = content.flatMap((part) => (part.type === "image" ? [{ type: "image" as const, data: part.data, mimeType: part.mimeType }] : []));
+  const images = content.flatMap((part) => ("data" in part && part.type === "image" ? [{ type: "image" as const, data: part.data, mimeType: part.mimeType }] : []));
   // Titles, on-screen text, and control names are the desktop's words, not the owner's.
   const fenced = await untrustedTextResult(text, { images: images.length }, "desktop");
   return { ...fenced, content: [...fenced.content, ...images] };

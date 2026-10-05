@@ -23,7 +23,7 @@ commit=0000000000000000000000000000000000000000
 epoch=1
 runtime_root="$work/runtime"
 mkdir -p "$runtime_root/bin" "$runtime_root/lib" "$runtime_root/licenses/ghost" \
-  "$runtime_root/licenses/npm/@modelcontextprotocol/sdk/1.29.0"
+  "$runtime_root/licenses/npm/yaml/2.9.0"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghostd"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost"
 cp "$source_root/packages/daemon/scripts/launchers/launcher" "$runtime_root/bin/ghost-desktop"
@@ -54,11 +54,11 @@ EOF
 cp "$source_root/LICENSE" "$runtime_root/licenses/ghost/LICENSE"
 cp "$source_root/THIRD_PARTY_NOTICES.md" \
   "$runtime_root/licenses/ghost/THIRD_PARTY_NOTICES.md"
-cp "$source_root/LICENSE" "$runtime_root/licenses/npm/@modelcontextprotocol/sdk/1.29.0/LICENSE"
+cp "$source_root/LICENSE" "$runtime_root/licenses/npm/yaml/2.9.0/LICENSE"
 cat > "$runtime_root/BUNDLED-LICENSES" <<EOF
 format=ghost-bundled-licenses/v1
 ghost	ghost-workspace	$version	Apache-2.0	licenses/ghost/LICENSE,licenses/ghost/THIRD_PARTY_NOTICES.md
-npm	@modelcontextprotocol/sdk	1.29.0	MIT	licenses/npm/@modelcontextprotocol/sdk/1.29.0/LICENSE
+npm	yaml	2.9.0	ISC	licenses/npm/yaml/2.9.0/LICENSE
 EOF
 find -P "$runtime_root" -type d -exec chmod 755 {} +
 find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {} +

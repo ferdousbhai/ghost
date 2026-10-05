@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { serveMcpTools } from "@ghost/extensions";
 import type { SessionToolDescriptor, SessionToolResult } from "../session-host.js";
 import { flagString, type ParsedCliArgs } from "./args.js";
 import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
@@ -21,31 +19,19 @@ export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   const path = requested
     ? sessionPath((await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"))).name, requested)
     : (await resolveTarget(ctx.client, ctx, parsed)).path;
-  const server = new Server({ name: "ghost", version: "1" }, { capabilities: { tools: {} } });
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const { tools } = (await ctx.client.request<{ tools: SessionToolDescriptor[] }>("GET", `${path}/tools`)).body;
-    return { tools: tools as never };
-  });
   // One id per serve process keys the desktop lease, so two harnesses bound to
   // the same conversation still take turns steering the desktop.
   const runId = randomUUID().slice(0, 8);
-  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-    const { name, arguments: args } = request.params;
-    const caller = `${server.getClientVersion()?.name ?? "delegated run"} ${runId}`;
-    const result = (await ctx.client.request<SessionToolResult>(
+  await serveMcpTools({
+    name: "ghost",
+    version: "1",
+    list: async () => (await ctx.client.request<{ tools: SessionToolDescriptor[] }>("GET", `${path}/tools`)).body.tools,
+    call: async (name, args, client, signal) => (await ctx.client.request<SessionToolResult>(
       "POST",
       `${path}/tools/${encodeURIComponent(name)}`,
-      { arguments: args ?? {}, caller },
-      { timeoutMs: 0, signal: extra.signal },
-    )).body;
-    return result as never;
-  });
-  const { promise: closed, resolve } = Promise.withResolvers<void>();
-  server.onclose = resolve;
-  // The transport reports only a close it made itself. When the harness ends
-  // stdin, close the server, which aborts a call still in flight.
-  process.stdin.once("end", () => void server.close().then(resolve, resolve));
-  await server.connect(new StdioServerTransport());
-  await closed;
+      { arguments: args, caller: `${client ?? "delegated run"} ${runId}` },
+      { timeoutMs: 0, signal },
+    )).body,
+  }, process.stdin, (line) => process.stdout.write(line));
   return 0;
 }

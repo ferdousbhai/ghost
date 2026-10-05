@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 // A stand-in ghost-desktop for daemon tests, so no test ever starts the real
-// one against the owner's desktop. GHOST_DESKTOP points the bridge here.
+// one against the owner's desktop. GHOST_DESKTOP points the bridge here. It
+// is the MCP SDK's own server on purpose: ghost's stdio client is checked
+// against the reference implementation.
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";

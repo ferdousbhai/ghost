@@ -1,9 +1,9 @@
-import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import type { McpToolResult } from "../src/mcp-stdio.js";
 import { describe, expect, it } from "vitest";
 import { createDesktopExtension, DESKTOP_ACT, DESKTOP_LOOK, type DesktopServer } from "../src/extensions/desktop.js";
 import { loadExtension } from "./support/harness.js";
 
-function server(reply: (name: string) => CallToolResult, calls: Array<string | undefined> = []): DesktopServer {
+function server(reply: (name: string) => McpToolResult, calls: Array<string | undefined> = []): DesktopServer {
   return {
     listTools: async () => [
       { name: DESKTOP_LOOK, description: "look", inputSchema: { type: "object" } },
