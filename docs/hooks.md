@@ -157,11 +157,9 @@ contains the same message directly:
 `harness` is the harness that answered the pass. `messages` exposes only that
 pass, its content Ghost's assistant parts (`text`, and `toolCall` with
 `failed: true` on a call that failed).
-`owner_prompt` is the owner's request and stays fixed across hook
-continuations. `turn_id` is a string UUID shared by `before_prompt` and every
-`session_stop` for that request. A queued follow-up becomes the new
-`owner_prompt` with a fresh `turn_id`; repeating the same request also gets a
-fresh identity. Before this contract, `turn_id` was a numeric pass counter.
+`owner_prompt` is the owner's request and `turn_id` a UUID naming it; both
+stay fixed across hook continuations, and every owner request, a queued
+follow-up included, gets a fresh `turn_id`.
 A blocking result is injected the way Codex and Claude Code inject Stop feedback: a
 user-role prompt whose text is `Stop hook feedback:` plus the reason, so the
 latest instruction is the hook's reason rather than a repeat of `owner_prompt`.

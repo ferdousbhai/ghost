@@ -377,14 +377,9 @@ describe("owner commands and hooks", () => {
     const sessions = host({ harnesses: [fake], hooks: stop.hooks });
     await turn(sessions, "do it");
     await turn(sessions, "do it");
-    const inputs = stop.inputs();
-    expect(inputs).toHaveLength(6);
-    const first = inputs[0]?.turn_id;
-    const second = inputs[3]?.turn_id;
-    expect(first).toEqual(expect.any(String));
-    expect(second).toEqual(expect.any(String));
-    expect(second).not.toBe(first);
-    expect(inputs.map((input) => input.turn_id)).toEqual([first, first, first, second, second, second]);
+    const ids = stop.inputs().map((input) => input.turn_id);
+    expect(ids).toEqual([ids[0], ids[0], ids[0], ids[3], ids[3], ids[3]]);
+    expect(ids[3]).not.toBe(ids[0]);
   });
 
   it("does not ask the stop hook while the owner's follow-up waits", async () => {
