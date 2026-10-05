@@ -1,8 +1,7 @@
 import { isAbsolute, join, resolve } from "node:path";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
-import { addMCPServer, removeMCPServer, updateMCPServer, type MCPConfigFile } from "./mcp-config.js";
+import { addMCPServer, removeMCPServer, updateMCPServer } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
-import { silentLogger, type Logger } from "./log.js";
 import { isRecord } from "@ghost/extensions";
 import { mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
@@ -11,9 +10,8 @@ import {
   type PrivateReadProbe,
 } from "./private-file.js";
 
-import { expandMcpServerConfig as expandMcpServerConfigWithEnvironment, sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
+import { sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
 import type { McpServerConfigView } from "./mcp-catalog-policy.js";
-import { errorMessage } from "@ghost/extensions";
 export interface McpServerView {
   name: string;
   enabled: boolean;
@@ -34,7 +32,6 @@ export interface McpCatalogSnapshot {
 
 export interface McpCatalogOptions {
   registry: GhostRegistry;
-  logger?: Logger;
   /** Test seam after home resolution and before catalog bytes are read. */
   readProbe?: (home: string) => void | Promise<void>;
   /** Synchronous adversarial seam inside the pinned private-file read. */
@@ -55,41 +52,19 @@ const defaultWriter: McpCatalogWriter = {
   remove: removeMCPServer,
 };
 
-export interface McpFileSource {
-  kind: McpServerView["source"];
-  absolutePath: string;
-  relativePath: McpServerView["path"];
-}
-
-export interface EffectiveMcpServer {
+/** One `mcp.json` row; `errors` is empty for a usable one. */
+export interface McpServerRow {
   name: string;
-  source: McpFileSource;
   config: unknown;
   errors: string[];
 }
 
-export interface EffectiveMcpDisabled {
-  name: string;
-  source: McpFileSource;
-}
-
-export interface EffectiveMcpRead {
-  claimedNames: string[];
-  disabled: EffectiveMcpDisabled[];
-  servers: EffectiveMcpServer[];
+interface McpFileRead {
+  rows: McpServerRow[];
   skipped: McpCatalogSkipped[];
 }
 
-export interface EffectiveMcpInput {
-  source: McpFileSource;
-  content?: string;
-  error?: string;
-}
-
-interface ParsedMcpInputs {
-  effective: EffectiveMcpRead;
-  configured: EffectiveMcpServer[];
-}
+const MCP_FILE = "mcp.json";
 
 export function normalizeMcpStdioCwd(
   config: MCPServerConfig,
@@ -105,12 +80,6 @@ export function normalizeMcpStdioCwd(
   };
 }
 
-/** Expand a row against this process's environment. */
-export function expandMcpServerConfig(config: MCPServerConfig): MCPServerConfig {
-  return expandMcpServerConfigWithEnvironment(config, process.env);
-}
-
-
 function validateMutation(name: string, value: unknown): asserts value is MCPServerConfig {
   const errors = mcpServerValidationErrors(name, value);
   if (errors.length > 0) {
@@ -122,129 +91,47 @@ function validateMutation(name: string, value: unknown): asserts value is MCPSer
   }
 }
 
-function ghostMcpSource(home: string): McpFileSource {
-  return {
-    kind: "canonical",
-    absolutePath: join(home, "mcp.json"),
-    relativePath: "mcp.json",
-  };
+function unreadable(reason: string): McpFileRead {
+  return { rows: [], skipped: [{ path: MCP_FILE, reason }] };
 }
 
-/**
- * Parse already-read MCP bytes without reopening their source paths.
- *
- * The caller owns descriptor confinement and byte limits, so the same parser
- * serves the catalog and the per-session admission read.
- */
-function parseMcpInputs(
-  inputs: readonly EffectiveMcpInput[],
-): ParsedMcpInputs {
-  const claimed = new Set<string>();
-  const claimedNames: string[] = [];
-  const configured: EffectiveMcpServer[] = [];
-  const disabled: EffectiveMcpDisabled[] = [];
-  const servers: EffectiveMcpServer[] = [];
-  const skipped: McpCatalogSkipped[] = [];
-
-  for (const input of inputs) {
-    if (input.error !== undefined) {
-      skipped.push({ path: input.source.relativePath, reason: input.error });
-      continue;
-    }
-    let document: unknown;
-    try {
-      document = JSON.parse(input.content ?? "") as MCPConfigFile;
-    } catch {
-      skipped.push({
-        path: input.source.relativePath,
-        reason: "MCP config could not be read or parsed.",
-      });
-      continue;
-    }
-    if (!isRecord(document)) {
-      skipped.push({ path: input.source.relativePath, reason: "MCP config must be a JSON object" });
-      continue;
-    }
-    const rawServers = document.mcpServers;
-    if (rawServers === undefined) continue;
-    if (!isRecord(rawServers)) {
-      skipped.push({ path: input.source.relativePath, reason: '"mcpServers" must be a JSON object' });
-      continue;
-    }
-    for (const [name, config] of Object.entries(rawServers)) {
-      if (claimed.has(name)) continue;
-      claimed.add(name);
-      claimedNames.push(name);
-      const server = {
-        name,
-        source: input.source,
-        config,
-        errors: mcpServerValidationErrors(name, config),
-      };
-      configured.push(server);
-      if (server.errors.length > 0) {
-        skipped.push({
-          path: `${input.source.relativePath}#mcpServers.${name}`,
-          reason: server.errors.join("; "),
-        });
-        continue;
-      }
-      if ((config as MCPServerConfig).enabled === false) {
-        disabled.push({ name, source: input.source });
-        continue;
-      }
-      servers.push(server);
-    }
-  }
-
-  return {
-    effective: { claimedNames, disabled, servers, skipped },
-    configured,
-  };
-}
-
-/** Read and parse the ghost's visible `mcp.json`. */
-async function readGhostMcpFile(
-  home: string,
-  probe?: PrivateReadProbe,
-): Promise<ParsedMcpInputs> {
-  const inputs: EffectiveMcpInput[] = [];
-  const source = ghostMcpSource(home);
+/** Read and parse the ghost's `mcp.json`; a missing file has no rows. */
+function readMcpFile(home: string, probe?: PrivateReadProbe): McpFileRead {
+  let text: string;
   try {
-    inputs.push({ source, content: readPrivateFileText(source.absolutePath, probe) });
+    text = readPrivateFileText(join(home, MCP_FILE), probe);
   } catch (error) {
     if (error instanceof PrivateReadError
       && error.refusal === "open"
       && (error.cause as NodeJS.ErrnoException).code === "ENOENT") {
-      return parseMcpInputs(inputs);
+      return { rows: [], skipped: [] };
     }
-    const reason = error instanceof PrivateReadError && error.refusal === "too_large"
+    return unreadable(error instanceof PrivateReadError && error.refusal === "too_large"
       ? "MCP config exceeds the 1 MiB limit"
       : error instanceof PrivateReadError && error.refusal === "encoding"
         ? "MCP config is not valid UTF-8"
-        : "MCP config could not be read or parsed.";
-    inputs.push({ source, error: reason });
+        : "MCP config could not be read or parsed.");
   }
-
-  return parseMcpInputs(inputs);
+  let document: unknown;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    return unreadable("MCP config could not be read or parsed.");
+  }
+  if (!isRecord(document)) return unreadable("MCP config must be a JSON object");
+  if (document.mcpServers === undefined) return { rows: [], skipped: [] };
+  if (!isRecord(document.mcpServers)) return unreadable('"mcpServers" must be a JSON object');
+  const rows = Object.entries(document.mcpServers)
+    .map(([name, config]) => ({ name, config, errors: mcpServerValidationErrors(name, config) }));
+  const skipped = rows.filter((row) => row.errors.length > 0)
+    .map((row) => ({ path: `${MCP_FILE}#mcpServers.${row.name}`, reason: row.errors.join("; ") }));
+  return { rows, skipped };
 }
 
-export async function readEffectiveMcp(home: string): Promise<EffectiveMcpRead> {
-  return (await readGhostMcpFile(home)).effective;
-}
-
-function translateWriterError(error: unknown, name: string): never {
-  const message = errorMessage(error);
-  if (message.includes("already exists")) {
-    throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
-  }
-  if (message.includes("not found")) {
-    throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-  }
-  if (message.includes("Invalid server config") || message.includes("Server name")) {
-    throw new GhostError("invalid_mcp_server", message, 400);
-  }
-  throw error;
+/** The rows a turn loads: valid, and not turned off. */
+export function readEnabledMcp(home: string): McpServerRow[] {
+  return readMcpFile(home).rows
+    .filter((row) => row.errors.length === 0 && (row.config as MCPServerConfig).enabled !== false);
 }
 
 /**
@@ -257,78 +144,54 @@ function translateWriterError(error: unknown, name: string): never {
 export class McpCatalog {
   private readonly registry: GhostRegistry;
   private readonly writer: McpCatalogWriter;
-  private readonly logger: Logger;
   private readonly readProbe: NonNullable<McpCatalogOptions["readProbe"]>;
   private readonly privateReadProbe: McpCatalogOptions["privateReadProbe"];
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
     this.writer = { ...defaultWriter, ...options.writer };
-    this.logger = options.logger ?? silentLogger;
     this.readProbe = options.readProbe ?? (() => {});
     this.privateReadProbe = options.privateReadProbe;
   }
 
-  private async effective(ghostName: string): Promise<ParsedMcpInputs> {
+  private async read(ghostName: string): Promise<McpFileRead & { path: string }> {
     const home = this.registry.get(ghostName).dir;
     await this.readProbe(home);
-    return readGhostMcpFile(home, this.privateReadProbe);
+    return { ...readMcpFile(home, this.privateReadProbe), path: join(home, MCP_FILE) };
+  }
+
+  private async row(ghostName: string, name: string): Promise<{ row: McpServerRow; path: string }> {
+    const { rows, path } = await this.read(ghostName);
+    const row = rows.find((candidate) => candidate.name === name);
+    if (!row) throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
+    return { row, path };
   }
 
   async listLeased(ghostName: string): Promise<McpCatalogSnapshot> {
-    const { effective, configured } = await this.effective(ghostName);
-    const servers: McpServerView[] = [];
-    const skipped = [...effective.skipped];
-    for (const server of configured) {
-      if (server.errors.length > 0) continue;
-      const config = server.config as MCPServerConfig;
-      servers.push({
-        name: server.name,
-        enabled: config.enabled !== false,
-        source: server.source.kind,
-        path: server.source.relativePath,
-        config: sanitizeMcpServerConfig(config),
-      });
-    }
+    const { rows, skipped } = await this.read(ghostName);
+    const servers: McpServerView[] = rows.filter((row) => row.errors.length === 0).map((row) => {
+      const config = row.config as MCPServerConfig;
+      return { name: row.name, enabled: config.enabled !== false, source: "canonical", path: MCP_FILE, config: sanitizeMcpServerConfig(config) };
+    });
     servers.sort((left, right) => left.name.localeCompare(right.name));
     skipped.sort((left, right) => left.path.localeCompare(right.path));
     return { servers, skipped };
   }
 
-  private async writeServer(
-    mutation: "add" | "update",
-    absolutePath: string,
-    name: string,
-    config: unknown,
-  ): Promise<void> {
-    try {
-      await this.writer[mutation](absolutePath, name, config as MCPServerConfig);
-    } catch (error) {
-      translateWriterError(error, name);
-    }
-  }
-
   async addLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    const { effective } = await this.effective(ghostName);
-    if (effective.claimedNames.includes(name)) {
-      throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
-    }
     // A new server costs context the moment it connects, so it starts off
     // unless the row says otherwise; `enable` is the deliberate step.
     const stored = "enabled" in config ? config : { ...config, enabled: false };
-    await this.writeServer("add", ghostMcpSource(this.registry.get(ghostName).dir).absolutePath, name, stored);
+    const { path } = await this.read(ghostName);
+    await this.writer.add(path, name, stored);
     return this.listLeased(ghostName);
   }
 
   async updateLeased(ghostName: string, name: string, config: unknown): Promise<McpCatalogSnapshot> {
     validateMutation(name, config);
-    const server = (await this.effective(ghostName)).configured
-      .find((candidate) => candidate.name === name);
-    if (!server) {
-      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-    }
-    await this.writeServer("update", server.source.absolutePath, name, config);
+    const { path } = await this.row(ghostName, name);
+    await this.writer.update(path, name, config);
     return this.listLeased(ghostName);
   }
 
@@ -336,35 +199,15 @@ export class McpCatalog {
     if (typeof enabled !== "boolean") {
       throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
     }
-    const server = (await this.effective(ghostName)).configured
-      .find((candidate) => candidate.name === name);
-    if (!server) {
-      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-    }
-    validateMutation(name, server.config);
-    try {
-      await this.writer.update(
-        server.source.absolutePath,
-        name,
-        { ...(server.config as MCPServerConfig), enabled },
-      );
-    } catch (error) {
-      translateWriterError(error, name);
-    }
+    const { row, path } = await this.row(ghostName, name);
+    validateMutation(name, row.config);
+    await this.writer.update(path, name, { ...row.config, enabled });
     return this.listLeased(ghostName);
   }
 
   async removeLeased(ghostName: string, name: string): Promise<McpCatalogSnapshot> {
-    const server = (await this.effective(ghostName)).configured
-      .find((candidate) => candidate.name === name);
-    if (!server) {
-      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
-    }
-    try {
-      await this.writer.remove(server.source.absolutePath, name);
-    } catch (error) {
-      translateWriterError(error, name);
-    }
+    const { path } = await this.row(ghostName, name);
+    await this.writer.remove(path, name);
     return this.listLeased(ghostName);
   }
 }

@@ -284,7 +284,7 @@ async function serveDaemon(
       ...(relay ? { relayTransport: relay } : {}),
     },
   });
-  const mcp = new McpCatalog({ registry, logger });
+  const mcp = new McpCatalog({ registry });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
 
   let listening: ListeningServer;

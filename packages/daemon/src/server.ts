@@ -10,13 +10,11 @@ import type { RemoteAccess, TailscaleIdentity } from "./tailscale-identity.js";
 import { requireConversationId } from "./conversation-log.js";
 import type {
   McpCatalog,
-  McpCatalogSnapshot,
 } from "./mcp-catalog.js";
 import { MAX_CHARACTER_BODY_LENGTH, openGhostHome,
   resolveDocumentsDirectory,
 } from "@ghost/extensions";
 import {
-  assertValidGhostName,
   GhostError,
   translateExtensionError,
   type GhostRegistry,
@@ -128,16 +126,13 @@ function jsonResponse(
   response.end(text);
 }
 
+/** The fields a client sees, whatever else the runner's status carries. */
 function publicHookStatus(status: GhostHookStatus): GhostHookStatus {
   return {
     active: status.active,
     total: status.total,
     events: status.events.map(({ event, count }) => ({ event, count })),
-    hooks: status.hooks.map(({ event, name, description }) => ({
-      event,
-      name,
-      description,
-    })),
+    hooks: status.hooks.map(({ event, name, description }) => ({ event, name, description })),
   };
 }
 
@@ -505,7 +500,7 @@ export function createDaemonServer(options: ServerOptions): Server {
       ghostName,
       (event) => {
         if (!closed && !response.writableEnded) {
-          response.write(`data: ${JSON.stringify(event)}\n\n`);
+          response.write(encodeSseEvent(event));
         }
       },
       () => {
@@ -657,28 +652,10 @@ export function createDaemonServer(options: ServerOptions): Server {
     jsonResponse(response, 200, { ok: true, title: stored });
   };
 
-  const mcpSnapshotLeased = async (
-    ghostName: string,
-    extra: Record<string, unknown> = {},
-  ): Promise<Record<string, unknown>> => {
-    if (!options.mcp) {
-      throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
-    }
-    return { ...(await options.mcp.listLeased(ghostName)), ...extra };
+  const requireMcp = (): McpCatalog => {
+    if (!options.mcp) throw new GhostError("not_found", "MCP management is not enabled on this daemon.", 404);
+    return options.mcp;
   };
-
-  const mcpSnapshot = (
-    ghostName: string,
-    extra: Record<string, unknown> = {},
-  ): Promise<Record<string, unknown>> => options.host.withGhost(
-    ghostName,
-    () => mcpSnapshotLeased(ghostName, extra),
-  );
-
-  const mutateMcp = async (
-    ghostName: string,
-    mutation: () => Promise<McpCatalogSnapshot>,
-  ): Promise<Record<string, unknown>> => options.host.withGhost(ghostName, async () => ({ ...(await mutation()) }));
 
   const handleMcpCollection = async (
     ghostName: string,
@@ -686,26 +663,17 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const mcp = options.mcp;
-    if (!mcp) {
-      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
-      return;
-    }
+    const mcp = requireMcp();
     if (method === "GET") {
-      jsonResponse(response, 200, await mcpSnapshot(ghostName));
+      jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.listLeased(ghostName)));
       return;
     }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { name, config } = body as { name?: unknown; config?: unknown };
+    const { name, config } = await readJsonObjectBody(request, maxBodyBytes) as { name?: unknown; config?: unknown };
     if (typeof name !== "string") {
       errorResponse(response, 400, "invalid_request", '"name" must be a string.');
       return;
     }
-    const snapshot = await mutateMcp(
-      ghostName,
-      () => mcp.addLeased(ghostName, name, config),
-    );
-    jsonResponse(response, 201, snapshot);
+    jsonResponse(response, 201, await options.host.withGhost(ghostName, () => mcp.addLeased(ghostName, name, config)));
   };
 
   const handleMcpServer = async (
@@ -715,25 +683,13 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const mcp = options.mcp;
-    if (!mcp) {
-      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
-      return;
-    }
+    const mcp = requireMcp();
     if (method === "DELETE") {
-      const snapshot = await mutateMcp(
-        ghostName,
-        () => mcp.removeLeased(ghostName, serverName),
-      );
-      jsonResponse(response, 200, snapshot);
+      jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.removeLeased(ghostName, serverName)));
       return;
     }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const snapshot = await mutateMcp(
-      ghostName,
-      () => mcp.updateLeased(ghostName, serverName, (body as { config?: unknown }).config),
-    );
-    jsonResponse(response, 200, snapshot);
+    const { config } = await readJsonObjectBody(request, maxBodyBytes) as { config?: unknown };
+    jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.updateLeased(ghostName, serverName, config)));
   };
 
   const handleMcpEnabled = async (
@@ -742,21 +698,9 @@ export function createDaemonServer(options: ServerOptions): Server {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const mcp = options.mcp;
-    if (!mcp) {
-      errorResponse(response, 404, "not_found", "MCP management is not enabled on this daemon.");
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const snapshot = await mutateMcp(
-      ghostName,
-      () => mcp.setEnabledLeased(
-        ghostName,
-        serverName,
-        (body as { enabled?: unknown }).enabled as boolean,
-      ),
-    );
-    jsonResponse(response, 200, snapshot);
+    const mcp = requireMcp();
+    const { enabled } = await readJsonObjectBody(request, maxBodyBytes) as { enabled?: unknown };
+    jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.setEnabledLeased(ghostName, serverName, enabled as boolean)));
   };
 
   /**
@@ -775,7 +719,6 @@ export function createDaemonServer(options: ServerOptions): Server {
       errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
       return;
     }
-    assertValidGhostName(name);
     const renamed = await options.host.renameGhost(ghostName, name);
     logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
     jsonResponse(response, 200, { ok: true, name: renamed.name });

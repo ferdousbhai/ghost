@@ -5,16 +5,10 @@
  */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import {
-  PrivateReadError,
-  readPrivateFileText,
-  type PrivateReadProbe,
-  writePrivateJsonAtomic,
-} from "./private-file.js";
+import { GhostError } from "./ghosts.js";
+import { PrivateReadError, readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
-import { validateServerName, validateServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
-
-export { validateServerName };
+import type { MCPServerConfig } from "./mcp-config-policy.js";
 
 /** The file: `mcpServers` is what Ghost reads; other keys pass through untouched. */
 export interface MCPConfigFile {
@@ -22,13 +16,10 @@ export interface MCPConfigFile {
   [key: string]: unknown;
 }
 
-export function readMCPConfigFile(
-  filePath: string,
-  probe?: PrivateReadProbe,
-): MCPConfigFile {
+function readMCPConfigFile(filePath: string): MCPConfigFile {
   let text: string;
   try {
-    text = readPrivateFileText(filePath, probe);
+    text = readPrivateFileText(filePath);
   } catch (error) {
     if (error instanceof PrivateReadError && error.refusal === "open") {
       const cause = error.cause as NodeJS.ErrnoException;
@@ -40,7 +31,7 @@ export function readMCPConfigFile(
   return JSON.parse(text) as MCPConfigFile;
 }
 
-export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile): Promise<void> {
+async function writeMCPConfigFile(filePath: string, config: MCPConfigFile): Promise<void> {
   await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
   await writePrivateJsonAtomic(filePath, config);
 }
@@ -48,57 +39,34 @@ export async function writeMCPConfigFile(filePath: string, config: MCPConfigFile
 /** The single ghostd systemd unit keeps one daemon on every ghost home, so serializing per file in-process is the whole lock. */
 const fileLocks = new Map<string, Promise<unknown>>();
 
-export interface MCPConfigMutationOptions {
-  readProbe?: PrivateReadProbe;
-}
-
-async function putServer(
-  filePath: string,
-  name: string,
-  config: MCPServerConfig,
-  mustBeNew: boolean,
-  options: MCPConfigMutationOptions,
-): Promise<void> {
-  const nameError = validateServerName(name);
-  if (nameError) throw new Error(nameError);
-  const errors = validateServerConfig(name, config);
-  if (errors.length > 0) throw new Error(`Invalid server config: ${errors.join("; ")}`);
+/**
+ * The writes, each a read-modify-write under the file's lock. The catalog
+ * validates a row before it gets here; existence is checked again under the
+ * lock, where it cannot race.
+ */
+async function putServer(filePath: string, name: string, config: MCPServerConfig, mustBeNew: boolean): Promise<void> {
   return serializeByKey(fileLocks, filePath, async () => {
-    const existing = readMCPConfigFile(filePath, options.readProbe);
+    const existing = readMCPConfigFile(filePath);
     if (mustBeNew && Object.hasOwn(existing.mcpServers ?? {}, name)) {
-      throw new Error(`Server "${name}" already exists in ${filePath}`);
+      throw new GhostError("mcp_server_exists", `MCP server ${JSON.stringify(name)} already exists.`, 409);
     }
     await writeMCPConfigFile(filePath, { ...existing, mcpServers: { ...existing.mcpServers, [name]: config } });
   });
 }
 
-export function addMCPServer(
-  filePath: string,
-  name: string,
-  config: MCPServerConfig,
-  options: MCPConfigMutationOptions = {},
-): Promise<void> {
-  return putServer(filePath, name, config, true, options);
+export function addMCPServer(filePath: string, name: string, config: MCPServerConfig): Promise<void> {
+  return putServer(filePath, name, config, true);
 }
 
-export function updateMCPServer(
-  filePath: string,
-  name: string,
-  config: MCPServerConfig,
-  options: MCPConfigMutationOptions = {},
-): Promise<void> {
-  return putServer(filePath, name, config, false, options);
+export function updateMCPServer(filePath: string, name: string, config: MCPServerConfig): Promise<void> {
+  return putServer(filePath, name, config, false);
 }
 
-export function removeMCPServer(
-  filePath: string,
-  name: string,
-  options: MCPConfigMutationOptions = {},
-): Promise<void> {
+export function removeMCPServer(filePath: string, name: string): Promise<void> {
   return serializeByKey(fileLocks, filePath, async () => {
-    const existing = readMCPConfigFile(filePath, options.readProbe);
+    const existing = readMCPConfigFile(filePath);
     if (!Object.hasOwn(existing.mcpServers ?? {}, name)) {
-      throw new Error(`Server "${name}" not found in ${filePath}`);
+      throw new GhostError("mcp_server_not_found", `No MCP server named ${JSON.stringify(name)}.`, 404);
     }
     const remaining = { ...existing.mcpServers };
     delete remaining[name];

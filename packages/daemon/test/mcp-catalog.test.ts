@@ -11,11 +11,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostError } from "../src/ghosts.js";
-import {
-  expandMcpServerConfig,
-  McpCatalog,
-  normalizeMcpStdioCwd,
-} from "../src/mcp-catalog.js";
+import { McpCatalog, normalizeMcpStdioCwd } from "../src/mcp-catalog.js";
+import { expandMcpServerConfig as expandWithEnvironment } from "../src/mcp-catalog-policy.js";
+
+const expandMcpServerConfig = (config: Parameters<typeof expandWithEnvironment>[0]) => expandWithEnvironment(config, process.env);
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 interface McpUrlSanitizerVector {

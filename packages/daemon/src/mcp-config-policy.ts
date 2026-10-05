@@ -31,7 +31,7 @@ export interface MCPSseServerConfig extends MCPServerConfigBase {
 
 export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig | MCPSseServerConfig;
 
-export function validateServerName(name: string): string | undefined {
+function validateServerName(name: string): string | undefined {
   if (!name) return "Server name cannot be empty";
   if (name.length > 100) return "Server name is too long (max 100 characters)";
   if (!/^[a-zA-Z0-9_.:-]+$/.test(name)) {
@@ -41,7 +41,7 @@ export function validateServerName(name: string): string | undefined {
 }
 
 /** Transport-level consistency, after Ghost's own field validation. */
-export function validateServerConfig(name: string, config: MCPServerConfig): string[] {
+function validateServerConfig(name: string, config: MCPServerConfig): string[] {
   const errors: string[] = [];
   const type = config.type ?? "stdio";
   const hasCommand = "command" in config && Boolean(config.command);
@@ -62,7 +62,7 @@ export function validateServerConfig(name: string, config: MCPServerConfig): str
 const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
 /** Expand `${VAR}` and `${VAR:-default}` from the process environment. */
-export function expandEnvVars(value: string, environment: Readonly<Record<string, string | undefined>>): string {
+function expandEnvVars(value: string, environment: Readonly<Record<string, string | undefined>>): string {
   return value.replace(ENV_PATTERN, (_match, name: string, fallback: string | undefined) =>
     environment[name] ?? fallback ?? "");
 }

@@ -61,7 +61,8 @@ import {
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
-import { expandMcpServerConfig, normalizeMcpStdioCwd, readEffectiveMcp } from "./mcp-catalog.js";
+import { expandMcpServerConfig } from "./mcp-catalog-policy.js";
+import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
 import { readPinState, writePins } from "./pins.js";
 import { readReadState, writeReads } from "./reads.js";
@@ -353,9 +354,9 @@ export class SessionHost {
       config: { command: this.scheduleCliPath, args: ["mcp", "serve", "-g", ghost.name, "-s", id] },
     }];
     try {
-      for (const server of (await readEffectiveMcp(ghost.dir)).servers) {
-        if (server.errors.length > 0 || server.name === GHOST_MCP_SERVER) continue;
-        const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig), ghost.dir);
+      for (const server of readEnabledMcp(ghost.dir)) {
+        if (server.name === GHOST_MCP_SERVER) continue;
+        const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, process.env), ghost.dir);
         servers.push({ name: server.name, config });
       }
     } catch (error) {
