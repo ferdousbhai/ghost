@@ -868,7 +868,14 @@ export class SessionHost {
   private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions): Promise<void> {
     const toolId = `bash-${Date.now().toString(36)}`;
     stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command, excludeFromContext: excluded }, cwd: this.ownerHome, intent: "Run a local command" });
+    // The log keeps the last 100 KB; a chatty command is trimmed in batches,
+    // and the card's summary is sent at most every 100 ms, not per line.
     let output = "";
+    let update: ReturnType<typeof setTimeout> | undefined;
+    const sendUpdate = () => {
+      update = undefined;
+      stream.emit({ type: "tool_execution_update", id: toolId, toolName: "bash", summary: tail(output.slice(-4 * TOOL_SUMMARY_MAX)) });
+    };
     const exit = await runHarness({
       launch: { argv: ["bash", "-c", command] },
       cwd: this.ownerHome,
@@ -876,11 +883,14 @@ export class SessionHost {
       parse: (line) => [{ type: "text", block: "out", delta: `${line}\n` }],
       onEvent: (event) => {
         if (event.type !== "text") return;
-        output = `${output}${event.delta}`.slice(-100_000);
-        stream.emit({ type: "tool_execution_update", id: toolId, toolName: "bash", summary: tail(output) });
+        output += event.delta;
+        if (output.length > 200_000) output = output.slice(-100_000);
+        update ??= setTimeout(sendUpdate, 100);
       },
       signal: stream.signal ?? new AbortController().signal,
     });
+    clearTimeout(update);
+    output = output.slice(-100_000);
     if (exit.stderr) output = `${output}${exit.stderr}`;
     if (exit.spawnError) output = `${output}${exit.spawnError}`;
     stream.emit({ type: "tool_execution_end", id: toolId, toolName: "bash", isError: exit.code !== 0, summary: tail(output) ?? `Exit ${exit.code ?? exit.signal}` });

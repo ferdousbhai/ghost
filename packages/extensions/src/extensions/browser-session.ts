@@ -101,6 +101,8 @@ export interface SessionFindResult {
 export interface SessionScreenshotResult extends PageSummary {
   readonly path: string;
   readonly bytes: number;
+  /** The captured image, as written to `path`. */
+  readonly image: Uint8Array;
 }
 
 export type SessionConsoleResult = BoundedEntryResult<import("./browser-backend.js").ConsoleEntry>;
@@ -416,7 +418,7 @@ export class GhostBrowserSession {
       }
       assertScreenshotBytesWithinLimit(capture.bytes.byteLength, "Browser screenshot");
       const saved = await this.#saveScreenshot(capture.bytes);
-      return { url: capture.url, title: capture.title, path: saved.path, bytes: saved.bytes };
+      return { url: capture.url, title: capture.title, path: saved.path, bytes: saved.bytes, image: capture.bytes };
     });
   }
 

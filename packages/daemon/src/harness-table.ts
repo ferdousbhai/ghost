@@ -9,7 +9,7 @@
  * continue is cwd-scoped. A harness whose continue is not names its session
  * in its output, and the host hands that id back (`sessionFrom`).
  */
-import { readdir, readFile } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord } from "@ghost/extensions";
@@ -326,17 +326,44 @@ async function codexRanOn(
 ): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
   const rollout = await codexRollout(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions"), session);
   if (!rollout) return null;
-  let provider: string | undefined;
-  let ran: Extract<HarnessEvent, { type: "model" }> | null = null;
-  for (const line of (await readFile(rollout, "utf8")).split("\n")) {
-    const entry = json(line);
-    const payload = record(entry?.payload);
-    if (entry?.type === "session_meta" && typeof payload.model_provider === "string") provider = payload.model_provider;
-    if (entry?.type === "turn_context" && typeof payload.model === "string") {
-      ran = { type: "model", model: payload.model, ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}) };
+  // A long session's rollout runs to a hundred megabytes: `session_meta` is its
+  // first line and the latest `turn_context` is near its end, so read only those.
+  const file = await open(rollout, "r");
+  try {
+    const { size } = await file.stat();
+    const head = Buffer.alloc(Math.min(size, 64 * 1024));
+    await file.read(head, 0, head.length, 0);
+    const meta = json(head.toString("utf8").split("\n")[0] ?? "");
+    const provider = meta?.type === "session_meta" ? record(meta.payload).model_provider : undefined;
+    let end = size;
+    let carry = Buffer.alloc(0);
+    while (end > 0) {
+      const start = Math.max(0, end - 1024 * 1024);
+      const chunk = Buffer.alloc(end - start);
+      await file.read(chunk, 0, chunk.length, start);
+      const window = Buffer.concat([chunk, carry]);
+      // The window's first line may continue in the chunk before it.
+      const first = start > 0 ? window.indexOf(0x0a) + 1 : 0;
+      const lines = window.subarray(first).toString("utf8").split("\n");
+      for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (!lines[index]?.includes('"turn_context"')) continue;
+        const entry = json(lines[index] ?? "");
+        const payload = record(entry?.payload);
+        if (entry?.type !== "turn_context" || typeof payload.model !== "string") continue;
+        return {
+          type: "model",
+          model: payload.model,
+          ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
+          ...(typeof provider === "string" ? { provider } : {}),
+        };
+      }
+      carry = window.subarray(0, first);
+      end = start;
     }
+    return null;
+  } finally {
+    await file.close();
   }
-  return ran && provider ? { ...ran, provider } : ran;
 }
 
 /**

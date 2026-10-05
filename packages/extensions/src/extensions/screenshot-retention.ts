@@ -6,7 +6,6 @@ import { GhostError } from "../errors.js";
 import {
   descriptorPath,
   openConfinedDirectory,
-  openConfinedFile,
   withDescriptorLock,
 } from "../linux-fs.js";
 import { expandHome, resolveUserDirectory } from "../xdg-user-dirs.js";
@@ -61,11 +60,7 @@ function escapeForPattern(value: string): string {
 
 export const DEFAULT_SCREENSHOT_RETENTION = 20;
 
-import {
-  assertScreenshotBytesWithinLimit,
-  MAX_SCREENSHOT_BYTES,
-  screenshotLimitError,
-} from "./screenshot-limits.js";
+import { assertScreenshotBytesWithinLimit } from "./screenshot-limits.js";
 
 export {
   assertScreenshotBase64WithinLimit,
@@ -218,35 +213,5 @@ export async function withScreenshotDirectory<T>(
     return await withDescriptorLock(directory, () => action(directory, logicalDir));
   } finally {
     await directory.close();
-  }
-}
-
-export async function readScreenshotFile(
-  screenshotDir: string,
-  path: string,
-): Promise<Buffer> {
-  const file = await openConfinedFile(resolve(screenshotDir), path, "Screenshot file");
-  if (!file) {
-    throw new GhostError("not_found", `Screenshot ${JSON.stringify(path)} no longer exists.`, {
-      path,
-    });
-  }
-  try {
-    const initialSize = (await file.stat()).size;
-    assertScreenshotBytesWithinLimit(initialSize, "Screenshot");
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for (;;) {
-      const available = MAX_SCREENSHOT_BYTES + 1 - total;
-      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, available));
-      const { bytesRead } = await file.read(chunk, 0, chunk.length, total);
-      if (bytesRead === 0) break;
-      total += bytesRead;
-      if (total > MAX_SCREENSHOT_BYTES) throw screenshotLimitError("Screenshot", total);
-      chunks.push(chunk.subarray(0, bytesRead));
-    }
-    return Buffer.concat(chunks, total);
-  } finally {
-    await file.close();
   }
 }

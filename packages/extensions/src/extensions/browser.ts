@@ -15,7 +15,6 @@ import {
   type BrowserSessionOptions,
   type GhostBrowserSession,
 } from "./browser-session.js";
-import { readScreenshotFile, resolveScreenshotDirectory } from "./screenshot-retention.js";
 import {
   resolveHome,
   textResult,
@@ -315,31 +314,18 @@ export function createBrowserExtension(
           }
 
           case "screenshot": {
-            const shot = await session.screenshot({
+            const { image, ...shot } = await session.screenshot({
               ...(params.full_page === undefined ? {} : { fullPage: params.full_page }),
               ...operation,
             });
-            const details = { action: "screenshot", ...shot };
-            // The pixels, not a description of them; the saved path stays in details.
-            let data: string | undefined;
-            try {
-              data = (await readScreenshotFile(resolveScreenshotDirectory(), shot.path)).toString("base64");
-            } catch {
-              data = undefined;
-            }
-            if (data !== undefined) {
-              return {
-                content: [
-                  { type: "text" as const, text: `Screenshot of ${shot.url} saved to ${shot.path}.` },
-                  { type: "image" as const, data, mimeType: "image/png" },
-                ],
-                details,
-              };
-            }
-            return textResult(
-              `Saved a screenshot of ${shot.url} to ${shot.path}`,
-              details,
-            );
+            // The pixels, not a description of them.
+            return {
+              content: [
+                { type: "text" as const, text: `Screenshot of ${shot.url} saved to ${shot.path}.` },
+                { type: "image" as const, data: Buffer.from(image).toString("base64"), mimeType: "image/png" },
+              ],
+              details: { action: "screenshot", ...shot },
+            };
           }
 
           case "back": {

@@ -98,6 +98,17 @@ describe("parsers over recorded output", () => {
       expect(await row?.ranOn?.("thread-a", { CODEX_HOME: home }))
         .toEqual({ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "low" });
       expect(await row?.ranOn?.("thread-c", { CODEX_HOME: home })).toBeNull();
+      // A long rollout is read from its ends: the newest turn_context sits
+      // behind megabytes of later entries, across the reader's 1 MiB windows.
+      const filler = JSON.stringify({ type: "response_item", payload: { text: "x".repeat(4096) } });
+      writeFileSync(join(home, "sessions", "2026/10/04", "rollout-2026-10-05T00-00-00-thread-long.jsonl"), [
+        JSON.stringify({ type: "session_meta", payload: { id: "thread-long", model_provider: "openai" } }),
+        ...Array.from({ length: 300 }, () => filler),
+        JSON.stringify({ type: "turn_context", payload: { model: "gpt-6.2-sol", effort: "medium" } }),
+        ...Array.from({ length: 700 }, () => filler),
+      ].join("\n"));
+      expect(await row?.ranOn?.("thread-long", { CODEX_HOME: home }))
+        .toEqual({ type: "model", model: "gpt-6.2-sol", provider: "openai", effort: "medium" });
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
