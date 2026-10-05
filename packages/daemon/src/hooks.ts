@@ -51,6 +51,7 @@ function runCommandHook(
         stderr: "",
         aborted: true,
         timedOut: false,
+        overflowed: false,
         executionFailed: false,
       });
       return;
@@ -73,6 +74,7 @@ function runCommandHook(
         stderr: "",
         aborted: false,
         timedOut: false,
+        overflowed: false,
         executionFailed: true,
       });
       return;
@@ -83,6 +85,7 @@ function runCommandHook(
     let stderrBytes = 0;
     let settled = false;
     let timedOut = false;
+    let overflowed = false;
     let aborted = false;
     let executionFailed = false;
     let stopping = false;
@@ -120,6 +123,7 @@ function runCommandHook(
         stderr: Buffer.concat(stderrChunks).toString("utf8"),
         aborted,
         timedOut,
+        overflowed,
         executionFailed,
       });
     };
@@ -146,17 +150,14 @@ function runCommandHook(
     child.stdout.on("data", (chunk: Buffer) => {
       stdoutBytes = append(stdoutChunks, chunk, stdoutBytes);
       if (stdoutBytes > MAX_HOOK_OUTPUT_BYTES) {
-        timedOut = true;
-        stderrChunks.length = 0;
-        stderrChunks.push(Buffer.from("Hook stdout exceeded 1 MB."));
-        stderrBytes = stderrChunks[0]?.length ?? 0;
+        overflowed = true;
         stop();
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
       stderrBytes = append(stderrChunks, chunk, stderrBytes);
       if (stderrBytes > MAX_HOOK_OUTPUT_BYTES) {
-        timedOut = true;
+        overflowed = true;
         stop();
       }
     });

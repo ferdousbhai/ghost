@@ -20,7 +20,7 @@ const config = {
   },
 };
 const result = (fields: Partial<CommandResult> = {}): CommandResult => ({
-  exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, executionFailed: false, ...fields,
+  exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false, ...fields,
 });
 const base = {
   session_id: "session-1", ghost_name: "casper", ghost_home: "/owner/casper", cwd: "/owner",
@@ -73,8 +73,10 @@ describe("shared hook policy", () => {
     expect(parseCommandResult(stop, result({ exitCode: 2, stderr: "Blocked" }), warn)).toEqual({ decision: "block", reason: "Blocked" });
     expect(parseCommandResult(stop, result({ stdout: "{bad" }), warn)).toBeUndefined();
     expect(parseCommandResult(stop, result({ timedOut: true }), warn)).toBeUndefined();
+    expect(parseCommandResult(stop, result({ overflowed: true, exitCode: 2, stderr: "partial" }), warn)).toBeUndefined();
     expect(parseCommandResult(stop, result({ executionFailed: true }), warn)).toBeUndefined();
-    expect(warnings).toHaveLength(4);
+    expect(warnings).toHaveLength(5);
+    expect(warnings).toContain("session_stop hook wrote more than 1 MB");
     expect(ghostSessionStopContinuation({ continue: true })).toBeUndefined();
     expect(ghostSessionStopContinuation({ continue: true, additionalContext: "Revise" })).toBe("Revise");
   });

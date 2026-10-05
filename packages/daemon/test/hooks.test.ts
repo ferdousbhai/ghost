@@ -351,7 +351,7 @@ describe("GhostHookRunner", () => {
         stdout: stdoutSentinel,
         stderr: stderrSentinel,
         aborted: false,
-        timedOut: false,
+        timedOut: false, overflowed: false,
         executionFailed: false,
       })
       .mockResolvedValueOnce({
@@ -359,7 +359,7 @@ describe("GhostHookRunner", () => {
         stdout: `{${stdoutSentinel}`,
         stderr: stderrSentinel,
         aborted: false,
-        timedOut: false,
+        timedOut: false, overflowed: false,
         executionFailed: false,
       });
     const logs: Array<{

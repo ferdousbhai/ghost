@@ -209,6 +209,8 @@ export interface CommandResult {
   stderr: string;
   aborted: boolean;
   timedOut: boolean;
+  /** Stopped for writing more than 1 MB to stdout or stderr. */
+  overflowed: boolean;
   executionFailed: boolean;
 }
 
@@ -227,6 +229,10 @@ export function parseCommandResult(
   }
   if (result.timedOut) {
     warn(`${hook.eventName} hook timed out`, { source: hook.source, timeoutMs: hook.timeoutMs });
+    return undefined;
+  }
+  if (result.overflowed) {
+    warn(`${hook.eventName} hook wrote more than 1 MB`, { source: hook.source });
     return undefined;
   }
   if (result.exitCode === 2) {
