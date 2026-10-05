@@ -90,13 +90,13 @@ describe("real ghostd streaming lifecycle", () => {
     await daemon!.waitForLaunches(1);
 
     const followUpText = "Keep the remaining tool work concise.";
-    const queued = await daemon!.request<{ streaming: boolean; count: number; followUp: string[] }>(
+    const queued = await daemon!.request<{ streaming: boolean; followUp: string[] }>(
       "POST",
       "/api/ghosts/casper/sessions/conv-follow-up/queue",
       { text: followUpText },
     );
     expect(queued.status).toBe(200);
-    expect(queued.body).toEqual({ streaming: true, count: 1, followUp: [followUpText] });
+    expect(queued.body).toEqual({ streaming: true, followUp: [followUpText] });
 
     pass.release();
     await within(stream.completion, "the followed-up SSE stream to reach EOF");

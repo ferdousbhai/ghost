@@ -157,7 +157,6 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 ------------------------------------------------------------------------------
 {
   "harness": "fake",
-  "historyTruncated": false,
   "id": "conv-golden",
   "messages": [
     {
