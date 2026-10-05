@@ -154,6 +154,19 @@ function abortOnClose(
   };
 }
 
+/** `body[key]` as a string, or the 400 every route answers for one that is not. */
+function stringField(body: Record<string, unknown>, key: string): string {
+  const value = body[key];
+  if (typeof value !== "string") throw new GhostError("invalid_request", `"${key}" must be a string.`, 400);
+  return value;
+}
+
+function booleanField(body: Record<string, unknown>, key: string): boolean {
+  const value = body[key];
+  if (typeof value !== "boolean") throw new GhostError("invalid_request", `"${key}" must be a boolean.`, 400);
+  return value;
+}
+
 function decodePathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -404,12 +417,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const name = (body as { name?: unknown }).name;
-    if (typeof name !== "string") {
-      errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
-      return;
-    }
+    const name = stringField(await readJsonObjectBody(request, maxBodyBytes), "name");
     const ghost = options.host.createGhost(name);
     logger.info("ghost created", { ghost: ghost.name });
     jsonResponse(response, 201, ghost);
@@ -510,12 +518,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { body: text } = body as { body?: unknown };
-    if (typeof text !== "string") {
-      errorResponse(response, 400, "invalid_request", '"body" must be a string.');
-      return;
-    }
+    const text = stringField(await readJsonObjectBody(request, maxBodyBytes), "body");
     await options.host.withGhost(ghostName, async () => {
       const ghost = options.registry.get(ghostName);
       await openGhostHome(ghost.dir).writeCharacter({ body: text });
@@ -542,12 +545,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { pinned } = body as { pinned?: unknown };
-    if (typeof pinned !== "boolean") {
-      errorResponse(response, 400, "invalid_request", "\"pinned\" must be a boolean.");
-      return;
-    }
+    const pinned = booleanField(await readJsonObjectBody(request, maxBodyBytes), "pinned");
     await options.host.setPinned(ghostName, conversationId, pinned);
     jsonResponse(response, 200, { ok: true, pinned });
   };
@@ -590,12 +588,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const { title } = body as { title?: unknown };
-    if (typeof title !== "string") {
-      errorResponse(response, 400, "invalid_request", "\"title\" must be a string.");
-      return;
-    }
+    const title = stringField(await readJsonObjectBody(request, maxBodyBytes), "title");
     const stored = await options.host.renameConversation(ghostName, conversationId, title);
     jsonResponse(response, 200, { ok: true, title: stored });
   };
@@ -616,11 +609,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.listLeased(ghostName)));
       return;
     }
-    const { name, config } = await readJsonObjectBody(request, maxBodyBytes) as { name?: unknown; config?: unknown };
-    if (typeof name !== "string") {
-      errorResponse(response, 400, "invalid_request", '"name" must be a string.');
-      return;
-    }
+    const body = await readJsonObjectBody(request, maxBodyBytes);
+    const name = stringField(body, "name");
+    const { config } = body;
     jsonResponse(response, 201, await options.host.withGhost(ghostName, () => mcp.addLeased(ghostName, name, config)));
   };
 
@@ -647,8 +638,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     response: ServerResponse,
   ): Promise<void> => {
     const mcp = requireMcp();
-    const { enabled } = await readJsonObjectBody(request, maxBodyBytes) as { enabled?: unknown };
-    jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.setEnabledLeased(ghostName, serverName, enabled as boolean)));
+    const enabled = booleanField(await readJsonObjectBody(request, maxBodyBytes), "enabled");
+    jsonResponse(response, 200, await options.host.withGhost(ghostName, () => mcp.setEnabledLeased(ghostName, serverName, enabled)));
   };
 
   /**
@@ -661,12 +652,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const name = (body as { name?: unknown }).name;
-    if (typeof name !== "string") {
-      errorResponse(response, 400, "invalid_request", "\"name\" must be a string.");
-      return;
-    }
+    const name = stringField(await readJsonObjectBody(request, maxBodyBytes), "name");
     const renamed = await options.host.renameGhost(ghostName, name);
     logger.info("ghost renamed", { ghost: ghostName, name: renamed.name });
     jsonResponse(response, 200, { ok: true, name: renamed.name });
@@ -889,12 +875,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         jsonResponse(response, 200, await remoteServe.status());
         return;
       }
-      const body = await readJsonObjectBody(request, maxBodyBytes);
-      if (typeof (body as { enabled?: unknown }).enabled !== "boolean") {
-        errorResponse(response, 400, "invalid_request", '"enabled" must be a boolean.');
-        return;
-      }
-      jsonResponse(response, 200, await remoteServe.setEnabled((body as { enabled: boolean }).enabled));
+      const enabled = booleanField(await readJsonObjectBody(request, maxBodyBytes), "enabled");
+      jsonResponse(response, 200, await remoteServe.setEnabled(enabled));
     }),
     // The one `/api` path exempt from the bearer token and the origin check, so
     // anything it returns is readable by anything that can reach the port.

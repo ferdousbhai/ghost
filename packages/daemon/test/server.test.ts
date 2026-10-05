@@ -575,6 +575,9 @@ describe("ghost MCP routes", () => {
       config: { type: "stdio", command: "proto-after" },
     })).status).toBe(200);
     expect((await jsonRequest(`${collection}/constructor/enabled`, "PUT", {
+      enabled: "yes",
+    })).status).toBe(400);
+    expect((await jsonRequest(`${collection}/constructor/enabled`, "PUT", {
       enabled: false,
     })).status).toBe(200);
     expect((await jsonRequest(`${collection}/toString`, "DELETE")).status).toBe(200);

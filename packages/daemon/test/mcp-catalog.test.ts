@@ -499,8 +499,6 @@ describe("McpCatalog mutations", () => {
       .rejects.toMatchObject({ code: "mcp_server_not_found", status: 404 });
     await expect(catalog.removeLeased("casper", "missing"))
       .rejects.toMatchObject({ code: "mcp_server_not_found", status: 404 });
-    await expect(catalog.setEnabledLeased("casper", "known", "yes" as unknown as boolean))
-      .rejects.toMatchObject({ code: "invalid_request", status: 400 });
     expect(GhostError).toBeDefined();
   });
 

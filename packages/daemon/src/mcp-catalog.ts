@@ -193,9 +193,6 @@ export class McpCatalog {
   }
 
   async setEnabledLeased(ghostName: string, name: string, enabled: boolean): Promise<McpCatalogSnapshot> {
-    if (typeof enabled !== "boolean") {
-      throw new GhostError("invalid_request", '"enabled" must be a boolean.', 400);
-    }
     const { row, path } = await this.row(ghostName, name);
     validateMutation(name, row.config);
     await this.writer.update(path, name, { ...row.config, enabled });
