@@ -16,7 +16,7 @@ import { MAX_CHARACTER_BODY_LENGTH, openGhostHome,
 } from "@ghost/extensions";
 import {
   GhostError,
-  translateExtensionError,
+  fromExtensionError,
   type GhostRegistry,
 } from "./ghosts.js";
 import type { GhostHookRunner } from "./hooks.js";
@@ -25,7 +25,6 @@ import { silentLogger, type Logger } from "./log.js";
 import {
   encodeSseEvent,
   parseTurnRequest,
-  TurnRequestError,
   SSE_HEADERS,
   SSE_KEEPALIVE_COMMENT,
   SSE_KEEPALIVE_INTERVAL_MS,
@@ -168,21 +167,11 @@ function abortOnClose(
   };
 }
 
-class InvalidPathEncodingError extends Error {
-  readonly code = "invalid_request";
-  readonly status = 400;
-
-  constructor() {
-    super("URL path segments must use valid percent-encoding.");
-    this.name = "InvalidPathEncodingError";
-  }
-}
-
 function decodePathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
   } catch (error) {
-    if (error instanceof URIError) throw new InvalidPathEncodingError();
+    if (error instanceof URIError) throw new GhostError("invalid_request", "URL path segments must use valid percent-encoding.", 400);
     throw error;
   }
 }
@@ -260,17 +249,17 @@ async function readJsonBody(
     const buffer = chunk as Buffer;
     total += buffer.length;
     if (total > maxBytes) {
-      throw new TurnRequestError("payload_too_large", "Request body is too large.");
+      throw new GhostError("payload_too_large", "Request body is too large.", 413);
     }
     chunks.push(buffer);
   }
   if (total === 0) {
-    throw new TurnRequestError("invalid_request", "Request body is required.");
+    throw new GhostError("invalid_request", "Request body is required.", 400);
   }
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new TurnRequestError("invalid_request", "Request body must be JSON.");
+    throw new GhostError("invalid_request", "Request body must be JSON.", 400);
   }
 }
 
@@ -284,7 +273,7 @@ async function readJsonObjectBody(
 ): Promise<Record<string, unknown>> {
   const body = await readJsonBody(request, maxBytes);
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new TurnRequestError("invalid_request", "Request body must be a JSON object.");
+    throw new GhostError("invalid_request", "Request body must be a JSON object.", 400);
   }
   return body as Record<string, unknown>;
 }
@@ -523,11 +512,7 @@ export function createDaemonServer(options: ServerOptions): Server {
   ): Promise<void> => {
     const character = await options.host.withGhost(ghostName, async () => {
       const ghost = options.registry.get(ghostName);
-      try {
-        return await openGhostHome(ghost.dir).readCharacter({ enforceLimit: false });
-      } catch (error) {
-        return translateExtensionError(error);
-      }
+      return await openGhostHome(ghost.dir).readCharacter({ enforceLimit: false });
     });
     jsonResponse(response, 200, {
       body: character?.body ?? "",
@@ -548,11 +533,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     }
     await options.host.withGhost(ghostName, async () => {
       const ghost = options.registry.get(ghostName);
-      try {
-        await openGhostHome(ghost.dir).writeCharacter({ body: text });
-      } catch (error) {
-        return translateExtensionError(error);
-      }
+      await openGhostHome(ghost.dir).writeCharacter({ body: text });
     });
     jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
   };
@@ -1064,23 +1045,12 @@ export function createDaemonServer(options: ServerOptions): Server {
           if (!response.writableEnded) response.end();
           return;
         }
-        if (error instanceof GhostError) {
-          errorResponse(response, error.status, error.code, error.message);
-          return;
-        }
-        if (error instanceof TurnRequestError) {
-          if (error.code === "payload_too_large") {
-            errorResponse(response, 413, error.code, error.message);
-            // Answer and hang up rather than reading the rest of a body we
-            // have already refused.
-            response.once("finish", () => request.destroy());
-            return;
-          }
-          errorResponse(response, 400, error.code, error.message);
-          return;
-        }
-        if (error instanceof InvalidPathEncodingError) {
-          errorResponse(response, error.status, error.code, error.message);
+        const failure = fromExtensionError(error);
+        if (failure instanceof GhostError) {
+          errorResponse(response, failure.status, failure.code, failure.message);
+          // Answer and hang up rather than reading the rest of a body we
+          // have already refused.
+          if (failure.status === 413) response.once("finish", () => request.destroy());
           return;
         }
         logger.error("request failed", {

@@ -1,9 +1,9 @@
+import { GhostError } from "../src/ghosts.js";
 import { describe, expect, it } from "vitest";
 import {
   classifyLimitMessage,
   encodeSseEvent,
   parseTurnRequest,
-  TurnRequestError,
   type TurnEvent,
 } from "../src/turn-events.js";
 import { parseSseStream } from "./helpers/fixtures.js";
@@ -41,7 +41,7 @@ describe("parseTurnRequest", () => {
   });
 
   it("rejects a body with no prompt text", () => {
-    expect(() => parseTurnRequest({ prompt: "   " })).toThrowError(TurnRequestError);
+    expect(() => parseTurnRequest({ prompt: "   " })).toThrowError(GhostError);
     expect(() => parseTurnRequest({ sessionId: "conv-1" })).toThrowError(/prompt/);
     expect(() => parseTurnRequest("nope")).toThrowError(/JSON object/);
   });

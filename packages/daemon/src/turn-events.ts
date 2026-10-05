@@ -3,6 +3,7 @@
  * for every harness. Clients ignore event types they do not know.
  */
 import { requireConversationId } from "./conversation-log.js";
+import { GhostError } from "./ghosts.js";
 
 export type TurnEvent =
   | { type: "start" }
@@ -99,23 +100,14 @@ export interface TurnRequest {
   prompt: string;
 }
 
-export class TurnRequestError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "TurnRequestError";
-    this.code = code;
-  }
-}
-
 /** Parse a turn request body, `{ prompt, sessionId? }`. */
 export function parseTurnRequest(body: unknown): TurnRequest {
   if (body === null || typeof body !== "object" || Array.isArray(body)) {
-    throw new TurnRequestError("invalid_request", "Request body must be a JSON object.");
+    throw new GhostError("invalid_request", "Request body must be a JSON object.", 400);
   }
   const { prompt, sessionId } = body as { prompt?: unknown; sessionId?: unknown };
   if (typeof prompt !== "string" || prompt.trim() === "") {
-    throw new TurnRequestError("invalid_request", "\"prompt\" must be non-empty text.");
+    throw new GhostError("invalid_request", "\"prompt\" must be non-empty text.", 400);
   }
   return {
     sessionId: typeof sessionId === "string" && sessionId ? requireConversationId(sessionId) : null,

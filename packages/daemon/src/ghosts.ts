@@ -61,11 +61,11 @@ const EXTENSION_ERROR_STATUS: Record<string, number> = {
  * Re-throw a `@ghost/extensions` error as the daemon's, keeping its code and
  * message so a client sees what the home writer actually refused.
  */
-export function translateExtensionError(error: unknown): never {
-  if (isExtensionGhostError(error)) {
-    throw new GhostError(error.code, error.message, EXTENSION_ERROR_STATUS[error.code] ?? 400);
-  }
-  throw error;
+/** A ghost tool's error as the daemon answers it; anything else passes through. */
+export function fromExtensionError(error: unknown): unknown {
+  return isExtensionGhostError(error)
+    ? new GhostError(error.code, error.message, EXTENSION_ERROR_STATUS[error.code] ?? 400)
+    : error;
 }
 
 export function isValidGhostName(name: string): boolean {
