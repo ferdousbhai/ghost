@@ -274,7 +274,7 @@ export class SessionHost {
     this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
-        this.logger = options.logger ?? silentLogger;
+    this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;

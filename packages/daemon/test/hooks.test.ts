@@ -39,6 +39,8 @@ function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStop
     type: "session_stop",
     owner_prompt: "Continue",
     messages: [],
+    last_assistant_message: null,
+    transcript_path: join(process.cwd(), ".conversation.jsonl"),
     turn_id: "turn-1",
     session_id: "session-1",
     session_file: join(process.cwd(), ".conversation.jsonl"),

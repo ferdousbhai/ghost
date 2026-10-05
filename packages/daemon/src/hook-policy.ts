@@ -28,10 +28,10 @@ export interface GhostSessionStopEvent extends GhostHookEventBase {
   owner_prompt: string;
   messages: unknown[];
   turn_id: string;
-  last_assistant_message?: unknown;
+  last_assistant_message: unknown;
   stop_hook_active: boolean;
   /** The conversation log on disk; `messages` carries only the current pass. */
-  transcript_path?: string;
+  transcript_path: string;
 }
 
 export interface GhostSessionStopResult {

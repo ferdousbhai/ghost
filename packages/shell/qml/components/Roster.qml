@@ -46,8 +46,8 @@ Item {
     }
 
     // Names that have already made their entrance. Ghostd.ghosts is replaced
-    // wholesale on every poll, which rebuilds every delegate; without this the
-    // roster would re-emerge on each refresh.
+    // wholesale on every refresh, which rebuilds every delegate; without this
+    // the roster would re-emerge each time.
     property var summoned: ({})
 
     implicitWidth: Theme.sidebarMeasure

@@ -55,7 +55,7 @@ describe("shared hook policy", () => {
       return { additionalContext: hook.command };
     })).toEqual({ additionalContext: "first\n\nsecond" });
     expect(called).toEqual(["first", "second"]);
-    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], turn_id: "turn-1", stop_hook_active: false };
+    const stop: GhostSessionStopEvent = { ...base, type: "session_stop", owner_prompt: "Continue", messages: [], last_assistant_message: null, transcript_path: base.session_file, turn_id: "turn-1", stop_hook_active: false };
     called.length = 0;
     expect(await runSessionStopHooks(commands, stop, async (hook) => {
       called.push(hook.command);
