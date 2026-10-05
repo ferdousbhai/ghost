@@ -91,10 +91,19 @@ TestCase {
         verify(tc.rendered(MarkdownCompat.normalize("[l](https://e.com)", "#fbbf24")).indexOf("#fbbf24") >= 0);
     }
 
+    // Raw HTML opening a list's first item drops the item out of the list.
+    function test_aListOpeningWithALinkKeepsItsBullets(): void {
+        compare((tc.rendered(MarkdownCompat.normalize("- [l](https://e.com) a\n- b", "#fbbf24")).match(/<li/g) || []).length, 2);
+    }
+
     function test_linksBecomeColouredAnchors(): void {
         compare(MarkdownCompat.normalize("see [the **manual**](https://e.com/m?a=1&b=2).", "#fff"),
             "see " + tc.a("https://e.com/m?a=1&amp;b=2", "the <b>manual</b>") + ".");
         compare(MarkdownCompat.normalize("[`a<b>.ts`](file.ts \"t\")", "#fff"), tc.a("file.ts", "<code>a&lt;b&gt;.ts</code>"));
+        compare(MarkdownCompat.normalize("**[b](u)** __[c](u)__ *[i](u)*", "#fff"),
+            tc.a("u", "<b>b</b>") + " " + tc.a("u", "<b>c</b>") + " " + tc.a("u", "<i>i</i>"));
+        compare(MarkdownCompat.normalize("- [l](u)\n- **[b](u)**", "#fff"),
+            "- \u200b" + tc.a("u", "l") + "\n- \u200b" + tc.a("u", "<b>b</b>"));
         compare(MarkdownCompat.normalize("(https://e.com/x).", "#fff"), "(" + tc.a("https://e.com/x", "https://e.com/x") + ").");
         compare(MarkdownCompat.normalize("`https://e.com` and `[l](u)`", "#fff"), "`https://e.com` and `[l](u)`");
         compare(MarkdownCompat.normalize("```\nhttps://e.com\n```", "#fff"), "```\nhttps://e.com\n```");

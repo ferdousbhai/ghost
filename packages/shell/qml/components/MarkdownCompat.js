@@ -65,7 +65,13 @@ function line(text, linkColor) {
         out += rewrite(text.slice(at, match.index)) + protectedSpan(match, linkColor);
         at = match.index + match[0].length;
     }
-    return out + rewrite(text.slice(at));
+    // Emphasis around raw HTML is dropped too, so it moves inside the anchor;
+    // and raw HTML opening a list's first item takes the list down with it,
+    // so a zero-width space opens the item instead.
+    return (out + rewrite(text.slice(at)))
+        .replace(/(\*\*|__)(<a [^>]*>)(.*?)<\/a>\1/g, "$2<b>$3</b></a>")
+        .replace(/(^|[^*_])([*_])(<a [^>]*>)(.*?)<\/a>\2(?![*_])/g, "$1$3<i>$4</i></a>")
+        .replace(/^(\s*(?:[-*+]|\d+[.)])\s+)<a /, "$1\u200b<a ");
 }
 
 /**
