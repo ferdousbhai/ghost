@@ -221,8 +221,8 @@ are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
 loop. The one deliberate exception: a harness whose output never names its
 model, provider, or effort has them read after the pass from the session
-record it wrote, found by the session id it reported (`ranOn`; codex's
-rollout file). The owner should always be able to see what answered. Everything else — model, auth, tools, permissions, compaction, retries —
+record it wrote, found by the session id it reported (`ranOn`: codex's
+rollout file, opencode's database). The owner should always be able to see what answered. Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
 The harness runs in the conversation directory with the conversation's

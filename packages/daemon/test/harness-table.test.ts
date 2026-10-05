@@ -103,6 +103,58 @@ describe("parsers over recorded output", () => {
     }
   });
 
+  // Lines trimmed from 2026-10-05 probes.
+  it("copilot and muse: the model their streams name, with copilot's vendor and effort", () => {
+    const copilot = (harnessRow("copilot") ?? { parser: () => () => [] }).parser();
+    expect(copilot(JSON.stringify({ type: "model.call_start", data: { turnId: "0", model: "mai-code-1.1-flash" } })))
+      .toEqual([{ type: "model", model: "mai-code-1.1-flash" }]);
+    expect(copilot(JSON.stringify({
+      type: "session.usage_checkpoint",
+      data: { promptCacheBreakState: [{ conversation: "main", lastActiveModel: "mai-code-1.1-flash",
+        models: { "mai-code-1.1-flash": { model: "mai-code-1.1-flash", vendor: "openai", reasoning_effort: "medium" } } }] },
+    }))).toEqual([{ type: "model", model: "mai-code-1.1-flash", provider: "openai", effort: "medium" }]);
+    const muse = (harnessRow("muse") ?? { parser: () => () => [] }).parser();
+    expect(muse(JSON.stringify({
+      payload_type: "run.model.configured",
+      payload: { kind: "run_model_configured", model_id: "muse-spark-1.3-contributor", provider_id: "meta" },
+    }))).toEqual([{ type: "model", model: "muse-spark-1.3-contributor", provider: "meta" }]);
+  });
+
+  it("agy: its own typed stream, the session it opened and a refusal as the turn's error", () => {
+    const agy = (harnessRow("agy") ?? { parser: () => () => [] }).parser();
+    expect([
+      { event: "init", conversation_id: "dac452a8", init: { cwd: "/tmp/c1", tools: [], permission_mode: "always-proceed" } },
+      { event: "step_update", step_update: { conversation_id: "dac452a8", step_index: 1, state: "DONE", step_type: "error_message" } },
+      { event: "result", result: { conversation_id: "dac452a8", status: "ERROR", response: "", error: "Individual quota reached." } },
+    ].flatMap((line) => agy(JSON.stringify(line)))).toEqual([
+      { type: "session", id: "dac452a8" },
+      { type: "error", message: "Individual quota reached." },
+    ]);
+    expect(agy(JSON.stringify({ event: "result", result: { status: "SUCCESS", response: "ok" } })))
+      .toEqual([{ type: "text", block: "result", delta: "ok" }]);
+  });
+
+  it("opencode: the model, provider, and variant of the session's latest assistant message", async () => {
+    const { Database } = await import("bun:sqlite");
+    const data = mkdtempSync(join(tmpdir(), "ghost-opencode-data-"));
+    try {
+      mkdirSync(join(data, "opencode"));
+      const db = new Database(join(data, "opencode", "opencode.db"));
+      db.run("CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)");
+      const add = db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)");
+      add.run("m1", "ses_a", 1, 1, JSON.stringify({ role: "assistant", modelID: "big-pickle", providerID: "opencode" }));
+      add.run("m2", "ses_a", 2, 2, JSON.stringify({ role: "assistant", modelID: "x-preview-f-free", providerID: "opencode", variant: "max" }));
+      add.run("m3", "ses_a", 3, 3, JSON.stringify({ role: "user", model: { providerID: "opencode", modelID: "big-pickle" } }));
+      db.close();
+      const row = harnessRow("opencode");
+      expect(await row?.ranOn?.("ses_a", { XDG_DATA_HOME: data }))
+        .toEqual({ type: "model", model: "x-preview-f-free", provider: "opencode", effort: "max" });
+      expect(await row?.ranOn?.("ses_b", { XDG_DATA_HOME: data })).toBeNull();
+    } finally {
+      rmSync(data, { recursive: true, force: true });
+    }
+  });
+
   it("muse: run output deltas and a tool result", () => {
     const events = parse("muse", "muse.jsonl");
     expect(reply(events)).toContain("Muse");

@@ -144,7 +144,7 @@ function mcpServersToml(servers: readonly HarnessMcpServer[]): string {
 /**
  * Claude Code's `stream-json` and Grok's `streaming-messages-json` (Anthropic
  * message events wrapped as `stream_event`, plus whole `assistant`/`user`
- * messages and a final `result`). Agy and Cursor print the same envelope.
+ * messages and a final `result`). Cursor prints the same envelope.
  */
 function anthropicStreamParser(): (line: string) => HarnessEvent[] {
   let message = 0;
@@ -327,6 +327,53 @@ async function codexRanOn(
   return null;
 }
 
+/**
+ * The model, provider, and variant of an OpenCode session's latest assistant
+ * message, from its database (`$XDG_DATA_HOME/opencode/opencode.db`): `run
+ * --format json` names none of them.
+ */
+async function opencodeRanOn(
+  session: string,
+  env: Readonly<Record<string, string | undefined>>,
+): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
+  const { Database } = await import("bun:sqlite");
+  const path = join(env.XDG_DATA_HOME || join(env.HOME ?? "", ".local", "share"), "opencode", "opencode.db");
+  const db = new Database(path, { readonly: true });
+  try {
+    const rows = db.query("SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC LIMIT 20").all(session) as { data: string }[];
+    for (const { data } of rows) {
+      const message = json(data);
+      if (message?.role !== "assistant" || typeof message.modelID !== "string") continue;
+      return {
+        type: "model",
+        model: message.modelID,
+        ...(typeof message.providerID === "string" ? { provider: message.providerID } : {}),
+        ...(typeof message.variant === "string" ? { effort: message.variant } : {}),
+      };
+    }
+    return null;
+  } finally {
+    db.close();
+  }
+}
+
+/**
+ * Antigravity's `stream-json` (agy 1.2): typed `init`, `step_update`, and a
+ * terminal `result`. Its step vocabulary is not yet recorded here, so the
+ * reply is the result's `response`, whole.
+ */
+function agyParser(): (line: string) => HarnessEvent[] {
+  return (line) => {
+    const event = json(line);
+    if (!event) return [];
+    if (event.event === "init" && typeof event.conversation_id === "string") return [{ type: "session", id: event.conversation_id }];
+    if (event.event !== "result") return [];
+    const result = record(event.result);
+    if (result.status === "ERROR") return [{ type: "error", message: str(result.error) || "The turn failed." }];
+    return str(result.response) ? [{ type: "text", block: "result", delta: str(result.response) }] : [];
+  };
+}
+
 /** OpenCode `run --format json`: one event per finished part. */
 function opencodeParser(): (line: string) => HarnessEvent[] {
   let reported = false;
@@ -364,6 +411,20 @@ function copilotParser(): (line: string) => HarnessEvent[] {
     if (!event) return [];
     const data = record(event.data);
     switch (event.type) {
+      case "model.call_start":
+        return typeof data.model === "string" ? [{ type: "model", model: data.model }] : [];
+      case "session.usage_checkpoint": {
+        // The cache record is where Copilot names the vendor and effort it ran.
+        const state = record((Array.isArray(data.promptCacheBreakState) ? data.promptCacheBreakState : [])[0]);
+        const ran = record(record(state.models)[str(state.lastActiveModel)]);
+        if (typeof ran.model !== "string") return [];
+        return [{
+          type: "model",
+          model: ran.model,
+          ...(typeof ran.vendor === "string" ? { provider: ran.vendor } : {}),
+          ...(typeof ran.reasoning_effort === "string" ? { effort: ran.reasoning_effort } : {}),
+        }];
+      }
       case "assistant.message_delta":
         return [{ type: "text", block: str(data.messageId), delta: str(data.deltaContent) }];
       case "assistant.reasoning_delta":
@@ -395,6 +456,9 @@ function museParser(): (line: string) => HarnessEvent[] {
     if (event.payload_type === "session.run.linked") {
       const stream = record(event.stream);
       if (typeof stream.id === "string") out.push({ type: "session", id: stream.id });
+    }
+    if (event.payload_type === "run.model.configured" && typeof payload.model_id === "string") {
+      out.push({ type: "model", model: payload.model_id, ...(typeof payload.provider_id === "string" ? { provider: payload.provider_id } : {}) });
     }
     if (event.payload_type === "run.output.delta") {
       out.push({ type: "text", block: str(record(payload.run_stream).id), delta: str(payload.text) });
@@ -523,6 +587,7 @@ const ROWS: readonly HarnessRow[] = [
       };
     },
     parser: opencodeParser,
+    ranOn: opencodeRanOn,
   },
   {
     id: "pi",
@@ -550,7 +615,7 @@ const ROWS: readonly HarnessRow[] = [
       ],
       files: turn.mcp.length > 0 ? { ".gemini/settings.json": writeJson(mcpServersJson(turn.mcp)) } : {},
     }),
-    parser: anthropicStreamParser,
+    parser: agyParser,
   },
   {
     id: "cursor-agent",
