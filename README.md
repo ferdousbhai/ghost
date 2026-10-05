@@ -32,8 +32,11 @@ Start with [docs/getting-started.md](docs/getting-started.md); the mental model
 is [docs/concepts.md](docs/concepts.md) and the stable boundaries are
 [CONTRACTS.md](CONTRACTS.md).
 
-Status: beta release candidate, held until
-[#17](https://github.com/ferdousbhai/ghost/issues/17) closes.
+Status: [v0.5.1](https://github.com/ferdousbhai/ghost/releases/tag/v0.5.1) is
+released. Ghost installs on Omarchy through the
+[signed package installer](docs/getting-started.md); inclusion in Omarchy's
+package repository and Install → AI menu is still in
+[#54](https://github.com/ferdousbhai/ghost/issues/54).
 
 License: Apache-2.0
 
