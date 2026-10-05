@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { assessHarness, parseOmarchyAgents, STALE_AFTER_MS } from "../src/harnesses.js";
+import { accountEnv, assessHarness, parseOmarchyAgents, STALE_AFTER_MS } from "../src/harnesses.js";
 import { runCli } from "./helpers/cli.js";
 
 const NOW = Date.parse("2026-09-26T12:00:00Z");
@@ -211,5 +211,23 @@ describe("ghost harnesses", () => {
     const result = await runCli(["harnesses"], { env: { PATH: join(root, "nowhere") }, home: root });
     expect(result.code).not.toBe(0);
     expect(result.stderr).toMatch(/^ghost: cannot list harnesses: /u);
+  });
+});
+
+describe("accountEnv", () => {
+  it("points claude, codex, and grok at Omarchy's active account, and nothing else", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "ghost-account-"));
+    try {
+      writeFileSync(join(bin, "omarchy-agent-account-home"), "#!/bin/sh\necho \"/accounts/$1\"\n");
+      chmodSync(join(bin, "omarchy-agent-account-home"), 0o755);
+      const env = { PATH: `${bin}:/usr/bin:/bin` };
+      expect(await accountEnv("claude", env)).toEqual({ CLAUDE_CONFIG_DIR: "/accounts/claude" });
+      expect(await accountEnv("codex", env)).toEqual({ CODEX_HOME: "/accounts/codex" });
+      // The owner's own choice of home wins, and a harness without accounts has none.
+      expect(await accountEnv("codex", { ...env, CODEX_HOME: "/mine" })).toEqual({});
+      expect(await accountEnv("pi", env)).toEqual({});
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });

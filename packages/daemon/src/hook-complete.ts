@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { loadGhostSettings } from "./ghost-settings.js";
 import { isGhostHome } from "./ghosts.js";
-import { eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
+import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import { harnessRow, SUPPORTED_HARNESSES, type HarnessRow } from "./harness-table.js";
 import { errorMessage } from "@ghost/extensions";
@@ -61,7 +61,8 @@ export async function completeForHook(input: HookCompleteInput, options: HookCom
       const exit = await runHarness({
         launch,
         cwd: dir,
-        env,
+        // The same subscription account the ghost's own turns spend.
+        env: { ...env, ...(await accountEnv(id, env)) },
         parse: row.parser(),
         onEvent: (event) => {
           if (event.type === "text") text += event.delta;

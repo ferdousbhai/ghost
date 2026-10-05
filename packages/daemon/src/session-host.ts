@@ -6,13 +6,11 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
-import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
@@ -42,10 +40,9 @@ import {
 import { resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
-  ACCOUNT_HOME_ENV,
   harnessRow,
   SUPPORTED_HARNESSES,
   type HarnessEvent,
@@ -77,7 +74,6 @@ import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
 
-const exec = promisify(execFile);
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
 export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
@@ -399,18 +395,6 @@ export class SessionHost {
     await symlink(target, path);
   }
 
-  private async accountEnv(harness: string): Promise<Record<string, string>> {
-    const variable = ACCOUNT_HOME_ENV[harness];
-    if (!variable || this.env[variable]) return {};
-    try {
-      const { stdout } = await exec("omarchy-agent-account-home", [harness], { env: this.env, timeout: 5_000 });
-      const home = stdout.trim();
-      return home ? { [variable]: home } : {};
-    } catch {
-      return {};
-    }
-  }
-
   /** The harness report, shared by turns and the picker for a minute; it takes most of a second. */
   private cachedReport(): Promise<HarnessReport> {
     const now = Date.now();
@@ -711,7 +695,7 @@ export class SessionHost {
   ): Promise<PassResult> {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
-    const account = this.accountEnv(row.id);
+    const account = accountEnv(row.id, this.env);
     const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost, id)]);
     await this.prepareDirectory(ghost, dir, persona);
     const launch = row.launch({ ...turn, persona, mcp });

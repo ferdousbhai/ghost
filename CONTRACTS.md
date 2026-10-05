@@ -155,8 +155,8 @@ directory to recoverable Trash in one rename; there is no fork.
   units; rename/delete retire units owned by that prefix. See
   [`schedules.ts`](packages/daemon/src/schedules.ts).
 - Harness credentials are the harness's own, signed in by the owner with that
-  harness; a turn spends the account Omarchy marks active for claude, codex,
-  and grok (`omarchy-agent-account-home`). An MCP server's headers or env are
+  harness; a turn, and a hook's completion, spends the account Omarchy marks
+  active for claude, codex, and grok (`omarchy-agent-account-home`). An MCP server's headers or env are
   literal values in the ghost's private `mcp.json`. Ghost keeps no keyring, no
   account allow-list, and no secret references.
 - Finished artifacts go to the destination the owner requested, defaulting to

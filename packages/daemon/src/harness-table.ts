@@ -706,13 +706,3 @@ export function harnessRow(id: string): HarnessRow | null {
   return BY_ID.get(id) ?? null;
 }
 
-/**
- * The subscription account home Omarchy keeps for a harness, passed the way
- * `omarchy-agent` passes it, so a ghost spends the same account the owner's
- * own launches do.
- */
-export const ACCOUNT_HOME_ENV: Readonly<Record<string, string>> = {
-  claude: "CLAUDE_CONFIG_DIR",
-  codex: "CODEX_HOME",
-  grok: "GROK_HOME",
-};

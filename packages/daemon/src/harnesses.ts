@@ -201,6 +201,30 @@ export async function readHarnessReport(
   return { harnesses, refresh: REFRESH_COMMAND };
 }
 
+/**
+ * The subscription account home Omarchy keeps for a harness, passed the way
+ * `omarchy-agent` passes it, so a ghost spends the same account the owner's
+ * own launches do.
+ */
+const ACCOUNT_HOME_ENV: Readonly<Record<string, string>> = {
+  claude: "CLAUDE_CONFIG_DIR",
+  codex: "CODEX_HOME",
+  grok: "GROK_HOME",
+};
+
+/** The environment that points a harness at Omarchy's active account for it, if it has one. */
+export async function accountEnv(harness: string, env: NodeJS.ProcessEnv): Promise<Record<string, string>> {
+  const variable = ACCOUNT_HOME_ENV[harness];
+  if (!variable || env[variable]) return {};
+  try {
+    const { stdout } = await exec("omarchy-agent-account-home", [harness], { env, timeout: 5_000 });
+    const home = stdout.trim();
+    return home ? { [variable]: home } : {};
+  } catch {
+    return {};
+  }
+}
+
 /** The ids of the report's harnesses that have room, in Omarchy's order. */
 export function eligibleIds(report: HarnessReport): string[] {
   return report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id);
