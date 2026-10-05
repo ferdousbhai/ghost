@@ -137,7 +137,7 @@ try {
   assert.equal(transcriptResponse.status, 200);
   const transcriptBody = await transcriptResponse.json();
   assert.deepEqual(Object.keys(transcriptBody), [
-    "id", "title", "harness", "messages", "total", "truncated", "historyTruncated",
+    "id", "title", "harness", "messages", "total", "truncated",
   ]);
   for (const message of transcriptBody.messages) {
     assert.equal(typeof message.entryId, "string");

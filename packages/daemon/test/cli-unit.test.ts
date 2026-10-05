@@ -51,7 +51,7 @@ describe("a ghost's own shell addresses its conversation", () => {
       paths.push(path);
       if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions });
       if (path.endsWith("/transcript")) {
-        return jsonResponse({ id: "conv-mine", title: null, harness: null, messages: [], total: 0, truncated: false, historyTruncated: false });
+        return jsonResponse({ id: "conv-mine", title: null, harness: null, messages: [], total: 0, truncated: false });
       }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };

@@ -804,10 +804,9 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     expect(queued.status).toBe(200);
     expect(await queued.json()).toEqual({
       streaming: true,
-      count: 1,
       followUp: ["Keep the result understated."],
     });
-    expect(await (await fetch(queueUrl(base, "conv-queue"))).json()).toMatchObject({ streaming: true, count: 1 });
+    expect(await (await fetch(queueUrl(base, "conv-queue"))).json()).toMatchObject({ streaming: true, followUp: ["Keep the result understated."] });
 
     for (const body of [{ text: "   " }, {}]) {
       const response = await enqueue(base, "conv-queue", body);
@@ -824,7 +823,7 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     expect(harness!.calls().map((call) => call.prompt)).toEqual(["Set the type.", "Keep the result understated."]);
 
     expect(await (await fetch(queueUrl(base, "conv-queue"))).json())
-      .toEqual({ streaming: false, count: 0, followUp: [] });
+      .toEqual({ streaming: false, followUp: [] });
     const tooLate = await enqueue(base, "conv-queue", { text: "Too late" });
     expect(tooLate.status).toBe(409);
     expect(await tooLate.json()).toMatchObject({ error: { code: "session_not_streaming" } });

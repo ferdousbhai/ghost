@@ -145,7 +145,6 @@ export interface SessionToolResult {
 
 export interface QueuedMessages {
   streaming: boolean;
-  count: number;
   followUp: readonly string[];
 }
 
@@ -175,7 +174,6 @@ export interface Transcript {
   messages: TranscriptMessage[];
   total: number;
   truncated: boolean;
-  historyTruncated: boolean;
 }
 
 export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
@@ -895,7 +893,7 @@ export class SessionHost {
   queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
     this.registry.get(ghostName);
     const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
-    return { streaming: turn !== undefined, count: turn?.followUps.length ?? 0, followUp: [...(turn?.followUps ?? [])] };
+    return { streaming: turn !== undefined, followUp: [...(turn?.followUps ?? [])] };
   }
 
   /** Queue text for after the current pass; a harness takes no input mid-run. */
@@ -1068,7 +1066,6 @@ export class SessionHost {
       messages,
       total: all.length,
       truncated: offset > 0 || offset + messages.length < all.length,
-      historyTruncated: false,
     };
   }
 

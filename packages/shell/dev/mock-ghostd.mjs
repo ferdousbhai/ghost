@@ -363,7 +363,6 @@ const transcriptOf = (s, params) => {
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
-    historyTruncated: s.historyTruncated === true,
   };
 };
 
@@ -1074,7 +1073,6 @@ const mockServer = createServer(async (req, res) => {
     const turn = activeTurns.get(turnKey(name, conversation));
     const snapshot = () => ({
       streaming: turn?.streaming === true,
-      count: turn?.followUp.length ?? 0,
       followUp: turn?.followUp ?? [],
     });
     if (req.method === "GET") return json(res, 200, snapshot());

@@ -396,7 +396,6 @@ Singleton {
 
     property alias transcript: transcriptModel
     /** True when the open conversation's stored history has an unavailable prefix. */
-    property bool transcriptHistoryTruncated: false
     property bool streaming: false
     property string activity: ""
     property var followUpQueue: []
@@ -1132,7 +1131,6 @@ Singleton {
             title: "",
             rows: [],
             hydratedRowCount: 0,
-            historyTruncated: false,
             streaming: false,
             request: null,
             lastStreamActivity: 0,
@@ -1187,7 +1185,6 @@ Singleton {
         const listed = root.sessions.find(session => session.id === state.sessionId);
         if (listed) state.title = listed.title || "";
         state.rows = root.visibleTranscriptRows();
-        state.historyTruncated = root.transcriptHistoryTruncated;
         state.streaming = root.streaming;
         state.activity = root.activity;
         state.followUpQueue = root.followUpQueue.slice();
@@ -1202,7 +1199,6 @@ Singleton {
     }
 
     function projectTurnProjection(state: var): void {
-        root.transcriptHistoryTruncated = state.historyTruncated === true;
         root.streaming = state.streaming;
         root.activity = state.activity;
         root.lastError = state.lastError;
@@ -1927,7 +1923,6 @@ Singleton {
             generation: state.transcriptGeneration,
             allowNotFound: allowNotFound,
             total: -1,
-            historyTruncated: null,
             nextOffset: 0,
             pageCount: 0,
             messages: [],
@@ -1949,7 +1944,6 @@ Singleton {
     function completeTranscriptLoad(state: var, load: var): void {
         if (!root.transcriptLoadIsCurrent(state, load)) return;
         state.transcriptLoad = null;
-        state.historyTruncated = load.historyTruncated === true;
         root.rehydrateTurn(state, load.messages);
         root.reachable = true;
         if (root.isActiveTurn(state)) root.sessionsError = "";
@@ -1969,7 +1963,6 @@ Singleton {
             + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset, null, function (xhr, body) {
             if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
                 load.messages = [];
-                load.historyTruncated = false;
                 root.completeTranscriptLoad(state, load);
                 return;
             }
@@ -1986,12 +1979,6 @@ Singleton {
                     throw new Error("invalid transcript total");
                 if (typeof body.truncated !== "boolean")
                     throw new Error("invalid transcript truncation marker");
-                if (typeof body.historyTruncated !== "boolean")
-                    throw new Error("invalid transcript history marker");
-                if (load.historyTruncated === null)
-                    load.historyTruncated = body.historyTruncated;
-                else if (load.historyTruncated !== body.historyTruncated)
-                    throw new Error("transcript history marker changed between pages");
                 if (load.total < 0) load.total = body.total;
                 else if (load.total !== body.total)
                     throw new Error("transcript changed between pages");

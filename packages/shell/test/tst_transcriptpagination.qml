@@ -31,16 +31,14 @@ TestCase {
         return result;
     }
 
-    function page(state: var, rows: var, total: int, truncated: bool,
-            historyTruncated: var): var {
+    function page(state: var, rows: var, total: int, truncated: bool): var {
         return {
             id: state.sessionId,
             title: null,
             harness: "claude",
             messages: rows,
             total: total,
-            truncated: truncated,
-            historyTruncated: historyTruncated === true
+            truncated: truncated
         };
     }
 
@@ -107,41 +105,6 @@ TestCase {
         compare(state.rows[1000].text, "message-1000");
         compare(state.rows[1004].text, "message-1004");
         compare(Ghostd.sessionsError, "");
-        verify(!Ghostd.transcriptHistoryTruncated);
-    }
-
-    function test_historyMarkerIsRequiredConsistentAndProjected(): void {
-        const state = activeState("legacy-history");
-        Ghostd.loadConversationTranscript(state, false);
-        const missingMarker = page(state, [], 0, false, false);
-        delete missingMarker.historyTruncated;
-        requests[0].complete(200, missingMarker);
-        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
-
-        requests = [];
-        Ghostd.sessionsError = "";
-        Ghostd.loadConversationTranscript(state, false);
-        requests[0].complete(200,
-            page(state, messages(0, 1000), 1001, true, true));
-        compare(requests.length, 2);
-        requests[1].complete(200,
-            page(state, messages(1000, 1), 1001, true, false));
-        compare(state.rows.length, 0);
-        compare(Ghostd.sessionsError, "ghostd sent an inconsistent transcript page");
-
-        requests = [];
-        Ghostd.sessionsError = "";
-        Ghostd.loadConversationTranscript(state, false);
-        requests[0].complete(200, page(state, [], 0, false, true));
-        verify(state.historyTruncated);
-        verify(Ghostd.transcriptHistoryTruncated);
-
-        // Reloading a complete history clears the marker again.
-        requests = [];
-        Ghostd.loadConversationTranscript(state, false);
-        requests[0].complete(200, page(state, [], 0, false, false));
-        verify(!state.historyTruncated);
-        verify(!Ghostd.transcriptHistoryTruncated);
     }
 
     function test_aPageForAnotherConversationIsRejected(): void {
@@ -161,7 +124,7 @@ TestCase {
             { role: "user", content: "hi", entryId: "u" },
             { role: "assistant", content: [], errorMessage: "codex usage limit reached",
                 entryId: "a" }
-        ], 2, false, false));
+        ], 2, false));
         compare(state.rows.length, 2);
         compare(state.rows[1].error, "codex usage limit reached");
     }
@@ -174,7 +137,7 @@ TestCase {
             content: "bounded text",
             contentTruncated: true,
             entryId: "bounded-owner"
-        }], 1, false, false));
+        }], 1, false));
 
         compare(state.rows.length, 1);
         compare(state.rows[0].text,

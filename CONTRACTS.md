@@ -387,9 +387,9 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated, historyTruncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
-| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, count, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
+| `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | Effective owner/guest identity. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
