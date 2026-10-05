@@ -681,7 +681,8 @@ Singleton {
             root.boardLoading = false;
             const parsed = xhr.status === 200 ? root.boardFrom(body) : null;
             if (parsed !== null) {
-                root.board = parsed;
+                // The pane polls every few seconds; an unchanged board keeps its cards.
+                if (JSON.stringify(parsed) !== JSON.stringify(root.board)) root.board = parsed;
                 root.boardError = "";
                 root.reachable = true;
             } else {
@@ -1524,22 +1525,33 @@ Singleton {
         if (ghost === root.activeGhost) eventsReconnect.restart();
     }
 
-    function ingestConversationEvents(chunk: string, ghost: string): void {
-        root.eventsFrameBuffer += chunk.replace(/\r\n/gu, "\n");
-        const frames = root.eventsFrameBuffer.split("\n\n");
-        root.eventsFrameBuffer = frames.pop();
+    /** The `data:` payloads of the complete SSE frames in `buffer + chunk`, and the partial frame left over. */
+    function sseFrames(buffer: string, chunk: string): var {
+        const frames = (buffer + chunk.replace(/\r\n/gu, "\n")).split("\n\n");
+        const rest = frames.pop();
+        const payloads = [];
         for (const frame of frames) {
+            // Keepalives are bare `: comment` frames with no data line.
             const line = frame.split("\n").find(value => value.startsWith("data:"));
-            if (!line) continue;
+            const payload = line ? line.slice(5).trim() : "";
+            if (payload !== "" && payload !== "[DONE]") payloads.push(payload);
+        }
+        return { rest: rest, payloads: payloads };
+    }
+
+    function ingestConversationEvents(chunk: string, ghost: string): void {
+        const parsed = root.sseFrames(root.eventsFrameBuffer, chunk);
+        root.eventsFrameBuffer = parsed.rest;
+        for (const payload of parsed.payloads) {
             try {
-                const event = JSON.parse(line.slice(5).trim());
+                const event = JSON.parse(payload);
                 if (event.type === "conversation-updated"
                         && root.validConversationId(event.id)
                         && ghost === root.activeGhost) {
                     root.fetchSessions(ghost);
                 }
             } catch (error) {
-                console.warn("ghost: unparseable conversation event:", line);
+                console.warn("ghost: unparseable conversation event:", payload);
             }
         }
     }
@@ -2225,15 +2237,9 @@ Singleton {
      */
     function ingestTurn(state: var, chunk: string): void {
         if (chunk === "") return;
-        state.frameBuffer += chunk.replace(/\r\n/gu, "\n");
-        const frames = state.frameBuffer.split("\n\n");
-        state.frameBuffer = frames.pop();
-        for (const frame of frames) {
-            // Keepalives are bare `: comment` frames with no data line.
-            const line = frame.split("\n").find(l => l.startsWith("data:"));
-            if (!line) continue;
-            const payload = line.slice(5).trim();
-            if (payload === "" || payload === "[DONE]") continue;
+        const parsed = root.sseFrames(state.frameBuffer, chunk);
+        state.frameBuffer = parsed.rest;
+        for (const payload of parsed.payloads) {
             try {
                 root.handleTurnEvent(state, JSON.parse(payload));
             } catch (error) {
@@ -2535,9 +2541,10 @@ Singleton {
     }
 
 
+    /** Both callers project afterwards; an unchanged queue keeps its array so its chips are not rebuilt. */
     function applyQueueFor(state: var, body: var): void {
-        state.followUpQueue = Array.isArray(body.followUp) ? body.followUp : [];
-        root.projectTurnFields(state);
+        const next = Array.isArray(body.followUp) ? body.followUp : [];
+        if (JSON.stringify(next) !== JSON.stringify(state.followUpQueue)) state.followUpQueue = next;
     }
 
     function fetchQueueFor(state: var): void {
