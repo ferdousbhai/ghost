@@ -361,6 +361,14 @@ Singleton {
         const row = root.sessions.find(session => session && session.id === root.currentSessionId);
         return row && typeof row.harness === "string" ? row.harness : "";
     }
+    /** What that harness last ran on, pi-style — "(provider) model • effort" —
+        or "" when it is a pick not yet run or said nothing. */
+    readonly property string currentModel: {
+        const row = root.sessions.find(session => session && session.id === root.currentSessionId);
+        if (!row || row.harness !== root.currentHarness) return "";
+        const model = (row.provider ? "(" + row.provider + ") " : "") + (row.model || "");
+        return [model, row.effort || ""].filter(part => part !== "").join(" • ");
+    }
 
     // The agent picker: GET /harness for the active ghost, the ghost's default
     // (PUT /harness), and one conversation's next agent (PUT .../harness).
@@ -2234,7 +2242,7 @@ Singleton {
     function handleTurnEvent(state: var, event: var): void {
         switch (event.type) {
         case "start":
-            state.activity = "";
+            state.activity = "starting";
             break;
         case "text_start":
             state.blocks[event.contentIndex] = { kind: "text", text: "" };
@@ -2263,6 +2271,12 @@ Singleton {
             break;
         case "session_stop_continued":
             root.receiveSessionStopContinuedFor(state, event.reason || "");
+            break;
+        case "thinking":
+            // Reasoning stays out of the transcript; the activity line reads
+            // its newest line, so only a tail is kept.
+            state.activity = "thinking:" + ((state.activity.startsWith("thinking:") ? state.activity.slice(9) : "")
+                + (event.delta || "")).slice(-600);
             break;
         case "tool_execution_start":
             state.activity = event.toolName;

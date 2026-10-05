@@ -712,6 +712,20 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(text).toBe("I set type for a living.");
   });
 
+  it("streams reasoning for the activity line but never logs it", async () => {
+    const base = await serve([{
+      events: [
+        { type: "thinking", block: "r", delta: "private reasoning" },
+        { type: "text", block: "a", delta: "Answer." },
+      ],
+    }]);
+    const { events } = await postTurn(base, TURN_BODY);
+    expect(events.some((event) => event.type === "thinking")).toBe(true);
+    const transcript = await (await fetch(`${base}/api/ghosts/casper/sessions/${TURN_BODY.sessionId}/transcript`)).text();
+    expect(transcript).toContain("Answer.");
+    expect(transcript).not.toContain("private reasoning");
+  });
+
   it("ignores a caller-supplied turn id header", async () => {
     const base = await serve();
     const response = await postTurn(base, TURN_BODY, { "x-ghost-turn-id": "turn-abc.1" });
@@ -829,11 +843,14 @@ describe("GET /api/ghosts/:name/sessions", () => {
     expect(sessions).toHaveLength(1);
     expect(Object.keys(sessions[0]!).sort()).toEqual([
       "createdAt",
+      "effort",
       "harness",
       "id",
       "messageCount",
+      "model",
       "pinned",
       "preview",
+      "provider",
       "title",
       "unread",
       "updatedAt",

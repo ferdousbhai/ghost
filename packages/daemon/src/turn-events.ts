@@ -19,6 +19,8 @@ export type TurnEvent =
   | { type: "text_start"; contentIndex: number }
   | { type: "text_delta"; contentIndex: number; delta: string }
   | { type: "text_end"; contentIndex: number; content: string }
+  /** The harness's reasoning, as far as it shows it; a new block starts on a new line. */
+  | { type: "thinking"; delta: string }
   | {
       type: "tool_execution_start";
       id: string;

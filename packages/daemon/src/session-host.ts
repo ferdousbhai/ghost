@@ -156,6 +156,10 @@ export interface SessionSummary {
   preview: string | null;
   /** The harness that carried the latest stretch of the conversation. */
   harness: string | null;
+  /** What that harness's latest pass ran on, as far as it said; null otherwise. */
+  model: string | null;
+  provider: string | null;
+  effort: string | null;
   createdAt: string;
   updatedAt: string;
   messageCount: number;
@@ -205,6 +209,8 @@ interface PassResult {
   readonly aborted: boolean;
   /** It produced output, so handing the prompt to another harness would repeat its work. */
   readonly produced: boolean;
+  /** The model the harness reported, if it did. */
+  readonly model: Extract<HarnessEvent, { type: "model" }> | null;
 }
 
 type TerminalError = Extract<TurnEvent, { type: "error" }>;
@@ -649,6 +655,9 @@ export class SessionHost {
           harness,
           content: result.content,
           ...(result.error ? { error: result.error } : {}),
+          ...(result.model ? { model: result.model.model } : {}),
+          ...(result.model?.provider ? { provider: result.model.provider } : {}),
+          ...(row.effort ? { effort: row.effort } : {}),
         }]);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
@@ -688,6 +697,8 @@ export class SessionHost {
     let open: { key: string; index: number; text: string } | null = null;
     let error: string | null = null;
     let produced = false;
+    let thoughtBlock: string | null = null;
+    let model: Extract<HarnessEvent, { type: "model" }> | null = null;
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
@@ -696,6 +707,12 @@ export class SessionHost {
     };
     const onEvent = (event: HarnessEvent): void => {
       switch (event.type) {
+        case "thinking":
+          // Reasoning streams for the activity line; it is not an answer and is not logged.
+          if (event.delta === "") return;
+          stream.emit({ type: "thinking", delta: thoughtBlock !== null && thoughtBlock !== event.block ? `\n${event.delta}` : event.delta });
+          thoughtBlock = event.block;
+          return;
         case "text": {
           if (event.delta === "") return;
           produced = true;
@@ -732,6 +749,9 @@ export class SessionHost {
           stream.emit({ type: "tool_execution_end", id: event.id, toolName: tool.name, isError: event.isError, ...(summary ? { summary } : {}) });
           return;
         }
+        case "model":
+          model = event;
+          return;
         case "session":
           writes.push(appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: row.id, session: event.id, dir }]));
           return;
@@ -752,13 +772,13 @@ export class SessionHost {
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
-    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced };
-    if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced };
+    if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
+    if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
     if (error === null && exit.code !== 0) {
       const stderr = exit.stderr.trim().split("\n").slice(-6).join("\n");
       error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
     }
-    return { content, error, aborted: false, produced };
+    return { content, error, aborted: false, produced, model };
   }
 
   private async beforePrompt(
@@ -948,6 +968,9 @@ export class SessionHost {
         title: state.title,
         preview: state.preview,
         harness: state.harness,
+        model: state.model,
+        provider: state.provider,
+        effort: state.effort,
         createdAt: state.createdAt ?? updatedAt,
         updatedAt,
         messageCount: state.messageCount,

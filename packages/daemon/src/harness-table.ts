@@ -39,13 +39,18 @@ export interface HarnessLaunch {
 /** What a turn's output says, normalized across harnesses. */
 export type HarnessEvent =
   | { readonly type: "text"; readonly block: string; readonly delta: string }
+  | { readonly type: "thinking"; readonly block: string; readonly delta: string }
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
+  /** The model answering, as the harness names it; `provider` where it says. */
+  | { readonly type: "model"; readonly model: string; readonly provider?: string }
   | { readonly type: "error"; readonly message: string };
 
 export interface HarnessRow {
   readonly id: string;
+  /** The reasoning effort its launch asks for, when it sets one. */
+  readonly effort?: string;
   launch(input: HarnessTurnInput): HarnessLaunch;
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
@@ -143,6 +148,7 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
     const out: HarnessEvent[] = [];
     if (typeof event.session_id === "string" && event.type === "system" && event.subtype === "init") {
       out.push({ type: "session", id: event.session_id });
+      if (typeof event.model === "string") out.push({ type: "model", model: event.model });
     }
     if (event.type === "stream_event") {
       const inner = record(event.event);
@@ -153,6 +159,8 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
         if (delta.type === "text_delta" && typeof delta.text === "string") {
           streamed.add(message);
           out.push({ type: "text", block, delta: delta.text });
+        } else if (delta.type === "thinking_delta" && typeof delta.thinking === "string") {
+          out.push({ type: "thinking", block, delta: delta.thinking });
         }
       }
       return out;
@@ -217,6 +225,8 @@ function codexParser(): (line: string) => HarnessEvent[] {
     switch (item.type) {
       case "agent_message":
         return done ? [{ type: "text", block: id, delta: str(item.text) }] : [];
+      case "reasoning":
+        return done ? [{ type: "thinking", block: id, delta: str(item.text) }] : [];
       case "command_execution":
         return done
           ? [{ type: "tool_end", id, isError: item.exit_code !== 0, output: outputText(item.aggregated_output) }]
@@ -244,11 +254,18 @@ function piParser(): (line: string) => HarnessEvent[] {
     const event = json(line);
     if (!event) return [];
     if (event.type === "session" && typeof event.id === "string") return [{ type: "session", id: event.id }];
-    if (event.type === "message_start") message += 1;
+    if (event.type === "message_start") {
+      message += 1;
+      const started = record(event.message);
+      if (started.role === "assistant" && typeof started.model === "string") {
+        return [{ type: "model", model: started.model, ...(typeof started.provider === "string" ? { provider: started.provider } : {}) }];
+      }
+    }
     if (event.type === "message_update") {
       const update = record(event.assistantMessageEvent);
       const block = `${message}:${String(update.contentIndex ?? 0)}`;
       if (update.type === "text_delta") return [{ type: "text", block, delta: str(update.delta) }];
+      if (update.type === "thinking_delta") return [{ type: "thinking", block, delta: str(update.delta) }];
     }
     if (event.type === "tool_execution_start") {
       return [{ type: "tool_start", id: str(event.toolCallId), name: str(event.toolName), args: event.args ?? {} }];
@@ -279,6 +296,7 @@ function opencodeParser(): (line: string) => HarnessEvent[] {
     }
     const part = record(event.part);
     if (event.type === "text") out.push({ type: "text", block: str(part.id), delta: str(part.text) });
+    if (event.type === "reasoning") out.push({ type: "thinking", block: str(part.id), delta: str(part.text) });
     if (event.type === "tool_use") {
       const state = record(part.state);
       const id = str(part.callID) || str(part.id);
@@ -304,6 +322,8 @@ function copilotParser(): (line: string) => HarnessEvent[] {
     switch (event.type) {
       case "assistant.message_delta":
         return [{ type: "text", block: str(data.messageId), delta: str(data.deltaContent) }];
+      case "assistant.reasoning_delta":
+        return [{ type: "thinking", block: str(data.reasoningId), delta: str(data.deltaContent) }];
       case "tool.execution_start":
         return [{ type: "tool_start", id: str(data.toolCallId), name: str(data.toolName), args: data.arguments ?? {} }];
       case "tool.execution_complete":
@@ -369,15 +389,18 @@ function writeJson(value: unknown): string {
 // `auto` model refuses an effort, opencode's variants are provider-specific,
 // and cursor-agent sets effort only inside a model name, so those keep the
 // owner's.
+const EFFORT = "low";
+
 const ROWS: readonly HarnessRow[] = [
   {
     id: "claude",
+    effort: EFFORT,
     // The prompt goes right after -p: --mcp-config takes a list.
     launch: (turn) => ({
       argv: [
         "claude", "-p", turn.prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
-        "--permission-mode", "bypassPermissions", "--effort", "low",
+        "--permission-mode", "bypassPermissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
         ...(turn.mcp.length > 0 ? ["--mcp-config", ".ghost-mcp.json"] : []),
       ],
@@ -387,11 +410,12 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "codex",
+    effort: EFFORT,
     launch: (turn) => ({
       argv: [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
-        "-c", 'model_reasoning_effort="low"',
+        "-c", `model_reasoning_effort="${EFFORT}"`,
         ...turn.mcp.flatMap(({ name, config }) => {
           const key = `mcp_servers.${tomlKey(name)}`;
           if (config.type === "http" || config.type === "sse") {
@@ -408,12 +432,13 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "grok",
+    effort: EFFORT,
     // Grok reads no AGENTS.md; --rules appends the persona to its system prompt.
     launch: (turn) => ({
       argv: [
         "grok", "-p", turn.prompt,
         "--output-format", "streaming-messages-json", "--include-partial-messages",
-        "--always-approve", "--rules", turn.persona, "--reasoning-effort", "low",
+        "--always-approve", "--rules", turn.persona, "--reasoning-effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
       ],
       files: turn.mcp.length > 0 ? { ".grok/config.toml": `${mcpServersToml(turn.mcp)}\n` } : {},
@@ -456,9 +481,10 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "pi",
+    effort: EFFORT,
     // pi has no MCP client; its own tools and extensions are the owner's.
     launch: (turn) => ({
-      argv: ["pi", "-p", "--mode", "json", "--thinking", "low", ...(turn.resume ? ["--continue"] : []), turn.prompt],
+      argv: ["pi", "-p", "--mode", "json", "--thinking", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),
     parser: piParser,
   },
@@ -471,9 +497,10 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "agy",
+    effort: EFFORT,
     launch: (turn) => ({
       argv: [
-        "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", "low",
+        "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
       ],
       files: turn.mcp.length > 0 ? { ".gemini/settings.json": writeJson(mcpServersJson(turn.mcp)) } : {},
@@ -495,9 +522,10 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "crush",
+    effort: EFFORT,
     // Crush keeps its sessions in the directory it runs in.
     launch: (turn) => ({
-      argv: ["crush", "run", "-q", "--reasoning-effort", "low", ...(turn.resume ? ["--continue"] : []), turn.prompt],
+      argv: ["crush", "run", "-q", "--reasoning-effort", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
       files: turn.mcp.length > 0
         ? { "crush.json": writeJson({ mcp: Object.fromEntries(turn.mcp.map(({ name, config }) => [name,
             config.type === "http" || config.type === "sse"
@@ -509,10 +537,11 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "muse",
+    effort: EFFORT,
     // `muse exec` starts fresh unless named; the first turn reports its session.
     launch: (turn) => ({
       argv: [
-        "muse", "exec", "--json", "--yolo", "--reasoning-effort", "low",
+        "muse", "exec", "--json", "--yolo", "--reasoning-effort", EFFORT,
         ...(turn.resume && turn.sessionId ? ["--session-id", turn.sessionId] : []),
         turn.prompt,
       ],

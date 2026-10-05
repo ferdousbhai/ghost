@@ -68,6 +68,16 @@ describe("parsers over recorded output", () => {
     expect(events.find((event) => event.type === "session")).toBeDefined();
   });
 
+  // Lines trimmed from 2026-10-04 probes; the recorded fixtures predate the fields.
+  it("claude and pi: the model, with pi's provider", () => {
+    const claude = (harnessRow("claude") ?? { parser: () => () => [] }).parser();
+    expect(claude(JSON.stringify({ type: "system", subtype: "init", session_id: "s1", model: "claude-opus-5-5" })))
+      .toEqual([{ type: "session", id: "s1" }, { type: "model", model: "claude-opus-5-5" }]);
+    const pi = (harnessRow("pi") ?? { parser: () => () => [] }).parser();
+    expect(pi(JSON.stringify({ type: "message_start", message: { role: "assistant", content: [], provider: "openai-codex", model: "gpt-6-astra" } })))
+      .toEqual([{ type: "model", model: "gpt-6-astra", provider: "openai-codex" }]);
+  });
+
   it("muse: run output deltas and a tool result", () => {
     const events = parse("muse", "muse.jsonl");
     expect(reply(events)).toContain("Muse");

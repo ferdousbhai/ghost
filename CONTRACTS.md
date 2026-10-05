@@ -380,7 +380,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated, historyTruncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
@@ -398,7 +398,8 @@ remote access is the tailnet viewer alone.
 
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
-emits `start`, then ordered `text_*`, `tool_execution_*`, `owner_message` (a queued
+emits `start`, then ordered `text_*`, `thinking` (the harness's reasoning, as
+far as it shows it; never logged), `tool_execution_*`, `owner_message` (a queued
 follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name`), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`

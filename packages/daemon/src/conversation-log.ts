@@ -30,7 +30,17 @@ export type LogEntry =
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
   /** `origin` is absent for an owner message. */
   | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" }
-  | { readonly type: "assistant"; readonly at: string; readonly harness: string; readonly content: readonly AssistantPart[]; readonly error?: string }
+  | {
+    readonly type: "assistant";
+    readonly at: string;
+    readonly harness: string;
+    readonly content: readonly AssistantPart[];
+    readonly error?: string;
+    /** The model, its provider, and the reasoning effort, as far as the harness said. */
+    readonly model?: string;
+    readonly provider?: string;
+    readonly effort?: string;
+  }
   | { readonly type: "command"; readonly at: string; readonly command: string; readonly output: string; readonly exitCode: number | null; readonly excluded: boolean }
   /**
    * A harness took over the conversation in `dir`; `session` is its own id
@@ -127,6 +137,10 @@ export interface LogState {
   readonly harnessDir: string | null;
   /** Whether that harness has run a turn in the conversation directory yet. */
   readonly harnessStarted: boolean;
+  /** What the bound harness's latest pass ran on; null once another harness binds. */
+  readonly model: string | null;
+  readonly provider: string | null;
+  readonly effort: string | null;
 }
 
 function firstLine(text: string): string | null {
@@ -144,6 +158,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
   let harnessSession: string | null = null;
   let harnessDir: string | null = null;
   let harnessStarted = false;
+  let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   for (const entry of entries) {
     switch (entry.type) {
       case "conversation":
@@ -160,12 +175,16 @@ export function logState(entries: readonly LogEntry[]): LogState {
         messageCount += 1;
         // A turn that failed before saying or doing anything left nothing to continue.
         if (entry.harness === harness && entry.content.length > 0) harnessStarted = true;
+        if (entry.harness === harness && (entry.model ?? entry.effort) !== undefined) {
+          ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
+        }
         break;
       case "harness":
         if (entry.harness !== harness || (entry.dir !== undefined && entry.dir !== harnessDir)) {
           harnessStarted = false;
           harnessSession = null;
         }
+        if (entry.harness !== harness) ran = { model: null, provider: null, effort: null };
         harness = entry.harness;
         harnessSession = entry.session ?? harnessSession;
         harnessDir = entry.dir ?? harnessDir;
@@ -174,7 +193,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
     }
   }
-  return { createdAt, title, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted };
+  return { createdAt, title, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
 }
 
 export interface TranscriptMessage {

@@ -101,6 +101,19 @@ TestCase {
         verify(findChild(header, "harnessError").visible);
     }
 
+    // The label says what the carrying agent last ran on, the way pi's footer
+    // does, and drops it for a pick that has not run yet.
+    function test_labelNamesTheModelTheAgentReported(): void {
+        Ghostd.sessions = [{ id: "a", title: "x", harness: "pi", model: "gpt-6-astra", provider: "openai-codex", effort: "low", messageCount: 2 }];
+        const header = createTemporaryObject(headerComponent, tc);
+        compare(findChild(header, "harnessLabel").text, "via pi  (openai-codex) gpt-6-astra • low ▾");
+        Ghostd.sessions = [{ id: "a", title: "x", harness: "codex", model: null, provider: null, effort: "low", messageCount: 2 }];
+        compare(findChild(header, "harnessLabel").text, "via codex  low ▾");
+        Ghostd.pendingHarnesses = ({ [Ghostd.conversationKey(Ghostd.activeGhost, "a")]: "claude" });
+        compare(findChild(header, "harnessLabel").text, "via claude ▾");
+        Ghostd.pendingHarnesses = ({});
+    }
+
     function test_choosingAnAgentPutsTheConversationRoute(): void {
         const header = openPicker(null);
         tc.click(header, "harnessChoose-pi");

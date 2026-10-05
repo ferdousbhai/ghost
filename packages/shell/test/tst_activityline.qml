@@ -37,8 +37,15 @@ TestCase {
         verify(line !== null);
         Ghostd.streaming = true;
 
-        Ghostd.activity = "thinking";
+        Ghostd.activity = "starting";
+        verify(line.phrase.startsWith("Starting"));
+
+        Ghostd.activity = "thinking:";
         compare(line.phrase, "Thinking");
+        Ghostd.activity = "thinking:**Reading the board**\n\nThe owner wants\n\n**Drafting a reply**\n\nShort";
+        compare(line.phrase, "Drafting a reply");
+        Ghostd.activity = "thinking:The owner asked about lunch.\nCheck the calendar first";
+        compare(line.phrase, "Check the calendar first");
 
         Ghostd.toolActivities = [tool("read", "running", { path: "docs/design.md" })];
         compare(line.phrase, "Reading docs/design.md");

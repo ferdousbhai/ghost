@@ -107,7 +107,8 @@ Item {
             objectName: "harnessLabel"
             anchors.verticalCenter: parent.verticalCenter
             visible: Ghostd.activeGhost !== ""
-            text: (Ghostd.currentHarness !== "" ? "via " + Ghostd.currentHarness : "harness: automatic") + " ▾"
+            text: (Ghostd.currentHarness === "" ? "harness: automatic"
+                : "via " + Ghostd.currentHarness + (Ghostd.currentModel !== "" ? "  " + Ghostd.currentModel : "")) + " ▾"
             color: harnessArea.containsMouse || root.pickerOpen ? Theme.foreground : Theme.foregroundDim
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSizeSmall

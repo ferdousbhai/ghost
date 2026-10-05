@@ -5,8 +5,8 @@
 // a turn.
 //
 // The ladder, in order: the tool call that is running, rendered by the same
-// ToolTrace the transcript cards use, then the plain state the runtime
-// reported. The ghost's own narration is not repeated here: it streams in the
+// ToolTrace the transcript cards use, then the newest line of the harness's
+// reasoning, then the plain state the runtime reported. The ghost's own narration is not repeated here: it streams in the
 // reading column, where the next text overwrites it (TurnBlocks.js). Nothing
 // rotates: a line changes when the work changes, and the ellipsis is what says
 // it is still going.
@@ -45,10 +45,22 @@ Item {
      * with the arguments that make it mean something.
      */
     function stateLine(activity: string): string {
-        if (activity === "thinking") return "Thinking";
+        if (activity.startsWith("thinking:")) return root.thoughtLine(activity.slice(9));
         if (activity === "waiting for ghostd") return "Waiting for ghostd";
+        if (activity === "starting") return Ghostd.currentHarness !== "" ? "Starting " + Ghostd.currentHarness : "Starting";
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         return "Working";
+    }
+
+    /**
+     * The newest line of the harness's reasoning: a `**heading**` when it
+     * writes summaries that way (codex, claude), else the last line begun.
+     */
+    function thoughtLine(thought: string): string {
+        const headings = thought.match(/\*\*([^*\n]+)\*\*/g);
+        if (headings) return headings[headings.length - 1].slice(2, -2).trim();
+        const lines = thought.split("\n").map(line => line.replace(/[*#_`]/g, "").trim()).filter(line => line !== "");
+        return lines.length > 0 ? lines[lines.length - 1] : "Thinking";
     }
 
     // The web original whispered its phrases in slate-300 at 80%. Light mode has

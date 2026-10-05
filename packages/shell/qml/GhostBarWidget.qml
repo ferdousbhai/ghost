@@ -38,7 +38,7 @@ Item {
 
     readonly property string status: !Ghostd.reachable
         ? "offline"
-        : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity : "thinking") : "idle")
+        : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity.replace(/^thinking:[^]*/, "thinking") : "thinking") : "idle")
 
     readonly property string tooltipText: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
         + " · " + root.status
