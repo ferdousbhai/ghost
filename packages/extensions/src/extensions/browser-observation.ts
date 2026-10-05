@@ -1,4 +1,6 @@
 /** Bounded, model-facing projections of browser observations. */
+import { isRecord } from "../record.js";
+
 export interface BackendJavascriptResult {
   readonly value: unknown;
   readonly type: string;
@@ -309,7 +311,7 @@ function projectEntries<T>(
       break;
     }
     const raw = rawEntries[index];
-    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    if (!isRecord(raw)) {
       omitted += 1;
       truncated = true;
       continue;

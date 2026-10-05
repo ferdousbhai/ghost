@@ -3,6 +3,7 @@ import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.j
 import { ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
+import type { RemoteStatus } from "../remote-serve.js";
 
 
 /** `ghost rename <new-name>`: move the whole ghost home under the new spelling. */
@@ -103,8 +104,8 @@ export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
     body = (await ctx.client.request("POST", "/api/remote", { enabled: action === "on" })).body;
   } else throw new ArgsError(`ghost remote does not know "${action}"; use status, on, or off.`);
   emit(ctx, body, (result) => {
-    const status = result as { enabled: boolean; url?: string | null; problem?: string | null };
-    return `${status.enabled ? "on" : "off"}${status.url ? ` ${status.url}` : ""}${status.problem ? ` (${status.problem})` : ""}\n`;
+    const status = result as Pick<RemoteStatus, "enabled" | "url" | "problem">;
+    return `${status.enabled ? "on" : "off"}${status.url ? ` ${status.url}` : ""}${status.problem ? ` (${status.problem.message})` : ""}\n`;
   });
   return 0;
 }

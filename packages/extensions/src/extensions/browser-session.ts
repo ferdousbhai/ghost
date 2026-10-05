@@ -9,6 +9,7 @@
 import { writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { GhostError } from "../errors.js";
+import { isRecord } from "../record.js";
 import {
   GhostBrowserError,
   withTimeout,
@@ -114,7 +115,7 @@ function boundedMatchString(value: unknown, maxChars: number): string {
 }
 
 function projectBrowserMatch(value: unknown): PageElementMatch | null {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  if (!isRecord(value)) return null;
   const match = value as Record<string, unknown>;
   const ref = typeof match.ref === "string" ? match.ref.trim() : "";
   if (

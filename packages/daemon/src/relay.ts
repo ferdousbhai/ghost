@@ -48,6 +48,7 @@ import {
   parseClientFrame,
 } from "./relay-protocol.js";
 import { relayToken } from "./token-store.js";
+import { errorMessage } from "@ghost/extensions";
 
 export const RELAY_PING_INTERVAL_MS = 20_000;
 export const RELAY_HELLO_TIMEOUT_MS = 5_000;
@@ -241,7 +242,7 @@ export class RelayHub implements RelayTransport {
         settle(
           disconnectedReply(
             op,
-            `The relay socket rejected the request: ${(error as Error).message}`,
+            `The relay socket rejected the request: ${errorMessage(error)}`,
           ),
         );
       }
@@ -275,7 +276,7 @@ export class RelayHub implements RelayTransport {
     try {
       token = this.#tokenOrMint();
     } catch (error) {
-      refuse(socket, 500, `The relay has no pairing token: ${(error as Error).message}`);
+      refuse(socket, 500, `The relay has no pairing token: ${errorMessage(error)}`);
       return;
     }
     const decision = authorizeRelayUpgrade(
@@ -421,7 +422,7 @@ export class RelayHub implements RelayTransport {
     try {
       token = this.#tokenOrMint();
     } catch (error) {
-      this.#dropPairing(RELAY_CLOSE_PAIRING_EXPIRED, `no relay token: ${(error as Error).message}`);
+      this.#dropPairing(RELAY_CLOSE_PAIRING_EXPIRED, `no relay token: ${errorMessage(error)}`);
       throw error;
     }
     clearTimeout(pairing.timer);
@@ -437,7 +438,7 @@ export class RelayHub implements RelayTransport {
       });
     } catch (error) {
       this.#logger.warn("relay pairing socket rejected the token", {
-        error: (error as Error).message,
+        error: errorMessage(error),
       });
     }
     this.#logger.info("relay paired", { code });

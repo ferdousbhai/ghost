@@ -8,6 +8,7 @@ import { EXIT_CODE } from "./client.js";
 import { ghostCli } from "./main.js";
 import { emit } from "./output.js";
 import type { CliContext, CliWritable, GhostCliOptions } from "./types.js";
+import { errorMessage } from "@ghost/extensions";
 
 class Sink implements CliWritable {
   value = "";
@@ -212,7 +213,7 @@ export async function smokeCommand(
     }
   } catch (error) {
     code = EXIT_CODE.failure;
-    const detail = (error as Error).message || daemonError.trim() || "daemon failed";
+    const detail = errorMessage(error) || daemonError.trim() || "daemon failed";
     report(step, false, detail, true);
   } finally {
     await stopProcess(child);

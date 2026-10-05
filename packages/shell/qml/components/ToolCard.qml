@@ -8,6 +8,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Qt5Compat.GraphicalEffects
 import "../services"
+import "Highlighter.js" as Highlighter
 import "ToolTrace.js" as ToolTrace
 
 Rectangle {
@@ -158,7 +159,7 @@ Rectangle {
                 id: chipLabel
                 anchors.centerIn: parent
                 width: parent.width - Theme.gap
-                text: Workbench.baseName(root.workbenchPath)
+                text: Highlighter.baseName(root.workbenchPath)
                 color: Theme.ghostAmber
                 font.family: Theme.fontFamilyMono
                 font.pixelSize: Theme.fontSizeSmall

@@ -7,6 +7,7 @@ import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
+import { errorMessage } from "@ghost/extensions";
 
 const exec = promisify(execFile);
 /** Enough trailing output to find a harness's limit message. */
@@ -133,7 +134,7 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     try {
       appendHandoff(path, receipt);
     } catch (error) {
-      ctx.runtime.stderr.write(`ghost: cannot record the handoff in ${path}: ${(error as Error).message}\n`);
+      ctx.runtime.stderr.write(`ghost: cannot record the handoff in ${path}: ${errorMessage(error)}\n`);
     }
   };
 

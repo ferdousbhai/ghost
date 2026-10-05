@@ -122,7 +122,7 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
   try {
     await closeDaemonResources(options);
   } catch (error) {
-    options.logger.warn("shutdown was not clean", { error: (error as Error).message });
+    options.logger.warn("shutdown was not clean", { error: errorMessage(error) });
   }
 }
 
@@ -203,7 +203,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     parsed = parseArgs(argv);
   } catch (error) {
-    process.stderr.write(`${(error as Error).message}\n\n${USAGE}`);
+    process.stderr.write(`${errorMessage(error)}\n\n${USAGE}`);
     return 2;
   }
   if (parsed.help) {
@@ -220,7 +220,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   try {
     config = loadConfig(parsed.overrides);
   } catch (error) {
-    logger.error("configuration is invalid", { error: (error as Error).message });
+    logger.error("configuration is invalid", { error: errorMessage(error) });
     return 1;
   }
 
@@ -231,7 +231,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   } catch (error) {
     logger.error("hook configuration is invalid", {
       path: hooksPath,
-      error: (error as Error).message,
+      error: errorMessage(error),
     });
     return 1;
   }
@@ -262,7 +262,7 @@ async function serveDaemon(
     await Promise.all(registry.list().map((ghost) => openGhostHome(ghost.dir).ensure()));
   } catch (error) {
     logger.error("could not ensure a ghost home layout", {
-      error: (error as Error).message,
+      error: errorMessage(error),
     });
     return 1;
   }
@@ -307,7 +307,7 @@ async function serveDaemon(
     logger.error("could not bind", {
       host: config.host,
       port: config.port,
-      error: (error as Error).message,
+      error: errorMessage(error),
     });
     await host.disposeAll();
     return 1;

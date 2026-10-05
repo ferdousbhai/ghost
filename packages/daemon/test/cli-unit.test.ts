@@ -219,6 +219,16 @@ describe("CLI API adaptation", () => {
     expect(paths.sort()).toEqual(["/api/ghosts", "/api/remote", "/api/status"]);
   });
 
+  it("ghost remote prints a problem's message, not the object", async () => {
+    const fetch: CliFetch = async () => jsonResponse({
+      enabled: false,
+      url: null,
+      problem: { code: "tailscale_stopped", message: "Tailscale is not running", action: "sudo tailscale up" },
+    });
+    const response = await runCli(["remote"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(response.stdout).toBe("off (Tailscale is not running)\n");
+  });
+
   it("reports the running daemon's version, commit, and source root", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;

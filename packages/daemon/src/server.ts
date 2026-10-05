@@ -34,7 +34,7 @@ import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
 import type { UpdateAvailable } from "./update-check.js";
 import type { SessionHost } from "./session-host.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage, isRecord } from "@ghost/extensions";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -272,7 +272,7 @@ async function readJsonObjectBody(
   maxBytes: number,
 ): Promise<Record<string, unknown>> {
   const body = await readJsonBody(request, maxBytes);
-  if (body === null || typeof body !== "object" || Array.isArray(body)) {
+  if (!isRecord(body)) {
     throw new GhostError("invalid_request", "Request body must be a JSON object.", 400);
   }
   return body as Record<string, unknown>;
@@ -409,7 +409,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     try {
       replaced = await hooks.replaceConfig(document);
     } catch (error) {
-      errorResponse(response, 400, "invalid_request", (error as Error).message);
+      errorResponse(response, 400, "invalid_request", errorMessage(error));
       return;
     }
     jsonResponse(response, 200, { path: replaced.path, document: replaced.document });
@@ -798,7 +798,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     // Fail before any byte of the stream, so the client sees a real status
     // code rather than an SSE error event it has to unwrap.
     const ghost = options.registry.get(ghostName);
-    const parsed = parseTurnRequest(await readJsonBody(request, maxBodyBytes));
+    const parsed = parseTurnRequest(await readJsonObjectBody(request, maxBodyBytes));
     const admission = await options.host.admitTurn(ghost.name, {
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
@@ -1040,7 +1040,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         if (response.headersSent) {
           logger.error("request failed after headers were sent", {
             path: url.pathname,
-            error: (error as Error).message,
+            error: errorMessage(error),
           });
           if (!response.writableEnded) response.end();
           return;
@@ -1055,7 +1055,7 @@ export function createDaemonServer(options: ServerOptions): Server {
         }
         logger.error("request failed", {
           path: url.pathname,
-          error: (error as Error).message,
+          error: errorMessage(error),
         });
         errorResponse(response, 500, "internal_error", "The daemon failed to handle the request.");
       }

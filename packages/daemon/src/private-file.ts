@@ -107,6 +107,13 @@ export function readPrivateFileText(path: string, probe?: PrivateReadProbe): str
   }
 }
 
+/** A read that failed only because the file is not there. */
+export function isMissingPrivateFile(error: unknown): boolean {
+  return error instanceof PrivateReadError
+    && error.refusal === "open"
+    && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
 /**
  * Replace `path` with `value` as pretty JSON, private (0600), through a
  * per-writer temporary file and one rename, so a reader never sees a torn

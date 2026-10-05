@@ -14,6 +14,7 @@ import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
+import { errorMessage } from "@ghost/extensions";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
@@ -35,7 +36,7 @@ function readCommandHooksDocument(path: string): unknown {
   try {
     return JSON.parse(readFileSync(path, "utf8"));
   } catch (error) {
-    throw new Error(`Cannot load Ghost hooks from ${path}: ${(error as Error).message}`);
+    throw new Error(`Cannot load Ghost hooks from ${path}: ${errorMessage(error)}`);
   }
 }
 

@@ -3,6 +3,7 @@ import type { ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { emit, relativeTime, table } from "./output.js";
 import type { CliContext } from "./types.js";
+import { errorMessage } from "@ghost/extensions";
 
 function windows(harness: Harness): string {
   if (!harness.usage) return "no usage record";
@@ -18,7 +19,7 @@ export async function harnessesCommand(_parsed: ParsedCliArgs, ctx: CliContext):
   try {
     report = await readHarnessReport(ctx.runtime.env, ctx.runtime.home);
   } catch (error) {
-    throw new CliError(EXIT_CODE.failure, `cannot list harnesses: ${(error as Error).message}`);
+    throw new CliError(EXIT_CODE.failure, `cannot list harnesses: ${errorMessage(error)}`);
   }
   emit(ctx, report, (body) => {
     const rows = body.harnesses.map((harness) => [

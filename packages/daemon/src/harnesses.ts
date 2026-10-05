@@ -121,7 +121,8 @@ function weeklyAllowance(window: UsageWindow, now: number): number | null {
   return 1 - left / WEEK_MS + WEEKLY_PACE_SLACK;
 }
 
-function which(name: string, env: NodeJS.ProcessEnv): string | null {
+/** The executable `name` resolves to on `env.PATH`, or null. */
+export function which(name: string, env: NodeJS.ProcessEnv): string | null {
   for (const dir of (env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
     try {

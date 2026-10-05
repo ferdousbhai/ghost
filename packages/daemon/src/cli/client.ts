@@ -105,7 +105,7 @@ export class DaemonClient {
     try {
       config = loadConfig({ env: runtime.env, home: runtime.home });
     } catch (error) {
-      throw new CliError(EXIT_CODE.usage, `invalid daemon configuration: ${(error as Error).message}`);
+      throw new CliError(EXIT_CODE.usage, `invalid daemon configuration: ${errorMessage(error)}`);
     }
     const host = config.host === "::1" ? "[::1]" : config.host;
     this.baseUrl = `http://${host}:${config.port}`;

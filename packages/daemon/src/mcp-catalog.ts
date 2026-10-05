@@ -5,6 +5,7 @@ import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.
 import { isRecord } from "@ghost/extensions";
 import { mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
+  isMissingPrivateFile,
   PrivateReadError,
   readPrivateFileText,
   type PrivateReadProbe,
@@ -101,11 +102,7 @@ function readMcpFile(home: string, probe?: PrivateReadProbe): McpFileRead {
   try {
     text = readPrivateFileText(join(home, MCP_FILE), probe);
   } catch (error) {
-    if (error instanceof PrivateReadError
-      && error.refusal === "open"
-      && (error.cause as NodeJS.ErrnoException).code === "ENOENT") {
-      return { rows: [], skipped: [] };
-    }
+    if (isMissingPrivateFile(error)) return { rows: [], skipped: [] };
     return unreadable(error instanceof PrivateReadError && error.refusal === "too_large"
       ? "MCP config exceeds the 1 MiB limit"
       : error instanceof PrivateReadError && error.refusal === "encoding"

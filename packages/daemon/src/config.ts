@@ -9,7 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
-import { xdgBaseDir } from "@ghost/extensions";
+import { errorMessage, xdgBaseDir } from "@ghost/extensions";
 import { isRecord } from "@ghost/extensions";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & {
@@ -86,15 +86,15 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     text = readFileSync(path, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw new Error(`Cannot read ${path}: ${(error as Error).message}`);
+    throw new Error(`Cannot read ${path}: ${errorMessage(error)}`);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new Error(`${path} is not valid JSON: ${(error as Error).message}`);
+    throw new Error(`${path} is not valid JSON: ${errorMessage(error)}`);
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+  if (!isRecord(parsed)) {
     throw new Error(`${path} must contain a JSON object.`);
   }
   const file = parsed as Record<string, unknown>;
@@ -120,7 +120,7 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     config.offline = file.offline;
   }
   if (file.remote !== undefined) {
-    if (file.remote === null || typeof file.remote !== "object" || Array.isArray(file.remote)) {
+    if (!isRecord(file.remote)) {
       throw new Error(`${path}: "remote" must be a JSON object.`);
     }
     const raw = file.remote as Record<string, unknown>;

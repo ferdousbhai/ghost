@@ -35,7 +35,7 @@ export async function ghostsCommand(
     }
     const { name } = await resolveGhost(ctx.client, ctx.runtime, requested);
     await listSessions(ctx.client, name);
-    const path = writeDefaultGhost(ctx.runtime, name);
+    const path = await writeDefaultGhost(ctx.runtime, name);
     emit(ctx, { ghost: name, path }, () => `${name}\n`);
     return 0;
   }

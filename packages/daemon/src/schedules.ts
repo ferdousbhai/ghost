@@ -19,9 +19,9 @@
  * same rule screenshot retention follows.
  */
 import { readdir, unlink } from "node:fs/promises";
-import { accessSync, constants } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { isValidGhostName } from "./ghosts.js";
+import { which } from "./harnesses.js";
 import {
   commandRunner,
   type CommandResult,
@@ -82,16 +82,7 @@ export function resolveScheduleUnitDirectory(
  * consulted first.
  */
 export function ghostCliPath(env: NodeJS.ProcessEnv = process.env): string {
-  for (const directory of (env.PATH ?? "").split(":").filter(Boolean)) {
-    const candidate = join(directory, "ghost");
-    try {
-      accessSync(candidate, constants.X_OK);
-      return candidate;
-    } catch {
-      // Not here; try the next PATH entry.
-    }
-  }
-  return "/usr/bin/ghost";
+  return which("ghost", env) ?? "/usr/bin/ghost";
 }
 
 export const SCHEDULED_WORK_POLICY = [

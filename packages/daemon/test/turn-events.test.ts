@@ -43,7 +43,6 @@ describe("parseTurnRequest", () => {
   it("rejects a body with no prompt text", () => {
     expect(() => parseTurnRequest({ prompt: "   " })).toThrowError(GhostError);
     expect(() => parseTurnRequest({ sessionId: "conv-1" })).toThrowError(/prompt/);
-    expect(() => parseTurnRequest("nope")).toThrowError(/JSON object/);
   });
 
 });

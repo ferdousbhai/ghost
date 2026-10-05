@@ -12,6 +12,7 @@ import { isGhostHome } from "./ghosts.js";
 import { eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import { harnessRow, SUPPORTED_HARNESSES, type HarnessRow } from "./harness-table.js";
+import { errorMessage } from "@ghost/extensions";
 
 export const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
 export const HOOK_COMPLETE_TIMEOUT_MS = 180_000;
@@ -95,7 +96,7 @@ export function parseHookCompleteInput(raw: string): HookCompleteInput {
   try {
     value = JSON.parse(raw);
   } catch (error) {
-    throw new Error(`stdin is not valid JSON: ${(error as Error).message}`);
+    throw new Error(`stdin is not valid JSON: ${errorMessage(error)}`);
   }
   const input = value as Partial<HookCompleteInput> | null;
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("stdin must contain a JSON object.");
@@ -116,7 +117,7 @@ export async function hookCompleteCommand(argv: string[]): Promise<number> {
     process.stdout.write(`${JSON.stringify({ text })}\n`);
     return 0;
   } catch (error) {
-    process.stderr.write(`${(error as Error).message}\n`);
+    process.stderr.write(`${errorMessage(error)}\n`);
     return 1;
   }
 }

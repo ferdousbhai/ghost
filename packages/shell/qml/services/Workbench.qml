@@ -100,12 +100,6 @@ Singleton {
         return segments.length === 0 ? "" : "/" + segments.join("/");
     }
 
-    function baseName(path: string): string {
-        const value = String(path || "");
-        const cut = value.lastIndexOf("/");
-        return cut < 0 ? value : value.slice(cut + 1);
-    }
-
     //
     // Three constraints, all measured against Quickshell 0.3.0 rather than
     // assumed, because every one of them is silent when you get it wrong:

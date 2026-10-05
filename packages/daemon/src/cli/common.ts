@@ -1,11 +1,12 @@
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync } from "node:fs";
+import { writePrivateJsonAtomic } from "../private-file.js";
 import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
 import type { CliContext, CliRuntime, CliStdin } from "./types.js";
-import { xdgBaseDir } from "@ghost/extensions";
+import { errorMessage, xdgBaseDir } from "@ghost/extensions";
 
 export async function stdinText(stdin: CliStdin): Promise<string> {
   if (typeof stdin === "string") return stdin;
@@ -32,20 +33,16 @@ export function readDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): str
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     if (error instanceof SyntaxError) throw new CliError(EXIT_CODE.usage, `${path} is not valid JSON`);
-    throw new CliError(EXIT_CODE.failure, `cannot read ${path}: ${(error as Error).message}`);
+    throw new CliError(EXIT_CODE.failure, `cannot read ${path}: ${errorMessage(error)}`);
   }
 }
 
-export function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">, ghost: string): string {
+export async function writeDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">, ghost: string): Promise<string> {
   const path = cliConfigPath(runtime);
   const directory = dirname(path);
   mkdirSync(directory, { recursive: true, mode: 0o700 });
   chmodSync(directory, 0o700);
-  const temporary = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporary, `${JSON.stringify({ ghost }, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  chmodSync(temporary, 0o600);
-  renameSync(temporary, path);
-  chmodSync(path, 0o600);
+  await writePrivateJsonAtomic(path, { ghost });
   return path;
 }
 

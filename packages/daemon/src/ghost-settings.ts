@@ -7,7 +7,7 @@ import { existsSync } from "node:fs";
 import { isMap, parse as parseYaml, parseDocument } from "yaml";
 import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "@ghost/extensions";
-import { MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
+import { isMissingPrivateFile, MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
 
 export interface GhostSettings {
   getString(path: string): string | undefined;
@@ -37,11 +37,8 @@ export function loadGhostSettings(homeDir: string): GhostSettings {
   try {
     text = readPrivateFileText(paths.settingsFile);
   } catch (error) {
+    if (isMissingPrivateFile(error)) return ghostSettingsFrom({});
     if (error instanceof PrivateReadError) {
-      if (error.refusal === "open"
-        && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT") {
-        return ghostSettingsFrom({});
-      }
       if (error.refusal === "too_large") {
         throw new Error(
           `Ghost settings file ${JSON.stringify(paths.settingsFile)} exceeds its ${MAX_PRIVATE_FILE_BYTES}-byte limit.`,

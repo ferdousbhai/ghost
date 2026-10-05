@@ -13,6 +13,7 @@ import {
   commandRunner,
   readTailscaleNode,
 } from "./tailscale-identity.js";
+import { errorMessage } from "@ghost/extensions";
 
 export interface RemoteProblem {
   code: string;
@@ -140,7 +141,7 @@ export class RemoteServe {
     } catch (error) {
       return isMissingBinary(error)
         ? unavailable({ ...off, tailscale: { ...off.tailscale, installed: false } }, TAILSCALE_MISSING)
-        : unavailable(off, { code: "tailscale_stopped", message: firstLine((error as Error).message) });
+        : unavailable(off, { code: "tailscale_stopped", message: firstLine(errorMessage(error)) });
     }
     const known: RemoteStatus = {
       ...off,
@@ -200,7 +201,7 @@ export class RemoteServe {
     } catch (error) {
       throw new Error(isMissingBinary(error)
         ? "qrencode is required to create the remote-access QR code."
-        : `qrencode failed: ${firstLine((error as Error).message)}`);
+        : `qrencode failed: ${firstLine(errorMessage(error))}`);
     }
     if (result.code !== 0) throw new Error(`qrencode failed: ${firstLine(result.stderr) || result.code}`);
     return result.stdout;
@@ -212,14 +213,14 @@ export class RemoteServe {
     try {
       result = await this.run(["serve", "status", "--json"]);
     } catch (error) {
-      return { ...known, problem: serveFailed(firstLine((error as Error).message)) };
+      return { ...known, problem: serveFailed(firstLine(errorMessage(error))) };
     }
     if (result.code !== 0) return { ...known, problem: serveFailed(detail(result)) };
     let scheme: Scheme | null;
     try {
       scheme = servedScheme(JSON.parse(result.stdout), this.target);
     } catch (error) {
-      return { ...known, problem: serveFailed(`tailscale serve status returned invalid JSON: ${(error as Error).message}`) };
+      return { ...known, problem: serveFailed(`tailscale serve status returned invalid JSON: ${errorMessage(error)}`) };
     }
     return {
       ...known,
@@ -239,7 +240,7 @@ export class RemoteServe {
     } catch (error) {
       return {
         ...current,
-        problem: isMissingBinary(error) ? TAILSCALE_MISSING : serveFailed(firstLine((error as Error).message)),
+        problem: isMissingBinary(error) ? TAILSCALE_MISSING : serveFailed(firstLine(errorMessage(error))),
       };
     }
     if (result.code !== 0) {

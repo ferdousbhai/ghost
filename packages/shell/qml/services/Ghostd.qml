@@ -1827,9 +1827,7 @@ Singleton {
             if (draft === null || session.id === root.currentSessionId)
                 draft = session;
             else if (draft.id !== root.currentSessionId) {
-                const whenA = Date.parse(draft.updatedAt || draft.createdAt || "") || 0;
-                const whenB = Date.parse(session.updatedAt || session.createdAt || "") || 0;
-                if (whenB > whenA) draft = session;
+                if (root.sessionTime(session) > root.sessionTime(draft)) draft = session;
             }
         }
         if (draft) kept.push(draft);
@@ -1841,10 +1839,13 @@ Singleton {
             const pinnedA = a.pinned === true ? 1 : 0;
             const pinnedB = b.pinned === true ? 1 : 0;
             if (pinnedA !== pinnedB) return pinnedB - pinnedA;
-            const whenA = Date.parse(a.updatedAt || a.createdAt || "") || 0;
-            const whenB = Date.parse(b.updatedAt || b.createdAt || "") || 0;
-            return whenB - whenA;
+            return root.sessionTime(b) - root.sessionTime(a);
         });
+    }
+
+    /** When a conversation last changed, for ordering; 0 when it never says. */
+    function sessionTime(session: var): real {
+        return Date.parse(session.updatedAt || session.createdAt || "") || 0;
     }
 
     /** Make one conversation the ghost's active one, clearing everything the last one owned. */

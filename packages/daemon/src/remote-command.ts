@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { loadConfig } from "./config.js";
 import { RemoteServe, type RemoteStatus } from "./remote-serve.js";
 import type { CommandRunner } from "./tailscale-identity.js";
+import { errorMessage } from "@ghost/extensions";
 
 export interface RemoteCommandOptions {
   env?: NodeJS.ProcessEnv;
@@ -49,7 +50,7 @@ export async function remoteCommand(
     else stdout(statusScreen(status));
     return status.problem ? 1 : 0;
   } catch (error) {
-    stderr(`ghostd remote: ${(error as Error).message}\n`);
+    stderr(`ghostd remote: ${errorMessage(error)}\n`);
     return 1;
   }
 }

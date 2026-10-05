@@ -6,7 +6,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { GhostError } from "./ghosts.js";
-import { PrivateReadError, readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
+import { isMissingPrivateFile, PrivateReadError, readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 
@@ -21,12 +21,8 @@ function readMCPConfigFile(filePath: string): MCPConfigFile {
   try {
     text = readPrivateFileText(filePath);
   } catch (error) {
-    if (error instanceof PrivateReadError && error.refusal === "open") {
-      const cause = error.cause as NodeJS.ErrnoException;
-      if (cause.code === "ENOENT") return { mcpServers: {} };
-      throw cause;
-    }
-    throw error;
+    if (isMissingPrivateFile(error)) return { mcpServers: {} };
+    throw error instanceof PrivateReadError && error.refusal === "open" ? error.cause : error;
   }
   return JSON.parse(text) as MCPConfigFile;
 }
