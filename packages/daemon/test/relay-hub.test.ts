@@ -110,7 +110,7 @@ async function connectExtension(options: {
       browser: "Chromium/141",
     }));
     // Let the hub process the hello before a test asks about the peer.
-    await waitFor(() => hub.peer !== undefined, 2_000).catch(() => undefined);
+    await waitFor(() => hub.status().peer !== null, 2_000).catch(() => undefined);
   }
   return socket;
 }
@@ -285,7 +285,7 @@ describe("pairing", () => {
   it("accepts the extension and reports who connected", async () => {
     await connectExtension();
     expect(hub.connected).toBe(true);
-    expect(hub.peer).toBe("Chromium/141 via fake-extension/1");
+    expect(hub.status().peer).toBe("Chromium/141 via fake-extension/1");
     expect(hub.status()).toMatchObject({ connected: true, peer: "Chromium/141 via fake-extension/1" });
   });
 
@@ -335,7 +335,7 @@ describe("pairing", () => {
 
     expect(await silentClosed).toBe(1006);
     expect(hub.connected).toBe(true);
-    expect(hub.peer).toBe("Chromium/141 via fake-extension/1");
+    expect(hub.status().peer).toBe("Chromium/141 via fake-extension/1");
     const replacementClosed = new Promise<number>((resolve) => replacement.once("close", resolve));
     await hub.close();
     expect(await replacementClosed).toBe(1001);

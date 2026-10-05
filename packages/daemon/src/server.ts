@@ -30,7 +30,7 @@ import {
   SSE_KEEPALIVE_INTERVAL_MS,
   type TurnEvent,
 } from "./turn-events.js";
-import { attachRelay, createRelayHub, type RelayHub } from "./relay.js";
+import { attachRelay, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
 import type { UpdateAvailable } from "./update-check.js";
 import type { SessionHost } from "./session-host.js";
@@ -47,11 +47,8 @@ export interface ServerOptions {
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
-  /**
-   * The browser relay. Omitted, one is built from the XDG token file unless
-   * `GHOSTD_RELAY=off`; pass `null` to leave the endpoint out entirely.
-   */
-  relay?: RelayHub | null;
+  /** The browser relay; without one the endpoint is left out. */
+  relay?: RelayHub;
   /**
    * The bearer token every `/api` route but `GET /api/relay/status` requires.
    *
@@ -86,11 +83,6 @@ const DEFAULT_MAX_BODY_BYTES = 1_048_576;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
-/** What `close()` needs from a server `createDaemonServer` built: streams to end and the relay to hang up. */
-const serverState = new WeakMap<Server, {
-  liveStreams: Set<ServerResponse>;
-  relay: RelayHub | null | undefined;
-}>();
 
 /**
  * Same-origin is the intended deployment (the Omarchy webapp wraps
@@ -301,14 +293,12 @@ function resolveApiToken(
   return minted.token;
 }
 
-export function createDaemonServer(options: ServerOptions): Server {
+/** The server, plus what `close()` needs: streams to end and the relay to hang up. */
+function createDaemonServer(options: ServerOptions): { server: Server; liveStreams: Set<ServerResponse>; relay: RelayHub | undefined } {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const liveStreams = new Set<ServerResponse>();
-  // `undefined` means "decide for me"; `null` means "no relay on this server".
-  const relay = options.relay === undefined
-    ? createRelayHub({ ...(options.logger ? { logger: options.logger } : {}) })
-    : options.relay;
+  const relay = options.relay;
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
   const remoteServe = options.remoteServe;
@@ -1082,13 +1072,7 @@ export function createDaemonServer(options: ServerOptions): Server {
     server.on("upgrade", (_request, socket) => socket.destroy());
   }
 
-  // Exposed so close() can end streams that would otherwise hold shutdown open.
-  serverState.set(server, { liveStreams, relay });
-  return server;
-}
-
-function relayHubOf(server: Server): RelayHub | undefined {
-  return serverState.get(server)?.relay ?? undefined;
+  return { server, liveStreams, relay };
 }
 
 export async function startDaemonServer(
@@ -1096,7 +1080,7 @@ export async function startDaemonServer(
 ): Promise<ListeningServer> {
   const address = options.address ?? "127.0.0.1";
   assertLoopback(address);
-  const server = createDaemonServer(options);
+  const { server, liveStreams, relay } = createDaemonServer(options);
   await new Promise<void>((resolvePromise, rejectPromise) => {
     server.once("error", rejectPromise);
     server.listen(options.port, address, () => {
@@ -1105,7 +1089,6 @@ export async function startDaemonServer(
     });
   });
   const bound = server.address() as AddressInfo;
-  const relay = relayHubOf(server);
   return {
     server,
     port: bound.port,
@@ -1116,7 +1099,7 @@ export async function startDaemonServer(
       // an open connection, and `server.close()` waits for those.
       await relay?.close();
       await new Promise<void>((resolvePromise, rejectPromise) => {
-        for (const stream of serverState.get(server)?.liveStreams ?? []) {
+        for (const stream of liveStreams) {
           if (!stream.writableEnded) stream.end();
         }
         server.close((error) => {

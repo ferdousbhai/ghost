@@ -95,8 +95,6 @@ export interface SessionHostOptions {
   scheduleCliPath?: string;
   runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
-  /** Test seam for retiring the process-wide browser entry before a home move. */
-  browserSessionClose?: (homeDir: string) => Promise<void>;
   logger?: Logger;
   extensionOptions?: GhostExtensionOptions;
   hooks?: GhostHookRunner;
@@ -241,7 +239,6 @@ export class SessionHost {
   private readonly scheduleCliPath: string;
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
-  private readonly browserSessionClose: (homeDir: string) => Promise<void>;
   private readonly logger: Logger;
   private readonly extensionOptions: GhostExtensionOptions;
   private readonly hooks: GhostHookRunner;
@@ -268,8 +265,7 @@ export class SessionHost {
     this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
-    this.browserSessionClose = options.browserSessionClose ?? closeBrowserSession;
-    this.logger = options.logger ?? silentLogger;
+        this.logger = options.logger ?? silentLogger;
     this.extensionOptions = options.extensionOptions ?? {};
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
@@ -701,7 +697,7 @@ export class SessionHost {
     const account = this.accountEnv(row.id);
     const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost, id)]);
     await this.prepareDirectory(ghost, dir, persona);
-    const launch = row.launch({ ...turn, persona, dir, mcp });
+    const launch = row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch.files);
 
     const content: AssistantPart[] = [];
@@ -948,7 +944,6 @@ export class SessionHost {
     const id = sessionId ? requireConversationId(sessionId) : null;
     try {
       const result = await tool.execute((args ?? {}) as never, signal, {
-        cwd: id ? conversationDir(ghostPaths(ghost.dir).sessionDir, id) : this.ownerHome,
         caller: caller ?? (id ? `conversation ${id}` : "a delegated run"),
       });
       return { content: result.content as SessionToolResult["content"], isError: false };
@@ -1154,7 +1149,7 @@ export class SessionHost {
   /** Release what the daemon holds under a home that is about to move. */
   private async quiesce(ghost: Ghost, outcome: "deleted" | "renamed"): Promise<void> {
     try {
-      await this.browserSessionClose(ghost.dir);
+      await closeBrowserSession(ghost.dir);
     } catch {
       throw new GhostError("browser_cleanup_pending", "The ghost's browser session did not close. Restore the browser relay and retry.", 503);
     }

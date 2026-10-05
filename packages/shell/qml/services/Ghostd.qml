@@ -395,7 +395,6 @@ Singleton {
     property bool hudChatFocused: false
 
     property alias transcript: transcriptModel
-    /** True when the open conversation's stored history has an unavailable prefix. */
     property bool streaming: false
     property string activity: ""
     property var followUpQueue: []
@@ -541,11 +540,6 @@ Singleton {
     }
 
     function reloadToken(): string {
-        if (root.tokenReloadOverride) {
-            const overridden = root.tokenReloadOverride();
-            root.apiToken = overridden ? String(overridden).trim() : "";
-            return root.apiToken;
-        }
         apiTokenFile.reload();
         const text = apiTokenFile.text();
         root.apiToken = text ? text.trim() : "";

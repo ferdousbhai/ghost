@@ -300,7 +300,6 @@ export async function startRealDaemonHarness(
       mcp,
       port: 0,
       apiToken: API_TOKEN,
-      relay: null,
     });
 
     let closing: Promise<void> | null = null;

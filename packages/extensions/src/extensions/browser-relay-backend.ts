@@ -164,13 +164,11 @@ export interface RelayRequestOptions {
 
 /**
  * The daemon's WebSocket client, reduced to what a backend needs. Keeping this to
- * three members is what keeps `packages/extensions` free of the daemon.
+ * two members is what keeps `packages/extensions` free of the daemon.
  */
 export interface RelayTransport {
   /** Whether an extension is connected right now. Must be synchronous and cheap. */
   readonly connected: boolean;
-  /** Who is on the other end, for messages: `Chromium 141 on ghost-tab 42`. */
-  readonly peer: string | undefined;
   /** Browser replies, including failures, resolve; local caller cancellation rejects. */
   request(
     op: RelayOp,

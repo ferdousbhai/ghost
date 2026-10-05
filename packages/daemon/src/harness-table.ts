@@ -27,8 +27,6 @@ export interface HarnessTurnInput {
   readonly sessionId: string | null;
   /** The rendered ghost system prompt; most rows read it from `AGENTS.md`. */
   readonly persona: string;
-  /** The conversation's working directory. */
-  readonly dir: string;
   readonly mcp: readonly HarnessMcpServer[];
 }
 

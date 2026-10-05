@@ -21,14 +21,11 @@ export interface GhostToolResult<TDetails = unknown> {
 }
 
 /**
- * What a tool execution can see of its conversation. `cwd` is the session's
- * current working directory, which for a ghost session is the ghost home
- * unless the model has changed it. `caller` names who acts — the session id
- * in-session, a delegated run's own id over `ghost mcp serve` — and keys the
- * desktop lease.
+ * What a tool execution can see of its call. `caller` names who acts — the
+ * conversation, or a delegated run's own id over `ghost mcp serve` — and keys
+ * the desktop lease.
  */
 export interface GhostToolContext {
-  readonly cwd: string;
   readonly caller?: string | undefined;
 }
 

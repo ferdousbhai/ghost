@@ -38,7 +38,6 @@ async function setup(): Promise<string> {
     host,
     port: 0,
     apiToken: null,
-    relay: null,
   });
   return `http://127.0.0.1:${listening.port}`;
 }

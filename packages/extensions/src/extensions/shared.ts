@@ -1,34 +1,18 @@
-import type { GhostToolContext, GhostToolResult } from "../extension-api.js";
-import { GhostError } from "../errors.js";
+import type { GhostToolResult } from "../extension-api.js";
 import { GhostHome, openGhostHome } from "../home.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
 
 export interface GhostExtensionOptions {
   /**
-   * The ghost home this extension serves; a string is a directory path.
-   * Omitted, every call resolves it from the session's own `cwd`. One process
-   * hosts several ghosts at once, so the home may never come from module scope
-   * or a process-global env var — both are shared across those sessions.
+   * The ghost home this extension serves; a string is a directory path. One
+   * process hosts several ghosts at once, so the home may never come from
+   * module scope or a process-global env var — both are shared across them.
    */
-  readonly home?: GhostHome | string;
+  readonly home: GhostHome | string;
 }
 
-export type CwdContext = Pick<GhostToolContext, "cwd">;
-
-export function resolveHome(
-  options: GhostExtensionOptions,
-  ctx: CwdContext,
-): GhostHome {
-  const configured = options.home;
-  if (configured instanceof GhostHome) return configured;
-  if (typeof configured === "string") return openGhostHome(configured);
-  if (!ctx.cwd) {
-    throw new GhostError(
-      "invalid_path",
-      "No ghost home: the session has no cwd and none was configured.",
-    );
-  }
-  return openGhostHome(ctx.cwd);
+export function resolveHome(options: GhostExtensionOptions): GhostHome {
+  return options.home instanceof GhostHome ? options.home : openGhostHome(options.home);
 }
 
 /** A plain text tool result. Tool *failures* throw; they never return here. */

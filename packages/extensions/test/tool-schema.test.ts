@@ -17,9 +17,7 @@ describe("stringEnum", () => {
 
   it("keeps every registered string enum strict-provider compatible", async () => {
     const harness = await loadExtension(
-      createGhostExtension({ backend: relayBackend({}), desktop: { listTools: async () => [], callTool: async () => ({ content: [] }) } }),
-      "/tmp/ghost-tool-schema-test",
-    );
+      createGhostExtension({ home: "/tmp/ghost-tool-schema-test", backend: relayBackend({}), desktop: { listTools: async () => [], callTool: async () => ({ content: [] }) } }));
     const expected = [
       [GHOST_BROWSER, "action", BROWSER_ACTIONS],
     ] as const;

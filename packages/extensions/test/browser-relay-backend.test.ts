@@ -41,7 +41,6 @@ interface Sent {
 
 class ScriptedTransport implements RelayTransport {
   connected = true;
-  peer: string | undefined = "Chromium/141 via ghost-relay/0.0.1";
   readonly sent: Sent[] = [];
   replies = new Map<RelayOp, RelayReply | ((args: Record<string, unknown>) => RelayReply)>();
   dropOn = new Set<RelayOp>();
@@ -151,10 +150,10 @@ describe("the protocol constants are a contract", () => {
     const home = await mkdtemp(join(tmpdir(), "ghost-relay-desc-"));
     const harness = await loadExtension(
       createBrowserExtension({
+        home,
         backend: relayBackend({ transport: new ScriptedTransport() }),
         browser: { idleTimeoutMs: 0 },
       }),
-      home,
     );
     const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
     expect(description).toMatch(/javascript/i);

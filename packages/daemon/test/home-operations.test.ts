@@ -87,7 +87,6 @@ describe("file work during whole-home moves", () => {
       host,
       mcp,
       port: 0,
-      relay: null,
       apiToken: null,
     });
     const base = `http://127.0.0.1:${listening.port}`;

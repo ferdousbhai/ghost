@@ -79,7 +79,6 @@ async function serve(
     host,
     mcp,
     port: 0,
-    relay: null,
     // Routing and streaming are the subject here; auth has its own file.
     apiToken: null,
     ...(serverOptions.maxBodyBytes === undefined

@@ -8,15 +8,13 @@
  * status payload is the one place a token could accidentally be published to an
  * unauthenticated route.
  */
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { mkdtemp, rm } from "node:fs/promises";
-import { createServer, request } from "node:http";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { createDaemonServer, startDaemonServer, type ListeningServer } from "../src/server.js";
+import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RelayHub } from "../src/relay.js";
 import {
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
@@ -25,7 +23,6 @@ import {
   RELAY_SUBPROTOCOL,
   RELAY_TOKEN_SUBPROTOCOL_PREFIX,
 } from "@ghost/extensions";
-import { GhostRegistry } from "../src/ghosts.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, type TempGhosts } from "./helpers/fixtures.js";
 
@@ -44,7 +41,7 @@ afterEach(async () => {
   temp = null;
 });
 
-async function serve(relay: RelayHub | null | undefined): Promise<string> {
+async function serve(relay: RelayHub | undefined): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   host = new SessionHost({ registry: temp.registry });
@@ -76,7 +73,7 @@ describe("GET /api/relay/status", () => {
   });
 
   it("says so plainly when the relay is switched off", async () => {
-    const base = await serve(null);
+    const base = await serve(undefined);
     const body = await (await fetch(`${base}/api/relay/status`)).json() as Record<string, unknown>;
     expect(body).toMatchObject({ enabled: false, connected: false });
     expect(body.reason).toMatch(/GHOSTD_RELAY/);
@@ -232,7 +229,7 @@ describe("the upgrade shares the port with the API", () => {
   });
 
   it("hangs up on an upgrade when there is no relay, rather than leaking the socket", async () => {
-    await serve(null);
+    await serve(undefined);
     const outcome = await new Promise<"upgraded" | "closed">((resolve) => {
       const upgrade = request({
         host: "127.0.0.1",
@@ -279,33 +276,10 @@ describe("the upgrade shares the port with the API", () => {
   });
 });
 
-describe("building a server does not mint a secret", () => {
-  it("leaves the token file alone until something tries to pair", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ghost-relay-unminted-"));
-    const tokenFile = join(dir, "relay-token");
-    vi.stubEnv("GHOSTD_RELAY_TOKEN_FILE", tokenFile);
-    try {
-      const registry = new GhostRegistry("/nonexistent-ghosts-root");
-      const sessionHost = new SessionHost({ registry });
-      const server = createDaemonServer({ registry, host: sessionHost, apiToken: null });
-      expect(existsSync(tokenFile)).toBe(false);
-      server.close();
-    } finally {
-      vi.unstubAllEnvs();
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
+describe("the server and its relay", () => {
   it("hands its own hub back so a backend can be wired to it", async () => {
     const relay = new RelayHub({ token: TOKEN, pingIntervalMs: 60_000 });
     await serve(relay);
     expect(listening?.relay).toBe(relay);
-  });
-
-  it("still starts, and still 404s, with the relay switched off", async () => {
-    const bare = createServer((_request, response) => response.writeHead(200).end());
-    await new Promise<void>((resolve) => bare.listen(0, "127.0.0.1", resolve));
-    expect((bare.address() as AddressInfo).port).toBeGreaterThan(0);
-    await new Promise<void>((resolve) => bare.close(() => resolve()));
   });
 });

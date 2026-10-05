@@ -54,7 +54,7 @@ export async function completeForHook(input: HookCompleteInput, options: HookCom
     const row = rows(id) as HarnessRow;
     const dir = await mkdtemp(join(tmpdir(), "ghost-hook-"));
     try {
-      const launch = row.launch({ prompt: input.prompt, resume: false, sessionId: null, persona: "", dir, mcp: [] });
+      const launch = row.launch({ prompt: input.prompt, resume: false, sessionId: null, persona: "", mcp: [] });
       await writeLaunchFiles(dir, launch.files);
       let text = "";
       let error: string | null = null;

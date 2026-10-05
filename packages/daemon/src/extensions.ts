@@ -37,10 +37,10 @@ function browserBackend(transport: RelayTransport | undefined): BrowserBackendFa
  */
 export function resolveGhostExtensions(
   options: GhostExtensionOptions,
-  homeDir: string | undefined,
+  homeDir: string,
 ): GhostExtensionFactory {
   const extensionOptions = {
-    ...(homeDir === undefined ? {} : { home: homeDir }),
+    home: homeDir,
     ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     backend: browserBackend(options.relayTransport),
   };

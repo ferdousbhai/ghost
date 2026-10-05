@@ -119,7 +119,6 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
     host,
     mcp: new McpCatalog({ registry: temp.registry }),
     apiToken,
-    relay: null,
     port: 0,
   });
   const tokenFile = join(temp.root, ".state", "api-token");

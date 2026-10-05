@@ -45,7 +45,6 @@ async function serve(apiToken: string | null = TOKEN): Promise<string> {
     registry: temp.registry,
     host,
     port: 0,
-    relay: null,
     apiToken,
   });
   return `http://127.0.0.1:${listening.port}`;

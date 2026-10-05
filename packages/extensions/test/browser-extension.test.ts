@@ -344,6 +344,7 @@ let backend: FakeBackend;
 
 function extension(overrides: Record<string, unknown> = {}) {
   return createBrowserExtension({
+    home: fixture.dir,
     backend: () => backend,
     ...overrides,
     browser: {
@@ -354,7 +355,7 @@ function extension(overrides: Record<string, unknown> = {}) {
 }
 
 async function browserHarness(overrides: Record<string, unknown> = {}) {
-  return loadExtension(extension(overrides), fixture.dir);
+  return loadExtension(extension(overrides));
 }
 
 async function expectGhostError(work: Promise<unknown>): Promise<GhostError> {
@@ -1007,11 +1008,10 @@ describe("console, network, and tabs", () => {
     backend = new FakeBackend();
     return loadExtension(
       createBrowserExtension({
+        home: fixture.dir,
         backend: () => backend,
         browser: { idleTimeoutMs: 0 },
-      }),
-      fixture.dir,
-    );
+      }));
   }
 
   it("drains console messages, framed as untrusted", async () => {
@@ -1302,11 +1302,10 @@ describe("timeouts", () => {
   it("shuts the browser down once it has been idle", async () => {
     const harness = await loadExtension(
       createBrowserExtension({
+        home: fixture.dir,
         backend: () => backend,
         browser: { idleTimeoutMs: 20 },
-      }),
-      fixture.dir,
-    );
+      }));
     await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
     expect(backend.closed).toBe(false);
     await new Promise((done) => setTimeout(done, 120));
@@ -1415,11 +1414,10 @@ describe("the backend is a choice, and policy sits above it", () => {
     backend = new FakeBackend();
     return loadExtension(
       createBrowserExtension({
+        home: fixture.dir,
         backend: () => backend,
         browser: { idleTimeoutMs: 0 },
-      }),
-      fixture.dir,
-    );
+      }));
   }
 
   it("drives whichever backend it was given", async () => {

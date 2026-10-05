@@ -19,7 +19,6 @@ import {
   resolveHome,
   textResult,
   untrustedTextResult,
-  type CwdContext,
   type GhostExtensionOptions,
 } from "./shared.js";
 
@@ -90,8 +89,8 @@ function describeProjectionChanges(changes: ReadonlyArray<readonly [number, stri
 export function createBrowserExtension(
   options: BrowserExtensionOptions,
 ): GhostExtensionFactory {
-  const sessionFor = (ctx: CwdContext): GhostBrowserSession =>
-    browserSessionFor(resolveHome(options, ctx).dir, {
+  const sessionFor = (): GhostBrowserSession =>
+    browserSessionFor(resolveHome(options).dir, {
       ...options.browser,
       backend: options.backend,
     });
@@ -197,8 +196,8 @@ export function createBrowserExtension(
           maximum: MAX_TIMEOUT_MS,
         })),
       }),
-      execute: async (params, signal, ctx) => {
-        const session = sessionFor(ctx);
+      execute: async (params, signal) => {
+        const session = sessionFor();
         const operation = {
           ...(params.timeout_ms === undefined ? {} : { timeoutMs: params.timeout_ms }),
           ...(signal === undefined ? {} : { signal }),

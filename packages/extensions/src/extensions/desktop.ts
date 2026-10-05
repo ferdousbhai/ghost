@@ -2,7 +2,7 @@ import type { TSchema } from "typebox";
 import type { GhostExtensionAPI, GhostExtensionFactory, GhostToolResult } from "../extension-api.js";
 import { errorMessage, GhostError, type GhostErrorCode } from "../errors.js";
 import { connectMcpServer, type McpClient, type McpTool, type McpToolResult } from "../mcp-stdio.js";
-import { untrustedTextResult, type GhostExtensionOptions } from "./shared.js";
+import { untrustedTextResult } from "./shared.js";
 
 export const DESKTOP_LOOK = "desktop_look";
 export const DESKTOP_ACT = "desktop_act";
@@ -19,7 +19,7 @@ export interface DesktopServer {
   callTool(name: string, args: Record<string, unknown>, caller: string | undefined, signal?: AbortSignal): Promise<McpToolResult>;
 }
 
-export interface DesktopExtensionOptions extends GhostExtensionOptions {
+export interface DesktopExtensionOptions {
   readonly desktop?: DesktopServer;
 }
 

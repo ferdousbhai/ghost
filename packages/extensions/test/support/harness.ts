@@ -7,7 +7,6 @@ import type {
   AnyGhostToolDefinition,
   GhostExtensionAPI,
   GhostExtensionFactory,
-  GhostToolContext,
   GhostToolResult,
 } from "../../src/extension-api.js";
 
@@ -23,17 +22,8 @@ export interface Harness {
   ): Promise<GhostToolResult<any>>;
 }
 
-function fakeContext(cwd: string): GhostToolContext {
-  // Only `cwd` is read by these extensions.
-  return { cwd };
-}
-
-export async function loadExtension(
-  factory: GhostExtensionFactory,
-  cwd: string,
-): Promise<Harness> {
+export async function loadExtension(factory: GhostExtensionFactory): Promise<Harness> {
   const tools = new Map<string, AnyTool>();
-  const ctx = fakeContext(cwd);
 
   const api = {
     registerTool(tool: AnyTool) {
@@ -49,7 +39,7 @@ export async function loadExtension(
     async call(name, params = {}, signal) {
       const tool = tools.get(name);
       if (!tool) throw new Error(`Tool ${name} is not registered`);
-      return tool.execute(params, signal, ctx);
+      return tool.execute(params, signal, {});
     },
   };
 }

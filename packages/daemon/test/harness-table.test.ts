@@ -31,7 +31,6 @@ const TURN: HarnessTurnInput = {
   resume: false,
   sessionId: null,
   persona: "You are Casper.",
-  dir: "/tmp/c1",
   mcp: [{ name: "ghost", config: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } }],
 };
 

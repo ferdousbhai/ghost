@@ -299,7 +299,7 @@ async function serveDaemon(
       logger,
       port: config.port,
       address: config.host,
-      relay: relay ?? null,
+      ...(relay ? { relay } : {}),
       remote: new RemoteAccess(config.remote),
       remoteServe,
     });

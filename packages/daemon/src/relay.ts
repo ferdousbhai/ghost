@@ -155,9 +155,9 @@ export class RelayHub implements RelayTransport {
   #closePromise: Promise<void> | undefined;
 
   constructor(options: RelayHubOptions = {}) {
-    // The token file is *not* touched here. Constructing a hub is something every
-    // `createDaemonServer` does, including in tests; minting a secret into the
-    // developer's real home as a side effect of building an object is not.
+    // The token file is *not* touched here: tests build hubs freely, and
+    // minting a secret into the developer's real home as a side effect of
+    // building an object would be wrong.
     this.#token = options.token;
     this.#logger = options.logger ?? silentLogger;
     this.#pingIntervalMs = options.pingIntervalMs ?? RELAY_PING_INTERVAL_MS;
@@ -175,10 +175,6 @@ export class RelayHub implements RelayTransport {
     return this.#socket !== undefined
       && this.#socket === this.#negotiatedSocket
       && this.#socket.readyState === 1 /* OPEN */;
-  }
-
-  get peer(): string | undefined {
-    return this.#peer;
   }
 
   request(

@@ -17,11 +17,8 @@ export function createGhostExtension(
 }
 
 export {
-  browserSessionFor,
   closeAllBrowserSessions,
   closeBrowserSession,
-  createBrowserExtension,
-  GHOST_BROWSER,
   type BrowserBackendFactory,
 } from "./browser.js";
 export {
@@ -41,7 +38,3 @@ export {
 } from "./browser-relay-backend.js";
 export type { BrowserFailure } from "./browser-backend.js";
 export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";
-export {
-  textResult,
-  untrustedTextResult,
-} from "./shared.js";

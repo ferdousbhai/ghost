@@ -4,46 +4,30 @@ export { isRecord } from "./record.js";
 export {
   CHARACTER_FILENAME,
   MAX_CHARACTER_BODY_LENGTH,
-  GhostHome,
   openGhostHome,
 } from "./home.js";
-
-export {
-  descriptorPath,
-  openDirectoryNoFollow,
-  openRegularFileNoFollow,
-} from "./linux-fs.js";
 
 export {
   buildGhostSystemPrompt,
   FIRST_MEETING_SECTION,
   isSeededCharacter,
   SEEDED_CHARACTER,
-  type CharacterFile,
-  type GhostSystemPromptInput,
 } from "./persona.js";
 
 export {
   collectGhostExtension,
-  type AnyGhostToolDefinition,
   type CollectedGhostExtension,
   type GhostExtensionFactory,
-  type GhostToolContext,
-  type GhostToolResult,
 } from "./extension-api.js";
-export { fenceUntrusted } from "./untrusted.js";
 
 export { serveMcpTools } from "./mcp-stdio.js";
 
 export { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
 
 export {
-  browserSessionFor,
   closeAllBrowserSessions,
   closeBrowserSession,
-  createBrowserExtension,
   createGhostExtension,
-  GHOST_BROWSER,
   MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
   RELAY_OPS,
@@ -54,8 +38,6 @@ export {
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_PAIR_CODE_PATTERN,
   relayBackend,
-  textResult,
-  untrustedTextResult,
   type BrowserBackendFactory,
   type BrowserFailure,
   type RelayOp,
