@@ -83,13 +83,6 @@ errors, and unexpected command-runner rejection are generically logged and
 fail open for both events; they never fail the owner turn or expose the
 command/error payload.
 
-## Host storage metadata
-
-ghostd always sends `ghost_home` and the conversation log's path. A host with
-no filesystem ghost home (hosted SummonGhost)
-omits those fields and sends `storage: { kind: "backend", ghost_id, session_id }`
-instead; a command must not treat those identifiers as local paths.
-
 ## `before_prompt` protocol
 
 A command receives the owner prompt, conversation metadata, the harness that

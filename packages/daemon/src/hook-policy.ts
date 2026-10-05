@@ -3,11 +3,10 @@ const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 
 export interface GhostHookEventBase {
   session_id: string;
-  session_file?: string;
+  session_file: string;
   signal: AbortSignal;
   ghost_name: string;
-  ghost_home?: string;
-  storage?: { kind: "backend"; ghost_id: string; session_id: string };
+  ghost_home: string;
   cwd: string;
   conversation_id: string;
   /** The harness the conversation's latest stretch ran on, when one has run. */
@@ -80,7 +79,6 @@ export interface CommandHook {
 }
 
 const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
-const BUILTIN_SETTINGS_KEYS = new Set<string>();
 
 /**
  * The `builtin` section of a `hooks.json` document once named hooks Ghost
@@ -92,18 +90,11 @@ function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: stri
   const builtin = parsed.builtin;
   if (builtin === undefined) return;
   if (!isRecord(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
-  for (const [key, raw] of Object.entries(builtin)) {
+  for (const key of Object.keys(builtin)) {
     if (!SETTINGS_KEY.test(key)) {
       throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
     }
-    if (!BUILTIN_SETTINGS_KEYS.has(key)) {
-      throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
-    }
-    if (!isRecord(raw)) throw new Error(`${path}: builtin.${key} must be an object.`);
-    const [field] = Object.keys(raw);
-    if (field !== undefined) {
-      throw new Error(`${path}: builtin.${key}.${field} is not a setting.`);
-    }
+    throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
   }
 }
 

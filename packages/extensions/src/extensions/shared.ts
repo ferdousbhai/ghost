@@ -1,18 +1,13 @@
 import type { GhostToolResult } from "../extension-api.js";
-import { GhostHome, openGhostHome } from "../home.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
 
 export interface GhostExtensionOptions {
   /**
-   * The ghost home this extension serves; a string is a directory path. One
-   * process hosts several ghosts at once, so the home may never come from
-   * module scope or a process-global env var — both are shared across them.
+   * The ghost home this extension serves. One process hosts several ghosts at
+   * once, so the home may never come from module scope or a process-global env
+   * var — both are shared across them.
    */
-  readonly home: GhostHome | string;
-}
-
-export function resolveHome(options: GhostExtensionOptions): GhostHome {
-  return options.home instanceof GhostHome ? options.home : openGhostHome(options.home);
+  readonly home: string;
 }
 
 /** A plain text tool result. Tool *failures* throw; they never return here. */

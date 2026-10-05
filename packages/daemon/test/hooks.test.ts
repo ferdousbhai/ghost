@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostHookRunner, type LocalHookEvent } from "../src/hooks.js";
+import { GhostHookRunner } from "../src/hooks.js";
 import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent } from "../src/hook-policy.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
@@ -17,12 +17,13 @@ function temporaryDirectory(): string {
   return directory;
 }
 
-function beforePromptEvent(overrides: Partial<LocalHookEvent<GhostBeforePromptEvent>> = {}): LocalHookEvent<GhostBeforePromptEvent> {
+function beforePromptEvent(overrides: Partial<GhostBeforePromptEvent> = {}): GhostBeforePromptEvent {
   return {
     type: "before_prompt",
     prompt: "Continue",
     turn_id: "turn-2",
     session_id: "session-1",
+    session_file: join(process.cwd(), ".conversation.jsonl"),
     signal: new AbortController().signal,
     ghost_name: "casper",
     ghost_home: process.cwd(),
@@ -33,13 +34,14 @@ function beforePromptEvent(overrides: Partial<LocalHookEvent<GhostBeforePromptEv
   };
 }
 
-function event(overrides: Partial<LocalHookEvent<GhostSessionStopEvent>> = {}): LocalHookEvent<GhostSessionStopEvent> {
+function event(overrides: Partial<GhostSessionStopEvent> = {}): GhostSessionStopEvent {
   return {
     type: "session_stop",
     owner_prompt: "Continue",
     messages: [],
     turn_id: "turn-1",
     session_id: "session-1",
+    session_file: join(process.cwd(), ".conversation.jsonl"),
     stop_hook_active: false,
     signal: new AbortController().signal,
     ghost_name: "casper",

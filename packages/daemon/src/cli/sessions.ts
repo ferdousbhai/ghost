@@ -12,7 +12,7 @@ export async function sessionsCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const sessions = await listSessions(ctx.client, name);
   emit(ctx, { sessions }, () => {
     const rows = sessions.map((session) => [

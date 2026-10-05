@@ -23,7 +23,7 @@ function renderSnapshot(body: unknown): string {
 export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "list", name, file] = parsed.positionals;
   if (action === "serve") return mcpServeCommand(parsed, ctx);
-  const { name: ghost } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const base = ghostPath(ghost, "/mcp");
   const server = (): string => {
     if (!name) throw new ArgsError(`ghost mcp ${action} needs a server name`);

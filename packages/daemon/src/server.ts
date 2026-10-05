@@ -167,6 +167,15 @@ function booleanField(body: Record<string, unknown>, key: string): boolean {
   return value;
 }
 
+/** A query parameter as a number, or undefined when absent. */
+function numberParam(url: URL, key: string): number | undefined {
+  const raw = url.searchParams.get(key);
+  if (raw === null) return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new GhostError("invalid_request", `"${key}" must be a number.`, 400);
+  return value;
+}
+
 function decodePathSegment(segment: string): string {
   try {
     return decodeURIComponent(segment);
@@ -395,8 +404,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     const hooks = options.hooks;
     const config = hooks?.config();
     if (!hooks || !config) {
-      errorResponse(response, 404, "not_found", "Hook configuration is not available.");
-      return;
+      throw new GhostError("not_found", "Hook configuration is not available.", 404);
     }
     if (method === "GET") {
       jsonResponse(response, 200, { path: config.path, document: config.document });
@@ -407,8 +415,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     try {
       replaced = await hooks.replaceConfig(document);
     } catch (error) {
-      errorResponse(response, 400, "invalid_request", errorMessage(error));
-      return;
+      throw new GhostError("invalid_request", errorMessage(error), 400);
     }
     jsonResponse(response, 200, { path: replaced.path, document: replaced.document });
   };
@@ -436,13 +443,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     response: ServerResponse,
   ): Promise<void> => {
     if (url.searchParams.get("confirm") !== ghostName) {
-      errorResponse(
-        response,
-        400,
+      throw new GhostError(
         "confirmation_required",
         `Deleting a ghost needs its name repeated: ?confirm=${encodeURIComponent(ghostName)}.`,
+        400,
       );
-      return;
     }
     const { trash } = await options.host.deleteGhost(ghostName);
     logger.info("ghost deleted", { ghost: ghostName, trash });
@@ -665,24 +670,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     response: ServerResponse,
   ): Promise<void> => {
     const query: { limit?: number; offset?: number } = {};
-    const limit = url.searchParams.get("limit");
-    if (limit !== null) {
-      const parsed = Number(limit);
-      if (!Number.isFinite(parsed)) {
-        errorResponse(response, 400, "invalid_request", "\"limit\" must be a number.");
-        return;
-      }
-      query.limit = parsed;
-    }
-    const offset = url.searchParams.get("offset");
-    if (offset !== null) {
-      const parsed = Number(offset);
-      if (!Number.isFinite(parsed)) {
-        errorResponse(response, 400, "invalid_request", "\"offset\" must be a number.");
-        return;
-      }
-      query.offset = parsed;
-    }
+    const limit = numberParam(url, "limit");
+    if (limit !== undefined) query.limit = limit;
+    const offset = numberParam(url, "offset");
+    if (offset !== undefined) query.offset = offset;
     jsonResponse(response, 200, await options.host.readTranscript(
       ghostName,
       conversationId,
@@ -774,8 +765,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // Running a tool acts on this desktop directly; a tailnet caller, even
     // the owner, acts only through the ghost.
     if (admission.identity) {
-      errorResponse(response, 403, "local_only", "Ghost tools run only for the machine-local token.");
-      return;
+      throw new GhostError("local_only", "Ghost tools run only for the machine-local token.", 403);
     }
     const ghostName = ghostOf(params);
     const conversationId = conversationOf(params);
@@ -816,8 +806,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     const body = await readJsonObjectBody(request, maxBodyBytes);
     const { text } = body as { text?: unknown };
     if (typeof text !== "string" || text.trim() === "") {
-      errorResponse(response, 400, "invalid_request", '"text" must be a non-empty string.');
-      return;
+      throw new GhostError("invalid_request", '"text" must be a non-empty string.', 400);
     }
     jsonResponse(
       response,
@@ -855,8 +844,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/remote/qr.svg", async ({ response }) => {
       const url = remoteServe ? (await remoteServe.status()).url : null;
       if (!remoteServe || !url) {
-        errorResponse(response, 404, "not_found", "Remote access is off.");
-        return;
+        throw new GhostError("not_found", "Remote access is off.", 404);
       }
       const svg = await remoteServe.qrSvg(url);
       response.writeHead(200, {
@@ -868,8 +856,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     route("GET POST", "api/remote", async ({ method, request, response }) => {
       if (!remoteServe) {
-        errorResponse(response, 404, "not_found", "Remote access is not available.");
-        return;
+        throw new GhostError("not_found", "Remote access is not available.", 404);
       }
       if (method === "GET") {
         jsonResponse(response, 200, await remoteServe.status());
@@ -887,18 +874,15 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     route("POST", "api/relay/pair", async ({ request, response }) => {
       if (!relay) {
-        errorResponse(response, 404, "not_found", "The relay is off (GHOSTD_RELAY).");
-        return;
+        throw new GhostError("not_found", "The relay is off (GHOSTD_RELAY).", 404);
       }
       const body = await readJsonObjectBody(request, maxBodyBytes) as { code?: unknown; allow?: unknown };
       if (typeof body.code !== "string" || typeof body.allow !== "boolean") {
-        errorResponse(response, 400, "invalid_request", '"code" must be the pairing code shown in the browser and "allow" a boolean.');
-        return;
+        throw new GhostError("invalid_request", '"code" must be the pairing code shown in the browser and "allow" a boolean.', 400);
       }
       const outcome = relay.resolvePairing(body.code.trim(), body.allow);
       if (outcome === "unknown") {
-        errorResponse(response, 404, "pairing_not_found", "No browser is waiting to pair with that code.");
-        return;
+        throw new GhostError("pairing_not_found", "No browser is waiting to pair with that code.", 404);
       }
       jsonResponse(response, 200, { ok: true, outcome, ...relay.status() });
     }),
@@ -914,8 +898,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/status", ({ response, admission }) => {
       // `root` is a filesystem path, so the whole row is the owner's alone.
       if (admission.identity?.role === "guest") {
-        errorResponse(response, 403, "owner_only", "Daemon source paths are visible only to the owner.");
-        return;
+        throw new GhostError("owner_only", "Daemon source paths are visible only to the owner.", 403);
       }
       jsonResponse(response, 200, {
         version: options.runningSource?.version ?? null,

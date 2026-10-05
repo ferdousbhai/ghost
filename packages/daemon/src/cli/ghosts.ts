@@ -33,7 +33,7 @@ export async function ghostsCommand(
       emit(ctx, { ghost }, () => ({ human: `${ghost}\n`, quiet: `${ghost}\n` }));
       return 0;
     }
-    const { name } = await resolveGhost(ctx.client, ctx.runtime, requested);
+    const name = await resolveGhost(ctx.client, ctx.runtime, requested);
     await listSessions(ctx.client, name);
     const path = await writeDefaultGhost(ctx.runtime, name);
     emit(ctx, { ghost: name, path }, () => `${name}\n`);

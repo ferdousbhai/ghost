@@ -925,7 +925,7 @@ export class SessionHost {
   private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
     let tools = this.tools.get(ghost.dir);
     if (!tools) {
-      tools = collectGhostExtension(resolveGhostExtensions({ ghostName: ghost.name, ...this.extensionOptions }, ghost.dir));
+      tools = collectGhostExtension(resolveGhostExtensions(this.extensionOptions, ghost.dir));
       tools.catch(() => this.tools.delete(ghost.dir));
       this.tools.set(ghost.dir, tools);
     }

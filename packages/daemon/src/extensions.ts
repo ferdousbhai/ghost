@@ -9,7 +9,6 @@ import {
 export type { RelayTransport };
 
 export interface GhostExtensionOptions {
-  ghostName?: string;
   /**
    * The daemon's relay hub, adapted as a transport; the browser backend is built
    * from it per session. Absent only when `GHOSTD_RELAY` is off, which leaves the
@@ -41,7 +40,6 @@ export function resolveGhostExtensions(
 ): GhostExtensionFactory {
   const extensionOptions = {
     home: homeDir,
-    ...(options.ghostName === undefined ? {} : { ghostName: options.ghostName }),
     backend: browserBackend(options.relayTransport),
   };
   return createGhostExtension(extensionOptions);

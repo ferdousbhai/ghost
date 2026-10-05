@@ -16,7 +16,6 @@ import {
   type GhostBrowserSession,
 } from "./browser-session.js";
 import {
-  resolveHome,
   textResult,
   untrustedTextResult,
   type GhostExtensionOptions,
@@ -90,7 +89,7 @@ export function createBrowserExtension(
   options: BrowserExtensionOptions,
 ): GhostExtensionFactory {
   const sessionFor = (): GhostBrowserSession =>
-    browserSessionFor(resolveHome(options).dir, {
+    browserSessionFor(options.home, {
       ...options.browser,
       backend: options.backend,
     });

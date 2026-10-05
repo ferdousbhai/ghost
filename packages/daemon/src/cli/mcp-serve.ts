@@ -17,7 +17,7 @@ export async function mcpServeCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   // on every call.
   const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
   const path = requested
-    ? sessionPath((await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"))).name, requested)
+    ? sessionPath(await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost")), requested)
     : (await resolveTarget(ctx.client, ctx, parsed)).path;
   // One id per serve process keys the desktop lease, so two harnesses bound to
   // the same conversation still take turns steering the desktop.

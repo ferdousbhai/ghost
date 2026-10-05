@@ -10,7 +10,7 @@ import type { RemoteStatus } from "../remote-serve.js";
 export async function renameCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const next = parsed.positionals[0];
   if (!next) throw new ArgsError("ghost rename needs the new name");
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const body = (await ctx.client.request("PUT", ghostPath(name, "/name"), { name: next })).body;
   emit(ctx, body, () => `Renamed ${name} to ${next}.\n`);
   return 0;
@@ -19,7 +19,7 @@ export async function renameCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
 /** `ghost character [set <file>]`: print or replace `character.md` through the daemon's validating writer. */
 export async function characterCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "show", file] = parsed.positionals;
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   if (action === "show") {
     const body = (await ctx.client.request<{ body: string }>("GET", ghostPath(name, "/character"))).body;
     emit(ctx, body, (result) => (result as { body: string }).body);
@@ -124,7 +124,7 @@ function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
 
 /** `ghost harness [<id>|--none]`: show or set the agent a ghost prefers. */
 export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const id = parsed.positionals[0];
   if (id && flagBoolean(parsed, "none")) throw new ArgsError("ghost harness takes an agent or --none, not both");
   const body = id || flagBoolean(parsed, "none")
@@ -138,7 +138,7 @@ export async function harnessCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
 export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const id = parsed.positionals[0];
   if (!id) throw new ArgsError("ghost switch needs the agent to switch to");
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   // A conversation not listed yet (no message landed) is addressed as given.
   const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
   const path = requested

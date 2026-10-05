@@ -23,8 +23,8 @@ const result = (fields: Partial<CommandResult> = {}): CommandResult => ({
   exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false, ...fields,
 });
 const base = {
-  session_id: "session-1", ghost_name: "casper", ghost_home: "/owner/casper", cwd: "/owner",
-  runtime: "pi" as const, conversation_id: "conversation-1", conversation_runtime: "pi" as const,
+  session_id: "session-1", session_file: "/owner/casper/sessions/conversation-1/.conversation.jsonl",
+  ghost_name: "casper", ghost_home: "/owner/casper", cwd: "/owner", conversation_id: "conversation-1",
   signal: new AbortController().signal,
 };
 

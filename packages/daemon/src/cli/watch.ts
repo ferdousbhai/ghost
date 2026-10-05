@@ -7,7 +7,7 @@ export async function watchCommand(
   parsed: ParsedCliArgs,
   ctx: CliContext,
 ): Promise<number> {
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   await ctx.client.stream(ghostPath(name, "/events"), undefined, (event) => {
     emit(ctx, event);
     return flagBoolean(parsed, "exit-on-first") ? false : undefined;

@@ -18,9 +18,6 @@ import { errorMessage } from "@ghost/extensions";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
-/** ghostd always has a filesystem ghost home, so its events always carry it (docs/hooks.md). */
-export type LocalHookEvent<Event> = Event & { ghost_home: string; storage?: never };
-
 /** Told a handler's display name when it starts (`running`) and when it returns. */
 export type HookObserver = (name: string, running: boolean) => void;
 
@@ -217,8 +214,8 @@ export class GhostHookRunner {
 
   /**
    * Admit `document` as the new `hooks.json`, write it through a temporary
-   * file and one rename, then swap the live command hooks. Handlers registered
-   * in-process are untouched, and the new commands apply at the next boundary.
+   * file and one rename, then swap the live command hooks; the new commands
+   * apply at the next boundary.
    * Replacements are serialized so two writers cannot interleave the file and
    * the live set.
    */
@@ -275,14 +272,14 @@ export class GhostHookRunner {
   }
 
   async emitBeforePrompt(
-    event: LocalHookEvent<GhostBeforePromptEvent>,
+    event: GhostBeforePromptEvent,
     onHook?: HookObserver,
   ): Promise<GhostBeforePromptResult | undefined> {
     return runBeforePromptHooks(this.commands, event, this.observed(onHook));
   }
 
   async emitSessionStop(
-    event: LocalHookEvent<GhostSessionStopEvent>,
+    event: GhostSessionStopEvent,
     onHook?: HookObserver,
   ): Promise<GhostSessionStopResult | undefined> {
     return runSessionStopHooks(this.commands, event, this.observed(onHook));

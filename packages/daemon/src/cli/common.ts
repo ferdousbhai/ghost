@@ -75,11 +75,11 @@ export async function resolveGhost(
   client: DaemonClient,
   runtime: CliRuntime,
   requested?: string,
-): Promise<{ name: string }> {
+): Promise<string> {
   const name = preferredGhostName(runtime, requested);
-  if (name) return { name };
+  if (name) return name;
   const ghosts = await listGhosts(client);
-  return { name: soleGhostName(ghosts.map((ghost) => ghost.name)) };
+  return soleGhostName(ghosts.map((ghost) => ghost.name));
 }
 
 export async function listSessions(client: DaemonClient, ghost: string): Promise<SessionSummary[]> {
@@ -106,18 +106,6 @@ export function latestSession(rows: readonly SessionSummary[]): SessionSummary |
     !latest || Date.parse(row.updatedAt) > Date.parse(latest.updatedAt) ? row : latest, undefined);
 }
 
-export async function resolveSession(
-  client: DaemonClient,
-  ghost: string,
-  requested?: string,
-): Promise<{ session: SessionSummary; sessions: SessionSummary[] }> {
-  const sessions = await listSessions(client, ghost);
-  if (requested) return { session: resolveSessionPrefix(sessions, requested), sessions };
-  const session = latestSession(sessions);
-  if (!session) throw notFound(`a session for ghost ${JSON.stringify(ghost)}`);
-  return { session, sessions };
-}
-
 /** `-s`, then `$GHOST_SESSION` (set in a ghost's own shell), else the latest session. */
 export function preferredSessionId(
   runtime: Pick<CliRuntime, "env">,
@@ -131,9 +119,11 @@ export async function resolveTarget(
   ctx: Pick<CliContext, "runtime">,
   parsed: ParsedCliArgs,
 ): Promise<{ name: string; session: SessionSummary; path: string }> {
-  const { name } = await resolveGhost(client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(client, ctx.runtime, flagString(parsed, "ghost"));
   const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
-  const { session } = await resolveSession(client, name, requested);
+  const sessions = await listSessions(client, name);
+  const session = requested ? resolveSessionPrefix(sessions, requested) : latestSession(sessions);
+  if (!session) throw notFound(`a session for ghost ${JSON.stringify(name)}`);
   return { name, session, path: sessionPath(name, session.id) };
 }
 

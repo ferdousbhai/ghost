@@ -12,7 +12,7 @@
 import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
-import { isRecord } from "@ghost/extensions";
+import { isRecord, xdgBaseDir } from "@ghost/extensions";
 
 export interface HarnessMcpServer {
   readonly name: string;
@@ -374,7 +374,7 @@ async function opencodeRanOn(
   env: Readonly<Record<string, string | undefined>>,
 ): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
   const { Database } = await import("bun:sqlite");
-  const path = join(env.XDG_DATA_HOME || join(env.HOME ?? "", ".local", "share"), "opencode", "opencode.db");
+  const path = join(xdgBaseDir(env, "XDG_DATA_HOME", env.HOME ?? ""), "opencode", "opencode.db");
   const db = new Database(path, { readonly: true });
   try {
     const rows = db.query("SELECT data FROM message WHERE session_id = ? ORDER BY time_created DESC LIMIT 20").all(session) as { data: string }[];

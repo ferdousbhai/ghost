@@ -64,7 +64,7 @@ export async function sayCommand(
   if (followUp && startNew) throw new ArgsError("--new and --follow-up are mutually exclusive");
   const text = await messageText(parsed.positionals, flagString(parsed, "message"), ctx.runtime.stdin);
   if (!text.trim()) throw new ArgsError("Message text cannot be empty.");
-  const { name } = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const requestedSession = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
 
   // The conversation an idle --follow-up turns into a fresh turn of.
