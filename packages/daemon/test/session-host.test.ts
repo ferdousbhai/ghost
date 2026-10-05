@@ -442,7 +442,7 @@ describe("choosing the agent", () => {
     writeFileSync(settings, "# the owner's note\nother: kept\n");
 
     expect(await sessions.listHarnesses("casper")).toMatchObject({
-      harnesses: [{ id: "first", eligible: true }, { id: "second", eligible: true }],
+      harnesses: [{ id: "first", eligible: true, effort: null }, { id: "second", eligible: true, effort: null }],
       ghostDefault: null,
       omarchyDefault: "first",
     });

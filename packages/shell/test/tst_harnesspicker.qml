@@ -149,9 +149,18 @@ TestCase {
         Ghostd.sessions = [];
         Ghostd.currentSessionId = "";
         const header = createTemporaryObject(headerComponent, tc);
-        compare(findChild(header, "harnessLabel").text, "harness: automatic ▾");
+        const label = findChild(header, "harnessLabel");
+        compare(label.text, "harness: automatic ▾");
         tc.click(header, "harnessLabel");
         tc.requests[0].complete(200, tc.choice());
+        compare(label.text, "harness: auto (claude) ▾");
+        Ghostd.harnessChoice = Object.assign({}, Ghostd.harnessChoice, {
+            harnesses: Ghostd.harnessChoice.harnesses.map(h => Object.assign({}, h, { effort: h.id === "claude" ? "low" : "" }))
+        });
+        compare(label.text, "harness: auto (claude • low) ▾");
+        Ghostd.harnessChoice = Object.assign({}, Ghostd.harnessChoice, { ghostDefault: "claude" });
+        compare(label.text, "harness: claude • low ▾");
+        Ghostd.harnessChoice = Object.assign({}, Ghostd.harnessChoice, { ghostDefault: null });
         tc.click(header, "harnessChoose-pi");
 
         const draft = Ghostd.currentSessionId;

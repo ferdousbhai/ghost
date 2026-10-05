@@ -361,6 +361,17 @@ Singleton {
         const row = root.sessions.find(session => session && session.id === root.currentSessionId);
         return row && typeof row.harness === "string" ? row.harness : "";
     }
+    /** What a conversation not yet bound starts on: the ghost's default, else
+        "auto (<Omarchy's default>)", each with the effort its launch asks for. */
+    readonly property string draftHarness: {
+        const choice = root.harnessChoice;
+        const named = harness => {
+            const row = choice.harnesses.find(h => h.id === harness);
+            return harness + (row && row.effort ? " • " + row.effort : "");
+        };
+        if (choice && choice.ghostDefault) return named(choice.ghostDefault);
+        return choice && choice.omarchyDefault ? "auto (" + named(choice.omarchyDefault) + ")" : "automatic";
+    }
     /** What that harness last ran on, pi-style — "(provider) model • effort" —
         or "" when it is a pick not yet run or said nothing. */
     readonly property string currentModel: {
@@ -372,7 +383,7 @@ Singleton {
 
     // The agent picker: GET /harness for the active ghost, the ghost's default
     // (PUT /harness), and one conversation's next agent (PUT .../harness).
-    /** `{ harnesses: [{ id, eligible, reason }], ghostDefault, omarchyDefault }`, or null until read. */
+    /** `{ harnesses: [{ id, eligible, reason, effort }], ghostDefault, omarchyDefault }`, or null until read. */
     property var harnessChoice: null
     property string harnessError: ""
     /** conversationKey -> the agent the owner picked, until a listing reports it. */
@@ -937,7 +948,8 @@ Singleton {
             harnesses: body.harnesses.filter(h => h && name(h.id) !== null).map(h => ({
                 id: h.id,
                 eligible: h.eligible !== false,
-                reason: typeof h.reason === "string" ? h.reason : ""
+                reason: typeof h.reason === "string" ? h.reason : "",
+                effort: typeof h.effort === "string" ? h.effort : ""
             })),
             ghostDefault: name(body.ghostDefault),
             omarchyDefault: name(body.omarchyDefault)
@@ -1503,7 +1515,11 @@ Singleton {
                 root.eventsConsumed = whole.length;
                 // The stream carries invalidations rather than history. A
                 // reconnect closes the only possible missed-event window.
-                if (connected && ghost === root.activeGhost) root.fetchSessions(ghost);
+                if (connected && ghost === root.activeGhost) {
+                    root.fetchSessions(ghost);
+                    // The header names the agent a new conversation starts on.
+                    root.fetchHarnesses();
+                }
             }
         }
         if (xhr.readyState !== 4 || xhr !== root.eventsRequest) return;

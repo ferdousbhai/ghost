@@ -39,16 +39,16 @@ const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) ||
  */
 const MOCK_HARNESSES = [
   {
-    id: "claude", eligible: true, reason: null,
+    id: "claude", eligible: true, reason: null, effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "5h", percent: 42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
   },
   {
-    id: "codex", eligible: false, reason: "weekly window is full",
+    id: "codex", eligible: false, reason: "weekly window is full", effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "weekly", percent: 100, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
   },
-  { id: "pi", eligible: true, reason: null, usage: null },
+  { id: "pi", eligible: true, reason: null, effort: "low", usage: null },
 ];
 const OMARCHY_DEFAULT_HARNESS = "claude";
 /** ghost name -> its own default agent; absent means automatic. */

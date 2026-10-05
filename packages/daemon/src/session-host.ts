@@ -190,7 +190,8 @@ export type ConversationEventListener = (event: ConversationUpdatedEvent) => voi
 
 /** The agents a ghost can run on, as the picker shows them. */
 export interface HarnessChoices {
-  harnesses: Harness[];
+  /** `effort` is the one its launch asks for, null where the owner's setting stands. */
+  harnesses: (Harness & { effort: string | null })[];
   /** The ghost's `settings.yml` `harness`, or null for automatic. */
   ghostDefault: string | null;
   /** Omarchy's default agent, the next preference after the ghost's own. */
@@ -442,7 +443,10 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const [report, omarchyDefault] = await Promise.all([this.harnessReport(), this.defaultHarness()]);
     return {
-      harnesses: report.harnesses.filter((harness) => this.rowOf(harness.id) !== null),
+      harnesses: report.harnesses.flatMap((harness) => {
+        const row = this.rowOf(harness.id);
+        return row ? [{ ...harness, effort: row.effort ?? null }] : [];
+      }),
       ghostDefault: loadGhostSettings(ghost.dir).getString("harness") ?? null,
       omarchyDefault,
     };
