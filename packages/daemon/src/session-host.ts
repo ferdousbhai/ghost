@@ -9,7 +9,7 @@
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { lstat, mkdir, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -386,12 +386,15 @@ export class SessionHost {
     }
   }
 
+  /** Point the link at `target`, so a renamed home relinks on its next turn; anything not a link is left alone. */
   private async ensureLink(path: string, target: string): Promise<void> {
     try {
-      await lstat(path);
-    } catch {
-      await symlink(target, path);
+      if ((await readlink(path)) === target) return;
+      await rm(path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return;
     }
+    await symlink(target, path);
   }
 
   private async accountEnv(harness: string): Promise<Record<string, string>> {
@@ -434,8 +437,8 @@ export class SessionHost {
    * then every other eligible one Ghost has a row for.
    */
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
-    const eligible = (await this.eligibleHarnesses()).filter((id) => this.rowOf(id) !== null);
-    return orderHarnesses(eligible, [current, loadGhostSettings(ghost.dir).getString("harness") ?? null, await this.defaultHarness()]);
+    const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
+    return orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, loadGhostSettings(ghost.dir).getString("harness") ?? null, omarchyDefault]);
   }
 
   // ── Agent choice ──────────────────────────────────────────────────────
@@ -700,9 +703,10 @@ export class SessionHost {
   ): Promise<PassResult> {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
-    const persona = await this.renderPersona(ghost);
+    const account = this.accountEnv(row.id);
+    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost, id)]);
     await this.prepareDirectory(ghost, dir, persona);
-    const launch = row.launch({ ...turn, persona, dir, mcp: await this.mcpServers(ghost, id) });
+    const launch = row.launch({ ...turn, persona, dir, mcp });
     await writeLaunchFiles(dir, launch.files);
 
     const content: AssistantPart[] = [];
@@ -777,7 +781,7 @@ export class SessionHost {
       }
     };
 
-    const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await this.accountEnv(row.id)) };
+    const env = { ...this.env, ...conversationEnvironment(ghost.name, id), ...(await account) };
     const exit = await runHarness({
       launch,
       cwd: dir,
@@ -1000,7 +1004,7 @@ export class SessionHost {
 
   private async requireConversation(ghost: Ghost, sessionId: string | null | undefined): Promise<string> {
     const id = requireConversationId(sessionId ?? "default");
-    if ((await readLog(ghostPaths(ghost.dir).sessionDir, id)) === null) {
+    if (!existsSync(logPath(ghostPaths(ghost.dir).sessionDir, id))) {
       throw new GhostError("not_found", `This ghost has no conversation ${JSON.stringify(id)}.`, 404);
     }
     return id;
@@ -1194,27 +1198,11 @@ export class SessionHost {
       await this.quiesce(ghost, "renamed");
       const renamed = this.registry.rename(ghost.name, nextName);
       this.closeConversationEventStreams(ghost.name);
-      await this.dropSkillLinks(renamed);
       this.logger.info("renamed ghost", { ghost: ghost.name, name: renamed.name });
       return renamed;
     } finally {
       this.reservedGhosts.delete(ghost.name);
       this.reservedGhosts.delete(nextName);
-    }
-  }
-
-  /** Skill links name the old home's path; the next turn in each conversation relinks them. */
-  private async dropSkillLinks(ghost: Ghost): Promise<void> {
-    const { sessionDir } = ghostPaths(ghost.dir);
-    for (const id of await this.conversationIds(sessionDir)) {
-      for (const root of [".claude", ".agents"]) {
-        const link = join(conversationDir(sessionDir, id), root, "skills");
-        try {
-          if ((await lstat(link)).isSymbolicLink()) await rm(link);
-        } catch {
-          // No link to drop.
-        }
-      }
     }
   }
 

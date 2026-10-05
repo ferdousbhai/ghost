@@ -3,7 +3,7 @@
  * (persona, cwd, env, resume, MCP), what it streams back, what the
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GhostHookEvent } from "../src/hook-policy.js";
@@ -213,6 +213,7 @@ describe("harness choice", () => {
   it("hands the log to the harness again after a home rename moves the conversation", async () => {
     const fake = harness(replies("I am Casper.", "Still here."));
     const sessions = host({ harnesses: [fake] });
+    mkdirSync(join(temp.root, "casper", "skills"));
     await turn(sessions, "Who are you?");
     await sessions.renameGhost("casper", "wisp");
     const events: TurnEvent[] = [];
@@ -222,6 +223,8 @@ describe("harness choice", () => {
     expect(second?.resume).toBe(false);
     expect(second?.cwd).toBe(conversationDir(ghostPaths(join(temp.root, "wisp")).sessionDir, "c1"));
     expect(second?.prompt).toContain("Owner: Who are you?");
+    // The skills link named the old home; the turn points it at the new one.
+    expect(readlinkSync(join(second?.cwd ?? "", ".claude", "skills"))).toBe(join(temp.root, "wisp", "skills"));
   });
 
   it("prefers the ghost's harness setting over Omarchy's order", async () => {
