@@ -36,5 +36,5 @@ export {
   type RelayRequestOptions,
   type RelayTransport,
 } from "./browser-relay-backend.js";
-export type { BrowserFailure } from "./browser-backend.js";
+export { isBrowserFailure, type BrowserFailure } from "./browser-backend.js";
 export { MAX_SCREENSHOT_BYTES } from "./screenshot-retention.js";

@@ -85,6 +85,11 @@ export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 const HARNESS_REPORT_TTL_MS = 60_000;
 /** The live tail of a tool's output shown on its card. */
 const TOOL_SUMMARY_MAX = 800;
+/**
+ * A conversation name is a label in a sidebar, not a description. The cap is
+ * generous for a sentence and short enough to stay a label.
+ */
+const MAX_CONVERSATION_TITLE_LENGTH = 120;
 /** The MCP server name ghost's own tools are served under. */
 export const GHOST_MCP_SERVER = "ghost";
 
@@ -222,6 +227,12 @@ function tail(text: string): string | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   return trimmed.length > TOOL_SUMMARY_MAX ? `…${trimmed.slice(-TOOL_SUMMARY_MAX)}` : trimmed;
+}
+
+/** An owner `!command` (`!!` keeps it out of the ghost's context), or null for a prompt. */
+function ownerCommand(prompt: string): { command: string; excluded: boolean } | null {
+  const match = /^(!!?)\s*([\s\S]*)$/u.exec(prompt.trim());
+  return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
 }
 
 function keyOf(ghostName: string, id: string): string {
@@ -502,7 +513,8 @@ export class SessionHost {
     if (this.admissions.has(key) || this.deleting.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
     }
-    if (/^!!?\s*$/u.test(options.prompt.trim())) throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
+    const command = ownerCommand(options.prompt);
+    if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
     this.admissions.add(key);
     let released = false;
     let started = false;
@@ -516,7 +528,7 @@ export class SessionHost {
         if (started || released) throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
         started = true;
         try {
-          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, stream));
+          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream));
         } finally {
           release();
           this.announce(ghost.name, id);
@@ -536,13 +548,18 @@ export class SessionHost {
     }
   }
 
-  private async runAdmitted(ghost: Ghost, id: string, prompt: string, stream: AdmittedTurnOptions): Promise<void> {
+  private async runAdmitted(
+    ghost: Ghost,
+    id: string,
+    prompt: string,
+    command: ReturnType<typeof ownerCommand>,
+    stream: AdmittedTurnOptions,
+  ): Promise<void> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
-    const command = /^(!!?)\s*([\s\S]+)$/u.exec(prompt.trim());
     if (command) {
-      await this.runOwnerCommand(ghost, id, command[2] as string, command[1] === "!!", stream);
+      await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream);
       return;
     }
     const key = keyOf(ghost.name, id);
@@ -1033,6 +1050,10 @@ export class SessionHost {
 
   async renameConversation(ghostName: string, sessionId: string | null | undefined, title: string): Promise<string> {
     const trimmed = title.trim();
+    if (trimmed.length === 0) throw new GhostError("invalid_request", "\"title\" must not be empty.", 400);
+    if (trimmed.length > MAX_CONVERSATION_TITLE_LENGTH) {
+      throw new GhostError("invalid_request", `"title" must be at most ${MAX_CONVERSATION_TITLE_LENGTH} characters.`, 400);
+    }
     if (!/\P{C}/u.test(trimmed)) {
       throw new GhostError("invalid_request", "A conversation title needs at least one printable character.", 400);
     }

@@ -35,7 +35,6 @@ import {
   MAX_SCREENSHOT_BYTES,
   RELAY_DISCONNECTED_MESSAGE,
   RELAY_PROTOCOL_VERSION,
-  type BrowserFailure,
   type RelayOp,
   type RelayReply,
   type RelayRequestOptions,
@@ -110,24 +109,6 @@ interface Pending {
 
 function disconnectedReply(op: RelayOp, message = RELAY_DISCONNECTED_MESSAGE): RelayReply {
   return { ok: false, failure: "browser_unavailable", message, details: { op } };
-}
-
-/** The failure vocabulary is the extensions package's; anything else is a lie. */
-const KNOWN_FAILURES = new Set<BrowserFailure>([
-  "browser_unavailable",
-  "blocked_url",
-  "navigation_failed",
-  "timeout",
-  "no_page",
-  "unknown_ref",
-  "element_not_found",
-  "invalid_input",
-]);
-
-function asFailure(value: string): BrowserFailure {
-  return KNOWN_FAILURES.has(value as BrowserFailure)
-    ? (value as BrowserFailure)
-    : "navigation_failed";
 }
 
 export class RelayHub implements RelayTransport {
@@ -551,7 +532,7 @@ export class RelayHub implements RelayTransport {
             ? { ok: true, result: frame.result }
             : {
               ok: false,
-              failure: asFailure(frame.error.failure),
+              failure: frame.error.failure,
               message: frame.error.message,
               ...(frame.error.details ? { details: frame.error.details } : {}),
             },

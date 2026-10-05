@@ -39,6 +39,7 @@ export {
   RELAY_PAIR_CODE_PATTERN,
   relayBackend,
   type BrowserBackendFactory,
+  isBrowserFailure,
   type BrowserFailure,
   type RelayOp,
   type RelayReply,

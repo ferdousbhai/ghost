@@ -14,9 +14,7 @@ export type BrowserFailure =
   | "no_page"
   | "unknown_ref"
   | "element_not_found"
-  | "invalid_input"
-  | "blocked_action"
-  | "action_budget";
+  | "invalid_input";
 
 const FAILURE_CODES = {
   browser_unavailable: "not_found",
@@ -27,9 +25,11 @@ const FAILURE_CODES = {
   unknown_ref: "not_found",
   element_not_found: "not_found",
   invalid_input: "invalid_format",
-  blocked_action: "forbidden",
-  action_budget: "limit_exceeded",
 } as const;
+
+export function isBrowserFailure(value: unknown): value is BrowserFailure {
+  return typeof value === "string" && Object.hasOwn(FAILURE_CODES, value);
+}
 
 export class GhostBrowserError extends GhostError {
   readonly failure: BrowserFailure;

@@ -80,8 +80,8 @@ describe("client frames", () => {
     }));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok || parsed.frame.t !== "res" || parsed.frame.ok) return;
-    // Parsing keeps whatever came; the hub is what narrows it to the vocabulary.
-    expect(parsed.frame.error).toEqual({ failure: "made_up", message: "nope", details: { a: 1 } });
+    // A name outside the extensions package's vocabulary is not believed.
+    expect(parsed.frame.error).toEqual({ failure: "navigation_failed", message: "nope", details: { a: 1 } });
   });
 
   it("accepts an event", () => {

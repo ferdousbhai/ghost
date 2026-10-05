@@ -4,11 +4,12 @@ import {
   RELAY_PAIR_SUBPROTOCOL_PREFIX,
   RELAY_PAIR_CODE_PATTERN,
   RELAY_PATH,
+  type BrowserFailure,
   type RelayOp,
 } from "@ghost/extensions";
 import type { IncomingHttpHeaders } from "node:http";
 import { tokenMatches } from "./token-store.js";
-import { isRecord } from "@ghost/extensions";
+import { isBrowserFailure, isRecord } from "@ghost/extensions";
 
 
 export interface RelayHelloFrame {
@@ -30,7 +31,7 @@ export interface RelayResponseError {
   readonly id: number;
   readonly ok: false;
   readonly error: {
-    readonly failure: string;
+    readonly failure: BrowserFailure;
     readonly message: string;
     readonly details?: Record<string, unknown>;
   };
@@ -151,7 +152,8 @@ export function parseClientFrame(raw: string): ParsedClientFrame {
           id,
           ok: false,
           error: {
-            failure: typeof failure === "string" ? failure : "navigation_failed",
+            // The failure vocabulary is the extensions package's; anything else is a lie.
+            failure: isBrowserFailure(failure) ? failure : "navigation_failed",
             message: error.message,
             ...(isRecord(details) ? { details } : {}),
           },

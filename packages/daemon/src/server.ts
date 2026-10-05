@@ -78,11 +78,6 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
-/**
- * A conversation name is a label in a sidebar, not a description. The cap is
- * generous for a sentence and short enough to stay a label.
- */
-const MAX_CONVERSATION_TITLE_LENGTH = 120;
 
 /**
  * Same-origin is the intended deployment (the Omarchy webapp wraps
@@ -601,25 +596,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       errorResponse(response, 400, "invalid_request", "\"title\" must be a string.");
       return;
     }
-    const trimmed = title.trim();
-    if (trimmed.length === 0) {
-      errorResponse(response, 400, "invalid_request", "\"title\" must not be empty.");
-      return;
-    }
-    if (trimmed.length > MAX_CONVERSATION_TITLE_LENGTH) {
-      errorResponse(
-        response,
-        400,
-        "invalid_request",
-        `"title" must be at most ${MAX_CONVERSATION_TITLE_LENGTH} characters.`,
-      );
-      return;
-    }
-    const stored = await options.host.renameConversation(
-      ghostName,
-      conversationId,
-      trimmed,
-    );
+    const stored = await options.host.renameConversation(ghostName, conversationId, title);
     jsonResponse(response, 200, { ok: true, title: stored });
   };
 

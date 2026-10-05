@@ -40,25 +40,6 @@ function validateServerName(name: string): string | undefined {
   return undefined;
 }
 
-/** Transport-level consistency, after Ghost's own field validation. */
-function validateServerConfig(name: string, config: MCPServerConfig): string[] {
-  const errors: string[] = [];
-  const type = config.type ?? "stdio";
-  const hasCommand = "command" in config && Boolean(config.command);
-  const hasUrl = "url" in config && Boolean(config.url);
-  if (hasCommand && hasUrl) {
-    errors.push(`Server "${name}": both "command" and "url" are set - server should be either stdio (command) OR http/sse (url), not both`);
-  }
-  if (type === "stdio") {
-    if (!hasCommand) errors.push(`Server "${name}": stdio server requires "command" field`);
-  } else if (type === "http" || type === "sse") {
-    if (!hasUrl) errors.push(`Server "${name}": ${type} server requires "url" field`);
-  } else {
-    errors.push(`Server "${name}": unknown server type "${String(type)}"`);
-  }
-  return errors;
-}
-
 const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
 /** Expand `${VAR}` and `${VAR:-default}` from the process environment. */
@@ -157,7 +138,5 @@ function ownedMcpValidationErrors(value: unknown): string[] {
 export function mcpServerValidationErrors(name: string, value: unknown): string[] {
   const nameError = validateServerName(name);
   if (nameError) return [nameError];
-  const ownedErrors = ownedMcpValidationErrors(value);
-  if (ownedErrors.length > 0) return ownedErrors;
-  return validateServerConfig(name, value as unknown as MCPServerConfig);
+  return ownedMcpValidationErrors(value);
 }
