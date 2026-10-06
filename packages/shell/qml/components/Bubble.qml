@@ -13,6 +13,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import "../services"
+import "../services/Attachments.js" as Attachments
 import "MarkdownCompat.js" as MarkdownCompat
 import "MarkdownSegments.js" as MarkdownSegments
 
@@ -28,10 +29,14 @@ Item {
 
     readonly property bool mine: root.speaker === "user"
     readonly property bool hookNotice: root.speaker === "hook"
+    // A prompt's image lines are drawn as pictures, not printed.
+    readonly property var promptParts: root.mine ? Attachments.split(root.body) : ({ text: root.body, images: [] })
+    readonly property var images: root.promptParts.images
+    readonly property int imageSize: 180
     readonly property string displayBody: {
         const raw = root.hookNotice
             ? (root.body !== "" ? "Stop hook · " + root.body : "Stop hook continued")
-            : root.body;
+            : root.promptParts.text;
         // A trailing newline is a POSIX terminator, not a blank line. Qt's
         // PlainText path paints it as one, which is the empty band under a
         // prompt (CodeView already strips the same thing for the gutter).
@@ -217,7 +222,11 @@ Item {
         // HUD. The measure only bites past that width.
         width: root.mine
             ? Math.min(parent.width * 0.82,
-                Math.max(tailText.implicitWidth + root.contentInset * 2, 72))
+                Math.max((root.hasBody ? tailText.implicitWidth : 0) + root.contentInset * 2,
+                    root.images.length > 0
+                        ? root.images.length * (root.imageSize + Theme.gap / 2) - Theme.gap / 2
+                            + root.contentInset * 2
+                        : 0, 72))
             : Math.min(parent.width, Theme.readingMeasure)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
@@ -255,6 +264,44 @@ Item {
                     required property var modelData
                     width: content.width
                     activity: modelData
+                }
+            }
+
+            // The images a prompt carried, each opening full size on click.
+            Flow {
+                id: pictures
+                objectName: "promptImages"
+
+                width: parent.width
+                visible: root.images.length > 0
+                spacing: Theme.gap / 2
+
+                Repeater {
+                    model: root.images
+
+                    delegate: Image {
+                        id: picture
+
+                        required property string modelData
+                        readonly property string url: Ghostd.attachmentUrl(picture.modelData)
+
+                        source: picture.url
+                        width: Math.min(root.imageSize, pictures.width)
+                        height: picture.implicitWidth > 0
+                            ? Math.round(picture.width * picture.implicitHeight / picture.implicitWidth)
+                            : root.imageSize * 0.75
+                        sourceSize.width: root.imageSize * 2
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        Accessible.role: Accessible.Graphic
+                        Accessible.name: "Attached image"
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: if (picture.url !== "") ExternalLinks.openPath(picture.url.slice("file://".length))
+                        }
+                    }
                 }
             }
 

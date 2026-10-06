@@ -18,6 +18,7 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
+import "Attachments.js" as Attachments
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
@@ -2054,6 +2055,79 @@ Singleton {
             });
         });
         return tools;
+    }
+
+    // Images waiting to go with the next message. Each is uploaded into the
+    // conversation directory the moment it is attached, so Send only has to
+    // name it; one attached to another conversation is dropped on a switch.
+    // `local` is what the composer draws: the source file until the upload
+    // lands, then the stored copy.
+    property var attachments: []
+    property var attachmentRequests: ({})
+    property int attachmentSerial: 0
+    readonly property bool attachmentsBusy: root.attachments.some(item => item.path === "" && item.error === "")
+
+    onCurrentSessionIdChanged: root.dropStaleAttachments()
+
+    /** `file://` URL of a stored attachment in the active conversation, or "". */
+    function attachmentUrl(path: string): string {
+        if (!Attachments.isAttachmentPath(path) || root.currentSessionId === "") return "";
+        const ghost = root.ghosts.find(row => row && row.name === root.activeGhost);
+        if (!ghost || typeof ghost.dir !== "string" || ghost.dir === "") return "";
+        return "file://" + ghost.dir + "/sessions/" + root.currentSessionId + "/" + path;
+    }
+
+    /**
+     * Attach a local image file to the active conversation's next message.
+     * `temporary` marks a file the HUD wrote itself (a paste), removed once
+     * the daemon holds its own copy.
+     */
+    function attach(localPath: string, temporary: bool): void {
+        const ghost = root.activeGhost;
+        if (ghost === "" || !Attachments.isImageFile(localPath)) return;
+        const sessionId = root.ensureSession(ghost);
+        if (sessionId === "") return;
+        const id = "a" + (++root.attachmentSerial);
+        root.attachments = root.attachments.concat([{
+            id: id, ghost: ghost, sessionId: sessionId,
+            local: "file://" + localPath, path: "", error: ""
+        }]);
+        root.request(root.attachmentRequests, id, "POST",
+            "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/"
+                + encodeURIComponent(sessionId) + "/attachments",
+            { path: localPath },
+            function (xhr, body) {
+                const stored = xhr.status === 201 && body && Attachments.isAttachmentPath(body.path)
+                    ? body.path : "";
+                if (stored !== "" && temporary) Quickshell.execDetached(["rm", "-f", "--", localPath]);
+                root.attachments = root.attachments.map(item => item.id !== id ? item
+                    : Object.assign({}, item, stored !== ""
+                        ? { path: stored, local: root.attachmentUrl(stored) || item.local }
+                        : { error: root.refusal(xhr, "Attach image") }));
+            },
+            () => root.attachments.some(item => item.id === id));
+    }
+
+    function detach(id: string): void {
+        root.retire(root.attachmentRequests, id);
+        root.attachments = root.attachments.filter(item => item.id !== id);
+    }
+
+    /** The stored paths to name in the message being sent, emptying the tray. */
+    function takeAttachments(): var {
+        const paths = root.attachments.filter(item => item.path !== "").map(item => item.path);
+        for (const item of root.attachments) root.retire(root.attachmentRequests, item.id);
+        root.attachments = [];
+        return paths;
+    }
+
+    function dropStaleAttachments(): void {
+        const kept = root.attachments.filter(item =>
+            item.ghost === root.activeGhost && item.sessionId === root.currentSessionId);
+        if (kept.length === root.attachments.length) return;
+        for (const item of root.attachments)
+            if (kept.indexOf(item) < 0) root.retire(root.attachmentRequests, item.id);
+        root.attachments = kept;
     }
 
     function send(text: string): void {
