@@ -1406,6 +1406,8 @@ describe("attachments", () => {
     expect(text.status).toBe(415);
     const relative = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "shot.png" }) });
     expect(relative.status).toBe(400);
+    const directory = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: temp!.root }) });
+    expect(directory.status).toBe(404);
     for (const name of ["..%2F.conversation.jsonl", "x.png", "abc-0000000g.png"]) {
       expect((await fetch(`${url(base, "c1")}/${name}`)).status, name).toBe(404);
     }

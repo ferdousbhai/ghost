@@ -684,9 +684,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       if (admission.identity) throw new GhostError("local_only", "Only the machine-local token attaches a local file.", 403);
       const path = stringField(await readJsonObjectBody(request, maxBodyBytes), "path");
       if (!isAbsolute(path)) throw new GhostError("invalid_request", "\"path\" must be absolute.", 400);
-      const size = await stat(path).then((s) => s.size, () => {
-        throw new GhostError("not_found", `No file at ${path}.`, 404);
-      });
+      const size = await stat(path).then((s) => s.isFile() ? s.size : -1, () => -1);
+      if (size < 0) throw new GhostError("not_found", `No file at ${path}.`, 404);
       if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", "An attachment is at most 20 MiB.", 413);
       bytes = await readFile(path);
     }

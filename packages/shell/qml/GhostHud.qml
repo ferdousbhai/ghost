@@ -485,7 +485,6 @@ FloatingWindow {
             anchors.right: parent.right
             anchors.rightMargin: Theme.pad
             anchors.bottom: parent.bottom
-            width: hud.navigationWidth
             currentSection: hud.currentSection
             activeHookCount: Ghostd.activeHookCount
             onSelected: section => hud.showSection(section)

@@ -2092,7 +2092,7 @@ Singleton {
         const id = "a" + (++root.attachmentSerial);
         root.attachments = root.attachments.concat([{
             id: id, ghost: ghost, sessionId: sessionId,
-            local: "file://" + localPath, path: "", error: ""
+            local: "file://" + localPath, temporary: temporary, path: "", error: ""
         }]);
         root.request(root.attachmentRequests, id, "POST",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/"
@@ -2101,7 +2101,8 @@ Singleton {
             function (xhr, body) {
                 const stored = xhr.status === 201 && body && Attachments.isAttachmentPath(body.path)
                     ? body.path : "";
-                if (stored !== "" && temporary) Quickshell.execDetached(["rm", "-f", "--", localPath]);
+                // The daemon has read the file, whatever it answered.
+                if (temporary) Quickshell.execDetached(["rm", "-f", "--", localPath]);
                 root.attachments = root.attachments.map(item => item.id !== id ? item
                     : Object.assign({}, item, stored !== ""
                         ? { path: stored }
@@ -2111,24 +2112,33 @@ Singleton {
     }
 
     function detach(id: string): void {
-        root.retire(root.attachmentRequests, id);
-        root.attachments = root.attachments.filter(item => item.id !== id);
+        root.keepAttachments(item => item.id !== id);
     }
 
     /** The stored paths to name in the message being sent, emptying the tray. */
     function takeAttachments(): var {
         const paths = root.attachments.filter(item => item.path !== "").map(item => item.path);
-        for (const item of root.attachments) root.retire(root.attachmentRequests, item.id);
-        root.attachments = [];
+        root.keepAttachments(() => false);
         return paths;
     }
 
     function dropStaleAttachments(): void {
-        const kept = root.attachments.filter(item =>
+        root.keepAttachments(item =>
             item.ghost === root.activeGhost && item.sessionId === root.currentSessionId);
+    }
+
+    /**
+     * Keep the tray's items that pass `keep`; any other stops its upload, and
+     * a paste the HUD wrote itself leaves XDG_RUNTIME_DIR with it.
+     */
+    function keepAttachments(keep: var): void {
+        const kept = root.attachments.filter(keep);
         if (kept.length === root.attachments.length) return;
-        for (const item of root.attachments)
-            if (kept.indexOf(item) < 0) root.retire(root.attachmentRequests, item.id);
+        for (const item of root.attachments) {
+            if (kept.indexOf(item) >= 0) continue;
+            root.retire(root.attachmentRequests, item.id);
+            if (item.temporary) Quickshell.execDetached(["rm", "-f", "--", item.local.slice("file://".length)]);
+        }
         root.attachments = kept;
     }
 
@@ -2393,7 +2403,8 @@ Singleton {
     }
 
     /**
-     * The turn's text part for a content index, appended on first sight. The
+     * The turn's text part for a content index, appended on first sight — in
+     * a new message when the current one already holds a tool call. The
      * daemon closes a text block before a tool call starts, so arrival order
      * is content order and `parts` reads like a stored message's content.
      */

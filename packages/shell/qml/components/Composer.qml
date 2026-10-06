@@ -77,8 +77,7 @@ Item {
             for (const url of drop.urls) {
                 const text = String(url);
                 if (!text.startsWith("file://")) continue;
-                const path = decodeURIComponent(text.slice("file://".length));
-                if (Attachments.isImageFile(path)) Ghostd.attach(path, false);
+                Ghostd.attach(decodeURIComponent(text.slice("file://".length)), false);
             }
             field.forceActiveFocus();
         }
