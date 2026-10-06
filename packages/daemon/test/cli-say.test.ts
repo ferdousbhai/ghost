@@ -65,6 +65,22 @@ describe("ghost say", () => {
     });
   });
 
+  it("prints an owner !command's output, the turn's whole answer", async () => {
+    const fake = await fakeDaemon([
+      { type: "start" },
+      { type: "tool_execution_start", id: "bash-1", toolName: "bash", arguments: { command: "ls" }, cwd: "/home/owner" },
+      { type: "tool_execution_update", id: "bash-1", toolName: "bash", summary: "a" },
+      { type: "tool_execution_end", id: "bash-1", toolName: "bash", isError: true, summary: "a\nb\nls: c: No such file" },
+      { type: "done", reason: "stop" },
+    ]);
+    const result = await runCli(["say", "!ls", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("a\nb\nls: c: No such file\n");
+    expect(result.stderr).not.toContain("✗");
+    const quiet = await runCli(["say", "!ls", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    expect(quiet.stdout).toBe("a\nb\nls: c: No such file\n");
+  });
+
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
     const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {

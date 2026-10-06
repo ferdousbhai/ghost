@@ -86,6 +86,9 @@ export async function sayCommand(
     ?? await turnConversationId(ctx, name, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
+  // An owner `!command` streams as one bash card; its output is the card's
+  // summary (the tail the HUD shows), and it is this turn's whole answer.
+  const ownerCommand = /^\s*!/u.test(text);
   let finalText = "";
   let terminal: "done" | "error" | undefined;
   await ctx.client.stream(ghostPath(name, "/messages"), {
@@ -112,6 +115,8 @@ export async function sayCommand(
         human = `${event.text}\n`;
       } else if (event.type === "session_stop_continued" && typeof event.reason === "string") {
         human = `Stop hook · ${event.reason}\n`;
+      } else if (event.type === "tool_execution_end" && ownerCommand && typeof event.summary === "string") {
+        human = quiet = `${event.summary}\n`;
       } else if (event.type === "done") {
         human = finalText && !finalText.endsWith("\n") ? "\n" : "";
         quiet = finalText ? `${finalText}${finalText.endsWith("\n") ? "" : "\n"}` : "";
@@ -123,7 +128,7 @@ export async function sayCommand(
         if (secondary) ctx.runtime.stderr.write(`${dim(`⚙ ${toolDescription(event)}`, ctx.runtime.stdout.isTTY === true)}\n`);
         break;
       case "tool_execution_end":
-        if (secondary && event.isError === true) {
+        if (secondary && event.isError === true && !ownerCommand) {
           const name = typeof event.toolName === "string" ? event.toolName : "tool";
           const summary = typeof event.summary === "string" ? `: ${truncate(event.summary, 80)}` : "";
           ctx.runtime.stderr.write(`${dim(`✗ ${name}${summary}`, ctx.runtime.stdout.isTTY === true)}\n`);
