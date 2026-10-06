@@ -2177,7 +2177,6 @@ Singleton {
         if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
-    /** Only the new message: ghostd owns the history. */
     /**
      * The active session id for a ghost, minting one on first use. A conversation
      * is created lazily by the daemon on the first turn; until then it lives only
@@ -2262,7 +2261,7 @@ Singleton {
         case "tool_execution_start":
             state.activity = event.toolName;
             // The daemon drops a repeated call id, so each start is a new call.
-            state.parts.push({ type: "toolCall", id: event.id });
+            state.parts.push({ type: "toolCall" });
             state.presentationDirty = true;
             root.updateToolFor(state, event.id, {
                 name: event.toolName,

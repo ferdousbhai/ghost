@@ -11,7 +11,6 @@ import { GhostError } from "./ghosts.js";
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DIRNAME = "attachments";
 const FILE = /^[a-z0-9]+-[0-9a-f]{8}\.(png|jpg|gif|webp)$/;
-const TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
 
 /** The image format from its leading bytes, so neither a header nor a file name is trusted. */
 function sniff(bytes: Uint8Array): string | null {
@@ -38,7 +37,7 @@ export async function readAttachment(conversationDir: string, name: string): Pro
   const ext = FILE.exec(name)?.[1];
   if (!ext) throw new GhostError("not_found", "No such attachment.", 404);
   try {
-    return { bytes: await readFile(join(conversationDir, DIRNAME, name)), type: TYPES[ext] ?? "application/octet-stream" };
+    return { bytes: await readFile(join(conversationDir, DIRNAME, name)), type: `image/${ext === "jpg" ? "jpeg" : ext}` };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new GhostError("not_found", "No such attachment.", 404);
     throw error;
