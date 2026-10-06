@@ -130,6 +130,28 @@ describe("ghost say", () => {
     expect(result.code).toBe(130);
   });
 
+  it("stops a conversation's running turn with ghost stop", async () => {
+    const requests: string[] = [];
+    server = createServer((request, response) => {
+      requests.push(`${request.method} ${request.url}`);
+      response.writeHead(200, { "content-type": "application/json" });
+      if (request.url === "/api/ghosts") {
+        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper", createdAt: new Date().toISOString() }]));
+      } else if (request.url === "/api/ghosts/casper/sessions") {
+        response.end(JSON.stringify({ sessions: [{ id: "remote-1", title: "Photo", updatedAt: new Date().toISOString(), messageCount: 2, pinned: false, unread: false, running: true }] }));
+      } else {
+        response.end(JSON.stringify({ stopped: true }));
+      }
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const result = await runCli(["stop", "-g", "casper", "-s", "remote-1"], { env: { GHOSTD_PORT: String(port) }, home: "/tmp/ghost-cli-home" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("stopped remote-1\n");
+    expect(requests).toContain("POST /api/ghosts/casper/sessions/remote-1/stop");
+  });
+
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
     const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {

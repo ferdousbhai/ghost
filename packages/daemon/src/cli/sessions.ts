@@ -57,6 +57,14 @@ export async function showCommand(
   return 0;
 }
 
+/** Stop a conversation's running turn, whichever client started it. */
+export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+  const body = (await ctx.client.request("POST", `${path}/stop`, {})).body;
+  emit(ctx, body, () => `stopped ${session.id}\n`);
+  return 0;
+}
+
 export async function sessionActionCommand(
   verb: "title" | "pin" | "unpin",
   parsed: ParsedCliArgs,

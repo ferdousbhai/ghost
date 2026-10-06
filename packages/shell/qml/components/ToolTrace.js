@@ -209,7 +209,6 @@ function view(activity, completed, failed, expanded) {
     return {
         trace: text(activity, completed, failed, expanded),
         diagnosticInput: diagnosticInput,
-        hasDiagnostics: String(activity.name || "") !== "" || diagnosticInput !== "",
         fileTarget: fileTarget(activity),
         fileCwd: fileCwd(activity)
     };

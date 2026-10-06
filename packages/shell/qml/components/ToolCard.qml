@@ -30,7 +30,6 @@ Rectangle {
         root.call(), root.completed, root.failed, root.expanded)
     readonly property string trace: root.presentation.trace
     readonly property string diagnosticInput: root.presentation.diagnosticInput
-    readonly property bool hasDiagnostics: root.presentation.hasDiagnostics
 
     // Paths resolve against the cwd captured when that exact call began; a
     // relative path with no cwd offers no chip rather than silently opening a
@@ -67,9 +66,8 @@ Rectangle {
     MouseArea {
         id: cardHover
         anchors.fill: parent
-        hoverEnabled: root.hasDiagnostics
-        cursorShape: root.hasDiagnostics ? Qt.PointingHandCursor : Qt.ArrowCursor
-        enabled: root.hasDiagnostics
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
         onClicked: root.expanded = !root.expanded
     }
 
@@ -177,7 +175,7 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.call().name !== undefined && root.call().name !== ""
+            visible: root.expanded
             width: parent.width
             text: "Tool · " + root.call().name
             color: root.detailColor

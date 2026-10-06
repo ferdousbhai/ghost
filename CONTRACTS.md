@@ -426,12 +426,12 @@ The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches is a named verb there (ghost list, rename, character, sessions
-and their title/pin/read/delete, the agent a ghost prefers (`ghost harness`)
+and their title/pin/read/delete/stop, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), MCP, hooks, remote, status,
 skill), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
-`self`, `harnesses`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+`self`, `harnesses`, `background`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
 and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the

@@ -30,7 +30,7 @@ import { preferredGhostName, preferredSessionId } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
-import { sessionActionCommand, sessionsCommand, showCommand } from "./sessions.js";
+import { sessionActionCommand, sessionsCommand, showCommand, stopCommand } from "./sessions.js";
 import { smokeCommand } from "./smoke.js";
 import { statusCommand } from "./status.js";
 import type { CliContext, CliRuntime, GhostCliOptions } from "./types.js";
@@ -73,6 +73,14 @@ export const COMMANDS: readonly Command[] = [
     example: 'ghost say --new "Start fresh"',
     positionals: [0, Number.POSITIVE_INFINITY],
     run: sayCommand,
+  },
+  {
+    verb: "stop",
+    usage: "stop [-g <name>] [-s <id>] [--json] [-q]",
+    summary: "Stop a conversation's running turn.",
+    example: "ghost stop -s cli-abc",
+    positionals: [0, 0],
+    run: stopCommand,
   },
   {
     verb: "list",
