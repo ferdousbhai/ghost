@@ -206,16 +206,20 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     return el;
   }
   /**
-   * What a reply shows: the text after its last tool call, or while it is
-   * still inside its calls the narration before them (the HUD's TurnBlocks rule).
+   * A message's texts as the bubbles they show as: every text stays, and text
+   * after a tool call is the next message (the HUD's TurnBlocks rule).
    */
-  function finalText(parts) {
-    let run = [], last = [];
+  function bubbles(parts) {
+    const out = [];
+    let tooled = true;
     for (const p of parts) {
-      if (p.type === "toolCall") { if (run.length) last = run; run = []; }
-      else if (p.text.trim()) run.push(p.text);
+      if (p.type === "toolCall") tooled = true;
+      else if (p.text.trim()) {
+        if (tooled) out.push(p.text); else out[out.length - 1] += "\\n\\n" + p.text;
+        tooled = false;
+      }
     }
-    return (run.length ? run : last).join("\\n\\n");
+    return out;
   }
   function empty() {
     const el = document.createElement("div"); el.className = "empty";
@@ -229,10 +233,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const stick = !keep || nearBottom(), top = log.scrollTop;
     log.textContent = "";
     for (const m of messages) {
-      const body = finalText(m.content);
-      if (!body.trim()) continue;
-      if (m.role === "user") log.append(userBubble(body));
-      else if (m.role === "assistant") log.append(assistantBubble(body));
+      const texts = bubbles(m.content);
+      if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\\n\\n")));
+      else if (m.role === "assistant") for (const text of texts) log.append(assistantBubble(text));
     }
     if (!log.childElementCount) empty();
     log.scrollTop = stick ? log.scrollHeight : top;
@@ -331,7 +334,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       prompt.value = ""; grow(); clearTray();
       log.querySelector(".empty")?.remove();
       log.append(userBubble(message));
-      const reply = assistantBubble(""); reply.classList.add("pending"); log.append(reply);
+      const replies = [assistantBubble("")]; replies[0].classList.add("pending"); log.append(replies[0]);
       // Only the call running now, the way the HUD's activity line shows it; a
       // finished reply keeps none of them.
       const activity = document.createElement("div"); activity.className = "activity";
@@ -353,17 +356,22 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             if (ev.type === "text_start") parts.push({ type: "text", text: "" });
             else if (ev.type === "text_delta") {
               parts.at(-1).text += ev.delta;
-              reply.replaceChildren(renderMarkdown(finalText(parts), document));
+              const texts = bubbles(parts);
+              if (texts.length > replies.length) {
+                activity.remove(); replies.at(-1).classList.remove("pending");
+                const next = assistantBubble(""); next.classList.add("pending"); log.append(next); replies.push(next);
+              }
+              if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
             } else if (ev.type === "tool_execution_start") {
               parts.push({ type: "toolCall" });
-              activity.textContent = ev.toolName + "\u2026"; reply.after(activity);
+              activity.textContent = ev.toolName + "\u2026"; replies.at(-1).after(activity);
             }
             else if (ev.type === "error") show(ev.errorMessage);
             follow(stick);
           }
         }
       } finally {
-        reply.classList.remove("pending");
+        replies.at(-1).classList.remove("pending");
         activity.remove();
       }
     } finally {

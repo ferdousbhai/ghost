@@ -226,9 +226,9 @@ TestCase {
         compare(tools[1].status, "complete");
     }
 
-    // Tool events carry no content index, so a call is placed after the text
-    // that announced it and before the text that follows.
-    function test_liveToolSplitsNarrationFromReply(): void {
+    // Text after a tool call is the ghost's next message: the calls stay with
+    // the text before them, and nothing the ghost said is replaced.
+    function test_textAfterToolsIsASeparateMessage(): void {
         const turn = openTurn("tool-order", null);
         Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 0, content: "Checking." });
         Ghostd.handleTurnEvent(turn.state, {
@@ -238,11 +238,17 @@ TestCase {
             type: "tool_execution_start", id: "c2", toolName: "Read", arguments: { file_path: "/b" }
         });
         Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 1, content: "Done." });
+        // A late end for a call in the closed message makes no card here.
+        Ghostd.handleTurnEvent(turn.state, { type: "tool_execution_end", id: "c2", isError: false });
         Ghostd.flushTurn(turn.state, true);
 
-        compare(turn.state.rows[1].text, "Done.");
-        const tools = turn.state.rows[1].toolActivity;
-        compare(tools.length, 2);
+        compare(turn.state.rows.length, 3);
+        compare(turn.state.rows[1].text, "Checking.");
+        verify(!turn.state.rows[1].pending);
+        compare(turn.state.rows[1].toolActivity.length, 2);
+        compare(turn.state.rows[1].toolActivity[1].status, "complete");
+        compare(turn.state.rows[2].text, "Done.");
+        compare(turn.state.rows[2].toolActivity.length, 0);
     }
 
     function test_ownerCommandStreamsAsABashCard(): void {

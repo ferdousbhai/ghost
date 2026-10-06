@@ -2336,6 +2336,7 @@ Singleton {
             const part = state.parts[i];
             if (part.type === "text" && part.index === index) return part;
         }
+        root.openMessageAfterToolsFor(state);
         const part = { type: "text", index: index, text: "" };
         state.parts.push(part);
         return part;
@@ -2352,8 +2353,12 @@ Singleton {
                 next.push(item);
             }
         }
-        // Only a start creates a card, and it names every field a card reads.
-        if (!found) next.push(Object.assign({ id: id }, patch));
+        // Only a start creates a card, and it names every field a card reads;
+        // a late end for a call in an earlier message has no card here.
+        if (!found) {
+            if (patch.name === undefined) return;
+            next.push(Object.assign({ id: id }, patch));
+        }
         state.toolActivities = next;
         root.syncToolActivityFor(state);
     }
@@ -2492,6 +2497,20 @@ Singleton {
             role: "assistant", text: "", toolActivity: [], error: "", pending: true
         });
         state.assistantRow = state.rows.length - 1;
+    }
+
+    /**
+     * Text after a tool call is the ghost's next message: settle the row that
+     * holds the calls and give the new text a row of its own.
+     */
+    function openMessageAfterToolsFor(state: var): void {
+        if (!state.parts.some(part => part.type === "toolCall")) return;
+        root.settleToolActivityFor(state, false);
+        root.flushTurn(state, true);
+        if (state.assistantRow >= 0 && state.assistantRow < state.rows.length)
+            root.setTurnRow(state, state.assistantRow, "pending", false);
+        root.openAssistantRowFor(state);
+        root.resetAssistantSegmentFor(state);
     }
 
 

@@ -1,9 +1,8 @@
 import QtTest
 import "../qml/services/TurnBlocks.js" as TurnBlocks
 
-// The reply rule's one job: the reading column shows the latest text of the
-// turn. Text a tool call followed holds the column until the next text
-// replaces it.
+// Every text the ghost writes stays: a message is its text parts, and a
+// restored turn is cut into messages where text follows a tool call.
 TestCase {
     name: "TurnBlocks"
 
@@ -15,50 +14,33 @@ TestCase {
         return { type: "toolCall" };
     }
 
-    function test_textAfterTheLastToolCallIsTheReply(): void {
-        compare(TurnBlocks.fromParts([t("Checking your Dropbox for the invoice."), call(), t("It is dated the 14th, for £420.")]),
-            "It is dated the 14th, for £420.");
-    }
-
-    function test_eachToolCallOverwritesTheTextBeforeIt(): void {
-        compare(TurnBlocks.fromParts([t("Looking that up."), call(), t("Now checking the calendar."), call(), t("Tuesday at four.")]),
-            "Tuesday at four.");
-    }
-
-    function test_lengthAndSentenceCountDoNotMatter(): void {
-        // No classifier: a long, multi-sentence section before a call is
-        // replaced like any other.
-        const section = "The first invoice covers hosting for the quarter and "
-            + "is already settled, which is why it does not appear on the "
-            + "outstanding list; the second is the one you are looking for, "
-            + "and it is the one I will open next so we can read the terms.";
-        compare(TurnBlocks.fromParts([t(section), call(), t("Here they are.")]), "Here they are.");
-    }
-
-    function test_theColumnKeepsTheAnnouncementWhileItsCallRuns(): void {
-        // The call has started and nothing has followed it yet: the latest
-        // text stays on screen rather than the column going blank. A turn
-        // that ends there keeps it as its last words.
-        compare(TurnBlocks.fromParts([t("Checking your Dropbox")]), "Checking your Dropbox");
-        compare(TurnBlocks.fromParts([t("Checking your Dropbox"), call()]), "Checking your Dropbox");
-    }
-
-    function test_turnWithNoToolsIsAllReply(): void {
-        compare(TurnBlocks.fromParts([t("Short answer."), t("Longer one.")]), "Short answer.\n\nLonger one.");
-    }
-
-    function test_severalPartsAfterTheLastCallAreOneReply(): void {
-        compare(TurnBlocks.fromParts([t("Reading it."), call(), t("First part."), t("Second part.")]),
-            "First part.\n\nSecond part.");
-    }
-
-    function test_parallelCallsReplaceOneAnnouncement(): void {
-        compare(TurnBlocks.fromParts([t("Checking both calendars."), call(), call(), t("Both free.")]), "Both free.");
-    }
-
-    function test_blankTextIsNothing(): void {
+    function test_aMessageIsAllItsText(): void {
+        compare(TurnBlocks.fromParts([t("Short answer."), t("  "), t("Longer one.")]),
+            "Short answer.\n\nLonger one.");
         compare(TurnBlocks.fromParts([t("   \n "), call()]), "");
-        compare(TurnBlocks.fromParts([t("Looking."), call(), t("  ")]), "Looking.");
+    }
+
+    function test_storedTextAfterAToolCallIsTheNextMessage(): void {
+        const rows = TurnBlocks.rows([
+            { role: "user", content: [t("when is the launch?")] },
+            { role: "assistant", content: [t("Looking through your docs."), call(), call(),
+                t("The roadmap puts launch in March."), t("Want the source?")] }
+        ]);
+        compare(rows.length, 3);
+        compare(rows[1].text, "Looking through your docs.");
+        compare(rows[1].parts.length, 3);
+        compare(rows[2].text, "The roadmap puts launch in March.\n\nWant the source?");
+    }
+
+    function test_aCutKeepsTheTurnsErrorOnItsLastMessage(): void {
+        const rows = TurnBlocks.rows([
+            { role: "user", content: [t("go")] },
+            { role: "assistant", content: [t("Trying."), call()] },
+            { role: "assistant", content: [t("It broke.")], errorMessage: "boom" }
+        ]);
+        compare(rows.length, 3);
+        compare(rows[1].error, "");
+        compare(rows[2].error, "boom");
     }
 
     function test_toolOnlyTurnSurvivesWithNoTextBesideIt(): void {
@@ -92,11 +74,12 @@ TestCase {
             { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "eval" }], entryId: "a3" },
             { role: "assistant", content: [{ type: "text", text: "13 repos." }], entryId: "a4" }
         ]);
-        compare(rows.length, 2);
-        // The preamble sat in a message of its own, severed from the call that
-        // made it one; regrouping is what lets the reply rule see them together.
-        compare(rows[1].text, "13 repos.");
-        compare(rows[1].parts.length, 4);
+        compare(rows.length, 3);
+        // The preamble sat in a message of its own; regrouping puts its calls
+        // beside it, and the reply after them is the next message.
+        compare(rows[1].text, "Looking now.");
+        compare(rows[1].parts.length, 3);
+        compare(rows[2].text, "13 repos.");
     }
 
     function test_emptyMessagesLeaveNoRow(): void {

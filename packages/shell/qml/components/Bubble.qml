@@ -70,8 +70,8 @@ Item {
         // A settled row will not grow, and saying so lets the answer's last
         // block close instead of riding in the tail with the one before it.
         const step = MarkdownSegments.advance(root.displayBody, root.blockScan, !root.busy);
-        // A row the list reused for another message, or a reply that replaced
-        // the narration before it, is not a continuation of what is on screen.
+        // A row the list reused for another message is not a continuation of
+        // what is on screen.
         if (step.reset) bodyBlocks.clear();
         for (const segment of step.segments) bodyBlocks.append({ markdown: segment });
         root.liveTail = step.tail;

@@ -228,10 +228,10 @@ If you expect one of these, it is missing on purpose:
   command and ends it with `ghost say --follow-up`, which wakes the
   conversation that started it. Ghost keeps no job table, jobs API, or jobs
   strip, and cannot cancel what it did not start.
-- **No narration classifier in the HUD.** The reading column shows the latest
-  text of a turn: text that announced a tool call holds the column while the
-  call runs and the next text replaces it. No length limit or sentence rule
-  decides what is "status", and a tool card carries no copy of it.
+- **No narration classifier.** Every text the ghost writes stays, as its own
+  message: text that follows a tool call starts the next one, in the HUD and
+  the tailnet viewer alike, and the calls belong to the message before them.
+  No length limit or sentence rule decides what is "status".
 - **No compositor plugin for background input.** Wayland lets input reach
   only the focused window, so the helper's focus-borrowing transactions,
   restore logic, and honesty metadata exist to make that safe and visible.

@@ -1,42 +1,34 @@
 .pragma library
 
-// TurnBlocks — what a turn shows in the reading column.
+// TurnBlocks — how a turn becomes messages in the reading column.
 //
-// A model narrates itself: "Checking your Dropbox for the invoice", then a
-// tool call, then the answer. One structural rule covers it, with no
-// classifier, length limit, or sentence counting: the column shows the latest
-// text of the turn. Text a tool call followed was the ghost announcing that
-// call; it holds the column while the call runs, and the next text replaces
-// it, so the final answer is simply the last run of text. The live stream and
-// a restored transcript both give it ordered content parts.
+// Every text the ghost writes stays, and text that follows a tool call is its
+// next message, the way a chat app shows a burst of replies; the calls belong
+// to the message before them. The live stream (Ghostd opens a row at that
+// boundary) and a restored transcript (`rows`) cut in the same place.
 
-/**
- * The reply markdown of an assistant turn's ordered content parts: the text
- * after the last tool call, or the latest text before it while the turn is
- * still inside its calls.
- */
+function isTool(part) {
+    return part.type === "toolCall";
+}
+
+function isText(part) {
+    return part.type === "text" && part.text.trim() !== "";
+}
+
+/** A message's markdown: its text parts in order. */
 function fromParts(parts) {
-    var run = [];            // the text parts since the last tool call
-    var announced = [];      // the last run a tool call followed
-    for (var i = 0; i < parts.length; i++) {
-        var part = parts[i];
-        if (part.type === "toolCall") {
-            if (run.length > 0) announced = run;
-            run = [];
-        } else if (part.text.trim() !== "") {
-            run.push(part.text);
-        }
-    }
-    return (run.length > 0 ? run : announced).join("\n\n");
+    return parts.filter(isText).map(function (part) {
+        return part.text;
+    }).join("\n\n");
 }
 
 /**
  * Regroup a stored conversation into the rows the live stream would have made.
  *
- * One turn may be stored as several consecutive assistant messages.
- * Regrouping keeps a restored answer in one row, shown the way the live stream
- * would have shown it. A row with no text survives when it still holds a tool
- * call or a failure.
+ * One turn may be stored as several consecutive assistant messages, and one
+ * stored message may hold several of the ghost's: rows are cut where text
+ * follows a tool call, as the live stream cuts them. A row with no text
+ * survives when it still holds a tool call or a failure.
  *
  * Returns `[{ role, text, parts, contentTruncated, error }]`; an assistant
  * row's `parts` is its ordered content, for recovering its tool cards, and
@@ -50,9 +42,7 @@ function rows(messages) {
 
     function commit() {
         var text = fromParts(parts);
-        var carriesTool = parts.some(function (part) {
-            return part.type === "toolCall";
-        });
+        var carriesTool = parts.some(isTool);
         if (text !== "" || carriesTool || error !== "")
             out.push({ role: "assistant", text: text, parts: parts, error: error });
         parts = [];
@@ -62,7 +52,11 @@ function rows(messages) {
     for (var i = 0; i < messages.length; i++) {
         var message = messages[i];
         if (message.role === "assistant") {
-            parts = parts.concat(message.content);
+            for (var p = 0; p < message.content.length; p++) {
+                var part = message.content[p];
+                if (isText(part) && parts.some(isTool)) commit();
+                parts.push(part);
+            }
             if (message.errorMessage) error = message.errorMessage;
             continue;
         }
