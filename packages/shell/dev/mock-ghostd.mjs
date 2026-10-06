@@ -677,8 +677,10 @@ async function streamTurn(res, name, body) {
     if (prompt.startsWith("!")) {
       const command = prompt.slice(1).trim();
       const ran = await pump(res, ownerCommand(command), stream) !== null;
-      // ghostd logs the command as it ends; the transcript shows it as the ghost's message.
+      // ghostd logs the command as it ends; the transcript shows the owner's
+      // `!command`, then its output as the ghost's message.
       if (existing) {
+        append(existing, { role: "user", content: textParts(prompt) });
         append(existing, { role: "assistant", content: textParts(ran
           ? `\`$ ${command}\`\n\n\`\`\`\nmock output of ${command}\n\`\`\``
           : `\`$ ${command}\`\n\n\`\`\`\n\n\`\`\`\n\n(exit signal)`) });

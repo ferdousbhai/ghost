@@ -222,9 +222,9 @@ export function logState(entries: readonly LogEntry[]): LogState {
         }
         break;
       case "command":
-        // A `!command` the transcript shows is a message, and the owner's words.
+        // A `!command` the transcript shows is two messages, the owner's words and its output.
         if (entry.excluded) break;
-        messageCount += 1;
+        messageCount += 2;
         preview ??= firstLine(`!${entry.command}`);
         break;
       case "harness":
@@ -278,10 +278,12 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         ...(entry.error ? { errorMessage: entry.error } : {}),
       };
     } else if (entry.type === "command" && !entry.excluded) {
+      // The owner's `!command`, then its output, as the live turn showed them.
+      messages.push({ role: "user", content: [{ type: "text", text: `!${entry.command}` }], entryId });
       message = {
         role: "assistant",
         content: [{ type: "text", text: commandText(entry) }],
-        entryId,
+        entryId: `${entryId}o`,
       };
     }
     if (message) messages.push(message);

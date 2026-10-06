@@ -362,6 +362,10 @@ describe("owner commands and hooks", () => {
     const events = await turn(sessions, "!echo printed-$GHOST_SESSION");
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: false }));
     expect(fake.calls()).toEqual([]);
+    // Read back as the live turn showed it: the owner's `!command`, then its output.
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.map((message) => [message.role, message.entryId])).toEqual([["user", "e1"], ["assistant", "e1o"]]);
+    expect(messages[0]?.content).toEqual([{ type: "text", text: "!echo printed-$GHOST_SESSION" }]);
 
     await turn(sessions, "what did I run?");
     const [call] = fake.calls();
@@ -390,7 +394,7 @@ describe("owner commands and hooks", () => {
     sessions.stopTurn("casper", "c9");
     await running;
     expect(await sessions.listSessions("casper")).toEqual([
-      expect.objectContaining({ id: "c9", running: false, messageCount: 1, preview: "!sleep 30" }),
+      expect.objectContaining({ id: "c9", running: false, messageCount: 2, preview: "!sleep 30" }),
     ]);
 
     // The first owner message still titles it; the command keeps the preview.
