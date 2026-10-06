@@ -20,7 +20,6 @@ export { homeTrashDir } from "./trash.js";
 export interface Ghost {
   name: string;
   dir: string;
-  createdAt: string;
 }
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
@@ -109,14 +108,6 @@ function isFile(path: string): boolean {
  */
 export function isGhostHome(dir: string): boolean {
   return isDirectory(dir) && isFile(join(dir, CHARACTER_FILENAME));
-}
-
-function createdAtOf(dir: string): string {
-  const stats = statSync(dir);
-  // birthtime is 0 on filesystems that do not record it; mtime is the
-  // honest fallback.
-  const birth = stats.birthtimeMs > 0 ? stats.birthtimeMs : stats.mtimeMs;
-  return new Date(birth).toISOString();
 }
 
 export function ghostPaths(dir: string): {
@@ -217,7 +208,7 @@ export class GhostRegistry {
       if (!isValidGhostName(name)) continue;
       const dir = join(this.root, name);
       if (!isGhostHome(dir)) continue;
-      ghosts.push({ name, dir, createdAt: createdAtOf(dir) });
+      ghosts.push({ name, dir });
     }
     return ghosts.sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -226,7 +217,7 @@ export class GhostRegistry {
     if (!isValidGhostName(name)) return null;
     const dir = join(this.root, name);
     if (!isGhostHome(dir)) return null;
-    return { name, dir, createdAt: createdAtOf(dir) };
+    return { name, dir };
   }
 
   get(name: string): Ghost {
@@ -254,7 +245,7 @@ export class GhostRegistry {
       // isGhostHome() check and here.
       flag: "wx",
     });
-    return { name, dir, createdAt: createdAtOf(dir) };
+    return { name, dir };
   }
 
   /**
@@ -322,7 +313,7 @@ export class GhostRegistry {
         throw error;
       }
     }
-    return { name: nextName, dir: target, createdAt: createdAtOf(target) };
+    return { name: nextName, dir: target };
   }
 
   /**

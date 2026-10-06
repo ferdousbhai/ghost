@@ -18,7 +18,6 @@ function session(id: string): SessionSummary {
     model: null,
     provider: null,
     effort: null,
-    createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
     messageCount: 0,
     pinned: false,
@@ -238,7 +237,7 @@ describe("CLI API adaptation", () => {
         return jsonResponse({
           version: "1.4.0",
           source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
-          update: { latest: "1.5.0", command: "omarchy-update", url: "https://github.com/ferdousbhai/ghost/releases/tag/v1.5.0" },
+          update: { latest: "1.5.0", command: "omarchy-update" },
         });
       }
       return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);

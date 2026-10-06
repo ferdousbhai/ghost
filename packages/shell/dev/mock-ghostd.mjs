@@ -145,12 +145,8 @@ const REMOTE_QR_SVG = `<?xml version="1.0" encoding="UTF-8"?>
   <path fill="black" d="M2 2h7v7H2zm2 2v3h3V4zm16-2h7v7h-7zm2 2v3h3V4zM2 20h7v7H2zm2 2v3h3v-3zm8-20h2v2h-2zm3 1h2v3h-2zm-4 4h3v2h-3zm5 3h3v3h-3zm-5 3h2v3h-2zm4 2h2v4h-2zm4-5h2v2h-2zm2 3h3v2h-3zm-7 8h3v3h-3zm5-3h2v2h-2zm3 3h3v2h-3zm-8 5h2v2h-2zm4-1h3v2h-3zm5 0h2v2h-2z"/>
 </svg>`;
 
-/** @type {{ name: string, dir: string, createdAt: string }[]} */
-const ghosts = ["casper", "moaning-myrtle"].map((name) => ({
-  name,
-  dir: join(GHOSTS_ROOT, name),
-  createdAt: new Date(Date.now() - 86_400_000).toISOString(),
-}));
+/** @type {{ name: string, dir: string }[]} */
+const ghosts = ["casper", "moaning-myrtle"].map((name) => ({ name, dir: join(GHOSTS_ROOT, name) }));
 
 const conversationEventClients = new Map();
 
@@ -372,7 +368,6 @@ const sessionSummary = (name) => (s) => {
     title: s.title ?? null,
     preview: s.preview ?? (first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null),
     harness: s.harness ?? null,
-    createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     messageCount: s.messages.length,
     pinned: s.pinned === true,
@@ -761,7 +756,7 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 404, { error: { code: "pairing_not_found", message: "No browser is waiting to pair with that code." } });
     }
     relayPairingCode = "";
-    return json(res, 200, { ok: true, outcome: body.allow ? "paired" : "denied", ...relaySnapshot() });
+    return json(res, 200, { outcome: body.allow ? "paired" : "denied", ...relaySnapshot() });
   }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
     if (req.method === "GET") return json(res, 200, remoteSnapshot());
@@ -812,7 +807,7 @@ const mockServer = createServer(async (req, res) => {
     const name = typeof body?.name === "string" ? body.name.trim() : "";
     if (!/^[a-z0-9][a-z0-9-]*$/iu.test(name)) return json(res, 400, { error: "invalid name" });
     if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: "already exists" });
-    const ghost = { name, dir: join(GHOSTS_ROOT, name), createdAt: new Date().toISOString() };
+    const ghost = { name, dir: join(GHOSTS_ROOT, name) };
     ghosts.push(ghost);
     if (OWNS_GHOSTS_ROOT) seedMockHome(name);
     return json(res, 201, ghost);

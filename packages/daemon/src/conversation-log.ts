@@ -128,7 +128,6 @@ export function newConversationEntry(id: string, now: Date): LogEntry {
 }
 
 export interface LogState {
-  readonly createdAt: string | null;
   /** The owner's title, else one derived from the first owner message. */
   readonly title: string | null;
   readonly preview: string | null;
@@ -184,7 +183,6 @@ export function derivedTitle(text: string): string | null {
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {
-  let createdAt: string | null = null;
   let title: string | null = null;
   let preview: string | null = null;
   let derived: string | null = null;
@@ -197,9 +195,6 @@ export function logState(entries: readonly LogEntry[]): LogState {
   let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   for (const entry of entries) {
     switch (entry.type) {
-      case "conversation":
-        createdAt = entry.createdAt;
-        break;
       case "title":
         title = entry.title;
         break;
@@ -241,7 +236,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
     }
   }
-  return { createdAt, title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
+  return { title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
 }
 
 export interface TranscriptMessage {

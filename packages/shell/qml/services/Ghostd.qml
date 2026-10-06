@@ -682,7 +682,7 @@ Singleton {
     // The browser relay's pairing prompt is daemon-global as well. GhostHud
     // polls it only while shown: the code the extension popup displays has to
     // match the one here, and that is what makes Allow safe to click.
-    /** `{code, since}` while a browser is waiting for Allow, else null. */
+    /** `{code}` while a browser is waiting for Allow, else null. */
     property var relayPairing: null
     property bool relayResolving: false
     property string relayError: ""
@@ -1683,7 +1683,6 @@ Singleton {
             title: null,
             preview: null,
             harness: null,
-            createdAt: now,
             updatedAt: now,
             messageCount: messageCount,
             pinned: false,
@@ -1836,7 +1835,7 @@ Singleton {
 
     /** When a conversation last changed, for ordering; 0 when it never says. */
     function sessionTime(session: var): real {
-        return Date.parse(session.updatedAt || session.createdAt || "") || 0;
+        return Date.parse(session.updatedAt || "") || 0;
     }
 
     /** Make one conversation the ghost's active one, clearing everything the last one owned. */
@@ -2067,8 +2066,8 @@ Singleton {
     // Images waiting to go with the next message. Each is uploaded into the
     // conversation directory the moment it is attached, so Send only has to
     // name it; one attached to another conversation is dropped on a switch.
-    // `local` is what the composer draws: the source file until the upload
-    // lands, then the stored copy.
+    // `local` is the source file; the composer draws the daemon's copy once
+    // `path` is set.
     property var attachments: []
     property var attachmentRequests: ({})
     property int attachmentSerial: 0

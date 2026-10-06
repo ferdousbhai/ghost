@@ -311,7 +311,6 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: McpConfig.transport(serverRow.modelData).toUpperCase()
-                                    + " · " + McpConfig.text(serverRow.modelData.source || "ghost")
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamilyMono
                                 font.pixelSize: Theme.fontSizeCaption

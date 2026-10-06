@@ -59,13 +59,11 @@ describe("GhostRegistry.list", () => {
     expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["casper", "mina"]);
   });
 
-  it("reports name, dir, and an ISO createdAt", () => {
+  it("reports name and dir", () => {
     temp = makeTempGhosts();
     seedGhost(temp.root, { name: "casper" });
     const [ghost] = temp.registry.list();
-    expect(ghost?.name).toBe("casper");
-    expect(ghost?.dir).toBe(join(temp.root, "casper"));
-    expect(ghost?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(ghost).toEqual({ name: "casper", dir: join(temp.root, "casper") });
   });
 });
 

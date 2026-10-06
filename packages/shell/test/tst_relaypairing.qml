@@ -74,7 +74,7 @@ TestCase {
         Ghostd.refreshRelay();
         compare(tc.requests.length, 1);
 
-        tc.requests[0].complete(200, { ok: true, outcome: "paired", pairing: null });
+        tc.requests[0].complete(200, { outcome: "paired", pairing: null });
         compare(Ghostd.relayResolving, false);
         compare(Ghostd.relayPairing, null);
         compare(Ghostd.relayError, "");
@@ -84,7 +84,7 @@ TestCase {
         Ghostd.relayPairing = { code: "482913" };
         Ghostd.resolveRelayPairing("482913", false);
         compare(JSON.parse(tc.requests[0].body), { code: "482913", allow: false });
-        tc.requests[0].complete(200, { ok: true, outcome: "denied", pairing: null });
+        tc.requests[0].complete(200, { outcome: "denied", pairing: null });
         compare(Ghostd.relayPairing, null);
     }
 
@@ -113,7 +113,7 @@ TestCase {
         compare(tc.requests[0].aborted, true);
         // The aborted poll's late completion cannot clear the prompt.
         compare(Ghostd.relayPairing.code, "482913");
-        tc.requests[1].complete(200, { ok: true, pairing: null });
+        tc.requests[1].complete(200, { pairing: null });
         compare(Ghostd.relayPairing, null);
     }
 }

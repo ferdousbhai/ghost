@@ -55,14 +55,13 @@ export type TurnEvent =
     };
 
 /**
- * A harness refused on quota. Sent before the terminal `error`, so the HUD
- * and hooks can name the limit instead of a generic failure.
+ * A harness refused on quota. Sent before the terminal `error`, whose
+ * message it classifies, so the HUD and CLI can name the limit.
  */
 export interface LimitReachedEvent {
   type: "limit_reached";
   harness: string;
   kind: "rate_limit" | "usage_limit" | "overloaded" | "billing";
-  message: string;
 }
 
 const LIMIT_PATTERNS: ReadonlyArray<[RegExp, LimitReachedEvent["kind"]]> = [

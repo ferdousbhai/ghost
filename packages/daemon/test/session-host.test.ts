@@ -188,7 +188,7 @@ describe("harness choice", () => {
     const sessions = host({ harnesses: [spent] });
     const events = await turn(sessions, "hello");
 
-    expect(events).toContainEqual({ type: "limit_reached", harness: "only", kind: "usage_limit", message: "You've hit your usage limit." });
+    expect(events).toContainEqual({ type: "limit_reached", harness: "only", kind: "usage_limit" });
     expect(events.at(-1)).toMatchObject({ type: "error" });
   });
 

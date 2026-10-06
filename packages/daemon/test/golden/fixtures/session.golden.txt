@@ -137,7 +137,6 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 ------------------------------------------------------------------------------
 [
   {
-    "createdAt": "<time>",
     "effort": null,
     "harness": "fake",
     "id": "conv-golden",

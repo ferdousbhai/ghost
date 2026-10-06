@@ -206,19 +206,19 @@ TestCase {
         Ghostd.currentSessionId = "keep";
         const visible = Ghostd.orderSessions([
             {
-                id: "old", title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "old", title: null, messageCount: 0, updatedAt: now,
                 pinned: false, localOnly: true
             },
             {
-                id: "keep", title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "keep", title: null, messageCount: 0, updatedAt: now,
                 pinned: false, localOnly: true
             },
             {
-                id: "listed-empty", title: null, messageCount: 0, updatedAt: now, createdAt: now,
+                id: "listed-empty", title: null, messageCount: 0, updatedAt: now,
                 pinned: false
             },
             {
-                id: "named", title: "Weekend", messageCount: 2, updatedAt: now, createdAt: now,
+                id: "named", title: "Weekend", messageCount: 2, updatedAt: now,
                 pinned: false
             }
         ]);

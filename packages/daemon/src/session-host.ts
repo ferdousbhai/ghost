@@ -158,7 +158,6 @@ export interface SessionSummary {
   model: string | null;
   provider: string | null;
   effort: string | null;
-  createdAt: string;
   updatedAt: string;
   messageCount: number;
   pinned: boolean;
@@ -680,7 +679,7 @@ export class SessionHost {
 
   private failure(stream: AdmittedTurnOptions, harness: string, message: string, aborted: boolean): TerminalError {
     const kind = aborted ? null : classifyLimitMessage(message);
-    if (kind) stream.emit({ type: "limit_reached", harness, kind, message });
+    if (kind) stream.emit({ type: "limit_reached", harness, kind });
     return { type: "error", reason: aborted ? "aborted" : "error", errorMessage: message };
   }
 
@@ -1004,7 +1003,6 @@ export class SessionHost {
         model: state.model,
         provider: state.provider,
         effort: state.effort,
-        createdAt: state.createdAt ?? updatedAt,
         updatedAt,
         messageCount: state.messageCount,
         pinned: pins.pinned.includes(id),

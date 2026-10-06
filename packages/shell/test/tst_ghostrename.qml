@@ -8,8 +8,8 @@ TestCase {
     function fixtureState(): var {
         return {
             ghosts: [
-                { name: "Casper", dir: "/tmp/ghosts/Casper", createdAt: "old" },
-                { name: "Wendy", dir: "/tmp/ghosts/Wendy", createdAt: "new" }
+                { name: "Casper", dir: "/tmp/ghosts/Casper" },
+                { name: "Wendy", dir: "/tmp/ghosts/Wendy" }
             ],
             sessionIds: { Casper: "casper-chat", Wendy: "wendy-chat" },
             mcpGhost: "Casper",

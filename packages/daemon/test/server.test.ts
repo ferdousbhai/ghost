@@ -173,14 +173,13 @@ describe("listener shutdown", () => {
 });
 
 describe("GET /api/ghosts", () => {
-  it("lists ghosts with name, dir, and createdAt", async () => {
+  it("lists ghosts with name and dir", async () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts`);
     expect(response.status).toBe(200);
     const ghosts = await response.json() as Array<Record<string, string>>;
     expect(ghosts).toHaveLength(1);
-    expect(ghosts[0]).toMatchObject({ name: "casper", dir: join(temp!.root, "casper") });
-    expect(ghosts[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(ghosts[0]).toEqual({ name: "casper", dir: join(temp!.root, "casper") });
   });
 });
 
@@ -841,7 +840,6 @@ describe("GET /api/ghosts/:name/sessions", () => {
     };
     expect(sessions).toHaveLength(1);
     expect(Object.keys(sessions[0]!).sort()).toEqual([
-      "createdAt",
       "effort",
       "harness",
       "id",
@@ -865,7 +863,6 @@ describe("GET /api/ghosts/:name/sessions", () => {
       unread: true,
       running: false,
     });
-    expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it("accepts a 128-character id and rejects any other shape before storage, on every route", async () => {
@@ -1358,7 +1355,7 @@ describe("routing and transport", () => {
 describe("GET /api/status", () => {
   it("reports the last update check, and null when none is known", async () => {
     const base = await serve(undefined, {
-      update: () => ({ latest: "0.9.0", command: "omarchy-update", url: "https://github.com/ferdousbhai/ghost/releases/tag/v0.9.0" }),
+      update: () => ({ latest: "0.9.0", command: "omarchy-update" }),
     });
     const status = await fetch(`${base}/api/status`);
     expect(status.status).toBe(200);
