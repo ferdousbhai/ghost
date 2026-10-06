@@ -57,7 +57,8 @@ export function renderMarkdown(source: string, doc: MarkdownDocument): MarkdownN
   let i = 0;
   while (i < lines.length) {
     const line = at(i);
-    const fence = /^\s*(```|~~~)/.exec(line);
+    // A fence closes only on one at least as long, as in CommonMark.
+    const fence = /^\s*(`{3,}|~{3,})/.exec(line);
     if (fence) {
       const body: string[] = [];
       for (i++; i < lines.length && !at(i).trimStart().startsWith(fence[1] ?? ""); i++) body.push(at(i));

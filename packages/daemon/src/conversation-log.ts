@@ -254,7 +254,9 @@ export interface TranscriptMessage {
 
 function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
   const status = entry.exitCode === 0 ? "" : `\n\n(exit ${entry.exitCode ?? "signal"})`;
-  return `\`\`\`\n${entry.output}\n\`\`\`${status}`;
+  // A fence longer than any backtick run inside, so output holding ``` stays code.
+  const fence = "`".repeat(Math.max(3, ...[...entry.output.matchAll(/`+/g)].map((run) => run[0].length + 1)));
+  return `${fence}\n${entry.output.trimEnd()}\n${fence}${status}`;
 }
 
 /** The renderable messages, in order; harness and title records are not messages. */

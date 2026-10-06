@@ -20,6 +20,12 @@ function html(n: FakeNode | string): string {
 const md = (s: string) => html(renderMarkdown(s, doc) as unknown as FakeNode);
 
 describe("remote viewer markdown", () => {
+  test("a longer fence holds a shorter one, as an owner command's output may", () => {
+    expect(md("````\n# Readme\n```sh\nls\n```\n````\n\n(exit 1)")).toBe(
+      "<pre><code># Readme\n```sh\nls\n```</code></pre><p>(exit 1)</p>",
+    );
+  });
+
   test("blocks", () => {
     expect(md("# Title\n\nSome text\nnext line\n\n- a\n- **b**\n\n1. one\n2. two")).toBe(
       "<h1>Title</h1><p>Some text\nnext line</p><ul><li>a</li><li><strong>b</strong></li></ul><ol><li>one</li><li>two</li></ol>",

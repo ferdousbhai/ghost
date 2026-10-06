@@ -421,6 +421,13 @@ describe("owner commands and hooks", () => {
     expect((await sessions.listSessions("casper")).map((row) => row.id)).not.toContain("c8");
   });
 
+  it("fences a command's output so a ``` line inside stays code", async () => {
+    const sessions = host({ harnesses: [harness([])] });
+    await turn(sessions, "!printf '# Readme\\n```sh\\nls\\n```\\n'");
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.at(-1)?.content).toEqual([{ type: "text", text: "````\n# Readme\n```sh\nls\n```\n````" }]);
+  });
+
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });
