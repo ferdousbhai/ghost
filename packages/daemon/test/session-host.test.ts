@@ -428,6 +428,14 @@ describe("owner commands and hooks", () => {
     expect(messages.at(-1)?.content).toEqual([{ type: "text", text: "````\n# Readme\n```sh\nls\n```\n````" }]);
   });
 
+  it("hands a message that is only a photo to the harness, not to bash", async () => {
+    const fake = harness(replies("a red bicycle"));
+    const sessions = host({ harnesses: [fake] });
+    const events = await turn(sessions, "![image](attachments/k1-photo.jpg)");
+    expect(events.some((event) => event.type === "tool_execution_start" && event.toolName === "bash")).toBe(false);
+    expect(fake.calls()[0]?.prompt).toContain("![image](attachments/k1-photo.jpg)");
+  });
+
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });

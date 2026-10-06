@@ -84,7 +84,7 @@ export async function sayCommand(
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
   // An owner `!command` streams as one bash card; its output is the card's
   // summary (the tail the HUD shows), and it is this turn's whole answer.
-  const ownerCommand = /^\s*!/u.test(text);
+  const ownerCommand = /^\s*!!?(?!\[)/u.test(text);
   let finalText = "";
   let terminal: "done" | "error" | undefined;
   // The turn outlives this process; Ctrl-C asks ghostd to stop it, and the

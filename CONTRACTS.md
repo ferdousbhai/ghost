@@ -254,7 +254,8 @@ error. A harness new to a conversation receives the newest
 `HANDOFF_CONTEXT_CHARS` of the log as `<conversation-so-far>`; a continuing one
 receives the owner's `!` commands it has not seen as `<owner-commands>`. The
 owner's `!command` runs in the owner home with the conversation's identity
-and is logged; `!!command` is logged but never handed on.
+and is logged; `!!command` is logged but never handed on. A message that
+opens with an attached photo, `![image](…)`, is a prompt, not a command.
 
 A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 --follow-up`) runs as the next pass in the same stream. A

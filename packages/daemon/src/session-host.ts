@@ -227,9 +227,13 @@ function tail(text: string): string | undefined {
   return trimmed.length > TOOL_SUMMARY_MAX ? `…${trimmed.slice(-TOOL_SUMMARY_MAX)}` : trimmed;
 }
 
-/** An owner `!command` (`!!` keeps it out of the ghost's context), or null for a prompt. */
+/**
+ * An owner `!command` (`!!` keeps it out of the ghost's context), or null for
+ * a prompt. A message that opens with an attached photo, `![image](…)`, is a
+ * prompt.
+ */
 function ownerCommand(prompt: string): { command: string; excluded: boolean } | null {
-  const match = /^(!!?)\s*([\s\S]*)$/u.exec(prompt.trim());
+  const match = /^(!!?)(?!\[)\s*([\s\S]*)$/u.exec(prompt.trim());
   return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
 }
 
