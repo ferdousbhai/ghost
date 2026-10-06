@@ -288,19 +288,32 @@ Item {
 
                         source: picture.path === "" ? "" : "file://" + picture.path
                         width: Math.min(root.imageSize, pictures.width)
-                        height: picture.implicitWidth > 0
-                            ? Math.round(picture.width * picture.implicitHeight / picture.implicitWidth)
-                            : root.imageSize * 0.75
+                        // A file that is gone or unreadable says so in one line
+                        // rather than holding an empty frame.
+                        height: picture.status === Image.Error ? unavailable.implicitHeight
+                            : picture.implicitWidth > 0
+                                ? Math.round(picture.width * picture.implicitHeight / picture.implicitWidth)
+                                : root.imageSize * 0.75
                         sourceSize.width: root.imageSize * 2
                         fillMode: Image.PreserveAspectFit
                         asynchronous: true
                         Accessible.role: Accessible.Graphic
                         Accessible.name: "Attached image"
 
+                        Text {
+                            id: unavailable
+                            visible: picture.status === Image.Error
+                            text: "Photo unavailable"
+                            color: Theme.foregroundDim
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSizeSmall
+                        }
+
                         MouseArea {
                             anchors.fill: parent
+                            enabled: picture.status === Image.Ready
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: if (picture.path !== "") ExternalLinks.openPath(picture.path)
+                            onClicked: ExternalLinks.openPath(picture.path)
                         }
                     }
                 }

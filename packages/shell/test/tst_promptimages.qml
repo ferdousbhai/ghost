@@ -46,6 +46,20 @@ TestCase {
         tryCompare(pictures.children, "length", 3); // two images and the Repeater
     }
 
+    function test_aMissingPhotoSaysSoInOneLine(): void {
+        Ghostd.ghosts = [{ name: "casper", dir: "/nonexistent/ghost-home" }];
+        Ghostd.activeGhost = "casper";
+        Ghostd.currentSessionId = "phone-1";
+        const picture = findChild(prompt, "promptImages").children[0];
+        tryCompare(picture, "status", Image.Error);
+        verify(picture.height < prompt.imageSize * 0.75);
+        verify(picture.children[0].visible);
+        compare(picture.children[0].text, "Photo unavailable");
+        Ghostd.currentSessionId = "";
+        Ghostd.activeGhost = "";
+        Ghostd.ghosts = [];
+    }
+
     function test_onlyPromptsCarryAttachments(): void {
         compare(reply.images, []);
         verify(!findChild(reply, "promptImages").visible);
