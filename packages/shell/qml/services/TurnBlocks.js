@@ -18,22 +18,16 @@
 function fromParts(parts) {
     var run = [];            // the text parts since the last tool call
     var announced = [];      // the last run a tool call followed
-    var closed = false;      // a tool call has followed `run`
     for (var i = 0; i < parts.length; i++) {
         var part = parts[i];
         if (part.type === "toolCall") {
             if (run.length > 0) announced = run;
-            closed = true;
-            continue;
-        }
-        if (part.text.trim() === "") continue;
-        if (closed) {
             run = [];
-            closed = false;
+        } else if (part.text.trim() !== "") {
+            run.push(part.text);
         }
-        run.push(part.text);
     }
-    return (closed ? announced : run).join("\n\n");
+    return (run.length > 0 ? run : announced).join("\n\n");
 }
 
 /**

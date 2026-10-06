@@ -233,7 +233,7 @@ function tail(text: string): string | undefined {
  * prompt.
  */
 function ownerCommand(prompt: string): { command: string; excluded: boolean } | null {
-  const match = /^(!!?)(?!\[)\s*([\s\S]*)$/u.exec(prompt.trim());
+  const match = /^(?!!\[)(!!?)\s*([\s\S]*)$/u.exec(prompt.trim());
   return match ? { command: match[2] as string, excluded: match[1] === "!!" } : null;
 }
 

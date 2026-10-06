@@ -434,6 +434,12 @@ describe("owner commands and hooks", () => {
     const events = await turn(sessions, "![image](attachments/k1-photo.jpg)");
     expect(events.some((event) => event.type === "tool_execution_start" && event.toolName === "bash")).toBe(false);
     expect(fake.calls()[0]?.prompt).toContain("![image](attachments/k1-photo.jpg)");
+
+    // `!!` keeps a command whose text opens with `[` out of the ghost's context.
+    const kept = await turn(sessions, "!![ -d / ] && echo kept", "c2");
+    expect(kept).toContainEqual(expect.objectContaining({ type: "tool_execution_end", toolName: "bash", isError: false }));
+    const { messages } = await sessions.readTranscript("casper", "c2", {});
+    expect(messages).toEqual([]);
   });
 
   it("keeps `!!command` output from the ghost", async () => {
