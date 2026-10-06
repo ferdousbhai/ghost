@@ -214,6 +214,15 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     el.replaceChildren(renderMarkdown(value, document));
     return el;
   }
+  /** A reply's last text between tool calls: the answer, not the narration on the way to it. */
+  function finalText(parts) {
+    let text = "", last = "";
+    for (const p of parts) {
+      if (p.type === "text") text += p.text;
+      else if (p.type === "toolCall") { if (text.trim()) last = text; text = ""; }
+    }
+    return text.trim() ? text : last;
+  }
   function empty() {
     const el = document.createElement("div"); el.className = "empty";
     el.innerHTML = GLYPH; el.append(ghost ? "Say something to " + ghost + "." : "No ghost here yet.");
@@ -228,8 +237,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
           : (m.content || []).filter((p) => p.type === "text").map((p) => p.text).join("");
         if (body.trim()) log.append(userBubble(body));
       } else if (m.role === "assistant") {
-        const body = typeof m.content === "string" ? m.content
-          : (m.content || []).filter((p) => p.type === "text").map((p) => p.text).join("");
+        const body = typeof m.content === "string" ? m.content : finalText(m.content || []);
         if (body.trim()) log.append(assistantBubble(body));
       }
     }
@@ -331,7 +339,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       // finished reply keeps none of them.
       const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
-      let replyText = "";
+      // Text before a tool call stays up until the next text replaces it.
+      let replyText = "", fresh = false;
       const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
       try {
         for (;;) {
@@ -345,8 +354,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             if (!line) continue;
             const ev = JSON.parse(line.slice(6));
             const stick = nearBottom();
-            if (ev.type === "text_delta") { replyText += ev.delta; reply.replaceChildren(renderMarkdown(replyText, document)); }
-            else if (ev.type === "tool_execution_start") { activity.textContent = ev.toolName + "\u2026"; reply.after(activity); }
+            if (ev.type === "text_delta") {
+              replyText = (fresh ? "" : replyText) + ev.delta; fresh = false;
+              reply.replaceChildren(renderMarkdown(replyText, document));
+            } else if (ev.type === "tool_execution_start") { fresh = true; activity.textContent = ev.toolName + "\u2026"; reply.after(activity); }
             else if (ev.type === "error") show(ev.errorMessage);
             follow(stick);
           }
