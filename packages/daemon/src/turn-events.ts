@@ -36,7 +36,6 @@ export type TurnEvent =
   | {
       type: "tool_execution_update";
       id: string;
-      toolName: string;
       summary?: string;
     }
   | {

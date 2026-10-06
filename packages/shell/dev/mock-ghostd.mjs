@@ -270,7 +270,7 @@ if (OWNS_GHOSTS_ROOT) {
 // exercises the HUD's fallback). A turn appends to its conversation and, on
 // the first turn, "titles" it like the real daemon.
 
-/** @type {Map<string, Map<string, { id, title, harness, createdAt, updatedAt, messages }>>} */
+/** @type {Map<string, Map<string, { id, title, harness, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
 // Persisted messages carry an `entryId`; opaque and monotonic here, as in a
@@ -300,7 +300,6 @@ function ghostSessions(name) {
       id: `sess-${name}-1`,
       title: "first contact",
       harness: "claude",
-      createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
     }, [
       { role: "user", content: textParts("hello, who lives here?") },
@@ -327,7 +326,6 @@ function ghostSessions(name) {
       id: `sess-${name}-2`,
       title: null, // titling hasn't run — exercises the fallback label
       harness: "codex",
-      createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
     }, [
       { role: "user", content: textParts("quick question about memory") },
@@ -555,7 +553,7 @@ function* ownerCommand(command) {
     arguments: { command },
     cwd: SESSION_CWD,
   };
-  yield { type: "tool_execution_update", id, toolName: "bash", summary: `mock output of ${command}` };
+  yield { type: "tool_execution_update", id, summary: `mock output of ${command}` };
   yield { type: "tool_execution_end", id, toolName: "bash", isError: false, summary: `mock output of ${command}` };
   yield { type: "done" };
 }
@@ -654,7 +652,7 @@ async function streamTurn(res, name, body) {
   let existing = store.get(sessionId);
   if (!existing && validConversationId(sessionId)) {
     const now = new Date().toISOString();
-    existing = { id: sessionId, title: null, createdAt: now, updatedAt: now, messages: [] };
+    existing = { id: sessionId, title: null, updatedAt: now, messages: [] };
     store.set(sessionId, existing);
   }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });

@@ -168,8 +168,7 @@ TestCase {
     function test_limitReachedNamesTheLimitInsteadOfAGenericFailure(): void {
         const turn = openTurn("limit", null);
         Ghostd.handleTurnEvent(turn.state, {
-            type: "limit_reached", harness: "claude", kind: "usage_limit",
-            message: "claude usage limit reached."
+            type: "limit_reached", harness: "claude", kind: "usage_limit"
         });
         compare(turn.state.activity, "limit reached");
         Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "the provider ended the turn." });

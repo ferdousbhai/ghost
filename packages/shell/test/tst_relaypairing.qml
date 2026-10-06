@@ -25,7 +25,7 @@ TestCase {
     }
 
     function test_pairing_parses_only_a_six_digit_code(): void {
-        compare(Ghostd.relayPairingFrom({ pairing: { code: "482913", since: "2026-09-08T10:00:00Z" } }),
+        compare(Ghostd.relayPairingFrom({ pairing: { code: "482913" } }),
             { code: "482913" });
         compare(Ghostd.relayPairingFrom({ pairing: null }), null);
         compare(Ghostd.relayPairingFrom({ pairing: { code: "abc" } }), null);

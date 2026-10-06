@@ -17,7 +17,7 @@ async function fakeDaemon(events: unknown[]): Promise<{
   server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/api/ghosts") {
       response.writeHead(200, { "content-type": "application/json" });
-      response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper", createdAt: new Date().toISOString() }]));
+      response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
       return;
     }
     if (request.method === "GET" && request.url === "/api/ghosts/casper/sessions") {
@@ -70,7 +70,7 @@ describe("ghost say", () => {
     const fake = await fakeDaemon([
       { type: "start" },
       { type: "tool_execution_start", id: "bash-1", toolName: "bash", arguments: { command: "ls" }, cwd: "/home/owner" },
-      { type: "tool_execution_update", id: "bash-1", toolName: "bash", summary: "a" },
+      { type: "tool_execution_update", id: "bash-1", summary: "a" },
       { type: "tool_execution_end", id: "bash-1", toolName: "bash", isError: true, summary: "a\nb\nls: c: No such file" },
       { type: "done" },
     ]);
@@ -104,7 +104,7 @@ describe("ghost say", () => {
     server = createServer((request, response) => {
       if (request.url === "/api/ghosts") {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper", createdAt: new Date().toISOString() }]));
+        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
       } else if (request.url === "/api/ghosts/casper/messages") {
         turn = response;
         response.writeHead(200, { "content-type": "text/event-stream" });
@@ -136,7 +136,7 @@ describe("ghost say", () => {
       requests.push(`${request.method} ${request.url}`);
       response.writeHead(200, { "content-type": "application/json" });
       if (request.url === "/api/ghosts") {
-        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper", createdAt: new Date().toISOString() }]));
+        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
       } else if (request.url === "/api/ghosts/casper/sessions") {
         response.end(JSON.stringify({ sessions: [{ id: "remote-1", title: "Photo", updatedAt: new Date().toISOString(), messageCount: 2, pinned: false, unread: false, running: true }] }));
       } else {

@@ -866,7 +866,7 @@ export class SessionHost {
     let update: ReturnType<typeof setTimeout> | undefined;
     const sendUpdate = () => {
       update = undefined;
-      stream.emit({ type: "tool_execution_update", id: toolId, toolName: "bash", summary: tail(output.slice(-4 * TOOL_SUMMARY_MAX)) });
+      stream.emit({ type: "tool_execution_update", id: toolId, summary: tail(output.slice(-4 * TOOL_SUMMARY_MAX)) });
     };
     const exit = await runHarness({
       launch: { argv: ["bash", "-c", command] },
