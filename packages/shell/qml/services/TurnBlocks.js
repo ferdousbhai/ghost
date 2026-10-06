@@ -7,59 +7,32 @@
 // classifier, length limit, or sentence counting: the column shows the latest
 // text of the turn. Text a tool call followed was the ghost announcing that
 // call; it holds the column while the call runs, and the next text replaces
-// it, so the final answer is simply the last run of text.
-//
-// Both the live stream (content indices) and a restored transcript (ordered
-// content parts) carry the order this needs.
-
-function ascending(a, b) {
-    return a - b;
-}
+// it, so the final answer is simply the last run of text. The live stream and
+// a restored transcript both give it ordered content parts.
 
 /**
- * The reply markdown of an assistant turn: the text after the last tool call,
- * or the latest text before it while the turn is still inside its calls.
- *
- * `blocks` maps content index → `{ kind, text }` (text blocks only), matching
- * the buffer the SSE reader fills. `toolIndices` are the positions of the tool
- * calls among those indices; a live call's is fractional (Ghostd.toolSlot).
+ * The reply markdown of an assistant turn's ordered content parts: the text
+ * after the last tool call, or the latest text before it while the turn is
+ * still inside its calls.
  */
-function split(blocks, toolIndices) {
-    // One walk over every content index in order, text and tool call alike.
-    var isTool = {};
-    var order = [];
-    var raw = toolIndices || [];
-    for (var t = 0; t < raw.length; t++) {
-        var tool = Number(raw[t]);
-        if (isNaN(tool)) continue;
-        isTool[tool] = true;
-        order.push(tool);
-    }
-    var keys = Object.keys(blocks || {});
-    for (var k = 0; k < keys.length; k++) {
-        var block = blocks[keys[k]];
-        // Only whether the block is blank: collapsing a reply that grows on
-        // every tick would be quadratic work.
-        if (block && block.kind === "text" && String(block.text || "").trim() !== "")
-            order.push(Number(keys[k]));
-    }
-    order.sort(ascending);
-
-    var run = [];            // the text blocks since the last tool call
+function fromParts(parts) {
+    var run = [];            // the text parts since the last tool call
     var announced = [];      // the last run a tool call followed
     var closed = false;      // a tool call has followed `run`
-    for (var i = 0; i < order.length; i++) {
-        var index = order[i];
-        if (isTool[index]) {
+    for (var i = 0; i < (parts || []).length; i++) {
+        var part = parts[i];
+        if (!part) continue;
+        if (part.type === "toolCall") {
             if (run.length > 0) announced = run;
             closed = true;
             continue;
         }
+        if (part.type !== "text" || String(part.text || "").trim() === "") continue;
         if (closed) {
             run = [];
             closed = false;
         }
-        run.push(blocks[index].text);
+        run.push(part.text);
     }
     return (closed ? announced : run).join("\n\n");
 }
@@ -153,19 +126,4 @@ function rows(messages) {
     }
     commit();
     return out;
-}
-
-/** The same reply over a stored message's ordered content parts. */
-function fromParts(parts) {
-    var blocks = {};
-    var toolIndices = [];
-    for (var i = 0; i < (parts || []).length; i++) {
-        var part = parts[i];
-        if (!part) continue;
-        if (part.type === "text" && typeof part.text === "string")
-            blocks[i] = { kind: "text", text: part.text };
-        else if (part.type === "toolCall")
-            toolIndices.push(i);
-    }
-    return split(blocks, toolIndices);
 }

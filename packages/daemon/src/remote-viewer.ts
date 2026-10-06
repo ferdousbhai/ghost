@@ -235,14 +235,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   function render(messages) {
     log.textContent = "";
     for (const m of messages) {
-      if (m.role === "user") {
-        const body = typeof m.content === "string" ? m.content
-          : (m.content || []).filter((p) => p.type === "text").map((p) => p.text).join("");
-        if (body.trim()) log.append(userBubble(body));
-      } else if (m.role === "assistant") {
-        const body = typeof m.content === "string" ? m.content : finalText(m.content || []);
-        if (body.trim()) log.append(assistantBubble(body));
-      }
+      const body = finalText(m.content);
+      if (!body.trim()) continue;
+      if (m.role === "user") log.append(userBubble(body));
+      else if (m.role === "assistant") log.append(assistantBubble(body));
     }
     if (!log.childElementCount) empty();
     log.scrollTop = log.scrollHeight;

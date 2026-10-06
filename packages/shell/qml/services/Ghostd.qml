@@ -1128,9 +1128,8 @@ Singleton {
             followUpQueue: [],
             queueSubmitting: false,
             queueError: "",
-            blocks: ({}),
+            parts: [],
             toolActivities: [],
-            toolIdsByContent: ({}),
             assistantRow: -1,
             consumed: 0,
             frameBuffer: "",
@@ -2142,9 +2141,8 @@ Singleton {
     // projects it with projectTurnFields.
 
     function resetAssistantSegmentFor(state: var): void {
-        state.blocks = ({});
+        state.parts = [];
         state.toolActivities = [];
-        state.toolIdsByContent = ({});
         state.presentationDirty = true;
     }
 
@@ -2246,18 +2244,16 @@ Singleton {
             state.activity = "starting:" + (event.harness || "");
             break;
         case "text_start":
-            state.blocks[event.contentIndex] = { kind: "text", text: "" };
+            root.textPart(state, event.contentIndex);
             state.presentationDirty = true;
             state.activity = "writing";
             break;
         case "text_delta":
-            if (!state.blocks[event.contentIndex])
-                state.blocks[event.contentIndex] = { kind: "text", text: "" };
-            state.blocks[event.contentIndex].text += event.delta;
+            root.textPart(state, event.contentIndex).text += event.delta;
             state.presentationDirty = true;
             break;
         case "text_end":
-            state.blocks[event.contentIndex] = { kind: "text", text: event.content };
+            root.textPart(state, event.contentIndex).text = event.content;
             state.presentationDirty = true;
             break;
         case "queue":
@@ -2284,8 +2280,8 @@ Singleton {
             break;
         case "tool_execution_start":
             state.activity = event.toolName;
-            if (Object.values(state.toolIdsByContent).indexOf(event.id) < 0) {
-                state.toolIdsByContent[root.toolSlot(state)] = event.id;
+            if (!state.parts.some(part => part.type === "toolCall" && part.id === event.id)) {
+                state.parts.push({ type: "toolCall", id: event.id });
                 state.presentationDirty = true;
             }
             const started = {
@@ -2335,18 +2331,18 @@ Singleton {
     }
 
     /**
-     * Where a starting tool call sits among the turn's text blocks. Tool events
-     * carry no content index, and the daemon closes the open text block before
-     * a call starts, so the call goes after the latest text block and after any
-     * call already placed there: last + 1/2, last + 2/3, … — always below the
-     * next text block's index, which is what TurnBlocks.split orders by.
+     * The turn's text part for a content index, appended on first sight. The
+     * daemon closes a text block before a tool call starts, so arrival order
+     * is content order and `parts` reads like a stored message's content.
      */
-    function toolSlot(state: var): real {
-        const texts = Object.keys(state.blocks).map(Number);
-        const last = texts.length > 0 ? Math.max(...texts) : -1;
-        const placed = Object.keys(state.toolIdsByContent)
-            .filter(key => Number(key) > last).length;
-        return last + (placed + 1) / (placed + 2);
+    function textPart(state: var, index: int): var {
+        for (let i = state.parts.length - 1; i >= 0; i--) {
+            const part = state.parts[i];
+            if (part.type === "text" && part.index === index) return part;
+        }
+        const part = { type: "text", index: index, text: "" };
+        state.parts.push(part);
+        return part;
     }
 
     function updateToolFor(state: var, id: string, patch: var): void {
@@ -2393,7 +2389,7 @@ Singleton {
     function flushTurn(state: var, force: bool): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
         if (!force && !state.presentationDirty) return;
-        const body = TurnBlocks.split(state.blocks, Object.keys(state.toolIdsByContent));
+        const body = TurnBlocks.fromParts(state.parts);
         const row = state.rows[state.assistantRow];
         if (row.text !== body)
             root.setTurnRow(state, state.assistantRow, "text", body);
@@ -2478,7 +2474,7 @@ Singleton {
             && state.assistantRow === state.rows.length - 1
             && state.rows[state.assistantRow].text === ""
             && state.toolActivities.length === 0
-            && Object.keys(state.blocks).length === 0;
+            && state.parts.length === 0;
         if (emptyPlaceholder) {
             // The daemon can dequeue a batch of owner messages before the next
             // harness pass. Keep those as consecutive rows rather than

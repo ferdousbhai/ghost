@@ -65,7 +65,7 @@ TestCase {
         const line = createTemporaryObject(lineComponent, tc);
         verify(line !== null);
         Ghostd.streaming = true;
-        const state = { activity: "", blocks: {} };
+        const state = { activity: "", parts: [] };
 
         Ghostd.handleTurnEvent(state, { type: "text_start", contentIndex: 0 });
         Ghostd.activity = state.activity;
