@@ -1,8 +1,11 @@
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { apiToken as apiTokenStore, tokenMatches } from "./token-store.js";
+import { MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import { assertLoopback } from "./config.js";
 import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
 import type { RemoteServe } from "./remote-serve.js";
@@ -235,8 +238,16 @@ function bearerToken(header: string | string[] | undefined): string {
  * so a mutating route cannot be reached by a simple cross-site request.
  */
 function isJsonContentType(header: string | string[] | undefined): boolean {
-  if (typeof header !== "string") return false;
-  return (header.split(";")[0] ?? "").trim().toLowerCase() === "application/json";
+  return mediaType(header) === "application/json";
+}
+
+/** `image/*` is no form type either, so an attachment body keeps the same guarantee. */
+function isImageContentType(header: string | string[] | undefined): boolean {
+  return mediaType(header).startsWith("image/");
+}
+
+function mediaType(header: string | string[] | undefined): string {
+  return typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
 }
 
 function applyCors(request: IncomingMessage, response: ServerResponse): void {
@@ -248,10 +259,7 @@ function applyCors(request: IncomingMessage, response: ServerResponse): void {
   response.setHeader("access-control-allow-headers", "content-type, authorization");
 }
 
-async function readJsonBody(
-  request: IncomingMessage,
-  maxBytes: number,
-): Promise<unknown> {
+async function readBody(request: IncomingMessage, maxBytes: number): Promise<Buffer> {
   const chunks: Buffer[] = [];
   let total = 0;
   for await (const chunk of request) {
@@ -265,8 +273,16 @@ async function readJsonBody(
   if (total === 0) {
     throw new GhostError("invalid_request", "Request body is required.", 400);
   }
+  return Buffer.concat(chunks);
+}
+
+async function readJsonBody(
+  request: IncomingMessage,
+  maxBytes: number,
+): Promise<unknown> {
+  const body = await readBody(request, maxBytes);
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    return JSON.parse(body.toString("utf8"));
   } catch {
     throw new GhostError("invalid_request", "Request body must be JSON.", 400);
   }
@@ -362,12 +378,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
       return null;
     }
-    if ((method === "POST" || method === "PUT") && !isJsonContentType(request.headers["content-type"])) {
+    const type = request.headers["content-type"];
+    if ((method === "POST" || method === "PUT") && !isJsonContentType(type) && !isImageContentType(type)) {
       errorResponse(
         response,
         415,
         "unsupported_media_type",
-        "Mutating requests must be application/json.",
+        "Mutating requests must be application/json, or an image for an attachment.",
       );
       return null;
     }
@@ -663,6 +680,38 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     jsonResponse(response, 200, { ok: true, name: renamed.name });
   };
 
+  /**
+   * An image body from any owner, or `{ path }` naming a local file from the
+   * machine-local token, which is already on this machine.
+   */
+  const handleSaveAttachment = async ({ params, request, response, admission }: RequestContext): Promise<void> => {
+    let bytes: Uint8Array;
+    if (isImageContentType(request.headers["content-type"])) {
+      bytes = await readBody(request, MAX_ATTACHMENT_BYTES + 1);
+    } else {
+      if (admission.identity) throw new GhostError("local_only", "Only the machine-local token attaches a local file.", 403);
+      const path = stringField(await readJsonObjectBody(request, maxBodyBytes), "path");
+      if (!isAbsolute(path)) throw new GhostError("invalid_request", "\"path\" must be absolute.", 400);
+      const size = await stat(path).then((s) => s.size, () => {
+        throw new GhostError("not_found", `No file at ${path}.`, 404);
+      });
+      if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", "An attachment is at most 20 MiB.", 413);
+      bytes = await readFile(path);
+    }
+    jsonResponse(response, 201, { path: await options.host.saveAttachment(ghostOf(params), conversationOf(params), bytes) });
+  };
+
+  const handleReadAttachment = async ({ params, response }: RequestContext): Promise<void> => {
+    const { bytes, type } = await options.host.readAttachment(ghostOf(params), conversationOf(params), decodePathSegment(params.file ?? ""));
+    response.writeHead(200, {
+      "content-type": type,
+      "content-length": bytes.length,
+      "cache-control": "private, max-age=31536000, immutable",
+      "x-content-type-options": "nosniff",
+    });
+    response.end(bytes);
+  };
+
   const handleTranscript = async (
     ghostName: string,
     conversationId: string,
@@ -923,6 +972,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("PUT", "api/ghosts/:ghost/sessions/:id/pin", ({ params, request, response }) => handleSetSessionPin(ghostOf(params), conversationOf(params), request, response)),
     route("PUT", "api/ghosts/:ghost/sessions/:id/read", ({ params, request, response }) => handleMarkSessionRead(ghostOf(params), conversationOf(params), request, response)),
     route("PUT", "api/ghosts/:ghost/sessions/:id/title", ({ params, request, response }) => handleRenameSession(ghostOf(params), conversationOf(params), request, response)),
+    route("POST", "api/ghosts/:ghost/sessions/:id/attachments", handleSaveAttachment),
+    route("GET", "api/ghosts/:ghost/sessions/:id/attachments/:file", handleReadAttachment),
     route("GET", "api/ghosts/:ghost/sessions/:id/transcript", ({ params, url, response }) => handleTranscript(ghostOf(params), conversationOf(params), url, response)),
     route("GET", "api/ghosts/:ghost/sessions/:id/tools", (context) => handleSessionTools(context, undefined)),
     route("POST", "api/ghosts/:ghost/sessions/:id/tools/:tool", (context) => handleSessionTools(context, context.params.tool)),

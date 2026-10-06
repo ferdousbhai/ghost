@@ -145,6 +145,11 @@ export interface LogState {
   readonly effort: string | null;
 }
 
+/** The owner's words without attachment markers: an imported `[Attachment: …]` or an attached image's line. */
+function ownerWords(text: string): string {
+  return text.replace(/\[Attachment:[^\]]*\]|^!\[[^\]]*\]\(attachments\/[^)\s]+\)$/gmu, " ").trim();
+}
+
 function firstLine(text: string): string | null {
   const line = text.split("\n").map((part) => part.trim()).find((part) => part.length > 0);
   if (!line) return null;
@@ -163,7 +168,7 @@ const TITLE_WORDS = 7;
  * a filler word. Null when nothing substantive is left (a bare "hey").
  */
 export function derivedTitle(text: string): string | null {
-  const plain = text.replace(/\[Attachment:[^\]]*\]/gu, " ").trim();
+  const plain = ownerWords(text);
   const named = plain.match(/\b(?:called|named|titled)\s+["“]([^"”]{2,60})["”]/iu)?.[1]?.replace(/^#+\s*/u, "").trim();
   if (named) return named;
   let clause = plain.split(/(?<=[.?!])\s|\n|;|:\s|\s[-–—]\s|,\s(?:and |but |so |then )?(?:i |can |could |please )/iu)[0] ?? "";
@@ -200,7 +205,8 @@ export function logState(entries: readonly LogEntry[]): LogState {
       case "user":
         messageCount += 1;
         if (preview === null && entry.origin === undefined) {
-          preview = firstLine(entry.text);
+          // A message of attachments alone still says what it was.
+          preview = firstLine(ownerWords(entry.text)) ?? (entry.text.trim() ? "Photo" : null);
           derived = derivedTitle(entry.text);
         }
         break;

@@ -18,6 +18,7 @@ import {
   resolveDocumentsDirectory,
   type CollectedGhostExtension,
 } from "@ghost/extensions";
+import { readAttachment, saveAttachment } from "./attachments.js";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
 import { closeBrowserSession, errorMessage, FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
 import {
@@ -1052,6 +1053,21 @@ export class SessionHost {
     await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
     this.announce(ghost.name, id);
     return trimmed;
+  }
+
+  /** Store an image in the conversation directory, which need not hold a turn yet. */
+  saveAttachment(ghostName: string, sessionId: string, bytes: Uint8Array): Promise<string> {
+    return this.withGhost(ghostName, () => {
+      const ghost = this.registry.get(ghostName);
+      return saveAttachment(conversationDir(ghostPaths(ghost.dir).sessionDir, requireConversationId(sessionId)), bytes);
+    });
+  }
+
+  readAttachment(ghostName: string, sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
+    return this.withGhost(ghostName, () => {
+      const ghost = this.registry.get(ghostName);
+      return readAttachment(conversationDir(ghostPaths(ghost.dir).sessionDir, requireConversationId(sessionId)), name);
+    });
   }
 
   readTranscript(

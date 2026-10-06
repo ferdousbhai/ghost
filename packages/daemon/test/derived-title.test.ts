@@ -10,6 +10,7 @@ describe("derivedTitle", () => {
     ['Create a doc called "Tool Approval Test Feb 26" with some placeholder content', "Tool Approval Test Feb 26"],
     ["Weekly delegation check. Run `bun scripts/handoff-report.ts`.", "Weekly delegation check"],
     ["[Attachment: profile_picture.jpg]\nwhat do you see", "What do you see"],
+    ["what is in this picture?\n\n![image](attachments/k1-0123abcd.jpg)", "What is in this picture"],
     ["Find the latest Grok 4.5 release notes online and summarize them", "Find the latest Grok 4.5 release notes"],
   ])("%s", (text, title) => {
     expect(derivedTitle(text)).toBe(title);
@@ -18,6 +19,16 @@ describe("derivedTitle", () => {
   it("gives nothing for a bare greeting", () => {
     expect(derivedTitle("hey")).toBeNull();
     expect(derivedTitle("Hello!")).toBeNull();
+  });
+});
+
+describe("logState preview", () => {
+  const at = "2026-10-05T00:00:00.000Z";
+  it("skips attachment lines, and names a message of photos alone", () => {
+    expect(logState([{ type: "user", at, text: "![image](attachments/a-0123abcd.png)\nlook at this" }]).preview).toBe("look at this");
+    const photo = logState([{ type: "user", at, text: "![image](attachments/a-0123abcd.png)" }]);
+    expect(photo.preview).toBe("Photo");
+    expect(photo.title).toBeNull();
   });
 });
 

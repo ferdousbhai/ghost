@@ -1371,3 +1371,41 @@ describe("GET /api/status", () => {
     expect(await (await fetch(`${quiet}/api/status`)).json()).toMatchObject({ update: null });
   });
 });
+
+describe("attachments", () => {
+  const PNG = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex");
+  const url = (base: string, id: string) => `${base}/api/ghosts/casper/sessions/${id}/attachments`;
+
+  it("stores an image in the conversation directory before its first turn and serves it back", async () => {
+    const base = await serve();
+    const saved = await fetch(url(base, "hud-new"), { method: "POST", headers: { "content-type": "image/png" }, body: PNG });
+    expect(saved.status).toBe(201);
+    const { path } = await saved.json() as { path: string };
+    expect(path).toMatch(/^attachments\/[a-z0-9]+-[0-9a-f]{8}\.png$/);
+    const dir = conversationDir(ghostPaths(join(temp!.root, "casper")).sessionDir, "hud-new");
+    expect(readFileSync(join(dir, path))).toEqual(PNG);
+    // A directory holding only attachments is not a conversation yet.
+    expect((await (await fetch(`${base}/api/ghosts/casper/sessions`)).json() as { sessions: unknown[] }).sessions).toEqual([]);
+
+    const served = await fetch(`${url(base, "hud-new")}/${path.slice("attachments/".length)}`);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await served.arrayBuffer())).toEqual(PNG);
+  });
+
+  it("copies a local file named by path, and refuses what is not an image", async () => {
+    const base = await serve();
+    const local = join(temp!.root, "shot.png");
+    writeFileSync(local, PNG);
+    const copied = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: local }) });
+    expect(copied.status).toBe(201);
+
+    const text = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "image/png" }, body: "not an image" });
+    expect(text.status).toBe(415);
+    const relative = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "shot.png" }) });
+    expect(relative.status).toBe(400);
+    for (const name of ["..%2F.conversation.jsonl", "x.png", "abc-0000000g.png"]) {
+      expect((await fetch(`${url(base, "c1")}/${name}`)).status, name).toBe(404);
+    }
+  });
+});

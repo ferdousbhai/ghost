@@ -261,7 +261,8 @@ A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation.
 Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
-and nothing else. Images, attachments, and model choice are the harness's.
+and nothing else. Reading images and choosing the model are the harness's;
+Ghost only stores an attached image where the harness can open it.
 
 ### Background work and hooks
 
@@ -388,6 +389,8 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated }`; a message's optional `contentTruncated: true` marks bounded stored text, `errorMessage` a failed turn. |
+| `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
+| `GET /sessions/:id/attachments/:file` | The stored image. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
