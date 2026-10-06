@@ -110,8 +110,9 @@ stop the mock separately.
   `~/ghosts`.
 - On `ask`: the spectral summoning orb naming the tool call it is inside of,
   then the reply arriving word by word with `**bold**` rendered as bold. The
-  narration never reaches the transcript, and the tool call settles behind the
-  row's quiet "1 step" toggle rather than into a card of its own.
+  narration holds the row while the tool call runs and the reply replaces it,
+  and the tool call settles behind the row's quiet "1 step" toggle rather than
+  into a card of its own.
 - A finished turn or failure raises a desktop toast unless
   its conversation is being viewed in the focused chat panel. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.

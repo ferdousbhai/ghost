@@ -298,8 +298,8 @@ function ghostSessions(name) {
     const now = Date.now();
     // A failed tool call and a failed turn are rehydrate-only surfaces: no
     // scripted turn produces them, so unless they are in the seed there is
-    // nothing to open. `content` as an ordered part list is the stored shape
-    // that can carry a tool call (TurnBlocks.partsOf); a plain string cannot.
+    // nothing to open. `content` is an ordered part list, the stored shape
+    // the daemon always sends.
     const titled = seedSession({
       id: `sess-${name}-1`,
       title: "first contact",

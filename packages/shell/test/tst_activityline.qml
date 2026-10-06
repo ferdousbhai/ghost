@@ -98,9 +98,9 @@ TestCase {
         Ghostd.streaming = true;
         const args = { path: "notes.md" };
 
-        Ghostd.toolActivities = [tool("write", "preparing", ({}))];
+        Ghostd.toolActivities = [tool("write", "running", ({}))];
         compare(line.phrase, "Writing a file");
-        Ghostd.toolActivities = [tool("write", "queued", args)];
+        Ghostd.toolActivities = [tool("write", "running", args)];
         Ghostd.activity = "";
         compare(line.phrase, "Writing notes.md");
         Ghostd.toolActivities = [tool("write", "running", args)];

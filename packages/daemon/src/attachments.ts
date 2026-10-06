@@ -25,9 +25,6 @@ function sniff(bytes: Uint8Array): string | null {
 
 /** Store an image in the conversation directory; returns the path a message names it by. */
 export async function saveAttachment(conversationDir: string, bytes: Uint8Array): Promise<string> {
-  if (bytes.length > MAX_ATTACHMENT_BYTES) {
-    throw new GhostError("payload_too_large", "An attachment is at most 20 MiB.", 413);
-  }
   const ext = sniff(bytes);
   if (!ext) throw new GhostError("unsupported_media_type", "An attachment must be a PNG, JPEG, GIF, or WebP image.", 415);
   const name = `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}.${ext}`;

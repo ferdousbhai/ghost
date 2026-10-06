@@ -18,7 +18,6 @@ pragma Singleton
 import Quickshell
 import Quickshell.Io
 import QtQuick
-import "Attachments.js" as Attachments
 import "GhostRename.js" as GhostRename
 import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
@@ -2024,7 +2023,7 @@ Singleton {
                 text: row.text + (row.contentTruncated
                     ? "\n\n*[Saved message truncated]*" : ""),
                 toolActivity: row.role === "assistant"
-                    ? root.messageTools({ content: row.parts }) : [],
+                    ? root.messageTools(row.parts) : [],
                 error: row.error || "",
                 pending: false
             });
@@ -2033,10 +2032,9 @@ Singleton {
         root.projectTurnFields(state);
     }
 
-    function messageTools(message: var): var {
-        if (!Array.isArray(message.content)) return [];
+    function messageTools(parts: var): var {
         const tools = [];
-        message.content.forEach(part => {
+        parts.forEach(part => {
             if (!part || part.type !== "toolCall") return;
             tools.push({
                 id: part.id || ("history-" + Math.random()),
@@ -2058,7 +2056,7 @@ Singleton {
      * nothing: on this machine the ghost opens any file the owner points it to.
      */
     function attachmentUrl(path: string): string {
-        if (!Attachments.isAttachmentPath(path) || root.currentSessionId === "") return "";
+        if (root.currentSessionId === "") return "";
         const ghost = root.ghosts.find(row => row && row.name === root.activeGhost);
         if (!ghost || typeof ghost.dir !== "string" || ghost.dir === "") return "";
         return "file://" + ghost.dir + "/sessions/" + root.currentSessionId + "/" + path;
@@ -2359,7 +2357,6 @@ Singleton {
         if (!found) next.push(Object.assign({
             id: id,
             name: patch.name || "tool",
-            status: "preparing",
             arguments: ({}),
             cwd: "",
             summary: ""

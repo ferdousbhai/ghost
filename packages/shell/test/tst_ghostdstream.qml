@@ -211,18 +211,17 @@ TestCase {
     // A stored call keeps no cwd, so a relative path is never resolved
     // against a directory the call may not have run in.
     function test_restoredToolHasNoCwd(): void {
-        const tools = Ghostd.messageTools({
-            content: [{ type: "toolCall", id: "history-write", name: "write", arguments: { path: "notes.md" } }]
-        });
+        const tools = Ghostd.messageTools(
+            [{ type: "toolCall", id: "history-write", name: "write", arguments: { path: "notes.md" } }]);
         compare(tools.length, 1);
         compare(tools[0].cwd, "");
     }
 
     function test_restoredFailedCallStaysFailed(): void {
-        const tools = Ghostd.messageTools({ content: [
+        const tools = Ghostd.messageTools([
             { type: "toolCall", id: "a", name: "Bash", arguments: {}, failed: true },
             { type: "toolCall", id: "b", name: "Bash", arguments: {} }
-        ] });
+        ]);
         compare(tools[0].status, "failed");
         compare(tools[1].status, "complete");
     }

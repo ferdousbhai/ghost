@@ -20,6 +20,6 @@ TestCase {
     function test_pathsNeverLeaveTheConversation(): void {
         compare(Attachments.split("![x](attachments/../../character.md)").images, []);
         compare(Attachments.split("![x](attachments/sub/a.png)").images, []);
-        verify(!Attachments.isAttachmentPath("/etc/passwd"));
+        compare(Attachments.split("![x](/etc/passwd)").images, []);
     }
 }

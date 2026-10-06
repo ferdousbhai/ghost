@@ -24,7 +24,6 @@ Rectangle {
     function call(): var { return root.activity || ({}) }
 
     readonly property bool running: root.call().status === "running"
-        || root.call().status === "preparing" || root.call().status === "queued"
     readonly property bool completed: root.call().status === "complete"
     readonly property bool failed: root.call().status === "failed"
     readonly property var presentation: ToolTrace.view(

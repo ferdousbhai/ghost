@@ -1057,17 +1057,15 @@ export class SessionHost {
 
   /** Store an image in the conversation directory, which need not hold a turn yet. */
   saveAttachment(ghostName: string, sessionId: string, bytes: Uint8Array): Promise<string> {
-    return this.withGhost(ghostName, () => {
-      const ghost = this.registry.get(ghostName);
-      return saveAttachment(conversationDir(ghostPaths(ghost.dir).sessionDir, requireConversationId(sessionId)), bytes);
-    });
+    return this.withGhost(ghostName, () => saveAttachment(this.attachmentDir(ghostName, sessionId), bytes));
   }
 
   readAttachment(ghostName: string, sessionId: string, name: string): Promise<{ bytes: Buffer; type: string }> {
-    return this.withGhost(ghostName, () => {
-      const ghost = this.registry.get(ghostName);
-      return readAttachment(conversationDir(ghostPaths(ghost.dir).sessionDir, requireConversationId(sessionId)), name);
-    });
+    return this.withGhost(ghostName, () => readAttachment(this.attachmentDir(ghostName, sessionId), name));
+  }
+
+  private attachmentDir(ghostName: string, sessionId: string): string {
+    return conversationDir(ghostPaths(this.registry.get(ghostName).dir).sessionDir, requireConversationId(sessionId));
   }
 
   readTranscript(

@@ -203,19 +203,13 @@ function input(activity) {
     return json === "{}" ? "" : compact(json, 150);
 }
 
-function hasDiagnostics(activity, preparedInput) {
-    activity = fields(activity);
-    return String(activity.name || "") !== ""
-        || (preparedInput === undefined ? input(activity) : preparedInput) !== "";
-}
-
 function view(activity, completed, failed, expanded) {
     activity = fields(activity);
     const diagnosticInput = input(activity);
     return {
         trace: text(activity, completed, failed, expanded),
         diagnosticInput: diagnosticInput,
-        hasDiagnostics: hasDiagnostics(activity, diagnosticInput),
+        hasDiagnostics: String(activity.name || "") !== "" || diagnosticInput !== "",
         fileTarget: fileTarget(activity),
         fileCwd: fileCwd(activity)
     };

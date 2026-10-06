@@ -230,22 +230,15 @@ function bearerToken(header: string | string[] | undefined): string {
 }
 
 /**
- * `application/json`, parameters allowed (`; charset=utf-8`). The point is to
- * exclude the three types a form can post without a preflight —
- * `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data` —
- * so a mutating route cannot be reached by a simple cross-site request.
+ * `application/json`, or `image/*` for an attachment, parameters allowed
+ * (`; charset=utf-8`). The point is to exclude the three types a form can post
+ * without a preflight — `text/plain`, `application/x-www-form-urlencoded`,
+ * `multipart/form-data` — so a mutating route cannot be reached by a simple
+ * cross-site request.
  */
-function isJsonContentType(header: string | string[] | undefined): boolean {
-  return mediaType(header) === "application/json";
-}
-
-/** `image/*` is no form type either, so an attachment body keeps the same guarantee. */
-function isImageContentType(header: string | string[] | undefined): boolean {
-  return mediaType(header).startsWith("image/");
-}
-
-function mediaType(header: string | string[] | undefined): string {
-  return typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
+function isPreflightedContentType(header: string | string[] | undefined): boolean {
+  const type = typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
+  return type === "application/json" || type.startsWith("image/");
 }
 
 function applyCors(request: IncomingMessage, response: ServerResponse): void {
@@ -376,8 +369,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       errorResponse(response, 403, "read_only", "Tailnet guests can watch this ghost but not act for it.");
       return null;
     }
-    const type = request.headers["content-type"];
-    if ((method === "POST" || method === "PUT") && !isJsonContentType(type) && !isImageContentType(type)) {
+    if ((method === "POST" || method === "PUT") && !isPreflightedContentType(request.headers["content-type"])) {
       errorResponse(
         response,
         415,
@@ -679,10 +671,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   const handleSaveAttachment = async ({ params, request, response }: RequestContext): Promise<void> => {
-    if (!isImageContentType(request.headers["content-type"])) {
-      throw new GhostError("unsupported_media_type", "An attachment body is the image itself.", 415);
-    }
-    const bytes = await readBody(request, MAX_ATTACHMENT_BYTES + 1);
+    const bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
     jsonResponse(response, 201, { path: await options.host.saveAttachment(ghostOf(params), conversationOf(params), bytes) });
   };
 

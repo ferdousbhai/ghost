@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
 
 export const LOG_VERSION = 1;
-/** A stored text is cut here; the transcript marks it `contentTruncated`. */
+/** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
 export const MAX_LOG_TEXT = 200_000;
 const PREVIEW_MAX = 120;
 /** How much of the earlier conversation a newly bound harness is handed. */

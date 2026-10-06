@@ -124,21 +124,14 @@ TestCase {
         compare(rows[2].text, "done");
     }
 
-    function test_stringContentStillReadsAsARow(): void {
-        const rows = TurnBlocks.rows([{ role: "user", content: "plain string", entryId: "u1" }]);
-        compare(rows.length, 1);
-        compare(rows[0].text, "plain string");
-    }
-
-    function test_savedTextTruncationSurvivesAssistantGrouping(): void {
+    function test_aTruncatedOwnerMessageSaysSo(): void {
         const rows = TurnBlocks.rows([
-            { role: "user", content: "whole prompt", entryId: "u1" },
-            { role: "assistant", content: "first", entryId: "a1" },
-            { role: "assistant", content: "second", entryId: "a2", contentTruncated: true }
+            { role: "user", content: [{ type: "text", text: "long prompt" }], entryId: "u1", contentTruncated: true },
+            { role: "assistant", content: [{ type: "text", text: "reply" }], entryId: "a1" }
         ]);
         compare(rows.length, 2);
-        verify(!rows[0].contentTruncated);
-        verify(rows[1].contentTruncated);
+        verify(rows[0].contentTruncated);
+        verify(!rows[1].contentTruncated);
     }
 
     function test_stopHookNoticeSplitsAssistantPasses(): void {
