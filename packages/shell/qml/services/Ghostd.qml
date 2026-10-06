@@ -2103,8 +2103,7 @@ Singleton {
                     : Object.assign({}, item, stored !== ""
                         ? { path: stored }
                         : { error: root.refusal(xhr, "Attach image") }));
-            },
-            () => root.attachments.some(item => item.id === id));
+            });
     }
 
     function detach(id: string): void {
