@@ -1,6 +1,6 @@
 pragma ComponentBehavior: Bound
 
-// The fixed context rail: one quiet, full-height edge shared by chat, the
+// The floating context rail: one quiet card on the right edge shared by chat, the
 // ghost's home, and runtime capabilities. The host owns routing; this component
 // owns only selection, keyboard traversal, and the active/hover treatment.
 import QtQuick
@@ -72,20 +72,19 @@ FocusScope {
         if (item) item.forceActiveFocus();
     }
 
+    // The rail floats: a card hugging the destinations, centred on the edge,
+    // rather than a full-height bar walling off the right side.
     Rectangle {
-        anchors.fill: parent
+        anchors.fill: rail
+        anchors.margins: -Theme.gap / 2
         color: Theme.surface
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            width: 1
-            color: Theme.border
-        }
+        border.width: 1
+        border.color: Theme.border
+        radius: Theme.radius
     }
 
     Column {
+        id: rail
         anchors.centerIn: parent
         spacing: Theme.gap / 2
 

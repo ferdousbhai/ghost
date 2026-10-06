@@ -37,7 +37,7 @@ FloatingWindow {
     property string currentSection: "chat"
     /** The navigable sections, in rail order; the body stack follows it. */
     readonly property var sections: navigation.destinations.map(destination => destination.id)
-    readonly property int navigationWidth: 64
+    readonly property int navigationWidth: Theme.controlHeight + Theme.gap * 2
 
     // How this window is named to the compositor, and the regex that finds it
     // again. Both halves of launch-or-focus go through here.
@@ -477,12 +477,13 @@ FloatingWindow {
             }
         }
 
-        // A permanent rail at the far right, reserving its width instead of
-        // covering the content.
+        // A permanent rail floating at the right edge, reserving its width
+        // instead of covering the content.
         GhostNavigation {
             id: navigation
             anchors.top: parent.top
             anchors.right: parent.right
+            anchors.rightMargin: Theme.pad
             anchors.bottom: parent.bottom
             width: hud.navigationWidth
             currentSection: hud.currentSection

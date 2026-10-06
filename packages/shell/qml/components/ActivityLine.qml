@@ -7,9 +7,9 @@
 // The ladder, in order: the tool call that is running, rendered by the same
 // ToolTrace the transcript cards use, then the state the runtime reported (a
 // reasoning heading, a hook, the reply being written), then the call that
-// last settled, in the past tense. The ghost's own narration is not repeated
-// here: it streams in the reading column, where the next text overwrites it
-// (TurnBlocks.js). Nothing rotates: a line changes when the work changes, and
+// last settled, in the past tense. The ghost's own text is not repeated
+// here: each one is a message in the reading column (TurnBlocks.js).
+// Nothing rotates: a line changes when the work changes, and
 // the ellipsis is what says it is still going.
 import QtQuick
 import "../services"
@@ -35,7 +35,7 @@ Item {
         return null;
     }
     readonly property string toolLine: root.liveTool
-        ? ToolTrace.text(root.liveTool, false, false, false) : ""
+        ? ToolTrace.text(root.liveTool, false, false, true) : ""
     readonly property var lastTool: Ghostd.toolActivities.length > 0
         ? Ghostd.toolActivities[Ghostd.toolActivities.length - 1] : null
     readonly property string phrase: root.toolLine !== "" ? root.toolLine
@@ -55,7 +55,7 @@ Item {
         if (activity.startsWith("starting:")) return "Starting " + activity.slice(9);
         if (activity.startsWith("hook:") && activity.length > 5) return activity.slice(5);
         if (root.lastTool)
-            return ToolTrace.text(root.lastTool, true, root.lastTool.status === "failed", false);
+            return ToolTrace.text(root.lastTool, true, root.lastTool.status === "failed", true);
         return "Working";
     }
 
@@ -74,7 +74,9 @@ Item {
     readonly property color phraseColor: Theme.light
         ? Theme.foregroundDim : Qt.rgba(0.796, 0.835, 0.882, 0.8)
 
-    implicitHeight: visible ? 30 : 0
+    // A long command or error wraps rather than eliding to one line; the cap
+    // keeps a pasted script from pushing the composer off the pane.
+    implicitHeight: visible ? Math.max(30, phraseText.implicitHeight + 8) : 0
     visible: Ghostd.streaming || root.failing
     clip: false
 
@@ -89,7 +91,8 @@ Item {
     Row {
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 4
         spacing: Theme.gap
 
         Item {
@@ -114,7 +117,7 @@ Item {
         }
 
         Text {
-            anchors.verticalCenter: parent.verticalCenter
+            id: phraseText
             width: Math.max(parent.width - 22 - Theme.gap, 0)
             text: root.failing
                 ? Ghostd.lastError
@@ -124,6 +127,10 @@ Item {
             font.pixelSize: Theme.fontSizeSmall
             font.weight: Font.Light
             font.letterSpacing: 0.5
+            // Centre the first line on the orb, whatever the font height.
+            topPadding: Math.max(0, (22 - contentHeight / Math.max(lineCount, 1)) / 2)
+            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+            maximumLineCount: 4
             elide: Text.ElideRight
         }
     }
