@@ -115,8 +115,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .assistant table { border-collapse: collapse; display: block; overflow-x: auto; margin: 0 0 .75em; font-size: .9em; }
   .assistant :is(th, td) { border: 1px solid var(--line); padding: .35em .65em; text-align: left; vertical-align: top; }
   .assistant th { background: var(--deep); font-family: var(--mono); font-size: .85em; color: var(--amber); font-weight: 600; }
-  .tool { font-family: var(--mono); font-size: .75rem; color: var(--faint); display: flex; gap: .45rem; align-items: center; margin-bottom: -.5rem; }
-  .tool::before { content: ""; width: .35rem; height: .35rem; background: var(--amber); opacity: .6; flex: none; }
+  .activity { font-family: var(--mono); font-size: .75rem; color: var(--faint); display: flex; gap: .45rem; align-items: center; margin-top: -.5rem; }
+  .activity::before { content: ""; width: .35rem; height: .35rem; background: var(--amber); opacity: .6; flex: none; }
 
   #status { font-family: var(--mono); font-size: .75rem; color: var(--rose); padding: .3rem 1rem 0; text-align: center; }
   #status:empty { display: none; }
@@ -214,9 +214,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     el.replaceChildren(renderMarkdown(value, document));
     return el;
   }
-  function toolLine(name) {
-    const el = document.createElement("div"); el.className = "tool"; el.textContent = name; return el;
-  }
   function empty() {
     const el = document.createElement("div"); el.className = "empty";
     el.innerHTML = GLYPH; el.append(ghost ? "Say something to " + ghost + "." : "No ghost here yet.");
@@ -231,9 +228,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
           : (m.content || []).filter((p) => p.type === "text").map((p) => p.text).join("");
         if (body.trim()) log.append(userBubble(body));
       } else if (m.role === "assistant") {
-        const parts = typeof m.content === "string" ? [{ type: "text", text: m.content }] : (m.content || []);
-        for (const p of parts) if (p.type === "toolCall") log.append(toolLine(p.name));
-        const body = parts.filter((p) => p.type === "text").map((p) => p.text).join("");
+        const body = typeof m.content === "string" ? m.content
+          : (m.content || []).filter((p) => p.type === "text").map((p) => p.text).join("");
         if (body.trim()) log.append(assistantBubble(body));
       }
     }
@@ -331,6 +327,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       log.querySelector(".empty")?.remove();
       log.append(userBubble(message));
       const reply = assistantBubble(""); reply.classList.add("pending"); log.append(reply);
+      // Only the call running now, the way the HUD's activity line shows it; a
+      // finished reply keeps none of them.
+      const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
       let replyText = "";
       const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
@@ -347,13 +346,14 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             const ev = JSON.parse(line.slice(6));
             const stick = nearBottom();
             if (ev.type === "text_delta") { replyText += ev.delta; reply.replaceChildren(renderMarkdown(replyText, document)); }
-            else if (ev.type === "tool_execution_start") reply.before(toolLine(ev.toolName));
+            else if (ev.type === "tool_execution_start") { activity.textContent = ev.toolName + "\u2026"; reply.after(activity); }
             else if (ev.type === "error") show(ev.errorMessage);
             follow(stick);
           }
         }
       } finally {
         reply.classList.remove("pending");
+        activity.remove();
       }
     } finally {
       streaming = false; refresh();
