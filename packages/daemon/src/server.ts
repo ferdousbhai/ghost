@@ -861,8 +861,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       response.end(manifest);
     }),
     route("GET", "api/remote/whoami", ({ response, admission }) => {
-      const identity = admission.identity;
-      jsonResponse(response, 200, identity ? { login: identity.login, role: identity.role, ...(identity.name ? { name: identity.name } : {}) } : { login: null, role: "owner" });
+      jsonResponse(response, 200, { role: admission.identity?.role ?? "owner" });
     }),
     route("GET", "api/remote/qr.svg", async ({ response }) => {
       const url = remoteServe ? (await remoteServe.status()).url : null;

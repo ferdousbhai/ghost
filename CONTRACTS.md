@@ -396,7 +396,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
-| `GET /api/remote/whoami` | Effective owner/guest identity. |
+| `GET /api/remote/whoami` | `{ role }`: the caller's effective role, `owner` or `guest`. |
 | `GET\|POST /api/remote` and `GET /api/remote/qr.svg` | Tailscale Serve status/control and active URL QR. |
 | `GET /manifest.webmanifest` | Public viewer manifest. |
 

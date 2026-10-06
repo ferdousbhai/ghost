@@ -1,7 +1,7 @@
 /**
  * Who is calling over the tailnet. `tailscale serve` terminates TLS on the
  * tailnet address, proxies to the loopback daemon, and stamps the caller's
- * identity on the request as `Tailscale-User-Login` / `Tailscale-User-Name`,
+ * identity on the request as `Tailscale-User-Login`,
  * stripping any such header a client sent itself. Ghost accepts the identity
  * only on a loopback connection: on this owner-only machine a local process
  * that could forge the header could already read the API token file, so the
@@ -73,7 +73,6 @@ export type RemoteRole = "owner" | "guest";
 
 export interface TailscaleIdentity {
   login: string;
-  name?: string;
   role: RemoteRole;
 }
 
@@ -119,8 +118,7 @@ export class RemoteAccess {
     if (!login || !LOOPBACK_ADDRESSES.has(request.socket.remoteAddress ?? "")) return null;
     const role: RemoteRole = (await this.ownerLogin()) === login ? "owner" : "guest";
     if (role === "guest" && this.guests === "none") return null;
-    const name = header(request, "tailscale-user-name");
-    return { login, role, ...(name ? { name } : {}) };
+    return { login, role };
   }
 
   /** Resolved once it is known; an unanswered `tailscale status` is asked again next time. */

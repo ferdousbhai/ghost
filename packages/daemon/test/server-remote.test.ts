@@ -47,7 +47,6 @@ async function serve(
 
 const asTailnet = (login: string, extra: Record<string, string> = {}) => ({
   "tailscale-user-login": login,
-  "tailscale-user-name": "Some One",
   ...extra,
 });
 
@@ -117,7 +116,7 @@ describe("tailnet identity", () => {
     expect((await fetch(`${base}/api/ghosts`)).status).toBe(401);
 
     const guest = await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("guest@example.com") });
-    expect(await guest.json()).toEqual({ login: "guest@example.com", role: "guest", name: "Some One" });
+    expect(await guest.json()).toEqual({ role: "guest" });
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("guest@example.com") })).status).toBe(200);
     const write = await fetch(`${base}/api/ghosts`, {
       method: "POST",
@@ -134,7 +133,7 @@ describe("tailnet identity", () => {
     expect(attach.status).toBe(403);
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
-      .toMatchObject({ login: "owner@example.com", role: "owner" });
+      .toEqual({ role: "owner" });
     const create = await fetch(`${base}/api/ghosts`, {
       method: "POST",
       headers: { ...asTailnet("OWNER@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
@@ -144,7 +143,7 @@ describe("tailnet identity", () => {
     expect((await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com", { origin: "https://evil.example" }) })).status).toBe(403);
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: { authorization: `Bearer ${TOKEN}` } })).json())
-      .toEqual({ login: null, role: "owner" });
+      .toEqual({ role: "owner" });
   });
 
   it("runs ghost tools only for the machine-local token, never a tailnet owner", async () => {
