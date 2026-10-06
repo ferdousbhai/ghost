@@ -223,7 +223,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     log.replaceChildren(el);
   }
 
-  function render(messages) {
+  // \`keep\`: a refresh of the same conversation holds the owner's place unless
+  // they were already reading the newest message.
+  function render(messages, keep = false) {
+    const stick = !keep || nearBottom(), top = log.scrollTop;
     log.textContent = "";
     for (const m of messages) {
       const body = finalText(m.content);
@@ -232,19 +235,21 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       else if (m.role === "assistant") log.append(assistantBubble(body));
     }
     if (!log.childElementCount) empty();
-    log.scrollTop = log.scrollHeight;
+    log.scrollTop = stick ? log.scrollHeight : top;
   }
 
-  async function loadTranscript() {
+  async function loadTranscript(keep = false) {
     if (!ghost || !session || session === draft) return render([]);
     const path = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript";
     let t = await api(path);
     // A phone shows the newest page; a long conversation's first page is its oldest.
     if (t.truncated) t = await api(path + "?offset=" + (t.total - t.messages.length));
-    render(t.messages);
+    render(t.messages, keep);
   }
 
-  async function loadSessions() {
+  // An event names one conversation; only that one's transcript is read again.
+  async function loadSessions(changed) {
+    const before = session;
     const { sessions } = await api("/ghosts/" + seg(ghost) + "/sessions");
     if (draft && sessions.some((s) => s.id === draft)) draft = null;
     if (!sessions.length && !draft && owner) draft = session = mint();
@@ -259,14 +264,15 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     if (!list.some((s) => s.id === session)) session = list[0]?.id || null;
     select.value = session || "";
     select.disabled = list.length < 2;
-    await loadTranscript();
+    if (session !== before) await loadTranscript();
+    else if (changed === undefined || changed === session) await loadTranscript(changed !== undefined);
   }
 
   function watch() {
     events?.close();
     if (!ghost) return;
     events = new EventSource("/api/ghosts/" + seg(ghost) + "/events");
-    events.onmessage = () => { if (!streaming) loadSessions().catch(show); };
+    events.onmessage = (e) => { if (!streaming) loadSessions(JSON.parse(e.data).id).catch(show); };
   }
 
   function show(err) { $("status").textContent = err?.message || String(err || ""); }

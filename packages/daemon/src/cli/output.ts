@@ -5,8 +5,8 @@ export function writeJson(stream: CliWritable, value: unknown): void {
   stream.write(`${JSON.stringify(value)}\n`);
 }
 
-export function relativeTime(value: string | number | Date, now = Date.now()): string {
-  const timestamp = value instanceof Date ? value.getTime() : typeof value === "number" ? value : Date.parse(value);
+export function relativeTime(value: string, now = Date.now()): string {
+  const timestamp = Date.parse(value);
   if (!Number.isFinite(timestamp)) return "—";
   const elapsed = Math.max(0, now - timestamp);
   const minutes = Math.floor(elapsed / 60_000);

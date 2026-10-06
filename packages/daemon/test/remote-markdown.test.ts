@@ -61,7 +61,7 @@ describe("remote viewer markdown", () => {
 
 describe("remote viewer transcript", () => {
   test("a long conversation opens on its newest page", async () => {
-    const source = REMOTE_VIEWER_HTML.match(/async function loadTranscript\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    const source = REMOTE_VIEWER_HTML.match(/async function loadTranscript\([^)]*\) \{[\s\S]*?\n {2}\}/)?.[0];
     expect(source).toBeDefined();
     const total = 2500;
     const api = async (path: string) => {
