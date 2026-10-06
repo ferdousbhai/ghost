@@ -165,6 +165,7 @@ Type, and:
 | `Enter` *(mid-turn)* | queue the text; it runs as soon as the current pass ends |
 | `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
+| `Ctrl+N` | start a new conversation (the sidebar's `+`) |
 
 The 64-pixel rail on the right switches sections: **Chat**, **Board**,
 **Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost

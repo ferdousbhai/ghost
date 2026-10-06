@@ -242,16 +242,16 @@ FloatingWindow {
             else if (hud.workbenchOpen) Workbench.close();
             else event.accepted = false;
         }
-        // Ctrl+B toggles the whole left sidebar, editor-style. This reaches the
-        // card by focus-chain propagation even while the composer holds focus,
-        // since a plain TextEdit does not consume Ctrl+B.
+        // Ctrl+B toggles the whole left sidebar, editor-style; Ctrl+N starts a
+        // conversation, as in any chat app. These reach the card by focus-chain
+        // propagation even while the composer holds focus, since a plain
+        // TextEdit consumes neither.
         Keys.onPressed: event => {
-            if (hud.currentSection === "chat"
-                    && (event.modifiers & Qt.ControlModifier)
-                    && event.key === Qt.Key_B) {
-                hud.sidebarOpen = !hud.sidebarOpen;
-                event.accepted = true;
-            }
+            if (hud.currentSection !== "chat" || !(event.modifiers & Qt.ControlModifier)) return;
+            if (event.key === Qt.Key_B) hud.sidebarOpen = !hud.sidebarOpen;
+            else if (event.key === Qt.Key_N) sidebar.startConversation();
+            else return;
+            event.accepted = true;
         }
 
         // Two cold blobs breathing far under the reading surface. `z: -1` puts
@@ -309,6 +309,7 @@ FloatingWindow {
 
                     // Toggled as one unit with Ctrl+B.
                     Sidebar {
+                        id: sidebar
                         visible: hud.sidebarOpen
                         // A nested Layout defaults Layout.fillWidth to true, which
                         // would let the sidebar swallow the whole row and crush the

@@ -15,6 +15,13 @@ ColumnLayout {
 
     spacing: Theme.sectionGap
 
+    /** The footer's `+`, also Ctrl+N: a fresh conversation, keyboard back in the composer. */
+    function startConversation(): void {
+        conversations.reset();
+        Ghostd.newConversation();
+        root.refocused();
+    }
+
     Flickable {
         id: rosterScroll
         Layout.fillWidth: true
@@ -89,11 +96,7 @@ ColumnLayout {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    conversations.reset();
-                    Ghostd.newConversation();
-                    root.refocused();
-                }
+                onClicked: root.startConversation()
             }
         }
     }
