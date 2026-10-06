@@ -163,16 +163,17 @@ function classify(line) {
     return "paragraph";
 }
 
-/** The fence character a line opens with, or "" if it opens none. */
+/** The fence a line opens with, its whole run of ` or ~, or "" if it opens none. */
 function opensFence(line) {
     var match = /^[ \t]*(`{3,}|~{3,})/u.exec(line);
-    return match ? match[1].charAt(0) : "";
+    return match ? match[1] : "";
 }
 
-function closesFence(line, marker) {
+/** A fence closes only on a run of its own character at least as long, as in CommonMark. */
+function closesFence(line, fence) {
     var trimmed = line.trim();
-    if (trimmed.length < 3) return false;
+    if (trimmed.length < fence.length) return false;
     for (var i = 0; i < trimmed.length; i++)
-        if (trimmed.charAt(i) !== marker) return false;
+        if (trimmed.charAt(i) !== fence.charAt(0)) return false;
     return true;
 }

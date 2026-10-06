@@ -93,6 +93,9 @@ TestCase {
         const nested = tc.stream("- item\n\n  ```\n  a\n\n  b\n  ```\n\nAfter.\n", 5);
         compare(nested.segments.length, 1);
         compare(nested.segments[0], "- item\n\n  ```\n  a\n\n  b\n  ```\n\n");
+        // A longer fence holds a shorter one, as a command's output fence does.
+        const longer = tc.stream("````\n# Title\n\n```sh\nls\n```\n\n# After\n````\n\nDone.\n", 5);
+        compare(longer.segments[0], "````\n# Title\n\n```sh\nls\n```\n\n# After\n````\n\n");
     }
 
     // A blank line between items makes one loose list. Splitting it would
