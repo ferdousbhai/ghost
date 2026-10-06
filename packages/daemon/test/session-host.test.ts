@@ -267,6 +267,27 @@ describe("queued follow-ups and aborts", () => {
     expect(events.filter((event) => event.type === "done" || event.type === "error")).toHaveLength(1);
   });
 
+  it("announces a turn's start with its prompt already in the transcript", async () => {
+    const fake = harness([]);
+    const gate = fake.gate("hold");
+    fake.setTurns([{ gate: gate.path, events: [{ type: "text", block: "a", delta: "ok" }] }]);
+    const sessions = host({ harnesses: [fake] });
+    const seen: string[][] = [];
+    sessions.subscribeConversationEvents("casper", () => {
+      seen.push([]);
+      const slot = seen.length - 1;
+      void sessions.readTranscript("casper", "c1", {}).then((transcript) => {
+        seen[slot] = transcript.messages.filter((message) => message.role === "user")
+          .map((message) => message.content.map((part) => part.type === "text" ? part.text : "").join(""));
+      });
+    }, () => {});
+    const running = turn(sessions, "check the issues");
+    await waitFor(() => fake.calls().length === 1);
+    expect(seen[0]).toEqual(["check the issues"]);
+    gate.release();
+    await running;
+  });
+
   it("refuses a stop when nothing is running", () => {
     const sessions = host({ harnesses: [harness(replies("x"))] });
     expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));

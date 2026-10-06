@@ -383,8 +383,11 @@ const sessionSummary = (name) => (s) => {
   };
 };
 
-/** Persist one turn's exchanges: `[{ prompt, reply }]`, follow-ups after the first. */
-function recordTurn(name, id, exchanges) {
+/**
+ * Persist one turn's exchanges: `[{ prompt, reply }]`, follow-ups after the
+ * first. `promptLogged`: the first prompt went in when the turn started.
+ */
+function recordTurn(name, id, exchanges, promptLogged = false) {
   if (!validConversationId(id)) return;
   const store = ghostSessions(name);
   const now = Date.now();
@@ -394,8 +397,8 @@ function recordTurn(name, id, exchanges) {
     s = { id, title: null, createdAt: new Date(now).toISOString(), messages: [] };
     store.set(id, s);
   }
-  for (const { prompt, reply } of exchanges) {
-    append(s, { role: "user", content: textParts(prompt) });
+  for (const [index, { prompt, reply }] of exchanges.entries()) {
+    if (index > 0 || !promptLogged) append(s, { role: "user", content: textParts(prompt) });
     append(s, { role: "assistant", content: [{ type: "text", text: reply }] });
   }
   s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
@@ -625,7 +628,9 @@ function openStream(res) {
   const keepalive = flag("--stall-stream") ? null : setInterval(() => {
     if (!res.writableEnded) res.write(": keepalive\n\n");
   }, 15_000);
-  const stream = { closed: false };
+  // A turn outlives its client, as in ghostd: `closed` only stops the writes,
+  // and `stopped` (POST …/stop) ends the turn.
+  const stream = { closed: false, stopped: false };
   res.on("close", () => {
     stream.closed = true;
     clearInterval(keepalive);
@@ -633,16 +638,21 @@ function openStream(res) {
   return stream;
 }
 
+/** Write a frame while the client still listens. */
+function send(res, stream, event) {
+  if (!stream.closed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
 /**
  * Drive scripted events onto an SSE response. Returns the reply text, or null
- * if the client left mid-stream.
+ * if the turn was stopped.
  */
 async function pump(res, events, stream) {
   let reply = "";
   for (const event of events) {
-    if (stream.closed) return null;
+    if (stream.stopped) return null;
     if (event.type === "text_end") reply = event.content;
-    res.write(`data: ${JSON.stringify(event)}\n\n`);
+    send(res, stream, event);
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   return reply;
@@ -656,6 +666,13 @@ async function streamTurn(res, name, body) {
   const turn = { streaming: true, followUp: [], res, stream };
   activeTurns.set(key, turn);
   answering.add(key);
+  // Like ghostd, log the prompt of an existing conversation as the turn starts,
+  // so another client sees what is running.
+  const existing = ghostSessions(name).get(sessionId);
+  if (existing && !prompt.startsWith("!")) {
+    append(existing, { role: "user", content: textParts(prompt) });
+    publishConversationUpdated(name, sessionId);
+  }
   const exchanges = [];
   let failed = false;
   try {
@@ -671,8 +688,8 @@ async function streamTurn(res, name, body) {
     // with owner_message, then streams the pass that answers it.
     while (turn.followUp.length > 0) {
       const text = turn.followUp.shift();
-      res.write(`data: ${JSON.stringify({ type: "queue", followUp: turn.followUp })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: "owner_message", text })}\n\n`);
+      send(res, stream, { type: "queue", followUp: turn.followUp });
+      send(res, stream, { type: "owner_message", text });
       reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
       if (reply === null) return;
       exchanges.push({ prompt: text, reply });
@@ -683,9 +700,9 @@ async function streamTurn(res, name, body) {
     }
     if (!flag("--omit-terminal")) {
       failed = flag("--fail");
-      res.write(`data: ${JSON.stringify(failed
+      send(res, stream, failed
         ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
-        : { type: "done", reason: "stop" })}\n\n`);
+        : { type: "done", reason: "stop" });
     }
     res.end();
   } finally {
@@ -696,7 +713,7 @@ async function streamTurn(res, name, body) {
   // Persist the completed turn so the listing and transcript reflect it,
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote
   // no reply, so nothing is recorded.
-  if (!failed) recordTurn(name, sessionId, exchanges);
+  if (!failed) recordTurn(name, sessionId, exchanges, existing !== undefined && !prompt.startsWith("!"));
 }
 
 const mockServer = createServer(async (req, res) => {
@@ -1063,8 +1080,8 @@ const mockServer = createServer(async (req, res) => {
         error: { message: "this conversation is not streaming", code: "session_not_streaming" },
       });
     }
-    turn.stream.closed = true;
-    turn.res.end(`data: ${JSON.stringify({ type: "error", reason: "aborted", errorMessage: "Turn aborted." })}\n\n`);
+    turn.stream.stopped = true;
+    if (!turn.stream.closed) turn.res.end(`data: ${JSON.stringify({ type: "error", reason: "aborted", errorMessage: "Turn aborted." })}\n\n`);
     return json(res, 200, { stopped: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
@@ -1090,7 +1107,7 @@ const mockServer = createServer(async (req, res) => {
         });
       }
       turn.followUp.push(text);
-      turn.res.write(`data: ${JSON.stringify({ type: "queue", followUp: turn.followUp })}\n\n`);
+      send(turn.res, turn.stream, { type: "queue", followUp: turn.followUp });
       return json(res, 200, snapshot());
     }
   }

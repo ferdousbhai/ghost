@@ -43,15 +43,20 @@ TestCase {
     }
 
     function test_runningListingShowsTheTurnAndItsEndReloads(): void {
+        Ghostd.activeTurnState(true).toolActivities = [{ id: "t1", name: "bash", status: "complete" }];
         list(true);
         verify(Ghostd.streaming);
-        // No stream here, so nothing for the silence watchdog to expire.
+        // No stream here, so nothing for the silence watchdog to expire, and
+        // nothing of this HUD's last turn describes the running one.
         compare(Ghostd.liveConversationKeys, []);
-        compare(requests("GET", /\/transcript/).length, 0);
+        compare(Ghostd.toolActivities, []);
+        // The transcript shows the prompt that is running…
+        compare(requests("GET", /\/sessions\/c1\/transcript/).length, 1);
 
         list(false);
         verify(!Ghostd.streaming);
-        compare(requests("GET", /\/sessions\/c1\/transcript/).length, 1);
+        // …and what ran, once it ends.
+        compare(requests("GET", /\/sessions\/c1\/transcript/).length, 2);
     }
 
     function test_stopAsksGhostd(): void {

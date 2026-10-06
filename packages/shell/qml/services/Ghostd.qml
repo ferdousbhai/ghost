@@ -1589,11 +1589,13 @@ Singleton {
                 : root.turnStates[root.conversationKey(ghost, session.id)];
             if (!state || state.streaming || state.detached === running) continue;
             state.detached = running;
-            if (!running) {
-                // With no stream here, no `queue` event clears the chips; the transcript shows what ran.
-                state.followUpQueue = [];
-                if (root.isActiveTurn(state)) root.loadConversationTranscript(state, false);
-            }
+            // Nothing of this HUD's last turn describes another client's; with no
+            // stream here, no `queue` event clears the chips. The transcript shows
+            // the prompt while it runs and what ran when it ends.
+            state.activity = "";
+            state.toolActivities = [];
+            state.followUpQueue = [];
+            if (root.isActiveTurn(state)) root.loadConversationTranscript(state, false);
             root.projectTurnFields(state);
         }
     }

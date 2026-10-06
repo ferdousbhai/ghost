@@ -515,7 +515,6 @@ export class SessionHost {
       run: async (stream) => {
         if (started || released) throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
         started = true;
-        this.announce(ghost.name, id);
         try {
           await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
         } finally {
@@ -549,6 +548,7 @@ export class SessionHost {
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
     if (command) {
+      this.announce(ghost.name, id);
       await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream, signal);
       return;
     }
@@ -570,6 +570,8 @@ export class SessionHost {
           ownerPrompt = text;
         }
         await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
+        // Other clients learn the turn is running with its prompt already readable.
+        this.announce(ghost.name, id);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         if (origin !== "hook") {
           const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
