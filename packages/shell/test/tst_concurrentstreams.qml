@@ -137,6 +137,27 @@ TestCase {
         Ghostd.lastError = "";
     }
 
+    // Leaving a conversation and coming back keeps its earlier rows' tool
+    // cards: nothing copies the projected ListModel back into the state.
+    function test_toolCardsSurviveLeavingAndReturning(): void {
+        const state = Ghostd.ensureTurnState("casper", "cards");
+        Ghostd.currentSessionId = "cards";
+        Ghostd.replaceTurnRows(state, [{
+            role: "assistant", text: "done", error: "", pending: false,
+            toolActivity: [{ id: "t1", name: "read", status: "complete", arguments: {}, cwd: "", summary: "" }]
+        }]);
+        Ghostd.showTurnState("casper", "cards");
+
+        Ghostd.captureActiveTurn(state);
+        Ghostd.currentSessionId = "";
+        Ghostd.showTurnState("casper", "");
+        Ghostd.currentSessionId = "cards";
+        Ghostd.showTurnState("casper", "cards");
+
+        compare(state.rows[0].toolActivity.length, 1);
+        compare(Ghostd.transcript.get(0).toolActivity.count, 1);
+    }
+
     function test_newLiveRowSurvivesRefetchAndDefersReadWrite(): void {
         const aborts = { count: 0 };
         const turn = openTurn("new-live", "New prompt", aborts);

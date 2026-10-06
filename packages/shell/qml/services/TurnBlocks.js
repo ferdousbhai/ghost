@@ -69,8 +69,7 @@ function rows(messages) {
         var message = messages[i];
         if (message.role === "assistant") {
             parts = parts.concat(message.content);
-            if (typeof message.errorMessage === "string" && message.errorMessage !== "")
-                error = message.errorMessage;
+            if (message.errorMessage) error = message.errorMessage;
             continue;
         }
         commit();

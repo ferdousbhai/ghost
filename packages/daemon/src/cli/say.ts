@@ -33,11 +33,7 @@ function toolDescription(event: StreamEvent): string {
   if (args && typeof args === "object" && typeof (args as { command?: unknown }).command === "string") {
     detail = ((args as { command: string }).command.split("\n")[0] ?? "").trim();
   } else {
-    try {
-      detail = JSON.stringify(args ?? {});
-    } catch {
-      detail = String(args);
-    }
+    detail = JSON.stringify(args ?? {});
   }
   return `${name}: ${truncate(detail, 80)}`;
 }

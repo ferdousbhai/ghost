@@ -1,13 +1,8 @@
-import type { AssistantPart } from "../conversation-log.js";
-import type { SessionSummary } from "../session-host.js";
+import type { Transcript } from "../session-host.js";
 import { flagString, type ParsedCliArgs } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
 import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
-
-function displaySessionId(session: SessionSummary): string {
-  return session.id;
-}
 
 export async function sessionsCommand(
   parsed: ParsedCliArgs,
@@ -17,7 +12,7 @@ export async function sessionsCommand(
   const sessions = await listSessions(ctx.client, name);
   emit(ctx, { sessions }, () => {
     const rows = sessions.map((session) => [
-      displaySessionId(session),
+      session.id,
       truncate(session.title ?? session.preview ?? "—", 42),
       relativeTime(session.updatedAt),
       String(session.messageCount),
@@ -25,23 +20,13 @@ export async function sessionsCommand(
     ]);
     return {
       human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "",
-      quiet: sessions.map(displaySessionId).join("\n") + (sessions.length ? "\n" : ""),
+      quiet: sessions.map((session) => session.id).join("\n") + (sessions.length ? "\n" : ""),
     };
   });
   return 0;
 }
 
-interface TranscriptBody {
-  id: string;
-  harness: string | null;
-  title: string | null;
-  messages: Array<{ role: "user" | "assistant" | "hook"; content: readonly AssistantPart[] }>;
-  total: number;
-  truncated: boolean;
-}
-
-
-function transcriptMarkdown(body: TranscriptBody, ghost: string): string {
+function transcriptMarkdown(body: Transcript, ghost: string): string {
   return body.messages.map((message) => {
     const heading = message.role === "user" ? "you"
       : message.role === "hook" ? "Stop hook"
@@ -64,7 +49,7 @@ export async function showCommand(
   if (limit) query.set("limit", limit);
   if (offset) query.set("offset", offset);
   const suffix = query.size ? `?${query}` : "";
-  const response = await ctx.client.request<TranscriptBody>("GET", `${path}/transcript${suffix}`);
+  const response = await ctx.client.request<Transcript>("GET", `${path}/transcript${suffix}`);
   emit(ctx, response.body, (body) => {
     const markdown = transcriptMarkdown(body, name);
     return markdown ? `${markdown}\n` : "";

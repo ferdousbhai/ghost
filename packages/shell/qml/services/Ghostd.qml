@@ -1103,13 +1103,6 @@ Singleton {
         };
     }
 
-    function visibleTranscriptRows(): var {
-        const rows = [];
-        for (let index = 0; index < transcriptModel.count; index++)
-            rows.push(root.cloneTranscriptRow(transcriptModel.get(index)));
-        return rows;
-    }
-
     function newTurnState(ghost: string, sessionId: string): var {
         return {
             key: root.conversationKey(ghost, sessionId),
@@ -1162,21 +1155,14 @@ Singleton {
     }
 
     /**
-     * Copy the root projection back into the active conversation's state. Call
-     * it before switching away from or mutating the active conversation:
-     * controls and tests write the projected root fields directly.
+     * Keep the active conversation's listed title before switching away from
+     * or mutating it. Everything else the HUD shows is already in `state`: the
+     * root fields and transcriptModel are only ever written as its projection.
      */
     function captureActiveTurn(state: var): void {
         if (!root.isActiveTurn(state)) return;
         const listed = root.sessions.find(session => session.id === state.sessionId);
         if (listed) state.title = listed.title || "";
-        state.rows = root.visibleTranscriptRows();
-        state.streaming = root.streaming;
-        state.activity = root.activity;
-        state.followUpQueue = root.followUpQueue.slice();
-        state.queueError = root.queueError;
-        state.toolActivities = root.toolActivities.slice();
-        state.assistantRow = root.assistantRow;
     }
 
     function projectTurnFields(state: var): void {
@@ -2440,8 +2426,6 @@ Singleton {
             && state.assistantRow < state.rows.length;
         const emptyPlaceholder = hasAssistant
             && state.assistantRow === state.rows.length - 1
-            && state.rows[state.assistantRow].text === ""
-            && state.toolActivities.length === 0
             && state.parts.length === 0;
         if (emptyPlaceholder) {
             // The daemon can dequeue a batch of owner messages before the next

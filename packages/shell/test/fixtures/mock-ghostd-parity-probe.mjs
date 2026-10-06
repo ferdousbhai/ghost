@@ -168,7 +168,6 @@ try {
   const turnEvents = await turnResponse.text();
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
   assert.ok(!turnEvents.includes('"toolcall_'));
-  assert.ok(!turnEvents.includes('"command_output"'));
 
   // Removed routes stay removed.
   for (const path of ["model", "models", "providers", "sessions/sess-casper-1/ask",

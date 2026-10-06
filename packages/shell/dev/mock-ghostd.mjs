@@ -613,20 +613,13 @@ function* script(name, prompt) {
 const answering = new Set();
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
-const ghostIsAnswering = (name) => [...answering].some((key) => {
-  try {
-    return JSON.parse(key)[0] === name;
-  } catch {
-    return false;
-  }
-});
+const ghostIsAnswering = (name) => [...answering].some((key) => JSON.parse(key)[0] === name);
 
-function openStream(req, res) {
+function openStream(res) {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
     connection: "keep-alive",
-    "x-ghost-turn-id": req.headers["x-ghost-turn-id"] ?? crypto.randomUUID(),
   });
   const keepalive = flag("--stall-stream") ? null : setInterval(() => {
     if (!res.writableEnded) res.write(": keepalive\n\n");
@@ -654,10 +647,10 @@ async function pump(res, events, stream) {
   return reply;
 }
 
-async function streamTurn(req, res, name, body) {
+async function streamTurn(res, name, body) {
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : "(no prompt)";
   const sessionId = body.sessionId;
-  const stream = openStream(req, res);
+  const stream = openStream(res);
   const key = turnKey(name, sessionId);
   const turn = { streaming: true, followUp: [], res };
   activeTurns.set(key, turn);
@@ -916,7 +909,7 @@ const mockServer = createServer(async (req, res) => {
         },
       });
     }
-    return streamTurn(req, res, name, body);
+    return streamTurn(res, name, body);
   }
   if (parts[3] === "mcp" && parts.length === 4 && req.method === "GET") {
     return json(res, 200, mcpSnapshot(name));
