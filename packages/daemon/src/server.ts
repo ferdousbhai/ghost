@@ -741,10 +741,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         });
       }
     } catch (error) {
-      // runAdmitted guarantees a terminal event for anything that happens inside
-      // the turn; this path is for the refusals it throws instead (a busy
-      // session), which still have to reach the client in-stream because the
-      // status line is already sent.
+      // runAdmitted guarantees a terminal event for anything inside its own
+      // try; this path is for a failure before it (the first log write), which
+      // still has to reach the client in-stream because the status line is
+      // already sent.
       emit({
         type: "error",
         reason: "error",

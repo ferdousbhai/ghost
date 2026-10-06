@@ -1879,6 +1879,8 @@ Singleton {
         const state = root.ensureTurnState(ghost, id);
         if (state.streaming) return;
         root.loadConversationTranscript(state, true);
+        // Another client's running turn may already hold follow-ups.
+        root.fetchQueueFor(state);
     }
 
     function markConversationRead(ghost: string, id: string): void {

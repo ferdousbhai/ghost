@@ -382,7 +382,7 @@ describe("owner commands and hooks", () => {
   });
 
   it("lists a conversation of owner commands while one runs and after", async () => {
-    const sessions = host({ harnesses: [harness([])] });
+    const sessions = host({ harnesses: [harness(replies("on it"))] });
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c9", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
@@ -393,9 +393,13 @@ describe("owner commands and hooks", () => {
       expect.objectContaining({ id: "c9", running: false, messageCount: 1, preview: "!sleep 30" }),
     ]);
 
+    // The first owner message still titles it; the command keeps the preview.
+    await turn(sessions, "fix the failing build please", "c9");
+    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c9", title: "Fix the failing build please", preview: "!sleep 30" });
+
     // `!!` output is kept from the transcript too, so it alone is no conversation.
     await turn(sessions, "!!echo hidden", "c8");
-    expect((await sessions.listSessions("casper")).map((row) => row.id)).toEqual(["c9"]);
+    expect((await sessions.listSessions("casper")).map((row) => row.id)).not.toContain("c8");
   });
 
   it("keeps `!!command` output from the ghost", async () => {

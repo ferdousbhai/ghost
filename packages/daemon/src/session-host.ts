@@ -505,7 +505,6 @@ export class SessionHost {
     const controller = new AbortController();
     this.admissions.set(key, controller);
     let released = false;
-    let started = false;
     const release = () => {
       if (released) return;
       released = true;
@@ -513,8 +512,6 @@ export class SessionHost {
     };
     return {
       run: async (stream) => {
-        if (started || released) throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
-        started = true;
         try {
           await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
         } finally {

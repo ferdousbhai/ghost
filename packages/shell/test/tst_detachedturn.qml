@@ -82,6 +82,13 @@ TestCase {
         compare(requests("GET", /\/sessions\/c1\/queue$/).length, 2);
     }
 
+    function test_openingARunningConversationReadsItsQueue(): void {
+        list(true);
+        requests("GET", /\/sessions\/c1\/queue$/)[0].complete(200, { streaming: true, followUp: [] });
+        Ghostd.finishOpenConversation("c1");
+        compare(requests("GET", /\/sessions\/c1\/queue$/).length, 2);
+    }
+
     function test_aRefusedFollowUpLeavesNoChip(): void {
         list(true);
         Ghostd.queueMessage("too late");

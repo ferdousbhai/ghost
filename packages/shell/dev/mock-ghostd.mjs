@@ -1104,9 +1104,14 @@ const mockServer = createServer(async (req, res) => {
           error: { message: "text must not be empty", code: "invalid_request" },
         });
       }
-      if (!turn?.streaming) {
+      if (!turn) {
         return json(res, 409, {
           error: { message: "this conversation is not streaming", code: "session_not_streaming" },
+        });
+      }
+      if (!turn.streaming) {
+        return json(res, 409, {
+          error: { message: "An owner command is running in this conversation; send this when it ends.", code: "session_busy" },
         });
       }
       turn.followUp.push(text);

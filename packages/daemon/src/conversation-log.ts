@@ -188,6 +188,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
   let title: string | null = null;
   let preview: string | null = null;
   let derived: string | null = null;
+  let ownerWrote = false;
   let messageCount = 0;
   let harness: string | null = null;
   let harnessSession: string | null = null;
@@ -204,9 +205,11 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
       case "user":
         messageCount += 1;
-        if (preview === null && entry.origin === undefined) {
+        // The first owner message titles the conversation, even after a `!command` previewed it.
+        if (!ownerWrote && entry.origin === undefined) {
+          ownerWrote = true;
           // A message of attachments alone still says what it was.
-          preview = firstLine(ownerWords(entry.text)) ?? (entry.text.trim() ? "Photo" : null);
+          preview ??= firstLine(ownerWords(entry.text)) ?? (entry.text.trim() ? "Photo" : null);
           derived = derivedTitle(entry.text);
         }
         break;
