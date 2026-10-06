@@ -997,7 +997,9 @@ export class SessionHost {
     for (const { id, log } of listed) {
       if (!log) continue;
       const { state, updatedAt } = log;
-      if (state.messageCount === 0 && state.title === null) continue;
+      // An owner command logs when it ends, so a running one is listed before anything is.
+      const running = this.admissions.has(keyOf(ghost.name, id));
+      if (state.messageCount === 0 && state.title === null && !running) continue;
       const readAt = reads.reads[id];
       rows.push({
         id,
@@ -1012,7 +1014,7 @@ export class SessionHost {
         messageCount: state.messageCount,
         pinned: pins.pinned.includes(id),
         unread: readAt === undefined || updatedAt > readAt,
-        running: this.admissions.has(keyOf(ghost.name, id)),
+        running,
       });
     }
     return rows.sort((a, b) => (a.pinned === b.pinned ? b.updatedAt.localeCompare(a.updatedAt) : (a.pinned ? -1 : 1)));

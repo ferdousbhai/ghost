@@ -218,6 +218,12 @@ export function logState(entries: readonly LogEntry[]): LogState {
           ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
         }
         break;
+      case "command":
+        // A `!command` the transcript shows is a message, and the owner's words.
+        if (entry.excluded) break;
+        messageCount += 1;
+        preview ??= firstLine(`!${entry.command}`);
+        break;
       case "harness":
         if (entry.harness !== harness || (entry.dir !== undefined && entry.dir !== harnessDir)) {
           harnessStarted = false;

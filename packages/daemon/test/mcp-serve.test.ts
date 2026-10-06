@@ -114,10 +114,11 @@ describe("ghost mcp serve", () => {
   });
 
   it("serves a new conversation whose first `!` command is still running", async () => {
-    // A conversation with no message yet is not listed; the id the daemon
-    // handed the shell still binds.
+    // Nothing is logged until the command ends; the id the daemon handed the
+    // shell binds meanwhile, and the listing shows it running.
     await startLiveTurn("fresh-1");
-    expect((await daemon.host.listSessions("casper")).some((session) => session.id === "fresh-1")).toBe(false);
+    expect((await daemon.host.listSessions("casper")).find((session) => session.id === "fresh-1"))
+      .toMatchObject({ running: true, messageCount: 0 });
     const { tools } = await (await connect("fresh-1")).listTools();
     expect(tools.map((tool) => tool.name)).toContain("ghost_browser");
   });

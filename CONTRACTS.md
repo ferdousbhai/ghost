@@ -301,8 +301,7 @@ A delegated harness can load the ghost's tools with `ghost mcp serve`, the
 same stdio MCP server every conversation turn gets, which proxies
 `tools/list` and `tools/call` to the `/sessions/:id/tools` routes, bound at
 start to `-s`, then `$GHOST_SESSION` (which `ghost delegate` passes through);
-an id not listed yet, a new conversation whose first turn is still running,
-binds as given. Each serve process sends its own `caller` (the MCP client's
+an id not listed yet binds as given. Each serve process sends its own `caller` (the MCP client's
 name plus a per-process id) with every call, which keys the desktop lease.
 `ghost delegate` adds
 it to the two harnesses whose flags for it are known, unless the run already
@@ -388,7 +387,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start and end each announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start and end each announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. The tailnet viewer is the one client that attaches: on the machine the ghost opens any file the owner names. |

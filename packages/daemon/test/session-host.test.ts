@@ -358,6 +358,23 @@ describe("owner commands and hooks", () => {
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted", errorMessage: "Command aborted." });
   });
 
+  it("lists a conversation of owner commands while one runs and after", async () => {
+    const sessions = host({ harnesses: [harness([])] });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c9", prompt: "!sleep 30", emit: (event) => events.push(event) });
+    await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
+    expect(await sessions.listSessions("casper")).toEqual([expect.objectContaining({ id: "c9", running: true, messageCount: 0 })]);
+    sessions.stopTurn("casper", "c9");
+    await running;
+    expect(await sessions.listSessions("casper")).toEqual([
+      expect.objectContaining({ id: "c9", running: false, messageCount: 1, preview: "!sleep 30" }),
+    ]);
+
+    // `!!` output is kept from the transcript too, so it alone is no conversation.
+    await turn(sessions, "!!echo hidden", "c8");
+    expect((await sessions.listSessions("casper")).map((row) => row.id)).toEqual(["c9"]);
+  });
+
   it("keeps `!!command` output from the ghost", async () => {
     const fake = harness(replies("ok", "ok"));
     const sessions = host({ harnesses: [fake] });
