@@ -354,8 +354,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             const stick = nearBottom();
             if (ev.type === "text_start") parts.push({ type: "text", text: "" });
             else if (ev.type === "text_delta") {
-              if (parts.at(-1)?.type === "text") parts.at(-1).text += ev.delta;
-              else parts.push({ type: "text", text: ev.delta });
+              parts.at(-1).text += ev.delta;
               reply.replaceChildren(renderMarkdown(finalText(parts), document));
             } else if (ev.type === "tool_execution_start") {
               parts.push({ type: "toolCall" });

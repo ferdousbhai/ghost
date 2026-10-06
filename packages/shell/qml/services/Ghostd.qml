@@ -1587,15 +1587,20 @@ Singleton {
             const running = session.running === true;
             const state = running ? root.ensureTurnState(ghost, session.id)
                 : root.turnStates[root.conversationKey(ghost, session.id)];
-            if (!state || state.streaming || state.detached === running) continue;
-            state.detached = running;
-            // Nothing of this HUD's last turn describes another client's; with no
-            // stream here, no `queue` event clears the chips. The transcript shows
-            // the prompt while it runs and what ran when it ends.
-            state.activity = "";
-            state.toolActivities = [];
-            state.followUpQueue = [];
-            if (root.isActiveTurn(state)) root.loadConversationTranscript(state, false);
+            if (!state || state.streaming || (!running && !state.detached)) continue;
+            if (state.detached !== running) {
+                state.detached = running;
+                // Nothing of this HUD's last turn describes another client's.
+                state.activity = "";
+                state.toolActivities = [];
+                state.followUpQueue = [];
+            }
+            // ghostd announces each pass too (a follow-up, a stop hook): with no
+            // stream here, the transcript and the queue are read again each time.
+            if (root.isActiveTurn(state)) {
+                root.loadConversationTranscript(state, false);
+                root.fetchQueueFor(state);
+            }
             root.projectTurnFields(state);
         }
     }
@@ -2495,7 +2500,7 @@ Singleton {
     }
 
     function fetchQueueFor(state: var): void {
-        if (!state.streaming || state.queueStatusRequest) return;
+        if (!(state.streaming || state.detached) || state.queueStatusRequest) return;
         root.request(state, "queueStatusRequest", "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", null, function (xhr, body) {
                 if (xhr.status === 200) {
@@ -2503,7 +2508,7 @@ Singleton {
                     else state.queueError = "ghostd sent malformed queue state";
                 }
                 root.projectTurnFields(state);
-            }, () => state.streaming);
+            }, () => state.streaming || state.detached);
     }
 
     /** Queue a follow-up for the running turn; the daemon runs it after the current pass. */
@@ -2524,6 +2529,9 @@ Singleton {
                 state.queueSubmitting = false;
                 if (xhr.status !== 200) {
                     state.queueError = root.describeError(xhr, "POST queue");
+                    // The refused text goes back to the composer, not into a chip.
+                    const at = state.followUpQueue.lastIndexOf(prompt);
+                    if (at >= 0) state.followUpQueue = state.followUpQueue.filter((_, index) => index !== at);
                     root.fetchQueueFor(state);
                     root.composerDraft(prompt);
                 } else if (body) {

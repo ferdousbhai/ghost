@@ -72,6 +72,26 @@ TestCase {
         compare(requests("GET", /\/sessions\/c1\/transcript/).length, 2);
     }
 
+    function test_eachAnnouncedPassIsReadAgain(): void {
+        list(true);
+        requests("GET", /\/sessions\/c1\/queue$/)[0].complete(200, { streaming: true, followUp: ["later"] });
+        compare(Ghostd.followUpQueue, ["later"]);
+        // ghostd announces the next pass (the follow-up starting): read again.
+        list(true);
+        compare(requests("GET", /\/sessions\/c1\/transcript/).length, 2);
+        compare(requests("GET", /\/sessions\/c1\/queue$/).length, 2);
+    }
+
+    function test_aRefusedFollowUpLeavesNoChip(): void {
+        list(true);
+        Ghostd.queueMessage("too late");
+        compare(Ghostd.followUpQueue, ["too late"]);
+        requests("POST", /\/sessions\/c1\/queue$/)[0].complete(409, {
+            error: { code: "session_not_streaming", message: "not streaming" }
+        });
+        compare(Ghostd.followUpQueue, []);
+    }
+
     function test_followUpQueuesIntoTheRunningTurn(): void {
         list(true);
         Ghostd.queueMessage("also check the issue");
