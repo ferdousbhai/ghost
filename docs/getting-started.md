@@ -236,11 +236,8 @@ and any skill you installed untouched.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
 - **Remote access.** `ghostd remote status` (or the HUD's Remote access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only. On a
-  phone, `+` starts a conversation, the camera attaches photos, and the mic
-  dictates through the browser's own speech recognition, which browsers allow
-  only over HTTPS: turn on HTTPS certificates in the Tailscale admin console
-  and the viewer moves to `https://` on the daemon's next start or the next
-  time remote access is switched on.
+  phone, `+` starts a conversation and the camera attaches photos; dictate
+  with the keyboard's own mic.
 
 ## 10. If something is wrong
 

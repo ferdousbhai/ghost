@@ -3,8 +3,9 @@
  * no framework, served by the daemon at `/`. It talks to the
  * same API the shell uses; `tailscale serve` supplies the caller's identity,
  * so the page carries no token. Guests see a read-only view; the owner can
- * type, dictate, and attach photos. It wears the HUD's colours — Tokyo Night
- * under the ghost's amber — in a messaging app's shape.
+ * type (the phone keyboard's mic dictates) and attach photos. It wears the
+ * HUD's colours — Tokyo Night under the ghost's amber — in a messaging app's
+ * shape.
  */
 import { createHash } from "node:crypto";
 import { renderMarkdown } from "./remote-markdown.js";
@@ -14,8 +15,7 @@ const icon = (paths: string, cls = "icon") =>
 const GLYPH = icon(`<path d="M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01"/>`, "glyph");
 const PLUS = icon(`<path d="M5 12h14M12 5v14"/>`);
 const CAMERA = icon(`<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z"/><circle cx="12" cy="13" r="3"/>`);
-const MIC = icon(`<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>`, "icon mic");
-const SEND = icon(`<path d="m3 3 3 9-3 9 19-9z"/><path d="M6 12h16"/>`, "icon send");
+const SEND = icon(`<path d="m3 3 3 9-3 9 19-9z"/><path d="M6 12h16"/>`);
 
 export const REMOTE_VIEWER_HTML = `<!doctype html>
 <meta charset="utf-8">
@@ -141,14 +141,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   textarea { flex: 1; min-width: 0; background: none; border: 0; outline: none; resize: none; font-size: 16px; line-height: 1.4; padding: .58rem 0; max-height: 35dvh; caret-color: var(--amber); }
   textarea::placeholder { color: var(--faint); }
   #camera { width: 2.3rem; height: 2.5rem; display: grid; place-items: center; color: var(--dim); font-size: 1.25rem; flex: none; }
-  #action { background: var(--amber); color: var(--deep); transition: transform .12s, background .15s; }
-  #action:active { transform: scale(.94); }
-  #action:disabled { background: var(--surface); color: var(--faint); }
-  #action .icon { font-size: 1.2rem; }
-  #action .send { margin-left: .12rem; }
-  #action:not(.mic-mode) .mic, #action.mic-mode .send { display: none; }
-  #action.listening { background: var(--rose); color: #fff; animation: pulse 1.2s ease-in-out infinite; }
-  @keyframes pulse { 50% { box-shadow: 0 0 0 .45rem #fb718533; } }
+  #send { background: var(--amber); color: var(--deep); transition: transform .12s, background .15s; }
+  #send:active { transform: scale(.94); }
+  #send:disabled { background: var(--surface); color: var(--faint); }
+  #send .icon { font-size: 1.2rem; margin-left: .12rem; }
 </style>
 <header>
   ${GLYPH}
@@ -169,7 +165,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       <button id="camera" type="button" aria-label="Attach a photo" title="Attach a photo">${CAMERA}</button>
       <input id="file" type="file" accept="image/*" multiple hidden>
     </div>
-    <button id="action" class="round" type="button" aria-label="Send">${MIC}${SEND}</button>
+    <button id="send" class="round" aria-label="Send" disabled>${SEND}</button>
   </div>
 </form>
 <script>
@@ -183,12 +179,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   const mint = () => "remote-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 0xffffff).toString(36);
   ${renderMarkdown.toString()}
   const GLYPH = ${JSON.stringify(GLYPH)};
-  const Speech = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const canDictate = !!Speech && window.isSecureContext;
   let ghost = null, session = null, draft = null, events = null, streaming = false, owner = false;
-  let pending = [], listening = null;
+  let pending = [];
 
-  const log = $("log"), prompt = $("prompt"), action = $("action");
+  const log = $("log"), prompt = $("prompt");
   const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
   const follow = (stick) => { if (stick) log.scrollTop = log.scrollHeight; };
   const attachmentUrl = (path) => "/api/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/attachments/" + seg(path.slice("attachments/".length));
@@ -315,37 +309,12 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   }
   function clearTray() { for (const item of [...pending]) drop(item); }
 
-  // ── Dictation: the browser's speech recognition types into the box.
-
-  function dictate() {
-    if (listening) { listening.stop(); return; }
-    const rec = new Speech();
-    rec.continuous = true; rec.interimResults = true; rec.lang = navigator.language;
-    const base = prompt.value.trim() ? prompt.value.trimEnd() + " " : "";
-    rec.onresult = (e) => {
-      let heard = "";
-      for (const r of e.results) heard += r[0].transcript;
-      prompt.value = base + heard; grow();
-    };
-    rec.onerror = (e) => { if (e.error !== "aborted" && e.error !== "no-speech") show("Dictation: " + e.error); };
-    rec.onend = () => { listening = null; refresh(); };
-    listening = rec; rec.start(); refresh();
-  }
-
-  function refresh() {
-    const ready = !!prompt.value.trim() || pending.length > 0;
-    const mic = !ready && canDictate || !!listening;
-    action.classList.toggle("mic-mode", mic);
-    action.classList.toggle("listening", !!listening);
-    action.disabled = streaming || (!mic && !ready);
-    action.setAttribute("aria-label", listening ? "Stop dictation" : mic ? "Dictate" : "Send");
-  }
+  function refresh() { $("send").disabled = streaming || (!prompt.value.trim() && !pending.length); }
   function grow() { prompt.style.height = "auto"; prompt.style.height = prompt.scrollHeight + "px"; refresh(); }
 
   async function send() {
     const text = prompt.value.trim();
     if ((!text && !pending.length) || streaming || !ghost) return;
-    listening?.stop();
     streaming = true; show(""); refresh();
     try {
       await Promise.all(pending.map((p) => p.upload));
@@ -397,10 +366,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) {
       e.preventDefault(); send().catch(show);
     }
-  };
-  action.onclick = () => {
-    if (action.classList.contains("mic-mode")) dictate();
-    else send().catch(show);
   };
   $("composer").onsubmit = (e) => { e.preventDefault(); send().catch(show); };
   $("camera").onclick = () => $("file").click();
