@@ -74,4 +74,14 @@ describe("ghost help topics", () => {
     expect(text).toContain("handoff note");
     expect(text).toContain("Never spend a window you were not asked to spend.");
   });
+
+  it("harnesses: herdr runs in Ghost's own session with owner-named, owner-authenticated harnesses", () => {
+    const text = renderHelpTopic("harnesses", INPUT);
+    expect(text).toContain("every command takes `--session ghost`");
+    expect(text).toContain("systemd-run --user --unit=herdr-ghost herdr --session ghost server");
+    expect(text).toContain("Install only harnesses the owner names, with `mise use -g <harness>`");
+    expect(text).toContain("never read, type, or store a credential");
+    expect(text).toContain("`--wait` alone is not proof");
+    expect(text).toContain("after `ghost harnesses` shows it has room");
+  });
 });

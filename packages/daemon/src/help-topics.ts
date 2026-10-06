@@ -93,6 +93,11 @@ function harnesses(): string[] {
     "When the owner named the harness (\"have codex do it\"), pass `--owner-named` before it: `ghost delegate --owner-named codex -- exec \"<task>\"`. The receipts record who picked.",
     "Your own turns run on one of these agents too. `ghost harness` shows which this ghost prefers; `ghost harness <agent>` sets it (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
+    "",
+    "## Long-lived sessions in herdr",
+    "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, after `ghost harnesses` shows it has room. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
+    "Install only harnesses the owner names, with `mise use -g <harness>` (mise registry names: claude, codex, grok, muse, pi, omp, opencode, crush, copilot, cursor-agent). Each uses the owner's own account: start it, ask the owner to sign in, and never read, type, or store a credential. Then `herdr integration install <harness>` lets herdr resume it; tell the owner you did.",
+    "`herdr --session ghost workspace create --cwd <project-dir> --label <label>` returns a root pane; `herdr --session ghost agent start <name> --kind <harness> --pane <id>` starts the harness there; `agent prompt <name> \"<task>\"` hands it work. Confirm submission and read results with `agent read <name> --source recent-unwrapped`: `--wait` alone is not proof. `blocked` means it is asking something: read it, and ask the owner unless the answer is plainly within the task they gave. `agent send-keys <name> ctrl+c` stops it. To be woken when it settles, detach `herdr --session ghost agent wait <name>` with the `ghost help background` recipe. The owner can watch with `herdr session attach ghost`.",
   ];
 }
 
