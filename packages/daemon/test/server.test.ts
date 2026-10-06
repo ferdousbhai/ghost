@@ -1395,12 +1395,17 @@ describe("attachments", () => {
     expect(Buffer.from(await served.arrayBuffer())).toEqual(PNG);
   });
 
-  it("refuses what is not an image, and a name it did not give", async () => {
+  it("copies a local file named by path, and refuses what is not an image", async () => {
     const base = await serve();
-    const json = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/etc/hostname" }) });
-    expect(json.status).toBe(415);
+    const local = join(temp!.root, "shot.png");
+    writeFileSync(local, PNG);
+    const copied = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: local }) });
+    expect(copied.status).toBe(201);
+
     const text = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "image/png" }, body: "not an image" });
     expect(text.status).toBe(415);
+    const relative = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "shot.png" }) });
+    expect(relative.status).toBe(400);
     for (const name of ["..%2F.conversation.jsonl", "x.png", "abc-0000000g.png"]) {
       expect((await fetch(`${url(base, "c1")}/${name}`)).status, name).toBe(404);
     }

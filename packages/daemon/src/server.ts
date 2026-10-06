@@ -1,3 +1,5 @@
+import { readFile, stat } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -670,8 +672,24 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     jsonResponse(response, 200, { ok: true, name: renamed.name });
   };
 
-  const handleSaveAttachment = async ({ params, request, response }: RequestContext): Promise<void> => {
-    const bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
+  /**
+   * An image body from any owner, or JSON `{ path }` naming a local image
+   * from the machine-local token: the HUD's pasted or dropped picture.
+   */
+  const handleSaveAttachment = async ({ params, request, response, admission }: RequestContext): Promise<void> => {
+    let bytes: Uint8Array;
+    if (!String(request.headers["content-type"] ?? "").startsWith("application/json")) {
+      bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
+    } else {
+      if (admission.identity) throw new GhostError("local_only", "Only the machine-local token attaches a local file.", 403);
+      const path = stringField(await readJsonObjectBody(request, maxBodyBytes), "path");
+      if (!isAbsolute(path)) throw new GhostError("invalid_request", "\"path\" must be absolute.", 400);
+      const size = await stat(path).then((s) => s.size, () => {
+        throw new GhostError("not_found", `No file at ${path}.`, 404);
+      });
+      if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", "An attachment is at most 20 MiB.", 413);
+      bytes = await readFile(path);
+    }
     jsonResponse(response, 201, { path: await options.host.saveAttachment(ghostOf(params), conversationOf(params), bytes) });
   };
 

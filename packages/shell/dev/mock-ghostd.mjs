@@ -8,6 +8,7 @@
  * daemon streams one: a `bash` tool card and no reply.
  */
 import {
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   renameSync,
@@ -1003,6 +1004,24 @@ const mockServer = createServer(async (req, res) => {
     if (harness === null) ghostDefaultHarness.delete(name);
     else ghostDefaultHarness.set(name, harness);
     return json(res, 200, harnessSnapshot(name));
+  }
+  // The machine-local `{ path }` form of an attachment: the file is copied
+  // into the conversation directory, created if the draft has none yet.
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "attachments" && req.method === "POST") {
+    const body = await readBody(req).catch(() => ({}));
+    const conversation = routeConversation(parts);
+    if (!conversation) return json(res, 400, { error: { code: "invalid_conversation_id" } });
+    const match = typeof body?.path === "string" && /\.(png|jpe?g|webp|gif)$/iu.exec(body.path);
+    if (!match) return json(res, 415, { error: { message: "Attach a PNG, JPEG, WebP, or GIF image.", code: "unsupported_media_type" } });
+    const file = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}.${match[1].toLowerCase().replace("jpeg", "jpg")}`;
+    const dir = join(ghost.dir, "sessions", conversation, "attachments");
+    try {
+      mkdirSync(dir, { recursive: true });
+      copyFileSync(body.path, join(dir, file));
+    } catch (error) {
+      return json(res, 400, { error: { message: `Could not read ${body.path}: ${error.code ?? error}`, code: "invalid_request" } });
+    }
+    return json(res, 201, { path: `attachments/${file}` });
   }
   // A conversation's next turn runs on the picked agent; a draft the HUD
   // minted is not stored yet, so its pick waits for its first turn.
