@@ -359,8 +359,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             else if (ev.type === "text_delta") {
               parts.at(-1).text += ev.delta;
               const texts = bubbles(parts);
+              // Words mean the call before them is over.
+              if (texts.length) activity.remove();
               if (texts.length > replies.length) {
-                activity.remove(); replies.at(-1).classList.remove("pending");
+                replies.at(-1).classList.remove("pending");
                 replies.push(replyBubble());
               }
               if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
