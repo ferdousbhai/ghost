@@ -870,7 +870,7 @@ export class SessionHost {
    */
   private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions): Promise<void> {
     const toolId = `bash-${Date.now().toString(36)}`;
-    stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command, excludeFromContext: excluded }, cwd: this.ownerHome, intent: "Run a local command" });
+    stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command, excludeFromContext: excluded }, cwd: this.ownerHome });
     // The log keeps the last 100 KB; a chatty command is trimmed in batches,
     // and the card's summary is sent at most every 100 ms, not per line.
     let output = "";

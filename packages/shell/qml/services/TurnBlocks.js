@@ -1,40 +1,28 @@
 .pragma library
 
-// TurnBlocks — what a turn shows in the reading column, and what its tool
-// cards say they are for.
+// TurnBlocks — what a turn shows in the reading column.
 //
 // A model narrates itself: "Checking your Dropbox for the invoice", then a
 // tool call, then the answer. One structural rule covers it, with no
 // classifier, length limit, or sentence counting: the column shows the latest
-// text of the turn. Text that a tool call followed was the ghost announcing
-// that call, so the next text overwrites it in place and the final answer is
-// simply the last block. Nothing is discarded — the announcement survives as
-// the intent of the tool card it preceded, which is where it explains
-// something.
+// text of the turn. Text a tool call followed was the ghost announcing that
+// call; it holds the column while the call runs, and the next text replaces
+// it, so the final answer is simply the last run of text.
 //
 // Both the live stream (content indices) and a restored transcript (ordered
 // content parts) carry the order this needs.
-
-function oneLine(value) {
-    return String(value || "").replace(/\s+/gu, " ").trim();
-}
 
 function ascending(a, b) {
     return a - b;
 }
 
 /**
- * Split an assistant turn.
+ * The reply markdown of an assistant turn: the text after the last tool call,
+ * or the latest text before it while the turn is still inside its calls.
  *
  * `blocks` maps content index → `{ kind, text }` (text blocks only), matching
  * the buffer the SSE reader fills. `toolIndices` are the positions of the tool
  * calls among those indices; a live call's is fractional (Ghostd.toolSlot).
- *
- * Returns `{ body, captions }`: the reply markdown — the text after the last
- * tool call, or the latest text before it while the turn is still inside its
- * calls — and, per tool content index, the narration that announced that
- * call (one line, "" when the ghost called it silently). Consecutive calls
- * with no text between them share one announcement.
  */
 function split(blocks, toolIndices) {
     // One walk over every content index in order, text and tool call alike.
@@ -50,22 +38,19 @@ function split(blocks, toolIndices) {
     var keys = Object.keys(blocks || {});
     for (var k = 0; k < keys.length; k++) {
         var block = blocks[keys[k]];
-        // `trim`, not `oneLine`: this only asks whether the block is blank, and
-        // collapsing a reply that grows on every tick is quadratic work.
+        // Only whether the block is blank: collapsing a reply that grows on
+        // every tick would be quadratic work.
         if (block && block.kind === "text" && String(block.text || "").trim() !== "")
             order.push(Number(keys[k]));
     }
     order.sort(ascending);
 
-    var captions = {};
     var run = [];            // the text blocks since the last tool call
     var announced = [];      // the last run a tool call followed
     var closed = false;      // a tool call has followed `run`
     for (var i = 0; i < order.length; i++) {
         var index = order[i];
         if (isTool[index]) {
-            // Every call in a run of calls shares the announcement before it.
-            captions[index] = oneLine(run.join(" "));
             if (run.length > 0) announced = run;
             closed = true;
             continue;
@@ -76,9 +61,7 @@ function split(blocks, toolIndices) {
         }
         run.push(blocks[index].text);
     }
-    // Text after the last call is the reply; inside the calls, the column
-    // keeps the latest announcement rather than going blank.
-    return { body: (closed ? announced : run).join("\n\n"), captions: captions };
+    return (closed ? announced : run).join("\n\n");
 }
 
 function partsOf(message) {
@@ -172,8 +155,8 @@ function rows(messages) {
     return out;
 }
 
-/** The same split over a stored message's ordered content parts. */
-function splitParts(parts) {
+/** The same reply over a stored message's ordered content parts. */
+function fromParts(parts) {
     var blocks = {};
     var toolIndices = [];
     for (var i = 0; i < (parts || []).length; i++) {
@@ -185,8 +168,4 @@ function splitParts(parts) {
             toolIndices.push(i);
     }
     return split(blocks, toolIndices);
-}
-
-function fromParts(parts) {
-    return splitParts(parts).body;
 }

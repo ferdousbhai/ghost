@@ -1,10 +1,8 @@
 import QtTest
 import "../qml/services/TurnBlocks.js" as TurnBlocks
 
-// The split's one job: the reading column shows the latest text of the turn,
-// and nothing the ghost actually said is ever lost — what a tool call
-// overwrote becomes that call's caption. Every test below pins one of those
-// two halves.
+// The split's one job: the reading column shows the latest text of the turn.
+// Text a tool call followed holds the column until the next text replaces it.
 TestCase {
     name: "TurnBlocks"
 
@@ -12,15 +10,12 @@ TestCase {
         return { kind: "text", text: value };
     }
 
-
     function test_textAfterTheLastToolCallIsTheReply(): void {
         const blocks = {
             0: textBlock("Checking your Dropbox for the invoice."),
             2: textBlock("It is dated the 14th, for £420.")
         };
-        const turn = TurnBlocks.split(blocks, [1]);
-        compare(turn.body, "It is dated the 14th, for £420.");
-        compare(turn.captions[1], "Checking your Dropbox for the invoice.");
+        compare(TurnBlocks.split(blocks, [1]), "It is dated the 14th, for £420.");
     }
 
     function test_eachToolCallOverwritesTheTextBeforeIt(): void {
@@ -29,48 +24,38 @@ TestCase {
             2: textBlock("Now checking the calendar."),
             4: textBlock("Tuesday at four.")
         };
-        const turn = TurnBlocks.split(blocks, [1, 3]);
-        compare(turn.body, "Tuesday at four.");
-        compare(turn.captions[1], "Looking that up.");
-        compare(turn.captions[3], "Now checking the calendar.");
+        compare(TurnBlocks.split(blocks, [1, 3]), "Tuesday at four.");
     }
 
     function test_lengthAndSentenceCountDoNotMatter(): void {
         // No classifier: a long, multi-sentence section before a call is
-        // overwritten like any other, and survives as the call's caption.
+        // replaced like any other.
         const section = "The first invoice covers hosting for the quarter and "
             + "is already settled, which is why it does not appear on the "
             + "outstanding list; the second is the one you are looking for, "
             + "and it is the one I will open next so we can read the terms.";
         const blocks = { 0: textBlock(section), 2: textBlock("Here they are.") };
-        const turn = TurnBlocks.split(blocks, [1]);
-        compare(turn.body, "Here they are.");
-        compare(turn.captions[1], section);
+        compare(TurnBlocks.split(blocks, [1]), "Here they are.");
     }
 
     function test_liveTextBeforeAnyCallStreamsInTheColumn(): void {
-        const turn = TurnBlocks.split({ 0: textBlock("Checking your Dropbox") }, []);
-        compare(turn.body, "Checking your Dropbox");
-        compare(Object.keys(turn.captions).length, 0);
+        compare(TurnBlocks.split({ 0: textBlock("Checking your Dropbox") }, []), "Checking your Dropbox");
     }
 
     function test_theColumnKeepsTheAnnouncementWhileItsCallRuns(): void {
         // The call has started and nothing has followed it yet: the latest
         // text stays on screen rather than the column going blank.
-        const turn = TurnBlocks.split({ 0: textBlock("Checking your Dropbox") }, [1]);
-        compare(turn.body, "Checking your Dropbox");
-        compare(turn.captions[1], "Checking your Dropbox");
+        compare(TurnBlocks.split({ 0: textBlock("Checking your Dropbox") }, [1]), "Checking your Dropbox");
     }
 
     function test_toolOnlyTurnKeepsItsLastWords(): void {
         // Nothing followed the calls, so the narration is all the ghost said.
-        const blocks = { 0: textBlock("Saving that to memory.") };
-        compare(TurnBlocks.split(blocks, [1]).body, "Saving that to memory.");
+        compare(TurnBlocks.split({ 0: textBlock("Saving that to memory.") }, [1]), "Saving that to memory.");
     }
 
     function test_turnWithNoToolsIsAllReply(): void {
         const blocks = { 0: textBlock("Short answer."), 1: textBlock("Longer one.") };
-        compare(TurnBlocks.split(blocks, []).body, "Short answer.\n\nLonger one.");
+        compare(TurnBlocks.split(blocks, []), "Short answer.\n\nLonger one.");
     }
 
     function test_severalBlocksAfterTheLastCallAreOneReply(): void {
@@ -79,42 +64,23 @@ TestCase {
             2: textBlock("First part."),
             3: textBlock("Second part.")
         };
-        compare(TurnBlocks.split(blocks, [1]).body, "First part.\n\nSecond part.");
+        compare(TurnBlocks.split(blocks, [1]), "First part.\n\nSecond part.");
     }
 
-    function test_parallelCallsShareOneAnnouncement(): void {
+    function test_parallelCallsReplaceOneAnnouncement(): void {
         const blocks = { 0: textBlock("Checking both calendars."), 3: textBlock("Both free.") };
-        const turn = TurnBlocks.split(blocks, [1, 2]);
-        compare(turn.captions[1], "Checking both calendars.");
-        compare(turn.captions[2], "Checking both calendars.");
-    }
-
-    function test_aSilentCallHasNoCaption(): void {
-        const blocks = { 1: textBlock("Done.") };
-        const turn = TurnBlocks.split(blocks, [0]);
-        compare(turn.captions[0], "");
-        compare(turn.body, "Done.");
-    }
-
-    function test_captionsAreOneLine(): void {
-        const blocks = { 0: textBlock("Reading the page\n  for train times…") };
-        compare(TurnBlocks.split(blocks, [1]).captions[1], "Reading the page for train times…");
+        compare(TurnBlocks.split(blocks, [1, 2]), "Both free.");
     }
 
     function test_blankBlocksAreNothing(): void {
-        const turn = TurnBlocks.split({ 0: textBlock("   \n ") }, [1]);
-        compare(turn.body, "");
-        compare(turn.captions[1], "");
+        compare(TurnBlocks.split({ 0: textBlock("   \n ") }, [1]), "");
     }
 
     function test_toolIndicesArriveAsStrings(): void {
         // The live buffer keys tool calls by Object.keys, so they come as text.
         const blocks = { 0: textBlock("Looking."), 2: textBlock("Found.") };
-        const turn = TurnBlocks.split(blocks, ["1"]);
-        compare(turn.body, "Found.");
-        compare(turn.captions[1], "Looking.");
+        compare(TurnBlocks.split(blocks, ["1"]), "Found.");
     }
-
 
     function test_storedPartsSplitTheSameWay(): void {
         const parts = [
@@ -123,7 +89,6 @@ TestCase {
             { type: "text", text: "The roadmap puts launch in March." }
         ];
         compare(TurnBlocks.fromParts(parts), "The roadmap puts launch in March.");
-        compare(TurnBlocks.splitParts(parts).captions[1], "Looking through your docs.");
     }
 
     function test_storedUserMessageSurvivesWhole(): void {

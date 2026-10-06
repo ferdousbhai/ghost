@@ -26,7 +26,7 @@ TestCase {
     function tool(name, status, args): var {
         return {
             id: "tool-" + name, name: name, status: status,
-            arguments: args, cwd: "", summary: "", intent: ""
+            arguments: args, cwd: "", summary: ""
         };
     }
 

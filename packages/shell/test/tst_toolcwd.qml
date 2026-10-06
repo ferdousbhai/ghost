@@ -28,11 +28,11 @@ TestCase {
     function test_nativeRelativeTargetsUseEachCallsOwnCwd(): void {
         const before = makeCard({
             name: "write", status: "complete", cwd: "/home/owner",
-            arguments: { path: "same.md" }, intent: "", summary: ""
+            arguments: { path: "same.md" }, summary: ""
         });
         const after = makeCard({
             name: "edit", status: "complete", cwd: "/home/owner/project",
-            arguments: { path: "same.md" }, intent: "", summary: ""
+            arguments: { path: "same.md" }, summary: ""
         });
         verify(before !== null);
         verify(after !== null);
@@ -43,7 +43,7 @@ TestCase {
     function test_oldRelativeNativeTargetDoesNotGuessGhostHome(): void {
         const card = makeCard({
             name: "write", status: "complete",
-            arguments: { path: "same.md" }, intent: "", summary: ""
+            arguments: { path: "same.md" }, summary: ""
         });
         verify(card !== null);
         compare(card.workbenchPath, "");
@@ -53,7 +53,7 @@ TestCase {
     function test_absoluteTargetNeedsNoRecordedCwd(): void {
         const card = makeCard({
             name: "edit", status: "complete",
-            arguments: { path: "/srv/shared/notes.md" }, intent: "", summary: ""
+            arguments: { path: "/srv/shared/notes.md" }, summary: ""
         });
         verify(card !== null);
         compare(card.workbenchPath, "/srv/shared/notes.md");

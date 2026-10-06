@@ -112,7 +112,7 @@ function fileCwd(activity) {
 
 // A trace describes the purpose of the work, never the mechanism used to do
 // it. These fallbacks also keep restored transcripts useful: persisted tool
-// calls retain their arguments, while live intent/result summaries do not.
+// calls retain their arguments, while live result summaries do not.
 function fallback(activity, completed) {
     const name = toolName(activity);
     const verb = VERBS[name];
@@ -181,8 +181,7 @@ function text(activity, completed, failed, expanded) {
     const limit = expanded ? 1200 : 180;
     const summary = !failed && resultIsRawContent(activity)
         ? "" : compact(activity.summary || "", limit);
-    const intent = compact(activity.intent || "", limit);
-    const base = summary || intent || fallback(activity, completed);
+    const base = summary || fallback(activity, completed);
     if (failed && summary === "" && base !== "")
         return "Couldn’t complete: " + base;
     return base;
@@ -207,8 +206,7 @@ function input(activity) {
 function hasDiagnostics(activity, preparedInput) {
     activity = fields(activity);
     return String(activity.name || "") !== ""
-        || (preparedInput === undefined ? input(activity) : preparedInput) !== ""
-        || Boolean(activity.intent && activity.summary);
+        || (preparedInput === undefined ? input(activity) : preparedInput) !== "";
 }
 
 function view(activity, completed, failed, expanded) {

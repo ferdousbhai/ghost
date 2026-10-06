@@ -37,7 +37,6 @@ TestCase {
             name: "Bash",
             status: status,
             arguments: ({}),
-            intent: "Checking " + id,
             summary: ""
         };
     }

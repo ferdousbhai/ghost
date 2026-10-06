@@ -214,7 +214,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     el.replaceChildren(renderMarkdown(value, document));
     return el;
   }
-  /** A reply's last text between tool calls: the answer, not the narration on the way to it. */
+  /**
+   * What a reply shows: the text after its last tool call, or while it is
+   * still inside its calls the narration before them (the HUD's TurnBlocks rule).
+   */
   function finalText(parts) {
     let text = "", last = "";
     for (const p of parts) {
@@ -339,8 +342,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       // finished reply keeps none of them.
       const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
-      // Text before a tool call stays up until the next text replaces it.
-      let replyText = "", fresh = false;
+      const parts = [];
       const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
       try {
         for (;;) {
@@ -355,9 +357,13 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             const ev = JSON.parse(line.slice(6));
             const stick = nearBottom();
             if (ev.type === "text_delta") {
-              replyText = (fresh ? "" : replyText) + ev.delta; fresh = false;
-              reply.replaceChildren(renderMarkdown(replyText, document));
-            } else if (ev.type === "tool_execution_start") { fresh = true; activity.textContent = ev.toolName + "\u2026"; reply.after(activity); }
+              if (parts.at(-1)?.type === "text") parts.at(-1).text += ev.delta;
+              else parts.push({ type: "text", text: ev.delta });
+              reply.replaceChildren(renderMarkdown(finalText(parts), document));
+            } else if (ev.type === "tool_execution_start") {
+              parts.push({ type: "toolCall" });
+              activity.textContent = ev.toolName + "\u2026"; reply.after(activity);
+            }
             else if (ev.type === "error") show(ev.errorMessage);
             follow(stick);
           }

@@ -73,16 +73,6 @@ TestCase {
         compare(state.queueError, "");
     }
 
-    function test_restoredToolCardCarriesTheNarrationThatAnnouncedIt(): void {
-        const tools = Ghostd.messageTools({ content: [
-            { type: "text", text: "Checking your Dropbox for the invoice." },
-            { type: "toolCall", id: "t1", name: "read", arguments: { path: "inv.pdf" } },
-            { type: "text", text: "It is dated the 14th." }
-        ] });
-        compare(tools.length, 1);
-        compare(tools[0].intent, "Checking your Dropbox for the invoice.");
-    }
-
     function test_dequeuedFollowUpBecomesTranscriptRowWithoutReload(): void {
         const turn = openTurn("follow-up", null);
         turn.state.followUpQueue = ["Use the shorter version."];
@@ -254,15 +244,13 @@ TestCase {
         compare(turn.state.rows[1].text, "Done.");
         const tools = turn.state.rows[1].toolActivity;
         compare(tools.length, 2);
-        compare(tools[0].intent, "Checking.");
-        compare(tools[1].intent, "Checking.");
     }
 
     function test_ownerCommandStreamsAsABashCard(): void {
         const turn = openTurn("owner-command", null);
         Ghostd.handleTurnEvent(turn.state, {
             type: "tool_execution_start", id: "cmd", toolName: "bash",
-            arguments: { command: "ls" }, cwd: "/home/owner", intent: "Run a local command"
+            arguments: { command: "ls" }, cwd: "/home/owner"
         });
         Ghostd.handleTurnEvent(turn.state, {
             type: "tool_execution_end", id: "cmd", toolName: "bash", isError: false, summary: "a b"

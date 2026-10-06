@@ -2036,9 +2036,8 @@ Singleton {
 
     function messageTools(message: var): var {
         if (!Array.isArray(message.content)) return [];
-        const captions = TurnBlocks.splitParts(message.content).captions;
         const tools = [];
-        message.content.forEach((part, index) => {
+        message.content.forEach(part => {
             if (!part || part.type !== "toolCall") return;
             tools.push({
                 id: part.id || ("history-" + Math.random()),
@@ -2048,10 +2047,7 @@ Singleton {
                 arguments: part.arguments || ({}),
                 // A stored call keeps no cwd, so a relative path offers no file chip.
                 cwd: "",
-                summary: "",
-                // What the ghost said it was doing before this call, so a
-                // restored card explains itself the way the live one did.
-                intent: captions[index] || ""
+                summary: ""
             });
         });
         return tools;
@@ -2298,9 +2294,6 @@ Singleton {
                 arguments: event.arguments || ({}),
                 cwd: typeof event.cwd === "string" ? event.cwd : ""
             };
-            // The runtime's own statement of purpose outranks the caption
-            // TurnBlocks recovered from the narration; "" would erase it.
-            if (event.intent) started.intent = event.intent;
             root.updateToolFor(state, event.id, started);
             break;
         case "tool_execution_update":
@@ -2373,8 +2366,7 @@ Singleton {
             status: "preparing",
             arguments: ({}),
             cwd: "",
-            summary: "",
-            intent: ""
+            summary: ""
         }, patch));
         state.toolActivities = next;
         root.syncToolActivityFor(state);
@@ -2401,20 +2393,10 @@ Singleton {
     function flushTurn(state: var, force: bool): void {
         if (state.assistantRow < 0 || state.assistantRow >= state.rows.length) return;
         if (!force && !state.presentationDirty) return;
-        const turn = TurnBlocks.split(state.blocks, Object.keys(state.toolIdsByContent));
+        const body = TurnBlocks.split(state.blocks, Object.keys(state.toolIdsByContent));
         const row = state.rows[state.assistantRow];
-        if (row.text !== turn.body)
-            root.setTurnRow(state, state.assistantRow, "text", turn.body);
-        // The text a call overwrote is that call's own announcement, unless
-        // the runtime already said what the call was for.
-        for (const index of Object.keys(turn.captions)) {
-            const caption = turn.captions[index];
-            if (caption === "") continue;
-            const id = state.toolIdsByContent[index];
-            const activity = state.toolActivities.find(item => item.id === id);
-            if (activity && !activity.intent)
-                root.updateToolFor(state, id, { intent: caption });
-        }
+        if (row.text !== body)
+            root.setTurnRow(state, state.assistantRow, "text", body);
         state.presentationDirty = false;
         root.projectTurnFields(state);
     }

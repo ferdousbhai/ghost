@@ -178,16 +178,6 @@ Rectangle {
         }
 
         Text {
-            visible: root.expanded && root.call().summary && root.call().intent
-            width: parent.width
-            text: "Intent · " + ToolTrace.compact(root.call().intent, 1200)
-            color: root.detailColor
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            wrapMode: Text.Wrap
-        }
-
-        Text {
             visible: root.expanded && root.call().name !== undefined && root.call().name !== ""
             width: parent.width
             text: "Tool · " + root.call().name

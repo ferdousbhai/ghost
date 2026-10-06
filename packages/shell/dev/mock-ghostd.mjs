@@ -315,8 +315,8 @@ function ghostSessions(name) {
         timestamp: now - 3_607_000,
         content: [
           { type: "text", text: "Opening the current project brief" },
-          // A restored call has no live intent and no summary, so the card
-          // falls back to the arguments: they have to say what it was for.
+          // A restored call has no summary, so the card falls back to the
+          // arguments: they have to say what it was for.
           {
             type: "toolCall",
             id: "call-seed-read",
@@ -546,8 +546,8 @@ const readBody = (req) =>
   });
 
 /** A finished tool call: the start/end pair the daemon brackets every call with. */
-function* toolCall(id, toolName, args, intent, summary) {
-  yield { type: "tool_execution_start", id, toolName, arguments: args, cwd: SESSION_CWD, intent };
+function* toolCall(id, toolName, args, summary) {
+  yield { type: "tool_execution_start", id, toolName, arguments: args, cwd: SESSION_CWD };
   yield { type: "tool_execution_end", id, toolName, isError: false, summary };
 }
 
@@ -572,7 +572,6 @@ function* ownerCommand(command) {
     toolName: "bash",
     arguments: { command, excludeFromContext: false },
     cwd: SESSION_CWD,
-    intent: "Run a local command",
   };
   yield { type: "tool_execution_update", id, toolName: "bash", summary: `mock output of ${command}` };
   yield { type: "tool_execution_end", id, toolName: "bash", isError: false, summary: `mock output of ${command}` };
@@ -587,26 +586,22 @@ function* ownerCommand(command) {
 function* script(name, prompt) {
   let contentIndex = 0;
   yield { type: "start" };
-  // The preamble a real model emits before reaching for a tool. It belongs
-  // beside the orb, never in the reading column, so this is what the HUD's
-  // split (qml/services/TurnBlocks.js) has to get right.
+  // The preamble a real model emits before reaching for a tool: it holds the
+  // reading column until the reply replaces it (qml/services/TurnBlocks.js).
   yield* textBlock(contentIndex++, "Checking what I remember about that");
   // Tool calls take no content index; the daemon numbers text blocks only.
-  yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) },
-    "Read the relevant note", "Note checked");
+  yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) }, "Note checked");
   for (let step = 1; step < TOOL_STEPS; step++) {
     const toolName = step % 3 === 0 ? "Grep" : (step % 3 === 1 ? "Read" : "Glob");
     yield* toolCall(`call_long_${step}`, toolName,
-      { step: step + 1, file_path: join(SESSION_CWD, `step-${step + 1}.md`) },
-      `Run tool-heavy step ${step + 1}`, `Completed step ${step + 1}`);
+      { step: step + 1, file_path: join(SESSION_CWD, `step-${step + 1}.md`) }, `Completed step ${step + 1}`);
   }
   // A ghost with no character writes one during the turn with the same
   // native file tool the real harnesses use.
   if (ONBOARDING.has(name)) {
     const content = `# ${name}\n\nDrafted in the dev harness, from: ${prompt.slice(0, 40)}`;
     const path = join(GHOSTS_ROOT, name, "character.md");
-    yield* toolCall("call_2", "Write", { file_path: path, content },
-      "Write my character", "Character written");
+    yield* toolCall("call_2", "Write", { file_path: path, content }, "Character written");
   }
   const reply =
     `You said: **${prompt}**\n\n`

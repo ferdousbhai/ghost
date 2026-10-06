@@ -229,9 +229,9 @@ If you expect one of these, it is missing on purpose:
   conversation that started it. Ghost keeps no job table, jobs API, or jobs
   strip, and cannot cancel what it did not start.
 - **No narration classifier in the HUD.** The reading column shows the latest
-  text of a turn; each tool call overwrites the text that announced it, and
-  that text survives as the tool card's intent. No length limit or sentence
-  rule decides what is "status".
+  text of a turn: text that announced a tool call holds the column while the
+  call runs and the next text replaces it. No length limit or sentence rule
+  decides what is "status", and a tool card carries no copy of it.
 - **No compositor plugin for background input.** Wayland lets input reach
   only the focused window, so the helper's focus-borrowing transactions,
   restore logic, and honesty metadata exist to make that safe and visible.

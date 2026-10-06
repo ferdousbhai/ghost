@@ -32,7 +32,6 @@ export type TurnEvent =
       toolName: string;
       arguments: unknown;
       cwd: string;
-      intent?: string;
     }
   | {
       type: "tool_execution_update";

@@ -6,25 +6,11 @@ import "../qml/components/ToolTrace.js" as ToolTrace
 TestCase {
     name: "ToolTrace"
 
-    function test_liveIntentWinsOverMechanism(): void {
-        const activity = {
-            name: "ghost_browser",
-            status: "running",
-            arguments: { action: "find", query: "train times" },
-            intent: "Checking whether the last train still runs",
-            summary: ""
-        };
-        const trace = ToolTrace.text(activity, false, false, false);
-        compare(trace, "Checking whether the last train still runs");
-        verify(!trace.includes("browser"));
-    }
-
     function test_liveSummaryBecomesOutcome(): void {
         const activity = {
             name: "grep",
             status: "complete",
             arguments: { pattern: "launch" },
-            intent: "Find the launch plan",
             summary: "Found the plan in roadmap.md"
         };
         compare(ToolTrace.text(activity, true, false, false), "Found the plan in roadmap.md");
@@ -35,7 +21,6 @@ TestCase {
             name: "read",
             status: "complete",
             arguments: { path: "projects/roadmap.md" },
-            intent: "",
             summary: ""
         };
         compare(ToolTrace.text(activity, true, false, false), "Read projects/roadmap.md");
@@ -47,7 +32,6 @@ TestCase {
             status: "complete",
             cwd: "/home/owner/projects/one",
             arguments: { path: "notes/today.md" },
-            intent: "",
             summary: ""
         };
         const view = ToolTrace.view(activity, true, false, false);
@@ -76,19 +60,19 @@ TestCase {
 
     function test_ghostToolsReadTheSameUnderAnyHarnessNamespace(): void {
         for (const name of ["desktop_look", "mcp__ghost__desktop_look", "ghost.desktop_look"]) {
-            const look = { name: name, status: "completed", arguments: { image: true }, intent: "", summary: "" };
+            const look = { name: name, status: "completed", arguments: { image: true }, summary: "" };
             compare(ToolTrace.text(look, true, false, false), "Checked what’s on screen", name);
         }
     }
 
     function test_desktopToolsSayWhatTheyDid(): void {
-        const look = { name: "desktop_look", status: "completed", arguments: { window: "firefox", image: true }, intent: "", summary: "" };
+        const look = { name: "desktop_look", status: "completed", arguments: { window: "firefox", image: true }, summary: "" };
         compare(ToolTrace.text(look, true, false, false), "Checked what’s on screen");
-        const ui = { name: "desktop_look", status: "running", arguments: { window: "firefox", ui: true }, intent: "", summary: "" };
+        const ui = { name: "desktop_look", status: "running", arguments: { window: "firefox", ui: true }, summary: "" };
         compare(ToolTrace.text(ui, false, false, false), "Looking through a window");
-        const one = { name: "desktop_act", status: "completed", arguments: { steps: [{ do: "type", text: "hi" }] }, intent: "", summary: "" };
+        const one = { name: "desktop_act", status: "completed", arguments: { steps: [{ do: "type", text: "hi" }] }, summary: "" };
         compare(ToolTrace.text(one, true, false, false), "Typed on the desktop");
-        const many = { name: "desktop_act", status: "running", arguments: { steps: [{ do: "click" }, { do: "type" }] }, intent: "", summary: "" };
+        const many = { name: "desktop_act", status: "running", arguments: { steps: [{ do: "click" }, { do: "type" }] }, summary: "" };
         compare(ToolTrace.text(many, false, false, false), "Working on the desktop");
     }
 
@@ -97,7 +81,6 @@ TestCase {
             name: "ghost_browser",
             status: "failed",
             arguments: { action: "open", url: "https://example.com" },
-            intent: "",
             summary: ""
         };
         compare(
@@ -111,7 +94,7 @@ TestCase {
     function test_nativeToolsDescribeTheirWork(): void {
         function trace(name, args, completed) {
             return ToolTrace.text(
-                { name: name, status: "running", arguments: args, intent: "", summary: "" },
+                { name: name, status: "running", arguments: args, summary: "" },
                 completed === true, false, false);
         }
         compare(trace("read", { path: "docs/design.md" }), "Reading docs/design.md");
@@ -130,7 +113,7 @@ TestCase {
     function test_harnessSpellingsDescribeTheSameWork(): void {
         function trace(name, args) {
             return ToolTrace.text(
-                { name: name, status: "complete", arguments: args, intent: "", summary: "" },
+                { name: name, status: "complete", arguments: args, summary: "" },
                 true, false, false);
         }
         compare(trace("Read", { file_path: "/tmp/notes.md" }), "Read /tmp/notes.md");
@@ -146,7 +129,6 @@ TestCase {
             name: "read",
             status: "complete",
             arguments: { path: "docs/design.md" },
-            intent: "",
             summary: "# design\nthe whole file, verbatim"
         };
         compare(ToolTrace.text(read, true, false, false), "Read docs/design.md");
@@ -159,7 +141,6 @@ TestCase {
             name: "internal_operation",
             status: "running",
             arguments: ({}),
-            intent: "",
             summary: ""
         };
         compare(ToolTrace.text(activity, false, false, false), "");
