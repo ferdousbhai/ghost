@@ -214,6 +214,39 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
   };
 }
 
+/**
+ * The script inside codex's `/usr/bin/bash -lc '<script>'` wrapper, which it
+ * reports as the command; every trace would otherwise read "Running /usr/bin/bash".
+ * A command that is not one quoted shell word stays as codex sent it.
+ */
+function codexScript(command: string): string {
+  const word = /^\S*\/(?:ba|z)?sh -lc (.+)$/su.exec(command)?.[1];
+  if (word === undefined) return command;
+  let script = "";
+  for (let i = 0; i < word.length; i++) {
+    const char = word[i] as string;
+    if (char === "'") {
+      const end = word.indexOf("'", i + 1);
+      if (end < 0) return command;
+      script += word.slice(i + 1, end);
+      i = end;
+    } else if (char === '"') {
+      for (i++; i < word.length && word[i] !== '"'; i++) {
+        if (word[i] === "\\" && /[$`"\\\n]/u.test(word[i + 1] ?? "")) i++;
+        script += word[i];
+      }
+      if (i >= word.length) return command;
+    } else if (char === "\\") {
+      script += word[++i] ?? "";
+    } else if (/\s/u.test(char)) {
+      return command;
+    } else {
+      script += char;
+    }
+  }
+  return script;
+}
+
 /** Codex `exec --json`: thread/turn/item events. */
 function codexParser(): (line: string) => HarnessEvent[] {
   return (line) => {
@@ -234,7 +267,7 @@ function codexParser(): (line: string) => HarnessEvent[] {
       case "command_execution":
         return done
           ? [{ type: "tool_end", id, isError: item.exit_code !== 0, output: outputText(item.aggregated_output) }]
-          : [{ type: "tool_start", id, name: "bash", args: { command: item.command } }];
+          : [{ type: "tool_start", id, name: "bash", args: { command: codexScript(str(item.command)) } }];
       case "mcp_tool_call":
         return done
           ? [{ type: "tool_end", id, isError: item.status === "failed", output: outputText(record(item.result).content ?? record(item.error).message) }]

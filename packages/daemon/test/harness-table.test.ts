@@ -56,6 +56,33 @@ describe("parsers over recorded output", () => {
     expect(events.some((event) => event.type === "error")).toBe(false);
   });
 
+  // Every probe ran `echo ghost-probe-42`; a card shows what the model wrote,
+  // never the harness's shell wrapper around it.
+  it.each([
+    ["claude", "claude.jsonl"],
+    ["codex", "codex.jsonl"],
+    ["grok", "grok.jsonl"],
+    ["copilot", "copilot.jsonl"],
+    ["pi", "pi.jsonl"],
+  ])("%s: a command card carries the script itself", (id, fixture) => {
+    const start = parse(id, fixture).find((event) => event.type === "tool_start");
+    expect(start?.type === "tool_start" && start.args).toMatchObject({ command: "echo ghost-probe-42" });
+  });
+
+  it("codex: a command is the script inside its bash -lc wrapper", () => {
+    const parser = (harnessRow("codex") ?? { parser: () => () => [] }).parser();
+    const command = (wrapped: string) => {
+      const [event] = parser(JSON.stringify({ type: "item.started", item: { id: "i", type: "command_execution", command: wrapped } }));
+      return event?.type === "tool_start" ? (event.args as { command: string }).command : undefined;
+    };
+    expect(command("/usr/bin/bash -lc 'pnpm --filter @ghost/omarchy test'")).toBe("pnpm --filter @ghost/omarchy test");
+    expect(command(String.raw`/usr/bin/bash -lc "rg -n \"mic|composer\" -g '*.qml' | head"`))
+      .toBe(`rg -n "mic|composer" -g '*.qml' | head`);
+    expect(command(String.raw`/usr/bin/bash -lc "sed -e 's|"'^dir=.*|x|'"' f"`)).toBe("sed -e 's|^dir=.*|x|' f");
+    expect(command("/usr/bin/bash -lc 'unterminated")).toBe("/usr/bin/bash -lc 'unterminated");
+    expect(command("ls -la")).toBe("ls -la");
+  });
+
   it("copilot: message deltas and one tool execution", () => {
     const events = parse("copilot", "copilot.jsonl");
     expect(reply(events)).toContain("ZEPHYR: I’m Zephyr.");
