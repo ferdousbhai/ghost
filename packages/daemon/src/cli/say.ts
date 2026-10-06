@@ -82,9 +82,11 @@ export async function sayCommand(
     ?? await turnConversationId(ctx, name, startNew, requestedSession);
 
   const secondary = !flagBoolean(parsed, "json") && !flagBoolean(parsed, "quiet");
-  // An owner `!command` streams as one bash card; its output is the card's
-  // summary (the tail the HUD shows), and it is this turn's whole answer.
-  const ownerCommand = /^\s*!!?(?!\[)/u.test(text);
+  // An owner `!command` streams as one bash card before any harness starts;
+  // its output is the card's summary (the tail the HUD shows), and it is this
+  // turn's whole answer. ghostd alone decides what a command is.
+  let harnessStarted = false;
+  let ownerCommand = false;
   let finalText = "";
   let terminal: "done" | "error" | undefined;
   // The turn outlives this process; Ctrl-C asks ghostd to stop it, and the
@@ -101,6 +103,8 @@ export async function sayCommand(
       sessionId: conversationId,
     }, (unknownEvent) => {
       const event = unknownEvent as StreamEvent;
+      if (event.type === "harness") harnessStarted = true;
+      else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
       if (event.type === "limit_reached") {
         const limit = event as unknown as { harness?: string; kind?: string };
         const kind = String(limit.kind ?? "limit").replace("_", " ");

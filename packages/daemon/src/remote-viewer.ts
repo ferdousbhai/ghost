@@ -121,7 +121,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   #tray:empty { display: none; }
   .thumb { position: relative; flex: none; width: 4.2rem; height: 4.2rem; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: .6rem; border: 1px solid var(--line); }
-  .thumb.uploading img { opacity: .45; }
   .thumb button { position: absolute; top: -.35rem; right: -.35rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--deep); border: 1px solid var(--line); color: var(--dim); font-size: .9rem; line-height: 1; display: grid; place-items: center; }
   .row { max-width: 46rem; margin: 0 auto; display: flex; align-items: flex-end; gap: .45rem; }
   .round { width: 2.6rem; height: 2.6rem; border-radius: 50%; display: grid; place-items: center; flex: none; font-size: 1.3rem; }
@@ -286,19 +285,15 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob || file), "image/jpeg", 0.85));
   }
 
+  // A photo is uploaded when its message is sent, so one removed from the
+  // tray, or a draft abandoned, never reaches the ghost's disk.
   function attach(file) {
-    if (!session) draft = session = mint();
-    const item = { url: URL.createObjectURL(file), path: null, el: document.createElement("div") };
-    item.el.className = "thumb uploading";
+    const item = { file, url: URL.createObjectURL(file), el: document.createElement("div") };
+    item.el.className = "thumb";
     const img = document.createElement("img"); img.src = item.url; img.alt = "";
     const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "\\u00d7"; remove.setAttribute("aria-label", "Remove photo");
     remove.onclick = () => drop(item);
     item.el.append(img, remove); $("tray").append(item.el);
-    const target = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/attachments";
-    item.upload = shrink(file)
-      .then((blob) => api(target, { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob }))
-      .then((r) => { item.path = r.path; item.el.classList.remove("uploading"); })
-      .catch((err) => { drop(item); show(err); });
     pending.push(item); refresh();
   }
   function drop(item) {
@@ -315,11 +310,13 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     if ((!text && !pending.length) || streaming || !ghost) return;
     streaming = true; show(""); refresh();
     try {
-      await Promise.all(pending.map((p) => p.upload));
-      const lines = pending.filter((p) => p.path).map((p) => "![image](" + p.path + ")");
-      const message = [text, ...lines].filter(Boolean).join("\\n\\n");
-      if (!message) return;
       if (!session) draft = session = mint();
+      const target = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/attachments";
+      const paths = await Promise.all(pending.map(async (p) => {
+        const blob = await shrink(p.file);
+        return (await api(target, { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob })).path;
+      }));
+      const message = [text, ...paths.map((path) => "![image](" + path + ")")].filter(Boolean).join("\\n\\n");
       const r = await fetch("/api/ghosts/" + seg(ghost) + "/messages", {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ prompt: message, sessionId: session }),

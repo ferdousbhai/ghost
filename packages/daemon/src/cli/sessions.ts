@@ -16,7 +16,7 @@ export async function sessionsCommand(
       truncate(session.title ?? session.preview ?? "—", 42),
       relativeTime(session.updatedAt),
       String(session.messageCount),
-      [session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
+      [session.running ? "running" : "", session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
     ]);
     return {
       human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "",
