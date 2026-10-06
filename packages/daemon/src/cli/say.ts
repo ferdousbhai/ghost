@@ -89,7 +89,9 @@ export async function sayCommand(
   let terminal: "done" | "error" | undefined;
   // The turn outlives this process; Ctrl-C asks ghostd to stop it, and the
   // stream then ends with the turn's own `aborted` error. A second Ctrl-C exits.
+  let interrupted = false;
   const stop: NodeJS.SignalsListener = () => {
+    interrupted = true;
     ctx.client.request("POST", sessionPath(name, conversationId, "/stop"), {}).catch(() => undefined);
   };
   process.once("SIGINT", stop);
@@ -147,5 +149,6 @@ export async function sayCommand(
     (process as NodeJS.EventEmitter).off("SIGINT", stop);
   }
   if (!terminal) ctx.runtime.stderr.write("ghost: turn stream ended without a terminal event\n");
+  if (interrupted) return EXIT_CODE.interrupted;
   return terminal === "done" ? EXIT_CODE.success : EXIT_CODE.failure;
 }

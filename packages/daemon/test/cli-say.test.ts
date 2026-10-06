@@ -96,6 +96,38 @@ describe("ghost say", () => {
     expect(result.stdout).toBe("I'll check the log.\n\nIt failed at 3am.\n");
   });
 
+  it("stops the turn in ghostd on Ctrl-C and exits interrupted", async () => {
+    let turn: import("node:http").ServerResponse | undefined;
+    let stopped = "";
+    server = createServer((request, response) => {
+      if (request.url === "/api/ghosts") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper", createdAt: new Date().toISOString() }]));
+      } else if (request.url === "/api/ghosts/casper/messages") {
+        turn = response;
+        response.writeHead(200, { "content-type": "text/event-stream" });
+        response.write(`data: ${JSON.stringify({ type: "start" })}\n\n`);
+      } else {
+        stopped = `${request.method} ${request.url}`;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end("{}");
+        turn?.end(`data: ${JSON.stringify({ type: "error", reason: "aborted", errorMessage: "Turn aborted." })}\n\n`);
+      }
+    });
+    await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    const port = typeof address === "object" && address ? address.port : 0;
+    const running = runCli(["say", "hold on", "--new", "-g", "casper"], {
+      env: { GHOSTD_PORT: String(port) },
+      home: "/tmp/ghost-cli-home",
+    });
+    while (!turn) await new Promise((resolve) => setTimeout(resolve, 5));
+    process.emit("SIGINT", "SIGINT");
+    const result = await running;
+    expect(stopped).toMatch(/^POST \/api\/ghosts\/casper\/sessions\/cli-[^/]+\/stop$/);
+    expect(result.code).toBe(130);
+  });
+
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
     const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
