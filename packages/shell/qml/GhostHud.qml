@@ -423,6 +423,7 @@ FloatingWindow {
                             // Room for a real draft before it scrolls, never the
                             // whole pane: the transcript above must stay in view.
                             maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
+                            onNewConversationRequested: sidebar.startConversation()
 
                             onSubmitted: prompt => {
                                 if (Ghostd.streaming) Ghostd.queueMessage(prompt);

@@ -14,6 +14,7 @@ Item {
     id: root
 
     signal submitted(string text)
+    signal newConversationRequested()
 
     property alias text: field.text
 
@@ -51,6 +52,7 @@ Item {
         id: surface
 
         anchors.fill: parent
+        anchors.rightMargin: micButton.visible ? micButton.width + Theme.gap : 0
         radius: Theme.bubbleRadius
         color: field.activeFocus ? Theme.film(0.07) : Theme.film(0.05)
         border.width: 1
@@ -66,79 +68,38 @@ Item {
             ColorAnimation { duration: Theme.durMed }
         }
 
-        // The prompt. summonghost.com puts a `$` in the ghost's amber ahead of
-        // its install line for the same reason: it says, before anything is
-        // typed, that this is a place you say things to a machine. `❯` rather
-        // than `$` because what follows is addressed to the ghost, not to a
-        // shell — Ghost has its own prefixes for those.
-        Text {
-            id: promptGlyph
-
-            anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.leftMargin: Theme.controlPaddingX
-            anchors.topMargin: Theme.pad / 2
-            text: "❯"
-            color: field.enabled ? Theme.ghostAmber : Theme.foregroundFaint
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSize
-            font.weight: Font.Bold
-        }
-
-        // Dictation: Omarchy's Voxtype types into whatever has the keyboard,
-        // so the button hands focus straight back to the field after toggling
-        // it. Hidden entirely when Voxtype is not running.
         Item {
-            id: micButton
-
-            anchors.right: parent.right
-            anchors.top: parent.top
-            anchors.rightMargin: Theme.controlPaddingX
-            anchors.topMargin: Theme.pad / 2
-            width: Theme.charWidth * 2
-            height: Theme.fontSize * 1.4
-            visible: Dictation.available
+            id: composeButton
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.leftMargin: Theme.pad / 2
+            width: Theme.controlHeight
+            height: Theme.controlHeight
+            visible: Ghostd.activeGhost !== ""
             activeFocusOnTab: true
-
             Accessible.role: Accessible.Button
-            Accessible.name: Dictation.recording ? "Stop dictation" : "Start dictation"
+            Accessible.name: "New conversation"
 
-            Rectangle {
-                id: micDot
+            Text {
                 anchors.centerIn: parent
-                width: Theme.fontSize * 0.6
-                height: width
-                radius: width / 2
-                color: Dictation.recording ? Theme.ghostAmber
-                    : (Dictation.state === "transcribing" ? Theme.foregroundDim : "transparent")
-                border.width: Dictation.recording ? 0 : 1
-                border.color: micArea.containsMouse ? Theme.ghostAmber : Theme.foregroundFaint
-
-                SequentialAnimation on opacity {
-                    running: Dictation.recording && !Theme.reducedMotion
-                    loops: Animation.Infinite
-                    NumberAnimation { to: 0.35; duration: 600 }
-                    NumberAnimation { to: 1; duration: 600 }
-                    onRunningChanged: if (!running) micDot.opacity = 1
-                }
+                text: "+"
+                color: composeArea.containsMouse ? Theme.ghostAmberBright : Theme.foregroundDim
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeHeading
             }
 
             MouseArea {
-                id: micArea
+                id: composeArea
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                    Dictation.toggle();
-                    field.forceActiveFocus();
-                }
+                onClicked: root.newConversationRequested()
             }
 
             Keys.onPressed: event => {
                 if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                         || event.key === Qt.Key_Space) {
-                    Dictation.toggle();
-                    field.forceActiveFocus();
+                    root.newConversationRequested();
                     event.accepted = true;
                 }
             }
@@ -149,11 +110,9 @@ Item {
 
             anchors.fill: parent
             anchors.margins: Theme.pad / 2
-            // One column of air after the prompt, the way a shell leaves one.
-            anchors.leftMargin: promptGlyph.anchors.leftMargin
-                + promptGlyph.implicitWidth + Theme.charWidth
-            anchors.rightMargin: Theme.pad / 2
-                + (micButton.visible ? micButton.width + Theme.charWidth : 0)
+            anchors.leftMargin: composeButton.visible
+                ? composeButton.width + Theme.pad : Theme.pad
+            anchors.rightMargin: Theme.pad
             contentWidth: width
             contentHeight: field.implicitHeight
             clip: true
@@ -233,6 +192,59 @@ Item {
                     font.pixelSize: Theme.fontSize
                     elide: Text.ElideRight
                 }
+            }
+        }
+    }
+
+    // Voxtype types into the focused field, so return focus after toggling.
+    Rectangle {
+        id: micButton
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        width: Theme.controlHeight + Theme.pad
+        height: width
+        radius: width / 2
+        visible: Dictation.available
+        color: Dictation.recording ? Theme.ghostAmber : Theme.film(0.10)
+        border.width: 1
+        border.color: Dictation.recording ? Theme.ghostAmberBright : Theme.film(0.20)
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: Dictation.recording ? "Stop dictation" : "Start dictation"
+
+        GhostGlyph {
+            anchors.centerIn: parent
+            size: Theme.fontSize + 4
+            path: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"
+            tint: Dictation.recording ? Theme.background :
+                (micArea.containsMouse ? Theme.ghostAmberBright : Theme.foregroundBright)
+        }
+
+        SequentialAnimation on opacity {
+            running: Dictation.recording && !Theme.reducedMotion
+            loops: Animation.Infinite
+            NumberAnimation { to: 0.55; duration: 600 }
+            NumberAnimation { to: 1; duration: 600 }
+            onRunningChanged: if (!running) micButton.opacity = 1
+        }
+
+        MouseArea {
+            id: micArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                Dictation.toggle();
+                field.forceActiveFocus();
+            }
+        }
+
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || event.key === Qt.Key_Space) {
+                Dictation.toggle();
+                field.forceActiveFocus();
+                event.accepted = true;
             }
         }
     }

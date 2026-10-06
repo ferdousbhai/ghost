@@ -4,7 +4,7 @@ import "../services"
 
 // The HUD's left column: the ghost roster stacked over this ghost's
 // conversations, each in its own scroller so a long list never crowds the
-// other out, and a footer button that starts a new conversation.
+// other out.
 ColumnLayout {
     id: root
 
@@ -15,7 +15,7 @@ ColumnLayout {
 
     spacing: Theme.sectionGap
 
-    /** The footer's `+`, also Ctrl+N: a fresh conversation, keyboard back in the composer. */
+    /** The composer's `+`, also Ctrl+N: a fresh conversation, keyboard back in the composer. */
     function startConversation(): void {
         conversations.reset();
         Ghostd.newConversation();
@@ -59,45 +59,4 @@ ColumnLayout {
         onDeleteRequested: (sessionId, title) => root.conversationDeleteRequested(sessionId, title)
     }
 
-    // Footer, Notes-style: the one button that adds to the list. It lives
-    // outside the conversations' scroller so it stays put while they scroll.
-    Item {
-        Layout.fillWidth: true
-        Layout.preferredHeight: Theme.controlHeight
-        visible: Ghostd.activeGhost !== ""
-
-        Rectangle {
-            anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            width: Theme.controlHeight
-            height: Theme.controlHeight
-            radius: width / 2
-            color: composeArea.containsMouse ? Theme.amber(0.15) : Theme.amber(0.10)
-            border.width: 1
-            border.color: composeArea.containsMouse ? Theme.amber(0.30) : Theme.amber(0.20)
-
-            Behavior on color {
-                enabled: !Theme.reducedMotion
-                ColorAnimation { duration: Theme.durFast }
-            }
-
-            Text {
-                anchors.centerIn: parent
-                // "+" over a compose glyph: it is in every sans-serif, so it
-                // never falls back to tofu.
-                text: "+"
-                color: Theme.ghostAmberBright
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeHeading
-            }
-
-            MouseArea {
-                id: composeArea
-                anchors.fill: parent
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.startConversation()
-            }
-        }
-    }
 }

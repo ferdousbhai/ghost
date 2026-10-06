@@ -3,7 +3,7 @@ import QtTest
 import "../qml/components"
 import "../qml/services"
 
-// The sidebar's `+` and Ctrl+N share one entry point: a fresh conversation,
+// The composer's `+` and Ctrl+N share one entry point: a fresh conversation,
 // the search field cleared, and the keyboard handed back to the composer.
 TestCase {
     name: "SidebarCompose"
@@ -16,6 +16,15 @@ TestCase {
         id: sidebar
         width: 300
         height: 600
+    }
+
+    Composer {
+        id: composer
+        x: 0
+        y: 540
+        width: 300
+        height: 48
+        onNewConversationRequested: sidebar.startConversation()
     }
 
     SignalSpy { id: refocused; target: sidebar; signalName: "refocused" }
@@ -40,6 +49,12 @@ TestCase {
         verify(Ghostd.currentSessionId !== "");
         compare(Ghostd.sessions.length, 1);
         compare(Ghostd.sessions[0].messageCount, 0);
+        compare(refocused.count, 1);
+    }
+
+    function test_composeButtonOpensADraft(): void {
+        mouseClick(composer, 18, 24);
+        verify(Ghostd.currentSessionId !== "");
         compare(refocused.count, 1);
     }
 }
