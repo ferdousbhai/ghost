@@ -53,8 +53,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     display: flex; align-items: center; gap: .7rem;
   }
   header > .glyph { font-size: 1.6rem; color: var(--amber); filter: drop-shadow(0 0 6px #fbbf2466); }
-  .titles { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-  .pick { position: relative; min-width: 0; display: flex; max-width: 100%; }
+  .pick { position: relative; min-width: 0; display: flex; }
+  .pick:has(#session) { flex: 1; }
+  .pick:has(#ghost) { flex: none; max-width: 40%; }
   .pick select {
     appearance: none; -webkit-appearance: none; background: none; border: 0; min-width: 0; width: 100%;
     padding: 0 1.1rem 0 0; text-overflow: ellipsis; white-space: nowrap; overflow: hidden; outline: none;
@@ -62,16 +63,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .pick::after { content: ""; position: absolute; right: .25rem; top: 50%; width: .38rem; height: .38rem; margin-top: -.28rem; border: solid var(--faint); border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); pointer-events: none; }
   .pick:has(select:disabled)::after { display: none; }
   .pick select:disabled { opacity: 1; }
-  #ghost { font-family: var(--mono); font-size: .72rem; color: var(--amber); font-weight: 600; letter-spacing: .04em; }
+  #ghost { font-family: var(--mono); font-size: .85rem; color: var(--amber); font-weight: 600; letter-spacing: .04em; text-align: right; }
   #session { font-size: 1rem; font-weight: 500; color: var(--fg); }
   #ghost option, #session option { background: var(--surface); color: var(--fg); }
-  #me {
-    width: 2.1rem; height: 2.1rem; border-radius: 50%; display: grid; place-items: center; flex: none;
-    background: var(--surface); border: 1px solid var(--amber-line); color: var(--amber);
-    font-weight: 600; font-size: .85rem; text-transform: uppercase; user-select: none;
-  }
-  #me.guest { border-color: var(--line); color: var(--faint); }
-  #me:empty { display: none; }
 
   main {
     flex: 1; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch;
@@ -148,11 +142,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
-  <div class="titles">
-    <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
-    <div class="pick"><select id="session" aria-label="Conversation"></select></div>
-  </div>
-  <span id="me" role="img"></span>
+  <div class="pick"><select id="session" aria-label="Conversation"></select></div>
+  <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
 <main id="log"></main>
 <div id="status" role="status"></div>
@@ -399,9 +390,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   (async () => {
     const who = await api("/remote/whoami");
     owner = who.role !== "guest";
-    const me = $("me"), label = who.login ? who.login + (owner ? "" : " (read-only)") : "";
-    me.textContent = (who.name || who.login || "").trim().charAt(0);
-    me.title = label; me.setAttribute("aria-label", label); me.classList.toggle("guest", !owner);
     $("composer").hidden = !owner;
     refresh();
     const ghosts = await api("/ghosts");
