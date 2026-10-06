@@ -700,9 +700,10 @@ export class SessionHost {
     await writeLaunchFiles(dir, launch.files);
 
     const content: AssistantPart[] = [];
-    const textParts = new Map<string, number>();
     const tools = new Map<string, { name: string; part: number }>();
-    let open: { key: string; index: number; text: string } | null = null;
+    // The text block streaming now and its logged part, the last one while it is open,
+    // so a block key a harness reuses after a tool call logs a new part, as the stream shows.
+    let open: { key: string; index: number; part: number; text: string } | null = null;
     let error: string | null = null;
     let produced = false;
     let thoughtBlock: string | null = null;
@@ -728,18 +729,13 @@ export class SessionHost {
           const key = event.block;
           if (open?.key !== key) {
             closeBlock();
-            open = { key, index: blocks.next++, text: "" };
+            open = { key, index: blocks.next++, part: content.length, text: "" };
+            content.push({ type: "text", text: "" });
             stream.emit({ type: "text_start", contentIndex: open.index });
           }
           open.text += event.delta;
+          content[open.part] = { type: "text", text: open.text };
           stream.emit({ type: "text_delta", contentIndex: open.index, delta: event.delta });
-          const at = textParts.get(key);
-          if (at === undefined) {
-            textParts.set(key, content.length);
-            content.push({ type: "text", text: event.delta });
-          } else {
-            content[at] = { type: "text", text: (content[at] as { text: string }).text + event.delta };
-          }
           return;
         }
         case "tool_start":

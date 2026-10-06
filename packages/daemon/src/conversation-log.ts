@@ -254,7 +254,7 @@ export interface TranscriptMessage {
 
 function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
   const status = entry.exitCode === 0 ? "" : `\n\n(exit ${entry.exitCode ?? "signal"})`;
-  return `\`$ ${entry.command}\`\n\n\`\`\`\n${entry.output}\n\`\`\`${status}`;
+  return `\`\`\`\n${entry.output}\n\`\`\`${status}`;
 }
 
 /** The renderable messages, in order; harness and title records are not messages. */

@@ -682,8 +682,8 @@ async function streamTurn(res, name, body) {
       if (existing) {
         append(existing, { role: "user", content: textParts(prompt) });
         append(existing, { role: "assistant", content: textParts(ran
-          ? `\`$ ${command}\`\n\n\`\`\`\nmock output of ${command}\n\`\`\``
-          : `\`$ ${command}\`\n\n\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
+          ? `\`\`\`\nmock output of ${command}\n\`\`\``
+          : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
       }
       if (ran) res.end();
     } else {

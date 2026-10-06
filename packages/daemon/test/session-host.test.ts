@@ -288,6 +288,21 @@ describe("queued follow-ups and aborts", () => {
     await running;
   });
 
+  it("logs text after a tool call as its own part when the harness reuses the block key", async () => {
+    const fake = harness([]);
+    fake.setTurns([{ events: [
+      { type: "text", block: "run", delta: "Let me check." },
+      { type: "tool_start", id: "t1", name: "bash", args: { command: "ls" } },
+      { type: "tool_end", id: "t1", isError: false, output: "ok" },
+      { type: "text", block: "run", delta: "Done: X" },
+    ] }]);
+    const sessions = host({ harnesses: [fake] });
+    await turn(sessions, "check it");
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.at(-1)?.content.map((part) => part.type === "text" ? part.text : part.type))
+      .toEqual(["Let me check.", "toolCall", "Done: X"]);
+  });
+
   it("refuses a stop when nothing is running", () => {
     const sessions = host({ harnesses: [harness(replies("x"))] });
     expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));
