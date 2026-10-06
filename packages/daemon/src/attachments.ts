@@ -4,7 +4,7 @@
  * relative path and the harness opens it with its own file tools.
  */
 import { randomBytes } from "node:crypto";
-import { mkdir, open, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
 
@@ -29,12 +29,7 @@ export async function saveAttachment(conversationDir: string, bytes: Uint8Array)
   if (!ext) throw new GhostError("unsupported_media_type", "An attachment must be a PNG, JPEG, GIF, or WebP image.", 415);
   const name = `${Date.now().toString(36)}-${randomBytes(4).toString("hex")}.${ext}`;
   await mkdir(join(conversationDir, DIRNAME), { recursive: true });
-  const file = await open(join(conversationDir, DIRNAME, name), "wx");
-  try {
-    await file.writeFile(bytes);
-  } finally {
-    await file.close();
-  }
+  await writeFile(join(conversationDir, DIRNAME, name), bytes, { flag: "wx" });
   return `${DIRNAME}/${name}`;
 }
 

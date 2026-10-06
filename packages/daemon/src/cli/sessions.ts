@@ -1,7 +1,8 @@
+import type { AssistantPart } from "../conversation-log.js";
 import type { SessionSummary } from "../session-host.js";
 import { flagString, type ParsedCliArgs } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
-import { emit, relativeTime, table, textContent, truncate } from "./output.js";
+import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
 
 function displaySessionId(session: SessionSummary): string {
@@ -34,38 +35,20 @@ interface TranscriptBody {
   id: string;
   harness: string | null;
   title: string | null;
-  messages: Array<{ role: "user" | "assistant" | "hook"; content: unknown }>;
+  messages: Array<{ role: "user" | "assistant" | "hook"; content: readonly AssistantPart[] }>;
   total: number;
   truncated: boolean;
 }
 
-function toolLine(part: Record<string, unknown>): string | undefined {
-  if (part.type !== "toolCall") return undefined;
-  const name = typeof part.name === "string" ? part.name : "tool";
-  const args = JSON.stringify(part.arguments ?? {});
-  return `> ⚙ ${name}(${truncate(args, 120)})`;
-}
 
 function transcriptMarkdown(body: TranscriptBody, ghost: string): string {
   return body.messages.map((message) => {
     const heading = message.role === "user" ? "you"
       : message.role === "hook" ? "Stop hook"
       : ghost;
-    const lines: string[] = [];
-    if (Array.isArray(message.content)) {
-      for (const part of message.content) {
-        if (!part || typeof part !== "object") continue;
-        const tool = toolLine(part as Record<string, unknown>);
-        if (tool) lines.push(tool);
-        else {
-          const text = textContent([part]);
-          if (text) lines.push(text);
-        }
-      }
-    } else {
-      const text = textContent(message.content);
-      if (text) lines.push(text);
-    }
+    const lines = message.content.map((part) => part.type === "toolCall"
+      ? `> ⚙ ${part.name}(${truncate(JSON.stringify(part.arguments ?? {}), 120)})`
+      : part.text).filter(Boolean);
     return `**${heading}:**\n\n${lines.join("\n")}`;
   }).join("\n\n");
 }

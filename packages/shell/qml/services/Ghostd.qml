@@ -2035,7 +2035,7 @@ Singleton {
     function messageTools(parts: var): var {
         const tools = [];
         parts.forEach(part => {
-            if (!part || part.type !== "toolCall") return;
+            if (part.type !== "toolCall") return;
             tools.push({
                 id: part.id || ("history-" + Math.random()),
                 name: part.name || "tool",
@@ -2043,8 +2043,7 @@ Singleton {
                 status: part.failed === true ? "failed" : "complete",
                 arguments: part.arguments || ({}),
                 // A stored call keeps no cwd, so a relative path offers no file chip.
-                cwd: "",
-                summary: ""
+                cwd: ""
             });
         });
         return tools;
@@ -2278,17 +2277,15 @@ Singleton {
             break;
         case "tool_execution_start":
             state.activity = event.toolName;
-            if (!state.parts.some(part => part.type === "toolCall" && part.id === event.id)) {
-                state.parts.push({ type: "toolCall", id: event.id });
-                state.presentationDirty = true;
-            }
-            const started = {
+            // The daemon drops a repeated call id, so each start is a new call.
+            state.parts.push({ type: "toolCall", id: event.id });
+            state.presentationDirty = true;
+            root.updateToolFor(state, event.id, {
                 name: event.toolName,
                 status: "running",
                 arguments: event.arguments || ({}),
                 cwd: typeof event.cwd === "string" ? event.cwd : ""
-            };
-            root.updateToolFor(state, event.id, started);
+            });
             break;
         case "tool_execution_update":
             root.updateToolFor(state, event.id, {
@@ -2354,13 +2351,8 @@ Singleton {
                 next.push(item);
             }
         }
-        if (!found) next.push(Object.assign({
-            id: id,
-            name: patch.name || "tool",
-            arguments: ({}),
-            cwd: "",
-            summary: ""
-        }, patch));
+        // Only a start creates a card, and it names every field a card reads.
+        if (!found) next.push(Object.assign({ id: id }, patch));
         state.toolActivities = next;
         root.syncToolActivityFor(state);
     }
@@ -2414,8 +2406,8 @@ Singleton {
         if (!state.streaming) return;
         root.settleToolActivityFor(state, false);
         state.streaming = false;
-        // Re-split now the turn is closed, so the last flush tick's text is
-        // what the row shows.
+        // Flushes are throttled; force one so the row shows the turn's final
+        // text.
         root.flushTurn(state, true);
         root.resetInteractionStateFor(state);
         let text = "";

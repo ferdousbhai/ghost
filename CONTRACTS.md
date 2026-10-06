@@ -414,7 +414,7 @@ running, by its `name`), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id, tool name, the
-conversation directory, and a bounded output summary. An owner `!command` is
+directory it ran in, and a bounded output summary. An owner `!command` is
 one `bash` tool card, then `done`.
 
 ### `ghost` CLI

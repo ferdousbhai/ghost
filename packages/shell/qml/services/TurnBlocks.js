@@ -19,15 +19,14 @@ function fromParts(parts) {
     var run = [];            // the text parts since the last tool call
     var announced = [];      // the last run a tool call followed
     var closed = false;      // a tool call has followed `run`
-    for (var i = 0; i < (parts || []).length; i++) {
+    for (var i = 0; i < parts.length; i++) {
         var part = parts[i];
-        if (!part) continue;
         if (part.type === "toolCall") {
             if (run.length > 0) announced = run;
             closed = true;
             continue;
         }
-        if (part.type !== "text" || String(part.text || "").trim() === "") continue;
+        if (part.text.trim() === "") continue;
         if (closed) {
             run = [];
             closed = false;
@@ -53,38 +52,31 @@ function fromParts(parts) {
 function rows(messages) {
     var out = [];
     var parts = [];
-    var open = false;
     var error = "";
 
     function commit() {
-        if (!open) return;
         var text = fromParts(parts);
         var carriesTool = parts.some(function (part) {
-            return part && part.type === "toolCall";
+            return part.type === "toolCall";
         });
         if (text !== "" || carriesTool || error !== "")
             out.push({ role: "assistant", text: text, parts: parts, error: error });
         parts = [];
-        open = false;
         error = "";
     }
 
-    for (var i = 0; i < (messages || []).length; i++) {
+    for (var i = 0; i < messages.length; i++) {
         var message = messages[i];
-        if (!message) continue;
-        var content = Array.isArray(message.content) ? message.content : [];
         if (message.role === "assistant") {
-            open = true;
             // push.apply, not concat: a restored turn is one message per tool
             // call, and concat copies the whole accumulator each time.
-            Array.prototype.push.apply(parts, content);
+            Array.prototype.push.apply(parts, message.content);
             if (typeof message.errorMessage === "string" && message.errorMessage !== "")
                 error = message.errorMessage;
             continue;
         }
-        if (message.role !== "user" && message.role !== "hook") continue;
         commit();
-        var text = fromParts(content);
+        var text = fromParts(message.content);
         if (text === "") continue;
         out.push({ role: message.role, text: text, contentTruncated: message.contentTruncated === true });
     }

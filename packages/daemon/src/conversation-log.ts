@@ -237,8 +237,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 
 export interface TranscriptMessage {
   role: "user" | "assistant" | "hook";
-  content: unknown;
-  timestamp?: number;
+  content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
   errorMessage?: string;
@@ -259,7 +258,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
       message = {
         role: entry.origin === "hook" ? "hook" : "user",
         content: [{ type: "text", text: entry.text }],
-        timestamp: Date.parse(entry.at),
         entryId,
         ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
       };
@@ -267,7 +265,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
       message = {
         role: "assistant",
         content: entry.content,
-        timestamp: Date.parse(entry.at),
         entryId,
         ...(entry.error ? { errorMessage: entry.error } : {}),
       };
@@ -275,7 +272,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
       message = {
         role: "assistant",
         content: [{ type: "text", text: commandText(entry) }],
-        timestamp: Date.parse(entry.at),
         entryId,
       };
     }

@@ -167,8 +167,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
         }
       ],
       "entryId": "#1",
-      "role": "user",
-      "timestamp": "<time>"
+      "role": "user"
     },
     {
       "content": [
@@ -187,8 +186,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
         }
       ],
       "entryId": "#2",
-      "role": "assistant",
-      "timestamp": "<time>"
+      "role": "assistant"
     },
     {
       "content": [
@@ -198,8 +196,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
         }
       ],
       "entryId": "#3",
-      "role": "user",
-      "timestamp": "<time>"
+      "role": "user"
     },
     {
       "content": [
@@ -209,8 +206,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
         }
       ],
       "entryId": "#4",
-      "role": "assistant",
-      "timestamp": "<time>"
+      "role": "assistant"
     }
   ],
   "title": "Remember that I want short answers",

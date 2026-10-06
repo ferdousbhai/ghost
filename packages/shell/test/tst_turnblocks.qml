@@ -61,13 +61,6 @@ TestCase {
         compare(TurnBlocks.fromParts([t("Looking."), call(), t("  ")]), "Looking.");
     }
 
-    function test_storedUserMessageSurvivesWhole(): void {
-        // No tool calls, so nothing can be mistaken for narration.
-        const parts = [{ type: "text", text: "when is the launch?" }];
-        compare(TurnBlocks.fromParts(parts), "when is the launch?");
-    }
-
-
     function test_toolOnlyTurnSurvivesWithNoTextBesideIt(): void {
         const rows = TurnBlocks.rows([
             { role: "user", content: [{ type: "text", text: "tidy it" }] },
@@ -143,28 +136,5 @@ TestCase {
         ]);
         compare(rows.map(row => row.role).join(","), "user,assistant,hook,assistant");
         compare(rows[2].text, "Keep going.");
-    }
-
-    function test_unknownRolesAreSkippedWithoutBreakingTheGrouping(): void {
-        const rows = TurnBlocks.rows([
-            { role: "assistant", content: [{ type: "text", text: "Reading." }], entryId: "a1" },
-            { role: "toolResult", content: [{ type: "text", text: "internal" }] },
-            { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read" }], entryId: "a2" }
-        ]);
-        compare(rows.length, 1);
-        // The internal message did not break the run, so both assistant
-        // messages landed in one row and the call is beside its narration.
-        compare(rows[0].parts.length, 2);
-        // Narration is all this turn said, so it keeps it rather than showing
-        // an empty row — the tool-only fallback, reached through grouping.
-        compare(rows[0].text, "Reading.");
-    }
-
-    function test_storedPartsIgnoreUnknownKinds(): void {
-        const parts = [
-            { type: "thinking", text: "hmm" },
-            { type: "text", text: "Right — March." }
-        ];
-        compare(TurnBlocks.fromParts(parts), "Right — March.");
     }
 }

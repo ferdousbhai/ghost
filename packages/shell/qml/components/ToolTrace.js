@@ -85,7 +85,7 @@ function verbTrace(verb, activity, completed) {
     const raw = verb.of ? verb.of(activity) : argument(activity, verb.key);
     if (raw === "") return completed ? verb.alonePast : verb.alonePresent;
     return (completed ? verb.past : verb.present) + " "
-        + (verb.quote ? quoted(raw) : compact(raw, 80)) + (verb.suffix || "");
+        + (verb.quote ? quoted(raw) : compact(raw, 80));
 }
 
 

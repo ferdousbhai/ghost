@@ -61,16 +61,6 @@ export function dim(text: string, enabled: boolean): string {
   return enabled ? `\u001b[2m${text}\u001b[22m` : text;
 }
 
-export function textContent(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.flatMap((part) => {
-    if (!part || typeof part !== "object") return [];
-    const row = part as { type?: unknown; text?: unknown };
-    return row.type === "text" && typeof row.text === "string" ? [row.text] : [];
-  }).join("");
-}
-
 export function describeErrorBody(body: unknown, fallback: string): string {
   if (body && typeof body === "object") {
     const error = (body as { error?: unknown }).error;

@@ -307,12 +307,11 @@ function ghostSessions(name) {
       createdAt: new Date(now - 7_200_000).toISOString(),
       updatedAt: new Date(now - 3_600_000).toISOString(),
     }, [
-      { role: "user", content: textParts("hello, who lives here?"), timestamp: now - 7_200_000 },
-      { role: "assistant", content: [{ type: "text", text: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.` }], timestamp: now - 7_195_000 },
-      { role: "user", content: textParts("open the current project brief and tell me what's left"), timestamp: now - 3_608_000 },
+      { role: "user", content: textParts("hello, who lives here?") },
+      { role: "assistant", content: [{ type: "text", text: `I'm **${name}**. This thread was seeded by the mock so resume has history to show.` }] },
+      { role: "user", content: textParts("open the current project brief and tell me what's left") },
       {
         role: "assistant",
-        timestamp: now - 3_607_000,
         content: [
           { type: "text", text: "Opening the current project brief" },
           // A restored call has no summary, so the card falls back to the
@@ -335,8 +334,8 @@ function ghostSessions(name) {
       createdAt: new Date(now - 600_000).toISOString(),
       updatedAt: new Date(now - 600_000).toISOString(),
     }, [
-      { role: "user", content: textParts("quick question about memory"), timestamp: now - 600_000 },
-      { role: "assistant", content: [], errorMessage: "codex usage limit reached", timestamp: now - 595_000 },
+      { role: "user", content: textParts("quick question about memory") },
+      { role: "assistant", content: [], errorMessage: "codex usage limit reached" },
     ]);
     sessionStore.set(name, new Map([[titled.id, titled], [untitled.id, untitled]]));
   }
@@ -395,8 +394,8 @@ function recordTurn(name, id, exchanges) {
     store.set(id, s);
   }
   for (const { prompt, reply } of exchanges) {
-    append(s, { role: "user", content: textParts(prompt), timestamp: now });
-    append(s, { role: "assistant", content: [{ type: "text", text: reply }], timestamp: now });
+    append(s, { role: "user", content: textParts(prompt) });
+    append(s, { role: "assistant", content: [{ type: "text", text: reply }] });
   }
   s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
     ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;

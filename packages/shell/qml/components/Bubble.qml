@@ -70,8 +70,8 @@ Item {
         // A settled row will not grow, and saying so lets the answer's last
         // block close instead of riding in the tail with the one before it.
         const step = MarkdownSegments.advance(root.displayBody, root.blockScan, !root.busy);
-        // A row the list reused for another message, or a turn re-split once it
-        // settled, is not a continuation of what is on screen.
+        // A row the list reused for another message, or a reply that replaced
+        // the narration before it, is not a continuation of what is on screen.
         if (step.reset) bodyBlocks.clear();
         for (const segment of step.segments) bodyBlocks.append({ markdown: segment });
         root.liveTail = step.tail;
@@ -223,10 +223,8 @@ Item {
         width: root.mine
             ? Math.min(parent.width * 0.82,
                 Math.max((root.hasBody ? tailText.implicitWidth : 0) + root.contentInset * 2,
-                    root.images.length > 0
-                        ? root.images.length * (root.imageSize + Theme.gap / 2) - Theme.gap / 2
-                            + root.contentInset * 2
-                        : 0, 72))
+                    root.images.length * (root.imageSize + Theme.gap / 2) - Theme.gap / 2
+                        + root.contentInset * 2, 72))
             : Math.min(parent.width, Theme.readingMeasure)
         implicitWidth: Math.max(content.implicitWidth, 1) + root.contentInset * 2
         implicitHeight: content.implicitHeight + root.contentInset * 2
