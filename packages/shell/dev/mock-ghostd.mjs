@@ -383,27 +383,15 @@ const sessionSummary = (name) => (s) => {
   };
 };
 
-/**
- * Persist one turn's exchanges, `[{ prompt, reply }]`, into the conversation
- * the turn created as it started; the first prompt went in then. A null reply
- * is a pass the stop cut short: ghostd logs it as "Turn aborted."
- */
-function recordTurn(name, id, exchanges) {
+/** A finished turn's conversation takes its harness, its time, and a title from its prompt. */
+function recordTurn(name, id, prompt) {
   const s = ghostSessions(name).get(id);
   if (!s) return;
-  const now = Date.now();
-  for (const [index, { prompt, reply }] of exchanges.entries()) {
-    if (index > 0) append(s, { role: "user", content: textParts(prompt) });
-    append(s, reply === null
-      ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
-      : { role: "assistant", content: [{ type: "text", text: reply }] });
-  }
   s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
     ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
   draftHarness.delete(turnKey(name, id));
-  s.updatedAt = new Date(now).toISOString();
-  // Titling after the first turn: derive a title from the prompt.
-  if (!s.title) s.title = exchanges[0]?.prompt.slice(0, 40) || "New conversation";
+  s.updatedAt = new Date().toISOString();
+  if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
   publishConversationUpdated(name, id, s.updatedAt);
 }
 
@@ -660,7 +648,8 @@ async function streamTurn(res, name, body) {
   const sessionId = body.sessionId;
   const stream = openStream(res);
   const key = turnKey(name, sessionId);
-  const turn = { streaming: true, followUp: [], res, stream };
+  // An owner command has no passes, so nothing queues into it.
+  const turn = { streaming: !prompt.startsWith("!"), followUp: [], res, stream };
   activeTurns.set(key, turn);
   answering.add(key);
   // Like ghostd, a turn creates its conversation and logs its prompt as it
@@ -675,8 +664,12 @@ async function streamTurn(res, name, body) {
   }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
   if (existing) publishConversationUpdated(name, sessionId);
-  const exchanges = [];
-  let failed = false;
+  const failing = flag("--fail") && !flag("--omit-terminal");
+  // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
+  // "Turn aborted.", a --fail one with its error.
+  const logReply = (reply) => existing && append(existing, reply === null
+    ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
+    : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
   try {
     if (prompt.startsWith("!")) {
       const command = prompt.slice(1).trim();
@@ -686,33 +679,35 @@ async function streamTurn(res, name, body) {
         append(existing, { role: "assistant", content: textParts(ran
           ? `\`$ ${command}\`\n\n\`\`\`\nmock output of ${command}\n\`\`\``
           : `\`$ ${command}\`\n\n\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
-        if (!existing.title) existing.title = prompt.slice(0, 40);
       }
       if (ran) res.end();
-      return;
-    }
-    exchanges.push({ prompt, reply: await pump(res, script(name, prompt), stream) });
-    // A queued follow-up runs after the current pass: the daemon announces it
-    // with owner_message, then streams the pass that answers it.
-    while (exchanges.at(-1).reply !== null && turn.followUp.length > 0) {
-      const text = turn.followUp.shift();
-      send(res, stream, { type: "queue", followUp: turn.followUp });
-      send(res, stream, { type: "owner_message", text });
-      exchanges.push({ prompt: text, reply: await pump(res, textBlock(0, `Following up on **${text}**.`), stream) });
-    }
-    // A stopped turn already ended its stream with `aborted`.
-    if (exchanges.at(-1).reply !== null) {
-      if (flag("--stall-stream")) {
-        await new Promise((resolve) => res.once("close", resolve));
-        return;
+    } else {
+      let reply = await pump(res, script(name, prompt), stream);
+      logReply(reply);
+      // A queued follow-up runs after the current pass: the daemon logs and
+      // announces it, says owner_message, then streams the pass that answers it.
+      while (reply !== null && turn.followUp.length > 0) {
+        const text = turn.followUp.shift();
+        if (existing) append(existing, { role: "user", content: textParts(text) });
+        publishConversationUpdated(name, sessionId);
+        send(res, stream, { type: "queue", followUp: turn.followUp });
+        send(res, stream, { type: "owner_message", text });
+        reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
+        logReply(reply);
       }
-      if (!flag("--omit-terminal")) {
-        failed = flag("--fail");
-        send(res, stream, failed
-          ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
-          : { type: "done", reason: "stop" });
+      // A stopped turn already ended its stream with `aborted`.
+      if (reply !== null) {
+        if (flag("--stall-stream")) {
+          await new Promise((resolve) => res.once("close", resolve));
+          return;
+        }
+        if (!flag("--omit-terminal")) {
+          send(res, stream, failing
+            ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
+            : { type: "done", reason: "stop" });
+        }
+        res.end();
       }
-      res.end();
     }
   } finally {
     answering.delete(key);
@@ -721,9 +716,7 @@ async function streamTurn(res, name, body) {
     // Every end announces, as ghostd's does: stopped, failed, or done.
     if (existing) publishConversationUpdated(name, sessionId);
   }
-  // Persist what the turn said, stopped or done, and title it from its prompt.
-  // A --fail turn wrote no reply, so nothing more is recorded.
-  if (!failed) recordTurn(name, sessionId, exchanges);
+  recordTurn(name, sessionId, prompt);
 }
 
 const mockServer = createServer(async (req, res) => {

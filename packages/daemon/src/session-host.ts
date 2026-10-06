@@ -528,12 +528,7 @@ export class SessionHost {
 
   /** One whole turn; exactly one terminal `done` or `error` is emitted. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
-    const admission = await this.admitTurn(ghostName, options);
-    try {
-      await admission.run(options);
-    } finally {
-      admission.release();
-    }
+    await (await this.admitTurn(ghostName, options)).run(options);
   }
 
   private async runAdmitted(
@@ -922,8 +917,11 @@ export class SessionHost {
   /** Queue text for after the current pass; a harness takes no input mid-run. */
   async queueMessage(ghostName: string, sessionId: string | null | undefined, text: string): Promise<QueuedMessages> {
     this.registry.get(ghostName);
-    const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
+    const key = keyOf(ghostName, requireConversationId(sessionId ?? "default"));
+    const turn = this.live.get(key);
     if (!turn) {
+      // A running `!command` has no passes to queue after.
+      if (this.admissions.has(key)) throw new GhostError("session_busy", "An owner command is running in this conversation; send this when it ends.", 409);
       throw new GhostError("session_not_streaming", "This conversation is not currently streaming; send a normal message instead.", 409);
     }
     turn.followUps.push(text);

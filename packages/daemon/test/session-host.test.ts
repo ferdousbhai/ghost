@@ -374,6 +374,8 @@ describe("owner commands and hooks", () => {
     const events: TurnEvent[] = [];
     const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "!sleep 30", emit: (event) => events.push(event) });
     await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
+    // A command has no passes to queue after; it is busy, not idle.
+    await expect(sessions.queueMessage("casper", "c1", "after")).rejects.toMatchObject({ code: "session_busy" });
     sessions.stopTurn("casper", "c1");
     await running;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted", errorMessage: "Command aborted." });

@@ -201,6 +201,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       for (const path of paths) {
         const a = document.createElement("a"); a.href = attachmentUrl(path); a.target = "_blank";
         const img = document.createElement("img"); img.src = a.href; img.alt = "Attached photo"; img.loading = "lazy";
+        img.onerror = () => a.replaceWith("Photo unavailable");
         a.append(img); pics.append(a);
       }
       el.append(pics);
