@@ -54,7 +54,7 @@ FocusScope {
             / root.destinations.length
     ))
 
-    implicitWidth: 64
+    implicitWidth: Theme.controlHeight + Theme.gap * 2
     implicitHeight: Theme.pad * 30
     clip: false
     activeFocusOnTab: true

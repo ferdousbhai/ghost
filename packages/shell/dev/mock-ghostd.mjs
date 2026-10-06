@@ -576,8 +576,9 @@ function* ownerCommand(command) {
 function* script(name, prompt) {
   let contentIndex = 0;
   yield { type: "start" };
-  // The preamble a real model emits before reaching for a tool: it holds the
-  // reading column until the reply replaces it (qml/services/TurnBlocks.js).
+  // The preamble a real model emits before reaching for a tool: it stays as its
+  // own message, and the reply after the call is the next one
+  // (qml/services/TurnBlocks.js).
   yield* textBlock(contentIndex++, "Checking what I remember about that");
   // Tool calls take no content index; the daemon numbers text blocks only.
   yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) }, "Note checked");

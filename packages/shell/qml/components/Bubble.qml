@@ -281,8 +281,7 @@ Item {
                         id: picture
 
                         required property string modelData
-                        // A photo the tailnet viewer attached, read from the
-                        // conversation directory; the HUD itself attaches nothing.
+                        // An attached image, read from the conversation directory.
                         readonly property string path: Workbench.home === "" || Ghostd.currentSessionId === ""
                             ? "" : Workbench.home + "/sessions/" + Ghostd.currentSessionId + "/" + picture.modelData
 

@@ -118,7 +118,12 @@ Item {
                 Image {
                     anchors.fill: parent
                     anchors.margins: 1
-                    source: chip.modelData.local
+                    // The daemon's copy once it holds one: a pasted file is
+                    // removed as soon as it is uploaded.
+                    source: chip.modelData.path !== "" && Workbench.home !== ""
+                        ? "file://" + Workbench.home + "/sessions/" + chip.modelData.sessionId
+                            + "/" + chip.modelData.path
+                        : chip.modelData.local
                     sourceSize.width: tray.height * 2
                     sourceSize.height: tray.height * 2
                     fillMode: Image.PreserveAspectCrop
@@ -334,7 +339,7 @@ Item {
     Rectangle {
         id: micButton
         anchors.right: parent.right
-        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenter: surface.verticalCenter
         width: Theme.controlHeight + Theme.pad
         height: width
         radius: width / 2

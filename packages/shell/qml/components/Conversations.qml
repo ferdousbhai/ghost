@@ -4,7 +4,7 @@ pragma ComponentBehavior: Bound
 // is open, and a way to start a fresh one. Mirrors Roster.qml's shape and
 // interaction, one rung down the left panel. Rows come from
 // GET /api/ghosts/:name/sessions plus at most one unstarted HUD draft; opening
-// one loads its transcript (#26); the sidebar footer's + starts a blank thread.
+// one loads its transcript (#26); the composer's + (Ctrl+N) starts a blank thread.
 //
 // The list is shaped like Apple Notes' sidebar: its section heading and search
 // field sit on top, then the rows. Starred (pinned) state lives on the daemon
@@ -44,8 +44,8 @@ Item {
     implicitWidth: Theme.sidebarMeasure
     implicitHeight: 240
 
-    /** Drop the filter — what a caller outside the list (the sidebar footer's
-        compose button) needs before the view jumps to a brand-new
+    /** Drop the filter — what a caller outside the list (the composer's `+`,
+        or Ctrl+N) needs before the view jumps to a brand-new
         conversation. */
     function reset(): void {
         searchInput.text = "";

@@ -37,7 +37,7 @@ FloatingWindow {
     property string currentSection: "chat"
     /** The navigable sections, in rail order; the body stack follows it. */
     readonly property var sections: navigation.destinations.map(destination => destination.id)
-    readonly property int navigationWidth: Theme.controlHeight + Theme.gap * 2
+    readonly property int navigationWidth: navigation.implicitWidth
 
     // How this window is named to the compositor, and the regex that finds it
     // again. Both halves of launch-or-focus go through here.

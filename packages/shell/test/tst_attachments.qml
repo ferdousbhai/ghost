@@ -29,7 +29,6 @@ TestCase {
         compare(Attachments.split("![x](attachments/../../character.md)").images, []);
         compare(Attachments.split("![x](attachments/sub/a.png)").images, []);
         compare(Attachments.split("![x](/etc/passwd)").images, []);
-        compare(Attachments.compose("hi", ["../a.png", "attachments/ok.png"]), "hi\n![image](attachments/ok.png)");
     }
 
     function test_onlyImagesTheDaemonTakes(): void {

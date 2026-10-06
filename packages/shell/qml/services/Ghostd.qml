@@ -2079,14 +2079,6 @@ Singleton {
 
     onCurrentSessionIdChanged: root.dropStaleAttachments()
 
-    /** `file://` URL of a stored attachment in the active conversation, or "". */
-    function attachmentUrl(path: string): string {
-        if (!Attachments.isAttachmentPath(path) || root.currentSessionId === "") return "";
-        const ghost = root.ghosts.find(row => row && row.name === root.activeGhost);
-        if (!ghost || typeof ghost.dir !== "string" || ghost.dir === "") return "";
-        return "file://" + ghost.dir + "/sessions/" + root.currentSessionId + "/" + path;
-    }
-
     /**
      * Attach a local image file to the active conversation's next message.
      * `temporary` marks a file the HUD wrote itself (a paste), removed once
@@ -2112,7 +2104,7 @@ Singleton {
                 if (stored !== "" && temporary) Quickshell.execDetached(["rm", "-f", "--", localPath]);
                 root.attachments = root.attachments.map(item => item.id !== id ? item
                     : Object.assign({}, item, stored !== ""
-                        ? { path: stored, local: root.attachmentUrl(stored) || item.local }
+                        ? { path: stored }
                         : { error: root.refusal(xhr, "Attach image") }));
             },
             () => root.attachments.some(item => item.id === id));
@@ -2549,12 +2541,9 @@ Singleton {
             root.removeTurnRow(state, state.assistantRow);
             state.assistantRow = -1;
         } else {
-            root.settleToolActivityFor(state, false);
             // The HTTP turn continues, but this assistant segment ends where
-            // the new row enters; flush what it said.
-            root.flushTurn(state, true);
-            if (hasAssistant)
-                root.setTurnRow(state, state.assistantRow, "pending", false);
+            // the new row enters.
+            root.closeAssistantRowFor(state);
         }
         state.activity = "";
         root.appendTurnRow(state, {
@@ -2579,12 +2568,17 @@ Singleton {
      */
     function openMessageAfterToolsFor(state: var): void {
         if (!state.parts.some(part => part.type === "toolCall")) return;
+        root.closeAssistantRowFor(state);
+        root.openAssistantRowFor(state);
+        root.resetAssistantSegmentFor(state);
+    }
+
+    /** Settle the assistant row's calls, flush what it said, and stop it pending. */
+    function closeAssistantRowFor(state: var): void {
         root.settleToolActivityFor(state, false);
         root.flushTurn(state, true);
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length)
             root.setTurnRow(state, state.assistantRow, "pending", false);
-        root.openAssistantRowFor(state);
-        root.resetAssistantSegmentFor(state);
     }
 
 

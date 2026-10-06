@@ -94,8 +94,8 @@ stop the mock separately.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the permanent Chat / Board / Character / Hooks / MCP /
-  Remote access rail at the right edge. `SUPER+CTRL+G` is
+  bottom, and the Chat / Board / Character / Hooks / MCP / Remote access
+  rail floating at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`. Hooks shows the
   daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
@@ -110,9 +110,9 @@ stop the mock separately.
   `~/ghosts`.
 - On `ask`: the spectral summoning orb naming the tool call it is inside of,
   then the reply arriving word by word with `**bold**` rendered as bold. The
-  narration holds the row while the tool call runs and the reply replaces it,
-  and the tool call settles behind the row's quiet "1 step" toggle rather than
-  into a card of its own.
+  narration stays as its own message, its tool call settled behind that
+  message's quiet "1 step" toggle rather than in a card of its own, and the
+  reply arrives as the next message.
 - A finished turn or failure raises a desktop toast unless
   its conversation is being viewed in the focused chat panel. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.

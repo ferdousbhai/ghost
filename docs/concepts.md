@@ -230,8 +230,8 @@ If you expect one of these, it is missing on purpose:
   strip, and cannot cancel what it did not start.
 - **No narration classifier.** Every text the ghost writes stays, as its own
   message: text that follows a tool call starts the next one, in the HUD and
-  the tailnet viewer alike, and the calls belong to the message before them.
-  No length limit or sentence rule decides what is "status".
+  the tailnet viewer alike; in the HUD the calls belong to the message before
+  them. No length limit or sentence rule decides what is "status".
 - **No compositor plugin for background input.** Wayland lets input reach
   only the focused window, so the helper's focus-borrowing transactions,
   restore logic, and honesty metadata exist to make that safe and visible.

@@ -65,7 +65,7 @@ TestCase {
         compare(rows[0].error, undefined);
     }
 
-    function test_oneTurnSplitAcrossMessagesBecomesOneRow(): void {
+    function test_storedCallsJoinThePreambleBeforeThem(): void {
         // Older projections may give each tool call its own message.
         const rows = TurnBlocks.rows([
             { role: "user", content: [{ type: "text", text: "check my repos" }], entryId: "u1" },

@@ -26,7 +26,7 @@ function split(body) {
 
 /** The prompt to send: the typed text, then one image line per stored path. */
 function compose(text, paths) {
-    const lines = (paths || []).filter(isAttachmentPath).map(path => "![image](" + path + ")");
+    const lines = (paths || []).map(path => "![image](" + path + ")");
     const typed = String(text || "").trim();
     return (typed !== "" ? [typed] : []).concat(lines).join("\n");
 }
