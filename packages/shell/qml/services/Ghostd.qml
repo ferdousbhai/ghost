@@ -2096,11 +2096,8 @@ Singleton {
         root.captureActiveTurn(state);
         root.request(state, "stopRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
             + "/sessions/" + encodeURIComponent(state.sessionId) + "/stop", {}, function () {});
-        if (state.detached) {
-            state.detached = false;
-            root.projectTurnFields(state);
-            return;
-        }
+        // Another client's turn ends in the listing, which reloads what it left.
+        if (state.detached) return;
         root.cancelTurn(state);
     }
 

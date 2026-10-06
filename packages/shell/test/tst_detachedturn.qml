@@ -59,13 +59,17 @@ TestCase {
         compare(requests("GET", /\/sessions\/c1\/transcript/).length, 2);
     }
 
-    function test_stopAsksGhostd(): void {
+    function test_stopAsksGhostdAndTheEndReloads(): void {
         list(true);
         Ghostd.cancel();
         const stops = requests("POST", /\/api\/ghosts\/casper\/sessions\/c1\/stop$/);
         compare(stops.length, 1);
         compare(stops[0].body, "{}");
+        // Still running until ghostd says it ended; then what it left is read.
+        verify(Ghostd.streaming);
+        list(false);
         verify(!Ghostd.streaming);
+        compare(requests("GET", /\/sessions\/c1\/transcript/).length, 2);
     }
 
     function test_followUpQueuesIntoTheRunningTurn(): void {

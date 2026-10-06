@@ -219,12 +219,12 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
    * still inside its calls the narration before them (the HUD's TurnBlocks rule).
    */
   function finalText(parts) {
-    let text = "", last = "";
+    let run = [], last = [];
     for (const p of parts) {
-      if (p.type === "text") text += p.text;
-      else if (p.type === "toolCall") { if (text.trim()) last = text; text = ""; }
+      if (p.type === "toolCall") { if (run.length) last = run; run = []; }
+      else if (p.text.trim()) run.push(p.text);
     }
-    return text.trim() ? text : last;
+    return (run.length ? run : last).join("\\n\\n");
   }
   function empty() {
     const el = document.createElement("div"); el.className = "empty";
@@ -352,7 +352,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             if (!line) continue;
             const ev = JSON.parse(line.slice(6));
             const stick = nearBottom();
-            if (ev.type === "text_delta") {
+            if (ev.type === "text_start") parts.push({ type: "text", text: "" });
+            else if (ev.type === "text_delta") {
               if (parts.at(-1)?.type === "text") parts.at(-1).text += ev.delta;
               else parts.push({ type: "text", text: ev.delta });
               reply.replaceChildren(renderMarkdown(finalText(parts), document));

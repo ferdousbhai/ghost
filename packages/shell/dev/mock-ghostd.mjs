@@ -666,13 +666,18 @@ async function streamTurn(res, name, body) {
   const turn = { streaming: true, followUp: [], res, stream };
   activeTurns.set(key, turn);
   answering.add(key);
-  // Like ghostd, log the prompt of an existing conversation as the turn starts,
-  // so another client sees what is running.
-  const existing = ghostSessions(name).get(sessionId);
-  if (existing && !prompt.startsWith("!")) {
-    append(existing, { role: "user", content: textParts(prompt) });
-    publishConversationUpdated(name, sessionId);
+  // Like ghostd, a turn creates its conversation and logs its prompt as it
+  // starts (an owner command logs when it ends), so another client sees what
+  // is running.
+  const store = ghostSessions(name);
+  let existing = store.get(sessionId);
+  if (!existing && validConversationId(sessionId)) {
+    const now = new Date().toISOString();
+    existing = { id: sessionId, title: null, createdAt: now, updatedAt: now, messages: [] };
+    store.set(sessionId, existing);
   }
+  if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
+  if (existing) publishConversationUpdated(name, sessionId);
   const exchanges = [];
   let failed = false;
   try {
@@ -709,6 +714,8 @@ async function streamTurn(res, name, body) {
     answering.delete(key);
     turn.streaming = false;
     activeTurns.delete(key);
+    // Every end announces, as ghostd's does: stopped, failed, or done.
+    if (existing) publishConversationUpdated(name, sessionId);
   }
   // Persist the completed turn so the listing and transcript reflect it,
   // matching the daemon's lazy-create-and-title behaviour. A --fail turn wrote

@@ -110,7 +110,11 @@ export async function sayCommand(
       emit(ctx, event, (): string | RenderedOutput => {
         let human = "";
         let quiet = "";
-        if (event.type === "text_delta") {
+        if (event.type === "text_start" && finalText !== "") {
+          // A new text block after a tool call or another block starts its own paragraph.
+          finalText += "\n\n";
+          human = "\n\n";
+        } else if (event.type === "text_delta") {
           const delta = typeof event.delta === "string" ? event.delta : "";
           finalText += delta;
           human = delta;

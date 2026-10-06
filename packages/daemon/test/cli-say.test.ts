@@ -81,6 +81,21 @@ describe("ghost say", () => {
     expect(quiet.stdout).toBe("a\nb\nls: c: No such file\n");
   });
 
+  it("starts each text block on its own paragraph", async () => {
+    const fake = await fakeDaemon([
+      { type: "start" },
+      { type: "text_start", contentIndex: 0 },
+      { type: "text_delta", contentIndex: 0, delta: "I'll check the log." },
+      { type: "tool_execution_start", id: "1", toolName: "bash", arguments: { command: "tail log" } },
+      { type: "tool_execution_end", id: "1", toolName: "bash", isError: false },
+      { type: "text_start", contentIndex: 1 },
+      { type: "text_delta", contentIndex: 1, delta: "It failed at 3am." },
+      { type: "done", reason: "stop" },
+    ]);
+    const result = await runCli(["say", "why", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    expect(result.stdout).toBe("I'll check the log.\n\nIt failed at 3am.\n");
+  });
+
   it("emits every event as one JSON line", async () => {
     const fake = await fakeDaemon(successEvents);
     const result = await runCli(["say", "hello", "--new", "-g", "casper", "--json"], {
