@@ -68,9 +68,7 @@ function rows(messages) {
     for (var i = 0; i < messages.length; i++) {
         var message = messages[i];
         if (message.role === "assistant") {
-            // push.apply, not concat: a restored turn is one message per tool
-            // call, and concat copies the whole accumulator each time.
-            Array.prototype.push.apply(parts, message.content);
+            parts = parts.concat(message.content);
             if (typeof message.errorMessage === "string" && message.errorMessage !== "")
                 error = message.errorMessage;
             continue;

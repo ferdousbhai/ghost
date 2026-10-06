@@ -2049,18 +2049,6 @@ Singleton {
         return tools;
     }
 
-    /**
-     * `file://` URL of an image a message in the active conversation names
-     * (attached from the tailnet viewer), or "". The HUD itself attaches
-     * nothing: on this machine the ghost opens any file the owner points it to.
-     */
-    function attachmentUrl(path: string): string {
-        if (root.currentSessionId === "") return "";
-        const ghost = root.ghosts.find(row => row && row.name === root.activeGhost);
-        if (!ghost || typeof ghost.dir !== "string" || ghost.dir === "") return "";
-        return "file://" + ghost.dir + "/sessions/" + root.currentSessionId + "/" + path;
-    }
-
     function send(text: string): void {
         const prompt = text.trim();
         if (prompt === "" || root.streaming || root.activeGhost === "") return;
@@ -2088,7 +2076,7 @@ Singleton {
         root.dispatch(xhr, "POST",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify(root.buildBody(prompt, state)));
+            JSON.stringify({ prompt: prompt, sessionId: state.sessionId }));
     }
 
     function cancel(): void {
@@ -2190,10 +2178,6 @@ Singleton {
     }
 
     /** Only the new message: ghostd owns the history. */
-    function buildBody(prompt: string, state: var): var {
-        return { prompt: prompt, sessionId: state.sessionId };
-    }
-
     /**
      * The active session id for a ghost, minting one on first use. A conversation
      * is created lazily by the daemon on the first turn; until then it lives only
@@ -2287,17 +2271,13 @@ Singleton {
                 cwd: typeof event.cwd === "string" ? event.cwd : ""
             });
             break;
+        // An update or end only ever follows its call's start.
         case "tool_execution_update":
-            root.updateToolFor(state, event.id, {
-                name: event.toolName,
-                status: "running",
-                summary: event.summary || ""
-            });
+            root.updateToolFor(state, event.id, { summary: event.summary || "" });
             break;
         case "tool_execution_end":
             state.activity = "";
             root.updateToolFor(state, event.id, {
-                name: event.toolName,
                 status: event.isError ? "failed" : "complete",
                 summary: event.summary || ""
             });

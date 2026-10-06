@@ -281,9 +281,12 @@ Item {
                         id: picture
 
                         required property string modelData
-                        readonly property string url: Ghostd.attachmentUrl(picture.modelData)
+                        // A photo the tailnet viewer attached, read from the
+                        // conversation directory; the HUD itself attaches nothing.
+                        readonly property string path: Workbench.home === "" || Ghostd.currentSessionId === ""
+                            ? "" : Workbench.home + "/sessions/" + Ghostd.currentSessionId + "/" + picture.modelData
 
-                        source: picture.url
+                        source: picture.path === "" ? "" : "file://" + picture.path
                         width: Math.min(root.imageSize, pictures.width)
                         height: picture.implicitWidth > 0
                             ? Math.round(picture.width * picture.implicitHeight / picture.implicitWidth)
@@ -297,7 +300,7 @@ Item {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            onClicked: if (picture.url !== "") ExternalLinks.openPath(picture.url.slice("file://".length))
+                            onClicked: if (picture.path !== "") ExternalLinks.openPath(picture.path)
                         }
                     }
                 }
