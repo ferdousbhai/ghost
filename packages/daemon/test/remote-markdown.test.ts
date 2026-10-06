@@ -58,3 +58,22 @@ describe("remote viewer markdown", () => {
     expect(script).toContain("function renderMarkdown");
   });
 });
+
+describe("remote viewer transcript", () => {
+  test("a long conversation opens on its newest page", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function loadTranscript\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    expect(source).toBeDefined();
+    const total = 2500;
+    const api = async (path: string) => {
+      const offset = Number(new URL(`http://viewer${path}`).searchParams.get("offset") ?? 0);
+      const messages = Array.from({ length: Math.min(1000, total - offset) }, (_, i) => offset + i);
+      return { messages, total, truncated: offset > 0 || offset + messages.length < total };
+    };
+    let rendered: number[] = [];
+    const loadTranscript = new Function("api", "seg", "render", "ghost", "session", "draft", `${source}; return loadTranscript;`)(
+      api, (part: string) => part, (messages: number[]) => { rendered = messages; }, "casper", "c1", null,
+    ) as () => Promise<void>;
+    await loadTranscript();
+    expect([rendered[0], rendered.at(-1)]).toEqual([1500, 2499]);
+  });
+});

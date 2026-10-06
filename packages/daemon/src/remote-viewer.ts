@@ -247,7 +247,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 
   async function loadTranscript() {
     if (!ghost || !session || session === draft) return render([]);
-    const t = await api("/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript");
+    const path = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript";
+    let t = await api(path);
+    // A phone shows the newest page; a long conversation's first page is its oldest.
+    if (t.truncated) t = await api(path + "?offset=" + (t.total - t.messages.length));
     render(t.messages);
   }
 
