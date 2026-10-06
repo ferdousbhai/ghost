@@ -8,7 +8,6 @@ TestCase {
     readonly property var localServer: ({
         name: "local",
         enabled: false,
-        source: "canonical",
         config: {
             type: "stdio",
             command: "mcp-local",
@@ -21,7 +20,6 @@ TestCase {
     readonly property var remoteServer: ({
         name: "remote",
         enabled: true,
-        source: "canonical",
         config: {
             type: "http",
             url: "https://example.com/mcp?token=%5Bconfigured%5D",

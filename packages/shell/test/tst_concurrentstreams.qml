@@ -99,7 +99,7 @@ TestCase {
         compare(Ghostd.transcript.get(1).text, firstText + " continues");
         verify(Ghostd.streaming);
 
-        push(second, { type: "done", reason: "stop" });
+        push(second, { type: "done" });
         verify(!second.state.streaming);
         verify(first.state.streaming);
         verify(Ghostd.streaming);
@@ -107,10 +107,10 @@ TestCase {
         compare(finishedSpy.count, 1);
 
         // A duplicate terminal source (for example EOF racing the event) is a no-op.
-        Ghostd.handleTurnEvent(second.state, { type: "done", reason: "stop" });
+        Ghostd.handleTurnEvent(second.state, { type: "done" });
         compare(finishedSpy.count, 1);
 
-        push(first, { type: "done", reason: "stop" });
+        push(first, { type: "done" });
         verify(!Ghostd.anyStreaming);
         verify(!Ghostd.streaming);
         compare(finishedSpy.count, 2);
@@ -253,7 +253,7 @@ TestCase {
         Ghostd.sessions = [{ id: "one", title: "Login redirect" }];
         openTurn("two", "Other work", { count: 0 });
         push(first, { type: "text_end", contentIndex: 0, content: "Fixed. Tests pass." });
-        push(first, { type: "done", reason: "stop" });
+        push(first, { type: "done" });
         compare(Array.from(finishedSpy.signalArguments[0]), ["casper", "Fixed. Tests pass.", "one", "Login redirect"]);
     }
 

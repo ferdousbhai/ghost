@@ -169,8 +169,6 @@ export interface SessionSummary {
 
 export interface Transcript {
   id: string;
-  title: string | null;
-  harness: string | null;
   messages: TranscriptMessage[];
   total: number;
   truncated: boolean;
@@ -553,7 +551,7 @@ export class SessionHost {
     this.live.set(key, turn);
     const blocks = { next: 0 };
     const onHook: HookObserver = (name, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name });
-    let terminal: TurnEvent = { type: "done", reason: "stop" };
+    let terminal: TurnEvent = { type: "done" };
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
@@ -862,7 +860,7 @@ export class SessionHost {
    */
   private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions, signal: AbortSignal): Promise<void> {
     const toolId = `bash-${Date.now().toString(36)}`;
-    stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command, excludeFromContext: excluded }, cwd: this.ownerHome });
+    stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command }, cwd: this.ownerHome });
     // The log keeps the last 100 KB; a chatty command is trimmed in batches,
     // and the card's summary is sent at most every 100 ms, not per line.
     let output = "";
@@ -892,7 +890,7 @@ export class SessionHost {
     await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "command", at: new Date().toISOString(), command, output, exitCode: exit.code, excluded }]);
     stream.emit(signal.aborted
       ? { type: "error", reason: "aborted", errorMessage: "Command aborted." }
-      : { type: "done", reason: "stop" });
+      : { type: "done" });
   }
 
   queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
@@ -1092,15 +1090,12 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(sessionId ?? "default");
     const entries = (await readLog(ghostPaths(ghost.dir).sessionDir, id)) ?? [];
-    const state = logState(entries);
     const all = transcriptMessages(entries);
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
     const offset = Math.min(clamp(options.offset, 0, Number.MAX_SAFE_INTEGER), all.length);
     const messages = all.slice(offset, offset + limit);
     return {
       id,
-      title: state.title,
-      harness: state.harness,
       messages,
       total: all.length,
       truncated: offset > 0 || offset + messages.length < all.length,

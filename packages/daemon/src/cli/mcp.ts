@@ -5,7 +5,7 @@ import { mcpServeCommand } from "./mcp-serve.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
-type McpRow = { name: string; enabled: boolean; source: string; connectionStatus?: string };
+type McpRow = { name: string; enabled: boolean };
 type McpSnapshot = { servers?: McpRow[]; skipped?: Array<{ path: string; reason: string }> };
 
 function renderSnapshot(body: unknown): string {
@@ -13,13 +13,13 @@ function renderSnapshot(body: unknown): string {
   const rows = snapshot.servers ?? [];
   const skipped = snapshot.skipped ?? [];
   const lines = [rows.length > 0
-    ? table(rows.map((row) => [row.name, row.enabled ? "on" : "off", row.connectionStatus ?? "", row.source]), ["SERVER", "ENABLED", "CONNECTION", "SOURCE"])
+    ? table(rows.map((row) => [row.name, row.enabled ? "on" : "off"]), ["SERVER", "ENABLED"])
     : "No MCP servers configured."];
   for (const skip of skipped) lines.push(`skipped ${skip.path}: ${skip.reason}`);
   return `${lines.join("\n")}\n`;
 }
 
-/** `ghost mcp [list|add|rm|enable|disable|test|reconnect] ...` over the ghost's `mcp.json`, or `serve`. */
+/** `ghost mcp [list|add|set|rm|enable|disable] ...` over the ghost's `mcp.json`, or `serve`. */
 export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "list", name, file] = parsed.positionals;
   if (action === "serve") return mcpServeCommand(parsed, ctx);
@@ -51,15 +51,9 @@ export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promis
     case "disable":
       body = (await ctx.client.request("PUT", `${server()}/enabled`, { enabled: action === "enable" })).body;
       break;
-    case "test":
-    case "reconnect":
-      body = (await ctx.client.request("POST", `${server()}/${action}`)).body;
-      break;
     default:
-      throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, disable, test, reconnect, or serve.`);
+      throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, disable, or serve.`);
   }
-  emit(ctx, body, (result) => action === "test"
-    ? `${(result as { name: string; status: string; message: string }).name}: ${(result as { status: string }).status} — ${(result as { message: string }).message}\n`
-    : renderSnapshot(result));
+  emit(ctx, body, renderSnapshot);
   return 0;
 }

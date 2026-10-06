@@ -177,7 +177,7 @@ describe("POST /api/relay/pair", () => {
         body: JSON.stringify({ code: "482913", allow: true }),
       });
       expect(allowed.status).toBe(200);
-      expect(await allowed.json()).toMatchObject({ ok: true, outcome: "paired", pairing: null });
+      expect(await allowed.json()).toMatchObject({ outcome: "paired", pairing: null });
       await expect.poll(() => frames.some((frame) => (frame as { t: string }).t === "paired")).toBe(true);
       expect(frames).toContainEqual({ t: "paired", token: TOKEN });
     } finally {

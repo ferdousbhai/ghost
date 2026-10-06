@@ -47,7 +47,7 @@ const successEvents = [
   { type: "text_delta", contentIndex: 0, delta: "there" },
   { type: "tool_execution_start", id: "1", toolName: "bash", arguments: { command: "pwd\nwhoami" }, cwd: "/tmp" },
   { type: "tool_execution_end", id: "1", toolName: "bash", isError: false },
-  { type: "done", reason: "stop", usage: {} },
+  { type: "done" , usage: {} },
 ];
 
 describe("ghost say", () => {
@@ -72,7 +72,7 @@ describe("ghost say", () => {
       { type: "tool_execution_start", id: "bash-1", toolName: "bash", arguments: { command: "ls" }, cwd: "/home/owner" },
       { type: "tool_execution_update", id: "bash-1", toolName: "bash", summary: "a" },
       { type: "tool_execution_end", id: "bash-1", toolName: "bash", isError: true, summary: "a\nb\nls: c: No such file" },
-      { type: "done", reason: "stop" },
+      { type: "done" },
     ]);
     const result = await runCli(["say", "!ls", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.code).toBe(0);
@@ -92,7 +92,7 @@ describe("ghost say", () => {
       { type: "tool_execution_end", id: "1", toolName: "bash", isError: false },
       { type: "text_start", contentIndex: 1 },
       { type: "text_delta", contentIndex: 1, delta: "It failed at 3am." },
-      { type: "done", reason: "stop" },
+      { type: "done" },
     ]);
     const result = await runCli(["say", "why", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.stdout).toBe("I'll check the log.\n\nIt failed at 3am.\n");

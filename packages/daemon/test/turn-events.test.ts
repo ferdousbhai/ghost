@@ -14,7 +14,7 @@ describe("SSE framing", () => {
       { type: "start" },
       { type: "text_start", contentIndex: 0 },
       { type: "text_delta", contentIndex: 0, delta: "hi\n\nthere" },
-      { type: "done", reason: "stop" },
+      { type: "done" },
     ];
     // Keepalive comments and a trailing [DONE] must be invisible.
     const body = `: keepalive\n\n${events.map(encodeSseEvent).join("")}data: [DONE]\n\n`;

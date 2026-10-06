@@ -8,7 +8,7 @@ const expected = "emoji 👻 and CJK 漢字 stay exact";
 const wire = Buffer.from([
   `data: ${JSON.stringify({ type: "text_start", contentIndex: 0 })}\n\n`,
   `data: ${JSON.stringify({ type: "text_delta", contentIndex: 0, delta: expected })}\n\n`,
-  `data: ${JSON.stringify({ type: "done", reason: "stop" })}\n\n`,
+  `data: ${JSON.stringify({ type: "done" })}\n\n`,
 ].join(""), "utf8");
 
 function splitInside(buffer, token) {

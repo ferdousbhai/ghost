@@ -67,7 +67,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"Written down.","type":"text_delta"}
 {"content":"Written down.","contentIndex":0,"type":"text_end"}
-{"reason":"stop","type":"done"}
+{"type":"done"}
 
 ------------------------------------------------------------------------------
 [turn 2: owner prompt]
@@ -130,7 +130,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"That you want short answers.","type":"text_delta"}
 {"content":"That you want short answers.","contentIndex":0,"type":"text_end"}
-{"reason":"stop","type":"done"}
+{"type":"done"}
 
 ------------------------------------------------------------------------------
 [conversation listing]
@@ -157,7 +157,6 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 [rendered transcript]
 ------------------------------------------------------------------------------
 {
-  "harness": "fake",
   "id": "conv-golden",
   "messages": [
     {
@@ -210,7 +209,6 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
       "role": "assistant"
     }
   ],
-  "title": "Remember that I want short answers",
   "total": 4,
   "truncated": false
 }

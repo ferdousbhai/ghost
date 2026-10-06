@@ -566,7 +566,6 @@ describe("ghost MCP routes", () => {
     for (const name of names) {
       expect(listedByName.get(name)).toMatchObject({
         name,
-        source: "canonical",
         path: "mcp.json",
       });
     }
@@ -704,8 +703,6 @@ describe("POST /api/ghosts/:name/messages", () => {
       "text_end",
       "done",
     ]);
-    const done = events.at(-1) as Extract<TurnEvent, { type: "done" }>;
-    expect(done.reason).toBe("stop");
 
     const text = events
       .filter((event): event is Extract<TurnEvent, { type: "text_delta" }> =>
@@ -1229,13 +1226,11 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     expect(response.status).toBe(200);
     const transcript = await response.json() as {
       id: string;
-      title: string | null;
-      harness: string | null;
       messages: Array<{ role: string; content: unknown }>;
       total: number;
       truncated: boolean;
     };
-    expect(transcript).toMatchObject({ id: "conv-1", title: "Who are you", harness: "fake", total: 2, truncated: false });
+    expect(transcript).toMatchObject({ id: "conv-1", total: 2, truncated: false });
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "Who are you?" }]],
       ["assistant", [{ type: "text", text: "I set type for a living." }]],
@@ -1285,7 +1280,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ id: "nope", harness: null, messages: [], total: 0 });
+    expect(await response.json()).toEqual({ id: "nope", messages: [], total: 0, truncated: false });
     expect((await fetch(`${base}/api/ghosts/nobody/sessions/nope/transcript`)).status).toBe(404);
   });
 });
@@ -1332,7 +1327,7 @@ describe("routing and transport", () => {
     await postTurn(base, TURN_BODY);
     const transcript = await fetch(`${base}/api/ghosts/casp%65r/sessions/conv%2D1/transcript`);
     expect(transcript.status).toBe(200);
-    expect(await transcript.json()).toMatchObject({ id: "conv-1", harness: "fake" });
+    expect(await transcript.json()).toMatchObject({ id: "conv-1" });
   });
 
   it("allows a loopback browser origin and refuses a remote one", async () => {

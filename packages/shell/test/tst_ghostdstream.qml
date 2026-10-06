@@ -260,7 +260,7 @@ TestCase {
         Ghostd.handleTurnEvent(turn.state, {
             type: "tool_execution_end", id: "cmd", toolName: "bash", isError: false, summary: "a b"
         });
-        Ghostd.handleTurnEvent(turn.state, { type: "done", reason: "stop" });
+        Ghostd.handleTurnEvent(turn.state, { type: "done" });
 
         compare(turn.state.lastError, "");
         compare(turn.state.rows[1].role, "assistant");

@@ -923,7 +923,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       if (outcome === "unknown") {
         throw new GhostError("pairing_not_found", "No browser is waiting to pair with that code.", 404);
       }
-      jsonResponse(response, 200, { ok: true, outcome, ...relay.status() });
+      jsonResponse(response, 200, { outcome, ...relay.status() });
     }),
     route("GET PUT", "api/hooks/config", ({ method, request, response }) => handleHookConfig(method, request, response)),
     route("GET", "api/hooks", ({ response }) => {

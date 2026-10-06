@@ -136,13 +136,11 @@ describe("McpCatalog ghost-only discovery", () => {
 
     expect(snapshot.servers.map((server) => server.name)).toEqual(["disabled", "shared"]);
     expect(snapshot.servers.find((server) => server.name === "shared")).toMatchObject({
-      source: "canonical",
       path: "mcp.json",
       config: { type: "http", url: "https://canonical.example/mcp" },
     });
     expect(snapshot.servers.find((server) => server.name === "disabled")).toMatchObject({
       enabled: false,
-      source: "canonical",
       config: { command: "disabled-server" },
     });
     expect(snapshot.servers.some((server) => server.name === "ambient")).toBe(false);
@@ -449,7 +447,6 @@ describe("McpCatalog mutations", () => {
       expect(listedByName.get(name)).toMatchObject({
         name,
         enabled: true,
-        source: "canonical",
         path: "mcp.json",
         config: { type: "stdio", command: `${name}-before` },
       });

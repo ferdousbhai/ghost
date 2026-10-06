@@ -110,7 +110,7 @@ describe("real ghostd streaming lifecycle", () => {
       [followUpText, true],
     ]);
     expect(terminalEvents(stream.events)).toEqual([
-      expect.objectContaining({ type: "done", reason: "stop" }),
+      expect.objectContaining({ type: "done" }),
     ]);
     expectOneTerminalAtWireEnd(stream);
   });
@@ -173,7 +173,7 @@ describe("real ghostd streaming lifecycle", () => {
     const subsequent = await startWhenFree(daemon!, "conv-disconnect", "Try the conversation again.");
     await within(subsequent.completion, "the subsequent turn to reach EOF");
     expect(terminalEvents(subsequent.events)).toEqual([
-      expect.objectContaining({ type: "done", reason: "stop" }),
+      expect.objectContaining({ type: "done" }),
     ]);
     expect(daemon!.harness.calls()).toHaveLength(2);
     expectOneTerminalAtWireEnd(subsequent);
@@ -218,7 +218,7 @@ describe("real ghostd streaming lifecycle", () => {
 
     for (const stream of [first, second]) {
       expect(terminalEvents(stream.events)).toEqual([
-        expect.objectContaining({ type: "done", reason: "stop" }),
+        expect.objectContaining({ type: "done" }),
       ]);
       expectOneTerminalAtWireEnd(stream);
     }

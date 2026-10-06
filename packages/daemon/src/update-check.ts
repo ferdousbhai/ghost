@@ -19,7 +19,6 @@ export interface UpdateAvailable {
   readonly latest: string;
   /** The shell command that installs it on this machine. */
   readonly command: string;
-  readonly url: string;
 }
 
 export type UpdateFetch = (url: string, init: { headers: Record<string, string>; signal: AbortSignal }) => Promise<{
@@ -103,11 +102,10 @@ export class UpdateChecker {
     const fetch = this.#options.fetch ?? (globalThis.fetch as unknown as UpdateFetch);
     const latest = await fetchLatestReleaseVersion(fetch, this.#options.url);
     if (latest !== null && compareVersions(latest, this.#options.version) > 0) {
-      const url = `https://github.com/ferdousbhai/ghost/releases/tag/v${latest}`;
       if (this.#current?.latest !== latest) {
         this.#options.logger?.info("a newer ghost release is available", { running: this.#options.version, latest });
       }
-      this.#current = { latest, command: updateCommand(this.#options.sourceRoot), url };
+      this.#current = { latest, command: updateCommand(this.#options.sourceRoot) };
     } else {
       this.#current = null;
     }

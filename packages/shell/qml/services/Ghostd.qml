@@ -694,10 +694,7 @@ Singleton {
         const pairing = body.pairing;
         if (!pairing || typeof pairing !== "object" || typeof pairing.code !== "string"
                 || !/^[0-9]{6}$/.test(pairing.code)) return null;
-        return {
-            code: pairing.code,
-            since: typeof pairing.since === "string" ? pairing.since : ""
-        };
+        return { code: pairing.code };
     }
 
     function refreshRelay(): void {

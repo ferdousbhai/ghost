@@ -16,7 +16,6 @@ import type { McpServerConfigView } from "./mcp-catalog-policy.js";
 export interface McpServerView {
   name: string;
   enabled: boolean;
-  source: "canonical";
   path: "mcp.json";
   config: McpServerConfigView;
 }
@@ -168,7 +167,7 @@ export class McpCatalog {
     const { rows, skipped } = await this.read(ghostName);
     const servers: McpServerView[] = rows.filter((row) => row.errors.length === 0).map((row) => {
       const config = row.config as MCPServerConfig;
-      return { name: row.name, enabled: config.enabled !== false, source: "canonical", path: MCP_FILE, config: sanitizeMcpServerConfig(config) };
+      return { name: row.name, enabled: config.enabled !== false, path: MCP_FILE, config: sanitizeMcpServerConfig(config) };
     });
     servers.sort((left, right) => left.name.localeCompare(right.name));
     skipped.sort((left, right) => left.path.localeCompare(right.path));

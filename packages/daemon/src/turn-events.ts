@@ -46,10 +46,7 @@ export type TurnEvent =
       isError: boolean;
       summary?: string;
     }
-  | {
-      type: "done";
-      reason: "stop";
-    }
+  | { type: "done" }
   | LimitReachedEvent
   | {
       type: "error";

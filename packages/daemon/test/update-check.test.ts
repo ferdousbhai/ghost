@@ -90,7 +90,6 @@ describe("UpdateChecker", () => {
     expect(await checker.checkNow()).toEqual({
       latest: "0.3.1",
       command: "omarchy-update",
-      url: "https://github.com/ferdousbhai/ghost/releases/tag/v0.3.1",
     });
     expect(checker.current?.latest).toBe("0.3.1");
     const current = new UpdateChecker({ version: "0.3.1", sourceRoot: null, fetch: release("v0.3.1") });

@@ -68,7 +68,7 @@ describe("a turn", () => {
 
     expect(events[0]).toEqual({ type: "start" });
     expect(text(events)).toBe("I set type.");
-    expect(events.at(-1)).toMatchObject({ type: "done", reason: "stop" });
+    expect(events.at(-1)).toMatchObject({ type: "done" });
     const [call] = fake.calls();
     expect(call).toMatchObject({
       prompt: "What do you do?",
@@ -100,7 +100,7 @@ describe("a turn", () => {
 
     expect(fake.calls().map((call) => [call.prompt, call.resume])).toEqual([["ping", false], ["again", true]]);
     const transcript = await sessions.readTranscript("casper", "c1");
-    expect(transcript.harness).toBe("fake");
+    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("fake");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
       ["assistant", [{ type: "text", text: "pong" }]],

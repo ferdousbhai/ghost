@@ -113,7 +113,7 @@ function relaySnapshot() {
     enabled: true,
     connected: false,
     peer: null,
-    pairing: relayPairingCode === "" ? null : { code: relayPairingCode, since: new Date().toISOString() },
+    pairing: relayPairingCode === "" ? null : { code: relayPairingCode },
     pending: 0,
   };
 }
@@ -224,7 +224,6 @@ function mcpSnapshot(name) {
     servers: [...ghostMcp(name)].map(([serverName, server]) => ({
       name: serverName,
       enabled: server.enabled,
-      source: "canonical",
       path: "mcp.json",
       config: server.config,
     })).sort((a, b) => a.name.localeCompare(b.name)),
@@ -358,8 +357,6 @@ const transcriptOf = (s, params) => {
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
-    title: s.title ?? null,
-    harness: s.harness ?? null,
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
@@ -414,7 +411,7 @@ const json = (res, status, body) => {
 // small subset a pane edit can plausibly trip, worded the way ghostd words it.
 /** `GET /api/status`; `--update` makes it report a newer release. */
 const MOCK_VERSION = "0.0.0-mock";
-const MOCK_UPDATE = { latest: "0.0.1", command: "ghost update", url: "https://github.com/ferdousbhai/ghost/releases" };
+const MOCK_UPDATE = { latest: "0.0.1", command: "ghost update" };
 
 /** `GET /api/board`: readBoard's shape for a small Documents/board.md. */
 const MOCK_BOARD = {
@@ -560,12 +557,12 @@ function* ownerCommand(command) {
     type: "tool_execution_start",
     id,
     toolName: "bash",
-    arguments: { command, excludeFromContext: false },
+    arguments: { command },
     cwd: SESSION_CWD,
   };
   yield { type: "tool_execution_update", id, toolName: "bash", summary: `mock output of ${command}` };
   yield { type: "tool_execution_end", id, toolName: "bash", isError: false, summary: `mock output of ${command}` };
-  yield { type: "done", reason: "stop" };
+  yield { type: "done" };
 }
 
 /**
@@ -711,7 +708,7 @@ async function streamTurn(res, name, body) {
         if (!flag("--omit-terminal")) {
           send(res, stream, failing
             ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
-            : { type: "done", reason: "stop" });
+            : { type: "done" });
         }
         res.end();
       }

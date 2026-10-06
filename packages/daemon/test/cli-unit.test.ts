@@ -71,7 +71,7 @@ describe("a ghost's own shell addresses its conversation", () => {
         return jsonResponse({ error: { code: "session_not_streaming", message: "idle" } }, 409);
       }
       if (path === "/api/ghosts/casper/messages") {
-        return sseResponse([{ type: "text_delta", delta: "Noted." }, { type: "done", reason: "stop" }]);
+        return sseResponse([{ type: "text_delta", delta: "Noted." }, { type: "done" }]);
       }
       return jsonResponse({ error: { message: "unexpected request" } }, 500);
     };

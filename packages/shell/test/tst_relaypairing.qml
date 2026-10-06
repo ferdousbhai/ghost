@@ -26,7 +26,7 @@ TestCase {
 
     function test_pairing_parses_only_a_six_digit_code(): void {
         compare(Ghostd.relayPairingFrom({ pairing: { code: "482913", since: "2026-09-08T10:00:00Z" } }),
-            { code: "482913", since: "2026-09-08T10:00:00Z" });
+            { code: "482913" });
         compare(Ghostd.relayPairingFrom({ pairing: null }), null);
         compare(Ghostd.relayPairingFrom({ pairing: { code: "abc" } }), null);
         compare(Ghostd.relayPairingFrom({ pairing: { code: 482913 } }), null);
@@ -40,7 +40,7 @@ TestCase {
         compare(tc.requests.length, 1);
         compare(tc.requests[0].method, "GET");
         verify(tc.requests[0].url.endsWith("/api/relay/status"));
-        tc.requests[0].complete(200, { enabled: true, connected: false, pairing: { code: "111222", since: "" } });
+        tc.requests[0].complete(200, { enabled: true, connected: false, pairing: { code: "111222" } });
         compare(Ghostd.relayPairing.code, "111222");
 
         Ghostd.refreshRelay();
@@ -62,7 +62,7 @@ TestCase {
     }
 
     function test_allow_posts_the_code_and_applies_the_fresh_status(): void {
-        Ghostd.relayPairing = { code: "482913", since: "" };
+        Ghostd.relayPairing = { code: "482913" };
         Ghostd.resolveRelayPairing("482913", true);
         compare(Ghostd.relayResolving, true);
         compare(tc.requests.length, 1);
@@ -81,7 +81,7 @@ TestCase {
     }
 
     function test_deny_posts_allow_false(): void {
-        Ghostd.relayPairing = { code: "482913", since: "" };
+        Ghostd.relayPairing = { code: "482913" };
         Ghostd.resolveRelayPairing("482913", false);
         compare(JSON.parse(tc.requests[0].body), { code: "482913", allow: false });
         tc.requests[0].complete(200, { ok: true, outcome: "denied", pairing: null });
@@ -89,7 +89,7 @@ TestCase {
     }
 
     function test_a_stale_code_is_simply_gone(): void {
-        Ghostd.relayPairing = { code: "482913", since: "" };
+        Ghostd.relayPairing = { code: "482913" };
         Ghostd.resolveRelayPairing("482913", true);
         tc.requests[0].complete(404, { error: { code: "pairing_not_found", message: "gone" } });
         compare(Ghostd.relayPairing, null);
@@ -97,7 +97,7 @@ TestCase {
     }
 
     function test_a_daemon_failure_keeps_the_prompt_and_shows_why(): void {
-        Ghostd.relayPairing = { code: "482913", since: "" };
+        Ghostd.relayPairing = { code: "482913" };
         Ghostd.resolveRelayPairing("482913", true);
         tc.requests[0].complete(500, { error: { code: "internal", message: "relay has no token" } });
         compare(Ghostd.relayPairing.code, "482913");
@@ -106,7 +106,7 @@ TestCase {
     }
 
     function test_resolve_abandons_an_in_flight_poll(): void {
-        Ghostd.relayPairing = { code: "482913", since: "" };
+        Ghostd.relayPairing = { code: "482913" };
         Ghostd.refreshRelay();
         Ghostd.resolveRelayPairing("482913", true);
         compare(tc.requests.length, 2);

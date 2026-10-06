@@ -71,7 +71,6 @@ try {
   assert.equal(mcpResponse.status, 200);
   const mcp = await mcpResponse.json();
   assert.ok(mcp.servers.length > 0);
-  assert.ok(mcp.servers.every((server) => server.source === "canonical"));
   assert.ok(mcp.servers.every((server) => server.path === "mcp.json"));
 
   const rosterResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts`);
@@ -137,7 +136,7 @@ try {
   assert.equal(transcriptResponse.status, 200);
   const transcriptBody = await transcriptResponse.json();
   assert.deepEqual(Object.keys(transcriptBody), [
-    "id", "title", "harness", "messages", "total", "truncated",
+    "id", "messages", "total", "truncated",
   ]);
   for (const message of transcriptBody.messages) {
     assert.equal(typeof message.entryId, "string");

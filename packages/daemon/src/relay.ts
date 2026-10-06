@@ -81,7 +81,6 @@ export interface RelayHubOptions {
 
 export interface RelayPairing {
   code: string;
-  since: string;
 }
 
 export interface RelayStatus {
@@ -95,7 +94,6 @@ export interface RelayStatus {
 interface PendingPairing {
   readonly code: string;
   readonly socket: WebSocket;
-  readonly since: Date;
   readonly timer: NodeJS.Timeout;
   /** Keeps the extension's service worker alive while the owner decides. */
   readonly keepalive: NodeJS.Timeout;
@@ -231,9 +229,7 @@ export class RelayHub implements RelayTransport {
     return {
       connected: this.connected,
       peer: this.#peer ?? null,
-      pairing: this.#pairing
-        ? { code: this.#pairing.code, since: this.#pairing.since.toISOString() }
-        : null,
+      pairing: this.#pairing ? { code: this.#pairing.code } : null,
       pending: this.#pending.size,
     };
   }
@@ -353,7 +349,7 @@ export class RelayHub implements RelayTransport {
       }
     }, this.#pingIntervalMs);
     keepalive.unref?.();
-    this.#pairing = { code, socket: ws, since: new Date(), timer, keepalive };
+    this.#pairing = { code, socket: ws, timer, keepalive };
     ws.on("error", (error: Error) => {
       this.#logger.warn("relay pairing socket error", { error: error.message });
     });

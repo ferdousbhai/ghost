@@ -129,7 +129,6 @@ function searchableText(server) {
     return [
         text(server ? server.name : ""),
         transport(server),
-        text(server ? server.source : ""),
         text(config.command),
         text(config.url),
         text(config.cwd),
