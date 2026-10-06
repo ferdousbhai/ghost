@@ -49,15 +49,13 @@ let liveTurn: { end: () => Promise<void> } | undefined;
 /** Hold an owner `!` turn open in a conversation. */
 async function startLiveTurn(sessionId = "conv-1"): Promise<TurnEvent[]> {
   const events: TurnEvent[] = [];
-  const controller = new AbortController();
   const turn = daemon.host.runTurn("casper", {
     sessionId,
     prompt: "!sleep 30",
-    signal: controller.signal,
     emit: (event) => events.push(event),
   });
   await until(() => (events.some((event) => event.type === "tool_execution_start") ? true : null));
-  liveTurn = { end: async () => { controller.abort(); await turn.catch(() => {}); } };
+  liveTurn = { end: async () => { daemon.host.stopTurn("casper", sessionId); await turn.catch(() => {}); } };
   return events;
 }
 

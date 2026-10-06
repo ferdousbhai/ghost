@@ -148,11 +148,12 @@ describe("real ghostd streaming lifecycle", () => {
     expectOneTerminalAtWireEnd(stream);
   });
 
-  it("releases a conversation after its SSE client disconnects mid-turn", async () => {
+  it("keeps a turn running after its SSE client disconnects, until a stop ends it", async () => {
     await startGated((gate) => [
       gate({ events: [text("This response will be disconnected.")] }),
       { events: [text("The same conversation accepted another turn.")] },
     ]);
+    const session = `/api/ghosts/${daemon!.ghostName}/sessions/conv-disconnect`;
 
     const interrupted = await daemon!.startTurn("conv-disconnect", "Hold this turn open.");
     await interrupted.waitForEvent("start");
@@ -161,7 +162,14 @@ describe("real ghostd streaming lifecycle", () => {
     await expect(within(interrupted.completion, "the client socket to close"))
       .resolves.toEqual({ naturalEnd: false });
 
-    // The gate stays shut: only the abort can have ended the held harness.
+    // A request round trip later the server has seen the closed socket, and the turn still runs.
+    expect((await daemon!.request("GET", `${session}/queue`)).body).toMatchObject({ streaming: true });
+    const busy = await daemon!.startTurn("conv-disconnect", "Too early.");
+    expect(busy.status).toBe(409);
+    await busy.completion;
+
+    // The gate stays shut: only the stop can have ended the held harness.
+    expect((await daemon!.request("POST", `${session}/stop`, {})).status).toBe(200);
     const subsequent = await startWhenFree(daemon!, "conv-disconnect", "Try the conversation again.");
     await within(subsequent.completion, "the subsequent turn to reach EOF");
     expect(terminalEvents(subsequent.events)).toEqual([
@@ -169,6 +177,7 @@ describe("real ghostd streaming lifecycle", () => {
     ]);
     expect(daemon!.harness.calls()).toHaveLength(2);
     expectOneTerminalAtWireEnd(subsequent);
+    expect((await daemon!.request("POST", `${session}/stop`, {})).status).toBe(409);
   });
 
   it("writes keepalive comments across a long silent harness stretch", async () => {

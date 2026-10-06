@@ -367,7 +367,7 @@ const transcriptOf = (s, params) => {
 
 const firstLine = (text) => String(text).split("\n")[0].slice(0, 120);
 
-const sessionSummary = (s) => {
+const sessionSummary = (name) => (s) => {
   const first = s.messages.find((m) => m.role === "user");
   return {
     id: s.id,
@@ -379,6 +379,7 @@ const sessionSummary = (s) => {
     messageCount: s.messages.length,
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
+    running: answering.has(turnKey(name, s.id)),
   };
 };
 
@@ -652,7 +653,7 @@ async function streamTurn(res, name, body) {
   const sessionId = body.sessionId;
   const stream = openStream(res);
   const key = turnKey(name, sessionId);
-  const turn = { streaming: true, followUp: [], res };
+  const turn = { streaming: true, followUp: [], res, stream };
   activeTurns.set(key, turn);
   answering.add(key);
   const exchanges = [];
@@ -998,7 +999,7 @@ const mockServer = createServer(async (req, res) => {
   }
   if (parts[3] === "sessions" && parts.length === 4 && req.method === "GET") {
     const list = [...ghostSessions(name).values()]
-      .map(sessionSummary)
+      .map(sessionSummary(name))
       .sort((a, b) => (a.pinned === b.pinned
         ? Date.parse(b.updatedAt) - Date.parse(a.updatedAt) : (a.pinned ? -1 : 1)));
     return json(res, 200, { sessions: list });
@@ -1054,6 +1055,17 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     return json(res, 200, transcriptOf(s, url.searchParams));
+  }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stop" && req.method === "POST") {
+    const turn = activeTurns.get(turnKey(name, routeConversation(parts)));
+    if (!turn) {
+      return json(res, 409, {
+        error: { message: "this conversation is not streaming", code: "session_not_streaming" },
+      });
+    }
+    turn.stream.closed = true;
+    turn.res.end(`data: ${JSON.stringify({ type: "error", reason: "aborted", errorMessage: "Turn aborted." })}\n\n`);
+    return json(res, 200, { stopped: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
     const conversation = routeConversation(parts);

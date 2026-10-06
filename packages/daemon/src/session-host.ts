@@ -118,12 +118,10 @@ export interface RunTurnOptions {
   sessionId?: string | null;
   prompt: string;
   emit: (event: TurnEvent) => void;
-  signal?: AbortSignal;
 }
 
 export interface AdmittedTurnOptions {
   emit: (event: TurnEvent) => void;
-  signal?: AbortSignal;
 }
 
 export interface TurnAdmission {
@@ -165,6 +163,8 @@ export interface SessionSummary {
   messageCount: number;
   pinned: boolean;
   unread: boolean;
+  /** A turn or owner command is running in it now, whichever client started it. */
+  running: boolean;
 }
 
 export interface Transcript {
@@ -199,7 +199,6 @@ export interface HarnessChoices {
 
 interface LiveTurn {
   readonly followUps: string[];
-  readonly controller: AbortController;
   /** The turn's own stream, which announces each change to `followUps`. */
   readonly emit: (event: TurnEvent) => void;
 }
@@ -258,7 +257,8 @@ export class SessionHost {
   private readonly rowOf: (id: string) => HarnessRow | null;
   private readonly env: NodeJS.ProcessEnv;
   private readonly live = new Map<string, LiveTurn>();
-  private readonly admissions = new Set<string>();
+  /** Each admitted turn's stop: the turn outlives its client, so only `stopTurn` or shutdown ends it early. */
+  private readonly admissions = new Map<string, AbortController>();
   private readonly deleting = new Set<string>();
   private readonly reservedGhosts = new Set<string>();
   /** File work in flight per ghost, which a delete or rename waits out. */
@@ -502,7 +502,8 @@ export class SessionHost {
     }
     const command = ownerCommand(options.prompt);
     if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
-    this.admissions.add(key);
+    const controller = new AbortController();
+    this.admissions.set(key, controller);
     let released = false;
     let started = false;
     const release = () => {
@@ -514,8 +515,9 @@ export class SessionHost {
       run: async (stream) => {
         if (started || released) throw new GhostError("session_busy", "This turn admission is no longer available.", 409);
         started = true;
+        this.announce(ghost.name, id);
         try {
-          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream));
+          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
         } finally {
           release();
           this.announce(ghost.name, id);
@@ -541,21 +543,18 @@ export class SessionHost {
     prompt: string,
     command: ReturnType<typeof ownerCommand>,
     stream: AdmittedTurnOptions,
+    signal: AbortSignal,
   ): Promise<void> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
     if (command) {
-      await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream);
+      await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream, signal);
       return;
     }
     const key = keyOf(ghost.name, id);
-    const controller = new AbortController();
-    const turn: LiveTurn = { followUps: [], controller, emit: stream.emit };
+    const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
-    const abort = () => controller.abort();
-    stream.signal?.addEventListener("abort", abort, { once: true });
-    if (stream.signal?.aborted) controller.abort();
     const blocks = { next: 0 };
     const onHook: HookObserver = (name, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name });
     let terminal: TurnEvent = { type: "done", reason: "stop" };
@@ -564,7 +563,7 @@ export class SessionHost {
       let next: Pass | undefined = { text: prompt };
       let turnId = randomUUID();
       let ownerPrompt = prompt;
-      while (next && !controller.signal.aborted) {
+      while (next && !signal.aborted) {
         const { text, origin }: Pass = next;
         if (origin === "follow_up") {
           turnId = randomUUID();
@@ -573,10 +572,10 @@ export class SessionHost {
         await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
         if (origin !== "hook") {
-          const context = await this.beforePrompt(ghost, id, text, turnId, controller.signal, onHook);
+          const context = await this.beforePrompt(ghost, id, text, turnId, signal, onHook);
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;
         }
-        const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, controller.signal);
+        const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
         if (failure) {
           terminal = failure;
           break;
@@ -585,7 +584,7 @@ export class SessionHost {
         // is not asked while one waits, and loses to one sent while it ran.
         const continuation: string | null = turn.followUps.length > 0
           ? null
-          : await this.sessionStop(ghost, id, ownerPrompt, turnId, origin === "hook", controller.signal, onHook);
+          : await this.sessionStop(ghost, id, ownerPrompt, turnId, origin === "hook", signal, onHook);
         if (continuation && turn.followUps.length === 0) {
           stream.emit({ type: "session_stop_continued", reason: continuation });
           next = { text: continuation, origin: "hook" };
@@ -598,14 +597,13 @@ export class SessionHost {
         }
         next = followUp === undefined ? undefined : { text: followUp, origin: "follow_up" };
       }
-      if (controller.signal.aborted && terminal.type === "done") {
+      if (signal.aborted && terminal.type === "done") {
         terminal = { type: "error", reason: "aborted", errorMessage: "Turn aborted." };
       }
     } catch (error) {
       this.logger.error("turn failed", { ghost: ghost.name, conversation: id, error: errorMessage(error) });
-      terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
+      terminal = { type: "error", reason: signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
     } finally {
-      stream.signal?.removeEventListener("abort", abort);
       this.live.delete(key);
       stream.emit(terminal);
     }
@@ -868,7 +866,7 @@ export class SessionHost {
    * owner home with the conversation's identity and recorded in the log; its
    * output reaches the ghost with its next prompt.
    */
-  private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions): Promise<void> {
+  private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions, signal: AbortSignal): Promise<void> {
     const toolId = `bash-${Date.now().toString(36)}`;
     stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command, excludeFromContext: excluded }, cwd: this.ownerHome });
     // The log keeps the last 100 KB; a chatty command is trimmed in batches,
@@ -890,7 +888,7 @@ export class SessionHost {
         if (output.length > 200_000) output = output.slice(-100_000);
         update ??= setTimeout(sendUpdate, 100);
       },
-      signal: stream.signal ?? new AbortController().signal,
+      signal,
     });
     clearTimeout(update);
     output = output.slice(-100_000);
@@ -898,7 +896,7 @@ export class SessionHost {
     if (exit.spawnError) output = `${output}${exit.spawnError}`;
     stream.emit({ type: "tool_execution_end", id: toolId, toolName: "bash", isError: exit.code !== 0, summary: tail(output) ?? `Exit ${exit.code ?? exit.signal}` });
     await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "command", at: new Date().toISOString(), command, output, exitCode: exit.code, excluded }]);
-    stream.emit(stream.signal?.aborted
+    stream.emit(signal.aborted
       ? { type: "error", reason: "aborted", errorMessage: "Command aborted." }
       : { type: "done", reason: "stop" });
   }
@@ -907,6 +905,16 @@ export class SessionHost {
     this.registry.get(ghostName);
     const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
     return { streaming: turn !== undefined, followUp: [...(turn?.followUps ?? [])] };
+  }
+
+  /** Abort the conversation's running turn or owner command; its stream ends `aborted`. */
+  stopTurn(ghostName: string, sessionId?: string | null): void {
+    this.registry.get(ghostName);
+    const controller = this.admissions.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
+    if (!controller) {
+      throw new GhostError("session_not_streaming", "This conversation is not currently streaming.", 409);
+    }
+    controller.abort();
   }
 
   /** Queue text for after the current pass; a harness takes no input mid-run. */
@@ -1004,6 +1012,7 @@ export class SessionHost {
         messageCount: state.messageCount,
         pinned: pins.pinned.includes(id),
         unread: readAt === undefined || updatedAt > readAt,
+        running: this.admissions.has(keyOf(ghost.name, id)),
       });
     }
     return rows.sort((a, b) => (a.pinned === b.pinned ? b.updatedAt.localeCompare(a.updatedAt) : (a.pinned ? -1 : 1)));
@@ -1124,7 +1133,7 @@ export class SessionHost {
   // ── Ghost lifecycle ───────────────────────────────────────────────────
 
   private ghostBusy(ghostName: string): boolean {
-    return [...this.admissions, ...this.deleting].some((key) => ghostOfKey(key) === ghostName);
+    return [...this.admissions.keys(), ...this.deleting].some((key) => ghostOfKey(key) === ghostName);
   }
 
   createGhost(name: string): Ghost {
@@ -1233,7 +1242,7 @@ export class SessionHost {
 
   beginShutdown(): void {
     this.shuttingDown = true;
-    for (const turn of this.live.values()) turn.controller.abort();
+    for (const controller of this.admissions.values()) controller.abort();
   }
 
   async disposeAll(): Promise<void> {

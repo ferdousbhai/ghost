@@ -23,6 +23,7 @@ function session(id: string): SessionSummary {
     messageCount: 0,
     pinned: false,
     unread: false,
+    running: false,
   };
 }
 

@@ -1112,6 +1112,9 @@ Singleton {
             rows: [],
             hydratedRowCount: 0,
             streaming: false,
+            // ghostd runs this conversation's turn for another client, or for
+            // this HUD before a reload: shown as running, with no stream here.
+            detached: false,
             request: null,
             lastStreamActivity: 0,
             activity: "",
@@ -1128,6 +1131,7 @@ Singleton {
             presentationDirty: false,
             queueRequest: null,
             queueStatusRequest: null,
+            stopRequest: null,
             transcriptRequest: null,
             transcriptGeneration: 0,
             transcriptLoad: null
@@ -1171,7 +1175,7 @@ Singleton {
     }
 
     function projectTurnProjection(state: var): void {
-        root.streaming = state.streaming;
+        root.streaming = state.streaming || state.detached;
         root.activity = state.activity;
         root.lastError = state.lastError;
         root.followUpQueue = state.followUpQueue;
@@ -1568,12 +1572,30 @@ Singleton {
                     if (state) state.title = session.title || "";
                 }
                 root.sessions = root.mergeSessionListing(g, valid);
+                root.syncDetachedTurns(g, valid);
                 root.settlePendingHarnesses(g, valid);
                 root.sessionsError = "";
                 const current = root.sessions.find(session => session && session.id === root.currentSessionId);
                 if (root.hudVisible && current && current.unread === true)
                     root.markConversationRead(g, current.id);
             });
+    }
+
+    /** Follow the listing's `running` for turns this HUD has no stream for; one ending reloads its transcript. */
+    function syncDetachedTurns(ghost: string, list: var): void {
+        for (const session of list) {
+            const running = session.running === true;
+            const state = running ? root.ensureTurnState(ghost, session.id)
+                : root.turnStates[root.conversationKey(ghost, session.id)];
+            if (!state || state.streaming || state.detached === running) continue;
+            state.detached = running;
+            if (!running) {
+                // With no stream here, no `queue` event clears the chips; the transcript shows what ran.
+                state.followUpQueue = [];
+                if (root.isActiveTurn(state)) root.loadConversationTranscript(state, false);
+            }
+            root.projectTurnFields(state);
+        }
     }
 
     /**
@@ -2065,10 +2087,18 @@ Singleton {
             JSON.stringify({ prompt: prompt, sessionId: state.sessionId }));
     }
 
+    /** Stop the active conversation's turn in ghostd, which runs it regardless of this HUD's stream. */
     function cancel(): void {
         const state = root.activeTurnState(false);
         if (!state) return;
         root.captureActiveTurn(state);
+        root.request(state, "stopRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
+            + "/sessions/" + encodeURIComponent(state.sessionId) + "/stop", {}, function () {});
+        if (state.detached) {
+            state.detached = false;
+            root.projectTurnFields(state);
+            return;
+        }
         root.cancelTurn(state);
     }
 
@@ -2483,7 +2513,7 @@ Singleton {
         const state = root.activeTurnState(false);
         if (!state) return;
         root.captureActiveTurn(state);
-        if (prompt === "" || state.queueSubmitting || !state.streaming) return;
+        if (prompt === "" || state.queueSubmitting || !(state.streaming || state.detached)) return;
         state.queueSubmitting = true;
         state.queueError = "";
         // Show the chip immediately; the stream's `queue` event removes it

@@ -136,8 +136,8 @@ Item {
             readonly property bool active: entry.sessionData.id === Ghostd.currentSessionId
             readonly property bool pinned: entry.sessionData.pinned === true
             readonly property bool unread: entry.sessionData.unread === true && !entry.active
-            readonly property bool live: Ghostd.isConversationStreaming(
-                Ghostd.activeGhost, entry.sessionData.id)
+            readonly property bool live: entry.sessionData.running === true
+                || Ghostd.isConversationStreaming(Ghostd.activeGhost, entry.sessionData.id)
             readonly property bool deleting:
                 Ghostd.deletingSessionId === entry.sessionData.id
             readonly property bool editing: root.rename.editingKey === entry.sessionData.id

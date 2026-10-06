@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
-import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSessionPrefix, resolveTarget, stdinIsTty, stdinText } from "./common.js";
+import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSessionPrefix, resolveTarget, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -87,51 +87,61 @@ export async function sayCommand(
   const ownerCommand = /^\s*!/u.test(text);
   let finalText = "";
   let terminal: "done" | "error" | undefined;
-  await ctx.client.stream(ghostPath(name, "/messages"), {
-    prompt: text,
-    sessionId: conversationId,
-  }, (unknownEvent) => {
-    const event = unknownEvent as StreamEvent;
-    if (event.type === "limit_reached") {
-      const limit = event as unknown as { harness?: string; kind?: string };
-      const kind = String(limit.kind ?? "limit").replace("_", " ");
-      ctx.runtime.stderr.write(`ghost: ${limit.harness ?? "runtime"} ${kind} reached\n`);
-    } else if (event.type === "error") {
-      terminal = "error";
-      ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);
-    } else if (event.type === "done" && terminal !== "error") terminal = "done";
-    emit(ctx, event, (): string | RenderedOutput => {
-      let human = "";
-      let quiet = "";
-      if (event.type === "text_delta") {
-        const delta = typeof event.delta === "string" ? event.delta : "";
-        finalText += delta;
-        human = delta;
-      } else if (event.type === "owner_message" && typeof event.text === "string") {
-        human = `${event.text}\n`;
-      } else if (event.type === "session_stop_continued" && typeof event.reason === "string") {
-        human = `Stop hook · ${event.reason}\n`;
-      } else if (event.type === "tool_execution_end" && ownerCommand && typeof event.summary === "string") {
-        human = quiet = `${event.summary}\n`;
-      } else if (event.type === "done") {
-        human = finalText && !finalText.endsWith("\n") ? "\n" : "";
-        quiet = finalText ? `${finalText}${finalText.endsWith("\n") ? "" : "\n"}` : "";
-      }
-      return { human, quiet };
-    });
-    switch (event.type) {
-      case "tool_execution_start":
-        if (secondary) ctx.runtime.stderr.write(`${dim(`⚙ ${toolDescription(event)}`, ctx.runtime.stdout.isTTY === true)}\n`);
-        break;
-      case "tool_execution_end":
-        if (secondary && event.isError === true && !ownerCommand) {
-          const name = typeof event.toolName === "string" ? event.toolName : "tool";
-          const summary = typeof event.summary === "string" ? `: ${truncate(event.summary, 80)}` : "";
-          ctx.runtime.stderr.write(`${dim(`✗ ${name}${summary}`, ctx.runtime.stdout.isTTY === true)}\n`);
+  // The turn outlives this process; Ctrl-C asks ghostd to stop it, and the
+  // stream then ends with the turn's own `aborted` error. A second Ctrl-C exits.
+  const stop: NodeJS.SignalsListener = () => {
+    ctx.client.request("POST", sessionPath(name, conversationId, "/stop"), {}).catch(() => undefined);
+  };
+  process.once("SIGINT", stop);
+  try {
+    await ctx.client.stream(ghostPath(name, "/messages"), {
+      prompt: text,
+      sessionId: conversationId,
+    }, (unknownEvent) => {
+      const event = unknownEvent as StreamEvent;
+      if (event.type === "limit_reached") {
+        const limit = event as unknown as { harness?: string; kind?: string };
+        const kind = String(limit.kind ?? "limit").replace("_", " ");
+        ctx.runtime.stderr.write(`ghost: ${limit.harness ?? "runtime"} ${kind} reached\n`);
+      } else if (event.type === "error") {
+        terminal = "error";
+        ctx.runtime.stderr.write(`ghost: ${typeof event.errorMessage === "string" ? event.errorMessage : String(event.reason ?? "turn failed")}\n`);
+      } else if (event.type === "done" && terminal !== "error") terminal = "done";
+      emit(ctx, event, (): string | RenderedOutput => {
+        let human = "";
+        let quiet = "";
+        if (event.type === "text_delta") {
+          const delta = typeof event.delta === "string" ? event.delta : "";
+          finalText += delta;
+          human = delta;
+        } else if (event.type === "owner_message" && typeof event.text === "string") {
+          human = `${event.text}\n`;
+        } else if (event.type === "session_stop_continued" && typeof event.reason === "string") {
+          human = `Stop hook · ${event.reason}\n`;
+        } else if (event.type === "tool_execution_end" && ownerCommand && typeof event.summary === "string") {
+          human = quiet = `${event.summary}\n`;
+        } else if (event.type === "done") {
+          human = finalText && !finalText.endsWith("\n") ? "\n" : "";
+          quiet = finalText ? `${finalText}${finalText.endsWith("\n") ? "" : "\n"}` : "";
         }
-        break;
-    }
-  });
+        return { human, quiet };
+      });
+      switch (event.type) {
+        case "tool_execution_start":
+          if (secondary) ctx.runtime.stderr.write(`${dim(`⚙ ${toolDescription(event)}`, ctx.runtime.stdout.isTTY === true)}\n`);
+          break;
+        case "tool_execution_end":
+          if (secondary && event.isError === true && !ownerCommand) {
+            const name = typeof event.toolName === "string" ? event.toolName : "tool";
+            const summary = typeof event.summary === "string" ? `: ${truncate(event.summary, 80)}` : "";
+            ctx.runtime.stderr.write(`${dim(`✗ ${name}${summary}`, ctx.runtime.stdout.isTTY === true)}\n`);
+          }
+          break;
+      }
+    });
+  } finally {
+    (process as NodeJS.EventEmitter).off("SIGINT", stop);
+  }
   if (!terminal) ctx.runtime.stderr.write("ghost: turn stream ended without a terminal event\n");
   return terminal === "done" ? EXIT_CODE.success : EXIT_CODE.failure;
 }

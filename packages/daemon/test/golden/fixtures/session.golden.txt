@@ -146,6 +146,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
     "pinned": false,
     "preview": "Remember that I want short answers.",
     "provider": null,
+    "running": false,
     "title": "Remember that I want short answers",
     "unread": true,
     "updatedAt": "<time>"

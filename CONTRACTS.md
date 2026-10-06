@@ -260,6 +260,8 @@ A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 --follow-up`) runs as the next pass in the same stream. A
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation.
+A turn outlives its client: a dropped stream stops only the listening, and
+`POST /sessions/:id/stop` or daemon shutdown is the only early end.
 Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
 and nothing else. Reading images and choosing the model are the harness's;
 Ghost only stores an attached image where the harness can open it.
@@ -386,12 +388,13 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread }`, pinned first, then newest; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, createdAt, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start and end each announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, title, harness, messages, total, truncated }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB) → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. The tailnet viewer is the one client that attaches: on the machine the ghost opens any file the owner names. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
+| `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
 | `GET /api/remote/whoami` | Effective owner/guest identity. |

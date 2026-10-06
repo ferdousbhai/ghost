@@ -853,6 +853,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       "pinned",
       "preview",
       "provider",
+      "running",
       "title",
       "unread",
       "updatedAt",
@@ -865,6 +866,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
       messageCount: 2,
       pinned: false,
       unread: true,
+      running: false,
     });
     expect(sessions[0]?.createdAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });

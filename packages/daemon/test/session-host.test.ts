@@ -267,22 +267,28 @@ describe("queued follow-ups and aborts", () => {
     expect(events.filter((event) => event.type === "done" || event.type === "error")).toHaveLength(1);
   });
 
+  it("refuses a stop when nothing is running", () => {
+    const sessions = host({ harnesses: [harness(replies("x"))] });
+    expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));
+  });
+
   it("refuses a queued message when nothing is streaming", async () => {
     const sessions = host({ harnesses: [harness(replies("x"))] });
     await expect(sessions.queueMessage("casper", "c1", "late")).rejects.toMatchObject({ code: "session_not_streaming" });
   });
 
-  it("kills the harness on abort and ends the turn aborted", async () => {
+  it("kills the harness on stop and ends the turn aborted", async () => {
     const fake = harness([]);
     fake.setTurns([{ gate: fake.gate("never").path }]);
     const sessions = host({ harnesses: [fake] });
-    const controller = new AbortController();
     const events: TurnEvent[] = [];
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: (event) => events.push(event), signal: controller.signal });
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: (event) => events.push(event) });
     await waitFor(() => fake.calls().length === 1);
-    controller.abort();
+    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c1", running: true });
+    sessions.stopTurn("casper", "c1");
     await running;
     expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+    expect((await sessions.listSessions("casper"))[0]).toMatchObject({ id: "c1", running: false });
   });
 });
 
@@ -340,6 +346,16 @@ describe("owner commands and hooks", () => {
     const [call] = fake.calls();
     expect(call?.prompt).toContain("Owner ran `echo printed-$GHOST_SESSION`");
     expect(call?.prompt).toContain("printed-c1");
+  });
+
+  it("stops a running `!command`", async () => {
+    const sessions = host({ harnesses: [harness([])] });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "!sleep 30", emit: (event) => events.push(event) });
+    await waitFor(() => events.some((event) => event.type === "tool_execution_start"));
+    sessions.stopTurn("casper", "c1");
+    await running;
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted", errorMessage: "Command aborted." });
   });
 
   it("keeps `!!command` output from the ghost", async () => {

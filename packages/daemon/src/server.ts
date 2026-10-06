@@ -707,8 +707,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const streamSessionEvents = async (
     request: IncomingMessage,
     response: ServerResponse,
-    run: (emit: (event: TurnEvent) => void, signal: AbortSignal) => Promise<void>,
+    run: (emit: (event: TurnEvent) => void) => Promise<void>,
   ): Promise<void> => {
+    // A client that goes away stops listening, never the turn: `POST …/stop` is the only stop.
     const connection = abortOnClose(request, response);
     response.writeHead(200, SSE_HEADERS);
     response.write(SSE_KEEPALIVE_COMMENT);
@@ -722,13 +723,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
 
     let terminal = false;
     const emit = (event: TurnEvent): void => {
-      if (response.writableEnded || terminal) return;
+      if (response.writableEnded || connection.signal.aborted || terminal) return;
       if (event.type === "done" || event.type === "error") terminal = true;
       response.write(encodeSseEvent(event));
     };
 
     try {
-      await run(emit, connection.signal);
+      await run(emit);
       // Keep the HTTP seam honest even if a runtime regresses. The shell also
       // treats EOF without a terminal frame as failure, but emitting the error
       // here preserves one protocol invariant for every client and runtime.
@@ -771,8 +772,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       prompt: parsed.prompt,
     });
     try {
-      await streamSessionEvents(request, response, (emit, signal) =>
-        admission.run({ emit, signal }));
+      await streamSessionEvents(request, response, (emit) => admission.run({ emit }));
     } finally {
       // Covers a response failure before the stream callback consumes the
       // admission; ordinary run completion releases it first.
@@ -951,6 +951,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/ghosts/:ghost/sessions/:id/transcript", ({ params, url, response }) => handleTranscript(ghostOf(params), conversationOf(params), url, response)),
     route("GET", "api/ghosts/:ghost/sessions/:id/tools", (context) => handleSessionTools(context, undefined)),
     route("POST", "api/ghosts/:ghost/sessions/:id/tools/:tool", (context) => handleSessionTools(context, context.params.tool)),
+    route("POST", "api/ghosts/:ghost/sessions/:id/stop", ({ params, response }) => {
+      options.host.stopTurn(ghostOf(params), conversationOf(params));
+      jsonResponse(response, 200, { stopped: true });
+    }),
     route("GET POST", "api/ghosts/:ghost/sessions/:id/queue", ({ params, method, request, response }) => handleQueue(ghostOf(params), conversationOf(params), method, request, response)),
     route("GET POST", "api/ghosts/:ghost/mcp", ({ params, method, request, response }) => handleMcpCollection(ghostOf(params), method, request, response)),
     route("PUT DELETE", "api/ghosts/:ghost/mcp/:server", ({ params, method, request, response }) => handleMcpServer(ghostOf(params), decodePathSegment(params.server ?? ""), method, request, response)),
