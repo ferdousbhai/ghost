@@ -335,8 +335,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       log.querySelector(".empty")?.remove();
       log.append(userBubble(message));
       // A reply bubble waiting for its text; text after a tool call opens the next.
-      const pending = () => { const el = assistantBubble(""); el.classList.add("pending"); log.append(el); return el; };
-      const replies = [pending()];
+      const replyBubble = () => { const el = assistantBubble(""); el.classList.add("pending"); log.append(el); return el; };
+      const replies = [replyBubble()];
       // Only the call running now, the way the HUD's activity line shows it; a
       // finished reply keeps none of them.
       const activity = document.createElement("div"); activity.className = "activity";
@@ -361,7 +361,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
               const texts = bubbles(parts);
               if (texts.length > replies.length) {
                 activity.remove(); replies.at(-1).classList.remove("pending");
-                replies.push(pending());
+                replies.push(replyBubble());
               }
               if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
             } else if (ev.type === "tool_execution_start") {

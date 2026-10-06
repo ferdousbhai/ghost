@@ -250,6 +250,27 @@ TestCase {
         compare(turn.state.rows[2].toolActivity.length, 0);
     }
 
+    // Blank text between calls cuts nothing, as a restored transcript reads it.
+    function test_blankTextBetweenCallsIsNoMessage(): void {
+        const turn = openTurn("blank-between", null);
+        Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 0, content: "Checking." });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c1", toolName: "Read", arguments: { file_path: "/a" }
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_start", contentIndex: 1 });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 1, delta: "\n\n" });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c2", toolName: "Read", arguments: { file_path: "/b" }
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 2, delta: "Done." });
+        Ghostd.flushTurn(turn.state, true);
+
+        compare(turn.state.rows.length, 3);
+        compare(turn.state.rows[1].text, "Checking.");
+        compare(turn.state.rows[1].toolActivity.length, 2);
+        compare(turn.state.rows[2].text, "Done.");
+    }
+
     function test_ownerCommandStreamsAsABashCard(): void {
         const turn = openTurn("owner-command", null);
         Ghostd.handleTurnEvent(turn.state, {

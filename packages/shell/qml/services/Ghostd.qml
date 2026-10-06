@@ -2321,14 +2321,20 @@ Singleton {
             state.presentationDirty = true;
             state.activity = "writing";
             break;
-        case "text_delta":
-            root.textPart(state, event.contentIndex).text += event.delta;
+        case "text_delta": {
+            const part = root.textPart(state, event.contentIndex);
+            part.text += event.delta;
+            root.openMessageAfterToolsFor(state, part);
             state.presentationDirty = true;
             break;
-        case "text_end":
-            root.textPart(state, event.contentIndex).text = event.content;
+        }
+        case "text_end": {
+            const part = root.textPart(state, event.contentIndex);
+            part.text = event.content;
+            root.openMessageAfterToolsFor(state, part);
             state.presentationDirty = true;
             break;
+        }
         case "queue":
             root.applyQueueFor(state, event);
             break;
@@ -2398,8 +2404,7 @@ Singleton {
     }
 
     /**
-     * The turn's text part for a content index, appended on first sight — in
-     * a new message when the current one already holds a tool call. The
+     * The turn's text part for a content index, appended on first sight. The
      * daemon closes a text block before a tool call starts, so arrival order
      * is content order and `parts` reads like a stored message's content.
      */
@@ -2408,7 +2413,6 @@ Singleton {
             const part = state.parts[i];
             if (part.type === "text" && part.index === index) return part;
         }
-        root.openMessageAfterToolsFor(state);
         const part = { type: "text", index: index, text: "" };
         state.parts.push(part);
         return part;
@@ -2569,14 +2573,18 @@ Singleton {
     }
 
     /**
-     * Text after a tool call is the ghost's next message: settle the row that
-     * holds the calls and give the new text a row of its own.
+     * Text after a tool call is the ghost's next message: once `part` has
+     * words (blank text cuts nothing, as TurnBlocks.rows reads it back), the
+     * row holding the calls settles and `part` opens a row of its own.
      */
-    function openMessageAfterToolsFor(state: var): void {
-        if (!state.parts.some(part => part.type === "toolCall")) return;
+    function openMessageAfterToolsFor(state: var, part: var): void {
+        const at = state.parts.indexOf(part);
+        if (part.text.trim() === "" || !state.parts.slice(0, at).some(p => p.type === "toolCall")) return;
+        state.parts.splice(at, 1);
         root.closeAssistantRowFor(state);
         root.openAssistantRowFor(state);
         root.resetAssistantSegmentFor(state);
+        state.parts.push(part);
     }
 
     /** Settle the assistant row's calls, flush what it said, and stop it pending. */

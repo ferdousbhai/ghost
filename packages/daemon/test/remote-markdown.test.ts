@@ -1,3 +1,7 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { type MarkdownDocument, renderMarkdown } from "../src/remote-markdown.js";
 import { REMOTE_VIEWER_HTML } from "../src/remote-viewer.js";
@@ -76,4 +80,24 @@ describe("remote viewer transcript", () => {
     await loadTranscript();
     expect([rendered[0], rendered.at(-1)]).toEqual([1500, 2499]);
   });
+});
+
+// The page's script is a string to TypeScript and to the repo's lint, so a
+// name used before its declaration only failed on the phone. Lint it here.
+test("the viewer's own script declares every name before using it", () => {
+  const script = /<script>([\s\S]*?)<\/script>/u.exec(REMOTE_VIEWER_HTML)?.[1] ?? "";
+  expect(script).toContain("function bubbles(");
+  const dir = mkdtempSync(join(tmpdir(), "viewer-lint-"));
+  try {
+    const file = join(dir, "viewer.js");
+    writeFileSync(file, script);
+    const biome = join(import.meta.dirname, "../../../node_modules/.bin/biome");
+    const lint = spawnSync(biome, [
+      "lint", "--only=correctness/noInvalidUseBeforeDeclaration", "--only=suspicious/noRedeclare",
+      "--only=correctness/noUnusedVariables", file,
+    ], { encoding: "utf8" });
+    expect(lint.status, lint.stdout + lint.stderr).toBe(0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
