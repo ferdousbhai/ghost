@@ -4,14 +4,6 @@ import "../qml/services/Attachments.js" as Attachments
 TestCase {
     name: "Attachments"
 
-    function test_composeNamesEachImageAfterTheText(): void {
-        compare(Attachments.compose("  look at this \n", ["attachments/a.png", "attachments/b.jpg"]),
-            "look at this\n![image](attachments/a.png)\n![image](attachments/b.jpg)");
-        compare(Attachments.compose("", ["attachments/a.png"]), "![image](attachments/a.png)");
-        compare(Attachments.compose("just text", []), "just text");
-        compare(Attachments.compose("", []), "");
-    }
-
     function test_splitLiftsImageLinesOutOfAPrompt(): void {
         const parts = Attachments.split("look at this\n![image](attachments/a.png)\n![x](attachments/b.jpg)");
         compare(parts.text, "look at this");
@@ -29,13 +21,5 @@ TestCase {
         compare(Attachments.split("![x](attachments/../../character.md)").images, []);
         compare(Attachments.split("![x](attachments/sub/a.png)").images, []);
         verify(!Attachments.isAttachmentPath("/etc/passwd"));
-        compare(Attachments.compose("hi", ["../a.png", "attachments/ok.png"]), "hi\n![image](attachments/ok.png)");
-    }
-
-    function test_onlyImagesTheDaemonTakes(): void {
-        verify(Attachments.isImageFile("/tmp/shot.PNG"));
-        verify(Attachments.isImageFile("/tmp/p.jpeg"));
-        verify(!Attachments.isImageFile("/tmp/notes.md"));
-        verify(!Attachments.isImageFile("/tmp/photo.heic"));
     }
 }

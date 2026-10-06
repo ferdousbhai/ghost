@@ -132,12 +132,6 @@ describe("tailnet identity", () => {
       body: Buffer.from("89504e47", "hex"),
     });
     expect(attach.status).toBe(403);
-    const copy = await fetch(`${base}/api/ghosts/casper/sessions/remote-1/attachments`, {
-      method: "POST",
-      headers: { ...asTailnet("owner@example.com"), "content-type": "application/json", origin: `http://127.0.0.1:${listening!.port}` },
-      body: JSON.stringify({ path: "/etc/hostname" }),
-    });
-    expect(await copy.json()).toMatchObject({ error: { code: "local_only" } });
 
     expect(await (await fetch(`${base}/api/remote/whoami`, { headers: asTailnet("owner@example.com") })).json())
       .toMatchObject({ login: "owner@example.com", role: "owner" });

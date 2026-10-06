@@ -2,18 +2,13 @@ pragma ComponentBehavior: Bound
 
 // The input field. Enter sends (or queues a follow-up while the ghost is
 // working), Shift+Enter opens a new line, Esc bubbles up to the HUD so a
-// half-typed prompt is never a reason you can't dismiss. An image pasted or
-// dropped here rides along: it shows in the tray above the field until it is
-// sent or taken off, and Send names it in the message (see Attachments.js).
+// half-typed prompt is never a reason you can't dismiss.
 //
 // Plain TextEdit rather than QtQuick.Controls TextArea: Controls would pull in
 // a style whose colours would compete with the shared neutral design tokens.
 import QtQuick
-import Quickshell
-import Quickshell.Io
 import Qt5Compat.GraphicalEffects
 import "../services"
-import "../services/Attachments.js" as Attachments
 
 Item {
     id: root
@@ -25,135 +20,10 @@ Item {
     /** The tallest the field grows before it scrolls; the HUD sets it from its height. */
     property int maxHeight: 160
 
-    readonly property int trayHeight: tray.visible ? tray.height + Theme.gap / 2 : 0
-
-    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight) + root.trayHeight
+    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight)
 
     function take(): void {
         field.forceActiveFocus();
-    }
-
-    /** Send the draft with whatever images are attached; nothing while one is still uploading. */
-    function submit(): void {
-        if (Ghostd.attachmentsBusy) return;
-        root.submitted(Attachments.compose(field.text, Ghostd.takeAttachments()));
-        field.text = "";
-    }
-
-    // Wayland's clipboard is read by running wl-paste. The probe picks the
-    // first image type on offer and writes it under XDG_RUNTIME_DIR, printing
-    // the file it wrote; a clipboard with no image exits quietly, and the
-    // field's own paste has already handled any text.
-    Process {
-        id: pasteProbe
-
-        property string target: ""
-
-        command: ["sh", "-c",
-            "t=$(wl-paste --list-types 2>/dev/null | grep -m1 -E '^image/(png|jpeg|webp|gif)$') || exit 0; "
-            + "e=${t#image/}; [ \"$e\" = jpeg ] && e=jpg; "
-            + "wl-paste --no-newline --type \"$t\" > \"$1.$e\" && printf '%s\\n' \"$1.$e\"",
-            "sh", pasteProbe.target]
-        stdout: SplitParser {
-            onRead: data => {
-                const path = data.trim();
-                if (path !== "") Ghostd.attach(path, true);
-            }
-        }
-    }
-
-    function pasteImage(): void {
-        const runtime = Quickshell.env("XDG_RUNTIME_DIR") || "";
-        if (runtime === "" || pasteProbe.running || Ghostd.activeGhost === "") return;
-        pasteProbe.target = runtime + "/ghost-paste-" + Date.now().toString(36);
-        pasteProbe.running = true;
-    }
-
-    DropArea {
-        anchors.fill: parent
-        onEntered: drag => drag.accepted = drag.hasUrls
-        onDropped: drop => {
-            for (const url of drop.urls) {
-                const text = String(url);
-                if (!text.startsWith("file://")) continue;
-                const path = decodeURIComponent(text.slice("file://".length));
-                if (Attachments.isImageFile(path)) Ghostd.attach(path, false);
-            }
-            field.forceActiveFocus();
-        }
-    }
-
-    // The tray: one square per attached image, dimmed while it uploads,
-    // rose-edged if the daemon refused it, each with its own way off.
-    Row {
-        id: tray
-
-        anchors.left: parent.left
-        anchors.top: parent.top
-        spacing: Theme.gap / 2
-        visible: Ghostd.attachments.length > 0
-        height: 52
-
-        Repeater {
-            model: Ghostd.attachments
-
-            delegate: Rectangle {
-                id: chip
-
-                required property var modelData
-
-                width: tray.height
-                height: tray.height
-                radius: Theme.bubbleTailRadius
-                color: Theme.film(0.05)
-                border.width: 1
-                border.color: chip.modelData.error !== "" ? Theme.rose(0.60) : Theme.film(0.15)
-                clip: true
-
-                Accessible.role: Accessible.Graphic
-                Accessible.name: chip.modelData.error !== "" ? chip.modelData.error : "Attached image"
-
-                Image {
-                    anchors.fill: parent
-                    anchors.margins: 1
-                    source: chip.modelData.local
-                    sourceSize.width: tray.height * 2
-                    sourceSize.height: tray.height * 2
-                    fillMode: Image.PreserveAspectCrop
-                    asynchronous: true
-                    opacity: chip.modelData.path === "" && chip.modelData.error === "" ? 0.45 : 1
-                }
-
-                Rectangle {
-                    anchors.top: parent.top
-                    anchors.right: parent.right
-                    anchors.margins: 2
-                    width: 16
-                    height: 16
-                    radius: 8
-                    color: removeArea.containsMouse ? Theme.rose(0.85) : Qt.rgba(0, 0, 0, 0.55)
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "×"
-                        color: Theme.foregroundBright
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeSmall
-                    }
-
-                    MouseArea {
-                        id: removeArea
-                        anchors.fill: parent
-                        anchors.margins: -4
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Remove image"
-                        onClicked: Ghostd.detach(chip.modelData.id)
-                    }
-                }
-            }
-        }
     }
 
     // Focus halo: the warm bloom the old app put behind a focused input. It
@@ -181,7 +51,6 @@ Item {
         id: surface
 
         anchors.fill: parent
-        anchors.topMargin: root.trayHeight
         radius: Theme.bubbleRadius
         color: field.activeFocus ? Theme.film(0.07) : Theme.film(0.05)
         border.width: 1
@@ -341,11 +210,9 @@ Item {
                 Keys.onPressed: event => {
                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
                     if (enter && !(event.modifiers & Qt.ShiftModifier)) {
-                        root.submit();
+                        root.submitted(field.text);
+                        field.text = "";
                         event.accepted = true;
-                    } else if (event.matches(StandardKey.Paste)) {
-                        // Left unaccepted so the field still pastes any text.
-                        root.pasteImage();
                     }
                 }
 

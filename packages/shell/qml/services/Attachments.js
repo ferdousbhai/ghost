@@ -2,11 +2,10 @@
 
 // Attachments — how a message names the images sent with it.
 //
-// The daemon stores an attached image in the conversation directory and
-// answers with its path relative to it, `attachments/<file>`. The message
-// names each one on its own line as a Markdown image after the typed text, so
-// the harness (whose working directory that is) can open it, and every client
-// can draw it instead of printing the line.
+// The tailnet viewer stores a photo in the conversation directory and names
+// it on its own line as a Markdown image, `![image](attachments/<file>)`, so
+// the harness (whose working directory that is) can open it. The HUD only
+// reads that format: it draws the line as a picture instead of printing it.
 
 const LINE = /^!\[[^\]]*\]\((attachments\/[^)\s]+)\)$/u;
 
@@ -26,16 +25,4 @@ function split(body) {
         else kept.push(line);
     }
     return { text: images.length > 0 ? kept.join("\n").replace(/\s+$/u, "") : String(body || ""), images: images };
-}
-
-/** The prompt to send: the typed text, then one image line per stored path. */
-function compose(text, paths) {
-    const lines = (paths || []).filter(isAttachmentPath).map(path => "![image](" + path + ")");
-    const typed = String(text || "").trim();
-    return (typed !== "" ? [typed] : []).concat(lines).join("\n");
-}
-
-/** Whether a dropped or pasted local file is an image the daemon accepts. */
-function isImageFile(path) {
-    return /\.(png|jpe?g|webp|gif)$/iu.test(String(path || ""));
 }
