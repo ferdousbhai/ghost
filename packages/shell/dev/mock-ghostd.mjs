@@ -372,7 +372,7 @@ const sessionSummary = (name) => (s) => {
   return {
     id: s.id,
     title: s.title ?? null,
-    preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
+    preview: s.preview ?? (first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null),
     harness: s.harness ?? null,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
@@ -391,7 +391,8 @@ function recordTurn(name, id, prompt) {
     ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
   draftHarness.delete(turnKey(name, id));
   s.updatedAt = new Date().toISOString();
-  if (!s.title) s.title = prompt.slice(0, 40) || "New conversation";
+  // The first owner message titles it; a `!command` never does, as in ghostd.
+  if (!s.title && !prompt.startsWith("!")) s.title = prompt.slice(0, 40) || "New conversation";
   publishConversationUpdated(name, id, s.updatedAt);
 }
 
@@ -663,6 +664,8 @@ async function streamTurn(res, name, body) {
     store.set(sessionId, existing);
   }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
+  // As in ghostd, the first owner text previews it, a `!command` included.
+  if (existing) existing.preview ??= firstLine(prompt);
   if (existing) publishConversationUpdated(name, sessionId);
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as

@@ -523,7 +523,7 @@ export class SessionHost {
     };
   }
 
-  /** One whole turn; exactly one terminal `done` or `error` is emitted. */
+  /** One whole turn, as the server runs it; a failure outside its passes throws instead of emitting. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     await (await this.admitTurn(ghostName, options)).run(options);
   }
