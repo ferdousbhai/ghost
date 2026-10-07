@@ -81,7 +81,7 @@ import { trashPath, type TrashPathResult } from "./trash.js";
 export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 
 /** The handoff pass's prompt: the documents are the state a later session starts from. */
-export const HANDOFF_PROMPT = "The owner has been away for three minutes. Hand off: bring your notes in the owner's documents up to date with this conversation (what is done, what is verified, and the exact next step) so a fresh session could resume from them alone. Change nothing else. Reply in one line naming what you updated, or \"nothing to update\".";
+export const HANDOFF_PROMPT = "The owner has stepped away. Hand off: bring your notes in the owner's documents up to date with this conversation (what is done, what is verified, and the exact next step) so a fresh session could resume from them alone. Change nothing else. Reply in one line naming what you updated, or \"nothing to update\".";
 /** The turn ghostd starts after a handoff, so the ghost keeps working while the owner is away. */
 export const NEXT_WORK_PROMPT = "What should we work on next?";
 /** How long the owner has to cancel that turn. */
@@ -918,7 +918,8 @@ export class SessionHost {
         const ghost = this.registry.get(ghostName);
         await this.withGhost(ghost.name, async () => {
           const { sessionDir } = ghostPaths(ghost.dir);
-          const bound = logState((await readLog(sessionDir, id)) ?? []);
+          const entries = (await readLog(sessionDir, id)) ?? [];
+          const bound = logState(entries);
           const row = bound.harness === null ? null : this.rowOf(bound.harness);
           // Only a session the harness can resume here carries the conversation.
           if (!row || !bound.harnessStarted || bound.harnessDir !== conversationDir(sessionDir, id)) return;
@@ -937,9 +938,7 @@ export class SessionHost {
             ...(result.error ? { error: result.error } : {}),
           }]);
           this.announce(ghost.name, id);
-          if (!this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner((await readLog(sessionDir, id)) ?? [])) {
-            next = true;
-          }
+          next = !this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner(entries);
         });
       } catch (error) {
         this.logger.warn("handoff failed", { ghost: ghostName, conversation: id, error: errorMessage(error) });
@@ -969,10 +968,12 @@ export class SessionHost {
 
   /** The owner's cancel of a counting-down next-work turn; a no-op when none is. */
   async cancelNextWork(ghostName: string, sessionId: string | null | undefined): Promise<void> {
-    const key = keyOf(this.registry.get(ghostName).name, requireConversationId(sessionId ?? "default"));
+    const ghost = this.registry.get(ghostName);
+    const id = requireConversationId(sessionId ?? "default");
+    const key = keyOf(ghost.name, id);
     if (this.handoffs.get(key)?.continuesAt === undefined) return;
     await this.cancelHandoff(key);
-    this.announce(ghostName, requireConversationId(sessionId ?? "default"));
+    this.announce(ghost.name, id);
   }
 
   /**
@@ -1292,7 +1293,7 @@ export class SessionHost {
     }
     for (const name of names) this.reservedGhosts.add(name);
     await Promise.all([...this.handoffs.keys()]
-      .filter((key) => names.includes((JSON.parse(key) as [string, string])[0]))
+      .filter((key) => names.includes(ghostOfKey(key)))
       .map((key) => this.cancelHandoff(key)));
     await Promise.all(names.map((name) => {
       const lease = this.leases.get(name);
