@@ -1,6 +1,5 @@
 import QtQuick
 import Qt5Compat.GraphicalEffects
-import "../services"
 
 // A soft round bloom: `core` at the centre, `mid` at `midAt`, transparent at
 // the rim. Set `width`; it is always a circle. The radii are half the size on

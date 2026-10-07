@@ -45,41 +45,35 @@ Column {
         width: 72
         height: 72
 
-        // Still, like the halos: an endless animation would redraw the whole
-        // window every frame the empty conversation is open.
-        Item {
-            width: parent.width
-            height: parent.height
+        // Two still halos, amber and ember: an endless animation would redraw
+        // the whole window every frame the empty conversation is open.
+        Glow {
+            anchors.centerIn: parent
+            width: 200
+            visible: Ghostd.reachable
+            core: Theme.amber(0.15)
+            mid: Theme.amber(0.05)
+        }
 
-            // Two halos, one amber, one ember.
-            Glow {
+        Glow {
+            anchors.centerIn: parent
+            width: 132
+            visible: Ghostd.reachable
+            core: Theme.ember(0.10)
+            mid: Theme.ember(0.04)
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: Theme.bubbleRadius
+            color: Theme.film(0.04)
+            border.width: 1
+            border.color: Theme.film(0.10)
+
+            GhostGlyph {
                 anchors.centerIn: parent
-                width: 200
-                visible: Ghostd.reachable
-                core: Theme.amber(0.15)
-                mid: Theme.amber(0.05)
-            }
-
-            Glow {
-                anchors.centerIn: parent
-                width: 132
-                visible: Ghostd.reachable
-                core: Theme.ember(0.10)
-                mid: Theme.ember(0.04)
-            }
-
-            Rectangle {
-                anchors.fill: parent
-                radius: Theme.bubbleRadius
-                color: Theme.film(0.04)
-                border.width: 1
-                border.color: Theme.film(0.10)
-
-                GhostGlyph {
-                    anchors.centerIn: parent
-                    size: 36
-                    tint: Ghostd.reachable ? Theme.ghostAmberBright : Theme.danger
-                }
+                size: 36
+                tint: Ghostd.reachable ? Theme.ghostAmberBright : Theme.danger
             }
         }
     }

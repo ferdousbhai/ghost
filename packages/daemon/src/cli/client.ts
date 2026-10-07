@@ -180,12 +180,9 @@ export class DaemonClient {
     path: string,
     body: unknown | undefined,
     onEvent: (event: unknown) => boolean | void | Promise<boolean | void>,
-    options: { method?: "GET" | "POST"; signal?: AbortSignal } = {},
   ): Promise<void> {
-    const method = options.method ?? (body === undefined ? "GET" : "POST");
     const response = await this.#fetch(path, {
-      method,
-      ...(options.signal ? { signal: options.signal } : {}),
+      method: body === undefined ? "GET" : "POST",
       headers: {
         accept: "text/event-stream",
         ...(body === undefined ? {} : { "content-type": "application/json" }),

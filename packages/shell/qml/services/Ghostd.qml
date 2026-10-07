@@ -1668,10 +1668,7 @@ Singleton {
             return;
         }
         const previous = root.activeTurnState(false);
-        if (previous) {
-            root.captureActiveTurn(previous);
-            root.cancelTranscriptLoad(previous);
-        }
+        if (previous) root.leaveConversation(previous);
         const id = root.mintConversationId();
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
@@ -1858,21 +1855,27 @@ Singleton {
     /** Make one conversation the ghost's active one, clearing everything the last one owned. */
     function adoptConversation(ghost: string, id: string): void {
         const previous = root.activeTurnState(false);
-        if (previous) {
-            root.captureActiveTurn(previous);
-            if (previous.sessionId !== id) root.cancelTranscriptLoad(previous);
-        }
+        if (previous && previous.key !== root.conversationKey(ghost, id)) root.leaveConversation(previous);
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
-        // An idle conversation left behind keeps nothing: opening it again
-        // reloads its transcript, so its rows would only grow the shell.
-        if (previous && previous.key !== root.conversationKey(ghost, id) && !previous.streaming
-                && !previous.detached && !previous.queueSubmitting) {
-            const kept = Object.assign({}, root.turnStates);
-            delete kept[previous.key];
-            root.turnStates = kept;
+    }
+
+    /**
+     * Leave the open conversation for another of the same ghost. An idle one
+     * keeps nothing: opening it again reloads its transcript, so its rows
+     * would only grow the shell. One streaming, running for another client,
+     * or writing a queued message stays, with its listed title.
+     */
+    function leaveConversation(state: var): void {
+        root.cancelTranscriptLoad(state);
+        if (state.streaming || state.detached || state.queueSubmitting) {
+            root.captureActiveTurn(state);
+            return;
         }
+        const kept = Object.assign({}, root.turnStates);
+        delete kept[state.key];
+        root.turnStates = kept;
     }
 
     /**

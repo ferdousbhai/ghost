@@ -11,6 +11,6 @@ export async function watchCommand(
   await ctx.client.stream(ghostPath(name, "/events"), undefined, (event) => {
     emit(ctx, event);
     return flagBoolean(parsed, "exit-on-first") ? false : undefined;
-  }, { method: "GET" });
+  });
   return 0;
 }

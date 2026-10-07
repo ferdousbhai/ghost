@@ -137,10 +137,9 @@ TestCase {
         Ghostd.lastError = "";
     }
 
-    // Leaving a conversation and coming back keeps its earlier rows' tool
-    // cards: nothing copies the projected ListModel back into the state.
     // The shell keeps only what is open or running: an idle conversation left
-    // behind is dropped (opening it reloads it), a streaming one stays.
+    // behind, by opening another or by New, is dropped (opening it reloads
+    // it), a streaming one stays.
     function test_leavingAnIdleConversationDropsItsState(): void {
         const aborts = { count: 0 };
         const live = openTurn("live", "Still going", aborts);
@@ -150,8 +149,16 @@ TestCase {
         verify(Ghostd.turnStates[live.state.key] !== undefined);
         compare(Ghostd.turnStates[Ghostd.conversationKey("casper", "idle")], undefined);
         compare(aborts.count, 0);
+
+        const other = Ghostd.ensureTurnState("casper", "other");
+        Ghostd.appendTurnRow(other, { role: "user", text: "hi", toolActivity: [], error: "", pending: false });
+        Ghostd.newConversation();
+        compare(Ghostd.turnStates[other.key], undefined);
+        verify(Ghostd.turnStates[live.state.key] !== undefined);
     }
 
+    // Leaving a conversation and coming back keeps its earlier rows' tool
+    // cards: nothing copies the projected ListModel back into the state.
     function test_toolCardsSurviveLeavingAndReturning(): void {
         const state = Ghostd.ensureTurnState("casper", "cards");
         Ghostd.currentSessionId = "cards";
