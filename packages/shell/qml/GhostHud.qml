@@ -382,6 +382,7 @@ FloatingWindow {
 
                         ActivityLine {
                             Layout.fillWidth: true
+                            maxHeight: Math.max(90, Math.floor(hud.height * 0.28))
                         }
 
                         NextWorkLine {

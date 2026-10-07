@@ -189,5 +189,7 @@ TestCase {
         verify(scroll.contentHeight > scroll.height);
         scroll.contentY = scroll.contentHeight - scroll.height;
         verify(scroll.contentY > 0);
+        line.maxHeight = 90;
+        compare(line.implicitHeight, 90);
     }
 }
