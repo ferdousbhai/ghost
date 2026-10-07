@@ -363,8 +363,9 @@ working once keep-going lets a turn stop, ghostd runs one built-in idle chain
    `NEXT_WORK_PROMPT`, logged as a user entry with `origin: "auto"` (an
    `auto` transcript message). Its end starts the chain again.
 
-A new turn in the conversation, `DELETE …/continuation`, its deletion, or the
-ghost's move or shutdown stops a pending or running step first.
+A new turn in the conversation, its deletion, or the ghost's move or shutdown
+stops a pending or running step first; `DELETE …/continuation` stops only a
+countdown.
 
 Every `session_stop` and `before_prompt` behavior is a `hooks.json` command the
 owner chooses. Ghost has no in-process hook registration to be the other kind,
