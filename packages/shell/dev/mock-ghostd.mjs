@@ -676,6 +676,7 @@ async function streamTurn(res, name, body) {
   const logReply = (reply) => existing && append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
+  let stopped = false;
   try {
     if (prompt.startsWith("!")) {
       const command = prompt.slice(1).trim();
@@ -711,8 +712,9 @@ async function streamTurn(res, name, body) {
         reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
         logReply(reply);
       }
+      stopped = reply === null;
       // A stopped turn already ended its stream with `aborted`.
-      if (reply !== null) {
+      if (!stopped) {
         if (flag("--stall-stream")) {
           await new Promise((resolve) => res.once("close", resolve));
           return;
@@ -731,8 +733,9 @@ async function streamTurn(res, name, body) {
     activeTurns.delete(key);
     // Every end announces, as ghostd's does: stopped, failed, or done.
     if (existing) publishConversationUpdated(name, sessionId);
-    // --next-work: the countdown ghostd shows after an idle handoff, then its turn.
-    if (existing && NEXT_WORK_MS > 0 && !prompt.startsWith("!")) {
+    // --next-work: the countdown ghostd shows after an idle handoff, then its
+    // turn; as in ghostd, none follows a turn the owner stopped.
+    if (existing && NEXT_WORK_MS > 0 && !prompt.startsWith("!") && !stopped) {
       existing.continuesAt = new Date(Date.now() + NEXT_WORK_MS).toISOString();
       existing.continuation = setTimeout(() => {
         existing.continuesAt = null;

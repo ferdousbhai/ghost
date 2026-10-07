@@ -545,7 +545,8 @@ export class SessionHost {
         } finally {
           release();
           this.announce(ghost.name, id);
-          if (!command) this.scheduleHandoff(ghost.name, id);
+          // A stopped turn means the owner is here: nothing runs on its own after it.
+          if (!command && !controller.signal.aborted) this.scheduleHandoff(ghost.name, id);
         }
       },
       release,

@@ -350,9 +350,10 @@ working once keep-going lets a turn stop, ghostd runs one built-in idle chain
 `builtin` section of `hooks.json` (`handoff_idle_seconds` and
 `next_work_turns`, defined in [`docs/hooks.md`](docs/hooks.md)):
 
-1. **Handoff.** `handoff_idle_seconds` after a turn that ran a harness, with
-   no turn since, it resumes the conversation's own harness session, in its
-   directory, with `HANDOFF_PROMPT`. It runs no hooks, streams to no client, and is not a
+1. **Handoff.** `handoff_idle_seconds` after a turn that ran a harness and
+   was not stopped by the owner, with no turn since, it resumes the
+   conversation's own harness session, in its directory, with
+   `HANDOFF_PROMPT`. It runs no hooks, streams to no client, and is not a
    running turn in the listing. Its reply is one `handoff` log entry, which
    the transcript shows as a `handoff` message and a new harness's carried
    context leaves out.
