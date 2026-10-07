@@ -30,7 +30,7 @@ const base = {
 
 describe("shared hook policy", () => {
   it("keeps local admission, defaults, source order and public status", () => {
-    const commands = parseHooksDocument(config, path);
+    const { commands } = parseHooksDocument(config, path);
     expect(commands.map((hook) => [hook.eventName, hook.command, hook.timeoutMs])).toEqual([
       ["before_prompt", "first", 30000], ["before_prompt", "second", 500],
       ["session_stop", "accept", 30000], ["session_stop", "continue", 30000],
@@ -47,7 +47,7 @@ describe("shared hook policy", () => {
   });
 
   it("combines before-prompt contexts and stops at the first real continuation", async () => {
-    const commands = parseHooksDocument(config, path);
+    const { commands } = parseHooksDocument(config, path);
     const before: GhostBeforePromptEvent = { ...base, type: "before_prompt", prompt: "Continue", turn_id: "turn-1" };
     const called: string[] = [];
     expect(await runBeforePromptHooks(commands, before, async (hook) => {
@@ -65,7 +65,7 @@ describe("shared hook policy", () => {
   });
 
   it("preserves exit-code, invalid-output and fail-open interpretation", () => {
-    const [before, , stop] = parseHooksDocument(config, path);
+    const [before, , stop] = parseHooksDocument(config, path).commands;
     if (!before || !stop) throw new Error("fixture hooks missing");
     const warnings: string[] = [];
     const warn = (message: string) => warnings.push(message);

@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  DEFAULT_BUILTIN_SETTINGS, hookStatus, parseBuiltinSettings, parseCommandResult, parseHooksDocument,
+  DEFAULT_BUILTIN_SETTINGS, hookStatus, parseCommandResult, parseHooksDocument,
   runBeforePromptHooks, runSessionStopHooks,
   type BuiltinSettings, type CommandHook, type CommandResult, type GhostBeforePromptEvent,
   type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
@@ -202,11 +202,9 @@ export class GhostHookRunner {
 
   static fromConfig(path: string, options: GhostHookRunnerOptions = {}): GhostHookRunner {
     const document = readCommandHooksDocument(path);
-    const commands = parseHooksDocument(document, path);
     return new GhostHookRunner({
       ...options,
-      commands,
-      builtin: parseBuiltinSettings(document as Record<string, unknown>, path),
+      ...parseHooksDocument(document, path),
       commandConfig: { path, document: document as Record<string, unknown> },
     });
   }
@@ -231,9 +229,8 @@ export class GhostHookRunner {
   async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
-    const commands = parseHooksDocument(document, config.path);
+    const { commands, builtin } = parseHooksDocument(document, config.path);
     const admitted = document as Record<string, unknown>;
-    const builtin = parseBuiltinSettings(admitted, config.path);
     return serializeByKey(this.configWrites, config.path, async () => {
       await mkdir(dirname(config.path), { recursive: true });
       await writePrivateJsonAtomic(config.path, admitted);

@@ -94,7 +94,7 @@ const BUILTIN_KEYS = {
 } as const;
 
 /** The `builtin` section of a `hooks.json` document, defaults filled in. */
-export function parseBuiltinSettings(parsed: Record<string, unknown>, path: string): BuiltinSettings {
+function parseBuiltinSettings(parsed: Record<string, unknown>, path: string): BuiltinSettings {
   const settings = { ...DEFAULT_BUILTIN_SETTINGS };
   const builtin = parsed.builtin;
   if (builtin === undefined) return settings;
@@ -148,10 +148,9 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
  * Admit one `hooks.json` document. Every error names the offending field the
  * same way whether the document came from disk or from `PUT /api/hooks/config`.
  */
-export function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
+export function parseHooksDocument(parsed: unknown, path: string): { commands: CommandHook[]; builtin: BuiltinSettings } {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  parseBuiltinSettings(parsed, path);
-  return parseCommandHooks(parsed, path);
+  return { builtin: parseBuiltinSettings(parsed, path), commands: parseCommandHooks(parsed, path) };
 }
 
 function parseCommandHooks(parsed: Record<string, unknown>, path: string): CommandHook[] {
