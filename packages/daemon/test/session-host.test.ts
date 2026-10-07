@@ -772,6 +772,25 @@ describe("the idle handoff", () => {
     expect(fake.calls()).toHaveLength(1);
   });
 
+  it("starts no next-work turn once handoff_idle_seconds turns the chain off during its countdown", async () => {
+    const dir = tempDir();
+    cleanups.push(dir.cleanup);
+    const config = join(dir.path, "hooks.json");
+    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1 } }));
+    const hooks = GhostHookRunner.fromConfig(config);
+    const fake = harness(replies("done", "noted", "unexpected"));
+    const sessions = host({ harnesses: [fake], hooks, nextWorkCountdownMs: 300 });
+    await turn(sessions, "ship it");
+    const row = async () => (await sessions.listSessions("casper")).find((listed) => listed.id === "c1");
+    for (let tries = 0; !(await row())?.continuesAt; tries += 1) {
+      if (tries > 400) throw new Error("no countdown");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await hooks.replaceConfig({ builtin: { handoff_idle_seconds: 0 } });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(fake.calls()).toHaveLength(2);
+  });
+
   it("lists the countdown, and the owner's cancel stops the next-work turn", async () => {
     const fake = harness(replies("done", "noted", "unexpected"));
     const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 60_000 });

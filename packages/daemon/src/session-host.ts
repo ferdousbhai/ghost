@@ -962,7 +962,9 @@ export class SessionHost {
   private countDownNextWork(ghostName: string, id: string, key: string): void {
     const timer = setTimeout(() => {
       this.handoffs.delete(key);
-      if (this.hooks.builtin().nextWorkTurns === 0) return this.announce(ghostName, id);
+      // Either setting at 0 turns this step off (docs/hooks.md).
+      const { handoffIdleMs, nextWorkTurns } = this.hooks.builtin();
+      if (handoffIdleMs === 0 || nextWorkTurns === 0) return this.announce(ghostName, id);
       void this.admitTurn(ghostName, { sessionId: id, prompt: NEXT_WORK_PROMPT, origin: "auto" })
         .then((admission) => admission.run({ emit: () => {} }))
         .catch((error: unknown) => this.logger.warn("next-work turn did not start", { ghost: ghostName, conversation: id, error: errorMessage(error) }));
