@@ -2231,7 +2231,9 @@ Singleton {
         state.streaming = false;
         root.settleToolActivityFor(state, true);
         root.flushTurn(state, true);
-        // A stop never sends what was queued behind it: it goes back to the composer.
+        // A stop never sends what was queued behind it: it goes back to the
+        // composer, a follow-up still being written included, and only here.
+        root.retire(state, "queueRequest");
         if (state.followUpQueue.length > 0 && root.isActiveTurn(state))
             root.composerDraft(state.followUpQueue.join("\n\n"));
         root.resetInteractionStateFor(state);

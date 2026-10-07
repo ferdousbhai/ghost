@@ -379,6 +379,24 @@ TestCase {
         compare(turn.state.followUpQueue.length, 0);
     }
 
+    // A follow-up still being written goes back with the stop, and only then.
+    function test_aStopHandsBackAFollowUpInFlightOnce(): void {
+        const turn = openTurn("stop-in-flight", null);
+        const queued = [];
+        Ghostd.requestFactory = FakeXhr.factory(queued, /\/queue$/);
+        Ghostd.queueMessage("late thought");
+        compare(queued.length, 1);
+        const drafted = [];
+        const take = text => drafted.push(text);
+        Ghostd.composerDraft.connect(take);
+        Ghostd.cancelTurn(turn.state);
+        queued[0].complete(409, { error: { code: "session_not_streaming", message: "not streaming" } });
+        Ghostd.composerDraft.disconnect(take);
+        compare(drafted, ["late thought"]);
+        compare(turn.state.followUpQueue.length, 0);
+        compare(turn.state.queueError, "");
+    }
+
     function test_clickingActiveTitleDoesNotInterruptItsTurn(): void {
         const aborts = { count: 0 };
         const turn = openTurn("active-click", aborts);
