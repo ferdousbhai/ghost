@@ -185,14 +185,28 @@ Rectangle {
         property string key
         readonly property int value: HookConfig.builtinValue(Ghostd.hookConfig, setting.key)
 
+        /** Show the file's value: after a reload, a refused write, or a field left unchanged. */
+        function show(): void {
+            valueInput.text = String(setting.value);
+        }
+
         function commit(): void {
             const typed = Number(valueInput.text.trim());
             if (Number.isInteger(typed) && typed >= 0 && typed !== setting.value && root.editable && !root.busy)
                 Ghostd.writeHookConfig(HookConfig.withBuiltin(Ghostd.hookConfig, setting.key, typed));
-            else valueInput.text = String(setting.value);
+            else setting.show();
         }
 
+        onValueChanged: setting.show()
         spacing: Theme.gap
+
+        Connections {
+            target: Ghostd
+
+            function onHookConfigWriteFinished(): void {
+                setting.show();
+            }
+        }
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
@@ -225,7 +239,7 @@ Rectangle {
                 Accessible.name: setting.label
                 onCommitted: setting.commit()
                 onFocusLost: setting.commit()
-                onCancelled: valueInput.text = String(setting.value)
+                onCancelled: setting.show()
             }
         }
     }

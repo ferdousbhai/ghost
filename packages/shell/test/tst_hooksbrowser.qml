@@ -71,6 +71,7 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.retireHooksRequest();
+        Ghostd.retire(Ghostd, "hookConfigMutation");
         Ghostd.requestFactory = null;
         Ghostd.hookConfig = null;
         Ghostd.hookConfigLoaded = false;
@@ -135,6 +136,18 @@ TestCase {
         });
         tc.requests[0].complete(200, { path: Ghostd.hookConfigPath, document: JSON.parse(tc.requests[0].body) });
         tryVerify(function () { return findChild(browser, "hookBuiltin-next_work_turns").text === "0"; });
+    }
+
+    // A refused idle setting shows the file's value again, not what was typed.
+    function test_refusedIdleSettingShowsTheFilesValue(): void {
+        const browser = editableBrowser();
+        const turns = findChild(browser, "hookBuiltin-next_work_turns");
+        turns.text = "20000";
+        turns.accepted();
+        compare(tc.requests.length, 1);
+        tc.requests[0].complete(400, { error: { code: "bad_request", message: "builtin.next_work_turns must be an integer in [0, 10000]." } });
+        verify(Ghostd.hookConfigError !== "");
+        compare(turns.text, "100");
     }
 
     function test_commandHookIsEditedInPlaceAndTheFileIsReplacedWhole(): void {
