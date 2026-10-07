@@ -114,6 +114,28 @@ TestCase {
         verify(line.visible);
     }
 
+    // A follow-up queued while the stop hook decides waits for it: the turn
+    // stays settled until that follow-up's pass starts.
+    function test_queueingDuringAStopHookStaysSettled(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        Ghostd.streaming = true;
+        const state = Ghostd.newTurnState("", "");
+        state.streaming = true;
+
+        Ghostd.handleTurnEvent(state, { type: "hook_start", name: "Keep going?", event: "session_stop" });
+        Ghostd.handleTurnEvent(state, { type: "queue", followUp: ["and the index"] });
+        Ghostd.settling = state.settling;
+        verify(!Ghostd.working);
+        verify(!line.visible);
+
+        Ghostd.handleTurnEvent(state, { type: "hook_end", name: "Keep going?", event: "session_stop" });
+        Ghostd.handleTurnEvent(state, { type: "queue", followUp: [] });
+        Ghostd.handleTurnEvent(state, { type: "owner_message", text: "and the index" });
+        Ghostd.settling = state.settling;
+        verify(Ghostd.working);
+    }
+
     // A turn's own tool events clear `activity` between every lifecycle step,
     // which is what used to make the copy flicker. The call itself is the
     // steady thing, so it holds the line for the whole of its run.

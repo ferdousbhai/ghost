@@ -2333,7 +2333,9 @@ Singleton {
     }
 
     function handleTurnEvent(state: var, event: var): void {
-        if (event.event !== "session_stop") state.settling = false;
+        // While a stop hook decides, only new work shows: a queued follow-up
+        // waits for the hook, and a session_stop hook's own end is not work.
+        if (event.event !== "session_stop" && event.type !== "queue") state.settling = false;
         switch (event.type) {
         case "start":
             state.activity = "";
