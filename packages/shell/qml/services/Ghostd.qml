@@ -1865,6 +1865,14 @@ Singleton {
         root.sessionIds[ghost] = id;
         root.currentSessionId = id;
         root.showTurnState(ghost, id);
+        // An idle conversation left behind keeps nothing: opening it again
+        // reloads its transcript, so its rows would only grow the shell.
+        if (previous && previous.key !== root.conversationKey(ghost, id) && !previous.streaming
+                && !previous.detached && !previous.queueSubmitting) {
+            const kept = Object.assign({}, root.turnStates);
+            delete kept[previous.key];
+            root.turnStates = kept;
+        }
     }
 
     /**
