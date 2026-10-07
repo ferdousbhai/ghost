@@ -33,6 +33,8 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
+/** How long a session_stop hook decides after each reply; 0 runs none. */
+const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 /**
  * The agent CLIs the mock pretends are installed, in Omarchy's order; codex
  * has no room in its usage windows. A turn runs on the conversation's chosen
@@ -681,9 +683,17 @@ async function streamTurn(res, name, body) {
     } else {
       let reply = await pump(res, script(name, prompt), stream);
       logReply(reply);
-      // A queued follow-up runs after the current pass: the daemon logs and
-      // announces it, says owner_message, then streams the pass that answers it.
-      while (reply !== null && turn.followUp.length > 0) {
+      // After each pass a stop hook decides (never continuing, here); a queued
+      // follow-up then runs: the daemon logs and announces it, says
+      // owner_message, then streams the pass that answers it.
+      while (reply !== null) {
+        if (STOP_HOOK_MS > 0 && turn.followUp.length === 0) {
+          const hook = { name: "Deciding whether to keep going", event: "session_stop" };
+          send(res, stream, { type: "hook_start", ...hook });
+          await new Promise((resolve) => setTimeout(resolve, STOP_HOOK_MS));
+          send(res, stream, { type: "hook_end", ...hook });
+        }
+        if (turn.followUp.length === 0) break;
         const text = turn.followUp.shift();
         if (existing) append(existing, { role: "user", content: textParts(text) });
         publishConversationUpdated(name, sessionId);

@@ -2353,6 +2353,7 @@ Singleton {
         case "hook_start":
             if (event.event === "session_stop") {
                 state.settling = true;
+                state.activity = "";
                 root.closeAssistantRowFor(state);
                 break;
             }

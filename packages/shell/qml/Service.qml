@@ -48,7 +48,8 @@ Item {
         }
 
         function ask(prompt: string): void {
-            Ghostd.send(prompt);
+            if (Ghostd.streaming) Ghostd.queueMessage(prompt);
+            else Ghostd.send(prompt);
         }
 
         function section(name: string): void {

@@ -35,7 +35,8 @@ cd packages/shell
 node dev/mock-ghostd.mjs --port 17717
 # Shape a preview: --slow (30ms deltas), --tool-steps N,
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
-# --stall-stream (stream never settles), --update (a newer release is out).
+# --stall-stream (stream never settles), --update (a newer release is out),
+# --stop-hook S (a stop hook decides for S seconds after each reply).
 
 # Terminal 2: the one supported HUD preview command.
 bash dev/preview.sh qml 17717
