@@ -4,8 +4,6 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
 
-**Open work:** [`docs/HANDOFF.md`](docs/HANDOFF.md) carries an unfinished task and how to continue it. Read it before starting; delete both it and this line when it is done.
-
 ## Authoritative contract
 
 `CONTRACTS.md` defines the ghost-home layout, daemon API, the harness table, package boundaries, and lifecycle invariants. Read and update it with every contract change; do not duplicate those contracts here or in code comments. It stays trustworthy only through use: when you find a claim the code contradicts, fixing that drift (doc or code, whichever is wrong) is part of the task at hand, not a follow-up.
