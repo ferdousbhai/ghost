@@ -13,8 +13,8 @@ import type { HarnessEvent, HarnessLaunch } from "./harness-table.js";
 const KILL_GRACE_MS = 3_000;
 /** The stderr kept for an error message and limit classification. */
 const STDERR_TAIL_BYTES = 8_192;
-/** How long output may keep arriving after the harness itself exits. */
-const PIPE_DRAIN_MS = 2_000;
+/** How long output may keep arriving after a harness or hook process itself exits. */
+export const PIPE_DRAIN_MS = 2_000;
 
 export interface HarnessExit {
   readonly code: number | null;

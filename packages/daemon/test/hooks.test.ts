@@ -305,6 +305,35 @@ describe("GhostHookRunner", () => {
     }
   }, 15_000);
 
+  it("ends a hook with its own process when a setsid descendant keeps the pipes open", async () => {
+    if (process.platform === "win32") return;
+    const directory = temporaryDirectory();
+    const pidPath = join(directory, "background.pid");
+    const config = join(directory, "hooks.json");
+    // The documented background pattern, without redirecting output: the
+    // descendant leaves the hook's process group but still holds its stdout.
+    writeFileSync(config, JSON.stringify({
+      hooks: {
+        session_stop: [{
+          hooks: [{
+            type: "command",
+            command: `setsid sleep 30 & echo $! > ${JSON.stringify(pidPath)}; echo '{"decision":"block","reason":"Keep going."}'`,
+          }],
+        }],
+      },
+    }));
+    const runner = GhostHookRunner.fromConfig(config);
+    const started = Date.now();
+    try {
+      const result = await runner.emitSessionStop(event());
+      expect(Date.now() - started).toBeLessThan(10_000);
+      expect(ghostSessionStopContinuation(result)).toBe("Keep going.");
+    } finally {
+      const pid = Number(readFileSync(pidPath, "utf8"));
+      if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
+    }
+  }, 15_000);
+
   it("rejects NUL commands and fails every command event open on execution rejection", async () => {
     const directory = temporaryDirectory();
     const nulConfig = join(directory, "nul-hooks.json");

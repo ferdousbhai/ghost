@@ -10,6 +10,7 @@ import {
   type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
   type GhostSessionStopResult,
 } from "./hook-policy.js";
+import { PIPE_DRAIN_MS } from "./harness-process.js";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
@@ -163,6 +164,11 @@ function runCommandHook(
       executionFailed = true;
       stderrChunks.length = 0;
       finish(null);
+    });
+    // A descendant in its own session (`setsid job &`) keeps the pipes open
+    // past the hook and out of reach of stop(); the hook ends with its shell.
+    child.on("exit", (code) => {
+      setTimeout(() => finish(code), PIPE_DRAIN_MS).unref();
     });
     child.on("close", (code) => finish(code));
     child.stdin.on("error", () => {
