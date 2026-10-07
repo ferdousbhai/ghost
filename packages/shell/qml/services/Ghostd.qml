@@ -422,6 +422,12 @@ Singleton {
     property var renameGhostSnapshot: null
     property var renameSessionRequest: null
     property var sessionsRequest: null
+    property var nextWorkCancelRequest: null
+    /** When ghostd starts the open conversation's next-work turn, from the listing; "" when none counts down. */
+    readonly property string continuesAt: {
+        const open = root.sessions.find(session => session && session.id === root.currentSessionId);
+        return open && typeof open.continuesAt === "string" ? open.continuesAt : "";
+    }
     property var eventsRequest: null
     property string eventsGhost: ""
     property int eventsConsumed: 0
@@ -2184,6 +2190,16 @@ Singleton {
         // Another client's turn ends in the listing, which reloads what it left.
         if (state.detached) return;
         root.cancelTurn(state);
+    }
+
+    /** Cancel the open conversation's next-work countdown; the listing it announces clears the bar. */
+    function cancelNextWork(): void {
+        if (root.continuesAt === "" || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        root.request(root, "nextWorkCancelRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(root.currentSessionId) + "/continuation", null, function () {
+                root.fetchSessions(ghost);
+            });
     }
 
     function cancelTurn(state: var): void {

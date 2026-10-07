@@ -29,8 +29,8 @@ export type AssistantPart = { readonly type: "text"; readonly text: string } | T
 
 export type LogEntry =
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
-  /** `origin` is absent for an owner message. */
-  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" }
+  /** `origin` is absent for an owner message; `auto` is ghostd's next-work prompt. */
+  | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" }
   | {
     readonly type: "assistant";
     readonly at: string;
@@ -249,7 +249,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "handoff";
+  role: "user" | "assistant" | "hook" | "handoff" | "auto";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -271,7 +271,7 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
     let message: TranscriptMessage | null = null;
     if (entry.type === "user") {
       message = {
-        role: entry.origin === "hook" ? "hook" : "user",
+        role: entry.origin === "hook" || entry.origin === "auto" ? entry.origin : "user",
         content: [{ type: "text", text: entry.text }],
         entryId,
         ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
@@ -314,7 +314,7 @@ function assistantText(content: readonly AssistantPart[]): string {
 export function handoffContext(entries: readonly LogEntry[]): string | null {
   const lines: string[] = [];
   for (const entry of entries) {
-    if (entry.type === "user") lines.push(`${entry.origin === "hook" ? "Hook" : "Owner"}: ${entry.text}`);
+    if (entry.type === "user") lines.push(`${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`);
     if (entry.type === "assistant") {
       const text = assistantText(entry.content).trim();
       if (text) lines.push(`You: ${text}`);
@@ -325,6 +325,16 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
   let text = lines.join("\n\n");
   if (text.length > HANDOFF_CONTEXT_CHARS) text = `…${text.slice(-HANDOFF_CONTEXT_CHARS)}`;
   return text;
+}
+
+/** Next-work turns ghostd has started since the owner last wrote, which `next_work_turns` bounds. */
+export function autoTurnsSinceOwner(entries: readonly LogEntry[]): number {
+  let count = 0;
+  for (const entry of entries) {
+    if (entry.type === "command" || (entry.type === "user" && entry.origin === undefined)) count = 0;
+    else if (entry.type === "user" && entry.origin === "auto") count += 1;
+  }
+  return count;
 }
 
 /** Owner `!` commands since the harness last ran, which it has not seen. */

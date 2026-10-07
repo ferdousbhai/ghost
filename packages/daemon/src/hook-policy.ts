@@ -78,24 +78,36 @@ export interface CommandHook {
   source: string;
 }
 
-const SETTINGS_KEY = /^[a-z][a-z0-9_]*$/u;
+/** ghostd's own idle behaviors, set in `hooks.json`'s `builtin` section; 0 turns one off. */
+export interface BuiltinSettings {
+  /** Idle time after a turn before the handoff pass; 0 runs no handoff and no next-work turn. */
+  handoffIdleMs: number;
+  /** "What should we work on next?" turns allowed since the owner last wrote. */
+  nextWorkTurns: number;
+}
 
-/**
- * The `builtin` section of a `hooks.json` document once named hooks Ghost
- * registered in code. There is no such registration, so every key is refused;
- * the section is still read so an older `hooks.json` parses when it is empty
- * and says so plainly when it is not.
- */
-function validateBuiltinHookSettings(parsed: Record<string, unknown>, path: string): void {
+export const DEFAULT_BUILTIN_SETTINGS: BuiltinSettings = { handoffIdleMs: 180_000, nextWorkTurns: 100 };
+
+const BUILTIN_KEYS = {
+  handoff_idle_seconds: { field: "handoffIdleMs", scale: 1_000, maximum: 86_400 },
+  next_work_turns: { field: "nextWorkTurns", scale: 1, maximum: 10_000 },
+} as const;
+
+/** The `builtin` section of a `hooks.json` document, defaults filled in. */
+export function parseBuiltinSettings(parsed: Record<string, unknown>, path: string): BuiltinSettings {
+  const settings = { ...DEFAULT_BUILTIN_SETTINGS };
   const builtin = parsed.builtin;
-  if (builtin === undefined) return;
+  if (builtin === undefined) return settings;
   if (!isRecord(builtin)) throw new Error(`${path}: "builtin" must be an object.`);
-  for (const key of Object.keys(builtin)) {
-    if (!SETTINGS_KEY.test(key)) {
-      throw new Error(`${path}: builtin key ${JSON.stringify(key)} must match [a-z][a-z0-9_]*.`);
+  for (const [key, value] of Object.entries(builtin)) {
+    if (!Object.hasOwn(BUILTIN_KEYS, key)) throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
+    const { field, scale, maximum } = BUILTIN_KEYS[key as keyof typeof BUILTIN_KEYS];
+    if (!Number.isInteger(value) || (value as number) < 0 || (value as number) > maximum) {
+      throw new Error(`${path}: builtin.${key} must be an integer in [0, ${maximum}].`);
     }
-    throw new Error(`${path}: unsupported builtin key ${JSON.stringify(key)}.`);
+    settings[field] = (value as number) * scale;
   }
+  return settings;
 }
 
 export function ghostSessionStopContinuation(
@@ -138,7 +150,7 @@ function displayText(value: unknown, fallback: string, label: string, maximum: n
  */
 export function parseHooksDocument(parsed: unknown, path: string): CommandHook[] {
   if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
-  validateBuiltinHookSettings(parsed, path);
+  parseBuiltinSettings(parsed, path);
   return parseCommandHooks(parsed, path);
 }
 

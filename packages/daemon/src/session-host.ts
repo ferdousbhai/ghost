@@ -25,6 +25,7 @@ import {
   appendLog,
   conversationDir,
   conversationEnvironment,
+  autoTurnsSinceOwner,
   handoffContext,
   isValidConversationId,
   logPath,
@@ -79,10 +80,12 @@ import { trashPath, type TrashPathResult } from "./trash.js";
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
 export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 
-/** How long a conversation sits idle after a turn before its ghost hands off. */
-export const HANDOFF_IDLE_MS = 180_000;
 /** The handoff pass's prompt: the documents are the state a later session starts from. */
 export const HANDOFF_PROMPT = "The owner has been away for three minutes. Hand off: bring your notes in the owner's documents up to date with this conversation (what is done, what is verified, and the exact next step) so a fresh session could resume from them alone. Change nothing else. Reply in one line naming what you updated, or \"nothing to update\".";
+/** The turn ghostd starts after a handoff, so the ghost keeps working while the owner is away. */
+export const NEXT_WORK_PROMPT = "What should we work on next?";
+/** How long the owner has to cancel that turn. */
+export const NEXT_WORK_COUNTDOWN_MS = 15_000;
 /** How long one read of Omarchy's harness report is reused. */
 const HARNESS_REPORT_TTL_MS = 60_000;
 /** The live tail of a tool's output shown on its card. */
@@ -117,8 +120,8 @@ export interface SessionHostOptions {
   defaultHarness?: () => Promise<string | null>;
   /** The environment harnesses run with; the daemon's own by default. */
   env?: NodeJS.ProcessEnv;
-  /** Idle time after a turn before the handoff pass; `HANDOFF_IDLE_MS` by default. */
-  handoffIdleMs?: number;
+  /** The owner's window to cancel a next-work turn; `NEXT_WORK_COUNTDOWN_MS` by default. */
+  nextWorkCountdownMs?: number;
 }
 
 export interface RunTurnOptions {
@@ -171,6 +174,8 @@ export interface SessionSummary {
   unread: boolean;
   /** A turn or owner command is running in it now, whichever client started it. */
   running: boolean;
+  /** When ghostd will start a next-work turn here, unless the owner cancels; null otherwise. */
+  continuesAt: string | null;
 }
 
 export interface Transcript {
@@ -269,8 +274,14 @@ export class SessionHost {
   private readonly admissions = new Map<string, AbortController>();
   private readonly deleting = new Set<string>();
   /** Each conversation's pending or running handoff, which any new turn or move cancels first. */
-  private readonly handoffs = new Map<string, { timer?: ReturnType<typeof setTimeout>; controller?: AbortController; done?: Promise<void> }>();
-  private readonly handoffIdleMs: number;
+  private readonly handoffs = new Map<string, {
+    timer?: ReturnType<typeof setTimeout>;
+    controller?: AbortController;
+    done?: Promise<void>;
+    /** Set while a next-work turn counts down. */
+    continuesAt?: string;
+  }>();
+  private readonly nextWorkCountdownMs: number;
   private readonly reservedGhosts = new Set<string>();
   /** File work in flight per ghost, which a delete or rename waits out. */
   private readonly leases = new Map<string, { count: number; drained?: () => void }>();
@@ -294,7 +305,7 @@ export class SessionHost {
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
     this.rowOf = options.harnessRows ?? harnessRow;
-    this.handoffIdleMs = options.handoffIdleMs ?? HANDOFF_IDLE_MS;
+    this.nextWorkCountdownMs = options.nextWorkCountdownMs ?? NEXT_WORK_COUNTDOWN_MS;
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -501,7 +512,10 @@ export class SessionHost {
 
   // ── Turns ─────────────────────────────────────────────────────────────
 
-  async admitTurn(ghostName: string, options: Pick<RunTurnOptions, "sessionId" | "prompt">): Promise<TurnAdmission> {
+  async admitTurn(
+    ghostName: string,
+    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { origin?: "auto" },
+  ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
     const key = keyOf(ghost.name, id);
@@ -529,7 +543,7 @@ export class SessionHost {
     return {
       run: async (stream) => {
         try {
-          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
+          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, options.origin, command, stream, controller.signal));
         } finally {
           release();
           this.announce(ghost.name, id);
@@ -549,6 +563,7 @@ export class SessionHost {
     ghost: Ghost,
     id: string,
     prompt: string,
+    promptOrigin: "auto" | undefined,
     command: ReturnType<typeof ownerCommand>,
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
@@ -568,8 +583,8 @@ export class SessionHost {
     const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
     let terminal: TurnEvent = { type: "done" };
     try {
-      type Pass = { text: string; origin?: "follow_up" | "hook" };
-      let next: Pass | undefined = { text: prompt };
+      type Pass = { text: string; origin?: "follow_up" | "hook" | "auto" };
+      let next: Pass | undefined = { text: prompt, ...(promptOrigin ? { origin: promptOrigin } : {}) };
       let turnId = randomUUID();
       let ownerPrompt = prompt;
       while (next && !signal.aborted) {
@@ -870,11 +885,12 @@ export class SessionHost {
 
   // ── Handoff ───────────────────────────────────────────────────────────
 
-  /** After a turn, hand off once the conversation has sat idle for `handoffIdleMs`. */
+  /** After a turn, hand off once the conversation has sat idle as long as `hooks.json` says. */
   private scheduleHandoff(ghostName: string, id: string): void {
     const key = keyOf(ghostName, id);
-    if (this.shuttingDown || this.handoffs.has(key)) return;
-    const timer = setTimeout(() => void this.runHandoff(ghostName, id, key), this.handoffIdleMs);
+    const { handoffIdleMs } = this.hooks.builtin();
+    if (this.shuttingDown || this.handoffs.has(key) || handoffIdleMs === 0) return;
+    const timer = setTimeout(() => void this.runHandoff(ghostName, id, key), handoffIdleMs);
     timer.unref?.();
     this.handoffs.set(key, { timer });
   }
@@ -898,6 +914,7 @@ export class SessionHost {
     const controller = new AbortController();
     const handoff = { controller, done: undefined as Promise<void> | undefined };
     this.handoffs.set(key, handoff);
+    let next = false;
     handoff.done = (async () => {
       try {
         const ghost = this.registry.get(ghostName);
@@ -922,6 +939,9 @@ export class SessionHost {
             ...(result.error ? { error: result.error } : {}),
           }]);
           this.announce(ghost.name, id);
+          if (!this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner((await readLog(sessionDir, id)) ?? [])) {
+            next = true;
+          }
         });
       } catch (error) {
         this.logger.warn("handoff failed", { ghost: ghostName, conversation: id, error: errorMessage(error) });
@@ -930,6 +950,31 @@ export class SessionHost {
       }
     })();
     await handoff.done;
+    if (next && !this.handoffs.has(key) && !this.admissions.has(key)) this.countDownNextWork(ghostName, id, key);
+  }
+
+  /**
+   * Announce a next-work turn, then start it unless the owner cancels or
+   * writes first: the turn after keep-going lets one stop.
+   */
+  private countDownNextWork(ghostName: string, id: string, key: string): void {
+    const timer = setTimeout(() => {
+      this.handoffs.delete(key);
+      void this.admitTurn(ghostName, { sessionId: id, prompt: NEXT_WORK_PROMPT, origin: "auto" })
+        .then((admission) => admission.run({ emit: () => {} }))
+        .catch((error: unknown) => this.logger.warn("next-work turn did not start", { ghost: ghostName, conversation: id, error: errorMessage(error) }));
+    }, this.nextWorkCountdownMs);
+    timer.unref?.();
+    this.handoffs.set(key, { timer, continuesAt: new Date(Date.now() + this.nextWorkCountdownMs).toISOString() });
+    this.announce(ghostName, id);
+  }
+
+  /** The owner's cancel of a counting-down next-work turn; a no-op when none is. */
+  async cancelNextWork(ghostName: string, sessionId: string | null | undefined): Promise<void> {
+    const key = keyOf(this.registry.get(ghostName).name, requireConversationId(sessionId ?? "default"));
+    if (this.handoffs.get(key)?.continuesAt === undefined) return;
+    await this.cancelHandoff(key);
+    this.announce(ghostName, requireConversationId(sessionId ?? "default"));
   }
 
   /**
@@ -1088,6 +1133,7 @@ export class SessionHost {
         pinned: pins.pinned.includes(id),
         unread: readAt === undefined || updatedAt > readAt,
         running,
+        continuesAt: this.handoffs.get(keyOf(ghost.name, id))?.continuesAt ?? null,
       });
     }
     return rows.sort((a, b) => (a.pinned === b.pinned ? b.updatedAt.localeCompare(a.updatedAt) : (a.pinned ? -1 : 1)));

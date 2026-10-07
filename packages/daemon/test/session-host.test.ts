@@ -10,7 +10,7 @@ import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
-import { HANDOFF_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, tempDir, type TempGhosts } from "./helpers/fixtures.js";
@@ -633,10 +633,15 @@ describe("conversation metadata", () => {
   });
 });
 
+/** A hook runner with only ghostd's idle settings: handoff after `ms`, then up to `turns` next-work turns. */
+function idle(ms: number, turns: number): GhostHookRunner {
+  return new GhostHookRunner({ builtin: { handoffIdleMs: ms, nextWorkTurns: turns } });
+}
+
 describe("the idle handoff", () => {
   it("resumes the conversation's session once it sits idle and logs the reply as one handoff row", async () => {
     const fake = harness(replies("done", "Updated plan.md"));
-    const sessions = host({ harnesses: [fake], handoffIdleMs: 20 });
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
     await turn(sessions, "ship it");
     await waitFor(() => fake.calls().length === 2);
     expect(fake.calls()[1]).toMatchObject({ prompt: HANDOFF_PROMPT, resume: true });
@@ -656,12 +661,42 @@ describe("the idle handoff", () => {
     const fake = harness([]);
     const held = fake.gate("handoff");
     fake.setTurns([...replies("done"), { gate: held.path }, ...replies("next answer")]);
-    const sessions = host({ harnesses: [fake], handoffIdleMs: 20 });
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
     await turn(sessions, "ship it");
     await waitFor(() => fake.calls().length === 2);
     expect(text(await turn(sessions, "one more thing"))).toBe("next answer");
     expect(fake.calls()[2]?.prompt).toBe("one more thing");
     expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
+  });
+
+  it("keeps the ghost working after each handoff, up to next_work_turns since the owner wrote", async () => {
+    const fake = harness(replies("done", "noted", "idea one", "noted", "idea two", "noted", "unexpected"));
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 2), nextWorkCountdownMs: 20 });
+    await turn(sessions, "ship it");
+    await waitFor(() => fake.calls().length === 6);
+    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).split('"type":"handoff"').length === 4);
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fake.calls().map((call) => call.prompt)).toEqual([
+      "ship it", HANDOFF_PROMPT, NEXT_WORK_PROMPT, HANDOFF_PROMPT, NEXT_WORK_PROMPT, HANDOFF_PROMPT,
+    ]);
+    const { messages } = await sessions.readTranscript("casper", "c1");
+    expect(messages.map((message) => message.role)).toEqual([
+      "user", "assistant", "handoff", "auto", "assistant", "handoff", "auto", "assistant", "handoff",
+    ]);
+  });
+
+  it("lists the countdown, and the owner's cancel stops the next-work turn", async () => {
+    const fake = harness(replies("done", "noted", "unexpected"));
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 60_000 });
+    await turn(sessions, "ship it");
+    const row = async () => (await sessions.listSessions("casper")).find((listed) => listed.id === "c1");
+    for (let tries = 0; !(await row())?.continuesAt; tries += 1) {
+      if (tries > 200) throw new Error("no countdown");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    await sessions.cancelNextWork("casper", "c1");
+    expect((await row())?.continuesAt).toBeNull();
+    expect(fake.calls()).toHaveLength(2);
   });
 });
 

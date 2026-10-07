@@ -185,6 +185,22 @@ function withoutHandler(document, event, groupIndex, handlerIndex) {
     return next;
 }
 
+/** ghostd's idle settings in hooks.json's `builtin` section, and what an absent key means. */
+const BUILTIN_DEFAULTS = { handoff_idle_seconds: 180, next_work_turns: 100 };
+
+function builtinValue(document, key) {
+    const builtin = isObject(document) && isObject(document.builtin) ? document.builtin : {};
+    return Number.isInteger(builtin[key]) ? builtin[key] : BUILTIN_DEFAULTS[key];
+}
+
+/** `document` with one idle setting replaced; the daemon bounds it. */
+function withBuiltin(document, key, value) {
+    const next = clone(document);
+    if (!isObject(next.builtin)) next.builtin = {};
+    next.builtin[key] = value;
+    return next;
+}
+
 function same(left, right) {
     return JSON.stringify(clone(left)) === JSON.stringify(clone(right));
 }

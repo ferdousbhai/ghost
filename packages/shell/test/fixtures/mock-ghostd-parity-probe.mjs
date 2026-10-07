@@ -83,7 +83,7 @@ try {
   assert.equal(sessionsResponse.status, 200);
   const { sessions } = await sessionsResponse.json();
   assert.deepEqual(Object.keys(sessions[0]), [
-    "id", "title", "preview", "harness", "updatedAt", "messageCount", "pinned", "unread", "running",
+    "id", "title", "preview", "harness", "updatedAt", "messageCount", "pinned", "unread", "running", "continuesAt",
   ]);
 
   // Pinning lifts a conversation above newer ones, and unpinning puts it back.

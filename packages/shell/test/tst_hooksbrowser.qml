@@ -21,7 +21,7 @@ TestCase {
         id: browserComponent
         Components.HooksBrowser {
             width: 640
-            height: 480
+            height: 560
             visible: true
         }
     }
@@ -116,6 +116,25 @@ TestCase {
         verify(browser !== null);
         tryVerify(function () { return findChild(browser, "hookCommand") !== null; });
         return browser;
+    }
+
+    // ghostd's idle settings show their defaults and save into builtin,
+    // leaving the command hooks as they were.
+    function test_idleSettingsSaveIntoBuiltin(): void {
+        const browser = editableBrowser();
+        const turns = findChild(browser, "hookBuiltin-next_work_turns");
+        compare(findChild(browser, "hookBuiltin-handoff_idle_seconds").text, "180");
+        compare(turns.text, "100");
+
+        turns.text = "0";
+        turns.accepted();
+        compare(tc.requests.length, 1);
+        compare(JSON.parse(tc.requests[0].body), {
+            hooks: configDocument().hooks,
+            builtin: { next_work_turns: 0 }
+        });
+        tc.requests[0].complete(200, { path: Ghostd.hookConfigPath, document: JSON.parse(tc.requests[0].body) });
+        tryVerify(function () { return findChild(browser, "hookBuiltin-next_work_turns").text === "0"; });
     }
 
     function test_commandHookIsEditedInPlaceAndTheFileIsReplacedWhole(): void {

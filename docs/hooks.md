@@ -62,9 +62,11 @@ the reply already reads as finished, and only a continuation shows.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 
-Ghost registers no built-in hooks; its one built-in background pass, the idle
-handoff (`CONTRACTS.md`), runs none. An optional top-level `builtin` object is
-accepted only when empty, so an older `hooks.json` still parses.
+Ghost registers no built-in hooks. The top-level `builtin` object sets ghostd's
+idle chain instead (`CONTRACTS.md`, "Background work and hooks"), which runs
+none of them: `handoff_idle_seconds` (default 180) and `next_work_turns`
+(default 100), whole numbers where 0 turns that step off. The Hooks pane edits
+both.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level

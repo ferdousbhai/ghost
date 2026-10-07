@@ -826,6 +826,9 @@ describe("/api/ghosts/:name/sessions/:id/queue", () => {
     expect(tooLate.status).toBe(409);
     expect(await tooLate.json()).toMatchObject({ error: { code: "session_not_streaming" } });
     expect((await fetch(queueUrl(base, "conv-queue"), { method: "DELETE" })).status).toBe(405);
+    // Cancelling a next-work countdown is idempotent: with none pending it still answers.
+    const continuation = queueUrl(base, "conv-queue").replace(/queue$/u, "continuation");
+    expect(await (await fetch(continuation, { method: "DELETE" })).json()).toEqual({ cancelled: true });
   });
 });
 
@@ -840,6 +843,7 @@ describe("GET /api/ghosts/:name/sessions", () => {
     };
     expect(sessions).toHaveLength(1);
     expect(Object.keys(sessions[0]!).sort()).toEqual([
+      "continuesAt",
       "effort",
       "harness",
       "id",

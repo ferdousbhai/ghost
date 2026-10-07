@@ -62,9 +62,11 @@ named, and never into a ghost home.
 
 Because the documents are the state, a conversation left idle for three
 minutes gets one handoff pass on its own harness session that brings them up
-to date. It is Ghost's only background pass of its own: a harness turn ends
-when its answer does, and an owner who walks away mid-task would otherwise
-leave the documents behind the conversation.
+to date, then, after a 15-second window to cancel, a "What should we work on
+next?" turn, up to 100 since the owner last wrote. It is Ghost's only
+background work of its own: a harness turn ends when its answer does, and an
+owner who walks away would otherwise leave the documents behind and the ghost
+idle.
 
 The Documents directory is resolved the way screenshots resolve the Pictures
 directory: `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`.

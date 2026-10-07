@@ -971,6 +971,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       options.host.stopTurn(ghostOf(params), conversationOf(params));
       jsonResponse(response, 200, { stopped: true });
     }),
+    route("DELETE", "api/ghosts/:ghost/sessions/:id/continuation", async ({ params, response }) => {
+      await options.host.cancelNextWork(ghostOf(params), conversationOf(params));
+      jsonResponse(response, 200, { cancelled: true });
+    }),
     route("GET POST", "api/ghosts/:ghost/sessions/:id/queue", ({ params, method, request, response }) => handleQueue(ghostOf(params), conversationOf(params), method, request, response)),
     route("GET POST", "api/ghosts/:ghost/mcp", ({ params, method, request, response }) => handleMcpCollection(ghostOf(params), method, request, response)),
     route("PUT DELETE", "api/ghosts/:ghost/mcp/:server", ({ params, method, request, response }) => handleMcpServer(ghostOf(params), decodePathSegment(params.server ?? ""), method, request, response)),

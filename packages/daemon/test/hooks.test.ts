@@ -163,23 +163,25 @@ describe("GhostHookRunner", () => {
     expect(runner.hasHandlers("session_stop")).toBe(false);
   });
 
-  it("refuses every builtin key", async () => {
+  it("admits only the idle settings in builtin, and applies a replacement", async () => {
     const directory = temporaryDirectory();
     const config = join(directory, "hooks.json");
     writeFileSync(config, JSON.stringify({ hooks: {}, builtin: {} }));
     const runner = GhostHookRunner.fromConfig(config);
-
-    expect(runner.status().hooks).toEqual([]);
+    expect(runner.builtin()).toEqual({ handoffIdleMs: 180_000, nextWorkTurns: 100 });
 
     for (const [document, message] of [
       [{ hooks: {}, builtin: [] }, /"builtin" must be an object/u],
-      [{ hooks: {}, builtin: { "Bad-Key": {} } }, /must match \[a-z\]/u],
-      [{ hooks: {}, builtin: { memory_upkeep: {} } }, /unsupported builtin key/u],
       [{ hooks: {}, builtin: { review: {} } }, /unsupported builtin key/u],
+      [{ hooks: {}, builtin: { next_work_turns: -1 } }, /next_work_turns must be an integer/u],
+      [{ hooks: {}, builtin: { handoff_idle_seconds: 1.5 } }, /handoff_idle_seconds must be an integer/u],
     ] as const) {
       await expect(runner.replaceConfig(document)).rejects.toThrow(message);
     }
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual({ hooks: {}, builtin: {} });
+
+    await runner.replaceConfig({ hooks: {}, builtin: { handoff_idle_seconds: 60, next_work_turns: 0 } });
+    expect(runner.builtin()).toEqual({ handoffIdleMs: 60_000, nextWorkTurns: 0 });
   });
 
   it("has no configuration to replace when built without a file", async () => {

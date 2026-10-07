@@ -15,6 +15,7 @@ HooksBrowser 1.0 HooksBrowser.qml
 InlineRename 1.0 InlineRename.qml
 MarkdownEditor 1.0 MarkdownEditor.qml
 McpBrowser 1.0 McpBrowser.qml
+NextWorkLine 1.0 NextWorkLine.qml
 QueueLine 1.0 QueueLine.qml
 Board 1.0 Board.qml
 RemoteAccess 1.0 RemoteAccess.qml
