@@ -1,6 +1,7 @@
 import QtQuick
 import QtTest
 import "../qml/services"
+import "FakeXhr.js" as FakeXhr
 
 // Single-conversation stream settlement, driven through the real per-turn
 // path (ensureTurnState / beginTurnFor / handleTurnEvent / readTurnStream).
@@ -9,6 +10,9 @@ import "../qml/services"
 // must settle.
 TestCase {
     name: "GhostdStream"
+
+    SignalSpy { id: finishedSpy; target: Ghostd; signalName: "turnFinished" }
+    SignalSpy { id: failedSpy; target: Ghostd; signalName: "turnFailed" }
 
     function init(): void {
         Ghostd.turnStates = ({});
@@ -31,6 +35,57 @@ TestCase {
         Ghostd.liveConversationKeys = [];
         Ghostd.currentSessionId = "";
         Ghostd.clearTurnProjection();
+        Ghostd.requestFactory = null;
+    }
+
+    function cutTurn(id: string, resumed: var): var {
+        const turn = openTurn(id, null);
+        Ghostd.requestFactory = FakeXhr.factory(resumed, /\/stream\?/);
+        finishedSpy.clear();
+        failedSpy.clear();
+        turn.xhr.readyState = 4;
+        turn.xhr.responseText = "data: {\"type\":\"start\"}\n\n"
+            + "data: {\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"Hel\"}\n\n"
+            + "data: {\"type\":\"resume\",\"turn\":\"t1\",\"from\":2}\n\n";
+        Ghostd.readTurnStream(turn.xhr, turn.state.key, "turn", "missing terminal");
+        return turn;
+    }
+
+    function test_aCutResponseResumesWhereItEndedAndSettlesOnce(): void {
+        const resumed = [];
+        const turn = cutTurn("cut", resumed);
+
+        // The cut is not the end: the turn reads on from ghostd's resume route.
+        verify(turn.state.streaming);
+        compare(resumed.length, 1);
+        compare(resumed[0].method, "GET");
+        verify(resumed[0].url.endsWith("/api/ghosts/casper/sessions/cut/stream?turn=t1&from=2"));
+        compare(turn.state.request, resumed[0]);
+
+        // The resumed response is read from its own start.
+        resumed[0].status = 200;
+        resumed[0].readyState = 3;
+        resumed[0].responseText = "data: {\"type\":\"text_delta\",\"contentIndex\":0,\"delta\":\"lo\"}\n\n";
+        resumed[0].notify();
+        resumed[0].complete(200, resumed[0].responseText + "data: {\"type\":\"done\"}\n\n");
+
+        verifyInteractionSettled(turn.state);
+        compare(turn.state.rows[1].text, "Hello");
+        compare(turn.state.lastError, "");
+        compare(turn.state.request, null);
+        compare(finishedSpy.count, 1);
+        compare(failedSpy.count, 0);
+    }
+
+    function test_aTurnThatCannotResumeFailsOnce(): void {
+        const resumed = [];
+        const turn = cutTurn("cut-gone", resumed);
+        resumed[0].complete(404, { error: { code: "turn_not_found", message: "That turn is no longer resumable; read the transcript." } });
+
+        verifyInteractionSettled(turn.state);
+        verify(turn.state.lastError.indexOf("no longer resumable") >= 0);
+        compare(failedSpy.count, 1);
+        compare(finishedSpy.count, 0);
     }
 
     function openTurn(id: string, abortCounter: var): var {

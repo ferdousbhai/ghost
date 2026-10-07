@@ -38,8 +38,9 @@ storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
 ## UI boundaries
 
 - One `Ghostd` singleton serves HUD and in-process bar state. It parses
-  cumulative QML `XMLHttpRequest` SSE bodies directly; request objects remain
-  strongly owned until terminal settlement.
+  cumulative QML `XMLHttpRequest` SSE bodies directly, resuming a turn
+  response ghostd cut for size; request objects remain strongly owned until
+  terminal settlement.
 - The shell edits durable state only through authenticated daemon routes. It
   never reads ghost homes or the owner's documents directly.
 - While streaming, Enter queues a follow-up that runs after the current pass,

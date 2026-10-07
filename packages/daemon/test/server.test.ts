@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { McpCatalog, type McpCatalogOptions } from "../src/mcp-catalog.js";
-import type { TurnEvent } from "../src/turn-events.js";
+import type { TurnEvent, TurnResumeEvent } from "../src/turn-events.js";
 import {
   startDaemonServer,
   type ListeningServer,
@@ -55,6 +55,7 @@ async function serve(
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
     update?: ServerOptions["update"];
+    streamCutBytes?: number;
   } = {},
 ) {
   temp = makeTempGhosts();
@@ -87,6 +88,7 @@ async function serve(
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
     ...(serverOptions.update === undefined ? {} : { update: serverOptions.update }),
+    ...(serverOptions.streamCutBytes === undefined ? {} : { streamCutBytes: serverOptions.streamCutBytes }),
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -709,6 +711,45 @@ describe("POST /api/ghosts/:name/messages", () => {
       .map((event) => event.delta)
       .join("");
     expect(text).toBe("I set type for a living.");
+  });
+
+  it("cuts a long turn into responses that resume where the last one ended", async () => {
+    const deltas = Array.from({ length: 60 }, (_, index) => `${String(index).padStart(2, "0")}${"x".repeat(98)}`);
+    const base = await serve([{
+      events: deltas.map((delta) => ({ type: "text" as const, block: "a", delta })),
+    }], { streamCutBytes: 2_000 });
+    const first = await postTurn(base, TURN_BODY);
+    const responses: Array<Array<TurnEvent | TurnResumeEvent>> = [first.events];
+    for (let last = responses.at(-1)?.at(-1); last?.type === "resume"; last = responses.at(-1)?.at(-1)) {
+      const { turn, from } = last;
+      const response = await fetch(`${base}/api/ghosts/casper/sessions/${TURN_BODY.sessionId}/stream?turn=${turn}&from=${from}`);
+      expect(response.status).toBe(200);
+      responses.push(parseSseStream(await response.text()));
+    }
+
+    expect(responses.length).toBeGreaterThan(2);
+    const events = responses.flatMap((batch) => batch.filter((event): event is TurnEvent => event.type !== "resume"));
+    expect(events.filter((event) => event.type === "done" || event.type === "error")).toEqual([{ type: "done" }]);
+    expect(events.at(-1)).toEqual({ type: "done" });
+    expect(events.filter((event) => event.type === "text_delta").map((event) => event.delta)).toEqual(deltas);
+    expect(events.filter((event) => event.type === "start")).toHaveLength(1);
+    // Every response but the last ends in its resume frame, the only one it has.
+    for (const batch of responses.slice(0, -1)) {
+      expect(batch.filter((event) => event.type === "resume")).toEqual([batch.at(-1)]);
+    }
+  });
+
+  it("refuses to resume a turn it does not know or past where the turn has reached", async () => {
+    const base = await serve(replies("short"), { streamCutBytes: 1 });
+    const { events } = await postTurn(base, TURN_BODY);
+    const { turn } = events.at(-1) as unknown as TurnResumeEvent;
+    const stream = (query: string, session = TURN_BODY.sessionId) =>
+      fetch(`${base}/api/ghosts/casper/sessions/${session}/stream?${query}`);
+    const unknown = await stream("turn=nope&from=0");
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { error: { code: string } }).error.code).toBe("turn_not_found");
+    expect((await stream(`turn=${turn}&from=0`, "conv-other")).status).toBe(404);
+    expect((await stream(`turn=${turn}&from=999`)).status).toBe(400);
   });
 
   it("streams reasoning for the activity line but never logs it", async () => {

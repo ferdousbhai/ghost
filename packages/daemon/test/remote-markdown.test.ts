@@ -80,6 +80,24 @@ describe("remote viewer transcript", () => {
     await loadTranscript();
     expect([rendered[0], rendered.at(-1)]).toEqual([1500, 2499]);
   });
+
+  test("a cut turn reads on from its resume frame", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function\* turnEvents\([^)]*\) \{[\s\S]*?\n {2}\}/)?.[0];
+    expect(source).toBeDefined();
+    const sse = (...events: unknown[]) => new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+    const fetched: string[] = [];
+    const fetchStub = async (url: string) => {
+      fetched.push(url);
+      return sse({ type: "text_delta", delta: "b" }, { type: "done" });
+    };
+    const turnEvents = new Function("fetch", "seg", "ghost", "session", `${source}; return turnEvents;`)(
+      fetchStub, encodeURIComponent, "casper", "c1",
+    ) as (response: Response) => AsyncIterable<{ type: string }>;
+    const seen: string[] = [];
+    for await (const event of turnEvents(sse({ type: "start" }, { type: "resume", turn: "t1", from: 1 }))) seen.push(event.type);
+    expect(seen).toEqual(["start", "text_delta", "done"]);
+    expect(fetched).toEqual(["/api/ghosts/casper/sessions/c1/stream?turn=t1&from=1"]);
+  });
 });
 
 // The page's script is a string to TypeScript and to the repo's lint, so a

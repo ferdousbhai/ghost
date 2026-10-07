@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { homedir } from "node:os";
@@ -32,6 +33,7 @@ import {
   SSE_KEEPALIVE_COMMENT,
   SSE_KEEPALIVE_INTERVAL_MS,
   type TurnEvent,
+  type TurnResumeEvent,
 } from "./turn-events.js";
 import { attachRelay, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
@@ -70,6 +72,8 @@ export interface ServerOptions {
   remote?: RemoteAccess | null;
   /** Owns the Tailscale Serve exposure and its QR code; omitted, the `/api/remote` routes 404. */
   remoteServe?: RemoteServe;
+  /** Where a turn response is cut and continued (CONTRACTS.md, "Turn wire"); about 1 MB by default. */
+  streamCutBytes?: number;
 }
 
 export interface ListeningServer {
@@ -81,6 +85,21 @@ export interface ListeningServer {
 }
 
 const DEFAULT_MAX_BODY_BYTES = 1_048_576;
+/** Qt's XHR rebuilds a response's whole body on every chunk, so the HUD's cost grows with it. */
+const DEFAULT_STREAM_CUT_BYTES = 1_048_576;
+/** How long an ended turn stays resumable, for a client cut just before the end. */
+const RESUME_GRACE_MS = 60_000;
+
+/** One turn's events, kept while it runs (and briefly after) so a cut response can resume. */
+interface TurnLog {
+  readonly id: string;
+  readonly ghost: string;
+  readonly conversation: string;
+  /** Each event SSE-encoded; once `ended`, the last is the terminal. */
+  readonly frames: string[];
+  ended: boolean;
+  readonly followers: Set<() => void>;
+}
 
 /**
  * Same-origin is the intended deployment (the Omarchy webapp wraps
@@ -328,6 +347,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
   const remoteServe = options.remoteServe;
+  const streamCutBytes = options.streamCutBytes ?? DEFAULT_STREAM_CUT_BYTES;
+  const turnLogs = new Map<string, TurnLog>();
 
   /**
    * The gate every `/api` request passes before it is routed: `null` when it
@@ -721,59 +742,87 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     ));
   };
 
-  const streamSessionEvents = async (
-    request: IncomingMessage,
-    response: ServerResponse,
+  /** Run an admitted turn into a new log, which ends in exactly one terminal event. */
+  const startTurnLog = (
+    ghost: string,
+    conversation: string,
     run: (emit: (event: TurnEvent) => void) => Promise<void>,
-  ): Promise<void> => {
-    // A client that goes away stops listening, never the turn: `POST …/stop` is the only stop.
-    const connection = abortOnClose(request, response);
-    response.writeHead(200, SSE_HEADERS);
-    response.write(SSE_KEEPALIVE_COMMENT);
-    // A turn can idle behind a slow model; keep the connection warm. Ghost's
-    // in-repo SSE parsers skip frames without a `data:` line, so a comment costs
-    // nothing on the far end.
-    const keepalive = setInterval(() => {
-      if (!response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
-    }, SSE_KEEPALIVE_INTERVAL_MS);
-    liveStreams.add(response);
-
-    let terminal = false;
-    const emit = (event: TurnEvent): void => {
-      if (response.writableEnded || connection.signal.aborted || terminal) return;
-      if (event.type === "done" || event.type === "error") terminal = true;
-      response.write(encodeSseEvent(event));
+  ): TurnLog => {
+    const log: TurnLog = { id: randomUUID(), ghost, conversation, frames: [], ended: false, followers: new Set() };
+    turnLogs.set(log.id, log);
+    const append = (event: TurnEvent): void => {
+      if (log.ended) return;
+      if (event.type === "done" || event.type === "error") log.ended = true;
+      log.frames.push(encodeSseEvent(event));
+      for (const follower of [...log.followers]) follower();
     };
-
-    try {
-      await run(emit);
-      // Keep the HTTP seam honest even if a runtime regresses. The shell also
-      // treats EOF without a terminal frame as failure, but emitting the error
-      // here preserves one protocol invariant for every client and runtime.
-      if (!terminal && !connection.signal.aborted) {
-        emit({
-          type: "error",
-          reason: "error",
-          errorMessage: "The turn ended without a terminal event.",
-        });
-      }
-    } catch (error) {
-      // runAdmitted guarantees a terminal event for anything inside its own
-      // try; this path is for a failure outside it (the first log write, or an
-      // owner command), which still has to reach the client in-stream because
-      // the status line is already sent.
-      emit({
-        type: "error",
-        reason: "error",
-        errorMessage: errorMessage(error),
-      });
-    } finally {
-      clearInterval(keepalive);
-      liveStreams.delete(response);
-      connection.release();
-      if (!response.writableEnded) response.end();
-    }
+    void run(append).then(
+      // Keep the HTTP seam honest even if a runtime regresses: every client
+      // gets a terminal; after the turn's own, this is a no-op.
+      () => append({ type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." }),
+      // runAdmitted emits a terminal for anything inside its own try; this is
+      // a failure outside it (the first log write, or an owner command).
+      (error: unknown) => append({ type: "error", reason: "error", errorMessage: errorMessage(error) }),
+    ).finally(() => {
+      setTimeout(() => turnLogs.delete(log.id), RESUME_GRACE_MS).unref();
+    });
+    return log;
   };
+
+  /**
+   * Stream `log` from event `from` until its terminal, or until about
+   * `streamCutBytes` have gone out, when a `resume` frame ends the response.
+   * A client that goes away stops listening, never the turn: `POST …/stop` is
+   * the only stop.
+   */
+  const followTurn = (request: IncomingMessage, response: ServerResponse, log: TurnLog, from: number): Promise<void> =>
+    new Promise((resolveFollow) => {
+      const connection = abortOnClose(request, response);
+      response.writeHead(200, SSE_HEADERS);
+      response.write(SSE_KEEPALIVE_COMMENT);
+      // A turn can idle behind a slow model; keep the connection warm. Ghost's
+      // in-repo SSE parsers skip frames without a `data:` line, so a comment
+      // costs nothing on the far end.
+      const keepalive = setInterval(() => {
+        if (!response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
+      }, SSE_KEEPALIVE_INTERVAL_MS);
+      liveStreams.add(response);
+      let next = from;
+      let written = 0;
+      let finished = false;
+      const finish = (): void => {
+        if (finished) return;
+        finished = true;
+        log.followers.delete(pump);
+        clearInterval(keepalive);
+        liveStreams.delete(response);
+        connection.release();
+        if (!response.writableEnded) response.end();
+        resolveFollow();
+      };
+      const pump = (): void => {
+        if (connection.signal.aborted || response.writableEnded) {
+          finish();
+          return;
+        }
+        while (next < log.frames.length) {
+          const frame = log.frames[next++] as string;
+          response.write(frame);
+          written += frame.length;
+          // Never cut after the terminal: there is nothing left to resume.
+          if (written >= streamCutBytes && !(log.ended && next === log.frames.length)) {
+            const resume: TurnResumeEvent = { type: "resume", turn: log.id, from: next };
+            response.write(encodeSseEvent(resume));
+            finish();
+            return;
+          }
+        }
+        if (log.ended) finish();
+      };
+      connection.signal.addEventListener("abort", finish, { once: true });
+      log.followers.add(pump);
+      pump();
+    });
 
   const handleMessages = async (
     ghostName: string,
@@ -788,13 +837,28 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
     });
-    try {
-      await streamSessionEvents(request, response, (emit) => admission.run({ emit }));
-    } finally {
-      // Covers a response failure before the stream callback consumes the
-      // admission; ordinary run completion releases it first.
-      admission.release();
+    const log = startTurnLog(ghost.name, parsed.sessionId ?? "default", async (emit) => {
+      try {
+        await admission.run({ emit });
+      } finally {
+        admission.release();
+      }
+    });
+    await followTurn(request, response, log, 0);
+  };
+
+  /** The rest of a cut turn response; see CONTRACTS.md, "Turn wire". */
+  const handleTurnStream = async ({ params, url, request, response }: RequestContext): Promise<void> => {
+    const ghost = options.registry.get(ghostOf(params));
+    const log = turnLogs.get(url.searchParams.get("turn") ?? "");
+    if (!log || log.ghost !== ghost.name || log.conversation !== conversationOf(params)) {
+      throw new GhostError("turn_not_found", "That turn is no longer resumable; read the transcript.", 404);
     }
+    const from = numberParam(url, "from");
+    if (from === undefined || !Number.isInteger(from) || from < 0 || from > log.frames.length) {
+      throw new GhostError("invalid_request", "\"from\" must be an event index this turn has reached.", 400);
+    }
+    await followTurn(request, response, log, from);
   };
 
   /** `ghost mcp serve`'s backend: list this conversation's tools, or run one. */
@@ -964,6 +1028,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("PUT", "api/ghosts/:ghost/sessions/:id/title", ({ params, request, response }) => handleRenameSession(ghostOf(params), conversationOf(params), request, response)),
     route("POST", "api/ghosts/:ghost/sessions/:id/attachments", handleSaveAttachment),
     route("GET", "api/ghosts/:ghost/sessions/:id/attachments/:file", handleReadAttachment),
+    route("GET", "api/ghosts/:ghost/sessions/:id/stream", handleTurnStream),
     route("GET", "api/ghosts/:ghost/sessions/:id/transcript", ({ params, url, response }) => handleTranscript(ghostOf(params), conversationOf(params), url, response)),
     route("GET", "api/ghosts/:ghost/sessions/:id/tools", (context) => handleSessionTools(context, undefined)),
     route("POST", "api/ghosts/:ghost/sessions/:id/tools/:tool", (context) => handleSessionTools(context, context.params.tool)),

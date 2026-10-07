@@ -37,7 +37,8 @@ node dev/mock-ghostd.mjs --port 17717
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
 # --stall-stream (stream never settles), --update (a newer release is out),
 # --stop-hook S (a stop hook decides for S seconds after each reply),
-# --next-work S (a next-work countdown of S seconds after each reply).
+# --next-work S (a next-work countdown of S seconds after each reply),
+# --cut-bytes N (cut each turn response after N bytes, as ghostd does at ~1 MB).
 
 # Terminal 2: the one supported HUD preview command.
 bash dev/preview.sh qml 17717
@@ -151,7 +152,9 @@ Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
 
 - Streaming `XMLHttpRequest` — `readyState 3` fires once per network chunk for
   both GET and POST, with cumulative `responseText`. Measured headlessly
-  against a chunked SSE server before any UI existed.
+  against a chunked SSE server before any UI existed. Qt rebuilds that body
+  on every chunk (about 46% of a core at 8 MB), which is why ghostd cuts a
+  turn response at about 1 MB and the HUD resumes it.
 - Config load with zero QML errors; `qs ipc show`/`call`/`prop get`.
 - A full turn end to end against the mock: roster fetch, POST, SSE parse, tool
   activity, markdown render, terminal `done`, notification.

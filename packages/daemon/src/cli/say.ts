@@ -97,12 +97,15 @@ export async function sayCommand(
     ctx.client.request("POST", sessionPath(name, conversationId, "/stop"), {}).catch(() => undefined);
   };
   process.once("SIGINT", stop);
+  // A long turn's response is cut, its last frame naming where the next resumes.
+  let resume = null as { turn: string; from: number } | null;
   try {
-    await ctx.client.stream(ghostPath(name, "/messages"), {
-      prompt: text,
-      sessionId: conversationId,
-    }, (unknownEvent) => {
+    const onEvent = (unknownEvent: unknown): void => {
       const event = unknownEvent as StreamEvent;
+      if (event.type === "resume") {
+        resume = { turn: String(event.turn), from: Number(event.from) };
+        return;
+      }
       if (event.type === "harness") harnessStarted = true;
       else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
       if (event.type === "limit_reached") {
@@ -148,7 +151,13 @@ export async function sayCommand(
           }
           break;
       }
-    });
+    };
+    await ctx.client.stream(ghostPath(name, "/messages"), { prompt: text, sessionId: conversationId }, onEvent);
+    while (resume) {
+      const { turn, from } = resume;
+      resume = null;
+      await ctx.client.stream(sessionPath(name, conversationId, `/stream?turn=${encodeURIComponent(turn)}&from=${from}`), undefined, onEvent);
+    }
   } finally {
     (process as NodeJS.EventEmitter).off("SIGINT", stop);
   }

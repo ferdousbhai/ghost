@@ -1,6 +1,7 @@
 /**
  * The turn wire: the SSE events one `POST /messages` turn streams, the same
- * for every harness. Clients ignore event types they do not know.
+ * for every harness, plus the `resume` frame that ends a response cut for
+ * size. Clients ignore event types they do not know.
  */
 import { requireConversationId } from "./conversation-log.js";
 import { GhostError } from "./ghosts.js";
@@ -53,6 +54,16 @@ export type TurnEvent =
       reason: string;
       errorMessage?: string;
     };
+
+/**
+ * The last frame of a turn response cut for size, never a terminal: the turn
+ * runs on, and `GET …/sessions/:id/stream?turn=<turn>&from=<from>` continues it.
+ */
+export interface TurnResumeEvent {
+  type: "resume";
+  turn: string;
+  from: number;
+}
 
 /**
  * A harness refused on quota. Sent before the terminal `error`, whose

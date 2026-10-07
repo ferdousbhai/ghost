@@ -6,6 +6,8 @@ pragma Singleton
 // 0.3.0 / Qt 6.11.2) against a chunked SSE server, both GET and POST — see
 // dev/README.md. So SSE needs no helper process: we track a consumed offset,
 // buffer the trailing partial frame, and parse `data:` frames ourselves.
+// Rebuilding that body costs more the longer it grows, so ghostd cuts a turn's
+// response at about 1 MB and the HUD resumes it (resumeTurnStream).
 //
 // Auth: the daemon binds loopback, which is not the same as being private —
 // every browser on this machine can reach 127.0.0.1 too, and a page the user
@@ -1138,6 +1140,8 @@ Singleton {
             assistantRow: -1,
             consumed: 0,
             frameBuffer: "",
+            // The `resume` frame of a response ghostd cut, until it is resumed.
+            resume: null,
             presentationDirty: false,
             queueRequest: null,
             queueStatusRequest: null,
@@ -2237,6 +2241,7 @@ Singleton {
         state.assistantRow = -1;
         state.consumed = 0;
         state.frameBuffer = "";
+        state.resume = null;
         root.resetInteractionStateFor(state);
         state.activity = "waiting for ghostd";
         state.lastError = "";
@@ -2286,11 +2291,30 @@ Singleton {
         if (xhr.status !== 200) {
             if (xhr.status === 0) root.reachable = false;
             root.endTurnState(state, root.describeError(xhr, requestName));
+        } else if (state.streaming && state.resume) {
+            root.resumeTurnStream(state);
+            return;
         } else if (state.streaming) {
             root.endTurnState(state, missingTerminal);
         }
         if (xhr === state.request) state.request = null;
         root.projectTurnFields(state);
+    }
+
+    /** Read on where ghostd cut the turn's response (CONTRACTS.md, "Turn wire"). */
+    function resumeTurnStream(state: var): void {
+        const path = "/api/ghosts/" + encodeURIComponent(state.ghost) + "/sessions/"
+            + encodeURIComponent(state.sessionId) + "/stream?turn=" + encodeURIComponent(state.resume.turn)
+            + "&from=" + state.resume.from;
+        state.resume = null;
+        state.consumed = 0;
+        state.frameBuffer = "";
+        const xhr = root.newRequest();
+        state.request = xhr;
+        xhr.onreadystatechange = function () {
+            root.readTurnStream(xhr, state.key, "GET " + path, "the stream ended mid-turn");
+        };
+        root.dispatch(xhr, "GET", path, ({ "Accept": "text/event-stream" }), null);
     }
 
     function expireTurnStream(state: var): void {
@@ -2341,6 +2365,10 @@ Singleton {
     }
 
     function handleTurnEvent(state: var, event: var): void {
+        if (event.type === "resume") {
+            state.resume = { turn: String(event.turn), from: Number(event.from) };
+            return;
+        }
         // While a stop hook decides, only new work shows: a queued follow-up
         // waits for the hook, and a session_stop hook's own end is not work.
         if (event.event !== "session_stop" && event.type !== "queue") state.settling = false;

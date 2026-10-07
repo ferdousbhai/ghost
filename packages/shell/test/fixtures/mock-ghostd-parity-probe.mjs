@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 // streamed turn. Paths inside the ghost home never leak into transcripts.
 const here = dirname(fileURLToPath(import.meta.url));
 const mockPath = resolve(here, "../../dev/mock-ghostd.mjs");
-const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60"], {
+const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60", "--cut-bytes", "1000"], {
   stdio: ["ignore", "ignore", "pipe"],
 });
 
@@ -164,7 +164,29 @@ try {
     }),
   });
   assert.equal(turnResponse.status, 200);
-  const turnEvents = await turnResponse.text();
+  // A turn cut for size resumes, as ghostd's does, until its one terminal.
+  const frames = [];
+  let cuts = 0;
+  for (let response = turnResponse; response;) {
+    const events = (await response.text()).split("\n\n").filter((frame) => frame.startsWith("data: "))
+      .map((frame) => JSON.parse(frame.slice(6)));
+    const last = events.at(-1);
+    response = null;
+    if (last?.type === "resume") {
+      cuts += 1;
+      events.pop();
+      response = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/mock-trace-probe/stream?turn=${last.turn}&from=${last.from}`);
+      assert.equal(response.status, 200);
+    }
+    frames.push(...events);
+  }
+  assert.ok(cuts > 0);
+  assert.equal(frames[0].type, "start");
+  assert.deepEqual(frames.filter((event) => event.type === "done" || event.type === "error"), [{ type: "done" }]);
+  const gone = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/mock-trace-probe/stream?turn=nope&from=0`);
+  assert.equal(gone.status, 404);
+  assert.equal((await gone.json()).error.code, "turn_not_found");
+  const turnEvents = JSON.stringify(frames);
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
   assert.ok(!turnEvents.includes('"toolcall_'));
 

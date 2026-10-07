@@ -15,6 +15,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,6 +41,8 @@ const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
 /** Seconds a next-work countdown shows after each reply (the handoff is skipped); 0 shows none. */
 const NEXT_WORK_MS = Math.max(0, Number(opt("--next-work", "0")) || 0) * 1000;
+/** Where a turn response is cut and resumed, as ghostd cuts at about 1 MB; smaller to exercise it. */
+const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576);
 /** How long a session_stop hook decides after each reply; 0 runs none. */
 const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 /**
@@ -608,7 +611,34 @@ const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 const ghostIsAnswering = (name) => [...answering].some((key) => JSON.parse(key)[0] === name);
 
-function openStream(res) {
+/** Each turn's events by turn id, kept as ghostd keeps them so a cut response can resume. */
+const turnLogs = new Map();
+
+function openTurnLog(name, sessionId) {
+  // A turn outlives its client, as in ghostd: `stopped` (POST …/stop) ends it.
+  const log = { id: randomUUID(), name, sessionId, frames: [], ended: false, stopped: false, followers: new Set() };
+  turnLogs.set(log.id, log);
+  return log;
+}
+
+/** Close the log: a terminal was sent, or --omit-terminal ends the response without one. */
+function endLog(log) {
+  if (log.ended) return;
+  log.ended = true;
+  for (const follower of [...log.followers]) follower();
+  setTimeout(() => turnLogs.delete(log.id), 60_000).unref();
+}
+
+/** Append one event to the turn, for every response following it. */
+function send(log, event) {
+  if (log.ended) return;
+  log.frames.push(`data: ${JSON.stringify(event)}\n\n`);
+  if (event.type === "done" || event.type === "error") return endLog(log);
+  for (const follower of [...log.followers]) follower();
+}
+
+/** Stream the turn from event `from`, until it ends or CUT_BYTES end the response with `resume`. */
+function followTurn(res, log, from) {
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -617,31 +647,41 @@ function openStream(res) {
   const keepalive = flag("--stall-stream") ? null : setInterval(() => {
     if (!res.writableEnded) res.write(": keepalive\n\n");
   }, 15_000);
-  // A turn outlives its client, as in ghostd: `closed` only stops the writes,
-  // and `stopped` (POST …/stop) ends the turn.
-  const stream = { closed: false, stopped: false };
-  res.on("close", () => {
-    stream.closed = true;
+  let next = from;
+  let written = 0;
+  const finish = () => {
+    log.followers.delete(pump);
     clearInterval(keepalive);
-  });
-  return stream;
-}
-
-/** Write a frame while the client still listens. */
-function send(res, stream, event) {
-  if (!stream.closed && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
+    if (!res.writableEnded) res.end();
+  };
+  const pump = () => {
+    if (res.writableEnded) return finish();
+    while (next < log.frames.length) {
+      const frame = log.frames[next++];
+      res.write(frame);
+      written += frame.length;
+      if (written >= CUT_BYTES && !(log.ended && next === log.frames.length)) {
+        res.write(`data: ${JSON.stringify({ type: "resume", turn: log.id, from: next })}\n\n`);
+        return finish();
+      }
+    }
+    if (log.ended) finish();
+  };
+  res.on("close", finish);
+  log.followers.add(pump);
+  pump();
 }
 
 /**
- * Drive scripted events onto an SSE response. Returns the reply text, or null
- * if the turn was stopped.
+ * Drive scripted events into the turn. Returns the reply text, or null if
+ * the turn was stopped.
  */
-async function pump(res, events, stream) {
+async function pump(log, events) {
   let reply = "";
   for (const event of events) {
-    if (stream.stopped) return null;
+    if (log.stopped) return null;
     if (event.type === "text_end") reply = event.content;
-    send(res, stream, event);
+    send(log, event);
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   return reply;
@@ -650,10 +690,11 @@ async function pump(res, events, stream) {
 async function streamTurn(res, name, body) {
   const prompt = typeof body.prompt === "string" && body.prompt.trim() ? body.prompt.trim() : "(no prompt)";
   const sessionId = body.sessionId;
-  const stream = openStream(res);
+  const log = openTurnLog(name, sessionId);
+  followTurn(res, log, 0);
   const key = turnKey(name, sessionId);
   // An owner command has no passes, so nothing queues into it.
-  const turn = { streaming: !prompt.startsWith("!"), followUp: [], res, stream };
+  const turn = { streaming: !prompt.startsWith("!"), followUp: [], log };
   activeTurns.set(key, turn);
   answering.add(key);
   // Like ghostd, a turn creates its conversation and logs its prompt as it
@@ -685,7 +726,7 @@ async function streamTurn(res, name, body) {
   try {
     if (prompt.startsWith("!")) {
       const command = prompt.slice(1).trim();
-      const ran = await pump(res, ownerCommand(command), stream) !== null;
+      const ran = await pump(log, ownerCommand(command)) !== null;
       // ghostd logs the command as it ends; the transcript shows the owner's
       // `!command`, then its output as the ghost's message.
       if (existing) {
@@ -694,9 +735,8 @@ async function streamTurn(res, name, body) {
           ? `\`\`\`\nmock output of ${command}\n\`\`\``
           : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
       }
-      if (ran) res.end();
     } else {
-      let reply = await pump(res, script(name, prompt), stream);
+      let reply = await pump(log, script(name, prompt));
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
@@ -704,17 +744,17 @@ async function streamTurn(res, name, body) {
       while (reply !== null) {
         if (STOP_HOOK_MS > 0 && turn.followUp.length === 0) {
           const hook = { name: "Deciding whether to keep going", event: "session_stop" };
-          send(res, stream, { type: "hook_start", ...hook });
+          send(log, { type: "hook_start", ...hook });
           await new Promise((resolve) => setTimeout(resolve, STOP_HOOK_MS));
-          send(res, stream, { type: "hook_end", ...hook });
+          send(log, { type: "hook_end", ...hook });
         }
         if (turn.followUp.length === 0) break;
         const text = turn.followUp.shift();
         if (existing) append(existing, { role: "user", content: textParts(text) });
         publishConversationUpdated(name, sessionId);
-        send(res, stream, { type: "queue", followUp: turn.followUp });
-        send(res, stream, { type: "owner_message", text });
-        reply = await pump(res, textBlock(0, `Following up on **${text}**.`), stream);
+        send(log, { type: "queue", followUp: turn.followUp });
+        send(log, { type: "owner_message", text });
+        reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }
       stopped = reply === null;
@@ -725,11 +765,11 @@ async function streamTurn(res, name, body) {
           return;
         }
         if (!flag("--omit-terminal")) {
-          send(res, stream, failing
+          send(log, failing
             ? { type: "error", reason: "error", errorMessage: "mock-ghostd --fail" }
             : { type: "done" });
         }
-        res.end();
+        endLog(log);
       }
     }
   } finally {
@@ -1111,6 +1151,17 @@ const mockServer = createServer(async (req, res) => {
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, readAt: s.readAt });
   }
+  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stream" && req.method === "GET") {
+    const log = turnLogs.get(url.searchParams.get("turn") ?? "");
+    if (!log || log.name !== name || log.sessionId !== routeConversation(parts)) {
+      return json(res, 404, { error: { code: "turn_not_found", message: "That turn is no longer resumable; read the transcript." } });
+    }
+    const from = Number(url.searchParams.get("from"));
+    if (!Number.isInteger(from) || from < 0 || from > log.frames.length) {
+      return json(res, 400, { error: { code: "invalid_request", message: '"from" must be an event index this turn has reached.' } });
+    }
+    return followTurn(res, log, from);
+  }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "transcript" && req.method === "GET") {
     for (const field of ["limit", "offset"]) {
       const value = url.searchParams.get(field);
@@ -1146,8 +1197,8 @@ const mockServer = createServer(async (req, res) => {
         error: { message: "this conversation is not streaming", code: "session_not_streaming" },
       });
     }
-    turn.stream.stopped = true;
-    if (!turn.stream.closed) turn.res.end(`data: ${JSON.stringify({ type: "error", reason: "aborted", errorMessage: "Turn aborted." })}\n\n`);
+    turn.log.stopped = true;
+    send(turn.log, { type: "error", reason: "aborted", errorMessage: "Turn aborted." });
     return json(res, 200, { stopped: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "queue") {
@@ -1178,7 +1229,7 @@ const mockServer = createServer(async (req, res) => {
         });
       }
       turn.followUp.push(text);
-      send(turn.res, turn.stream, { type: "queue", followUp: turn.followUp });
+      send(turn.log, { type: "queue", followUp: turn.followUp });
       return json(res, 200, snapshot());
     }
   }

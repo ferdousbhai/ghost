@@ -409,6 +409,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
+| `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, continuesAt }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not; `continuesAt` is when a counting-down next-work turn starts, else null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
@@ -443,6 +444,13 @@ event (harness, kind) sent before that `error`; the classifier is
 tool and the directory it runs in, an update carries a bounded output
 summary, and an end names the tool and carries `isError` and the summary. An owner `!command` is
 one `bash` tool card, then `done`.
+
+A turn response is cut after about 1 MB of events so no client has to hold
+one ever-growing body: its last frame is then `resume` `{ turn, from }`, not a
+terminal, and the turn runs on. The client continues by opening
+`GET /sessions/:id/stream?turn=…&from=…`, which is itself cut the same way;
+counting `start` as event 0, the events across all responses are each sent
+once, in order, ending in the one terminal.
 
 ### `ghost` CLI
 

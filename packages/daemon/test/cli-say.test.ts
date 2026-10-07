@@ -9,12 +9,20 @@ afterEach(async () => {
   server = undefined;
 });
 
-async function fakeDaemon(events: unknown[]): Promise<{
+async function fakeDaemon(events: unknown[], resumed: unknown[] = []): Promise<{
   env: NodeJS.ProcessEnv;
   request: () => unknown;
+  resumedFrom: () => string | undefined;
 }> {
   let posted: unknown;
+  let resumedFrom: string | undefined;
   server = createServer((request, response) => {
+    if (request.method === "GET" && request.url?.includes("/stream?")) {
+      resumedFrom = request.url;
+      response.writeHead(200, { "content-type": "text/event-stream" });
+      response.end(resumed.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""));
+      return;
+    }
     if (request.method === "GET" && request.url === "/api/ghosts") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify([{ name: "casper", dir: "/tmp/casper" }]));
@@ -36,7 +44,7 @@ async function fakeDaemon(events: unknown[]): Promise<{
   await new Promise<void>((resolve) => server!.listen(0, "127.0.0.1", resolve));
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : 0;
-  return { env: { GHOSTD_PORT: String(port) }, request: () => posted };
+  return { env: { GHOSTD_PORT: String(port) }, request: () => posted, resumedFrom: () => resumedFrom };
 }
 
 const successEvents = [
@@ -64,6 +72,21 @@ describe("ghost say", () => {
       prompt: "hello",
       sessionId: expect.stringMatching(/^cli-[a-z0-9]+-[a-f0-9]{8}$/),
     });
+  });
+
+  it("follows a cut turn into its resumed stream", async () => {
+    const fake = await fakeDaemon([
+      { type: "start" },
+      { type: "text_delta", contentIndex: 0, delta: "hel" },
+      { type: "resume", turn: "turn-1", from: 2 },
+    ], [
+      { type: "text_delta", contentIndex: 0, delta: "lo" },
+      { type: "done" },
+    ]);
+    const result = await runCli(["say", "hi", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("hello\n");
+    expect(fake.resumedFrom()).toMatch(/^\/api\/ghosts\/casper\/sessions\/cli-[^/]+\/stream\?turn=turn-1&from=2$/);
   });
 
   it("prints an owner !command's output, the turn's whole answer", async () => {

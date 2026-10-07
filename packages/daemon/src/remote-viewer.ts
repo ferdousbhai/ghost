@@ -314,6 +314,28 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   function refresh() { $("send").disabled = streaming || (!prompt.value.trim() && !pending.length); }
   function grow() { prompt.style.height = "auto"; prompt.style.height = prompt.scrollHeight + "px"; refresh(); }
 
+  /** A turn's events, across the responses a long turn is cut into. */
+  async function* turnEvents(r) {
+    while (r) {
+      const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "", resume = null;
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let index;
+        while ((index = buffer.indexOf("\\n\\n")) >= 0) {
+          const frame = buffer.slice(0, index); buffer = buffer.slice(index + 2);
+          const line = frame.split("\\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          const ev = JSON.parse(line.slice(6));
+          if (ev.type === "resume") resume = ev; else yield ev;
+        }
+      }
+      r = resume && await fetch("/api/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/stream?turn=" + seg(resume.turn) + "&from=" + resume.from);
+      if (r && !r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText);
+    }
+  }
+
   async function send() {
     const text = prompt.value.trim();
     if ((!text && !pending.length) || streaming || !ghost) return;
@@ -342,39 +364,28 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
       const parts = [];
-      const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "";
       try {
-        for (;;) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let index;
-          while ((index = buffer.indexOf("\\n\\n")) >= 0) {
-            const frame = buffer.slice(0, index); buffer = buffer.slice(index + 2);
-            const line = frame.split("\\n").find((l) => l.startsWith("data: "));
-            if (!line) continue;
-            const ev = JSON.parse(line.slice(6));
-            const stick = nearBottom();
-            if (ev.type === "text_start") parts.push({ type: "text", text: "" });
-            else if (ev.type === "text_delta") {
-              parts.at(-1).text += ev.delta;
-              const texts = bubbles(parts);
-              // Words mean the call before them is over.
-              if (texts.length) activity.remove();
-              if (texts.length > replies.length) {
-                replies.at(-1).classList.remove("pending");
-                replies.push(replyBubble());
-              }
-              if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
-            } else if (ev.type === "tool_execution_start") {
-              parts.push({ type: "toolCall" });
-              activity.textContent = ev.toolName + "\u2026"; replies.at(-1).after(activity);
+        for await (const ev of turnEvents(r)) {
+          const stick = nearBottom();
+          if (ev.type === "text_start") parts.push({ type: "text", text: "" });
+          else if (ev.type === "text_delta") {
+            parts.at(-1).text += ev.delta;
+            const texts = bubbles(parts);
+            // Words mean the call before them is over.
+            if (texts.length) activity.remove();
+            if (texts.length > replies.length) {
+              replies.at(-1).classList.remove("pending");
+              replies.push(replyBubble());
             }
-            // A stop hook runs once the reply is complete; only a continuation shows.
-            else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");
-            else if (ev.type === "error") show(ev.errorMessage);
-            follow(stick);
+            if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
+          } else if (ev.type === "tool_execution_start") {
+            parts.push({ type: "toolCall" });
+            activity.textContent = ev.toolName + "\u2026"; replies.at(-1).after(activity);
           }
+          // A stop hook runs once the reply is complete; only a continuation shows.
+          else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");
+          else if (ev.type === "error") show(ev.errorMessage);
+          follow(stick);
         }
       } finally {
         replies.at(-1).classList.remove("pending");
