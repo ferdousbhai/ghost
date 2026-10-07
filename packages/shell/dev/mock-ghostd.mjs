@@ -28,7 +28,12 @@ const opt = (name, fallback) => {
   return i >= 0 && argv[i + 1] ? argv[i + 1] : fallback;
 };
 
-const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? "7717"));
+// No default port: 7717 is the owner's real ghostd, and a mock there would answer the live HUD.
+const PORT = Number(opt("--port", process.env.GHOSTD_PORT ?? ""));
+if (opt("--port", process.env.GHOSTD_PORT ?? "") === "" || !Number.isInteger(PORT) || PORT < 0 || PORT > 65_535 || PORT === 7717) {
+  console.error("mock-ghostd: pass --port <port> (any but 7717, the real ghostd's)");
+  process.exit(2);
+}
 const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
