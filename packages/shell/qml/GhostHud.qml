@@ -198,8 +198,7 @@ FloatingWindow {
         }
 
         function onComposerDraft(text: string): void {
-            composer.text = text;
-            composer.take();
+            composer.restore(text);
         }
     }
 

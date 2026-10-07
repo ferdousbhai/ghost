@@ -52,6 +52,17 @@ TestCase {
         compare(refocused.count, 1);
     }
 
+    // A stop or a refused follow-up hands text back; what the owner typed since stays.
+    function test_restoredTextKeepsTheDraft(): void {
+        composer.text = "";
+        composer.restore("queued");
+        compare(composer.text, "queued");
+        composer.text = "typed since";
+        composer.restore("queued");
+        compare(composer.text, "queued\n\ntyped since");
+        composer.text = "";
+    }
+
     function test_composeButtonOpensADraft(): void {
         mouseClick(composer, 18, 24);
         verify(Ghostd.currentSessionId !== "");

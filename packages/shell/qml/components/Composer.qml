@@ -34,6 +34,12 @@ Item {
         field.forceActiveFocus();
     }
 
+    /** Text ghostd handed back (a stop's queue, a refused follow-up), above what is typed since. */
+    function restore(text: string): void {
+        field.text = field.text.trim() === "" ? text : text + "\n\n" + field.text;
+        root.take();
+    }
+
     /** Send the draft with whatever images are attached; nothing while one is still uploading. */
     function submit(): void {
         if (Ghostd.attachmentsBusy) return;
