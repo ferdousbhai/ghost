@@ -74,10 +74,11 @@ Item {
     readonly property color phraseColor: Theme.light
         ? Theme.foregroundDim : Qt.rgba(0.796, 0.835, 0.882, 0.8)
 
-    // One line, elided: a height that followed the wrapped text fed back
-    // through the HUD's layout and pinned omarchy-shell at 100% CPU while
-    // its memory grew without bound (2026-10-07).
-    implicitHeight: visible ? 30 : 0
+    // Grow with the phrase, but leave the transcript in view. Text's height
+    // depends only on the width fixed by the HUD, and its first-line padding
+    // depends only on FontMetrics: neither reads the laid-out height back.
+    property real maxHeight: 180
+    implicitHeight: visible ? Math.min(root.maxHeight, Math.max(30, phraseText.implicitHeight + 8)) : 0
     visible: Ghostd.working || root.failing
     clip: false
 
@@ -93,6 +94,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
+        height: root.height
         anchors.topMargin: 4
         spacing: Theme.gap
 
@@ -117,26 +119,37 @@ Item {
             }
         }
 
-        Text {
-            id: phraseText
+        Flickable {
+            id: phraseScroll
+            objectName: "phraseScroll"
             width: Math.max(parent.width - 22 - Theme.gap, 0)
-            text: root.failing
-                ? Ghostd.lastError
-                : root.phrase + (Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
-            color: root.failing ? Theme.ghostRose : root.phraseColor
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-            font.weight: Font.Light
-            font.letterSpacing: 0.5
-            // Centre the first line on the orb from the font's line height:
-            // the laid-out height would make the padding depend on itself.
-            topPadding: Math.max(0, (22 - phraseMetrics.height) / 2)
+            height: Math.max(0, root.height - 4)
+            contentWidth: width
+            contentHeight: phraseText.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
 
-            FontMetrics {
-                id: phraseMetrics
-                font: phraseText.font
+            Text {
+                id: phraseText
+                width: phraseScroll.width
+                text: root.failing
+                    ? Ghostd.lastError
+                    : root.phrase + (Theme.reducedMotion ? "…" : ".".repeat(root.ellipsisStep))
+                color: root.failing ? Theme.ghostRose : root.phraseColor
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
+                font.weight: Font.Light
+                font.letterSpacing: 0.5
+                // Centre the first line on the orb without reading this
+                // Text's contentHeight back into its own padding.
+                topPadding: Math.max(0, (22 - phraseMetrics.height) / 2)
+                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+
+                FontMetrics {
+                    id: phraseMetrics
+                    font: phraseText.font
+                }
             }
-            elide: Text.ElideRight
         }
     }
 }

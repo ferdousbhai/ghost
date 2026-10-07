@@ -174,4 +174,20 @@ TestCase {
         verify(line.visible);
         verify(line.failing);
     }
+
+    function test_longStatusWrapsAndCanBeReadToTheEnd(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        line.width = 240;
+        Ghostd.lastError = "The command failed while reading the launch draft.\n\n"
+            + "The full paragraph explains what happened and where to continue. ".repeat(12);
+
+        const scroll = findChild(line, "phraseScroll");
+        verify(scroll !== null);
+        verify(line.implicitHeight > 30);
+        compare(line.implicitHeight, line.maxHeight);
+        verify(scroll.contentHeight > scroll.height);
+        scroll.contentY = scroll.contentHeight - scroll.height;
+        verify(scroll.contentY > 0);
+    }
 }
