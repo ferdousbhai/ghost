@@ -238,7 +238,7 @@ FloatingWindow {
         Keys.onEscapePressed: event => {
             event.accepted = true;
             if (hud.pending !== null) hud.dismissPending();
-            else if (Ghostd.streaming) Ghostd.cancel();
+            else if (Ghostd.working) Ghostd.cancel();
             else if (hud.workbenchOpen) Workbench.close();
             else event.accepted = false;
         }

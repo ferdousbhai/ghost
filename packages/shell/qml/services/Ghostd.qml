@@ -397,6 +397,11 @@ Singleton {
 
     property alias transcript: transcriptModel
     property bool streaming: false
+    // The reply is complete and only a stop hook is deciding whether the turn
+    // goes on: the turn still runs (a message sent now queues), but it shows
+    // nothing more unless the hook continues it.
+    property bool settling: false
+    readonly property bool working: root.streaming && !root.settling
     property string activity: ""
     property var followUpQueue: []
     property string queueError: ""
@@ -1113,6 +1118,7 @@ Singleton {
             // ghostd runs this conversation's turn for another client, or for
             // this HUD before a reload: shown as running, with no stream here.
             detached: false,
+            settling: false,
             request: null,
             lastStreamActivity: 0,
             activity: "",
@@ -1174,6 +1180,7 @@ Singleton {
 
     function projectTurnProjection(state: var): void {
         root.streaming = state.streaming || state.detached;
+        root.settling = state.settling;
         root.activity = state.activity;
         root.lastError = state.lastError;
         root.followUpQueue = state.followUpQueue;
@@ -2225,6 +2232,7 @@ Singleton {
     }
 
     function resetInteractionStateFor(state: var): void {
+        state.settling = false;
         state.activity = "";
         state.followUpQueue = [];
         state.queueSubmitting = false;
@@ -2309,6 +2317,7 @@ Singleton {
     }
 
     function handleTurnEvent(state: var, event: var): void {
+        if (event.event !== "session_stop") state.settling = false;
         switch (event.type) {
         case "start":
             state.activity = "";
@@ -2342,11 +2351,16 @@ Singleton {
             root.receiveOwnerMessageFor(state, event.text || "");
             break;
         case "hook_start":
+            if (event.event === "session_stop") {
+                state.settling = true;
+                root.closeAssistantRowFor(state);
+                break;
+            }
             // ActivityLine shows the name of the hook the turn is waiting on.
             state.activity = "hook:" + (event.name || "");
             break;
         case "hook_end":
-            state.activity = "";
+            if (event.event !== "session_stop") state.activity = "";
             break;
         case "session_stop_continued":
             root.receiveSessionStopContinuedFor(state, event.reason || "");

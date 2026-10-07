@@ -413,7 +413,7 @@ emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
-running, by its `name`), and `session_stop_continued` events, and exactly one
+running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is
 `classifyLimitMessage`. Tool events carry the call id; a start names the

@@ -457,18 +457,19 @@ describe("owner commands and hooks", () => {
     const sessions = host({ harnesses: [fake], hooks: stop.hooks });
     const events = await turn(sessions, "do it");
 
-    // Each run of the hook is bracketed by its name, so a client can say what
-    // the turn is waiting on between the reply and the terminal event.
+    // Each run of the hook is bracketed by its name and event, so a client can
+    // tell a stop hook, which runs after the reply is complete, from one the
+    // reply waits on.
     const hookEvents = events.filter((event) => event.type === "hook_start" || event.type === "hook_end"
       || event.type === "session_stop_continued" || event.type === "done");
     expect(hookEvents).toEqual([
-      { type: "hook_start", name: "Review" },
-      { type: "hook_end", name: "Review" },
-      { type: "hook_start", name: "Review" },
-      { type: "hook_end", name: "Review" },
+      { type: "hook_start", name: "Review", event: "before_prompt" },
+      { type: "hook_end", name: "Review", event: "before_prompt" },
+      { type: "hook_start", name: "Review", event: "session_stop" },
+      { type: "hook_end", name: "Review", event: "session_stop" },
       { type: "session_stop_continued", reason: "verify it" },
-      { type: "hook_start", name: "Review" },
-      { type: "hook_end", name: "Review" },
+      { type: "hook_start", name: "Review", event: "session_stop" },
+      { type: "hook_end", name: "Review", event: "session_stop" },
       expect.objectContaining({ type: "done" }),
     ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");

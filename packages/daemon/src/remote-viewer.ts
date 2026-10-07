@@ -370,6 +370,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
               parts.push({ type: "toolCall" });
               activity.textContent = ev.toolName + "\u2026"; replies.at(-1).after(activity);
             }
+            // A stop hook runs once the reply is complete; only a continuation shows.
+            else if (ev.type === "hook_start" && ev.event === "session_stop") replies.at(-1).classList.remove("pending");
             else if (ev.type === "error") show(ev.errorMessage);
             follow(stick);
           }

@@ -18,8 +18,8 @@ import { errorMessage } from "@ghost/extensions";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 
-/** Told a handler's display name when it starts (`running`) and when it returns. */
-export type HookObserver = (name: string, running: boolean) => void;
+/** Told a handler's display name and event when it starts (`running`) and when it returns. */
+export type HookObserver = (name: string, event: GhostHookEvent["type"], running: boolean) => void;
 
 interface GhostHookRunnerOptions {
   logger?: Logger;
@@ -254,11 +254,11 @@ export class GhostHookRunner {
 
   private observed(onHook?: HookObserver) {
     return async (hook: CommandHook, event: GhostHookEvent): Promise<GhostHookResult | undefined> => {
-      onHook?.(hook.name, true);
+      onHook?.(hook.name, event.type, true);
       try {
         return await this.runCommandFailOpen(hook, event);
       } finally {
-        onHook?.(hook.name, false);
+        onHook?.(hook.name, event.type, false);
       }
     };
   }

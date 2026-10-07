@@ -322,7 +322,7 @@ Item {
                     text: Ghostd.activeGhost === ""
                         ? "No ghost selected"
                         : (Dictation.label !== "" ? Dictation.label
-                        : Ghostd.streaming
+                        : Ghostd.working
                             ? "Follow up with " + Ghostd.activeGhost + "…"
                             : "Message " + Ghostd.activeGhost + "…")
                     color: Dictation.recording ? Theme.ghostAmber : Theme.foregroundDim

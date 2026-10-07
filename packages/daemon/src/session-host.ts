@@ -549,7 +549,7 @@ export class SessionHost {
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
     const blocks = { next: 0 };
-    const onHook: HookObserver = (name, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name });
+    const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
     let terminal: TurnEvent = { type: "done" };
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };

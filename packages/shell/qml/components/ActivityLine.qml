@@ -77,14 +77,14 @@ Item {
     // A long command or error wraps rather than eliding to one line; the cap
     // keeps a pasted script from pushing the composer off the pane.
     implicitHeight: visible ? Math.max(30, phraseText.implicitHeight + 8) : 0
-    visible: Ghostd.streaming || root.failing
+    visible: Ghostd.working || root.failing
     clip: false
 
     // The phrase says what is happening; these say it is still happening.
     Timer {
         interval: 430
         repeat: true
-        running: Ghostd.streaming && !Theme.reducedMotion
+        running: Ghostd.working && !Theme.reducedMotion
         onTriggered: root.ellipsisStep = (root.ellipsisStep + 1) % 4
     }
 
@@ -101,7 +101,7 @@ Item {
             clip: false
 
             SpectralOrb {
-                visible: Ghostd.streaming
+                visible: Ghostd.working
                 anchors.centerIn: parent
                 diameter: 20
             }

@@ -55,9 +55,10 @@ Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
 event, and are what the Hooks pane shows. While a handler runs, the turn
-stream carries `hook_start`/`hook_end` with its `name`, and the HUD shows that
-name as the turn's activity, so give a slow hook a name that says what it is
-doing ("Deciding whether to keep going").
+stream carries `hook_start`/`hook_end` with its `name` and `event`. The HUD
+shows a `before_prompt` hook's name as the turn's activity, so give a slow one
+a name that says what it is doing. A `session_stop` hook runs out of sight:
+the reply already reads as finished, and only a continuation shows.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 

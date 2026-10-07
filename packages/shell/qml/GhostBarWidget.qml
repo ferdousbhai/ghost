@@ -38,7 +38,7 @@ Item {
 
     readonly property string status: !Ghostd.reachable
         ? "offline"
-        : (Ghostd.streaming ? (Ghostd.activity !== "" ? Ghostd.activity.replace(/^(thinking|starting):[^]*/, "$1") : "thinking") : "idle")
+        : (Ghostd.working ? (Ghostd.activity !== "" ? Ghostd.activity.replace(/^(thinking|starting):[^]*/, "$1") : "thinking") : "idle")
 
     readonly property string tooltipText: (Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost)
         + " · " + root.status
@@ -58,7 +58,7 @@ Item {
     // ghost wears its own amber, brightened while it is working.
     readonly property color markTint: !Ghostd.reachable
         ? Theme.danger
-        : (Ghostd.streaming ? Theme.ghostAmberBright : Theme.ghostAmber)
+        : (Ghostd.working ? Theme.ghostAmberBright : Theme.ghostAmber)
 
     Accessible.role: Accessible.Button
     Accessible.name: Ghostd.activeGhost === "" ? "ghost" : Ghostd.activeGhost
@@ -90,7 +90,7 @@ Item {
         // HUD shows, seeded per ghost and per turn so two ghosts do not
         // shimmer alike.
         SpectralOrb {
-            visible: Ghostd.streaming && Ghostd.reachable
+            visible: Ghostd.working && Ghostd.reachable
             anchors.centerIn: parent
             diameter: 14
         }

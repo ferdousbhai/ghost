@@ -126,7 +126,7 @@ Item {
 
         Text {
             anchors.verticalCenter: parent.verticalCenter
-            visible: Ghostd.streaming
+            visible: Ghostd.working
             text: "Esc to stop"
             color: Theme.foregroundDim
             font.family: Theme.fontFamily

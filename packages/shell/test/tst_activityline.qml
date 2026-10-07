@@ -18,6 +18,7 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.streaming = false;
+        Ghostd.settling = false;
         Ghostd.activity = "";
         Ghostd.toolActivities = [];
         Ghostd.lastError = "";
@@ -72,21 +73,45 @@ TestCase {
         compare(line.phrase, "Writing a reply");
     }
 
-    // After the reply, a turn can still be waiting on an owner hook; the line
-    // names it rather than a bare "Working", and lets go when it returns.
+    // Before the reply, a turn can be waiting on an owner hook; the line names
+    // it rather than a bare "Working", and lets go when it returns.
     function test_aRunningHookIsNamed(): void {
         const line = createTemporaryObject(lineComponent, tc);
         verify(line !== null);
         Ghostd.streaming = true;
         const state = { activity: "" };
 
-        Ghostd.handleTurnEvent(state, { type: "hook_start", name: "Deciding whether to keep going" });
+        Ghostd.handleTurnEvent(state, { type: "hook_start", name: "Add context", event: "before_prompt" });
         Ghostd.activity = state.activity;
-        compare(line.phrase, "Deciding whether to keep going");
+        compare(line.phrase, "Add context");
 
-        Ghostd.handleTurnEvent(state, { type: "hook_end", name: "Deciding whether to keep going" });
+        Ghostd.handleTurnEvent(state, { type: "hook_end", name: "Add context", event: "before_prompt" });
         Ghostd.activity = state.activity;
         compare(line.phrase, "Working");
+    }
+
+    // A stop hook runs after the reply is complete, so the turn reads as done
+    // while it decides; a continuation brings the line back.
+    function test_aStopHookRunsOutOfSight(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        Ghostd.streaming = true;
+        const state = Ghostd.newTurnState("", "");
+        state.streaming = true;
+
+        Ghostd.handleTurnEvent(state, { type: "hook_start", name: "Keep going?", event: "session_stop" });
+        Ghostd.settling = state.settling;
+        verify(!Ghostd.working);
+        verify(!line.visible);
+
+        Ghostd.handleTurnEvent(state, { type: "hook_end", name: "Keep going?", event: "session_stop" });
+        Ghostd.settling = state.settling;
+        verify(!line.visible);
+
+        Ghostd.handleTurnEvent(state, { type: "session_stop_continued", reason: "Verify it." });
+        Ghostd.settling = state.settling;
+        verify(Ghostd.working);
+        verify(line.visible);
     }
 
     // A turn's own tool events clear `activity` between every lifecycle step,
