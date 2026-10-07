@@ -272,8 +272,9 @@ export class SessionHost {
   private readonly live = new Map<string, LiveTurn>();
   /** Each admitted turn's stop: the turn outlives its client, so only `stopTurn` or shutdown ends it early. */
   private readonly admissions = new Map<string, AbortController>();
-  private readonly deleting = new Set<string>();
-  /** Each conversation's pending or running handoff, which any new turn or move cancels first. */
+  /** A session being switched or trashed cannot admit a turn or another mutation. */
+  private readonly reservedSessions = new Set<string>();
+  /** Each conversation's pending or running handoff, which owner turns and moves cancel first. */
   private readonly handoffs = new Map<string, {
     timer?: ReturnType<typeof setTimeout>;
     controller?: AbortController;
@@ -497,17 +498,27 @@ export class SessionHost {
     if (!listed.eligible) throw new GhostError("harness_no_room", `${id} has no room: ${listed.reason ?? "its usage is spent"}.`, 409);
     const ghost = this.registry.get(ghostName);
     const conversation = requireConversationId(sessionId);
-    await this.withGhost(ghost.name, async () => {
-      const { sessionDir } = ghostPaths(ghost.dir);
-      const entries = await readLog(sessionDir, conversation);
-      if (entries !== null && logState(entries).harness === id) return;
-      await appendLog(sessionDir, conversation, [
-        ...(entries === null ? [newConversationEntry(conversation, new Date())] : []),
-        { type: "harness", at: new Date().toISOString(), harness: id, session: null, dir: conversationDir(sessionDir, conversation) },
-      ]);
-    });
-    this.announce(ghost.name, conversation);
-    return { id: conversation, harness: id };
+    const key = keyOf(ghost.name, conversation);
+    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
+      throw new GhostError("session_busy", "Wait for this conversation to finish before switching agents.", 409);
+    }
+    this.reservedSessions.add(key);
+    try {
+      await this.cancelHandoff(key);
+      await this.withGhost(ghost.name, async () => {
+        const { sessionDir } = ghostPaths(ghost.dir);
+        const entries = await readLog(sessionDir, conversation);
+        if (entries !== null && logState(entries).harness === id) return;
+        await appendLog(sessionDir, conversation, [
+          ...(entries === null ? [newConversationEntry(conversation, new Date())] : []),
+          { type: "harness", at: new Date().toISOString(), harness: id, session: null, dir: conversationDir(sessionDir, conversation) },
+        ]);
+      });
+      this.announce(ghost.name, conversation);
+      return { id: conversation, harness: id };
+    } finally {
+      this.reservedSessions.delete(key);
+    }
   }
 
   // ── Turns ─────────────────────────────────────────────────────────────
@@ -525,7 +536,7 @@ export class SessionHost {
     if (this.reservedGhosts.has(ghost.name)) {
       throw new GhostError("ghost_busy", "Wait for this ghost to finish moving before starting a turn.", 409);
     }
-    if (this.admissions.has(key) || this.deleting.has(key)) {
+    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
     }
     const command = ownerCommand(options.prompt);
@@ -1238,10 +1249,10 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const id = await this.requireConversation(ghost, sessionId);
     const key = keyOf(ghost.name, id);
-    if (this.admissions.has(key) || this.deleting.has(key)) {
+    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
       throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
     }
-    this.deleting.add(key);
+    this.reservedSessions.add(key);
     try {
       await this.cancelHandoff(key);
       const { sessionDir } = ghostPaths(ghost.dir);
@@ -1252,14 +1263,14 @@ export class SessionHost {
       this.announce(ghost.name, id);
       return trashed;
     } finally {
-      this.deleting.delete(key);
+      this.reservedSessions.delete(key);
     }
   }
 
   // ── Ghost lifecycle ───────────────────────────────────────────────────
 
   private ghostBusy(ghostName: string): boolean {
-    return [...this.admissions.keys(), ...this.deleting].some((key) => ghostOfKey(key) === ghostName);
+    return [...this.admissions.keys(), ...this.reservedSessions].some((key) => ghostOfKey(key) === ghostName);
   }
 
   createGhost(name: string): Ghost {

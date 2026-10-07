@@ -596,6 +596,35 @@ describe("choosing the agent", () => {
     await turn(sessions, "hello", "c2");
     expect(first.calls().map((c) => c.prompt)).toContain("hello");
   });
+  it("a switch stops a running idle handoff before changing the carrying harness", async () => {
+    const first = harness([], "first");
+    const held = first.gate("handoff");
+    first.setTurns([...replies("done"), { gate: held.path }, ...replies("unused")]);
+    const second = harness(replies("new harness"), "second");
+    const sessions = host({ harnesses: [first, second], hooks: idle(20, 0) });
+    await turn(sessions, "start");
+    await waitFor(() => first.calls().length === 2);
+
+    await sessions.chooseHarness("casper", "c1", "second");
+    held.release();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
+    expect(text(await turn(sessions, "continue"))).toBe("new harness");
+  });
+
+  it("a running turn cannot have its harness switched underneath it", async () => {
+    const first = harness([], "first");
+    const held = first.gate("turn");
+    first.setTurns([{ gate: held.path, ...replies("done")[0] }]);
+    const sessions = host({ harnesses: [first, harness(replies("unused"), "second")] });
+    const running = turn(sessions, "start");
+    await waitFor(() => first.calls().length === 1);
+
+    await expect(sessions.chooseHarness("casper", "c1", "second")).rejects.toMatchObject({ code: "session_busy" });
+    held.release();
+    await running;
+    expect((await sessions.listSessions("casper"))[0]?.harness).toBe("first");
+  });
   it("refuses to switch to an agent a turn would pass over", async () => {
     const fake = harness(replies("x"));
     const sessions = host({
