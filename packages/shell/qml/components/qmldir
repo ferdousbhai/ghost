@@ -9,6 +9,7 @@ ConfirmDialog 1.0 ConfirmDialog.qml
 Conversations 1.0 Conversations.qml
 CopyGlyph 1.0 CopyGlyph.qml
 FilePane 1.0 FilePane.qml
+FollowingList 1.0 FollowingList.qml
 GhostGlyph 1.0 GhostGlyph.qml
 GhostNavigation 1.0 GhostNavigation.qml
 HooksBrowser 1.0 HooksBrowser.qml
