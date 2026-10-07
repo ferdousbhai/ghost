@@ -363,8 +363,8 @@ working once keep-going lets a turn stop, ghostd runs one built-in idle chain
    `NEXT_WORK_PROMPT`, logged as a user entry with `origin: "auto"` (an
    `auto` transcript message). Its end starts the chain again.
 
-A new turn in the conversation, its deletion, or the ghost's move or shutdown
-stops a pending or running step first; `DELETE …/continuation` (and `ghost
+A new turn or harness switch in the conversation, its deletion, or the ghost's
+move or shutdown stops a pending or running step first; `DELETE …/continuation` (and `ghost
 stop` when no turn runs) stops only a countdown. Each step reads the settings
 when it starts, so turning one off also stops a step already scheduled.
 
