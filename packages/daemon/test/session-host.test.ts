@@ -669,6 +669,18 @@ describe("the idle handoff", () => {
     expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
   });
 
+  it("refuses a turn when shutdown begins while it waits out a running handoff", async () => {
+    const fake = harness([]);
+    const held = fake.gate("handoff");
+    fake.setTurns([...replies("done"), { gate: held.path }, ...replies("unexpected")]);
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
+    await turn(sessions, "ship it");
+    await waitFor(() => fake.calls().length === 2);
+    const admitted = sessions.admitTurn("casper", { sessionId: "c1", prompt: "late" });
+    sessions.beginShutdown();
+    await expect(admitted).rejects.toMatchObject({ code: "shutting_down" });
+  });
+
   it("keeps the ghost working after each handoff, up to next_work_turns since the owner wrote", async () => {
     const fake = harness(replies("done", "noted", "idea one", "noted", "idea two", "noted", "unexpected"));
     const sessions = host({ harnesses: [fake], hooks: idle(20, 2), nextWorkCountdownMs: 20 });

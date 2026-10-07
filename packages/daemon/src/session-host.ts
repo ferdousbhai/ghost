@@ -519,15 +519,13 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
     const key = keyOf(ghost.name, id);
+    // Waiting out a running handoff yields, so every refusal is checked after it.
+    await this.cancelHandoff(key);
     if (this.shuttingDown) throw new GhostError("shutting_down", "ghostd is shutting down.", 503);
     if (this.reservedGhosts.has(ghost.name)) {
       throw new GhostError("ghost_busy", "Wait for this ghost to finish moving before starting a turn.", 409);
     }
     if (this.admissions.has(key) || this.deleting.has(key)) {
-      throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
-    }
-    await this.cancelHandoff(key);
-    if (this.admissions.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
     }
     const command = ownerCommand(options.prompt);
