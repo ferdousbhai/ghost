@@ -41,36 +41,23 @@ Column {
     Item {
         id: plinth
 
-        property real bob: 0
-
         anchors.horizontalCenter: parent.horizontalCenter
         width: 72
         height: 72
 
-        // Bobs only while the card and its window are showing.
-        SequentialAnimation on bob {
-            running: root.visible && root.Window.visibility !== Window.Hidden
-                && !Theme.reducedMotion
-            loops: Animation.Infinite
-            NumberAnimation { to: -6; duration: 3000; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 6; duration: 3000; easing.type: Easing.InOutSine }
-        }
-
+        // Still, like the halos: an endless animation would redraw the whole
+        // window every frame the empty conversation is open.
         Item {
             width: parent.width
             height: parent.height
-            y: plinth.bob
 
-            // Two breathing halos, drifting out of phase because their periods
-            // differ rather than because either one waits.
+            // Two halos, one amber, one ember.
             Glow {
                 anchors.centerIn: parent
                 width: 200
                 visible: Ghostd.reachable
                 core: Theme.amber(0.15)
                 mid: Theme.amber(0.05)
-                breathLow: 0.5
-                breath: 2000
             }
 
             Glow {
@@ -79,8 +66,6 @@ Column {
                 visible: Ghostd.reachable
                 core: Theme.ember(0.10)
                 mid: Theme.ember(0.04)
-                breathLow: 0.45
-                breath: 1500
             }
 
             Rectangle {

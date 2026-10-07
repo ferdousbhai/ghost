@@ -255,7 +255,7 @@ FloatingWindow {
             event.accepted = true;
         }
 
-        // Two cold blobs breathing far under the reading surface. `z: -1` puts
+        // Two still, cold blobs far under the reading surface. `z: -1` puts
         // them over the card's own fill but beneath every layout child, and
         // `enabled: false` keeps the layer out of the input chain. Alphas are
         // held low enough that body text contrast is untouched.
@@ -271,8 +271,6 @@ FloatingWindow {
                 core: "#0d8b5cf6"
                 mid: "#048b5cf6"
                 midAt: 0.6
-                breathLow: 0.45
-                breath: 6000
             }
 
             Glow {
@@ -282,8 +280,6 @@ FloatingWindow {
                 core: "#0a3b82f6"
                 mid: "#033b82f6"
                 midAt: 0.6
-                breathLow: 0.5
-                breath: 7500
             }
         }
 
