@@ -63,8 +63,9 @@ import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { expandMcpServerConfig } from "./mcp-catalog-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
-import { readPinState, writePins } from "./pins.js";
-import { readReadState, writeReads } from "./reads.js";
+import { pinsPath, readPinState, writePins } from "./pins.js";
+import { readsPath, readReadState, writeReads } from "./reads.js";
+import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
 import {
   ghostCliPath,
@@ -286,6 +287,7 @@ export class SessionHost {
   private readonly reservedGhosts = new Set<string>();
   /** File work in flight per ghost, which a delete or rename waits out. */
   private readonly leases = new Map<string, { count: number; drained?: () => void }>();
+  private readonly metadataWrites = new Map<string, Promise<unknown>>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
   private readonly tools = new Map<string, Promise<CollectedGhostExtension>>();
   private reportCache?: { at: number; report: Promise<HarnessReport> };
@@ -1170,9 +1172,11 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
       const { sessionDir } = ghostPaths(ghost.dir);
-      const existing = new Set(await this.conversationIds(sessionDir));
-      const kept = (await readPinState(sessionDir)).pinned.filter((pin) => pin !== id && existing.has(pin));
-      await writePins(sessionDir, pinned ? [...kept, id] : kept);
+      await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
+        const existing = new Set(await this.conversationIds(sessionDir));
+        const kept = (await readPinState(sessionDir)).pinned.filter((pin) => pin !== id && existing.has(pin));
+        await writePins(sessionDir, pinned ? [...kept, id] : kept);
+      });
       this.announce(ghost.name, id);
     });
   }
@@ -1182,10 +1186,12 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
       const { sessionDir } = ghostPaths(ghost.dir);
-      const existing = new Set(await this.conversationIds(sessionDir));
-      const kept = Object.fromEntries(Object.entries((await readReadState(sessionDir)).reads).filter(([read]) => existing.has(read)));
       const readAt = openedAt.toISOString();
-      await writeReads(sessionDir, { ...kept, [id]: readAt });
+      await serializeByKey(this.metadataWrites, readsPath(sessionDir), async () => {
+        const existing = new Set(await this.conversationIds(sessionDir));
+        const kept = Object.fromEntries(Object.entries((await readReadState(sessionDir)).reads).filter(([read]) => existing.has(read)));
+        await writeReads(sessionDir, { ...kept, [id]: readAt });
+      });
       this.announce(ghost.name, id);
       return readAt;
     });
@@ -1263,8 +1269,10 @@ export class SessionHost {
       await this.cancelHandoff(key);
       const { sessionDir } = ghostPaths(ghost.dir);
       const trashed = trashPath(conversationDir(sessionDir, id), { env: this.env, home: this.ownerHome });
-      const pins = (await readPinState(sessionDir)).pinned;
-      if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
+      await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
+        const pins = (await readPinState(sessionDir)).pinned;
+        if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
+      });
       this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id, trash: trashed.trash });
       this.announce(ghost.name, id);
       return trashed;

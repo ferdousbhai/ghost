@@ -10,6 +10,8 @@ import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
+import { readPinState } from "../src/pins.js";
+import { readReadState } from "../src/reads.js";
 import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
@@ -654,6 +656,24 @@ describe("choosing the agent", () => {
 });
 
 describe("conversation metadata", () => {
+  it("keeps concurrent pin and read changes to different conversations", async () => {
+    const sessions = host({ harnesses: [harness(replies("one", "two"))] });
+    await turn(sessions, "first", "c1");
+    await turn(sessions, "second", "c2");
+
+    await Promise.all([
+      sessions.setPinned("casper", "c1", true),
+      sessions.setPinned("casper", "c2", true),
+    ]);
+    expect((await readPinState(sessionDir())).pinned.sort()).toEqual(["c1", "c2"]);
+
+    await Promise.all([
+      sessions.markRead("casper", "c1"),
+      sessions.markRead("casper", "c2"),
+    ]);
+    expect(Object.keys((await readReadState(sessionDir())).reads).sort()).toEqual(["c1", "c2"]);
+  });
+
   it("refuses metadata writes while the ghost home is moving", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "hello");
