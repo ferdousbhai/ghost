@@ -90,11 +90,12 @@ describe("remote viewer transcript", () => {
       fetched.push(url);
       return sse({ type: "text_delta", delta: "b" }, { type: "done" });
     };
+    // The page's open conversation has moved on; the turn's own is passed in.
     const turnEvents = new Function("fetch", "seg", "ghost", "session", `${source}; return turnEvents;`)(
-      fetchStub, encodeURIComponent, "casper", "c1",
-    ) as (response: Response) => AsyncIterable<{ type: string }>;
+      fetchStub, encodeURIComponent, "casper", "c2",
+    ) as (response: Response, conversation: string) => AsyncIterable<{ type: string }>;
     const seen: string[] = [];
-    for await (const event of turnEvents(sse({ type: "start" }, { type: "resume", turn: "t1", from: 1 }))) seen.push(event.type);
+    for await (const event of turnEvents(sse({ type: "start" }, { type: "resume", turn: "t1", from: 1 }), "/ghosts/casper/sessions/c1")) seen.push(event.type);
     expect(seen).toEqual(["start", "text_delta", "done"]);
     expect(fetched).toEqual(["/api/ghosts/casper/sessions/c1/stream?turn=t1&from=1"]);
   });

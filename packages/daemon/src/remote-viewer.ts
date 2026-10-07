@@ -314,8 +314,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   function refresh() { $("send").disabled = streaming || (!prompt.value.trim() && !pending.length); }
   function grow() { prompt.style.height = "auto"; prompt.style.height = prompt.scrollHeight + "px"; refresh(); }
 
-  /** A turn's events, across the responses a long turn is cut into. */
-  async function* turnEvents(r) {
+  /** A turn's events, across the responses a long turn is cut into; \`conversation\` is the one it runs in. */
+  async function* turnEvents(r, conversation) {
     while (r) {
       const reader = r.body.getReader(); const decoder = new TextDecoder(); let buffer = "", resume = null;
       for (;;) {
@@ -331,7 +331,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
           if (ev.type === "resume") resume = ev; else yield ev;
         }
       }
-      r = resume && await fetch("/api/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/stream?turn=" + seg(resume.turn) + "&from=" + resume.from);
+      r = resume && await fetch("/api" + conversation + "/stream?turn=" + seg(resume.turn) + "&from=" + resume.from);
       if (r && !r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText);
     }
   }
@@ -342,10 +342,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     streaming = true; show(""); refresh();
     try {
       if (!session) draft = session = mint();
-      const target = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/attachments";
+      // The turn stays in this conversation if the owner opens another while it runs.
+      const conversation = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session);
       const paths = await Promise.all(pending.map(async (p) => {
         const blob = await shrink(p.file);
-        return (await api(target, { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob })).path;
+        return (await api(conversation + "/attachments", { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob })).path;
       }));
       const message = [text, ...paths.map((path) => "![image](" + path + ")")].filter(Boolean).join("\\n\\n");
       const r = await fetch("/api/ghosts/" + seg(ghost) + "/messages", {
@@ -365,7 +366,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       follow(true);
       const parts = [];
       try {
-        for await (const ev of turnEvents(r)) {
+        for await (const ev of turnEvents(r, conversation)) {
           const stick = nearBottom();
           if (ev.type === "text_start") parts.push({ type: "text", text: "" });
           else if (ev.type === "text_delta") {
