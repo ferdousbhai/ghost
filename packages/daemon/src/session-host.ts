@@ -951,7 +951,8 @@ export class SessionHost {
       }
     })();
     await handoff.done;
-    if (next && !this.handoffs.has(key) && !this.admissions.has(key)) this.countDownNextWork(ghostName, id, key);
+    // A turn admitted at any point, even after the reply was logged, aborted this handoff.
+    if (next && !controller.signal.aborted) this.countDownNextWork(ghostName, id, key);
   }
 
   /**

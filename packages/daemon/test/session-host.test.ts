@@ -705,6 +705,21 @@ describe("the idle handoff", () => {
     expect(fake.calls()).toHaveLength(2);
   });
 
+  it("counts down no next-work turn when the owner writes as a handoff is logged", async () => {
+    const fake = harness(replies("done", "noted", "answer", "noted again", "unexpected"));
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 400 });
+    await turn(sessions, "ship it");
+    let owner: Promise<TurnEvent[]> | undefined;
+    sessions.subscribeConversationEvents("casper", () => {
+      if (!owner && readFileSync(logPath(sessionDir(), "c1"), "utf8").includes('"type":"handoff"')) owner = turn(sessions, "I'm back");
+    });
+    await waitFor(() => owner !== undefined);
+    expect(text(await (owner as Promise<TurnEvent[]>))).toBe("answer");
+    // The owner's turn schedules its own handoff; a countdown left by the first would take its place.
+    await waitFor(() => fake.calls().length === 4);
+    expect(fake.calls()[3]?.prompt).toBe(HANDOFF_PROMPT);
+  });
+
   it("refuses a turn when shutdown begins while it waits out a running handoff", async () => {
     const fake = harness([]);
     const held = fake.gate("handoff");
