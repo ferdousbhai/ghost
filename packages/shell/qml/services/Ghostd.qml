@@ -1135,6 +1135,9 @@ Singleton {
             followUpQueue: [],
             queueSubmitting: false,
             queueError: "",
+            // Owner text ghostd did not take while this conversation was not
+            // open, for the composer when it is (see handBack).
+            handedBack: "",
             parts: [],
             toolActivities: [],
             assistantRow: -1,
@@ -1215,6 +1218,15 @@ Singleton {
         if (!state) return;
         root.projectTurnRows(state);
         root.projectTurnFields(state);
+        if (state.handedBack === "") return;
+        root.composerDraft(state.handedBack);
+        state.handedBack = "";
+    }
+
+    /** Owner text ghostd did not take goes back to the composer, once its own conversation is open. */
+    function handBack(state: var, text: string): void {
+        if (root.isActiveTurn(state)) root.composerDraft(text);
+        else state.handedBack = state.handedBack === "" ? text : state.handedBack + "\n\n" + text;
     }
 
     function projectTurnRows(state: var): void {
@@ -1610,12 +1622,14 @@ Singleton {
                 state.toolActivities = [];
                 state.followUpQueue = [];
             }
+            if (!root.isActiveTurn(state)) {
+                if (!running) root.leaveConversation(state);
+                continue;
+            }
             // ghostd announces each pass too (a follow-up, a stop hook): with no
             // stream here, the transcript and the queue are read again each time.
-            if (root.isActiveTurn(state)) {
-                root.loadConversationTranscript(state, false);
-                root.fetchQueueFor(state);
-            }
+            root.loadConversationTranscript(state, false);
+            root.fetchQueueFor(state);
             root.projectTurnFields(state);
         }
     }
@@ -1865,11 +1879,12 @@ Singleton {
      * Leave the open conversation for another of the same ghost. An idle one
      * keeps nothing: opening it again reloads its transcript, so its rows
      * would only grow the shell. One streaming, running for another client,
-     * or writing a queued message stays, with its listed title.
+     * writing a queued message, or holding text handed back stays, with its
+     * listed title.
      */
     function leaveConversation(state: var): void {
         root.cancelTranscriptLoad(state);
-        if (state.streaming || state.detached || state.queueSubmitting) {
+        if (state.streaming || state.detached || state.queueSubmitting || state.handedBack !== "") {
             root.captureActiveTurn(state);
             return;
         }
@@ -2190,6 +2205,11 @@ Singleton {
         state.request = xhr;
         root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
+            if (xhr.readyState === 4 && xhr.status === 409 && xhr === state.request
+                    && root.errorCode(xhr) === "session_busy") {
+                root.joinRunningTurn(state, prompt);
+                return;
+            }
             root.readTurnStream(xhr, state.key,
                 "POST /api/ghosts/" + ghost + "/messages",
                 "the stream ended mid-turn");
@@ -2198,6 +2218,24 @@ Singleton {
             "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
             JSON.stringify({ prompt: prompt, sessionId: state.sessionId }));
+    }
+
+    /**
+     * ghostd was already running a turn here this HUD had not heard of (a
+     * next-work turn just started): the prompt becomes its follow-up, and the
+     * listing says what runs.
+     */
+    function joinRunningTurn(state: var, prompt: string): void {
+        state.request = null;
+        state.streaming = false;
+        root.removeTurnRow(state, state.assistantRow);
+        root.removeTurnRow(state, state.assistantRow - 1);
+        state.assistantRow = -1;
+        state.activity = "";
+        state.detached = true;
+        root.updateLiveConversationKeys();
+        root.queueFor(state, prompt);
+        root.fetchSessions(state.ghost);
     }
 
     /** Stop the active conversation's turn in ghostd, which runs it regardless of this HUD's stream. */
@@ -2232,10 +2270,9 @@ Singleton {
         root.settleToolActivityFor(state, true);
         root.flushTurn(state, true);
         // A stop never sends what was queued behind it: it goes back to the
-        // composer, a follow-up still being written included, and only here.
+        // composer, a follow-up still being written included.
         root.retire(state, "queueRequest");
-        if (state.followUpQueue.length > 0 && root.isActiveTurn(state))
-            root.composerDraft(state.followUpQueue.join("\n\n"));
+        if (state.followUpQueue.length > 0) root.handBack(state, state.followUpQueue.join("\n\n"));
         root.resetInteractionStateFor(state);
         if (state.assistantRow >= 0 && state.assistantRow < state.rows.length) {
             root.setTurnRow(state, state.assistantRow, "pending", false);
@@ -2698,10 +2735,13 @@ Singleton {
 
     /** Queue a follow-up for the running turn; the daemon runs it after the current pass. */
     function queueMessage(text: string): void {
-        const prompt = text.trim();
         const state = root.activeTurnState(false);
         if (!state) return;
         root.captureActiveTurn(state);
+        root.queueFor(state, text.trim());
+    }
+
+    function queueFor(state: var, prompt: string): void {
         if (prompt === "" || state.queueSubmitting || !(state.streaming || state.detached)) return;
         state.queueSubmitting = true;
         state.queueError = "";
@@ -2718,7 +2758,7 @@ Singleton {
                     const at = state.followUpQueue.lastIndexOf(prompt);
                     if (at >= 0) state.followUpQueue = state.followUpQueue.filter((_, index) => index !== at);
                     root.fetchQueueFor(state);
-                    root.composerDraft(prompt);
+                    root.handBack(state, prompt);
                 } else if (body) {
                     root.applyQueueFor(state, body);
                     state.queueError = "";
@@ -2739,6 +2779,16 @@ Singleton {
                 ? body.error.message
                 : (body.error || body.message || "");
             return typeof detail === "string" ? detail : "";
+        } catch (error) {
+            return "";
+        }
+    }
+
+    /** The daemon's error code for a failure, or "". */
+    function errorCode(xhr: var): string {
+        try {
+            const body = JSON.parse(xhr.responseText);
+            return body.error && typeof body.error.code === "string" ? body.error.code : "";
         } catch (error) {
             return "";
         }

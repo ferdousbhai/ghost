@@ -106,4 +106,57 @@ TestCase {
         compare(queued.length, 1);
         compare(JSON.parse(queued[0].body).text, "also check the issue");
     }
+
+    SignalSpy {
+        id: drafts
+        target: Ghostd
+        signalName: "composerDraft"
+    }
+
+    function test_aSendRefusedAsBusyQueuesIntoTheRunningTurn(): void {
+        // ghostd started a next-work turn this HUD has not heard of yet.
+        Ghostd.send("look at this too");
+        requests("POST", /\/api\/ghosts\/casper\/messages$/)[0].complete(409, {
+            error: { code: "session_busy", message: "This ghost is already answering in this conversation." }
+        });
+        verify(Ghostd.streaming);
+        compare(Ghostd.lastError, "");
+        compare(Ghostd.transcript.count, 0);
+        const queued = requests("POST", /\/sessions\/c1\/queue$/);
+        compare(queued.length, 1);
+        compare(JSON.parse(queued[0].body).text, "look at this too");
+        compare(Ghostd.followUpQueue, ["look at this too"]);
+        // The listing it asks for says what is running.
+        compare(requests("GET", /\/sessions$/).length, 1);
+    }
+
+    function test_anEndedTurnInAConversationNotOpenIsDropped(): void {
+        const listing = running => {
+            Ghostd.fetchSessions("casper");
+            requests("GET", /\/sessions$/).filter(xhr => xhr.readyState !== 4)[0].complete(200, {
+                sessions: [{ id: "c1", title: "Open" }, { id: "c2", title: "Next work", running: running }]
+            });
+        };
+        listing(true);
+        verify(Ghostd.turnStates[Ghostd.conversationKey("casper", "c2")]);
+        listing(false);
+        verify(!Ghostd.turnStates[Ghostd.conversationKey("casper", "c2")]);
+    }
+
+    function test_aRefusalAfterLeavingWaitsForItsConversation(): void {
+        drafts.clear();
+        list(true);
+        Ghostd.queueMessage("for the README");
+        Ghostd.finishOpenConversation("c2");
+        requests("POST", /\/sessions\/c1\/queue$/)[0].complete(409, {
+            error: { code: "session_not_streaming", message: "not streaming" }
+        });
+        // Not into the composer of another conversation…
+        compare(drafts.count, 0);
+        // …but back when its own is open again, even after its turn ended.
+        list(false);
+        Ghostd.finishOpenConversation("c1");
+        compare(drafts.count, 1);
+        compare(drafts.signalArguments[0][0], "for the README");
+    }
 }
