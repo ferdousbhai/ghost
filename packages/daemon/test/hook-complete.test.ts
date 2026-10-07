@@ -1,5 +1,5 @@
 /**
- * `ghostd hook-smol-complete`: one completion for an owner command hook, run
+ * `ghostd hook-complete`: one completion for an owner command hook, run
  * on the first harness that answers, in a scratch directory.
  */
 import { existsSync, mkdtempSync, rmSync } from "node:fs";

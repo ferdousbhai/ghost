@@ -340,7 +340,7 @@ Their JSON protocol, failure behavior, and settings are defined in
 Ghost sets `stop_hook_active` on hook continuation passes and does not impose
 a host bound; `owner_prompt` and `turn_id` identify one owner request across
 its continuations.
-`ghostd hook-smol-complete` gives a hook one completion from the ghost's
+`ghostd hook-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 A ghost keeps its notes in the
 owner's documents with its file tools during ordinary turns. Ghost runs no

@@ -1,8 +1,8 @@
 /**
- * `ghostd hook-smol-complete`: one completion for a trusted command hook (a
+ * `ghostd hook-complete`: one completion for a trusted command hook (a
  * stop-hook reviewer, a classifier), run headlessly on the ghost's preferred
  * harness in a scratch directory — no persona, no conversation, no Ghost
- * tools. The name is kept for the hooks already calling it.
+ * tools.
  */
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -110,7 +110,7 @@ export function parseHookCompleteInput(raw: string): HookCompleteInput {
 
 export async function hookCompleteCommand(argv: string[]): Promise<number> {
   if (argv.length > 0) {
-    process.stderr.write("hook-smol-complete accepts JSON on stdin and no arguments.\n");
+    process.stderr.write("hook-complete accepts JSON on stdin and no arguments.\n");
     return 2;
   }
   try {

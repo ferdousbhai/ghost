@@ -192,12 +192,16 @@ and Ghost shows it in the transcript as a dim "Stop hook" row. An
 informational notification alone is not.
 
 Trusted command hooks that need a classifier can invoke
-`ghostd hook-smol-complete` (the name predates harnesses). It reads
+`ghostd hook-complete`. It reads
 `{ "ghost_home": "/absolute/home", "prompt": "..." }` from stdin and returns
 `{ "text": "..." }`: one headless run of the ghost's preferred eligible
 harness, in the order a turn would pick, in a scratch directory with no
 persona, conversation, or Ghost tools; a harness that fails hands the prompt
-to the next. An older `role` field is ignored.
+to the next. It runs the same model and effort a turn does, with the owner's
+own CLI configuration, hooks included, and the caller's environment: a
+stop-hook reviewer marks its call (keep-going sets `KEEP_GOING_REVIEWING`) so
+the harness's own stop hook does not review the review. An older `role` field
+is ignored.
 
 ## Status
 

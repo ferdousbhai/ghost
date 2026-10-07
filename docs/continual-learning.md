@@ -253,7 +253,7 @@ The candidates, to be confirmed file by file when this is built:
     `model-selection.ts`, `model-config-view.ts`, runtime
     `model-routing.ts`: ≈ 830 lines).
 - **Model roles:** there is one model per ghost, and no separate small
-  model. Titles, greetings, and `ghostd hook-smol-complete` all call the
+  model. Titles, greetings, and `ghostd hook-complete` all call the
   ghost's own model on its node, with its adapter applied.
   - `smol_model` goes, along with the roles concept in `models.json`.
   - The cheapest-model ranking in daemon and runtime `smol.ts` goes

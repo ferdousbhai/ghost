@@ -36,7 +36,7 @@ Usage:
   ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
   ghostd remote [on|off|status]
-  ghostd hook-smol-complete
+  ghostd hook-complete
 
 Subcommands:
   relay-token              Print the browser-relay pairing token (minting one on
@@ -48,7 +48,7 @@ Subcommands:
                            401. --rotate mints a new one and invalidates the old.
   remote                   Show or change the daemon's tailnet exposure through
                            Tailscale Serve. Defaults to status.
-  hook-smol-complete       Command-hook bridge. Reads ghost_home and prompt as
+  hook-complete            Command-hook bridge. Reads ghost_home and prompt as
                            JSON on stdin and writes one completion from the
                            ghost's preferred harness as JSON on stdout.
 
@@ -197,7 +197,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (argv[0] === "relay-token") return relayToken.command(argv.slice(1));
   if (argv[0] === "api-token") return apiToken.command(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
-  if (argv[0] === "hook-smol-complete") return hookCompleteCommand(argv.slice(1));
+  if (argv[0] === "hook-complete") return hookCompleteCommand(argv.slice(1));
 
   let parsed: ParsedArgs;
   try {

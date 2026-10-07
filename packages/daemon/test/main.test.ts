@@ -70,7 +70,7 @@ describe("ghostd help", () => {
       "relay-token",
       "api-token",
       "remote",
-      "hook-smol-complete",
+      "hook-complete",
     ]) {
       expect(output).toContain(`ghostd ${command}`);
     }
