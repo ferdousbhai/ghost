@@ -74,9 +74,10 @@ Item {
     readonly property color phraseColor: Theme.light
         ? Theme.foregroundDim : Qt.rgba(0.796, 0.835, 0.882, 0.8)
 
-    // A long command or error wraps rather than eliding to one line; the cap
-    // keeps a pasted script from pushing the composer off the pane.
-    implicitHeight: visible ? Math.max(30, phraseText.implicitHeight + 8) : 0
+    // One line, elided: a height that followed the wrapped text fed back
+    // through the HUD's layout and pinned omarchy-shell at 100% CPU while
+    // its memory grew without bound (2026-10-07).
+    implicitHeight: visible ? 30 : 0
     visible: Ghostd.working || root.failing
     clip: false
 
@@ -127,10 +128,14 @@ Item {
             font.pixelSize: Theme.fontSizeSmall
             font.weight: Font.Light
             font.letterSpacing: 0.5
-            // Centre the first line on the orb, whatever the font height.
-            topPadding: Math.max(0, (22 - contentHeight / Math.max(lineCount, 1)) / 2)
-            wrapMode: Text.WrapAtWordBoundaryOrAnywhere
-            maximumLineCount: 4
+            // Centre the first line on the orb from the font's line height:
+            // the laid-out height would make the padding depend on itself.
+            topPadding: Math.max(0, (22 - phraseMetrics.height) / 2)
+
+            FontMetrics {
+                id: phraseMetrics
+                font: phraseText.font
+            }
             elide: Text.ElideRight
         }
     }
