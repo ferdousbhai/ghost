@@ -60,13 +60,13 @@ where the owner and every other ghost can see them. Finished deliverables go to
 the destination the owner asked for, the documents directory when none was
 named, and never into a ghost home.
 
-Because the documents are the state, a conversation left idle for three
-minutes gets one handoff pass on its own harness session that brings them up
-to date, then, after a 15-second window to cancel, a "What should we work on
-next?" turn, up to 100 since the owner last wrote. It is Ghost's only
-background work of its own: a harness turn ends when its answer does, and an
-owner who walks away would otherwise leave the documents behind and the ghost
-idle.
+Because the documents are the state, a conversation left idle gets one
+handoff pass on its own harness session that brings them up to date, then,
+after a short window to cancel, a "What should we work on next?" turn, up to a
+bound since the owner last wrote (settings in [hooks.md](hooks.md)). It is
+Ghost's only background work of its own: a harness turn ends when its answer
+does, and an owner who walks away would otherwise leave the documents behind
+and the ghost idle.
 
 The Documents directory is resolved the way screenshots resolve the Pictures
 directory: `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`.

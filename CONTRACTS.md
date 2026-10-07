@@ -347,12 +347,12 @@ owner's documents with its file tools, and they are the state a later session
 resumes from. So that they never trail a conversation, and so the ghost keeps
 working once keep-going lets a turn stop, ghostd runs one built-in idle chain
 ([`session-host.ts`](packages/daemon/src/session-host.ts)), set by the
-`builtin` section of `hooks.json` (`handoff_idle_seconds`, default 180;
-`next_work_turns`, default 100; 0 turns either off):
+`builtin` section of `hooks.json` (`handoff_idle_seconds` and
+`next_work_turns`, defined in [`docs/hooks.md`](docs/hooks.md)):
 
-1. **Handoff.** That long after a turn that ran a harness, with no turn since,
-   it resumes the conversation's own harness session, in its directory, with
-   `HANDOFF_PROMPT`. It runs no hooks, streams to no client, and is not a
+1. **Handoff.** `handoff_idle_seconds` after a turn that ran a harness, with
+   no turn since, it resumes the conversation's own harness session, in its
+   directory, with `HANDOFF_PROMPT`. It runs no hooks, streams to no client, and is not a
    running turn in the listing. Its reply is one `handoff` log entry, which
    the transcript shows as a `handoff` message and a new harness's carried
    context leaves out.

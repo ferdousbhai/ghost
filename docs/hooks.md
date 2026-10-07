@@ -64,9 +64,9 @@ handler that requests a continuation wins.
 
 Ghost registers no built-in hooks. The top-level `builtin` object sets ghostd's
 idle chain instead (`CONTRACTS.md`, "Background work and hooks"), which runs
-none of them: `handoff_idle_seconds` (default 180) and `next_work_turns`
-(default 100), whole numbers where 0 turns that step off. The Hooks pane edits
-both.
+none of them. Both are whole numbers: `handoff_idle_seconds` (default 180; 0
+turns the whole chain off) and `next_work_turns` (default 100; 0 ends it after
+the handoff). The Hooks pane edits both.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
