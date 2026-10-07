@@ -69,6 +69,28 @@ describe("parsers over recorded output", () => {
     expect(start?.type === "tool_start" && start.args).toMatchObject({ command: "echo ghost-probe-42" });
   });
 
+  // A start with no end leaves a card running for the rest of the turn, and
+  // the HUD's activity line names the newest running card.
+  it.each([
+    ["claude", "claude.jsonl"],
+    ["codex", "codex.jsonl"],
+    ["copilot", "copilot.jsonl"],
+    ["grok", "grok.jsonl"],
+    ["muse", "muse.jsonl"],
+    ["pi", "pi.jsonl"],
+  ])("%s: every tool that starts ends", (id, fixture) => {
+    const events = parse(id, fixture);
+    const ended = new Set(events.flatMap((event) => event.type === "tool_end" ? [event.id] : []));
+    expect(events.filter((event) => event.type === "tool_start" && !ended.has(event.id))).toEqual([]);
+  });
+
+  it("codex: a web search ends when Codex completes it", () => {
+    const parser = (harnessRow("codex") ?? { parser: () => () => [] }).parser();
+    const search = (type: string) => parser(JSON.stringify({ type, item: { id: "ws", type: "web_search", query: "" } }));
+    expect(search("item.started")).toEqual([{ type: "tool_start", id: "ws", name: "web_search", args: { query: "" } }]);
+    expect(search("item.completed")).toEqual([{ type: "tool_end", id: "ws", isError: false }]);
+  });
+
   it("codex: a command is the script inside its bash -lc wrapper", () => {
     const parser = (harnessRow("codex") ?? { parser: () => () => [] }).parser();
     const command = (wrapped: string) => {

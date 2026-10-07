@@ -277,7 +277,9 @@ function codexParser(): (line: string) => HarnessEvent[] {
           ? [{ type: "tool_start", id, name: "edit", args: { changes: item.changes } }, { type: "tool_end", id, isError: item.status === "failed" }]
           : [];
       case "web_search":
-        return done ? [] : [{ type: "tool_start", id, name: "web_search", args: { query: item.query } }];
+        return done
+          ? [{ type: "tool_end", id, isError: false }]
+          : [{ type: "tool_start", id, name: "web_search", args: { query: item.query } }];
       default:
         return [];
     }
