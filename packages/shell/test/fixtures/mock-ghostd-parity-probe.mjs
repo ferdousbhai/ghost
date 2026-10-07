@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 // streamed turn. Paths inside the ghost home never leak into transcripts.
 const here = dirname(fileURLToPath(import.meta.url));
 const mockPath = resolve(here, "../../dev/mock-ghostd.mjs");
-const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2"], {
+const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60"], {
   stdio: ["ignore", "ignore", "pipe"],
 });
 
@@ -167,6 +167,18 @@ try {
   const turnEvents = await turnResponse.text();
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
   assert.ok(!turnEvents.includes('"toolcall_'));
+
+  // A turn's end starts a next-work countdown, and the owner's next turn cancels it.
+  const traceRow = async () => (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
+    .sessions.find((session) => session.id === "mock-trace-probe");
+  assert.equal(typeof (await traceRow()).continuesAt, "string");
+  const nextTurn = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "one more thing", sessionId: "mock-trace-probe" }),
+  });
+  assert.equal((await traceRow()).continuesAt, null);
+  await nextTurn.text();
 
   // Removed routes stay removed.
   for (const path of ["model", "models", "providers", "sessions/sess-casper-1/ask",

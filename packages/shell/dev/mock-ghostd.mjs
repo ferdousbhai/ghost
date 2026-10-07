@@ -661,6 +661,11 @@ async function streamTurn(res, name, body) {
     existing = { id: sessionId, title: null, updatedAt: now, messages: [] };
     store.set(sessionId, existing);
   }
+  // As ghostd's does, a new turn cancels a counting-down next-work turn.
+  if (existing?.continuesAt) {
+    clearTimeout(existing.continuation);
+    existing.continuesAt = null;
+  }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
   // As in ghostd, the first owner text previews it, a `!command` included.
   if (existing) existing.preview ??= firstLine(prompt);
