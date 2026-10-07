@@ -49,7 +49,9 @@ export type LogEntry =
    * session store does not follow.
    */
   | { readonly type: "harness"; readonly at: string; readonly harness: string; readonly session: string | null; readonly dir?: string }
-  | { readonly type: "title"; readonly at: string; readonly title: string | null };
+  | { readonly type: "title"; readonly at: string; readonly title: string | null }
+  /** The idle handoff pass: its one-line reply, or why it failed. */
+  | { readonly type: "handoff"; readonly at: string; readonly harness: string; readonly text: string; readonly error?: string };
 
 const CONVERSATION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u;
 
@@ -142,6 +144,8 @@ export interface LogState {
   readonly model: string | null;
   readonly provider: string | null;
   readonly effort: string | null;
+  /** When the owner or the ghost last added to the conversation; a handoff or harness record is not that. */
+  readonly activeAt: string | null;
 }
 
 /** The owner's words without attachment markers: an imported `[Attachment: …]` or an attached image's line. */
@@ -193,7 +197,9 @@ export function logState(entries: readonly LogEntry[]): LogState {
   let harnessDir: string | null = null;
   let harnessStarted = false;
   let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
+  let activeAt: string | null = null;
   for (const entry of entries) {
+    if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
@@ -216,6 +222,9 @@ export function logState(entries: readonly LogEntry[]): LogState {
           ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
         }
         break;
+      case "handoff":
+        messageCount += 1;
+        break;
       case "command":
         // A `!command` the transcript shows is two messages, the owner's words and its output.
         if (entry.excluded) break;
@@ -236,11 +245,11 @@ export function logState(entries: readonly LogEntry[]): LogState {
         break;
     }
   }
-  return { title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran };
+  return { title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt };
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook";
+  role: "user" | "assistant" | "hook" | "handoff";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -273,6 +282,12 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         content: entry.content,
         entryId,
         ...(entry.error ? { errorMessage: entry.error } : {}),
+      };
+    } else if (entry.type === "handoff") {
+      message = {
+        role: "handoff",
+        content: [{ type: "text", text: entry.error ? `Failed: ${entry.error}` : entry.text }],
+        entryId,
       };
     } else if (entry.type === "command" && !entry.excluded) {
       // The owner's `!command`, then its output, as the live turn showed them.
@@ -325,8 +340,10 @@ export function unseenCommands(entries: readonly LogEntry[]): string | null {
 const listedLogs = new Map<string, { size: number; mtimeMs: number; state: LogState }>();
 
 /**
- * A log's state and last change, for listing conversations. The log only
- * grows, so it is parsed again only once its size or mtime moves.
+ * A log's state and last change, for listing conversations: its last entry
+ * from the owner or the ghost, so an idle handoff neither reorders the list nor
+ * marks it unread. The log only grows, so it is parsed again only once its size
+ * or mtime moves.
  */
 export async function listedLog(sessionDir: string, id: string): Promise<{ state: LogState; updatedAt: string } | null> {
   const file = logPath(sessionDir, id);
@@ -343,7 +360,7 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
     listed = { size: info.size, mtimeMs: info.mtimeMs, state: logState(entries) };
     listedLogs.set(file, listed);
   }
-  return { state: listed.state, updatedAt: info.mtime.toISOString() };
+  return { state: listed.state, updatedAt: listed.state.activeAt ?? info.mtime.toISOString() };
 }
 
 /**

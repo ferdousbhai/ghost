@@ -62,7 +62,8 @@ the reply already reads as finished, and only a continuation shows.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 
-Ghost registers no built-in hooks. An optional top-level `builtin` object is
+Ghost registers no built-in hooks; its one built-in background pass, the idle
+handoff (`CONTRACTS.md`), runs none. An optional top-level `builtin` object is
 accepted only when empty, so an older `hooks.json` still parses.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a

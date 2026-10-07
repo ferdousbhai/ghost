@@ -10,7 +10,7 @@ import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
-import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { HANDOFF_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, tempDir, type TempGhosts } from "./helpers/fixtures.js";
@@ -630,6 +630,38 @@ describe("conversation metadata", () => {
     const before = (await readLog(sessionDir(), "c1"))?.length;
     writeFileSync(logPath(sessionDir(), "c1"), `${readFileSync(logPath(sessionDir(), "c1"), "utf8")}{"type":"us`);
     expect((await readLog(sessionDir(), "c1"))?.length).toBe(before);
+  });
+});
+
+describe("the idle handoff", () => {
+  it("resumes the conversation's session once it sits idle and logs the reply as one handoff row", async () => {
+    const fake = harness(replies("done", "Updated plan.md"));
+    const sessions = host({ harnesses: [fake], handoffIdleMs: 20 });
+    await turn(sessions, "ship it");
+    await waitFor(() => fake.calls().length === 2);
+    expect(fake.calls()[1]).toMatchObject({ prompt: HANDOFF_PROMPT, resume: true });
+    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).includes('"type":"handoff"'));
+    const { messages } = await sessions.readTranscript("casper", "c1");
+    expect(messages.map((message) => [message.role, message.content])).toEqual([
+      ["user", [{ type: "text", text: "ship it" }]],
+      ["assistant", [{ type: "text", text: "done" }]],
+      ["handoff", [{ type: "text", text: "Updated plan.md" }]],
+    ]);
+    // The handoff is not news: the listing still dates the conversation by its reply.
+    const reply = (await readLog(sessionDir(), "c1"))?.findLast((entry) => entry.type === "assistant");
+    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.updatedAt).toBe(reply?.at);
+  });
+
+  it("gives way to the owner: a new turn stops a running handoff and nothing is logged for it", async () => {
+    const fake = harness([]);
+    const held = fake.gate("handoff");
+    fake.setTurns([...replies("done"), { gate: held.path }, ...replies("next answer")]);
+    const sessions = host({ harnesses: [fake], handoffIdleMs: 20 });
+    await turn(sessions, "ship it");
+    await waitFor(() => fake.calls().length === 2);
+    expect(text(await turn(sessions, "one more thing"))).toBe("next answer");
+    expect(fake.calls()[2]?.prompt).toBe("one more thing");
+    expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
   });
 });
 

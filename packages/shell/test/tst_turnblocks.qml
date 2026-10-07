@@ -120,4 +120,14 @@ TestCase {
         compare(rows.map(row => row.role).join(","), "user,assistant,hook,assistant");
         compare(rows[2].text, "Keep going.");
     }
+
+    // The idle handoff's reply is its own row after the answer, never part of it.
+    function test_handoffIsItsOwnRow(): void {
+        const rows = TurnBlocks.rows([
+            { role: "assistant", content: [{ type: "text", text: "Shipped." }], entryId: "a1" },
+            { role: "handoff", content: [{ type: "text", text: "Updated plan.md" }], entryId: "e2" }
+        ]);
+        compare(rows.map(row => row.role).join(","), "assistant,handoff");
+        compare(rows[1].text, "Updated plan.md");
+    }
 }

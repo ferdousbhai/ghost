@@ -28,14 +28,15 @@ Item {
     required property int rowIndex
 
     readonly property bool mine: root.speaker === "user"
-    readonly property bool hookNotice: root.speaker === "hook"
+    // A stop hook's continuation or the idle handoff: a dim line, not a message.
+    readonly property bool hookNotice: root.speaker === "hook" || root.speaker === "handoff"
     // A prompt's image lines are drawn as pictures, not printed.
     readonly property var promptParts: root.mine ? Attachments.split(root.body) : ({ text: root.body, images: [] })
     readonly property var images: root.promptParts.images
     readonly property int imageSize: 180
     readonly property string displayBody: {
-        const raw = root.hookNotice
-            ? (root.body !== "" ? "Stop hook · " + root.body : "Stop hook continued")
+        const raw = root.speaker === "handoff" ? "Handoff · " + (root.body || "done")
+            : root.hookNotice ? (root.body !== "" ? "Stop hook · " + root.body : "Stop hook continued")
             : root.promptParts.text;
         // A trailing newline is a POSIX terminator, not a blank line. Qt's
         // PlainText path paints it as one, which is the empty band under a

@@ -134,8 +134,8 @@ the harness's working directory and holds Ghost's log, `.conversation.jsonl`
 object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
-records, and `harness` records naming the harness that took over and the
-session id it reported. A torn last line is skipped. The log is the history
+records, `harness` records naming the harness that took over and the
+session id it reported, and `handoff` records (below). A torn last line is skipped. The log is the history
 every client reads; each harness's own transcript is its resume state and is
 not read back. A conversation is listed once a message lands or the owner
 names it; each row carries `preview`, the first owner text, and `title`,
@@ -343,8 +343,17 @@ its continuations.
 `ghostd hook-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
 A ghost keeps its notes in the
-owner's documents with its file tools during ordinary turns. Ghost runs no
-background memory pass of its own.
+owner's documents with its file tools, and they are the state a later session
+resumes from. So that they never trail a conversation, ghostd runs one built-in
+background pass, the idle handoff
+([`session-host.ts`](packages/daemon/src/session-host.ts), `HANDOFF_PROMPT`):
+three minutes (`HANDOFF_IDLE_MS`) after a turn that ran a harness, with no
+turn since, it resumes the conversation's own harness session, in its
+directory, with a prompt to bring the documents up to date. It runs no hooks,
+streams to no client, and is not a running turn in the listing; a new turn in
+the conversation, its deletion, or the ghost's move or shutdown stops it
+first. Its reply is logged as one `handoff` entry, which the transcript
+shows as a `handoff` message and a new harness's carried context leaves out.
 
 Every `session_stop` and `before_prompt` behavior is a `hooks.json` command the
 owner chooses. Ghost has no in-process hook registration to be the other kind,
@@ -388,9 +397,9 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise). |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `handoff` message is the idle handoff's one-line reply, or `Failed: <reason>`. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |

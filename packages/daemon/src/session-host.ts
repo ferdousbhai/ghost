@@ -78,6 +78,11 @@ import { trashPath, type TrashPathResult } from "./trash.js";
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
 export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
+
+/** How long a conversation sits idle after a turn before its ghost hands off. */
+export const HANDOFF_IDLE_MS = 180_000;
+/** The handoff pass's prompt: the documents are the state a later session starts from. */
+export const HANDOFF_PROMPT = "The owner has been away for three minutes. Hand off: bring your notes in the owner's documents up to date with this conversation (what is done, what is verified, and the exact next step) so a fresh session could resume from them alone. Change nothing else. Reply in one line naming what you updated, or \"nothing to update\".";
 /** How long one read of Omarchy's harness report is reused. */
 const HARNESS_REPORT_TTL_MS = 60_000;
 /** The live tail of a tool's output shown on its card. */
@@ -112,6 +117,8 @@ export interface SessionHostOptions {
   defaultHarness?: () => Promise<string | null>;
   /** The environment harnesses run with; the daemon's own by default. */
   env?: NodeJS.ProcessEnv;
+  /** Idle time after a turn before the handoff pass; `HANDOFF_IDLE_MS` by default. */
+  handoffIdleMs?: number;
 }
 
 export interface RunTurnOptions {
@@ -261,6 +268,9 @@ export class SessionHost {
   /** Each admitted turn's stop: the turn outlives its client, so only `stopTurn` or shutdown ends it early. */
   private readonly admissions = new Map<string, AbortController>();
   private readonly deleting = new Set<string>();
+  /** Each conversation's pending or running handoff, which any new turn or move cancels first. */
+  private readonly handoffs = new Map<string, { timer?: ReturnType<typeof setTimeout>; controller?: AbortController; done?: Promise<void> }>();
+  private readonly handoffIdleMs: number;
   private readonly reservedGhosts = new Set<string>();
   /** File work in flight per ghost, which a delete or rename waits out. */
   private readonly leases = new Map<string, { count: number; drained?: () => void }>();
@@ -284,6 +294,7 @@ export class SessionHost {
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
     this.rowOf = options.harnessRows ?? harnessRow;
+    this.handoffIdleMs = options.handoffIdleMs ?? HANDOFF_IDLE_MS;
   }
 
   // ── Conversation events ────────────────────────────────────────────────
@@ -501,6 +512,10 @@ export class SessionHost {
     if (this.admissions.has(key) || this.deleting.has(key)) {
       throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
     }
+    await this.cancelHandoff(key);
+    if (this.admissions.has(key)) {
+      throw new GhostError("session_busy", "This ghost is already answering in this conversation.", 409);
+    }
     const command = ownerCommand(options.prompt);
     if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
     const controller = new AbortController();
@@ -518,6 +533,7 @@ export class SessionHost {
         } finally {
           release();
           this.announce(ghost.name, id);
+          if (!command) this.scheduleHandoff(ghost.name, id);
         }
       },
       release,
@@ -852,6 +868,70 @@ export class SessionHost {
     return ghostSessionStopContinuation(result) ?? null;
   }
 
+  // ── Handoff ───────────────────────────────────────────────────────────
+
+  /** After a turn, hand off once the conversation has sat idle for `handoffIdleMs`. */
+  private scheduleHandoff(ghostName: string, id: string): void {
+    const key = keyOf(ghostName, id);
+    if (this.shuttingDown || this.handoffs.has(key)) return;
+    const timer = setTimeout(() => void this.runHandoff(ghostName, id, key), this.handoffIdleMs);
+    timer.unref?.();
+    this.handoffs.set(key, { timer });
+  }
+
+  /** Drop a pending handoff, or stop a running one and wait it out. */
+  private async cancelHandoff(key: string): Promise<void> {
+    const handoff = this.handoffs.get(key);
+    if (!handoff) return;
+    clearTimeout(handoff.timer);
+    handoff.controller?.abort();
+    this.handoffs.delete(key);
+    await handoff.done;
+  }
+
+  /**
+   * One pass on the conversation's own harness session, which has the whole
+   * conversation, asking it to bring the owner's documents up to date. It runs
+   * no hooks and its reply is logged as one `handoff` entry, not a message.
+   */
+  private async runHandoff(ghostName: string, id: string, key: string): Promise<void> {
+    const controller = new AbortController();
+    const handoff = { controller, done: undefined as Promise<void> | undefined };
+    this.handoffs.set(key, handoff);
+    handoff.done = (async () => {
+      try {
+        const ghost = this.registry.get(ghostName);
+        await this.withGhost(ghost.name, async () => {
+          const { sessionDir } = ghostPaths(ghost.dir);
+          const bound = logState((await readLog(sessionDir, id)) ?? []);
+          const row = bound.harness === null ? null : this.rowOf(bound.harness);
+          // Only a session the harness can resume here carries the conversation.
+          if (!row || !bound.harnessStarted || bound.harnessDir !== conversationDir(sessionDir, id)) return;
+          const result = await this.runPass(ghost, id, row, {
+            prompt: HANDOFF_PROMPT,
+            resume: true,
+            sessionId: bound.harnessSession,
+          }, { emit: () => {} }, { next: 0 }, controller.signal);
+          if (result.aborted) return;
+          const text = result.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n").trim();
+          await appendLog(sessionDir, id, [{
+            type: "handoff",
+            at: new Date().toISOString(),
+            harness: row.id,
+            text,
+            ...(result.error ? { error: result.error } : {}),
+          }]);
+          this.announce(ghost.name, id);
+        });
+      } catch (error) {
+        this.logger.warn("handoff failed", { ghost: ghostName, conversation: id, error: errorMessage(error) });
+      } finally {
+        if (this.handoffs.get(key) === handoff) this.handoffs.delete(key);
+      }
+    })();
+    await handoff.done;
+  }
+
   /**
    * The owner's `!command` (or `!!command`, kept from the ghost), run in the
    * owner home with the conversation's identity and recorded in the log; its
@@ -1110,6 +1190,7 @@ export class SessionHost {
     }
     this.deleting.add(key);
     try {
+      await this.cancelHandoff(key);
       const { sessionDir } = ghostPaths(ghost.dir);
       const trashed = trashPath(conversationDir(sessionDir, id), { env: this.env, home: this.ownerHome });
       const pins = (await readPinState(sessionDir)).pinned;
@@ -1166,6 +1247,9 @@ export class SessionHost {
       }
     }
     for (const name of names) this.reservedGhosts.add(name);
+    await Promise.all([...this.handoffs.keys()]
+      .filter((key) => names.includes((JSON.parse(key) as [string, string])[0]))
+      .map((key) => this.cancelHandoff(key)));
     await Promise.all(names.map((name) => {
       const lease = this.leases.get(name);
       return lease ? new Promise<void>((resolve) => { lease.drained = resolve; }) : undefined;
@@ -1235,6 +1319,7 @@ export class SessionHost {
   beginShutdown(): void {
     this.shuttingDown = true;
     for (const controller of this.admissions.values()) controller.abort();
+    for (const key of this.handoffs.keys()) void this.cancelHandoff(key);
   }
 
   async disposeAll(): Promise<void> {

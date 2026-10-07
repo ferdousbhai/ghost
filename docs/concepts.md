@@ -60,6 +60,12 @@ where the owner and every other ghost can see them. Finished deliverables go to
 the destination the owner asked for, the documents directory when none was
 named, and never into a ghost home.
 
+Because the documents are the state, a conversation left idle for three
+minutes gets one handoff pass on its own harness session that brings them up
+to date. It is Ghost's only background pass of its own: a harness turn ends
+when its answer does, and an owner who walks away mid-task would otherwise
+leave the documents behind the conversation.
+
 The Documents directory is resolved the way screenshots resolve the Pictures
 directory: `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`.
 Ghost never hard-codes a path, never indexes the directory, and never injects

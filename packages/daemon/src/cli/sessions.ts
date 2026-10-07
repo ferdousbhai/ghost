@@ -30,6 +30,7 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
   return body.messages.map((message) => {
     const heading = message.role === "user" ? "you"
       : message.role === "hook" ? "Stop hook"
+      : message.role === "handoff" ? "Handoff"
       : ghost;
     const lines = message.content.map((part) => part.type === "toolCall"
       ? `> ⚙ ${part.name}(${truncate(JSON.stringify(part.arguments ?? {}), 120)})`
