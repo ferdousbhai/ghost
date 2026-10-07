@@ -2150,9 +2150,14 @@ Singleton {
         root.attachments = kept;
     }
 
+    /** Start a turn with `text`, or queue it as a follow-up while one runs. */
     function send(text: string): void {
+        if (root.streaming) {
+            root.queueMessage(text);
+            return;
+        }
         const prompt = text.trim();
-        if (prompt === "" || root.streaming || root.activeGhost === "") return;
+        if (prompt === "" || root.activeGhost === "") return;
         const ghost = root.activeGhost;
         const sessionId = root.ensureSession(ghost);
         const state = root.ensureTurnState(ghost, sessionId);

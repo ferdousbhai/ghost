@@ -430,10 +430,7 @@ FloatingWindow {
                             maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
                             onNewConversationRequested: sidebar.startConversation()
 
-                            onSubmitted: prompt => {
-                                if (Ghostd.streaming) Ghostd.queueMessage(prompt);
-                                else Ghostd.send(prompt);
-                            }
+                            onSubmitted: prompt => Ghostd.send(prompt)
                         }
                     }
 
