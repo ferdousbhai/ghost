@@ -99,6 +99,27 @@ describe("remote viewer transcript", () => {
     expect(seen).toEqual(["start", "text_delta", "done"]);
     expect(fetched).toEqual(["/api/ghosts/casper/sessions/c1/stream?turn=t1&from=1"]);
   });
+
+  test("a message goes to the conversation it was written in, even if another opens while its photo uploads", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    expect(source).toBeDefined();
+    const posted: { url: string; body: unknown }[] = [];
+    const names = ["prompt", "pending", "ghost", "session", "draft", "streaming", "seg", "show", "refresh", "shrink", "api", "fetch"];
+    const page = new Function(...names, `${source}; return { send, open(id) { ghost = "other"; session = id; } };`)(
+      { value: "look" }, [{ file: new Blob(["x"], { type: "image/jpeg" }) }], "casper", "c1", null, false,
+      encodeURIComponent, () => {}, () => {}, async (file: Blob) => file,
+      async () => {
+        page.open("c2");
+        return { path: "attachments/p.jpg" };
+      },
+      async (url: string, init: { body: string }) => {
+        posted.push({ url, body: JSON.parse(init.body) });
+        return { ok: false, json: async () => ({ error: { message: "stop here" } }) };
+      },
+    ) as { send: () => Promise<void>; open: (id: string) => void };
+    await expect(page.send()).rejects.toThrow("stop here");
+    expect(posted).toEqual([{ url: "/api/ghosts/casper/messages", body: { prompt: "look\n\n![image](attachments/p.jpg)", sessionId: "c1" } }]);
+  });
 });
 
 // The page's script is a string to TypeScript and to the repo's lint, so a

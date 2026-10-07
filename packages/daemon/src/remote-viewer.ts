@@ -343,15 +343,16 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     try {
       if (!session) draft = session = mint();
       // The turn stays in this conversation if the owner opens another while it runs.
-      const conversation = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session);
+      const target = { ghost, session };
+      const conversation = "/ghosts/" + seg(target.ghost) + "/sessions/" + seg(target.session);
       const paths = await Promise.all(pending.map(async (p) => {
         const blob = await shrink(p.file);
         return (await api(conversation + "/attachments", { method: "POST", headers: { "content-type": blob.type || "image/jpeg" }, body: blob })).path;
       }));
       const message = [text, ...paths.map((path) => "![image](" + path + ")")].filter(Boolean).join("\\n\\n");
-      const r = await fetch("/api/ghosts/" + seg(ghost) + "/messages", {
+      const r = await fetch("/api/ghosts/" + seg(target.ghost) + "/messages", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ prompt: message, sessionId: session }),
+        body: JSON.stringify({ prompt: message, sessionId: target.session }),
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error?.message || r.statusText);
       prompt.value = ""; grow(); clearTray();
