@@ -654,6 +654,24 @@ describe("choosing the agent", () => {
 });
 
 describe("conversation metadata", () => {
+  it("refuses metadata writes while the ghost home is moving", async () => {
+    const sessions = host({ harnesses: [harness(replies("hi"))] });
+    await turn(sessions, "hello");
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const lease = sessions.withGhost("casper", () => held);
+    const deleting = sessions.deleteGhost("casper");
+    try {
+      await expect(sessions.setPinned("casper", "c1", true)).rejects.toMatchObject({ code: "ghost_busy" });
+      await expect(sessions.markRead("casper", "c1")).rejects.toMatchObject({ code: "ghost_busy" });
+      await expect(sessions.renameConversation("casper", "c1", "Moved")).rejects.toMatchObject({ code: "ghost_busy" });
+    } finally {
+      release();
+      await lease;
+      await deleting;
+    }
+  });
+
   it("lists, titles, pins, reads, and trashes a conversation", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "Plan the zine\nwith details");

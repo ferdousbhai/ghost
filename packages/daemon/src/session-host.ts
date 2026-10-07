@@ -1166,25 +1166,29 @@ export class SessionHost {
   }
 
   async setPinned(ghostName: string, sessionId: string | null | undefined, pinned: boolean): Promise<void> {
-    const ghost = this.registry.get(ghostName);
-    const id = await this.requireConversation(ghost, sessionId);
-    const { sessionDir } = ghostPaths(ghost.dir);
-    const existing = new Set(await this.conversationIds(sessionDir));
-    const kept = (await readPinState(sessionDir)).pinned.filter((pin) => pin !== id && existing.has(pin));
-    await writePins(sessionDir, pinned ? [...kept, id] : kept);
-    this.announce(ghost.name, id);
+    await this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      const { sessionDir } = ghostPaths(ghost.dir);
+      const existing = new Set(await this.conversationIds(sessionDir));
+      const kept = (await readPinState(sessionDir)).pinned.filter((pin) => pin !== id && existing.has(pin));
+      await writePins(sessionDir, pinned ? [...kept, id] : kept);
+      this.announce(ghost.name, id);
+    });
   }
 
   async markRead(ghostName: string, sessionId: string | null | undefined, openedAt = new Date()): Promise<string> {
-    const ghost = this.registry.get(ghostName);
-    const id = await this.requireConversation(ghost, sessionId);
-    const { sessionDir } = ghostPaths(ghost.dir);
-    const existing = new Set(await this.conversationIds(sessionDir));
-    const kept = Object.fromEntries(Object.entries((await readReadState(sessionDir)).reads).filter(([read]) => existing.has(read)));
-    const readAt = openedAt.toISOString();
-    await writeReads(sessionDir, { ...kept, [id]: readAt });
-    this.announce(ghost.name, id);
-    return readAt;
+    return this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      const { sessionDir } = ghostPaths(ghost.dir);
+      const existing = new Set(await this.conversationIds(sessionDir));
+      const kept = Object.fromEntries(Object.entries((await readReadState(sessionDir)).reads).filter(([read]) => existing.has(read)));
+      const readAt = openedAt.toISOString();
+      await writeReads(sessionDir, { ...kept, [id]: readAt });
+      this.announce(ghost.name, id);
+      return readAt;
+    });
   }
 
   async renameConversation(ghostName: string, sessionId: string | null | undefined, title: string): Promise<string> {
@@ -1196,11 +1200,13 @@ export class SessionHost {
     if (!/\P{C}/u.test(trimmed)) {
       throw new GhostError("invalid_request", "A conversation title needs at least one printable character.", 400);
     }
-    const ghost = this.registry.get(ghostName);
-    const id = await this.requireConversation(ghost, sessionId);
-    await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
-    this.announce(ghost.name, id);
-    return trimmed;
+    return this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      await appendLog(ghostPaths(ghost.dir).sessionDir, id, [{ type: "title", at: new Date().toISOString(), title: trimmed }]);
+      this.announce(ghost.name, id);
+      return trimmed;
+    });
   }
 
   /** Store an image in the conversation directory, which need not hold a turn yet. */
