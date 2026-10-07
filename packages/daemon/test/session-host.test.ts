@@ -674,7 +674,7 @@ describe("conversation metadata", () => {
     expect(Object.keys((await readReadState(sessionDir())).reads).sort()).toEqual(["c1", "c2"]);
   });
 
-  it("refuses metadata writes while the ghost home is moving", async () => {
+  it("refuses metadata changes and conversation deletion while the ghost home is moving", async () => {
     const sessions = host({ harnesses: [harness(replies("hi"))] });
     await turn(sessions, "hello");
     let release = () => {};
@@ -685,6 +685,7 @@ describe("conversation metadata", () => {
       await expect(sessions.setPinned("casper", "c1", true)).rejects.toMatchObject({ code: "ghost_busy" });
       await expect(sessions.markRead("casper", "c1")).rejects.toMatchObject({ code: "ghost_busy" });
       await expect(sessions.renameConversation("casper", "c1", "Moved")).rejects.toMatchObject({ code: "ghost_busy" });
+      await expect(sessions.deleteSession("casper", "c1")).rejects.toMatchObject({ code: "ghost_busy" });
     } finally {
       release();
       await lease;

@@ -1258,27 +1258,29 @@ export class SessionHost {
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
   async deleteSession(ghostName: string, sessionId: string | null | undefined): Promise<TrashPathResult> {
-    const ghost = this.registry.get(ghostName);
-    const id = await this.requireConversation(ghost, sessionId);
-    const key = keyOf(ghost.name, id);
-    if (this.admissions.has(key) || this.reservedSessions.has(key)) {
-      throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
-    }
-    this.reservedSessions.add(key);
-    try {
-      await this.cancelHandoff(key);
-      const { sessionDir } = ghostPaths(ghost.dir);
-      const trashed = trashPath(conversationDir(sessionDir, id), { env: this.env, home: this.ownerHome });
-      await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
-        const pins = (await readPinState(sessionDir)).pinned;
-        if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
-      });
-      this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id, trash: trashed.trash });
-      this.announce(ghost.name, id);
-      return trashed;
-    } finally {
-      this.reservedSessions.delete(key);
-    }
+    return this.withGhost(ghostName, async () => {
+      const ghost = this.registry.get(ghostName);
+      const id = await this.requireConversation(ghost, sessionId);
+      const key = keyOf(ghost.name, id);
+      if (this.admissions.has(key) || this.reservedSessions.has(key)) {
+        throw new GhostError("session_busy", "Wait for this conversation to finish before deleting it.", 409);
+      }
+      this.reservedSessions.add(key);
+      try {
+        await this.cancelHandoff(key);
+        const { sessionDir } = ghostPaths(ghost.dir);
+        const trashed = trashPath(conversationDir(sessionDir, id), { env: this.env, home: this.ownerHome });
+        await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
+          const pins = (await readPinState(sessionDir)).pinned;
+          if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
+        });
+        this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id, trash: trashed.trash });
+        this.announce(ghost.name, id);
+        return trashed;
+      } finally {
+        this.reservedSessions.delete(key);
+      }
+    });
   }
 
   // ── Ghost lifecycle ───────────────────────────────────────────────────
