@@ -33,6 +33,7 @@ checkdepends=(
   'jq'
   'nodejs'
   'python-yaml'
+  'ripgrep'
 )
 _runtime_optdepends=(
   'chromium: the browser the relay drives, and the browser-relay smoke test'

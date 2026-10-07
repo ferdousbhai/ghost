@@ -8,6 +8,7 @@ pkgbase = ghost-dev
 	checkdepends = jq
 	checkdepends = nodejs
 	checkdepends = python-yaml
+	checkdepends = ripgrep
 	makedepends = bun>=1.4.0
 	makedepends = desktop-file-utils
 	makedepends = git
