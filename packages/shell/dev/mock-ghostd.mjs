@@ -741,13 +741,14 @@ async function streamTurn(res, name, body) {
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
       // owner_message, then streams the pass that answers it.
-      while (reply !== null) {
+      while (reply !== null && !log.stopped) {
         if (STOP_HOOK_MS > 0 && turn.followUp.length === 0) {
           const hook = { name: "Deciding whether to keep going", event: "session_stop" };
           send(log, { type: "hook_start", ...hook });
           await new Promise((resolve) => setTimeout(resolve, STOP_HOOK_MS));
           send(log, { type: "hook_end", ...hook });
         }
+        if (log.stopped) break;
         if (turn.followUp.length === 0) break;
         const text = turn.followUp.shift();
         if (existing) append(existing, { role: "user", content: textParts(text) });
@@ -757,7 +758,7 @@ async function streamTurn(res, name, body) {
         reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }
-      stopped = reply === null;
+      stopped = reply === null || log.stopped;
       // A stopped turn already ended its stream with `aborted`.
       if (!stopped) {
         if (flag("--stall-stream")) {

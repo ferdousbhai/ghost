@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 // streamed turn. Paths inside the ghost home never leak into transcripts.
 const here = dirname(fileURLToPath(import.meta.url));
 const mockPath = resolve(here, "../../dev/mock-ghostd.mjs");
-const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60", "--cut-bytes", "1000"], {
+const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60", "--stop-hook", "0.5", "--cut-bytes", "1000"], {
   stdio: ["ignore", "ignore", "pipe"],
 });
 
@@ -201,6 +201,50 @@ try {
   });
   assert.equal((await traceRow()).continuesAt, null);
   await nextTurn.text();
+
+  // Stopping during a stop hook must end the turn without scheduling next work.
+  const stoppedId = "mock-stopped-hook";
+  let stoppedResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ prompt: "stop during hook", sessionId: stoppedId }),
+  });
+  let sawHook = false;
+  while (stoppedResponse) {
+    const reader = stoppedResponse.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let resume = null;
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      while (buffer.includes("\n\n")) {
+        const end = buffer.indexOf("\n\n");
+        const frame = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+        if (!frame.startsWith("data: ")) continue;
+        const event = JSON.parse(frame.slice(6));
+        if (event.type === "resume") resume = event;
+        if (event.type === "hook_start" && event.event === "session_stop") {
+          sawHook = true;
+          const stop = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/${stoppedId}/stop`, { method: "POST" });
+          assert.equal(stop.status, 200);
+        }
+      }
+    }
+    stoppedResponse = resume && await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/${stoppedId}/stream?turn=${resume.turn}&from=${resume.from}`);
+  }
+  assert.ok(sawHook);
+  for (let tries = 0; tries < 100; tries += 1) {
+    const row = (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
+      .sessions.find((session) => session.id === stoppedId);
+    if (!row.running) {
+      assert.equal(row.continuesAt, null);
+      break;
+    }
+    if (tries === 99) throw new Error("stopped mock turn did not settle");
+    await new Promise((resolveWait) => setTimeout(resolveWait, 20));
+  }
 
   // Removed routes stay removed.
   for (const path of ["model", "models", "providers", "sessions/sess-casper-1/ask",
