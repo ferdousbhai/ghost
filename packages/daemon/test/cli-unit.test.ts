@@ -61,6 +61,21 @@ describe("a ghost's own shell addresses its conversation", () => {
     expect(paths).toContain("/api/ghosts/casper/sessions/conv-mine/transcript");
   });
 
+  it("`ghost stop` cancels a next-work countdown when no turn runs", async () => {
+    const requests: string[] = [];
+    const counting = [session("conv-other"), { ...session("conv-mine"), continuesAt: "2026-01-01T00:00:15.000Z" }];
+    const fetch: CliFetch = async (input, init) => {
+      const path = new URL(input).pathname;
+      requests.push(`${init?.method ?? "GET"} ${path}`);
+      if (path === "/api/ghosts/casper/sessions") return jsonResponse({ sessions: counting });
+      if (path.endsWith("/continuation")) return jsonResponse({ cancelled: true });
+      return jsonResponse({ error: { message: "unexpected request" } }, 500);
+    };
+    const result = await runCli(["stop"], { env, home: "/tmp/ghost-cli-unit", fetch });
+    expect(result.code).toBe(0);
+    expect(requests).toContain("DELETE /api/ghosts/casper/sessions/conv-mine/continuation");
+  });
+
   it("turns a follow-up to an idle conversation into its next turn", async () => {
     const calls: Array<{ path: string; body: unknown }> = [];
     const fetch: CliFetch = async (input, init) => {

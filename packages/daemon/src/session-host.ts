@@ -916,6 +916,8 @@ export class SessionHost {
     let next = false;
     handoff.done = (async () => {
       try {
+        // The owner may have turned the chain off since the timer was set.
+        if (this.hooks.builtin().handoffIdleMs === 0) return;
         const ghost = this.registry.get(ghostName);
         await this.withGhost(ghost.name, async () => {
           const { sessionDir } = ghostPaths(ghost.dir);
@@ -939,7 +941,8 @@ export class SessionHost {
             ...(result.error ? { error: result.error } : {}),
           }]);
           this.announce(ghost.name, id);
-          next = !this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner(entries);
+          // A failed handoff means the harness is not answering; a next-work turn would fail too.
+          next = !result.error && !this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner(entries);
         });
       } catch (error) {
         this.logger.warn("handoff failed", { ghost: ghostName, conversation: id, error: errorMessage(error) });
@@ -958,6 +961,7 @@ export class SessionHost {
   private countDownNextWork(ghostName: string, id: string, key: string): void {
     const timer = setTimeout(() => {
       this.handoffs.delete(key);
+      if (this.hooks.builtin().nextWorkTurns === 0) return this.announce(ghostName, id);
       void this.admitTurn(ghostName, { sessionId: id, prompt: NEXT_WORK_PROMPT, origin: "auto" })
         .then((admission) => admission.run({ emit: () => {} }))
         .catch((error: unknown) => this.logger.warn("next-work turn did not start", { ghost: ghostName, conversation: id, error: errorMessage(error) }));

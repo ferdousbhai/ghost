@@ -357,15 +357,16 @@ working once keep-going lets a turn stop, ghostd runs one built-in idle chain
    running turn in the listing. Its reply is one `handoff` log entry, which
    the transcript shows as a `handoff` message and a new harness's carried
    context leaves out.
-2. **Next work.** While fewer than `next_work_turns` `auto` prompts follow the
-   owner's last message, it then lists `continuesAt` for 15 s
+2. **Next work.** After a handoff that did not fail, while fewer than
+   `next_work_turns` `auto` prompts follow the owner's last message, it then lists `continuesAt` for 15 s
    (`NEXT_WORK_COUNTDOWN_MS`) and starts an ordinary turn,
    `NEXT_WORK_PROMPT`, logged as a user entry with `origin: "auto"` (an
    `auto` transcript message). Its end starts the chain again.
 
 A new turn in the conversation, its deletion, or the ghost's move or shutdown
-stops a pending or running step first; `DELETE …/continuation` stops only a
-countdown.
+stops a pending or running step first; `DELETE …/continuation` (and `ghost
+stop` when no turn runs) stops only a countdown. Each step reads the settings
+when it starts, so turning one off also stops a step already scheduled.
 
 Every `session_stop` and `before_prompt` behavior is a `hooks.json` command the
 owner chooses. Ghost has no in-process hook registration to be the other kind,

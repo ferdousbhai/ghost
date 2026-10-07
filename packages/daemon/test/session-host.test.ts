@@ -714,6 +714,30 @@ describe("the idle handoff", () => {
     ]);
   });
 
+  it("starts no next-work turn after a failed handoff", async () => {
+    const fake = harness([...replies("done"), { exit: 1, stderr: "out of quota" }, ...replies("unexpected")]);
+    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 20 });
+    await turn(sessions, "ship it");
+    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).includes('"type":"handoff"'));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(fake.calls()).toHaveLength(2);
+    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.continuesAt).toBeNull();
+  });
+
+  it("reads the settings when a step starts, so turning the chain off stops one already scheduled", async () => {
+    const dir = tempDir();
+    cleanups.push(dir.cleanup);
+    const config = join(dir.path, "hooks.json");
+    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1 } }));
+    const hooks = GhostHookRunner.fromConfig(config);
+    const fake = harness(replies("done", "unexpected"));
+    const sessions = host({ harnesses: [fake], hooks });
+    await turn(sessions, "ship it");
+    await hooks.replaceConfig({ builtin: { handoff_idle_seconds: 0 } });
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+    expect(fake.calls()).toHaveLength(1);
+  });
+
   it("lists the countdown, and the owner's cancel stops the next-work turn", async () => {
     const fake = harness(replies("done", "noted", "unexpected"));
     const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 60_000 });

@@ -59,9 +59,14 @@ export async function showCommand(
   return 0;
 }
 
-/** Stop a conversation's running turn, whichever client started it. */
+/** Stop a conversation's running turn, whichever client started it, or cancel its next-work countdown. */
 export async function stopCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const { path, session } = await resolveTarget(ctx.client, ctx, parsed);
+  if (!session.running && session.continuesAt) {
+    const cancelled = (await ctx.client.request("DELETE", `${path}/continuation`)).body;
+    emit(ctx, cancelled, () => `cancelled next work in ${session.id}\n`);
+    return 0;
+  }
   const body = (await ctx.client.request("POST", `${path}/stop`, {})).body;
   emit(ctx, body, () => `stopped ${session.id}\n`);
   return 0;

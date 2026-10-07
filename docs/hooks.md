@@ -164,7 +164,9 @@ latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 ([`conversation-log.ts`](../packages/daemon/src/conversation-log.ts)), one JSON
 object per line, so a hook can review the whole owner turn, not just the
 current pass: an owner message is `{"type":"user","text"}` with no `origin`; a
-follow-up or hook continuation carries `origin` `"follow_up"` or `"hook"`. It
+follow-up, hook continuation, or ghostd's next-work prompt carries `origin`
+`"follow_up"`, `"hook"`, or `"auto"`, and an idle handoff is a
+`{"type":"handoff"}` entry. It
 is untrusted content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a
