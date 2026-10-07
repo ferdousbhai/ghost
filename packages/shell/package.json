@@ -14,7 +14,6 @@
   },
   "scripts": {
     "lint": "bash dev/qmllint.sh",
-    "dev": "node dev/mock-ghostd.mjs",
     "build": "true",
     "typecheck": "true",
     "test": "bash dev/test.sh"
