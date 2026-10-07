@@ -1,6 +1,6 @@
 /** Titles extracted from first owner messages, shaped like the owner's real ones. */
 import { describe, expect, it } from "vitest";
-import { derivedTitle, logState, type LogEntry } from "../src/conversation-log.js";
+import { autoTurnsSinceOwner, derivedTitle, logState, type LogEntry } from "../src/conversation-log.js";
 
 describe("derivedTitle", () => {
   it.each([
@@ -45,5 +45,15 @@ describe("logState title", () => {
 
   it("ignores messages the owner did not type", () => {
     expect(logState([{ type: "user", at, text: "Scheduled check now", origin: "follow_up" }]).title).toBeNull();
+  });
+});
+
+describe("autoTurnsSinceOwner", () => {
+  const at = "2026-10-07T00:00:00.000Z";
+  const user = (origin?: "follow_up" | "hook" | "auto"): LogEntry => ({ type: "user", at, text: "x", ...(origin ? { origin } : {}) });
+
+  it("counts next-work prompts since the owner last wrote, a queued follow-up included", () => {
+    expect(autoTurnsSinceOwner([user(), user("auto"), user("hook"), user("auto")])).toBe(2);
+    expect(autoTurnsSinceOwner([user("auto"), user("follow_up"), user("auto")])).toBe(1);
   });
 });

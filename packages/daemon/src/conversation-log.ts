@@ -331,8 +331,9 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
 export function autoTurnsSinceOwner(entries: readonly LogEntry[]): number {
   let count = 0;
   for (const entry of entries) {
-    if (entry.type === "command" || (entry.type === "user" && entry.origin === undefined)) count = 0;
-    else if (entry.type === "user" && entry.origin === "auto") count += 1;
+    if (entry.type === "user" && entry.origin === "auto") count += 1;
+    // The owner wrote: a message, a queued follow-up, or a `!command`.
+    else if (entry.type === "command" || (entry.type === "user" && entry.origin !== "hook")) count = 0;
   }
   return count;
 }
