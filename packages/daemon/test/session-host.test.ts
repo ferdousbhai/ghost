@@ -303,6 +303,25 @@ describe("queued follow-ups and aborts", () => {
       .toEqual(["Let me check.", "toolCall", "Done: X"]);
   });
 
+  it("still runs a follow-up queued behind a pass that failed", async () => {
+    const fake = harness([]);
+    const gate = fake.gate("first");
+    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "half" }], exit: 1, stderr: "crashed", gate: gate.path }, ...replies("second")]);
+    const sessions = host({ harnesses: [fake] });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: (event) => events.push(event) });
+    await waitFor(() => fake.calls().length === 1);
+    await sessions.queueMessage("casper", "c1", "two");
+    gate.release();
+    await running;
+    expect(fake.calls().map((call) => call.prompt)).toEqual(["one", "two"]);
+    expect(events.at(-1)).toEqual({ type: "done" });
+    const { messages } = await sessions.readTranscript("casper", "c1", {});
+    expect(messages.map((message) => [message.role, message.errorMessage ?? null])).toEqual([
+      ["user", null], ["assistant", "crashed"], ["user", null], ["assistant", null],
+    ]);
+  });
+
   it("refuses a stop when nothing is running", () => {
     const sessions = host({ harnesses: [harness(replies("x"))] });
     expect(() => sessions.stopTurn("casper", "c1")).toThrow(expect.objectContaining({ code: "session_not_streaming" }));

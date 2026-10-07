@@ -601,13 +601,13 @@ export class SessionHost {
           if (context) passPrompt = `${passPrompt}\n\n<hook-context>\n${context}\n</hook-context>`;
         }
         const failure = await this.runPasses(ghost, id, passPrompt, stream, blocks, signal);
-        if (failure) {
-          terminal = failure;
-          break;
-        }
+        // A failed pass ends the turn only when nothing is queued behind it:
+        // the owner's follow-ups were accepted and still run.
+        terminal = failure ?? { type: "done" };
+        if (failure && (signal.aborted || turn.followUps.length === 0)) break;
         // The owner's own queued message is the next instruction: a stop hook
         // is not asked while one waits, and loses to one sent while it ran.
-        const continuation: string | null = turn.followUps.length > 0
+        const continuation: string | null = failure || turn.followUps.length > 0
           ? null
           : await this.sessionStop(ghost, id, ownerPrompt, turnId, origin === "hook", signal, onHook);
         if (continuation && turn.followUps.length === 0) {

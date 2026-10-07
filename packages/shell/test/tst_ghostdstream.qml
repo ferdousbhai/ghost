@@ -311,6 +311,19 @@ TestCase {
         verify(!state.streaming);
     }
 
+    // A stop never sends what was queued behind it: the owner gets it back to edit.
+    function test_stoppingATurnReturnsItsQueueToTheComposer(): void {
+        const turn = openTurn("stop-queued", null);
+        turn.state.followUpQueue = ["first follow-up", "second"];
+        let drafted = null;
+        const take = text => { drafted = text; };
+        Ghostd.composerDraft.connect(take);
+        Ghostd.cancelTurn(turn.state);
+        Ghostd.composerDraft.disconnect(take);
+        compare(drafted, "first follow-up\n\nsecond");
+        compare(turn.state.followUpQueue.length, 0);
+    }
+
     function test_clickingActiveTitleDoesNotInterruptItsTurn(): void {
         const aborts = { count: 0 };
         const turn = openTurn("active-click", aborts);
