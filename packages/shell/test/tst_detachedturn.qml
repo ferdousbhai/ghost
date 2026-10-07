@@ -130,6 +130,20 @@ TestCase {
         compare(requests("GET", /\/sessions$/).length, 1);
     }
 
+    function test_aStopHandsBackWhatWasQueuedBehindIt(): void {
+        drafts.clear();
+        list(true);
+        Ghostd.queueMessage("then the tests");
+        requests("POST", /\/sessions\/c1\/queue$/)[0].complete(200, { streaming: true, followUp: ["then the tests"] });
+        Ghostd.cancel();
+        // A stop never runs what was queued: it goes back to the composer…
+        compare(drafts.count, 1);
+        compare(drafts.signalArguments[0][0], "then the tests");
+        compare(Ghostd.followUpQueue, []);
+        // …while the turn shows as running until ghostd says it ended.
+        verify(Ghostd.streaming);
+    }
+
     function test_anEndedTurnInAConversationNotOpenIsDropped(): void {
         const listing = running => {
             Ghostd.fetchSessions("casper");
