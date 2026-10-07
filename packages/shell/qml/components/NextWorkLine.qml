@@ -16,7 +16,6 @@ RowLayout {
 
     visible: Ghostd.continuesAt !== ""
     spacing: Theme.gap
-    onVisibleChanged: if (visible) root.tick()
 
     Timer {
         interval: 250
