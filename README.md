@@ -30,7 +30,7 @@ Install and first conversation:
 [concepts](https://github.com/ferdousbhai/ghost/blob/master/docs/concepts.md);
 the stable boundaries are [CONTRACTS.md](CONTRACTS.md).
 
-Status: [v0.5.2](https://github.com/ferdousbhai/ghost/releases/tag/v0.5.2) is
+Status: [v0.6.0](https://github.com/ferdousbhai/ghost/releases/tag/v0.6.0) is
 released and installs on Omarchy through the signed package installer;
 inclusion in Omarchy's package repository and Install → AI menu is tracked in
 [#54](https://github.com/ferdousbhai/ghost/issues/54).
