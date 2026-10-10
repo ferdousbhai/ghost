@@ -6,17 +6,19 @@
 // Qt 6.11.2 consumes `_` and `~` delimiters without applying them: `_i_`,
 // `__b__`, `~s~`, and `~~s~~` all render as bare text with the markers gone,
 // while `*i*`, `**b**`, and inline `<del>` still format
-// (test/tst_markdowncompat.qml pins both halves). So underscore emphasis
+// (test/tst_markdowncompat.qml pins what renders). So underscore emphasis
 // becomes star emphasis and tildes become `<del>`, under CommonMark's
 // underscore rule (no intraword emphasis, so `snake_case` stays), and never
 // inside fenced code, code spans, link destinations, autolinks, HTML tags, or
-// bare URLs.
+// bare URLs. Qt 6.12 formats the raw markers again and renders the rewrite
+// the same, so the rewrite goes once no supported Qt is older than 6.12
+// (Arch Linux ARM still ships 6.11).
 //
 // Links are painted in the application palette's link colour, a fixed blue,
 // whatever `linkColor` or the item's palette says; inline HTML anchors honour
 // their own style. So `[label](url)`, `<url>`, and bare URLs become
 // `<a style>` with the label converted to HTML, since markdown inside raw HTML
-// is not parsed. When Qt formats these again, this file is deleted.
+// is not parsed. When Qt honours linkColor, this half goes too.
 
 // Spans whose bytes must reach Qt untouched or as a link, in the order they
 // win: code span, image, inline link, autolink, HTML tag, bare URL.

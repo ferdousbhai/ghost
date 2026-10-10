@@ -3,9 +3,10 @@ import QtTest
 import "../qml/components/MarkdownCompat.js" as MarkdownCompat
 
 // MarkdownCompat rewrites the emphasis Qt 6.11 stopped formatting into forms
-// it still formats. Two halves are pinned: Qt's own behaviour (so the day it
-// formats `_i_` again, this fails and the rewrite is deleted), and the
-// rewrite's effect on what renders.
+// every Qt formats, so emphasis renders the same on 6.11 and on 6.12 (which
+// formats `_i_` and `~~s~~` again). What is pinned is the rewrite's effect on
+// what renders, never Qt's handling of the raw markers, which differs by
+// version.
 TestCase {
     id: tc
     name: "MarkdownCompat"
@@ -28,13 +29,6 @@ TestCase {
         ed.textFormat = TextEdit.RichText;
         return ed.text.replace(/[\s\S]*<body[^>]*>/, "").replace(/<\/body>[\s\S]*/, "")
             .replace(/<p style="[^"]*">/g, "<p>").replace(/\n/g, "").trim();
-    }
-
-    function test_qtDropsUnderscoreAndTildeEmphasis(): void {
-        compare(tc.rendered("a _i_ b"), "<p>a i b</p>");
-        compare(tc.rendered("__b__"), "<p>b</p>");
-        compare(tc.rendered("~~s~~"), "<p>s</p>");
-        compare(tc.rendered("a *i* b"), '<p>a <span style=" font-style:italic;">i</span> b</p>');
     }
 
     function test_rewrittenEmphasisRenders(): void {
