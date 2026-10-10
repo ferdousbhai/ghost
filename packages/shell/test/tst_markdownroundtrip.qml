@@ -17,6 +17,11 @@ import QtTest
 // Reformatting we would happily live with, recorded but not pinned: ordered
 // list markers gain a second space ("1. a" -> "1.  a"), setext headings become
 // ATX, tables are re-padded, and a trailing blank line is added to the file.
+//
+// Also recorded but not pinned, because it differs by Qt version and the
+// editor never round-trips: Qt 6.11 eats `_` and `~` emphasis markers
+// ("_i_ ~~s~~" comes back "i s", see MarkdownCompat.js) and Qt 6.12
+// keeps them. Re-run on both, 2026-10-10: source editing stands.
 TestCase {
     id: tc
     name: "MarkdownRoundTrip"
@@ -51,10 +56,7 @@ TestCase {
 
     function test_inlineAndBlockStructureSurvive(): void {
         compare(tc.roundTrip("# Heading\n"), "# Heading\n\n");
-        // Qt 6.11.2 also stopped parsing `_` and `~` emphasis at all (the
-        // markers are eaten, see tst_markdowncompat.qml), so they cannot come
-        // back. Re-run 2026-10-03: source editing stands, more so.
-        compare(tc.roundTrip("**b** _i_ ~~s~~ `c`\n"), "**b** i s `c`\n\n");
+        compare(tc.roundTrip("**b** *i* `c`\n"), "**b** *i* `c`\n\n");
         compare(tc.roundTrip("- one\n- two\n"), "- one\n- two\n");
         compare(tc.roundTrip("- [ ] todo\n- [x] done\n"), "- [ ] todo\n- [x] done\n");
         compare(tc.roundTrip("> quote\n"), "> quote\n\n");

@@ -76,4 +76,32 @@ TestCase {
         verify(!list.pinned);
         verify(!list.atYEnd);
     }
+
+    // A scrollbar drag sets contentY directly; the jump re-estimates
+    // contentHeight before contentYChanged arrives.
+    function test_a_reader_dragged_to_the_top_stays_put(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        list.contentY = list.originY;
+        wait(100);
+        verify(!list.pinned);
+        rows.append({ body: "a new reply" });
+        wait(100);
+        verify(!list.pinned);
+        verify(!list.atYEnd);
+    }
+
+    function test_a_growing_last_row_is_followed(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        rows.append({ body: "a new reply" });
+        for (let i = 0; i < 20; i++) {
+            rows.setProperty(rows.count - 1, "body", rows.get(rows.count - 1).body + " more".repeat(30));
+            wait(10);
+        }
+        tryVerify(() => list.atYEnd, 2000);
+        verify(list.pinned);
+    }
 }

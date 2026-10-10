@@ -1,0 +1,102 @@
+name: Native packages
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  # Arch Linux ARM ships no bun package, so the aarch64 build installs this
+  # upstream release (the version Arch's extra carries for x86_64).
+  ARM_BUN_VERSION: 1.4.2
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The daemon's relay conformance test reads a sibling clone of the
+      # extension (CONTRACTS.md) and skips without one.
+      - uses: actions/checkout@v4
+        with:
+          repository: ferdousbhai/ghost-chromium-extension
+          path: .ci/ghost-chromium-extension
+      - name: Prepare native Arch Linux ARM image
+        if: matrix.arch == 'aarch64'
+        run: |
+          curl --fail --location --retry 3 https://ca.us.mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz -o /tmp/archlinuxarm.tar.gz
+          docker import --platform linux/arm64 /tmp/archlinuxarm.tar.gz ghost-archlinuxarm:ci
+          base=https://github.com/oven-sh/bun/releases/download/bun-v$ARM_BUN_VERSION
+          curl --fail --location --retry 3 "$base/bun-linux-aarch64.zip" -o /tmp/bun-linux-aarch64.zip
+          curl --fail --location --retry 3 "$base/SHASUMS256.txt" -o /tmp/bun-SHASUMS256.txt
+          (cd /tmp && grep ' bun-linux-aarch64.zip$' bun-SHASUMS256.txt | sha256sum -c -)
+          mkdir -p .ci/bun
+          unzip -j /tmp/bun-linux-aarch64.zip bun-linux-aarch64/bun -d .ci/bun
+      - name: Build, check and smoke-test the package
+        env:
+          BUILD_ARCH: ${{ matrix.arch }}
+        run: |
+          case "$BUILD_ARCH" in
+            x86_64) image=archlinux:base-devel; platform=linux/amd64 ;;
+            aarch64) image=ghost-archlinuxarm:ci; platform=linux/arm64 ;;
+          esac
+          mkdir -p dist
+          docker run --rm --platform "$platform" -e BUILD_ARCH \
+            -e OUTPUT_UID="$(id -u)" -e OUTPUT_GID="$(id -g)" \
+            -v "$PWD:/source:ro" -v "$PWD/dist:/output" "$image" bash -euo pipefail -c '
+              [[ $(uname -m) == "$BUILD_ARCH" ]]
+              sed -i "/^\[options\]$/a DisableSandbox" /etc/pacman.conf
+              pacman-key --init
+              if [[ $BUILD_ARCH == aarch64 ]]; then pacman-key --populate archlinuxarm; else pacman-key --populate archlinux; fi
+              pacman -Syu --needed --noconfirm base-devel git
+              git config --global --add safe.directory /source
+              git config --global --add safe.directory /source/.git
+              git clone --no-hardlinks /source /build
+              commit=$(git -C /source rev-parse HEAD)
+              [[ $(git -C /build rev-parse HEAD) == "$commit" ]]
+              cp -a /source/.ci/ghost-chromium-extension /ghost-chromium-extension
+              # Every depends/makedepends/checkdepends entry the PKGBUILD declares.
+              mapfile -t constraints < <(cd /build/packaging/arch && bash -c "source PKGBUILD; printf \"%s\n\" \"\${depends[@]}\" \"\${makedepends[@]}\" \"\${checkdepends[@]}\"" | sort -u)
+              nodeps=()
+              if [[ $BUILD_ARCH == aarch64 ]]; then
+                install -Dm755 /source/.ci/bun/bun /usr/local/bin/bun
+                ln -s bun /usr/local/bin/bunx
+                # pacman cannot see the upstream bun, so makepkg skips its
+                # dependency check here and every other entry is checked below.
+                nodeps=(--nodeps)
+                kept=()
+                for constraint in "${constraints[@]}"; do
+                  [[ ${constraint%%[<>=]*} == bun ]] || kept+=("$constraint")
+                done
+                constraints=("${kept[@]}")
+              fi
+              pacman -S --needed --noconfirm "${constraints[@]%%[<>=]*}"
+              pacman -T "${constraints[@]}"
+              bun --version
+              useradd -m builder
+              chown -R builder:builder /build /output /ghost-chromium-extension
+              su builder -c "cd /build/packaging/arch && GHOST_SOURCE_REPO=file:///build GHOST_SOURCE_REF=commit=$commit GHOST_CHROMIUM_EXTENSION_DIR=/ghost-chromium-extension PKGDEST=/output PKGEXT=.pkg.tar.zst makepkg --force ${nodeps[*]}"
+              # pnpm verify also runs the owner scripts outside the workspace
+              # packages, which check() does not.
+              su builder -c "cd /build/packaging/arch/src/ghost && bun test scripts"
+              printf "%s\n" "$commit" > /output/source-commit.txt
+              chown -R "$OUTPUT_UID:$OUTPUT_GID" /output
+            '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ghost-${{ matrix.arch }}
+          path: |
+            dist/*.pkg.tar.zst
+            dist/source-commit.txt
+          if-no-files-found: error

@@ -14,15 +14,29 @@ ListView {
     // next change outside it follows.
     property bool following: false
 
+    // The contentY that `pinned` was last judged at. A long jump (a scrollbar
+    // drag, positionViewAtBeginning) builds rows at its target and re-estimates
+    // contentHeight before contentYChanged is delivered, so a contentY that
+    // differs from this belongs to a move `pinned` has not seen yet.
+    property real judgedY: 0
+
+    // Rows of unequal height move originY, so the end is measured from it.
+    function judge(): void {
+        judgedY = contentY;
+        pinned = contentY >= originY + contentHeight - height - 40;
+    }
+
     function follow(): void {
-        if (!pinned || following) return;
+        if (following) return;
+        if (contentY !== judgedY) judge();
+        if (!pinned) return;
         following = true;
         positionViewAtEnd();
+        judgedY = contentY;
         following = false;
     }
 
-    // Rows of unequal height move originY, so the end is measured from it.
-    onContentYChanged: if (!following) pinned = contentY >= originY + contentHeight - height - 40
+    onContentYChanged: if (!following) judge()
     onCountChanged: follow()
     onContentHeightChanged: follow()
 }
