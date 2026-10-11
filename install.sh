@@ -72,7 +72,7 @@ fi
 if ! pacman -Si ghost >/dev/null 2>&1; then
   printf 'Adding the [ghost] package repository (asks for sudo).\n'
   add_signed_repo ghost https://github.com/ferdousbhai/ghost/releases/latest/download \
-    35C47A06567940B6796B4D0F9B3C7BDF85268B31 || die "Could not add the [ghost] repository."
+    52130299581DAD685226900CA89CA1A6A1E74251 || die "Could not add the [ghost] repository."
 fi
 omarchy-pkg-add ghost
 

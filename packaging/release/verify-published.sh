@@ -58,7 +58,7 @@ verify_upgrade() {
   add_repo="$(sed -n '/^# --- add_signed_repo (shared) ---$/,/^# --- end add_signed_repo ---$/p' "$script_root/../../install.sh")"
   upgrade="$omarchy_repo$add_repo"'
 add_signed_repo ghost https://github.com/ferdousbhai/ghost/releases/download/v'"$previous"' \
-  35C47A06567940B6796B4D0F9B3C7BDF85268B31 >/dev/null 2>&1
+  52130299581DAD685226900CA89CA1A6A1E74251 >/dev/null 2>&1
 pacman -S --noconfirm ghost >/dev/null 2>&1
 pacman -Q ghost | grep -q "^ghost '"$previous"'-"
 sed -i "s#^Server = .*#Server = https://github.com/ferdousbhai/ghost/releases/latest/download#" /etc/pacman.d/ghost.conf
