@@ -1,12 +1,12 @@
 # Release inputs for the Omarchy package
 
 `publish.sh <version>` turns one exact Ghost source commit into the fixed
-public inputs from which Omarchy builds the stable `ghost` package, builds
-and signs the packages from those inputs, and publishes it all as a GitHub
-release on `ferdousbhai/ghost`. Until Omarchy's repository carries the
-package, the release is also the signed `[ghost]` pacman repository that
-`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` adds and installs from
-(see "Signed repository" below). The inputs:
+public inputs from which Omarchy builds the stable `ghost` package, and
+publishes them as a GitHub release on `ferdousbhai/ghost`. Omarchy's package
+repository carries `ghost`: its recipe (`pkgbuilds/ghost` in
+[omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs)) downloads these
+inputs from the release, and its `sync-upstream` workflow follows the tags.
+The inputs:
 
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
 2. `ghost-runtime-<version>-linux-any.tar.zst` (one archive for every Linux
@@ -51,8 +51,8 @@ Releases are cut from this machine, not from CI, and one command does the
 whole thing:
 
 ```sh
-packaging/release/publish.sh 0.1.1 --dry-run   # build, verify, render, sign; no tag
-packaging/release/publish.sh 0.1.1             # bump, push, tag, publish, verify
+packaging/release/publish.sh 0.1.1 --dry-run   # build, verify, build the packages; no tag
+packaging/release/publish.sh 0.1.1             # bump, push, tag, publish
 ```
 
 `publish.sh` bumps the five manifests `verify-release-version.sh` reads when
@@ -61,89 +61,47 @@ does this too); a real run then pushes, and the `pre-push` hook runs the
 whole gate. It builds the runtime and source archives with
 `SOURCE_DATE_EPOCH` pinned to the commit, verifies the sanitized source and
 the runtime smoke, writes `SHA256SUMS`, renders the stable `PKGBUILD`
-through `render-arch-package.sh` and the Omarchy contribution through
-[`../omarchy/render-contribution.sh`](../omarchy/render-contribution.sh),
-builds and signs the packages ([`build-repo.sh`](build-repo.sh)), creates
-the annotated tag, and publishes the GitHub release carrying:
+through `render-arch-package.sh` and builds both packages from it with
+`makepkg`, using the archives beside it rather than the release URLs (which
+do not exist yet), creates the annotated tag, and publishes the GitHub
+release carrying:
 
-- `install.sh`, the copy this release was verified with, which is what
-  `https://ferdousbhai.com/ghost/install.sh` redirects to;
+- `install.sh`, which is what `https://ferdousbhai.com/ghost/install.sh`
+  redirects to;
 - `ghost-<version>.tar.gz`;
 - `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
-- `SHA256SUMS`;
-- the rendered `PKGBUILD` and both package install hooks;
-- the signed repository: `ghost-runtime-<version>-1-any.pkg.tar.zst` and
-  `ghost-<version>-1-any.pkg.tar.zst` with their `.sig`, `ghost.db` and
-  `ghost.files` (plus `.tar.gz` forms) with their `.sig`, and
-  `ghost-signing-key.asc`.
+- `SHA256SUMS`.
 
 The installer itself is [`install.sh`](../../install.sh) at the repository
-root. [`test-installer.sh`](test-installer.sh), which the gate runs, checks
-its syntax, pins the hash of the `add_signed_repo` block it shares verbatim
-with the icloud-notes installer, and holds the docs, the release notes and
-`verify-published.sh` to one spelling of the public one-liner.
-
-A release counts as shipped only once
-[`verify-published.sh`](verify-published.sh), run by the
-[Verify published release](../../.github/workflows/verify-release.yml)
-workflow on GitHub's runners (so the releasing machine needs no Docker),
-has run the public one-liner
-in a clean Arch container and found this version installed, and has
-installed the previous release from its own tag and found that the `pacman
--Syu` `omarchy update` runs brings it to this version; otherwise
-`publish.sh` deletes the release and the tag. That rollback returns the
-one-liner to the release before, so before it tags, `publish.sh` asks
-[`resolve-installer.sh`](resolve-installer.sh) what the one-liner serves
-today and says what a rollback would land on. When the answer is nothing
-(the release before carries no `install.sh`, as every release before 0.4.2
-did) it warns and goes ahead, since publishing is the only way out; after
-a rollback it says the same thing again, with the way out. A one-liner that
-does not redirect to this repository's latest `install.sh` at all stops the
-run before the tag, because verification could only fail and the release
-would be rolled back for the site's fault. It then pushes the rendered
-recipe to the omarchy-pkgs fork branch
-([`update-omarchy-contribution.sh`](update-omarchy-contribution.sh)) so the
-open pull request tracks the release.
+root: on Omarchy it runs `omarchy-install-ai-ghost` when Omarchy ships it,
+and otherwise installs the `ghost` package from Omarchy's repository with
+`omarchy-pkg-add` and starts it for this login.
+[`test-installer.sh`](test-installer.sh), which the gate runs, checks its
+syntax and holds the docs and the release notes to one spelling of the
+public one-liner.
 
 The browser extension lives in its own repository; `PROTOCOL_VERSION` is the
 only pin between it and a Ghost release.
 
-## Signed repository
+## Omarchy's recipe
 
-[`build-repo.sh`](build-repo.sh) builds both packages from the rendered
-recipe with `makepkg`, using the archives beside it rather than the release
-URLs (which do not exist yet), signs the packages and the database with the
-key whose fingerprint [`package-signing-key.fingerprint`](package-signing-key.fingerprint)
-pins, and writes `out/repo/`. That key lives only in the releasing machine's
-keyring (its backup and rotation are described in the iCloud Notes README,
-which shares the key: <https://github.com/ferdousbhai/icloud-notes#releasing>); `install.sh` pins the same fingerprint, downloads the
-public key from the release, trusts it with `pacman-key`, writes
-`/etc/pacman.d/ghost.conf` pointing at `releases/latest/download`, keeps it
-across `omarchy refresh pacman` with a `pre-refresh-pacman` hook, and runs
-`omarchy-pkg-add ghost`. Updates then arrive with `omarchy update`. When the
-package lands in Omarchy's repository, that path takes over and the
-repository assets can stop being published.
-
-The contribution's `.omarchy/package.json` declares that release feed
-(`upstream.github`, the runtime asset per architecture, and the source archive
-URL), so omarchy-pkgs' `sync-upstream` rewrites `pkgver` and both checksum
-arrays on its own when a newer `vX.Y.Z` tag appears. The rendered contribution
-in `out/omarchy-ghost-<version>` is what goes into `pkgbuilds/ghost` of
-[omacom/omarchy-pkgs](https://github.com/omacom/omarchy-pkgs); the menu
-entries and install/remove scripts for the Omarchy repository itself are in
-[`../omarchy/`](../omarchy/). Once the package is upstream, Omarchy builds,
-signs, and promotes it through its `edge` → `rc` → `stable` channels, and the
-signed repository above retires.
+The rendered contribution
+([`../omarchy/render-contribution.sh`](../omarchy/render-contribution.sh)) is
+what went into `pkgbuilds/ghost` of omarchy-pkgs; its `.omarchy/package.json`
+declares this release feed (`upstream.github`, the runtime asset, and the
+source archive URL), so `sync-upstream` rewrites `pkgver` and both checksum
+arrays on its own when a newer `vX.Y.Z` tag appears, and Omarchy builds,
+signs, and promotes the package through its `edge` → `rc` → `stable`
+channels. [`../omarchy/test-contribution.sh`](../omarchy/test-contribution.sh)
+models that rewrite. A change to the recipe template here is a change to
+propose upstream, by hand; the menu entries and install/remove scripts for
+the Omarchy repository itself are in [`../omarchy/`](../omarchy/).
 
 ## After publishing
 
-Two things do not follow the tag on their own:
+Omarchy's `sync-upstream` picks the release up; nothing is pushed to
+omarchy-pkgs. One thing does not follow the tag on its own:
 
-- **Until omarchy-pkgs carries the package**, its pull request tracks the
-  release: `publish.sh` pushes `out/omarchy-ghost-<version>` to
-  `pkgbuilds/ghost` on the fork's `ghost` branch (`ferdousbhai/omarchy-pkgs`).
-  If that push failed, do it by hand. Once the package is merged,
-  `sync-upstream` does this for every later tag and this step disappears.
 - **A checkout install** (`~/.local/bin/ghostd` pointing at a clone, see
   [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md)) is
   updated by the command `ghost status` prints on its `update` line: a

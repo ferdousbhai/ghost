@@ -22,11 +22,10 @@ of — this page.
 
 ## 1. Install the package
 
-Open the Omarchy menu, then **Install → AI → Ghost**. Until the package is in
-Omarchy's repository ([#54](https://github.com/ferdousbhai/ghost/issues/54)),
-one line adds Ghost's own signed package repository (each release doubles as
-one) and installs the same package from it, so `omarchy update` keeps it
-current:
+Open the Omarchy menu, then **Install → AI → Ghost**. Until that entry ships
+([#54](https://github.com/ferdousbhai/ghost/issues/54)), one line installs the
+`ghost` package from Omarchy's repository and starts it for this login, and
+`omarchy update` keeps it current:
 
 ```sh
 curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash

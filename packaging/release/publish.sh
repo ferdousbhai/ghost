@@ -1,24 +1,18 @@
 #!/usr/bin/env bash
 # Cut a Ghost release from this machine: build the source and runtime archives,
 # verify them, tag the commit, and publish a GitHub release on
-# ferdousbhai/ghost (GHOST_RELEASE_REPOSITORY to override). The rendered
-# Omarchy contribution lands in packaging/release/out/omarchy-ghost-<version>
-# for a pull request to omacom/omarchy-pkgs.
+# ferdousbhai/ghost (GHOST_RELEASE_REPOSITORY to override). Omarchy's
+# package repository builds the `ghost` package from that release: its
+# sync-upstream workflow follows the tags and rewrites the recipe's pkgver and
+# checksums on its own.
 #
 #   packaging/release/publish.sh <version> [--dry-run]
 #
 # If the manifests do not say <version> yet, it bumps them, commits
-# `release: <version>` and pushes (the pre-push hook runs the gate). After
-# publishing it waits for the Verify published release workflow, which proves
-# the public one-liner installs the release from a clean container on GitHub's
-# runners (rolling the release back if not), and carries the rendered
-# recipe to the omarchy-pkgs pull request. Because a rollback returns the
-# one-liner to the release before, it first asks what that release serves
-# (resolve-installer.sh), so a rollback with no installer to land on is
-# announced before the release exists rather than discovered after.
+# `release: <version>` and pushes (the pre-push hook runs the gate).
 #
-# --dry-run bumps the version if needed, then builds, verifies, renders and
-# signs from the committed tree and stops before the push, tag and release.
+# --dry-run bumps the version if needed, then builds, verifies and builds the
+# packages from the committed tree and stops before the push, tag and release.
 set -euo pipefail
 
 usage='publish.sh <version> [--dry-run]'
@@ -79,23 +73,6 @@ if (( ! dry_run )); then
 fi
 (( dry_run )) || gh auth status >/dev/null
 
-# What the public one-liner serves before this release touches anything is
-# what a rollback leaves users with. Nothing served (the release before this
-# one carries no install.sh) is not a reason to stop, since publishing is the
-# only way out of it, but it is said now, while the landing page is live and
-# there is still time to decide. A one-liner that does not reach this
-# repository's latest asset at all is a reason to stop: verification cannot
-# pass, and the release would be rolled back for the site's fault.
-fallback="$(bash "$script_root/resolve-installer.sh" "$repository")" && fallback_status=0 || fallback_status=$?
-case "$fallback_status" in
-  0) fallback_note="the public one-liner serves install.sh from $fallback; a rollback of $tag lands there" ;;
-  2) fallback_note="WARNING: the public one-liner serves nothing today, and a rollback of $tag leaves it that way: https://ferdousbhai.com/ghost is live and its install command is a 404 until a release carrying install.sh stays published" ;;
-  *)
-    printf 'not releasing: verify-published.sh could only fail and roll %s back; fix the one-liner first\n' "$tag" >&2
-    exit 1
-    ;;
-esac
-
 commit="$(git rev-parse 'HEAD^{commit}')"
 epoch="$(git show -s --format=%ct "$commit")"
 work="$script_root/work"
@@ -127,80 +104,42 @@ source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
 runtime_sha="$(sha256sum "$out/ghost-runtime-$version-linux-any.tar.zst" | cut -d' ' -f1)"
 GHOST_RELEASE_REPOSITORY="$repository" \
   bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
+# Omarchy's recipe is the one rendered here (pkgbuilds/ghost in
+# omacom/omarchy-pkgs); building it from the archives beside it, rather than
+# the release URLs that do not exist yet, proves the release builds there.
+mkdir -p -- "$work"
+build="$(mktemp -d "$work/package-build.XXXXXX")"
 GHOST_RELEASE_REPOSITORY="$repository" \
-  bash "$script_root/../omarchy/render-contribution.sh" \
-    "$out/omarchy-ghost-$version" "$version" "$source_sha" "$runtime_sha"
-# The built, signed packages: the release doubles as the [ghost] pacman
-# repository until Omarchy's own repository carries the package.
-bash "$script_root/build-repo.sh" "$out" "$version"
+  bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha" "$runtime_sha"
+cp -- "$out/ghost-$version.tar.gz" "$out/ghost-runtime-$version-linux-any.tar.zst" "$build/ghost/"
+(
+  cd -- "$build/ghost"
+  LC_ALL=C PKGDEST="$build/pkg" PKGEXT=.pkg.tar.zst makepkg --force
+)
+rm -rf -- "$work"
 
 printf '\nrelease inputs for %s %s (%s):\n' "$repository" "$tag" "$commit"
 cat -- "$out/SHA256SUMS"
-printf '\n%s\n' "$fallback_note"
 if (( dry_run )); then
-  printf '\ndry run: no tag, no release. Omarchy contribution: %s; signed repository: %s\n' \
-    "$out/omarchy-ghost-$version" "$out/repo"
+  printf '\ndry run: no tag, no release. Release inputs: %s\n' "$out"
   exit 0
 fi
 
 # install.sh ships with the release because ferdousbhai.com/ghost/install.sh
-# redirects to the latest one: users get the copy this release was verified
-# with, not whatever master happens to hold.
+# redirects to the latest one.
 git tag -a "$tag" -m "ghost $version" "$commit"
 git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` (adds this release as the signed \`[ghost]\` pacman repository, then installs the package). Also the source and runtime inputs for the Omarchy \`ghost\` package." \
+  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` installs the \`ghost\` package from Omarchy's repository. Also the source and runtime inputs Omarchy builds that package from." \
   -- \
   "$out/install.sh" \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
   "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
-  "$out/SHA256SUMS" \
-  "$out/omarchy-ghost-$version/PKGBUILD" \
-  "$out/omarchy-ghost-$version/"*.install \
-  "$out/repo/"*
+  "$out/SHA256SUMS"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
-
-# Shipped means installable: the public one-liner must land this version
-# in a clean container. verify-published.sh does that in the Verify published
-# release workflow, which the release starts (GitHub's runners have Docker;
-# this machine needn't). If it fails, "latest" must not point at it.
-run=''
-for _ in {1..30}; do
-  run="$(gh run list --repo "$repository" --workflow verify-release.yml --event release \
-    --branch "$tag" --json databaseId --jq '.[0].databaseId // empty')"
-  [[ -z "$run" ]] || break
-  sleep 10
-done
-printf 'waiting for the Verify published release workflow (run %s)\n' "${run:-not started}"
-if [[ -z "$run" ]] || ! gh run watch "$run" --repo "$repository" --exit-status >/dev/null; then
-  [[ -z "$run" ]] || gh run view "$run" --repo "$repository" --log-failed 2>/dev/null | tail -n 20 >&2
-  if [[ -n "$run" ]]; then
-    printf 'rolling back %s: verification run %s failed\n' "$tag" "$run" >&2
-  else
-    printf 'rolling back %s: the verification workflow never started\n' "$tag" >&2
-  fi
-  gh release delete "$tag" --repo "$repository" --yes --cleanup-tag
-  git tag -d "$tag" >/dev/null 2>&1 || true
-  # The rollback is only as safe as what "latest" now serves. Say what that
-  # is, and when it is nothing, what the operator is looking at and the two
-  # ways out.
-  if fallback="$(bash "$script_root/resolve-installer.sh" "$repository")"; then
-    printf 'rolled back: the public one-liner serves install.sh from %s again\n' "$fallback" >&2
-  else
-    printf 'rolled back, and that is what users get now: https://ferdousbhai.com/ghost is live and its install command is a 404.\n' >&2
-    printf 'Fix the cause and run publish.sh %s again as soon as you can; to stop the bleeding first, attach the installer this run built to the release "latest" resolves to:\n' "$version" >&2
-    printf '  gh release upload <latest tag> %s --repo %s\n' "$out/install.sh" "$repository" >&2
-  fi
-  exit 1
-fi
-
-# The omarchy-pkgs pull request tracks the release by hand until the package
-# is upstream; a failure here leaves the release intact and says what to do.
-bash "$script_root/update-omarchy-contribution.sh" "$version" "$out/omarchy-ghost-$version" || \
-  printf 'could not update the omarchy-pkgs branch; push %s to pkgbuilds/ghost on the fork by hand\n' \
-    "$out/omarchy-ghost-$version" >&2
+printf "Omarchy's sync-upstream picks the release up and rebuilds the ghost package; nothing to push.\n"
 printf 'next: "After publishing" in packaging/release/README.md\n'

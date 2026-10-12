@@ -77,12 +77,9 @@ This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost-runtime` package uses the
 [v3 runtime-source mechanism](../release/README.md#reproducibility-boundary)
 and also installs `/usr/bin/ghostd` and `/usr/bin/ghost`. Ghost publishes the
-source and runtime inputs as a GitHub release (`../release/publish.sh`) and
-renders the Omarchy contribution; Omarchy owns the stable package build and
-promotion. Until Omarchy's repository carries the package, each release is also
-the signed `[ghost]` pacman repository `install.sh` adds (see
-[the release README](../release/README.md)); that is an interim install path,
-not a generic Arch publication channel.
+source and runtime inputs as a GitHub release (`../release/publish.sh`);
+Omarchy's package repository carries `ghost` and owns the stable package
+build and promotion (see [the release README](../release/README.md)).
 
 The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into

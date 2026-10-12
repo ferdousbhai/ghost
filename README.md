@@ -31,9 +31,9 @@ Install and first conversation:
 the stable boundaries are [CONTRACTS.md](CONTRACTS.md).
 
 Status: [v0.6.0](https://github.com/ferdousbhai/ghost/releases/tag/v0.6.0) is
-released and installs on Omarchy through the signed package installer;
-inclusion in Omarchy's package repository and Install → AI menu is tracked in
-[#54](https://github.com/ferdousbhai/ghost/issues/54).
+released and in Omarchy's package repository (`omarchy-pkg-add ghost`, or
+`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash`); the Install →
+AI menu entry is tracked in [#54](https://github.com/ferdousbhai/ghost/issues/54).
 
 An app can bring its own UI: `ghost-runtime` installs the daemon/API, CLI, and
 desktop/browser automation without the HUD (`packaging/arch/README.md`,
