@@ -84,7 +84,10 @@ with the icloud-notes installer, and holds the docs, the release notes and
 `verify-published.sh` to one spelling of the public one-liner.
 
 A release counts as shipped only once
-[`verify-published.sh`](verify-published.sh) has run the public one-liner
+[`verify-published.sh`](verify-published.sh), run by the
+[Verify published release](../../.github/workflows/verify-release.yml)
+workflow on GitHub's runners (so the releasing machine needs no Docker),
+has run the public one-liner
 in a clean Arch container and found this version installed, and has
 installed the previous release from its own tag and found that the `pacman
 -Syu` `omarchy update` runs brings it to this version; otherwise

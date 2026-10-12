@@ -9,8 +9,9 @@
 #
 # If the manifests do not say <version> yet, it bumps them, commits
 # `release: <version>` and pushes (the pre-push hook runs the gate). After
-# publishing it proves the public one-liner installs the release from a
-# clean container (rolling the release back if not) and carries the rendered
+# publishing it waits for the Verify published release workflow, which proves
+# the public one-liner installs the release from a clean container on GitHub's
+# runners (rolling the release back if not), and carries the rendered
 # recipe to the omarchy-pkgs pull request. Because a rollback returns the
 # one-liner to the release before, it first asks what that release serves
 # (resolve-installer.sh), so a rollback with no installer to land on is
@@ -164,10 +165,24 @@ gh release create "$tag" \
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"
 
 # Shipped means installable: the public one-liner must land this version
-# in a clean container. If it does not, "latest" must not point at it.
-previous="$(git describe --tags --abbrev=0 "$tag^" 2>/dev/null || true)"
-if ! bash "$script_root/verify-published.sh" "$version" "${previous#v}"; then
-  printf 'rolling back %s\n' "$tag" >&2
+# in a clean container. verify-published.sh does that in the Verify published
+# release workflow, which the release starts (GitHub's runners have Docker;
+# this machine needn't). If it fails, "latest" must not point at it.
+run=''
+for _ in {1..30}; do
+  run="$(gh run list --repo "$repository" --workflow verify-release.yml --event release \
+    --branch "$tag" --json databaseId --jq '.[0].databaseId // empty')"
+  [[ -z "$run" ]] || break
+  sleep 10
+done
+printf 'waiting for the Verify published release workflow (run %s)\n' "${run:-not started}"
+if [[ -z "$run" ]] || ! gh run watch "$run" --repo "$repository" --exit-status >/dev/null; then
+  [[ -z "$run" ]] || gh run view "$run" --repo "$repository" --log-failed 2>/dev/null | tail -n 20 >&2
+  if [[ -n "$run" ]]; then
+    printf 'rolling back %s: verification run %s failed\n' "$tag" "$run" >&2
+  else
+    printf 'rolling back %s: the verification workflow never started\n' "$tag" >&2
+  fi
   gh release delete "$tag" --repo "$repository" --yes --cleanup-tag
   git tag -d "$tag" >/dev/null 2>&1 || true
   # The rollback is only as safe as what "latest" now serves. Say what that
