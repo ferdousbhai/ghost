@@ -16,6 +16,17 @@ die() {
 command -v omarchy-pkg-add >/dev/null 2>&1 \
   || die "Ghost runs on Omarchy (https://omarchy.org). On Omarchy, open the menu and choose Install → AI → Ghost."
 
+# Installs from before Omarchy shipped Ghost added a self-hosted [ghost]
+# pacman repository, and a pre-refresh-pacman hook that keeps it. Releases no
+# longer publish its database, so left in place it would make every
+# `omarchy update` fail on the missing file.
+if [[ -e /etc/pacman.d/ghost.conf ]] || grep -qxF 'Include = /etc/pacman.d/ghost.conf' /etc/pacman.conf; then
+  printf 'Removing the old [ghost] package repository (asks for sudo).\n'
+  sudo sed -i '\#^Include = /etc/pacman.d/ghost.conf$#d' /etc/pacman.conf
+  sudo rm -f /etc/pacman.d/ghost.conf
+fi
+rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
+
 # Once Omarchy ships its own entry, that script is the whole install.
 if command -v omarchy-install-ai-ghost >/dev/null 2>&1; then
   exec omarchy-install-ai-ghost

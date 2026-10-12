@@ -132,7 +132,7 @@ git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` installs the \`ghost\` package from Omarchy's repository. Also the source and runtime inputs Omarchy builds that package from." \
+  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` installs the \`ghost\` package from Omarchy's repository. Also the source and runtime inputs Omarchy builds that package from. If you installed Ghost with the one-liner before Omarchy shipped it and \`omarchy update\` now fails on ghost.db, run the one-liner once more: it removes the old [ghost] repository." \
   -- \
   "$out/install.sh" \
   "$out/ghost-$version.tar.gz" \
