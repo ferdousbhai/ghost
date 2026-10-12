@@ -14,9 +14,8 @@ to `/usr/share/ghost/plugin` and prints the rest for you to run — a package ma
 not write into your home, so the link and the enable are yours.
 
 ```sh
-omarchy-pkg-add ghost          # or: Install → AI → Ghost; until Omarchy's repository
-                               # carries it, `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash`
-                               # adds Ghost's signed repository and does all of this
+omarchy-pkg-add ghost          # or `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash`,
+                               # which does all of this
 systemctl --user enable --now ghostd.service
 ln -sfn /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
 omarchy-shell shell rescanPlugins && omarchy plugin enable ferdousbhai.ghost

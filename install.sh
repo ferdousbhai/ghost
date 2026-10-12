@@ -2,12 +2,9 @@
 # ferdousbhai.com/ghost/install.sh — the terminal spelling of Omarchy → Install → AI → Ghost.
 #
 # Ghost is an Omarchy application and installs only through Omarchy's own
-# package path: the `ghost` package, then the `ghostd` user service for this
-# login. Until Omarchy's repository carries the package, every Ghost release
-# doubles as a signed pacman repository; this script trusts its key (checked
-# against the fingerprint pinned below), adds the repository, keeps it across
-# `omarchy refresh pacman`, and installs from it, so `omarchy update` keeps
-# Ghost current. Nothing is cloned or built in your home.
+# package path: the `ghost` package from Omarchy's repository, then the
+# `ghostd` user service for this login, so `omarchy update` keeps Ghost
+# current. Nothing is cloned or built in your home.
 set -Eeuo pipefail
 
 die() {
@@ -15,65 +12,26 @@ die() {
   exit 1
 }
 
-# --- add_signed_repo (shared) ---
-# Trust a project's package-signing key (checked against the pinned
-# fingerprint), add its signed pacman repository, and keep the repository
-# across `omarchy refresh pacman`, which rewrites /etc/pacman.conf from
-# Omarchy's defaults and then runs the user's pre-refresh-pacman hooks.
-# Works as root (`sudo bash`) or as a desktop user (sudo inside). This text
-# is identical in every installer that uses it, and each repository's test
-# pins its hash: change it here and in its twins together.
-add_signed_repo() {
-  local name="$1" release="$2" fingerprint="$3"
-  local conf="/etc/pacman.d/$name.conf" include="Include = /etc/pacman.d/$name.conf"
-  local sudo='' key user home hook_dir
-  (( EUID == 0 )) || sudo=sudo
-  key="$(mktemp)"
-  if ! curl -fsSL "$release/$name-signing-key.asc" -o "$key"; then
-    rm -f "$key"
-    echo "Could not download the package-signing key from $release." >&2
-    return 1
-  fi
-  if ! gpg --batch --with-colons --show-keys "$key" 2>/dev/null | grep -q "^fpr:*:$fingerprint:"; then
-    rm -f "$key"
-    echo "The downloaded key does not match the pinned fingerprint $fingerprint; nothing was changed." >&2
-    return 1
-  fi
-  $sudo pacman-key --add "$key"
-  $sudo pacman-key --lsign-key "$fingerprint"
-  rm -f "$key"
-  printf '[%s]\nSigLevel = Required DatabaseRequired\nServer = %s\n' "$name" "$release" | $sudo tee "$conf" >/dev/null
-  grep -qxF "$include" /etc/pacman.conf || printf '\n%s\n' "$include" | $sudo tee -a /etc/pacman.conf >/dev/null
-  user="${SUDO_USER:-${USER:-$(id -un)}}"
-  home="$(getent passwd "$user" | cut -d: -f6)"
-  if [[ -n $home && -d $home/.config/omarchy ]]; then
-    hook_dir="$home/.config/omarchy/hooks/pre-refresh-pacman.d"
-    install -d -o "$user" -g "$(id -gn "$user")" "$hook_dir"
-    printf '%s\n' '#!/bin/bash' \
-      "# Restore the [$name] repository after Omarchy rewrote /etc/pacman.conf." \
-      "grep -qxF '$include' /etc/pacman.conf || printf '\\n%s\\n' '$include' | sudo tee -a /etc/pacman.conf >/dev/null" \
-      > "$hook_dir/$name"
-    chown "$user" "$hook_dir/$name"
-    chmod 755 "$hook_dir/$name"
-  fi
-  $sudo pacman -Sy
-}
-# --- end add_signed_repo ---
-
 [[ "${EUID}" -ne 0 ]] || die "Run this as your desktop user, not root. It asks for sudo where the package system needs it."
 command -v omarchy-pkg-add >/dev/null 2>&1 \
   || die "Ghost runs on Omarchy (https://omarchy.org). On Omarchy, open the menu and choose Install → AI → Ghost."
+
+# Installs from before Omarchy shipped Ghost added a self-hosted [ghost]
+# pacman repository, and a pre-refresh-pacman hook that keeps it. Releases no
+# longer publish its database, so left in place it would make every
+# `omarchy update` fail on the missing file.
+if [[ -e /etc/pacman.d/ghost.conf ]] || grep -qxF 'Include = /etc/pacman.d/ghost.conf' /etc/pacman.conf; then
+  printf 'Removing the old [ghost] package repository (asks for sudo).\n'
+  sudo sed -i '\#^Include = /etc/pacman.d/ghost.conf$#d' /etc/pacman.conf
+  sudo rm -f /etc/pacman.d/ghost.conf
+fi
+rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
 
 # Once Omarchy ships its own entry, that script is the whole install.
 if command -v omarchy-install-ai-ghost >/dev/null 2>&1; then
   exec omarchy-install-ai-ghost
 fi
 
-if ! pacman -Si ghost >/dev/null 2>&1; then
-  printf 'Adding the [ghost] package repository (asks for sudo).\n'
-  add_signed_repo ghost https://github.com/ferdousbhai/ghost/releases/latest/download \
-    52130299581DAD685226900CA89CA1A6A1E74251 || die "Could not add the [ghost] repository."
-fi
 omarchy-pkg-add ghost
 
 # The daemon is a user unit. The HUD is an omarchy-shell plugin, so it is
