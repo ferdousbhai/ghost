@@ -5,8 +5,8 @@
 # up with this version of `ghost` and `ghost-runtime`. Given the previous
 # version, it also proves the way installed users get it: that release
 # installed from its own tag, then the `pacman -Syu` `omarchy update` runs,
-# must land on this version. publish.sh runs this after publishing and rolls
-# the release back if either fails.
+# must land on this version. The Verify published release workflow runs this
+# after publishing, and publish.sh rolls the release back if it fails.
 #
 #   verify-published.sh <version> [<previous-version>]
 #
