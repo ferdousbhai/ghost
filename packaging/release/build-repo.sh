@@ -50,7 +50,7 @@ rm -rf -- "$repo"
 mkdir -p -- "$repo"
 (
   cd -- "$build"
-  LC_ALL=C GPGKEY="$fingerprint" PKGDEST="$repo" makepkg --force --sign
+  LC_ALL=C GPGKEY="$fingerprint" PKGDEST="$repo" PKGEXT=.pkg.tar.zst makepkg --force --sign
 )
 (
   cd -- "$repo"
