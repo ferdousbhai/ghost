@@ -148,6 +148,26 @@ describe("a turn", () => {
 });
 
 describe("run resources", () => {
+  it("updates the live and persisted snapshot from attributed post-pass session facts", async () => {
+    const fake = harness([{ events: [{ type: "session", id: "native-1" }, { type: "text", block: "r", delta: "OK" }] }]);
+    const asked: Array<{ session: string; since: string | undefined }> = [];
+    Object.assign(fake.row, { inspectSession: async (session: string, _env: unknown, since?: string) => {
+      asked.push({ session, since });
+      return [{ type: "resources", resources: { skills: ["marker"], extensions: null, mcpServers: null } }];
+    } });
+    const sessions = host({ harnesses: [fake] });
+    const events = await turn(sessions, "hello");
+    const snapshots = events.filter((event) => event.type === "resources");
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]?.run).toBe(snapshots[1]?.run);
+    expect(asked[0]).toMatchObject({ session: "native-1", since: expect.stringMatching(/^\d{4}-/) });
+    const logged = (await readLog(sessionDir(), "c1"))!.filter((entry) => entry.type === "resources");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.resources.skills).toEqual(["marker"]);
+    expect((await sessions.readTranscript("casper", "c1")).messages[1]?.content)
+      .toEqual([{ type: "text", text: resourceSummary("fake", { skills: ["marker"], extensions: null, mcpServers: null }) }]);
+  });
+
   it("keeps each fallback and resumed run separate, without claiming configured resources loaded", async () => {
     const first = harness([{ events: [
       { type: "resources", resources: { skills: ["mail"], extensions: ["review"], mcpServers: [] } },
@@ -205,9 +225,9 @@ describe("harness choice", () => {
     const asked: string[] = [];
     Object.assign(quiet.row, {
       effort: "low",
-      ranOn: async (session: string) => {
+      inspectSession: async (session: string) => {
         asked.push(session);
-        return { type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" };
+        return [{ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" }];
       },
     });
     const sessions = host({ harnesses: [quiet] });

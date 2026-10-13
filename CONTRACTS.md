@@ -136,8 +136,9 @@ messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
 session id it reported, per-run `resources` records, and `handoff` records (below). A torn last line is skipped. The log is the history
-every client reads; each harness's own transcript is its resume state and is
-not read back. A conversation is listed once a message lands or the owner
+every client reads; each harness's own transcript is its resume state, never
+imported as conversation history. The display-only session metadata inspection
+below is the one exception to reading it. A conversation is listed once a message lands or the owner
 names it; each row carries `preview`, the first owner text, and `title`,
 the owner's name for it or else one extracted from that text without a model
 (`derivedTitle`), null when nothing substantive is left. Pins and read
@@ -219,15 +220,31 @@ start/end, session, model, and error events. Rows exist for claude, codex, grok,
 copilot, opencode, pi, omp, agy, cursor-agent, crush, and muse; their parsers
 are tested against output each CLI really printed. That table is the one
 per-harness adapter, and a row is launch flags plus a parser, never a chat
-loop. The one deliberate exception: a harness whose output never names its
-model, provider, or effort has them read after the pass from the session
-record it wrote, found by the session id it reported (`ranOn`: codex's
-rollout file, opencode's database). The owner should always be able to see what answered. Each pass also records
+loop. The one deliberate exception: display-only facts absent from stdout are read
+after the pass from the session record the harness wrote, found by a session id
+reported by this pass (`inspectSession`: Codex's rollout file, OpenCode's
+database). This reads the model/provider/effort, and Codex's own rendered
+`world_state.state.host_skills.body` catalog. Codex inventory is accepted only
+when the latest `turn_context` is timestamped at or after this pass started;
+otherwise a failed resume must not borrow an older run's inventory. Catalog
+names are parsed from its `### Available skills` section, not reconstructed
+from skill directories; missing or malformed catalogs remain unknown. After
+finding the latest model record, catalog lookup reads at most 8 MiB backwards;
+a catalog beyond that display-only read budget remains unknown. Nothing
+from that inspection enters handoff context. The owner should always be able to see what answered. Each pass also records
 and streams a `resources` snapshot `{ run, harness, resources: { skills,
 extensions, mcpServers }, summary }`. Lists contain only names reported by that
 run's harness; `null` means not reported, `[]` means explicitly none. Claude's
-init reports skills, plugins, and connected MCP servers; other rows leave fields
-unknown until they expose an inventory. Discovery is not inferred from installed
+init reports skills, plugins, and connected MCP servers; Grok's init reports
+skills and MCP servers. Copilot's `session.skills_loaded`,
+`session.extensions_loaded`, and `session.mcp_servers_loaded` events update
+their respective fields without clearing the others; only enabled skills,
+running extensions, and connected servers count. Subagent inventories are
+ignored. Later MCP status/removal/reconnect events update an already reported
+complete list, never turn partial evidence into an inventory. Codex's skill
+catalog is read after the pass as above. Other missing fields remain unknown;
+checked versions and probe limitations are in
+[`docs/run-resources.md`](docs/run-resources.md). Discovery is not inferred from installed
 files or launch configuration, and skill availability does not mean its full
 body has entered context. The snapshot starts unknown and is updated by the
 harness's report, never carried from an earlier run, including fallbacks and
@@ -254,7 +271,8 @@ mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
 in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
-carries it. pi has no MCP client.
+carries it. The current pi row does not forward Ghost's MCP servers; Pi 1.2
+itself supports MCP configured by the owner.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already
@@ -326,7 +344,7 @@ in them leaves the run alone), `codex` gets `-c mcp_servers.ghost.command`
 and `.args` overrides ahead of them. That table is a deliberate exception to
 the harness table's being the one adapter: two flags per harness, and it
 replaces a recipe every model had to copy exactly. Other harnesses load it
-themselves (an omp `mcp.json` row); pi has no MCP client.
+themselves (an omp `mcp.json` row, or Pi's native MCP settings).
 
 Every attempt, refused or run, appends one JSON line to
 `$XDG_STATE_HOME/ghost/handoffs.jsonl` (falling back to `~/.local/state`; the

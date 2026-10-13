@@ -759,6 +759,7 @@ export class SessionHost {
     let thoughtBlock: string | null = null;
     let model: Extract<HarnessEvent, { type: "model" }> | null = null;
     let session = turn.sessionId;
+    let reportedSession = false;
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
@@ -812,6 +813,7 @@ export class SessionHost {
           model = event;
           return;
         case "session":
+          reportedSession = true;
           session = event.id;
           writes.push(appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: row.id, session: event.id, dir }]));
           return;
@@ -833,8 +835,12 @@ export class SessionHost {
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
+    if (reportedSession && session !== null && row.inspectSession && !exit.spawnError && !signal.aborted) {
+      for (const fact of await row.inspectSession(session, env, at).catch(() => [])) {
+        if (fact.type === "resources" || model === null) onEvent(fact);
+      }
+    }
     await appendLog(sessionDir, id, [{ type: "resources", at, run, harness: row.id, resources, summary: resourceSummary(row.id, resources) }]);
-    if (model === null && session !== null && row.ranOn) model = await row.ranOn(session, env).catch(() => null);
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
     if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
     if (error === null && exit.code !== 0) {

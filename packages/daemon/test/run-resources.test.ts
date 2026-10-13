@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { handoffContext, logState, transcriptMessages, type LogEntry } from "../src/conversation-log.js";
-import { resourceNames, resourceSummary, unreportedResources } from "../src/run-resources.js";
+import { codexSkillNames, resourceNames, resourceSummary, unreportedResources } from "../src/run-resources.js";
 
 describe("run resources", () => {
   it("distinguishes unknown from none, bounds names, and rejects control characters", () => {
@@ -13,6 +13,16 @@ describe("run resources", () => {
     expect(resourceSummary("pi", unreportedResources())).toContain("Skills: not reported");
     expect(resourceSummary("claude", { skills: [], extensions: ["review"], mcpServers: [] }))
       .toContain("Skills: none\nExtensions/plugins: review\nConnected MCP servers: none");
+  });
+
+  it("extracts only names in Codex's rendered catalog section", () => {
+    expect(codexSkillNames("### Available skills\n- plugin:skill: Description. (file: r0/skill/SKILL.md)\n### Instructions\n- excluded: Other text\n"))
+      .toEqual(["plugin:skill"]);
+    expect(codexSkillNames("### Available skills\n")).toEqual([]);
+    expect(codexSkillNames("<recommended_plugins>\n- Not installed\n</recommended_plugins>")).toBeNull();
+    expect(codexSkillNames("### Available skills\nUnknown format")).toBeNull();
+    expect(codexSkillNames("### Available skills\n- valid: Description. (file: r0/skill/SKILL.md)\n- malformed row\n")).toBeNull();
+    expect(codexSkillNames(undefined)).toBeNull();
   });
 
   it("is display-only, not conversation activity or prompt context", () => {

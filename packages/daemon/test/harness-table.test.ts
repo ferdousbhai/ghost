@@ -160,9 +160,9 @@ describe("parsers over recorded output", () => {
       write("2026/09/30", "thread-a", "gpt-6.1-sol");
       write("2026/10/04", "thread-b", "gpt-6-astra");
       const row = harnessRow("codex");
-      expect(await row?.ranOn?.("thread-a", { CODEX_HOME: home }))
-        .toEqual({ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "low" });
-      expect(await row?.ranOn?.("thread-c", { CODEX_HOME: home })).toBeNull();
+      expect(await row?.inspectSession?.("thread-a", { CODEX_HOME: home }))
+        .toEqual([{ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "low" }]);
+      expect(await row?.inspectSession?.("thread-c", { CODEX_HOME: home })).toEqual([]);
       // A long rollout is read from its ends: the newest turn_context sits
       // behind megabytes of later entries, across the reader's 1 MiB windows.
       const filler = JSON.stringify({ type: "response_item", payload: { text: "x".repeat(4096) } });
@@ -172,8 +172,8 @@ describe("parsers over recorded output", () => {
         JSON.stringify({ type: "turn_context", payload: { model: "gpt-6.2-sol", effort: "medium" } }),
         ...Array.from({ length: 700 }, () => filler),
       ].join("\n"));
-      expect(await row?.ranOn?.("thread-long", { CODEX_HOME: home }))
-        .toEqual({ type: "model", model: "gpt-6.2-sol", provider: "openai", effort: "medium" });
+      expect(await row?.inspectSession?.("thread-long", { CODEX_HOME: home }))
+        .toEqual([{ type: "model", model: "gpt-6.2-sol", provider: "openai", effort: "medium" }]);
     } finally {
       rmSync(home, { recursive: true, force: true });
     }
@@ -194,6 +194,63 @@ describe("parsers over recorded output", () => {
       payload_type: "run.model.configured",
       payload: { kind: "run_model_configured", model_id: "muse-spark-1.3-contributor", provider_id: "meta" },
     }))).toEqual([{ type: "model", model: "muse-spark-1.3-contributor", provider: "meta" }]);
+  });
+
+  it("grok and copilot: inventories captured in native 2026-10-13 probes", () => {
+    expect(parse("grok", "grok-init-resources.jsonl").find((event) => event.type === "resources"))
+      .toEqual({ type: "resources", resources: { skills: ["cloud-calendar", "cloudmail", "built-in-browser"], extensions: null, mcpServers: [] } });
+    expect(parse("copilot", "copilot-resources.jsonl"))
+      .toEqual([{ type: "resources", resources: { skills: null, extensions: null, mcpServers: ["github-mcp-server"] } }]);
+  });
+
+  it("copilot: schema-based partial inventories accumulate without importing disabled resources or subagents", () => {
+    const parse = harnessRow("copilot")!.parser();
+    const event = (type: string, data: unknown, agentId?: string) => parse(JSON.stringify({ type, data, agentId }));
+    expect(event("session.skills_loaded", { skills: [{ name: "mail", enabled: true, path: "/private" }, { name: "off", enabled: false }] }))
+      .toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: null, mcpServers: null } }]);
+    expect(event("session.extensions_loaded", { extensions: [
+      { id: "plugin:review:checks", name: "checks", status: "running" }, { id: "user:broken", status: "failed" },
+    ] })).toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: null } }]);
+    expect(event("session.mcp_servers_loaded", { servers: [{ name: "ghost", status: "connected", error: "private" }, { name: "pending", status: "pending" }] }))
+      .toEqual([{ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: ["ghost"] } }]);
+    expect(event("session.skills_loaded", { skills: [] }, "worker")).toEqual([]);
+    expect(event("session.mcp_server_status_changed", { serverName: "ghost", status: "failed" }))
+      .toContainEqual({ type: "resources", resources: { skills: ["mail"], extensions: ["plugin:review:checks"], mcpServers: [] } });
+    event("session.mcp_server_status_changed", { serverName: "ghost", status: "connected" });
+    expect(event("session.mcp_server_removed", { serverName: "ghost" })[0])
+      .toMatchObject({ resources: { mcpServers: [] } });
+    expect(event("session.skills_loaded", { skills: [{ name: "invalid" }] })[0])
+      .toMatchObject({ resources: { skills: null, extensions: ["plugin:review:checks"], mcpServers: [] } });
+    expect(event("constructor", {})).toEqual([]);
+    expect(harnessRow("copilot")!.parser()(JSON.stringify({ type: "session.mcp_server_status_changed", data: { serverName: "partial", status: "connected" } })))
+      .toEqual([]);
+  });
+
+  it("codex: reads the rendered catalog for a fresh turn, never an old failed resume or plugin recommendations", async () => {
+    const home = mkdtempSync(join(tmpdir(), "ghost-codex-resources-"));
+    try {
+      const dir = join(home, "sessions", "2026", "10", "13");
+      mkdirSync(dir, { recursive: true });
+      const path = join(dir, "rollout-resource-thread.jsonl");
+      const fixture = readFileSync(new URL("./fixtures/harness/codex-world-state.jsonl", import.meta.url), "utf8");
+      writeFileSync(path, fixture);
+      const inspect = (since: string) => harnessRow("codex")!.inspectSession!("resource-thread", { CODEX_HOME: home }, since);
+      const facts = await inspect("2026-10-13T12:00:00.500Z");
+      expect(facts).toContainEqual({ type: "resources", resources: {
+        skills: ["resource-audit-marker", "visualize:visualize"], extensions: null, mcpServers: null,
+      } });
+      expect(JSON.stringify(facts)).not.toContain("/private");
+      expect((await inspect("2026-10-13T12:00:03.000Z")).some((event) => event.type === "resources")).toBe(false);
+      // A new full world state supersedes an old catalog even when it omits skills.
+      writeFileSync(path, fixture + [
+        { type: "world_state", payload: { full: true, state: { plugins_instructions: false } } },
+        { type: "turn_context", timestamp: "2026-10-13T12:00:05.000Z", payload: { model: "gpt-6.1-sol" } },
+      ].map((entry) => JSON.stringify(entry)).join("\n"));
+      expect(await inspect("2026-10-13T12:00:04.000Z"))
+        .toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null } });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("agy: its own typed stream, the session it opened and a refusal as the turn's error", () => {
@@ -223,9 +280,9 @@ describe("parsers over recorded output", () => {
       add.run("m3", "ses_a", 3, 3, JSON.stringify({ role: "user", model: { providerID: "opencode", modelID: "big-pickle" } }));
       db.close();
       const row = harnessRow("opencode");
-      expect(await row?.ranOn?.("ses_a", { XDG_DATA_HOME: data }))
-        .toEqual({ type: "model", model: "x-preview-f-free", provider: "opencode", effort: "max" });
-      expect(await row?.ranOn?.("ses_b", { XDG_DATA_HOME: data })).toBeNull();
+      expect(await row?.inspectSession?.("ses_a", { XDG_DATA_HOME: data }))
+        .toEqual([{ type: "model", model: "x-preview-f-free", provider: "opencode", effort: "max" }]);
+      expect(await row?.inspectSession?.("ses_b", { XDG_DATA_HOME: data })).toEqual([]);
     } finally {
       rmSync(data, { recursive: true, force: true });
     }

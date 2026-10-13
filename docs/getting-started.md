@@ -133,9 +133,12 @@ and on stderr with `ghost say` (`-q` suppresses it). It names the skills,
 extensions/plugins, and connected MCP servers that the harness reports for
 that run, including fallback attempts. **Not reported** is unknown, not an
 empty inventory; **none** means the harness explicitly reported an empty list.
-Claude exposes this in its startup event; harnesses without an inventory event
-(including Pi's headless JSON mode) show **not reported**. A listed skill can
-mean its description is available, not that its full body has entered context.
+Claude and Grok report inventories in startup events; Copilot reports fields
+when its corresponding loaded-resource events appear. Codex's skill catalog
+is read from that run's own context record after the pass. Missing fields stay
+**not reported**, including agents without inventory evidence on their headless
+path. See [agent coverage and probe evidence](run-resources.md). A listed skill
+can mean its description is available, not that its full body has entered context.
 The notice itself is display-only and adds nothing to the model's prompt.
 
 In the HUD, the harness label beside the conversation title opens a picker:
