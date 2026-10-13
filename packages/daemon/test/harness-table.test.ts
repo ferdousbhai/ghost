@@ -205,6 +205,13 @@ describe("parsers over recorded output", () => {
       .toEqual([{ type: "resources", resources: { skills: null, extensions: null, mcpServers: ["github-mcp-server"] } }]);
   });
 
+  it("cursor and omp: authenticated startup headers carry no inventory", () => {
+    expect(parse("cursor-agent", "cursor-init-no-inventory.jsonl"))
+      .toEqual([{ type: "session", id: "cursor-probe" }, { type: "model", model: "Auto" }]);
+    expect(parse("omp", "omp-header-no-inventory.jsonl"))
+      .toEqual([{ type: "session", id: "omp-probe" }]);
+  });
+
   it("copilot: schema-based partial inventories accumulate without importing disabled resources or subagents", () => {
     const parse = harnessRow("copilot")!.parser();
     const event = (type: string, data: unknown, agentId?: string) => parse(JSON.stringify({ type, data, agentId }));

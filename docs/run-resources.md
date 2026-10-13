@@ -27,8 +27,8 @@ conversation content.
 | Grok 1.0.52 | A successful headless probe emitted `skills` (names) and `mcp_servers` (explicitly empty) in `system/init`. Both are handled. No `plugins` field was reported, so extensions remain unknown. |
 | Copilot 1.0.96 | Successful headless probes, including the owner's installed binary after sign-in, emitted `session.mcp_servers_loaded` and status changes, with `github-mcp-server` connected. Its published schema and bundled runtime also define `session.skills_loaded` and `session.extensions_loaded`; the parser handles them if emitted, but neither appeared in these probes. Those fields therefore stay unknown, not empty. Only enabled skills, running extensions (source-qualified IDs), and connected MCP servers count. |
 | Codex 0.162.1 | `exec --json` emitted no inventory. The exact session's rollout did contain the rendered skill catalog in `world_state.state.host_skills.body`, including the scratch marker. Ghost reads names from that catalog after the pass, provided a fresh `turn_context` proves this attempt reached context construction. Plugins and MCP connections remain unknown: disabled plugin IDs and plugin recommendations are not evidence of loaded plugins. |
-| Cursor Agent 2026.10.01-e373342 | The retry still refused authentication before init, and native `status` reported `Not logged in`. The installed `7000.index.js` headless emitter constructs init with session/model/permission fields, without skill/plugin/MCP inventory. The shared parser would accept compatible inventory fields if a future version adds them; no current runtime inventory is verified. |
-| OMP 18.10.3 | The retry still stopped before output because no default model/authentication was selected. Read-only metadata checks found no credentials or selected model in the default profile; another terminal/profile's setup is not evidence for this invocation. Its embedded `packages/coding-agent/src/modes/print-mode.ts` writes a session header and agent events; the header carries no resource inventory. RPC/internal resource-loader access exists but is not evidence on Ghost's JSON print path. Remains unknown. |
+| Cursor Agent 2026.10.01-e373342 | After completing sign-in, native `status` confirmed authentication and the scratch run succeeded. Init contained type/subtype/auth-source/cwd/session/model/permission fields, with no skill/plugin/MCP inventory, confirming the installed `7000.index.js` emitter. The shared parser would accept compatible inventory fields if a future version adds them; current inventory remains unknown. |
+| OMP 18.10.3 | After signing into its default profile's OpenAI Codex provider, the scratch run succeeded with `OK`. Its JSON stream contained a session header, advisor-cost event, and agent/turn/message events, with no resource inventory, confirming the inspected embedded `packages/coding-agent/src/modes/print-mode.ts`. RPC/internal resource-loader access is not evidence on Ghost's JSON print path. Inventory remains unknown. |
 | Antigravity 1.3.4 | After sign-in, the native run succeeded with `OK`; its stream was init/step-update/result. Init contained only cwd/tools/permission fields, not a skill/plugin inventory. The parsed inventory remains unknown. |
 | OpenCode 1.19.0 | After installation/sign-in, the native run succeeded with `OK`; JSON contained step-start/text/step-finish, no inventory. This confirms the inspected version-tagged `run.ts` path. The existing session DB inspection reads model metadata only. Remains unknown. |
 | Crush | Excluded from further checks at the owner's request. No runtime integration or installation was changed. |
@@ -46,8 +46,9 @@ conversation content.
   export the installed binaries' protocols without model requests. Their
   list/RPC methods were inspected, not invoked as substitute Ghost backends.
 - Reduced recorded fixtures: `claude-init-resources.jsonl`,
-  `grok-init-resources.jsonl`, `copilot-resources.jsonl`, and
-  `codex-world-state.jsonl` under
+  `grok-init-resources.jsonl`, `copilot-resources.jsonl`,
+  `codex-world-state.jsonl`, `cursor-init-no-inventory.jsonl`, and
+  `omp-header-no-inventory.jsonl` under
   `packages/daemon/test/fixtures/harness/`. Additional schema-based tests are
   labelled as such; they are not claimed as recorded native events.
 
