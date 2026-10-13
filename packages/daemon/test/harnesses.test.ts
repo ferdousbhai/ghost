@@ -56,12 +56,11 @@ describe("assessHarness", () => {
     });
   });
 
-  it("is ineligible once a live window reaches the ceiling, naming it", () => {
+  it("keeps full usage informational", () => {
     const harness = assessHarness("claude", record([
       { label: "Session (5-hour)", percent: 0.93, resetsAt: LATER },
     ]), NOW);
-    expect(harness.eligible).toBe(false);
-    expect(harness.reason).toBe(`Session (5-hour) 93% used, resets ${LATER}`);
+    expect(harness).toMatchObject({ eligible: true, reason: null, usage: { windows: [{ percent: 0.93 }] } });
   });
 
   it("drops a window whose reset has passed instead of trusting its stale percent", () => {
@@ -97,43 +96,11 @@ describe("assessHarness", () => {
   });
 });
 
-describe("weekly pace", () => {
-  const DAY = 24 * 3_600_000;
-  const weekly = (percent: number, daysLeft: number | null, label = "Weekly (7-day)") =>
-    assessHarness("claude", record([
-      { label, percent, resetsAt: daysLeft === null ? null : new Date(NOW + daysLeft * DAY).toISOString() },
-    ]), NOW);
-
-  it("allows one day's share at the start of the week, and no more", () => {
-    expect(weekly(0.14, 7).eligible).toBe(true);
-    const ahead = weekly(0.2, 7);
-    expect(ahead.eligible).toBe(false);
-    expect(ahead.reason).toBe(
-      `Weekly (7-day) 20% used, ahead of weekly pace (14% by now), resets ${new Date(NOW + 7 * DAY).toISOString()}`,
-    );
-  });
-
-  it("allows the elapsed share plus a day mid-week", () => {
-    // 3.5 days in: 50% elapsed, 64% allowed.
-    expect(weekly(0.6, 3.5).eligible).toBe(true);
-    expect(weekly(0.7, 3.5)).toMatchObject({ eligible: false, reason: expect.stringContaining("ahead of weekly pace (64% by now)") });
-  });
-
-  it("leaves only the ceiling just before the reset", () => {
-    expect(weekly(0.89, 0.01).eligible).toBe(true);
-    expect(weekly(0.9, 0.01).reason).toMatch(/^Weekly \(7-day\) 90% used, resets /u);
-  });
-
-  it("falls back to the ceiling without a reset, for a reset over a week off, and for a non-weekly window", () => {
-    expect(weekly(0.5, null).eligible).toBe(true);
-    expect(weekly(0.5, 30).eligible).toBe(true);
-    expect(weekly(0.5, 7, "Session (5-hour)").eligible).toBe(true);
-  });
-
-  it("recognizes Omarchy's weekly labels", () => {
-    expect(weekly(0.5, 7, "Weekly").eligible).toBe(false);
-    expect(weekly(0.5, 7, "Fable Weekly").eligible).toBe(false);
-  });
+it("does not gate a stale weekly report ahead of pace", () => {
+  const harness = assessHarness("claude", record([
+    { label: "Weekly (7-day)", percent: 1, resetsAt: new Date(NOW + 7 * 24 * 3_600_000).toISOString() },
+  ], { updatedAt: new Date(NOW - STALE_AFTER_MS - 1).toISOString() }), NOW);
+  expect(harness).toMatchObject({ eligible: true, reason: null, usage: { stale: true, windows: [{ percent: 1 }] } });
 });
 
 describe("ghost harnesses", () => {
@@ -184,23 +151,23 @@ describe("ghost harnesses", () => {
     const body = JSON.parse(result.stdout) as { harnesses: Array<{ id: string; eligible: boolean; reason: string | null }>; refresh: string };
     expect(body.harnesses.map((harness) => [harness.id, harness.eligible])).toEqual([
       ["pi", true],
-      ["claude", false],
+      ["claude", true],
       ["codex", true],
     ]);
-    expect(body.harnesses[1]?.reason).toMatch(/^Session \(5-hour\) 95% used/u);
+    expect(body.harnesses[1]?.reason).toBeNull();
     expect(body.refresh).toBe("omarchy agent usage update");
   });
 
   it("-q prints only the eligible ids", async () => {
     const env = machine();
     const result = await runCli(["harnesses", "-q"], { env, home: root });
-    expect(result.stdout).toBe("pi\ncodex\n");
+    expect(result.stdout).toBe("pi\nclaude\ncodex\n");
   });
 
   it("renders a readable table", async () => {
     const env = machine();
     const result = await runCli(["harnesses"], { env, home: root });
-    expect(result.stdout).toContain("claude  no: Session (5-hour) 95% used");
+    expect(result.stdout).toContain("claude  eligible");
     expect(result.stdout).toContain("pi      eligible");
     expect(result.stdout).toContain("no usage record");
     expect(result.stdout).toContain("refresh: omarchy agent usage update");

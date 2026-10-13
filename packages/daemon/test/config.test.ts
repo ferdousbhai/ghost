@@ -39,7 +39,6 @@ describe("loadConfig", () => {
       port: DEFAULT_PORT,
       host: DEFAULT_HOST,
       ghostsRoot: join(root, "ghosts"),
-      offline: false,
       remote: { enabled: false },
       configPath: join(root, ".config", "ghost", "config.json"),
     });
@@ -87,7 +86,6 @@ describe("loadConfig", () => {
     const config = loadConfig({ env: {}, home: root });
     expect(config.port).toBe(8123);
     expect(config.ghostsRoot).toBe(join(root, "Spirits"));
-    expect(config.offline).toBe(true);
     expect(config.configPath).toBe(path);
   });
 
@@ -105,12 +103,11 @@ describe("loadConfig", () => {
     const root = makeHome();
     writeConfig(root, { port: 8123, ghostsRoot: join(root, "FromFile"), offline: true });
     const config = loadConfig({
-      env: { GHOSTD_PORT: "7000", GHOSTS_ROOT: join(root, "FromEnv"), GHOSTD_OFFLINE: "0" },
+      env: { GHOSTD_PORT: "7000", GHOSTS_ROOT: join(root, "FromEnv") },
       home: root,
     });
     expect(config.port).toBe(7000);
     expect(config.ghostsRoot).toBe(join(root, "FromEnv"));
-    expect(config.offline).toBe(false);
   });
 
   it("ignores an empty GHOSTD_CONFIG and falls back to the default path", () => {
@@ -125,10 +122,8 @@ describe("loadConfig", () => {
       env: { GHOSTD_PORT: "7000" },
       home: root,
       port: 7788,
-      offline: true,
     });
     expect(config.port).toBe(7788);
-    expect(config.offline).toBe(true);
   });
 
   it("refuses a malformed config file rather than silently defaulting", () => {

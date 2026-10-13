@@ -135,7 +135,7 @@ object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
-session id it reported, per-run `resources` records, and `handoff` records (below). A torn last line is skipped. The log is the history
+session id it reported, per-run `resources` records, and historical `handoff` records. A torn last line is skipped. The log is the history
 every client reads; each harness's own transcript is its resume state, never
 imported as conversation history. The display-only session metadata inspection
 below is the one exception to reading it. A conversation is listed once a message lands or the owner
@@ -202,7 +202,7 @@ Every turn's system prompt is the Ghost character and the stable policy
 sections, whose authoritative list and per-section size ceilings are
 [`prompt-budget.test.ts`](packages/daemon/test/prompt-budget.test.ts). Two sections carry contract the rest of this file
 relies on: the other-harnesses policy sends a task to an agent run in its
-project (`ghost delegate`, which refuses a harness without room) only when it
+project (`ghost delegate`, which runs an installed harness) only when it
 needs that project's instructions, settings, or MCP servers; the owner-context
 policy names the Documents directory as where finished work, notes, and the
 board live. Owner documents are read only when
@@ -279,7 +279,7 @@ Which harness answers is decided per turn
 carrying the conversation (or the one the owner or ghost switched it to),
 then the ghost's `settings.yml` `harness`, then
 Omarchy's default agent, then every other harness Omarchy reports installed
-and eligible (`ghost harnesses`), each only if eligible. A harness that fails
+(`ghost harnesses`). A harness that fails
 before producing anything (not signed in, out of quota, not installed) hands
 the prompt to the next; one that fails after answering ends the turn in an
 error. A harness new to a conversation receives the newest
@@ -320,10 +320,8 @@ job control. A ghost that wants a specialist runs the owner's installed `pi`,
 [`prompt-policy.ts`](packages/daemon/src/prompt-policy.ts)); that harness runs
 with the owner's own settings for it — its full tool set, project discovery,
 auth, and session semantics.
-`ghost delegate` runs `omarchy agent usage update --limits-only <harness>`
-(ignoring its failure), then applies `ghost harnesses`: a harness not listed
-exits 5, one listed ineligible exits 6, and neither runs. Otherwise the harness
-runs in the foreground in the caller's cwd and process group, with the caller's
+`ghost delegate` refuses an uninstalled harness (exit 5); otherwise it runs
+in the foreground in the caller's cwd and process group, with the caller's
 environment and stdin, its stdout and stderr streamed through unchanged; SIGINT
 and SIGTERM are forwarded to it, and once it exits the verb stops reading when
 its pipes have been idle for 100ms, so a descendant holding them cannot hang
@@ -353,9 +351,9 @@ previous one): `{v: 1, at, ghost, session, harness, pick, cwd, eligible, windows
 status, outcome}`, where `ghost` and `session` come from `$GHOST` and `$GHOST_SESSION`
 (or `null`), `pick` is `"owner"` when `--owner-named` says the owner named the
 harness or no `$GHOST` is set (the owner ran the verb), else `"ghost"`, `eligible` lists the harnesses eligible at the check, `windows` is
-this harness's live windows then, `status` is Omarchy's note when it could not
+this harness's last reported windows then, `status` is Omarchy's note when it could not
 measure this harness (an unmeasured harness is eligible, and this shows the
-check was blind) or `null`, and `outcome` is `{refused}` with the reason,
+usage was unmeasured) or `null`, and `outcome` is `{refused}` with the reason,
 or `{exit, signal, durationMs, limit}`, `durationMs` the harness's own run
 time, `limit` being `classifyLimitMessage`'s kind for the last 8 KiB of output
 of a run that did not exit 0, else `null`. No prompt text or arguments are
@@ -406,14 +404,14 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `POST /api/relay/pair` | Owner answers the pending pairing: `{ code, allow }`. Allow hands the relay token to that browser over its socket; a stale code is `404 pairing_not_found`. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
-| `GET /api/status` | Owner-only `{ version, source: { commit, root }, update }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. `update` is the daily release check's last answer, `{ latest, command }` or `null`; `command` is what installs it on this machine (`omarchy-update` for the package, pull + build + restart for a checkout). Ghost never applies an update itself; `--offline` skips the check ([`update-check.ts`](packages/daemon/src/update-check.ts)). |
+| `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
-| `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
+| `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
@@ -484,13 +482,9 @@ Omarchy usage record, `$XDG_STATE_HOME/omarchy/agents/usage/<id>.json` (falling
 back to `~/.local/state`). `--json` prints `{harnesses, refresh}`: each harness
 is `{id, eligible, reason, usage}`, and `usage` is `null` without a record,
 else `{updatedAt, stale, status, windows}` with each window `{label, percent,
-resetsAt}`, `percent` a 0–1 fraction used. A harness is ineligible when any
-window whose reset is still ahead is at 90% or more, or when a weekly one (a
-label matching `week` or `7-day`, its reset at most a week off) has used more
-than the fraction of its week elapsed since the reset plus one day's share
-(1/7); `reason` then names the window, else it is `null`. The thresholds are
-constants in [`harnesses.ts`](packages/daemon/src/harnesses.ts), not owner
-settings. A record's `ready` only says Omarchy has data to show, so it
+resetsAt}`, `percent` a 0–1 fraction used. All installed harnesses are eligible
+regardless of usage; `reason` is null.
+A record's `ready` only says Omarchy has data to show, so it
 decides nothing. A window whose reset has
 passed is dropped. `stale` marks a record older than 15 minutes; the verb never
 refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
@@ -510,8 +504,8 @@ enter logs or API responses.
 
 Ghosts run unthrottled. Harness limits surface as typed errors, and the
 harness's own retry and fallback behavior applies; Ghost's one contribution is
-the per-turn order of eligible harnesses above, judged from Omarchy's usage
-records. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
+the per-turn order of installed harnesses above. Omarchy usage records are
+informational only. Ghost adds no turn, hosted-session, concurrency, or spend cap. The
 one deliberate exception is the
 desktop lease (ghost-desktop's [`lease.ts`](https://github.com/ferdousbhai/ghost-desktop/blob/master/src/lease.ts)): there is one
 pointer and one focus, so every `desktop_act` call claims the desktop for its
@@ -596,7 +590,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   and must be the same version, and a second channel cannot hold that lock.
   Desktop toasts belong to the shell service, not stop hooks. Completed turns,
   and terminal failures notify unless their conversation is
-  being viewed in the focused chat panel. Cancellation is quiet. Toasts use
+  being viewed in the focused, visible chat panel. Only that chat marks replies
+  read. Cancellation is quiet. Toasts use
   the conversation title and a reply/error excerpt, replace live toasts
   per ghost and conversation using the notification server’s IDs, and open that
   conversation through a summon payload
@@ -605,7 +600,9 @@ not the daemon, protocols, or graphical-session lifecycle.
   It talks only to authenticated HTTP/SSE and never edits daemon-validated ghost
   state (character, control files) directly; the one deliberate
   exception is the workbench file editor, which writes ordinary files at the
-  owner's explicit direction. Dictation is Omarchy's Voxtype: the shell runs
+  owner's explicit direction. A conflict or failed save blocks closing,
+  switching files, and opening the external editor until resolved.
+  Dictation is Omarchy's Voxtype: the shell runs
   `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
   ships no speech stack of its own.
 - The [Ghost relay extension](https://github.com/ferdousbhai/ghost-chromium-extension)
@@ -639,7 +636,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   reach the model word for word, because they carry the remedy; its text is
   fenced as untrusted. No `ghost-desktop` on PATH means no desktop tools.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
-  inputs, not user data or service activation policy. A release is cut locally
+  inputs, not user data or service activation policy. Upgrade guidance
+  refreshes enablement and explicitly restarts an active daemon to load its bundle. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
   archive, runtime archive, and `SHA256SUMS` that Omarchy's package hook
@@ -648,10 +646,17 @@ not the daemon, protocols, or graphical-session lifecycle.
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).
 
+Browser tabs stay open across idle periods; only explicit close and lifecycle
+teardown retire the workspace. Browser element refs survive repeated finds
+and tab listings until navigation or tab selection invalidates them. Each backend
+page operation reports `no_page` when no tab is open, after checking relay
+availability; Ghost adds no preflight relay call.
+
 ## Harness and lifecycle invariants
 
 - Never start a test daemon against `~/ghosts`, the live port 7717, or the live
-  Quickshell bus. Tests use scratch homes and the shell preview's private
+  Quickshell bus. Canary/smoke daemons isolate Ghost config and owner hooks
+  and use a fake or disabled desktop. Tests use scratch homes and the shell preview's private
   HOME/XDG/dbus/Hyprland.
 - One daemon process owns a conversation, and one turn runs in it at a time;
   queued follow-ups into its live turn are the explicit exception.
@@ -661,7 +666,10 @@ Protocols implemented by a sidecar have one detailed document:
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.
 - Browser/session/process teardown tracks exact captured owners and PIDs: a
-  turn's harness is the process group ghostd spawned. No cleanup may kill by
+  turn's harness is the process group ghostd spawned. Settled passes close
+  inherited pipes and emit no late events; cancellation kills surviving members
+  of that group even after its leader exits. Normal completion leaves detached
+  background jobs alone. No cleanup may kill by
   pattern or remove a broad directory.
 - Logs redact secrets and private payloads. Journal identity fields are `GHOST`
   and `CONVERSATION`; other structured fields remain in `MESSAGE`.

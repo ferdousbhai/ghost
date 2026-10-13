@@ -27,6 +27,7 @@ Singleton {
     id: root
 
     property string filePath: ""
+    property var prepareToLeave: null
 
     readonly property string home: {
         const ghost = Ghostd.activeGhost;
@@ -44,10 +45,14 @@ Singleton {
      */
     function open(path: string): void {
         if (!root.canOpen(path)) return;
-        root.filePath = root.absolute(path);
+        const next = root.absolute(path);
+        if (next === root.filePath) return;
+        if (root.prepareToLeave && !root.prepareToLeave()) return;
+        root.filePath = next;
     }
 
     function close(): void {
+        if (root.prepareToLeave && !root.prepareToLeave()) return;
         root.filePath = "";
     }
 

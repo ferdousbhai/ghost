@@ -81,6 +81,8 @@ for install_script in \
     'systemctl --user enable --now ghostd.service'
   require_install_hook_activation "$install_script" post_upgrade \
     'systemctl --user reenable --now ghostd.service'
+  require_install_hook_activation "$install_script" post_upgrade \
+    'systemctl --user restart ghostd.service'
 done
 
 bash "$script_dir/test-split-payload.sh"

@@ -88,7 +88,6 @@ FloatingWindow {
     // surface itself; Hyprland's own open animation composes with it.
     onShownChanged: {
         Ghostd.hudVisible = hud.shown;
-        if (hud.shown) Ghostd.markCurrentConversationRead();
         if (hud.shown && !Theme.reducedMotion)
             materialize.restart();
     }
@@ -171,6 +170,7 @@ FloatingWindow {
         target: Ghostd
         property: "hudChatFocused"
         value: hud.shown && hud.focused() && hud.currentSection === "chat"
+            && (!hud.workbenchOpen || hud.workbenchSplit)
     }
 
     Connections {
@@ -373,10 +373,6 @@ FloatingWindow {
                                 width: Math.min(transcriptView.width - Theme.pad * 2,
                                     Theme.ch(46) + Theme.pad * 2)
                             }
-                        }
-
-                        UpdateNotice {
-                            Layout.fillWidth: true
                         }
 
                         ActivityLine {

@@ -119,12 +119,12 @@ describe("ghost help <topic>", () => {
     expect(result.stdout).toContain("ExecStart=/usr/bin/ghost say --new --ghost casper");
   });
 
-  it("wakes the shell's own conversation in the restart recipe", async () => {
+  it("restarts without sending a model prompt", async () => {
     const result = await runCli(["help", "self"], {
       env: { GHOSTD_PORT: "7718", GHOST: "casper", GHOST_SESSION: "conv-mine", PATH: "/nonexistent" },
       home: "/tmp/ghost-cli-unit",
     });
-    expect(result.stdout).toContain("ghost say --ghost casper --session conv-mine");
+    expect(result.stdout).not.toContain("ghost say");
   });
 });
 
@@ -252,7 +252,6 @@ describe("CLI API adaptation", () => {
         return jsonResponse({
           version: "1.4.0",
           source: { commit: "0123456789abcdef0123456789abcdef01234567", root: "/home/owner/src/ghost" },
-          update: { latest: "1.5.0", command: "omarchy-update" },
         });
       }
       return jsonResponse({ error: { code: "not_found", message: "Not found." } }, 404);
@@ -264,7 +263,6 @@ describe("CLI API adaptation", () => {
     });
     expect(response.stdout).toContain("daemon version 1.4.0");
     expect(response.stdout).toContain("daemon commit  0123456789abcdef0123456789abcdef01234567");
-    expect(response.stdout).toContain("update         1.5.0 is available · run: omarchy-update");
     expect(response.stdout).toContain("daemon source  /home/owner/src/ghost");
   });
 });

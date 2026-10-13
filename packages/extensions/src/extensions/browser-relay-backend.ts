@@ -26,14 +26,7 @@
  * and it means "the extension disconnected mid-request" is expressible in the same
  * channel as "that element is gone".
  *
- * **Refs are a stamped attribute, not a CDP node id.** `backendNodeId` is the
- * obvious choice and the wrong one: it is scoped to a live `DOM.enable` session,
- * it is invalidated by any navigation, and it obliges the extension to hold a
- * debugger attachment open between tool calls just to keep `e3` meaningful. The
- * extension instead stamps `data-ghost-ref="e3"` on each match, so a ref *is* a
- * selector: it survives as long as the node does and needs no attachment at all
- * until the moment something is clicked. Minting refs is the backend's business,
- * which is what lets `browser-session.ts` own the bookkeeping above it.
+ * Refs identify nodes in the relay's document-scoped isolated-world registry.
  *
  * Provenance: the relay shape (extension dials out over WebSocket, semantic verbs
  * rather than a remote `eval`, CDP only for input) is ported from the MIT-licensed
@@ -366,6 +359,13 @@ export class RelayBrowserBackend implements GhostBrowserBackend {
       throw new GhostBrowserError(
         "browser_unavailable",
         transport === undefined ? RELAY_OFF_MESSAGE : RELAY_DISCONNECTED_MESSAGE,
+        { op },
+      );
+    }
+    if (this.#tabId === undefined && op !== "open" && op !== "tabs" && op !== "close") {
+      throw new GhostBrowserError(
+        "no_page",
+        'No page is loaded. Use action "open" with a URL first.',
         { op },
       );
     }

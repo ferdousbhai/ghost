@@ -2,7 +2,7 @@
  * `ghost_browser`, driven against a fake browser backend.
  *
  * Everything under test lives above the `GhostBrowserBackend` seam: URL policy,
- * ref bookkeeping and invalidation, the read budget, the idle timer, and the
+ * ref bookkeeping and invalidation, the read budget, explicit close, and the
  * serialization of parallel tool calls. {@link FakeBackend} stands in for the
  * relay, so these tests need neither Chromium nor an extension.
  */
@@ -51,13 +51,11 @@ import {
   MAX_BROWSER_OBSERVATION_ITEMS,
   MAX_BROWSER_OBSERVATION_STRING_BYTES,
 } from "../src/extensions/browser-observation.js";
-import type { BrowserClock } from "../src/extensions/browser-session.js";
 import {
   browserSessionFor,
   closeAllBrowserSessions,
   closeBrowserSession,
   DEFAULT_ACTION_TIMEOUT_MS,
-  DEFAULT_IDLE_TIMEOUT_MS,
   GhostBrowserSession,
   MAX_BROWSER_MATCH_HREF_CHARS,
   MAX_BROWSER_MATCH_TEXT_CHARS,
@@ -82,7 +80,7 @@ interface FakeCall {
  * could launch its own Chromium. With one backend left — the relay into the
  * owner's browser — the seam is the honest place to stand, and it is what these
  * tests are about anyway: URL policy, refs and their invalidation, the read
- * budget, the idle timer, and the serialization above it.
+ * budget, explicit close, and the serialization above it.
  *
  * The in-page snippets (the relay extension's `page-scripts.js`) run in a real
  * DOM and are deliberately not covered here; this fake answers with canned results, and the
@@ -150,6 +148,12 @@ class FakeBackend implements GhostBrowserBackend {
     return key;
   }
 
+  #requirePage(): void {
+    if (this.#url === "about:blank") {
+      throw new GhostBrowserError("no_page", 'No page is loaded. Use action "open" with a URL first.');
+    }
+  }
+
   async current(): Promise<PageSummary | undefined> {
     return this.#url === "about:blank" ? undefined : this.#page();
   }
@@ -163,6 +167,7 @@ class FakeBackend implements GhostBrowserBackend {
   }
 
   async read(options: BackendActionOptions): Promise<BackendReadResult> {
+    this.#requirePage();
     this.calls.push({ name: "read", args: [options] });
     await this.#stall(this.readBarrier, options);
     // Untruncated on purpose: the budget belongs to the session layer.
@@ -173,11 +178,13 @@ class FakeBackend implements GhostBrowserBackend {
     query: string,
     options: BackendActionOptions & { readonly limit: number },
   ): Promise<readonly PageElementMatch[]> {
+    this.#requirePage();
     this.calls.push({ name: "find", args: [query, options] });
     return this.ignoreFindLimit ? this.findResults : this.findResults.slice(0, options.limit);
   }
 
   async click(target: BackendTarget, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "click", args: [target, options] });
     await this.#stall(this.actionBarrier, options);
     const destination = this.navigateOnClick.get(this.#resolve(target));
@@ -186,18 +193,21 @@ class FakeBackend implements GhostBrowserBackend {
   }
 
   async type(input: BackendTypeInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "type", args: [input, options] });
     this.#resolve(input);
     return this.#page();
   }
 
   async screenshot(options: BackendScreenshotOptions): Promise<BackendScreenshotResult> {
+    this.#requirePage();
     this.calls.push({ name: "screenshot", args: [options] });
     this.screenshots.push(options);
     return { ...this.#page(), bytes: this.screenshotContents };
   }
 
   async back(options: BackendActionOptions): Promise<BackendBackResult> {
+    this.#requirePage();
     this.calls.push({ name: "back", args: [options] });
     const previous = this.#history.pop();
     if (previous === undefined) return { ...this.#page(), moved: false };
@@ -206,21 +216,25 @@ class FakeBackend implements GhostBrowserBackend {
   }
 
   async forward(options: BackendActionOptions): Promise<BackendBackResult> {
+    this.#requirePage();
     this.calls.push({ name: "forward", args: [options] });
     return { ...this.#page(), moved: false };
   }
 
   async scroll(input: BackendScrollInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "scroll", args: [input, options] });
     return this.#page();
   }
 
   async drag(input: BackendDragInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "drag", args: [input, options] });
     return this.#page();
   }
 
   async key(input: BackendKeyInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "key", args: [input, options] });
     return this.#page();
   }
@@ -229,22 +243,26 @@ class FakeBackend implements GhostBrowserBackend {
     code: string,
     options: BackendActionOptions,
   ): Promise<BackendJavascriptResult> {
+    this.#requirePage();
     this.calls.push({ name: "javascript", args: [code, options] });
     await this.#stall(this.actionBarrier, options);
     return this.javascriptResult;
   }
 
   async readConsole(options: BackendActionOptions): Promise<readonly ConsoleEntry[]> {
+    this.#requirePage();
     this.calls.push({ name: "readConsole", args: [options] });
     return this.consoleEntries;
   }
 
   async readNetwork(options: BackendActionOptions): Promise<readonly NetworkEntry[]> {
+    this.#requirePage();
     this.calls.push({ name: "readNetwork", args: [options] });
     return this.networkEntries;
   }
 
   async upload(input: BackendUploadInput, options: BackendActionOptions): Promise<PageSummary> {
+    this.#requirePage();
     this.calls.push({ name: "upload", args: [input, options] });
     this.#resolve(input);
     return this.#page();
@@ -254,6 +272,7 @@ class FakeBackend implements GhostBrowserBackend {
     input: BackendResizeInput,
     options: BackendActionOptions,
   ): Promise<BackendResizeResult> {
+    this.#requirePage();
     this.calls.push({ name: "resize", args: [input, options] });
     return { ...this.#page(), applied: true };
   }
@@ -299,36 +318,6 @@ function targetKey(target: BackendTarget): string {
 }
 
 
-class ManualBrowserClock implements BrowserClock {
-  #nextId = 1;
-  readonly #callbacks = new Map<number, () => void>();
-
-  setTimeout(callback: () => void): ReturnType<typeof setTimeout> {
-    const id = this.#nextId;
-    this.#nextId += 1;
-    this.#callbacks.set(id, callback);
-    return {
-      __manualBrowserClockId: id,
-      unref: () => undefined,
-    } as unknown as ReturnType<typeof setTimeout>;
-  }
-
-  clearTimeout(timer: ReturnType<typeof setTimeout>): void {
-    const id = (timer as unknown as { __manualBrowserClockId: number }).__manualBrowserClockId;
-    this.#callbacks.delete(id);
-  }
-
-  get pendingCount(): number {
-    return this.#callbacks.size;
-  }
-
-  runAll(): void {
-    const callbacks = [...this.#callbacks.values()];
-    this.#callbacks.clear();
-    for (const callback of callbacks) callback();
-  }
-}
-
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
   const promise = new Promise<void>((done) => {
@@ -348,7 +337,7 @@ function extension(overrides: Record<string, unknown> = {}) {
     backend: () => backend,
     ...overrides,
     browser: {
-      idleTimeoutMs: 0,
+
       ...((overrides.browser as Record<string, unknown> | undefined) ?? {}),
     },
   });
@@ -608,6 +597,21 @@ describe("find and refs", () => {
       harness.call(GHOST_BROWSER, { action: "find", query: "   " }),
     );
     expect(error.code).toBe("invalid_format");
+  });
+
+  it("retains refs across successive finds, empty finds, and tab listings", async () => {
+    const harness = await openWithMatches();
+    backend.findResults = [SIGN_IN];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Sign in" });
+    backend.findResults = [SEARCH_BOX];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Email" });
+    backend.findResults = [];
+    await harness.call(GHOST_BROWSER, { action: "find", query: "Missing" });
+    await harness.call(GHOST_BROWSER, { action: "tabs" });
+    await harness.call(GHOST_BROWSER, { action: "click", ref: "e1" });
+    await harness.call(GHOST_BROWSER, { action: "type", ref: "e2", text: "owner" });
+    expect(backend.calls.findLast((call) => call.name === "click")?.args[0]).toEqual({ ref: "e1" });
+    expect(backend.calls.findLast((call) => call.name === "type")?.args[0]).toMatchObject({ ref: "e2" });
   });
 
   it("hands the backend the ref, and leaves resolving it to the backend", async () => {
@@ -1010,7 +1014,6 @@ describe("console, network, and tabs", () => {
       createBrowserExtension({
         home: fixture.dir,
         backend: () => backend,
-        browser: { idleTimeoutMs: 0 },
       }));
   }
 
@@ -1299,75 +1302,22 @@ describe("timeouts", () => {
     expect(backend.closed).toBe(false);
   });
 
-  it("shuts the browser down once it has been idle", async () => {
-    const harness = await loadExtension(
-      createBrowserExtension({
-        home: fixture.dir,
-        backend: () => backend,
-        browser: { idleTimeoutMs: 20 },
-      }));
-    await harness.call(GHOST_BROWSER, { action: "open", url: "https://example.com" });
-    expect(backend.closed).toBe(false);
-    await new Promise((done) => setTimeout(done, 120));
-    expect(backend.closed).toBe(true);
+  it("keeps browser tabs open while idle until explicitly closed", async () => {
+    vi.useFakeTimers();
+    try {
+      const session = new GhostBrowserSession({ homeDir: fixture.dir, backend: () => backend });
+      await session.open("https://example.com");
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
+      expect(backend.closed).toBe(false);
+      await session.close();
+      expect(backend.closed).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
 describe("serialized browser lifecycle", () => {
-  it("does not idle-close during an admitted action and rearms only after it settles", async () => {
-    const backend = new FakeBackend();
-    const clock = new ManualBrowserClock();
-    const blocked = deferred();
-    backend.readBarrier = blocked.promise;
-    const session = new GhostBrowserSession({
-      homeDir: fixture.dir,
-      backend: () => backend,
-      idleTimeoutMs: 25,
-      clock,
-    });
-    await session.open("https://example.com");
-
-    const reading = session.read();
-    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "read")).toBe(true));
-    clock.runAll();
-    expect(backend.calls.some((call) => call.name === "close")).toBe(false);
-
-    blocked.resolve();
-    await reading;
-    clock.runAll();
-    await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "close")).toBe(true));
-  });
-
-  it("keeps idle workspace release armed across a relay disconnect and reconnect", async () => {
-    const backend = new FakeBackend();
-    const clock = new ManualBrowserClock();
-    const session = new GhostBrowserSession({
-      homeDir: fixture.dir,
-      backend: () => backend,
-      idleTimeoutMs: 25,
-      clock,
-    });
-    await session.open("https://example.com");
-
-    backend.running = false;
-    backend.closeFailure = new GhostBrowserError(
-      "browser_unavailable",
-      "The relay disconnected.",
-    );
-    clock.runAll();
-    await vi.waitFor(() => {
-      expect(backend.calls.filter((call) => call.name === "close")).toHaveLength(1);
-      expect(clock.pendingCount).toBe(1);
-    });
-
-    backend.closeFailure = undefined;
-    backend.running = true;
-    clock.runAll();
-    await vi.waitFor(() => expect(backend.closed).toBe(true));
-    expect(backend.calls.filter((call) => call.name === "close")).toHaveLength(2);
-    expect(clock.pendingCount).toBe(0);
-  });
-
   it("cancels an in-flight action before the queued close begins", async () => {
     const backend = new FakeBackend();
     const blocked = deferred();
@@ -1375,7 +1325,6 @@ describe("serialized browser lifecycle", () => {
     const session = new GhostBrowserSession({
       homeDir: fixture.dir,
       backend: () => backend,
-      idleTimeoutMs: 0,
     });
     await session.open("https://example.com");
     const reading = session.read();
@@ -1397,7 +1346,6 @@ describe("serialized browser lifecycle", () => {
     const session = new GhostBrowserSession({
       homeDir: fixture.dir,
       backend: () => backend,
-      idleTimeoutMs: 0,
       closeTimeoutMs: 10,
     });
     await session.open("https://example.com");
@@ -1416,7 +1364,6 @@ describe("the backend is a choice, and policy sits above it", () => {
       createBrowserExtension({
         home: fixture.dir,
         backend: () => backend,
-        browser: { idleTimeoutMs: 0 },
       }));
   }
 
@@ -1484,16 +1431,16 @@ describe("the process-wide browser session registry", () => {
     const first = browserSessionFor(fixture.dir, { backend: SHARED_BACKEND });
     expect(browserSessionFor(fixture.dir, {
       backend: SHARED_BACKEND,
-      idleTimeoutMs: DEFAULT_IDLE_TIMEOUT_MS + 1,
+
       actionTimeoutMs: DEFAULT_ACTION_TIMEOUT_MS + 1,
     })).toBe(first);
   });
 
   it("reuses the session no matter which factory object asked for it", () => {
-    const first = browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 });
+    const first = browserSessionFor(fixture.dir, { backend: relayBackend({}) });
 
     expect(
-      browserSessionFor(fixture.dir, { backend: relayBackend({}), idleTimeoutMs: 0 }),
+      browserSessionFor(fixture.dir, { backend: relayBackend({}) }),
     ).toBe(first);
   });
 
@@ -1504,7 +1451,7 @@ describe("the process-wide browser session registry", () => {
     const factory = () => backend;
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     });
     await session.open("https://example.com");
     const first = closeAllBrowserSessions();
@@ -1512,13 +1459,13 @@ describe("the process-wide browser session registry", () => {
     await vi.waitFor(() => expect(backend.calls.some((call) => call.name === "close")).toBe(true));
     expect(() => browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     })).toThrowError(/shutdown is still in progress/i);
     blocked.resolve();
     await Promise.all([first, second]);
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     })).not.toBe(session);
   });
 
@@ -1528,11 +1475,11 @@ describe("the process-wide browser session registry", () => {
     const otherBackend = new FakeBackend();
     const first = browserSessionFor(fixture.dir, {
       backend: () => firstBackend,
-      idleTimeoutMs: 0,
+
     });
     const other = browserSessionFor(otherHome, {
       backend: () => otherBackend,
-      idleTimeoutMs: 0,
+
     });
     await first.open("https://example.com");
     await other.open("https://example.com");
@@ -1543,11 +1490,11 @@ describe("the process-wide browser session registry", () => {
     expect(otherBackend.closed).toBe(false);
     expect(browserSessionFor(otherHome, {
       backend: () => otherBackend,
-      idleTimeoutMs: 0,
+
     })).toBe(other);
     expect(browserSessionFor(fixture.dir, {
       backend: () => firstBackend,
-      idleTimeoutMs: 0,
+
     })).not.toBe(first);
     await closeBrowserSession(otherHome);
   });
@@ -1560,7 +1507,7 @@ describe("the process-wide browser session registry", () => {
     const factory = () => closingBackend;
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     });
     await session.open("https://example.com");
 
@@ -1571,11 +1518,11 @@ describe("the process-wide browser session registry", () => {
       call.name === "close")).toHaveLength(1));
     expect(() => browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     })).toThrowError(/still closing/i);
     expect(() => browserSessionFor(otherHome, {
       backend: SHARED_BACKEND,
-      idleTimeoutMs: 0,
+
     })).not.toThrow();
 
     blocked.resolve();
@@ -1588,7 +1535,7 @@ describe("the process-wide browser session registry", () => {
     const factory = () => failingBackend;
     const session = browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     });
     await session.open("https://example.com");
     vi.spyOn(failingBackend, "close")
@@ -1597,14 +1544,14 @@ describe("the process-wide browser session registry", () => {
     await expect(closeBrowserSession(fixture.dir)).rejects.toThrow("relay close failed");
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     })).toBe(session);
 
     await closeBrowserSession(fixture.dir);
     expect(failingBackend.closed).toBe(true);
     expect(browserSessionFor(fixture.dir, {
       backend: factory,
-      idleTimeoutMs: 0,
+
     })).not.toBe(session);
   });
 });

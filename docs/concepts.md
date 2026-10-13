@@ -206,13 +206,13 @@ If you expect one of these, it is missing on purpose:
   control; a ghost runs `pi`, `codex`, or `claude -p` from Bash through
   `ghost delegate` when it wants a specialist, and that harness owns its own
   discovery, tools, and auth. `ghost delegate` only refuses a harness that is
-  not installed or has no room and appends one receipt line per attempt, the
+  not installed and appends one receipt line per attempt, the
   evidence any change to how a ghost picks a harness has to be judged
   against; Ghost never reads it back. A delegated run reaches the ghost's
   browser and desktop only through `ghost mcp serve`, which runs the ghost's
   tools in the daemon.
 - **No routing claims.** Nothing yet shows that how a ghost picks a harness
-  improves outcomes beyond having room; the handoff receipts are how that gets
+  improves outcomes; the handoff receipts are how that gets
   measured, and nothing trains on them. A harness keeps its own tool loop and
   permissions: Ghost picks, launches, and records a run but does not steer it.
 - **No second browser backend** and no separate ghost browser profile.
@@ -240,9 +240,8 @@ If you expect one of these, it is missing on purpose:
   is a maintained interface rather than a plugin pinned to one Hyprland
   commit. Until then the ghost tells the owner when a shot or a click
   disturbed the desktop instead of pretending it did not.
-- **No auto-updater.** The daemon only reports a newer release
-  (`GET /api/status`, `ghost status`, the HUD line); Omarchy's package pipeline
-  installs it, and a checkout is the owner's to pull.
+- **No update checker or auto-updater.** Omarchy owns package updates; a
+  checkout is the owner's to pull, build, and restart.
 - **No throttles**, as above.
 
 ## Where to go next

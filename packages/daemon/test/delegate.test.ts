@@ -13,7 +13,7 @@ afterEach(() => {
   root = undefined;
 });
 
-function machine(options: { refreshMs?: number; refreshedClaudePercent?: number } = {}): { env: NodeJS.ProcessEnv; log: string; calls: string } {
+function machine(): { env: NodeJS.ProcessEnv; log: string; calls: string } {
   root = mkdtempSync(join(tmpdir(), "ghost-delegate-"));
   const bin = join(root, "bin");
   const usage = join(root, "state", "omarchy", "agents", "usage");
@@ -27,15 +27,10 @@ function machine(options: { refreshMs?: number; refreshedClaudePercent?: number 
   writeFileSync(join(root, "commands.json"), JSON.stringify({
     commands: [{ route: "omarchy default agent", args: "[claude|codex|grok|broken]" }],
   }));
-  // `omarchy commands --json` lists agents; `omarchy agent usage update` is logged, and can be slow.
+  // Every unexpected call is logged, so a delegate cannot silently refresh usage.
   executable("omarchy", [
     `[ "$1" = commands ] && exec cat '${join(root, "commands.json")}'`,
     `echo "$*" >> '${calls}'`,
-    `sleep ${(options.refreshMs ?? 0) / 1000}`,
-    // The launch-time refresh can find a window that moved since the last one.
-    ...(options.refreshedClaudePercent === undefined ? [] : [
-      `cp '${join(root, "claude-refreshed.json")}' '${join(usage, "claude.json")}'`,
-    ]),
   ].join("\n"));
   // claude echoes its args, or fails on a limit when asked.
   executable("claude", [
@@ -46,7 +41,7 @@ function machine(options: { refreshMs?: number; refreshedClaudePercent?: number 
     'echo "claude got: $*"',
     "exit 3",
   ].join("\n"));
-  executable("codex", "echo should-not-run; exit 0");
+  executable("codex", "echo codex-ran; exit 0");
   // Installed by every test Omarchy applies, yet its interpreter is gone: spawn fails.
   executable("broken", "exit 0", "#!/nonexistent/interpreter");
   const fresh = new Date().toISOString();
@@ -58,10 +53,6 @@ function machine(options: { refreshMs?: number; refreshedClaudePercent?: number 
   writeFileSync(join(usage, "codex.json"), JSON.stringify({
     updatedAt: fresh,
     limits: [{ label: "Weekly (7-day)", percent: 0.99, resetsAt: later }],
-  }));
-  writeFileSync(join(root, "claude-refreshed.json"), JSON.stringify({
-    updatedAt: fresh,
-    limits: [{ label: "Session (5-hour)", percent: options.refreshedClaudePercent ?? 0.2, resetsAt: later }],
   }));
   return {
     env: { PATH: `${bin}:/usr/bin:/bin`, XDG_STATE_HOME: join(root, "state"), GHOST: "aria", GHOST_SESSION: "cli-abc" },
@@ -75,13 +66,13 @@ function receipts(log: string): HandoffReceipt[] {
 }
 
 describe("ghost delegate", () => {
-  it("refreshes the harness, runs it with its args, streams its output, and exits with its status", async () => {
+  it("runs with its args without refreshing usage, streams output, and exits with its status", async () => {
     const { env, log, calls } = machine();
     // Everything after `--` is the harness's, including ghost's own flag names and another `--`.
     const result = await runCli(["delegate", "claude", "--", "-p", "fix it", "--", "--json"], { env, home: root });
     expect(result.stdout).toBe("claude got: -p fix it -- --json\n");
     expect(result.code).toBe(3);
-    expect(readFileSync(calls, "utf8")).toBe("agent usage update --limits-only claude\n");
+    expect(existsSync(calls)).toBe(false);
     const [receipt] = receipts(log);
     expect(receipt).toMatchObject({
       v: 1,
@@ -89,7 +80,7 @@ describe("ghost delegate", () => {
       session: "cli-abc",
       harness: "claude",
       cwd: process.cwd(),
-      eligible: ["claude", "broken"],
+      eligible: ["claude", "codex", "broken"],
       windows: [{ label: "Session (5-hour)", percent: 0.2 }],
       status: null,
       outcome: { exit: 3, signal: null, limit: null },
@@ -134,16 +125,6 @@ describe("ghost delegate", () => {
     ]);
   });
 
-  it("measures durationMs from the launch, not from the usage refresh", async () => {
-    const { env, log } = machine({ refreshMs: 1_000 });
-    const started = Date.now();
-    const result = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
-    expect(result.code).toBe(3);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(1_000);
-    const outcome = receipts(log)[0]?.outcome as { durationMs: number };
-    expect(outcome.durationMs).toBeLessThan(1_000);
-  });
-
   it("keeps the harness's status and warns when the receipt cannot be written", async () => {
     const { env, log } = machine();
     // The log's directory is taken by a file, so nothing can be appended.
@@ -152,10 +133,10 @@ describe("ghost delegate", () => {
     const run = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
     expect(run).toMatchObject({ code: 3, stdout: expect.stringMatching(/^claude got: hi /u) });
     expect(run.stderr).toMatch(/^ghost: cannot record the handoff in .*handoffs\.jsonl: /u);
-    const refusal = await runCli(["delegate", "codex", "--", "hi"], { env, home: root });
-    expect(refusal.code).toBe(6);
+    const refusal = await runCli(["delegate", "grok", "--", "hi"], { env, home: root });
+    expect(refusal.code).toBe(5);
     expect(refusal.stderr).toContain("cannot record the handoff");
-    expect(refusal.stderr).toContain("codex has no room");
+    expect(refusal.stderr).toContain("grok is not an installed agent CLI");
     expect(existsSync(log)).toBe(false);
   });
 
@@ -171,28 +152,13 @@ describe("ghost delegate", () => {
     expect(receipts(log)[0]).toMatchObject({ windows: [], status: "Claude limits unavailable", outcome: { exit: 3 } });
   });
 
-  it("refuses a harness without room, never running it, and records the refusal", async () => {
-    const { env, log } = machine();
+  it("runs a harness even when its recorded usage is full", async () => {
+    const { env, log, calls } = machine();
     const result = await runCli(["delegate", "codex", "--", "exec", "hi"], { env, home: root });
-    expect(result.code).toBe(6);
-    expect(result.stdout).not.toContain("should-not-run");
-    expect(result.stderr).toMatch(/codex has no room: Weekly \(7-day\) 99% used/u);
-    expect(receipts(log)[0]).toMatchObject({ harness: "codex", outcome: { refused: expect.stringMatching(/^Weekly/u) } });
-  });
-
-  it("refuses a harness whose window crossed the limit since it was picked", async () => {
-    // `ghost harnesses` still shows room; the refresh at launch finds the session spent.
-    const { env, log } = machine({ refreshedClaudePercent: 0.95 });
-    const before = await runCli(["harnesses", "-q"], { env, home: root });
-    expect(before.stdout).toContain("claude");
-    const result = await runCli(["delegate", "claude", "--", "hi"], { env, home: root });
-    expect(result.code).toBe(6);
-    expect(result.stdout).not.toContain("claude got");
-    expect(receipts(log)[0]).toMatchObject({
-      harness: "claude",
-      eligible: expect.not.arrayContaining(["claude"]),
-      outcome: { refused: expect.stringMatching(/^Session \(5-hour\) 95% used/u) },
-    });
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe("codex-ran\n");
+    expect(existsSync(calls)).toBe(false);
+    expect(receipts(log)[0]).toMatchObject({ harness: "codex", windows: [{ percent: 0.99 }], outcome: { exit: 0 } });
   });
 
   it("runs claude with the ghost's tools and records who picked it", async () => {
@@ -232,6 +198,31 @@ describe("withGhostTools", () => {
     expect(withGhostTools("codex", ["exec", "fix it"])).toEqual([
       "-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', "exec", "fix it",
     ]);
+  });
+
+  it("recognizes config flags with separate and equals values", () => {
+    for (const flag of ["-c", "--config"]) {
+      const value = 'mcp_servers.ghost.command="custom"';
+      for (const args of [[flag, value, "exec", "x"], [`${flag}=${value}`, "exec", "x"]]) {
+        expect(withGhostTools("codex", args)).toEqual(args);
+      }
+    }
+    const claude = ["-p", "x", "--mcp-config={}"];
+    expect(withGhostTools("claude", claude)).toEqual(claude);
+  });
+
+  it("does not mistake prompt text or another server's config for ghost config", () => {
+    for (const args of [
+      ["exec", "explain mcp_servers.ghost"],
+      ["exec", "--", "-c", 'mcp_servers.ghost.command="custom"'],
+      ["-c", 'mcp_servers.ghostly.command="custom"', "exec", "x"],
+    ]) {
+      expect(withGhostTools("codex", args)).toEqual([
+        "-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', ...args,
+      ]);
+    }
+    const claude = ["-p", "x", "--", "--mcp-config={}"];
+    expect(withGhostTools("claude", claude)).toEqual(claude);
   });
 
   it("leaves a run that names its own MCP config, a claude run with `--`, and other harnesses alone", () => {

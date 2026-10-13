@@ -7,6 +7,8 @@ QtObject {
     property bool watchChanges: false
     property bool atomicWrites: false
     property string writtenText: ""
+    property string contents: ""
+    property bool failWrites: false
 
     signal loaded()
     signal loadFailed()
@@ -14,8 +16,8 @@ QtObject {
     signal saved()
     signal saveFailed()
 
-    function text(): string { return ""; }
+    function text(): string { return contents; }
     function reload(): void {}
-    function setText(value: string): void { writtenText = value; saved(); }
+    function setText(value: string): void { if (failWrites) { saveFailed(); return; } writtenText = value; saved(); }
     function waitForJob(): void {}
 }

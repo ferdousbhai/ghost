@@ -43,7 +43,6 @@ import {
 } from "./screenshot-retention.js";
 
 export const DEFAULT_ACTION_TIMEOUT_MS = 30_000;
-export const DEFAULT_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const DEFAULT_BROWSER_CLOSE_TIMEOUT_MS = 10_000;
 export const DEFAULT_READ_BUDGET_CHARS = 8_000;
 const MIN_READ_BUDGET_CHARS = 200;
@@ -57,25 +56,12 @@ const MAX_BROWSER_REF_CHARS = 128;
 
 const BROWSER_REF_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
-/** Timers the session schedules its idle close with; tests substitute their own. */
-export interface BrowserClock {
-  readonly setTimeout: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>;
-  readonly clearTimeout: (timer: ReturnType<typeof setTimeout>) => void;
-}
-
-export const systemBrowserClock: BrowserClock = {
-  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
-  clearTimeout: (timer) => clearTimeout(timer),
-};
-
 export interface BrowserSessionOptions {
   /** The ghost home this session serves; its name prefixes the screenshots. */
   readonly homeDir: string;
   /** Which browser to drive. There is one, so the caller names it. */
   readonly backend: BrowserBackendFactory;
-  readonly idleTimeoutMs?: number;
   readonly actionTimeoutMs?: number;
-  readonly clock?: BrowserClock;
   readonly closeTimeoutMs?: number;
 }
 
@@ -162,22 +148,16 @@ export class GhostBrowserSession {
   readonly screenshotDir: string;
 
   #queue: Promise<unknown> = Promise.resolve();
-  #queuedActions = 0;
   #activeAbort: AbortController | undefined;
-  #idleTimer: ReturnType<typeof setTimeout> | undefined;
-  #refs = new Map<string, PageElementMatch>();
+  #refs = new Set<string>();
 
-  readonly #idleTimeoutMs: number;
   readonly #actionTimeoutMs: number;
-  readonly #clock: BrowserClock;
   readonly #closeTimeoutMs: number;
 
   constructor(options: BrowserSessionOptions) {
     this.homeDir = resolve(options.homeDir);
     this.screenshotDir = resolveScreenshotDirectory();
-    this.#idleTimeoutMs = options.idleTimeoutMs ?? DEFAULT_IDLE_TIMEOUT_MS;
     this.#actionTimeoutMs = options.actionTimeoutMs ?? DEFAULT_ACTION_TIMEOUT_MS;
-    this.#clock = options.clock ?? systemBrowserClock;
     this.#closeTimeoutMs = options.closeTimeoutMs ?? DEFAULT_BROWSER_CLOSE_TIMEOUT_MS;
     this.backend = options.backend();
   }
@@ -188,8 +168,6 @@ export class GhostBrowserSession {
 
 
   #serial<T>(work: () => Promise<T>): Promise<T> {
-    this.#queuedActions += 1;
-    this.#clearIdleTimer();
     const runWork = async (): Promise<T> => {
       const controller = new AbortController();
       this.#activeAbort = controller;
@@ -197,8 +175,6 @@ export class GhostBrowserSession {
         return await work();
       } finally {
         if (this.#activeAbort === controller) this.#activeAbort = undefined;
-        this.#queuedActions -= 1;
-        if (this.#queuedActions === 0) this.#touchIdleTimer();
       }
     };
     const run = this.#queue.then(runWork, runWork);
@@ -221,26 +197,6 @@ export class GhostBrowserSession {
       timeoutMs: options.timeoutMs ?? this.#actionTimeoutMs,
       ...(signal === undefined ? {} : { signal }),
     };
-  }
-
-  #clearIdleTimer(): void {
-    if (this.#idleTimer) this.#clock.clearTimeout(this.#idleTimer);
-    this.#idleTimer = undefined;
-  }
-
-  /**
-   * Arm the idle close, if nothing is queued.
-   *
-   * Only `#serial` calls this: a verb's body always runs with
-   * `#queuedActions >= 1`, so a call from inside one could never arm anything.
-   */
-  #touchIdleTimer(): void {
-    this.#clearIdleTimer();
-    if (this.#queuedActions > 0 || !this.backend.mayOwnTabs || this.#idleTimeoutMs <= 0) return;
-    this.#idleTimer = this.#clock.setTimeout(() => {
-      void this.close().catch(() => undefined);
-    }, this.#idleTimeoutMs);
-    this.#idleTimer.unref?.();
   }
 
   /** A bare host reads as https; only http(s) and about:blank open. */
@@ -267,7 +223,7 @@ export class GhostBrowserSession {
     const ref = target.ref?.trim();
     if (ref) {
       if (!this.#refs.has(ref)) {
-        const known = [...this.#refs.keys()];
+        const known = [...this.#refs];
         throw new GhostBrowserError(
           "unknown_ref",
           known.length === 0
@@ -314,7 +270,6 @@ export class GhostBrowserSession {
         ? Math.max(MIN_READ_BUDGET_CHARS, Math.min(Math.floor(requested), MAX_READ_BUDGET_CHARS))
         : DEFAULT_READ_BUDGET_CHARS;
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const result = await this.backend.read(operation);
       return {
         url: result.url,
@@ -342,7 +297,6 @@ export class GhostBrowserSession {
         ? Math.max(1, Math.min(Math.floor(requested), MAX_FIND_LIMIT))
         : DEFAULT_FIND_LIMIT;
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const backendMatches = await this.backend.find(trimmed, {
         ...operation,
         limit,
@@ -361,7 +315,7 @@ export class GhostBrowserSession {
         refs.add(match.ref);
         matches.push(match);
       }
-      this.#refs = new Map(matches.map((match) => [match.ref, match]));
+      for (const match of matches) this.#refs.add(match.ref);
       return {
         matches,
         total: backendMatches.length,
@@ -389,7 +343,6 @@ export class GhostBrowserSession {
     return this.#serial(async () => {
       const operation = this.#timeout(input);
       const checked = this.#checkTarget(input);
-      await this.#requirePage(operation);
       // Submitting is a separate, explicit act: filling a field is reversible,
       // pressing Enter on someone's form is not.
       const submit = input.submit === true;
@@ -405,7 +358,6 @@ export class GhostBrowserSession {
   screenshot(options: BrowserOperationOptions & { fullPage?: boolean } = {}): Promise<SessionScreenshotResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const capture = await this.backend.screenshot({
         ...operation,
         fullPage: options.fullPage === true,
@@ -444,7 +396,6 @@ export class GhostBrowserSession {
   back(options: BrowserOperationOptions = {}): Promise<BackendBackResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const page = await this.backend.back(operation);
       this.#invalidateRefs();
       return page;
@@ -454,7 +405,6 @@ export class GhostBrowserSession {
   forward(options: BrowserOperationOptions = {}): Promise<BackendBackResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const page = await this.backend.forward(operation);
       this.#invalidateRefs();
       return page;
@@ -469,7 +419,6 @@ export class GhostBrowserSession {
   } & BrowserOperationOptions): Promise<PageSummary> {
     return this.#serial(async () => {
       const operation = this.#timeout(input);
-      await this.#requirePage(operation);
       requireFiniteNumbers("Scroll", {
         deltaX: input.deltaX,
         deltaY: input.deltaY,
@@ -574,11 +523,9 @@ export class GhostBrowserSession {
       if (code.trim() === "") {
         throw new GhostBrowserError("invalid_input", "There is no code to run.");
       }
-      await this.#requirePage(operation);
       const result = projectJavascriptResult(
         await this.backend.javascript(code, operation),
       );
-      await this.#requirePage(operation);
       // Script can rewrite the page under our refs; the honest move is to drop them.
       this.#invalidateRefs();
       return result;
@@ -588,11 +535,9 @@ export class GhostBrowserSession {
   readConsole(options: BrowserOperationOptions = {}): Promise<SessionConsoleResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const entries = projectConsoleEntries(
         await this.backend.readConsole(operation),
       );
-      await this.#requirePage(operation);
       return entries;
     });
   }
@@ -600,11 +545,9 @@ export class GhostBrowserSession {
   readNetwork(options: BrowserOperationOptions = {}): Promise<SessionNetworkResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(options);
-      await this.#requirePage(operation);
       const entries = projectNetworkEntries(
         await this.backend.readNetwork(operation),
       );
-      await this.#requirePage(operation);
       return entries;
     });
   }
@@ -618,7 +561,6 @@ export class GhostBrowserSession {
         throw new GhostBrowserError("invalid_input", "Give at least one file path to upload.");
       }
       const checked = this.#checkTarget(input);
-      await this.#requirePage(operation);
       return this.backend.upload({ ...checked, paths: [...input.paths] }, operation);
     });
   }
@@ -626,7 +568,6 @@ export class GhostBrowserSession {
   resize(input: { width: number; height: number } & BrowserOperationOptions): Promise<BackendResizeResult> {
     return this.#serial(async () => {
       const operation = this.#timeout(input);
-      await this.#requirePage(operation);
       requireFiniteNumbers("Resize", { width: input.width, height: input.height });
       if (
         !Number.isInteger(input.width) || !Number.isInteger(input.height)
@@ -667,7 +608,7 @@ export class GhostBrowserSession {
       );
       // Switching or creating a tab lands the ghost on a different page; the refs
       // minted on the old one no longer mean anything.
-      this.#invalidateRefs();
+      if (input.op !== "list") this.#invalidateRefs();
       return result;
     });
   }
@@ -691,7 +632,6 @@ export class GhostBrowserSession {
   // close() has already clamped the timeout and wrapped the whole queued wait
   // in withTimeout, so this only forwards the operation to the backend.
   async #closeImpl(options: BrowserOperationOptions): Promise<boolean> {
-    this.#clearIdleTimer();
     this.#invalidateRefs();
     return this.backend.close(this.#timeout(options));
   }

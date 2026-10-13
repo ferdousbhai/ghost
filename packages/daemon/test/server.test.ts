@@ -54,7 +54,6 @@ async function serve(
     hooks?: ServerOptions["hooks"];
     mcpReadProbe?: McpCatalogOptions["readProbe"];
     scheduleCommandRunner?: SessionHostOptions["scheduleCommandRunner"];
-    update?: ServerOptions["update"];
     streamCutBytes?: number;
   } = {},
 ) {
@@ -87,7 +86,6 @@ async function serve(
       : { maxBodyBytes: serverOptions.maxBodyBytes }),
     ...(serverOptions.apiToken === undefined ? {} : { apiToken: serverOptions.apiToken }),
     ...(serverOptions.hooks === undefined ? {} : { hooks: serverOptions.hooks }),
-    ...(serverOptions.update === undefined ? {} : { update: serverOptions.update }),
     ...(serverOptions.streamCutBytes === undefined ? {} : { streamCutBytes: serverOptions.streamCutBytes }),
   });
   return `http://127.0.0.1:${listening.port}`;
@@ -1398,16 +1396,11 @@ describe("routing and transport", () => {
 });
 
 describe("GET /api/status", () => {
-  it("reports the last update check, and null when none is known", async () => {
-    const base = await serve(undefined, {
-      update: () => ({ latest: "0.9.0", command: "omarchy-update" }),
-    });
+  it("reports running source without release polling state", async () => {
+    const base = await serve();
     const status = await fetch(`${base}/api/status`);
     expect(status.status).toBe(200);
-    expect(await status.json()).toMatchObject({ update: { latest: "0.9.0", command: "omarchy-update" } });
-    await listening!.close();
-    const quiet = await serve();
-    expect(await (await fetch(`${quiet}/api/status`)).json()).toMatchObject({ update: null });
+    expect(await status.json()).toEqual({ version: null, source: { commit: null, root: null } });
   });
 });
 

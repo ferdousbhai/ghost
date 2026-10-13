@@ -49,9 +49,14 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
   return new Promise((resolve) => {
     let stderr = "";
     let settled = false;
+    let drainTimer: NodeJS.Timeout | undefined;
     const finish = (exit: HarnessExit): void => {
       if (settled) return;
       settled = true;
+      if (options.signal.aborted) signalGroup("SIGKILL");
+      if (drainTimer) clearTimeout(drainTimer);
+      child.stdout.destroy();
+      child.stderr.destroy();
       options.signal.removeEventListener("abort", abort);
       if (killTimer) clearTimeout(killTimer);
       resolve(exit);
@@ -64,7 +69,7 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
     });
     let killTimer: NodeJS.Timeout | undefined;
     const signalGroup = (signal: NodeJS.Signals): void => {
-      if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+      if (child.pid === undefined) return;
       try {
         process.kill(-child.pid, signal);
       } catch {
@@ -81,11 +86,12 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
 
     let pending = "";
     const feed = (line: string): void => {
-      if (line.trim() === "") return;
+      if (settled || line.trim() === "") return;
       for (const event of options.parse(line)) options.onEvent(event);
     };
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
+      if (settled) return;
       pending += chunk;
       let newline = pending.indexOf("\n");
       while (newline >= 0) {
@@ -96,6 +102,7 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
     });
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
+      if (settled) return;
       stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES);
     });
     child.on("error", (error) => finish({ code: null, signal: null, stderr, spawnError: error.message }));
@@ -108,7 +115,9 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
       finish({ code, signal, stderr });
     };
     child.on("exit", (code, signal) => {
-      setTimeout(() => close(code, signal), PIPE_DRAIN_MS).unref();
+      if (settled) return;
+      drainTimer = setTimeout(() => close(code, signal), PIPE_DRAIN_MS);
+      drainTimer.unref();
     });
     child.on("close", close);
   });

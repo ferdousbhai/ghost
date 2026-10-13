@@ -37,7 +37,6 @@ import {
 } from "./turn-events.js";
 import { attachRelay, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
-import type { UpdateAvailable } from "./update-check.js";
 import type { SessionHost } from "./session-host.js";
 import { errorMessage, isRecord } from "@ghost/extensions";
 
@@ -46,8 +45,6 @@ export interface ServerOptions {
   host: SessionHost;
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
-  /** The last update check's answer, for `GET /api/status`; omitted or null means none known. */
-  update?: () => UpdateAvailable | null;
   mcp?: McpCatalog;
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
@@ -1006,7 +1003,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, {
         version: options.runningSource?.version ?? null,
         source: { commit: options.runningSource?.commit ?? null, root: options.runningSource?.root ?? null },
-        update: options.update?.() ?? null,
       });
     }),
     route("GET", "api/ghosts", ({ response }) => handleListGhosts(response)),

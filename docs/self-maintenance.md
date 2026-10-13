@@ -20,6 +20,22 @@ Three rules hold the whole thing up:
    `ghost status` prints the commit the running daemon was built from, so you
    can tell whether a change has actually reached the process.
 
+## Discover the running install
+
+Before deploying, inspect the actual paths:
+
+```sh
+systemctl --user cat ghostd.service
+command -v ghostd ghost-desktop
+readlink -f ~/.config/omarchy/plugins/ferdousbhai.ghost
+ghost status
+```
+
+The package installs runtime and HUD from one version. Install both packages
+together before restarting the daemon and shell; building another checkout
+does not update them. The sections below describe an explicit development
+override, not a second package distribution channel.
+
 ## Run ghostd from a clone
 
 The package installs `/usr/bin/ghostd`, a shell launcher that execs Bun against
@@ -113,7 +129,7 @@ the turn that needs them.
 
 There is nothing to configure. When ghostd runs from a clone, that clone is
 the checkout of every ghost on the machine, and the policy says so; when it
-runs from the package, no ghost has one. A ghost works from the owner home,
+runs from the package, no ghost has one. A ghost works from its conversation directory,
 so it reaches the checkout per command (`cd <checkout> && ...`) or by absolute
 path. Nothing is discovered from the clone; its skills, rules, and MCP
 never enter a session.
@@ -121,27 +137,26 @@ never enter a session.
 ## The loop
 
 `ghost help self` is the procedure, and the ghost reads it from
-[`help-topics.ts`](../packages/daemon/src/help-topics.ts) — fetch, branch,
+[`help-topics.ts`](../packages/daemon/src/help-topics.ts) — follow repository rules,
 edit, test, commit, build, restart. What that text has no room to explain:
 
-**A turn never ends with the checkout dirty.** The tree the ghost edits is
-the one the owner updates with `git pull --ff-only`; half-finished edits left
-there block that update, so every change ends as a commit or is restored.
+**Preserve peer changes.** Commit your own edits using the repository's authorized
+workflow. Never restore or stash changes another session owns.
 
 **The restart is a transient `systemd-run --user` unit** rather than a plain
 `systemctl restart`, because a ghost restarting itself is killing its own
 parent. A child of the daemon dies with it and never runs the second half;
 a transient unit is not the daemon's child, so it survives to bring it back
-and to wake the conversation that asked. On the way down the daemon aborts
+without sending a model prompt. Verify afterward with the commands below.
+On the way down the daemon aborts
 every running turn; `TimeoutStopSec` in
 [`ghostd.service`](../packages/daemon/contrib/ghostd.service) is the only
 deadline.
 
 **The upstream nudge is encouragement, not a rule.** A ghost home is one
 owner's; `packages/`, `CONTRACTS.md`, and `docs/` are every ghost's. The ghost
-decides whether a fix generalises, and you decide at the push — the PR goes out
-under your GitHub account, so `CONTRIBUTING.md` has it show you the branch and
-ask first. You set up `gh auth` and a fork remote once.
+decides whether a fix generalises; your instructions and the checkout's
+contribution rules determine whether it is pushed directly or proposed upstream.
 
 ## Verify
 
@@ -159,21 +174,30 @@ or reports a packaged install when there is no checkout behind it.
 
 ## Canary before adopting
 
-Never prove a build by restarting the daemon you depend on. Run a second one
-first: a scratch root, a throwaway ghost, a free port.
+Never prove a build against the owner's ghost or desktop. For a checkout
+canary, use a private root and configuration, a fake desktop, and a free
+non-live port (7799 below):
 
 ```sh
-mkdir -p /tmp/ghost-canary/ghosts
-GHOSTS_ROOT=/tmp/ghost-canary/ghosts \
-  bun ~/src/ghost/packages/daemon/dist/main.js --port 7799
+task_canary_dir=$(mktemp -d /tmp/ghost-canary.XXXXXX)
+printf '{}\n' > "$task_canary_dir/hooks.json"
+GHOSTS_ROOT="$task_canary_dir/ghosts" \
+GHOSTD_CONFIG="$task_canary_dir/config.json" \
+GHOSTD_HOOKS="$task_canary_dir/hooks.json" \
+XDG_STATE_HOME="$task_canary_dir/state" \
+GHOST_DESKTOP="$PWD/packages/daemon/test/helpers/fake-desktop.ts" \
+  bun packages/daemon/dist/main.js --port 7799
 ```
 
-Point the client at it with `GHOSTD_PORT=7799 ghost status`. Nothing stops two
-daemons sharing a ghosts root; only the single `ghostd.service` unit keeps one,
-so give a canary its own root.
+Run that command from the built checkout. Point the client at the canary
+with `GHOSTD_PORT=7799` and
+`GHOSTD_API_TOKEN_FILE="$task_canary_dir/state/ghost/api-token"`. Stop its captured process
+before deleting the scratch directory. Functional desktop/HUD verification
+uses the nested preview, never the owner's session. `ghost smoke --no-turn`
+also creates an isolated throwaway daemon and reports each stage.
 
-Never port 7717. Never `~/ghosts`. The live daemon holds both, and a canary that
-touches either is not a canary.
+Never port 7717 or `~/ghosts`; scratch configuration also prevents live
+owner hooks from running. Every canary must use its own ghost root.
 
 ## Rollback
 
@@ -196,16 +220,9 @@ Never `rm -rf` a checkout. `git` already holds every state worth returning to.
 
 ## Updates
 
-The daemon asks GitHub for the latest release once shortly after boot and
-then daily, and `GET /api/status` carries the answer as `update`. `ghost
-status` prints it as one line with the exact command for this install
-(`omarchy-update` for the package; a pull, build, daemon restart, and
-`omarchy-restart-shell` for a checkout),
-the HUD shows the same line above the conversation and copies the command on a
-click, and the ghost's policy tells it to say an update is available and to run
-that command only when the owner asks. `--offline` skips the check. Nothing
-downloads or installs on its own: Omarchy's package pipeline follows Ghost's
-releases, and a checkout is the owner's to pull.
+Omarchy's package manager owns updates. Ghost does not poll releases, show
+update badges, or apply updates. A checkout is the owner's to pull, build,
+and restart using the repository's rules.
 
 ## Not built, on purpose
 

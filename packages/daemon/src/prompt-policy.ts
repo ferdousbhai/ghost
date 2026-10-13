@@ -13,8 +13,8 @@ export const OMARCHY_COMPUTER_USE_POLICY = [
 
 /**
  * Where a ghost's turns run, and when another agent is needed. Ghost owns no
- * delegation system: `ghost delegate` runs the owner's installed CLIs, refusing
- * one without room and recording each handoff.
+ * delegation system: `ghost delegate` runs the owner's installed CLIs and
+ * records each handoff.
  */
 export const HARNESS_LIMITS_POLICY = [
   "## Other harnesses",

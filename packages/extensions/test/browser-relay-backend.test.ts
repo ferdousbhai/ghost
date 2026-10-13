@@ -152,7 +152,6 @@ describe("the protocol constants are a contract", () => {
       createBrowserExtension({
         home,
         backend: relayBackend({ transport: new ScriptedTransport() }),
-        browser: { idleTimeoutMs: 0 },
       }),
     );
     const description = harness.tools.get(GHOST_BROWSER)?.description ?? "";
@@ -578,6 +577,29 @@ describe("when the relay is not there", () => {
     expect(error.message).toMatch(/restart ghostd/i);
   });
 
+  it.each(["read", "find"] as const)("reports a disconnected relay before missing-page guidance for %s", async (action) => {
+    const transport = transportWithPage();
+    transport.connected = false;
+    const backend = new RelayBrowserBackend({ transport });
+    const operation = action === "read"
+      ? backend.read({ timeoutMs: 5_000 })
+      : backend.find("button", { timeoutMs: 5_000, limit: 20 });
+    const error = await expectGhostError(operation);
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(error.message).toMatch(/extension.*paired|popup/i);
+    expect(transport.sent).toHaveLength(0);
+  });
+
+  it.each(["read", "find"] as const)("reports a disabled relay before missing-page guidance for %s", async (action) => {
+    const backend = new RelayBrowserBackend({});
+    const operation = action === "read"
+      ? backend.read({ timeoutMs: 5_000 })
+      : backend.find("button", { timeoutMs: 5_000, limit: 20 });
+    const error = await expectGhostError(operation);
+    expect(error.details["failure"]).toBe("browser_unavailable");
+    expect(error.message).toBe(RELAY_OFF_MESSAGE);
+  });
+
   it("forgets its tab when the extension disappears mid-request", async () => {
     const transport = transportWithPage();
     transport.answer("read", { page: PAGE, text: "hi" });
@@ -683,7 +705,6 @@ describe("the session layer's policy applies to the relay too", () => {
   function session() {
     return browserSessionFor(dir, {
       backend: relayBackend({ transport }),
-      idleTimeoutMs: 0,
     });
   }
 
@@ -694,6 +715,24 @@ describe("the session layer's policy applies to the relay too", () => {
   it("refuses a file URL before the relay hears about it", async () => {
     await expectGhostError(session().open("file:///etc/shadow"));
     expect(transport.sent).toHaveLength(0);
+  });
+
+  it("reports no_page without a relay round trip before opening a tab", async () => {
+    const error = await expectGhostError(session().read());
+    expect(error.details["failure"]).toBe("no_page");
+    expect(transport.sent).toHaveLength(0);
+  });
+
+  it("reads and drains observations without current-page preflights", async () => {
+    transport.answer("read", { page: PAGE, text: "content" });
+    transport.answer("console", { entries: [] });
+    transport.answer("network", { entries: [] });
+    const live = session();
+    await live.open(PAGE.url);
+    await live.read();
+    await live.readConsole();
+    await live.readNetwork();
+    expect(transport.sent.map((entry) => entry.op)).toEqual(["open", "read", "console", "network"]);
   });
 
   it("applies the read budget to whatever the extension returns", async () => {

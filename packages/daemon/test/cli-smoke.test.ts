@@ -15,10 +15,22 @@ afterEach(() => {
 });
 
 describe("ghost smoke", () => {
+  it("reports a missing daemon executable without hanging during cleanup", async () => {
+    home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-missing-"));
+    const missing = join(home, "missing-ghostd");
+    const result = await runCli(["smoke", "--no-turn", "--json"], {
+      env: { ...process.env, GHOSTD: missing }, home,
+    });
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout.trim())).toEqual({ step: "daemon", ok: false, detail: `could not start ${missing}` });
+  });
+
   it.skipIf(process.platform === "win32")("runs against bun src/main.ts without a provider turn", async () => {
     home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-test-"));
+    const ownerHooks = join(home, "owner-hooks.json");
+    writeFileSync(ownerHooks, "not valid hooks JSON");
     const result = await runCli(["smoke", "--no-turn", "--json"], {
-      env: { ...process.env, GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}` },
+      env: { ...process.env, GHOSTD_HOOKS: ownerHooks, GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}` },
       home,
     });
     expect(result.code, result.stderr).toBe(0);

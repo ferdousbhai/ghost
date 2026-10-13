@@ -17,8 +17,6 @@ export interface HelpTopicInput {
   readonly unitDir: string;
   /** The `ghost` executable a unit may exec. */
   readonly cliPath: string;
-  /** The conversation a restart should wake, when known. */
-  readonly sessionId?: string;
 }
 
 export function isHelpTopic(value: string): value is HelpTopic {
@@ -55,27 +53,21 @@ function timers(input: HelpTopicInput): string[] {
   ];
 }
 
-function self(input: HelpTopicInput): string[] {
-  const session = input.sessionId === undefined ? "" : ` --session ${input.sessionId}`;
+function self(): string[] {
   return [
     "# Self-maintenance",
-    "The loop: `git fetch`, branch from upstream master, edit, run the touched package's tests and `typecheck`, commit with the reason, `pnpm build`, restart. This is your own Bash, not a delegated task: no worktrees or task branches.",
-    "Never end a turn with the checkout dirty: commit the change, or `git restore` what you abandon. The owner updates this tree by fast-forward, and stray edits block it.",
-    "Your own directory, the one your character file lives in, is yours alone; `packages/` and `CONTRACTS.md` are every ghost's. When your work there would help every owner (a bug fixed, a real efficiency gain, a policy line that proved wrong), consider offering it upstream via `CONTRIBUTING.md` in the checkout; the PR goes out under the owner's GitHub account, so show them the branch and ask before you push.",
+    "Read the checkout's AGENTS.md and CONTRACTS.md; follow its authorized branch, commit, and push workflow. Edit, test the affected package, typecheck, commit with the reason, build, and restart.",
+    "Commit your own changes; preserve other sessions' edits. Never restore, stash, or discard changes you did not make.",
+    "The checkout is shared by every ghost. CONTRIBUTING.md describes upstream contributions; the owner's instructions decide whether to push directly or open a PR.",
     "To restart yourself, finish the turn and tell the owner first; a restart aborts every running turn:",
     "```sh",
     'systemd-run --user --on-active=5 --unit="ghost-restart-$(date +%s)" \\',
     '  --description="<reason>" \\',
-    "  sh -c 'systemctl --user restart ghostd.service; \\",
-    "         for i in $(seq 30); do ghost status -q >/dev/null 2>&1 && break; sleep 1; done; \\",
-    `         ghost say --ghost ${input.ghostName}${session} "You restarted ghostd for: <reason>. Check journalctl --user -t ghostd and report."'`,
+    "  systemctl --user restart ghostd.service",
     "```",
-    "The timestamped unit name keeps two restarts apart, the wait loop covers the daemon not yet listening, and the transient unit survives the restart because it is not your child.",
-    ...(input.sessionId === undefined
-      ? ["Without a session id the wake lands in your latest conversation."]
-      : []),
+    "The transient unit survives the daemon. Verify afterward with `ghost status` and `journalctl --user -t ghostd`; restart never sends a model prompt.",
     "A HUD change needs `omarchy-restart-shell`: the HUD is an omarchy-shell plugin, not a unit of yours, and a rescan leaves QML the shell already loaded in place.",
-    "`ghost status` names a newer Ghost release and the exact command that installs it here; tell the owner, and run it only when they ask.",
+    "Omarchy owns package updates; update a checkout only when the owner asks.",
     "History: `git log` in the checkout for what the code did, `journalctl --user -t ghostd` for what the daemon did, your transcript for why; read them before retrying a failed change.",
     "Undo: `git revert` plus a restart for code, Trash for a deleted ghost home, `omarchy-snapshot` or snapper for the system. Never `rm -rf` a checkout.",
   ];
@@ -88,14 +80,14 @@ function harnesses(): string[] {
     "Claude Code, Codex, pi, omp, and the other agent CLIs Omarchy installs run from Bash (`claude -p`, `codex`, `pi`, `omp`), each with the owner's own settings, auth, and tools.",
     "Run each handoff with the project directory as its cwd, `cd <project-dir> && ghost delegate <harness> -- <args>` (e.g. `ghost delegate claude -- -p \"<task>\"`), so the headless harness respects that project's settings exactly as the owner running it there by hand.",
     "`claude -p` edits files only with `--permission-mode acceptEdits` and runs commands (tests) only with `--allowedTools Bash`; put the task right after `-p`, since `--allowedTools`, `--add-dir`, and other list flags would swallow a task after them.",
-    "`ghost delegate` refreshes that harness's usage, refuses it (exit 6) when a window is nearly spent or a weekly one is ahead of pace, or (exit 5) when it is not installed, else runs it here, streams its output, and exits with its status. `ghost harnesses` lists which have room. Every attempt is recorded for the owner.",
+    "`ghost delegate` refuses an uninstalled harness (exit 5), else runs it here, streams its output, and exits with its status. `ghost harnesses` lists installed agents and informational usage. Every attempt is recorded for the owner.",
     "`ghost delegate` gives claude and codex runs your own tools through `ghost mcp serve`, so they can use your browser and desktop.",
     "When the owner named the harness (\"have codex do it\"), pass `--owner-named` before it: `ghost delegate --owner-named codex -- exec \"<task>\"`. The receipts record who picked.",
     "Your own turns run on one of these agents too. `ghost harness` shows which this ghost prefers; `ghost harness <agent>` sets it (`--none`: automatic); `ghost switch <agent>` runs this conversation's next turn on another agent, handed the conversation so far. Do either only when the owner asks.",
     "When a run stops on a limit, write a handoff note in the owner's documents (done, verified, exact next step) and continue on another harness or after the reset. Never spend a window you were not asked to spend.",
     "",
     "## Long-lived sessions in herdr",
-    "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, after `ghost harnesses` shows it has room. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
+    "When the owner wants a harness to keep running interactively (to watch, steer, or resume after a restart), run it in herdr instead, after `ghost harnesses` confirms it is installed. Use your own session, never the owner's: every command takes `--session ghost`. If `herdr session list` does not show it running, start it with `systemd-run --user --unit=herdr-ghost herdr --session ghost server`; a fresh server resumes the agents it had.",
     "Install only harnesses the owner names, with `mise use -g <harness>` (mise registry names: claude, codex, grok, muse, pi, omp, opencode, crush, copilot, cursor-agent). Each uses the owner's own account: start it, ask the owner to sign in, and never read, type, or store a credential. Then `herdr integration install <harness>` lets herdr resume it; tell the owner you did.",
     "`herdr --session ghost workspace create --cwd <project-dir> --label <label>` returns a root pane; `herdr --session ghost agent start <name> --kind <harness> --pane <id>` starts the harness there; `agent prompt <name> \"<task>\"` hands it work. Confirm submission and read results with `agent read <name> --source recent-unwrapped`: `--wait` alone is not proof. `blocked` means it is asking something: read it, and ask the owner unless the answer is plainly within the task they gave. `agent send-keys <name> ctrl+c` stops it. To be woken when it settles, detach `herdr --session ghost agent wait <name>` with the `ghost help background` recipe. The owner can watch with `herdr session attach ghost`.",
   ];
@@ -115,6 +107,6 @@ function background(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self: () => self(input), harnesses, background }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background }[topic]();
   return `${lines.join("\n")}\n`;
 }

@@ -142,10 +142,10 @@ Nothing to configure: each turn runs on one of the agent CLIs you already use,
 headless, in the conversation's own directory under the ghost home. Ghost
 picks, per turn, the one already carrying the conversation, then the ghost's
 `harness` setting, then your Omarchy default agent (`omarchy default agent
-<name>`), then any other installed agent whose usage windows have room:
+<name>`), then any other installed agent:
 
 ```sh
-ghost harnesses          # which agents are installed and which have room
+ghost harnesses          # installed agents and informational usage
 ```
 
 Open **Resources…** from the harness menu to inspect the latest successful
@@ -275,14 +275,15 @@ and any skill you installed untouched.
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
 | The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, link it into `~/.config/omarchy/plugins/` and `omarchy-shell shell rescanPlugins`. |
-| A turn fails at once | `ghost harnesses` — is any agent installed with room? Run that agent by hand once to confirm it is signed in |
+| A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
-After an upgrade, re-enable rather than restart, so an installation made with
-an older unit moves onto the graphical-session lifecycle:
+After an upgrade, re-enable to migrate older unit enablement, then restart
+the active daemon to load the new bundle:
 
 ```sh
 systemctl --user reenable --now ghostd.service
+systemctl --user restart ghostd.service
 omarchy-restart-shell
 ```
 

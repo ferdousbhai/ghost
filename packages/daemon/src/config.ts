@@ -22,8 +22,6 @@ export interface DaemonConfig {
   port: number;
   host: string;
   ghostsRoot: string;
-  /** Skip ghostd's own network call, the daily release check. Harnesses keep theirs. */
-  offline: boolean;
   /**
    * Who may reach the daemon through `tailscale serve`: `owner` is the login
    * that owns every ghost (default: the login this node belongs to), `guests`
@@ -39,7 +37,6 @@ export interface DaemonConfigFile {
   port?: number;
   host?: string;
   ghostsRoot?: string;
-  offline?: boolean;
   remote?: RemoteConfigFile;
 }
 
@@ -47,7 +44,6 @@ export interface DaemonConfigOverrides {
   port?: number;
   host?: string;
   ghostsRoot?: string;
-  offline?: boolean;
   configPath?: string;
   env?: NodeJS.ProcessEnv;
   home?: string;
@@ -62,8 +58,8 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
 export function assertLoopback(host: string): void {
   if (!LOOPBACK_HOSTS.has(host)) {
     throw new Error(
-      `ghostd binds loopback only (got "${host}"). The v1 API has no auth; `
-        + `exposing it off-host would publish every ghost's memory.`,
+      `ghostd binds loopback only (got "${host}"). `
+        + `Use the authenticated Tailscale viewer for remote access.`,
     );
   }
 }
@@ -113,12 +109,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     config.ghostsRoot = file.ghostsRoot;
   }
-  if (file.offline !== undefined) {
-    if (typeof file.offline !== "boolean") {
-      throw new Error(`${path}: "offline" must be a boolean.`);
-    }
-    config.offline = file.offline;
-  }
   if (file.remote !== undefined) {
     if (!isRecord(file.remote)) {
       throw new Error(`${path}: "remote" must be a JSON object.`);
@@ -146,12 +136,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
   return config;
 }
 
-function parseBoolean(raw: string, source: string): boolean {
-  if (["1", "true", "yes", "on"].includes(raw.toLowerCase())) return true;
-  if (["0", "false", "no", "off"].includes(raw.toLowerCase())) return false;
-  throw new Error(`Invalid boolean from ${source}: ${JSON.stringify(raw)}`);
-}
-
 function expandHome(path: string, home: string): string {
   if (path === "~") return home;
   if (path.startsWith("~/")) return join(home, path.slice(2));
@@ -169,7 +153,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
   const envPort = env.GHOSTD_PORT?.trim();
   const envHost = env.GHOSTD_HOST?.trim();
   const envRoot = env.GHOSTS_ROOT?.trim();
-  const envOffline = env.GHOSTD_OFFLINE?.trim();
   const envHooksPath = env.GHOSTD_HOOKS?.trim();
 
   const port = overrides.port
@@ -182,11 +165,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? file?.ghostsRoot
     ?? join(home, DEFAULT_GHOSTS_DIRNAME);
 
-  const offline = overrides.offline
-    ?? (envOffline ? parseBoolean(envOffline, "GHOSTD_OFFLINE") : undefined)
-    ?? file?.offline
-    ?? false;
-
   const hooksPath = resolve(expandHome(envHooksPath || join(dirname(configPath), "hooks.json"), home));
 
   assertLoopback(host);
@@ -194,7 +172,6 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     port,
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
-    offline,
     remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
     configPath,
     hooksPath,

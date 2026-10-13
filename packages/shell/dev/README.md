@@ -35,7 +35,7 @@ cd packages/shell
 node dev/mock-ghostd.mjs --port 17717
 # Shape a preview: --slow (30ms deltas), --tool-steps N,
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
-# --stall-stream (stream never settles), --update (a newer release is out),
+# --stall-stream (stream never settles),
 # --stop-hook S (a stop hook decides for S seconds after each reply),
 # --cut-bytes N (cut each turn response after N bytes, as ghostd does at ~1 MB).
 
@@ -100,8 +100,8 @@ stop the mock separately.
   rail floating at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`. Hooks shows the
-  daemon-global redacted catalog: bounded labels, lifecycle triggers, idle
-  timing, and the loaded count. It never returns hook commands, paths, prompts,
+  daemon-global redacted catalog: bounded labels, lifecycle triggers, and
+  the loaded count. It never returns hook commands, paths, prompts,
   or injected context, and opening it does not create a conversation. MCP lists
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
   enable/disable, and confirmed deletion without ever returning the seeded

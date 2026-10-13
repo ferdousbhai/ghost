@@ -1,6 +1,5 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { constants } from "node:os";
-import { promisify } from "node:util";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
 import { eligibleIds, readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../turn-events.js";
@@ -9,7 +8,6 @@ import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
 import { errorMessage } from "@ghost/extensions";
 
-const exec = promisify(execFile);
 /** Enough trailing output to find a harness's limit message. */
 const TAIL_CHARS = 8192;
 /**
@@ -88,27 +86,33 @@ const GHOST_MCP_CONFIG = JSON.stringify({ mcpServers: { ghost: { command: "ghost
  * names an MCP config, or (claude) when a `--` would make the flags text.
  */
 export function withGhostTools(id: string, args: readonly string[]): string[] {
-  if (id === "claude" && !args.includes("--") && !args.includes("--mcp-config")) {
+  const terminator = args.indexOf("--");
+  const options = terminator < 0 ? args : args.slice(0, terminator);
+  if (id === "claude" && terminator < 0
+    && !options.some((arg) => arg === "--mcp-config" || arg.startsWith("--mcp-config="))) {
     // Both flags take a list, so they go last, after the task.
     return [...args, "--allowedTools", "mcp__ghost", "--mcp-config", GHOST_MCP_CONFIG];
   }
-  if (id === "codex" && !args.some((arg) => arg.includes("mcp_servers.ghost"))) {
+  const hasGhostConfig = options.some((arg, index) => {
+    const value = arg === "-c" || arg === "--config"
+      ? options[index + 1]
+      : /^(?:-c|--config)=(.*)$/u.exec(arg)?.[1];
+    return value !== undefined && /^mcp_servers\.ghost(?:\.|\s*=)/u.test(value);
+  });
+  if (id === "codex" && !hasGhostConfig) {
     return ["-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', ...args];
   }
   return [...args];
 }
 
 /**
- * `ghost delegate <harness> -- <args>`: refresh the harness's usage, refuse it
- * without room, else run it here and exit with its status. Each attempt appends
- * one receipt to the handoff log.
+ * `ghost delegate <harness> -- <args>` runs an installed harness and returns
+ * its status. Each attempt appends one receipt to the handoff log.
  */
 export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [id, ...args] = parsed.positionals as [string, ...string[]];
   const { env, home } = ctx.runtime;
   const started = Date.now();
-  // Omarchy measures; a harness it has no collector for simply fails here.
-  await exec("omarchy", ["agent", "usage", "update", "--limits-only", id], { env, timeout: 15_000 }).catch(() => {});
   const report = await readHarnessReport(env, home).catch((error: Error) => {
     throw new CliError(EXIT_CODE.failure, `cannot check harnesses: ${error.message}`);
   });
@@ -141,10 +145,6 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   if (!harness) {
     record({ refused: "not installed" });
     throw new CliError(EXIT_CODE.notFound, `${id} is not an installed agent CLI; see ghost harnesses`);
-  }
-  if (!harness.eligible) {
-    record({ refused: harness.reason ?? "no room" });
-    throw new CliError(EXIT_CODE.conflict, `${id} has no room: ${harness.reason}; see ghost harnesses`);
   }
 
   const launched = Date.now();

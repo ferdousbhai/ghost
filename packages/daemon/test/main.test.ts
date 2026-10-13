@@ -22,14 +22,12 @@ describe("parseArgs", () => {
       "--port", "7788",
       "--ghosts-root", "/tmp/ghosts",
       "--config", "/tmp/config.json",
-      "--offline",
       "--log-level", "debug",
     ]);
     expect(parsed.overrides).toEqual({
       port: 7788,
       ghostsRoot: "/tmp/ghosts",
       configPath: "/tmp/config.json",
-      offline: true,
     });
     expect(parsed.logLevel).toBe("debug");
   });

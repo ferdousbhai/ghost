@@ -1,30 +1,8 @@
 pragma ComponentBehavior: Bound
 
-// One open file in the workbench: a slim header over a body that is a Markdown
-// editor, a code reader, or plain text, chosen by extension.
-//
-// The pane owns the only FileView, and with it the whole save/reload policy,
-// because that policy is one decision and splitting it across the two body
-// components would give it two half-answers. `watchChanges` is on so the
-// ghost's own edits stream into a pane the user already has open — that is the
-// point of having the workbench next to the transcript.
-//
-// The conflict rule, stated once: when the file changes underneath a buffer the
-// user has been typing into, neither side wins automatically. Adopting disk
-// would throw away typing that was never anywhere else; writing the buffer
-// would throw away whatever the ghost just wrote. But the two are usually
-// nowhere near each other, so the pane tries a line-based three-way merge first
-// (Merge.js) against the text it last read or wrote, and when that comes out
-// clean it says *nothing*: the merged text is in the buffer, autosave writes it
-// a moment later, and the user never learns there was a race. Only when both
-// sides moved the same lines does the old behaviour apply — buffer stays on
-// screen, autosave suspends, one line with the two resolutions next to it. A
-// clean buffer has nothing to lose and simply follows the file.
-//
-// A pane is bound to one path *for the life of the binding*: if the owner
-// repoints `filePath`, unsaved text is flushed to the old path before the new
-// one is read, so a buffer can never be written to a file the user did not
-// type it into.
+// The workbench owns one file buffer. Clean buffers follow disk; dirty buffers
+// merge disjoint edits and stop autosaving on a conflict. Closing or switching
+// files waits for a successful save, so failed writes never discard typing.
 import QtQuick
 import Quickshell.Io
 import "../services"
@@ -50,8 +28,10 @@ Item {
     property string diskText: ""
     /** Set while a write is in flight, so a failure can put the dot back. */
     property string preWriteDisk: ""
-    property string conflictText: ""
+    property var conflictText: null
     property string notice: ""
+    property bool readable: false
+    property bool readFailed: false
 
     readonly property bool dirty: root.markdown && editor.dirty
 
@@ -60,16 +40,25 @@ Item {
 
 
     function absorb(incoming: string): void {
-        if (incoming === root.diskText) return;
+        if (incoming === root.diskText) {
+            if (root.conflictText !== null) {
+                root.conflictText = null;
+                root.notice = "";
+            }
+            if (root.dirty) autosave.restart();
+            return;
+        }
         if (!root.dirty) {
             root.diskText = incoming;
             if (root.markdown) editor.adopt(incoming);
-            root.conflictText = "";
+            root.conflictText = null;
             root.notice = "";
             return;
         }
         if (incoming === editor.buffer) {
             root.diskText = incoming;
+            root.conflictText = null;
+            root.notice = "";
             return;
         }
         // Merge first. `diskText` is still the common ancestor here — the
@@ -83,7 +72,7 @@ Item {
             // is deliberately silent, so the timer is ours to start.
             root.diskText = incoming;
             editor.adoptMerged(merged.text);
-            root.conflictText = "";
+            root.conflictText = null;
             root.notice = "";
             autosave.restart();
             return;
@@ -95,7 +84,7 @@ Item {
     /** Write the buffer; true when a write was started. Nothing is written
         when nothing changed or a conflict has not been settled yet. */
     function save(): bool {
-        if (!root.dirty || root.conflictText !== "") return false;
+        if (!root.readable || !root.dirty || root.conflictText !== null) return false;
         autosave.stop();
         root.preWriteDisk = root.diskText;
         root.diskText = editor.buffer;
@@ -105,8 +94,10 @@ Item {
 
     /** Save now and wait for it — for closing, hiding, and rebinding, where
         the pane may not be around when an async write would have landed. */
-    function flush(): void {
-        if (root.save()) file.waitForJob();
+    function flush(): bool {
+        root.save();
+        file.waitForJob();
+        return !root.dirty && root.conflictText === null;
     }
 
     // Both resolutions end with buffer and file holding the same text and
@@ -115,21 +106,27 @@ Item {
     // what it wrote, takeTheirs() by adopting outright.
 
     function keepMine(): void {
-        root.conflictText = "";
+        root.conflictText = null;
         root.notice = "";
         root.save();
     }
 
     function takeTheirs(): void {
         const incoming = root.conflictText;
-        root.conflictText = "";
+        root.conflictText = null;
         root.notice = "";
         root.diskText = incoming;
         editor.adopt(incoming);
     }
 
-    Component.onCompleted: file.path = root.filePath
-    Component.onDestruction: root.flush()
+    Component.onCompleted: {
+        file.path = root.filePath;
+        Workbench.prepareToLeave = () => root.flush();
+    }
+    Component.onDestruction: {
+        root.flush();
+        Workbench.prepareToLeave = null;
+    }
 
     onVisibleChanged: if (!root.visible) root.flush()
 
@@ -138,27 +135,36 @@ Item {
     onFilePathChanged: {
         root.flush();
         root.diskText = "";
-        root.conflictText = "";
+        root.conflictText = null;
         root.notice = "";
         editor.adopt("");
+        root.readable = false;
+        file.path = "";
         file.path = root.filePath;
     }
 
     FileView {
         id: file
+        objectName: "fileView"
 
         watchChanges: true
         atomicWrites: true
         printErrors: false
 
-        onLoaded: root.absorb(file.text())
+        onLoaded: {
+            root.readable = true;
+            if (root.readFailed) root.notice = "";
+            root.readFailed = false;
+            root.absorb(file.text());
+        }
         onLoadFailed: {
-            root.diskText = "";
-            root.notice = "Could not read this file.";
+            root.readFailed = true;
+            root.readable = false;
+            root.notice = "Could not read this file — your edits are still here.";
         }
         // watchChanges reports the change; re-reading is ours to ask for.
         onFileChanged: file.reload()
-        onSaved: if (root.conflictText === "") root.notice = ""
+        onSaved: if (root.conflictText === null) root.notice = ""
         onSaveFailed: {
             root.diskText = root.preWriteDisk;
             root.notice = "Could not save — your edits are still here.";
@@ -285,8 +291,7 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        root.flush();
-                        Workbench.openInEditor(root.filePath);
+                        if (root.flush()) Workbench.openInEditor(root.filePath);
                     }
                 }
             }
@@ -305,8 +310,7 @@ Item {
                     hoverEnabled: true
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        root.flush();
-                        root.closed();
+                        if (root.flush()) root.closed();
                     }
                 }
             }
@@ -348,7 +352,7 @@ Item {
             }
 
             Text {
-                visible: root.conflictText !== ""
+                visible: root.conflictText !== null
                 text: "keep mine"
                 color: keepArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber
                 font.family: Theme.fontFamily
@@ -364,7 +368,7 @@ Item {
             }
 
             Text {
-                visible: root.conflictText !== ""
+                visible: root.conflictText !== null
                 text: "take theirs"
                 color: takeArea.containsMouse ? Theme.ghostAmberBright : Theme.ghostAmber
                 font.family: Theme.fontFamily
@@ -397,6 +401,7 @@ Item {
 
         MarkdownEditor {
             id: editor
+            objectName: "markdownEditor"
 
             anchors.fill: parent
             visible: root.markdown

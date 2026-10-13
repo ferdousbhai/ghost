@@ -155,6 +155,7 @@ export interface BackendTabsResult {
 }
 
 
+/** Page operations report no_page when no current tab exists; callers need no preflight. */
 export interface GhostBrowserBackend {
   readonly name: string;
   /** True while this backend may still own tabs, even if its transport is offline. */

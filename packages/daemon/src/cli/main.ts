@@ -26,7 +26,7 @@ import { ghostsCommand } from "./ghosts.js";
 import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
-import { preferredGhostName, preferredSessionId } from "./common.js";
+import { preferredGhostName } from "./common.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
@@ -238,7 +238,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "harnesses",
     usage: "harnesses [--json] [-q]",
-    summary: "List installed agent CLIs with their usage windows and whether each has room.",
+    summary: "List installed agent CLIs and informational usage windows.",
     example: "ghost harnesses --json",
     positionals: [0, 0],
     run: harnessesCommand,
@@ -262,7 +262,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "delegate",
     usage: "delegate [--owner-named] <harness> -- <args...>",
-    summary: "Run a harness with room here, streaming its output, and record the handoff; claude and codex runs get the ghost's own tools.",
+    summary: "Run an installed harness here and record the handoff; claude and codex runs get the ghost's own tools.",
     example: "cd ~/code/app && ghost delegate claude -- -p \"Fix the failing test\"",
     flags: DELEGATE_ARGS,
     positionals: [1, Number.POSITIVE_INFINITY],
@@ -287,12 +287,10 @@ export const COMMANDS: readonly Command[] = [
       if (topic !== undefined && isHelpTopic(topic)) {
         // Rendered for the ghost the shell belongs to; no daemon needed.
         const ghostName = preferredGhostName(ctx.runtime, flagString(parsed, "ghost")) ?? "<ghost>";
-        const sessionId = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
         ctx.runtime.stdout.write(renderHelpTopic(topic, {
           ghostName,
           unitDir: resolveScheduleUnitDirectory(ctx.runtime.home, ctx.runtime.env),
           cliPath: ghostCliPath(ctx.runtime.env),
-          ...(sessionId === undefined ? {} : { sessionId }),
         }));
         return EXIT_CODE.success;
       }

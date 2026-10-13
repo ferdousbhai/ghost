@@ -8,11 +8,6 @@ import "../qml/components/Merge.js" as Merge
 // three agree on. So the tests below check the *text*, not a diff summary, and
 // the property test at the end re-derives that guarantee from scratch.
 //
-// FilePane itself cannot be instantiated here — it needs the `qs` module that
-// only Quickshell synthesises at runtime, the same limitation
-// test/tst_codegutter.qml and test/tst_markdownbody.qml record — so the pane's
-// merge-first policy is pinned at this level: what FilePane.absorb() does with
-// `{ok, text}` is a three-line branch over exactly these answers.
 TestCase {
     id: tc
     name: "Merge"

@@ -41,9 +41,9 @@ function daemonCommand(ctx: CliContext): string[] {
 }
 
 async function stopProcess(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  child.kill("SIGTERM");
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<"timeout">((resolve) => {
     timer = setTimeout(() => resolve("timeout"), 5_000);
@@ -120,7 +120,9 @@ export async function smokeCommand(
     // Harnesses keep their sign-ins under the owner's own XDG config and data
     // directories, so only Ghost's config moves into the scratch tree.
     GHOSTD_CONFIG: join(scratch, "config", "ghost", "config.json"),
-    GHOSTD_OFFLINE: "1",
+    GHOSTD_HOOKS: join(scratch, "config", "ghost", "hooks.json"),
+    // A smoke check cannot act on the owner's desktop, even if a model tries.
+    GHOST_DESKTOP: "/usr/bin/false",
   };
   const command = daemonCommand(ctx);
   const child = spawn(command[0] as string, [...command.slice(1), "--port", String(port)], {
@@ -145,6 +147,7 @@ export async function smokeCommand(
   let code: number = EXIT_CODE.success;
   let step = "daemon";
   try {
+    if (child.pid === undefined) throw new Error(`could not start ${command[0]}`);
     await waitUntilServing(port, child, 10_000);
     const options = {
       env,

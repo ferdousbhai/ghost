@@ -63,22 +63,6 @@ Singleton {
         modal, and a rename is typed in the roster row itself. */
     property string ghostRenameError: ""
 
-    function validUpdate(update: var): bool {
-        return !!update && typeof update === "object" && !Array.isArray(update)
-            && typeof update.latest === "string" && update.latest !== ""
-            && typeof update.command === "string" && update.command !== "";
-    }
-
-    /** What the daemon knows about newer releases; nothing else in /api/status is read here. */
-    function fetchDaemonStatus(): void {
-        if (root.statusRequest) return;
-        root.request(root, "statusRequest", "GET", "/api/status", null, function (xhr, body) {
-            if (xhr.status !== 200) return;
-            root.updateAvailable = body && root.validUpdate(body.update) ? body.update : null;
-            if (body) root.reachable = true;
-        });
-    }
-
     // Remote access is daemon-global rather than ghost- or conversation-scoped,
     // so its owner/request state survives ghost and conversation switches.
 
@@ -304,11 +288,6 @@ Singleton {
     readonly property string remoteUrl: typeof root.remoteStatus.url === "string" ? root.remoteStatus.url : ""
     property bool remoteLoading: false
     property bool remoteMutating: false
-    /**
-     * A newer Ghost release the daemon knows about, `{ latest, command, url }`,
-     * or null. The daemon checks once a day; this is only its last answer.
-     */
-    property var updateAvailable: null
     property string remoteError: ""
     /** Authenticated SVG responses become a data URL for QML's Image, whose
         network loader cannot attach the bearer header itself. */
@@ -396,6 +375,7 @@ Singleton {
     property var harnessSessionRequest: null
     property bool hudVisible: false
     property bool hudChatFocused: false
+    onHudChatFocusedChanged: if (root.hudChatFocused) root.markCurrentConversationRead()
 
     property alias transcript: transcriptModel
     property bool streaming: false
@@ -431,7 +411,6 @@ Singleton {
     property var characterRequest: null
     property var characterWriteRequest: null
     property var remoteRequest: null
-    property var statusRequest: null
     property var remoteQrRequest: null
     property var hooksRequest: null
     property var hookConfigRequest: null
@@ -731,7 +710,6 @@ Singleton {
 
     function refresh(): void {
         root.fetchHooks(false);
-        root.fetchDaemonStatus();
         root.retire(root, "listRequest");
         root.request(root, "listRequest", "GET", "/api/ghosts", null, function (xhr, list) {
             if (xhr.status !== 200) {
@@ -1628,7 +1606,7 @@ Singleton {
                 root.settlePendingHarnesses(g, valid);
                 root.sessionsError = "";
                 const current = root.sessions.find(session => session && session.id === root.currentSessionId);
-                if (root.hudVisible && current && current.unread === true)
+                if (root.hudChatFocused && current && current.unread === true)
                     root.markConversationRead(g, current.id);
             });
     }
@@ -1940,7 +1918,7 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "" || id === "") return;
         root.adoptConversation(ghost, id);
-        root.markConversationRead(ghost, id);
+        if (root.hudChatFocused) root.markConversationRead(ghost, id);
         const state = root.ensureTurnState(ghost, id);
         if (state.streaming) return;
         root.loadConversationTranscript(state, true);
@@ -1970,7 +1948,7 @@ Singleton {
     }
 
     function markCurrentConversationRead(): void {
-        if (!root.hudVisible || root.activeGhost === "" || root.currentSessionId === "") return;
+        if (!root.hudChatFocused || root.activeGhost === "" || root.currentSessionId === "") return;
         root.markConversationRead(root.activeGhost, root.currentSessionId);
     }
 
@@ -2654,7 +2632,7 @@ Singleton {
         Qt.callLater(function () {
             root.loadConversationTranscript(state, false);
         });
-        if (errorMessage === "" && root.hudVisible && root.isActiveTurn(state))
+        if (errorMessage === "" && root.hudChatFocused && root.isActiveTurn(state))
             root.markConversationRead(state.ghost, state.sessionId);
     }
 

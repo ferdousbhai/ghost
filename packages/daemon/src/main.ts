@@ -22,7 +22,6 @@ import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
-import { UpdateChecker } from "./update-check.js";
 import { SessionHost } from "./session-host.js";
 import {
   resolveScheduleUnitDirectory,
@@ -56,13 +55,12 @@ Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --offline            Skip the daily release check
       --log-level <level>  debug | info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
 
 Environment:
-  GHOSTD_PORT, GHOSTD_HOST, GHOSTS_ROOT, GHOSTD_OFFLINE, GHOSTD_CONFIG,
+  GHOSTD_PORT, GHOSTD_HOST, GHOSTS_ROOT, GHOSTD_CONFIG,
   XDG_CONFIG_HOME, XDG_STATE_HOME, GHOSTD_API_TOKEN_FILE,
   GHOSTD_RELAY_TOKEN_FILE
 `;
@@ -172,9 +170,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
         index += 1;
         overrides.configPath = requireValue(argv, index, arg);
         break;
-      case "--offline":
-        overrides.offline = true;
-        break;
       case "--log-level": {
         index += 1;
         const value = requireValue(argv, index, arg);
@@ -253,10 +248,6 @@ async function serveDaemon(
     DAEMON_VERSION,
     dirname(fileURLToPath(import.meta.url)),
   );
-  const updates = config.offline
-    ? null
-    : new UpdateChecker({ version: runningSource.version, sourceRoot: runningSource.root, logger });
-  updates?.start();
   registry.ensureRoot();
   try {
     await Promise.all(registry.list().map((ghost) => openGhostHome(ghost.dir).ensure()));
@@ -295,7 +286,6 @@ async function serveDaemon(
       mcp,
       hooks,
       runningSource,
-      update: () => updates?.current ?? null,
       logger,
       port: config.port,
       address: config.host,
@@ -326,7 +316,6 @@ async function serveDaemon(
     version: runningSource.version,
     commit: runningSource.commit,
     source: runningSource.root,
-    offline: config.offline,
     config: config.configPath,
     hooks: hooksPath,
     // Never the token; `ghostd relay-token` is the only way to see it.

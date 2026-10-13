@@ -420,7 +420,7 @@ export class SessionHost {
     return entry.report;
   }
 
-  /** Installed harnesses Omarchy's usage records say have room, in Omarchy's order. */
+  /** Installed harnesses, in Omarchy's order. */
   private omarchyEligible(): Promise<readonly string[]> {
     return this.cachedReport()
       .then(eligibleIds)
@@ -477,11 +477,8 @@ export class SessionHost {
    */
   async chooseHarness(ghostName: string, sessionId: string, id: string): Promise<{ id: string; harness: string }> {
     this.requireRow(id);
-    // A turn only runs on an agent with room, so a choice it would pass over
-    // is refused here rather than silently ignored.
     const listed = (await this.cachedReport()).harnesses.find((harness) => harness.id === id);
     if (!listed) throw new GhostError("harness_not_installed", `${id} is not installed.`, 409);
-    if (!listed.eligible) throw new GhostError("harness_no_room", `${id} has no room: ${listed.reason ?? "its usage is spent"}.`, 409);
     const ghost = this.registry.get(ghostName);
     const conversation = requireConversationId(sessionId);
     const key = keyOf(ghost.name, conversation);
@@ -646,7 +643,7 @@ export class SessionHost {
       return {
         type: "error",
         reason: "error",
-        errorMessage: "No agent CLI is installed with room to run. `ghost harnesses` shows why.",
+        errorMessage: "No supported agent CLI is installed. See `ghost harnesses`.",
       };
     }
     let lastError = "The turn failed.";

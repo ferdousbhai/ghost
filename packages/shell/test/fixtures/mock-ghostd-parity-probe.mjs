@@ -103,7 +103,7 @@ try {
   assert.equal((await badPin.json()).error.code, "invalid_request");
 
   const status = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
-  assert.deepEqual(Object.keys(status), ["version", "source", "update"]);
+  assert.deepEqual(Object.keys(status), ["version", "source"]);
   assert.deepEqual(Object.keys(status.source), ["commit", "root"]);
 
   const board = await (await fetch(`http://127.0.0.1:${port}/api/board`)).json();
@@ -117,7 +117,7 @@ try {
   const harnessChoice = await (await fetch(harnessUrl)).json();
   assert.deepEqual(Object.keys(harnessChoice), ["harnesses", "ghostDefault", "omarchyDefault"]);
   assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "eligible", "reason", "effort", "usage"]);
-  assert.ok(harnessChoice.harnesses.some((h) => h.eligible === false && typeof h.reason === "string"));
+  assert.ok(harnessChoice.harnesses.every((h) => h.eligible === true && h.reason === null));
   assert.equal(harnessChoice.ghostDefault, null);
   assert.equal((await (await putJson(harnessUrl, { harness: "pi" })).json()).ghostDefault, "pi");
   assert.equal((await (await putJson(harnessUrl, { harness: null })).json()).ghostDefault, null);

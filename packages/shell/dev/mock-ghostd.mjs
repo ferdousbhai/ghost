@@ -45,19 +45,19 @@ const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576
 const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
 /**
  * The agent CLIs the mock pretends are installed, in Omarchy's order; codex
- * has no room in its usage windows. A turn runs on the conversation's chosen
+ * reports a full usage window, which is informational. A turn runs on the conversation's chosen
  * agent, then the ghost's default, then Omarchy's.
  */
 const MOCK_HARNESSES = [
   {
     id: "claude", eligible: true, reason: null, effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
-      windows: [{ label: "5h", percent: 42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
+      windows: [{ label: "5h", percent: 0.42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
   },
   {
-    id: "codex", eligible: false, reason: "weekly window is full", effort: "low",
+    id: "codex", eligible: true, reason: null, effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
-      windows: [{ label: "weekly", percent: 100, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
+      windows: [{ label: "weekly", percent: 1, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
   },
   { id: "pi", eligible: true, reason: null, effort: "low", usage: null },
 ];
@@ -413,9 +413,8 @@ const json = (res, status, body) => {
 // The daemon's hooks.json, kept as one document the way ghostd does, with
 // its status projection derived from it. The loader's shape check is the
 // small subset a pane edit can plausibly trip, worded the way ghostd words it.
-/** `GET /api/status`; `--update` makes it report a newer release. */
+/** `GET /api/status` reports the running source. */
 const MOCK_VERSION = "0.0.0-mock";
-const MOCK_UPDATE = { latest: "0.0.1", command: "ghost update" };
 
 /** `GET /api/board`: readBoard's shape for a small Documents/board.md. */
 const MOCK_BOARD = {
@@ -852,7 +851,6 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, {
       version: MOCK_VERSION,
       source: { commit: null, root: null },
-      update: flag("--update") ? MOCK_UPDATE : null,
     });
   }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "board" && req.method === "GET") {

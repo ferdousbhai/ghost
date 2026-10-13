@@ -108,7 +108,8 @@ leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 
-A runtime upgrade requires `systemctl --user reenable --now ghostd.service`;
+A runtime upgrade requires `systemctl --user reenable --now ghostd.service`
+followed by `systemctl --user restart ghostd.service` to load the new bundle;
 an installed HUD also needs `omarchy-restart-shell`. Re-enabling moves an installation made with the old
 daemon unit away from `default.target` and into the graphical-session lifecycle.
 A rescan will not do here: the plugin's entry point is unchanged, so the shell

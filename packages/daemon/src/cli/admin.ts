@@ -115,7 +115,7 @@ interface HarnessChoicesBody {
   omarchyDefault: string | null;
 }
 
-/** The preference only; `ghost harnesses` lists the agents and their room. */
+/** The preference only; `ghost harnesses` lists installed agents and usage. */
 function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
   const preferred = body.ghostDefault
     ?? (body.omarchyDefault ? `automatic (Omarchy default: ${body.omarchyDefault})` : "automatic");

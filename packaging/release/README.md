@@ -102,12 +102,9 @@ the Omarchy repository itself are in [`../omarchy/`](../omarchy/).
 Omarchy's `sync-upstream` picks the release up; nothing is pushed to
 omarchy-pkgs. One thing does not follow the tag on its own:
 
-- **A checkout install** (`~/.local/bin/ghostd` pointing at a clone, see
-  [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md)) is
-  updated by the command `ghost status` prints on its `update` line: a
-  fast-forward pull, `pnpm install --frozen-lockfile`, `pnpm build`, a daemon
-  restart, and `omarchy-restart-shell`. The daemon checks for releases at boot and daily,
-  so the line appears within a day, or at once after a daemon restart.
+- **A checkout install** is the owner's to pull, build, and restart; follow
+  [`../../docs/self-maintenance.md`](../../docs/self-maintenance.md). Ghost
+  does not poll for releases.
 
 `ghost-dev` remains the checkout-only rolling recipe under
 [`../arch/`](../arch/). It provides and conflicts with `ghost` so the two

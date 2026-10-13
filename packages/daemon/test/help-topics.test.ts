@@ -22,29 +22,16 @@ describe("ghost help topics", () => {
     expect(text).toContain("systemctl --user list-timers");
   });
 
-  it("self: the loop, a clean checkout, the upstream nudge, the restart unit, the HUD restart, history, and undo", () => {
+  it("self: follows repository rules and restarts without a model prompt", () => {
     const text = renderHelpTopic("self", INPUT);
-    expect(text).toContain("branch from upstream master");
-    expect(text).toContain("Never end a turn with the checkout dirty");
-    expect(text).toContain("consider offering it upstream");
-    expect(text).toContain("`CONTRIBUTING.md` in the checkout");
-    expect(text).toContain("ask before you push");
-    expect(text).toContain('--unit="ghost-restart-$(date +%s)"');
-    expect(text).toContain("ghost say --ghost aria \"You restarted ghostd");
-    expect(text).not.toContain("--session");
-    expect(text).toContain("your latest conversation");
-    expect(text).toContain("omarchy-restart-shell");
-    expect(text).not.toContain("rescanPlugins");
-    expect(text).not.toContain("ghost-shell.service");
-    expect(text).toContain("journalctl --user -t ghostd");
-    expect(text).toContain("`git revert`");
-    expect(text).toContain("Never `rm -rf` a checkout.");
-  });
-
-  it("self: the restart wakes this conversation when the session is known", () => {
-    const text = renderHelpTopic("self", { ...INPUT, sessionId: "cli-abc123" });
-    expect(text).toContain("ghost say --ghost aria --session cli-abc123");
-    expect(text).not.toContain("your latest conversation");
+    expect(text).toContain("AGENTS.md and CONTRACTS.md");
+    expect(text).toContain("preserve other sessions' edits");
+    expect(text).toContain('systemctl --user restart ghostd.service');
+    expect(text).toContain('journalctl --user -t ghostd');
+    expect(text).toContain('omarchy-restart-shell');
+    expect(text).not.toContain('ghost say');
+    expect(text).not.toContain('git restore');
+    expect(text).not.toContain('branch from upstream master');
   });
 
   it("background: the detached recipe that wakes the conversation", () => {
@@ -62,10 +49,9 @@ describe("ghost help topics", () => {
     expect(text).not.toContain("orchestrator");
     expect(text).toContain("cd <project-dir> && ghost delegate <harness> -- <args>");
     expect(text).toContain("respects that project's settings");
-    expect(text).toContain("refuses it (exit 6)");
-    expect(text).toContain("(exit 5) when it is not installed");
+    expect(text).toContain("refuses an uninstalled harness (exit 5)");
     expect(text).toContain("exits with its status");
-    expect(text).toContain("`ghost harnesses` lists which have room");
+    expect(text).toContain("`ghost harnesses` lists installed agents and informational usage");
     expect(text).toContain("`ghost delegate` gives claude and codex runs your own tools");
     expect(text).toContain("--owner-named");
     expect(text).toContain("--permission-mode acceptEdits");
@@ -82,6 +68,6 @@ describe("ghost help topics", () => {
     expect(text).toContain("Install only harnesses the owner names, with `mise use -g <harness>`");
     expect(text).toContain("never read, type, or store a credential");
     expect(text).toContain("`--wait` alone is not proof");
-    expect(text).toContain("after `ghost harnesses` shows it has room");
+    expect(text).toContain("after `ghost harnesses` confirms it is installed");
   });
 });

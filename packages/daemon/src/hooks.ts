@@ -89,6 +89,7 @@ function runCommandHook(
     let executionFailed = false;
     let stopping = false;
     let killTimer: NodeJS.Timeout | undefined;
+    let drainTimer: NodeJS.Timeout | undefined;
 
     const append = (chunks: Buffer[], chunk: Buffer, used: number): number => {
       const remaining = Math.max(0, MAX_HOOK_OUTPUT_BYTES - used);
@@ -113,6 +114,11 @@ function runCommandHook(
     const finish = (exitCode: number | null) => {
       if (settled) return;
       settled = true;
+      if (stopping) signalTree("SIGKILL");
+      if (drainTimer) clearTimeout(drainTimer);
+      child.stdin.destroy();
+      child.stdout.destroy();
+      child.stderr.destroy();
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
       event.signal.removeEventListener("abort", onAbort);
@@ -147,6 +153,7 @@ function runCommandHook(
     event.signal.addEventListener("abort", onAbort, { once: true });
 
     child.stdout.on("data", (chunk: Buffer) => {
+      if (settled) return;
       stdoutBytes = append(stdoutChunks, chunk, stdoutBytes);
       if (stdoutBytes > MAX_HOOK_OUTPUT_BYTES) {
         overflowed = true;
@@ -154,6 +161,7 @@ function runCommandHook(
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
+      if (settled) return;
       stderrBytes = append(stderrChunks, chunk, stderrBytes);
       if (stderrBytes > MAX_HOOK_OUTPUT_BYTES) {
         overflowed = true;
@@ -168,7 +176,9 @@ function runCommandHook(
     // A descendant in its own session (`setsid job &`) keeps the pipes open
     // past the hook and out of reach of stop(); the hook ends with its shell.
     child.on("exit", (code) => {
-      setTimeout(() => finish(code), PIPE_DRAIN_MS).unref();
+      if (settled) return;
+      drainTimer = setTimeout(() => finish(code), PIPE_DRAIN_MS);
+      drainTimer.unref();
     });
     child.on("close", (code) => finish(code));
     child.stdin.on("error", () => {

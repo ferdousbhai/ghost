@@ -300,6 +300,21 @@ describe("GhostHookRunner", () => {
     const directory = temporaryDirectory();
     const pidPath = join(directory, "background.pid");
     const config = join(directory, "hooks.json");
+    const gate = join(directory, "write-late");
+    const outcome = join(directory, "pipe-state");
+    const descendant = join(directory, "descendant.cjs");
+    writeFileSync(descendant, `
+      const fs = require("node:fs");
+      process.stdout.on("error", () => {});
+      const timer = setInterval(() => {
+        if (!fs.existsSync(${JSON.stringify(gate)})) return;
+        clearInterval(timer);
+        process.stdout.write("late\\n", (error) => {
+          fs.writeFileSync(${JSON.stringify(outcome)}, error ? "closed" : "open");
+          process.exit(0);
+        });
+      }, 10);
+    `);
     // The documented background pattern, without redirecting output: the
     // descendant leaves the hook's process group but still holds its stdout.
     writeFileSync(config, JSON.stringify({
@@ -307,7 +322,7 @@ describe("GhostHookRunner", () => {
         session_stop: [{
           hooks: [{
             type: "command",
-            command: `setsid sleep 30 & echo $! > ${JSON.stringify(pidPath)}; echo '{"decision":"block","reason":"Keep going."}'`,
+            command: `setsid ${JSON.stringify(process.execPath)} ${JSON.stringify(descendant)} & echo $! > ${JSON.stringify(pidPath)}; echo '{"decision":"block","reason":"Keep going."}'`,
           }],
         }],
       },
@@ -318,11 +333,50 @@ describe("GhostHookRunner", () => {
       const result = await runner.emitSessionStop(event());
       expect(Date.now() - started).toBeLessThan(10_000);
       expect(ghostSessionStopContinuation(result)).toBe("Keep going.");
+      writeFileSync(gate, "ready");
+      await vi.waitFor(() => expect(existsSync(outcome)).toBe(true));
+      expect(readFileSync(outcome, "utf8")).toBe("closed");
     } finally {
       const pid = Number(readFileSync(pidPath, "utf8"));
       if (pid > 0 && isAlive(pid)) process.kill(pid, "SIGKILL");
     }
   }, 15_000);
+
+  it("kills a TERM-ignoring descendant when the stopped hook leader exits first", async () => {
+    const directory = temporaryDirectory();
+    const pidPath = join(directory, "child.pid");
+    const childScript = join(directory, "child.cjs");
+    const parentScript = join(directory, "parent.cjs");
+    const config = join(directory, "hooks.json");
+    writeFileSync(childScript, `
+      process.on("SIGTERM", () => {});
+      require("node:fs").writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
+      setInterval(() => {}, 1000);
+    `);
+    writeFileSync(parentScript, `
+      require("node:child_process").spawn(process.execPath, [${JSON.stringify(childScript)}], { stdio: "ignore" });
+      setInterval(() => {}, 1000);
+    `);
+    writeFileSync(config, JSON.stringify({ hooks: { session_stop: [{ hooks: [{
+      type: "command", command: `${JSON.stringify(process.execPath)} ${JSON.stringify(parentScript)}`,
+    }] }] } }));
+    const controller = new AbortController();
+    const running = GhostHookRunner.fromConfig(config).emitSessionStop(event({ signal: controller.signal }));
+    try {
+      await vi.waitFor(() => expect(existsSync(pidPath)).toBe(true), { timeout: 3_000 });
+      controller.abort();
+      await running;
+      const pid = Number(readFileSync(pidPath, "utf8"));
+      await vi.waitFor(() => expect(isAlive(pid)).toBe(false));
+    } finally {
+      controller.abort();
+      await running;
+      if (existsSync(pidPath)) {
+        const pid = Number(readFileSync(pidPath, "utf8"));
+        if (isAlive(pid)) process.kill(pid, "SIGKILL");
+      }
+    }
+  }, 10_000);
 
   it("rejects NUL commands and fails every command event open on execution rejection", async () => {
     const directory = temporaryDirectory();

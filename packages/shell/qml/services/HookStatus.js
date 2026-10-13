@@ -31,7 +31,7 @@ function boundedDisplayText(value, maximum) {
 /**
  * Validate the daemon's complete redacted status projection. No partial or
  * repaired value is displayed: an inconsistent count could otherwise make a
- * hidden handler appear absent, and flooring idle timing would change meaning.
+ * hidden handler appear absent.
  */
 function normalize(body) {
     if (!isObject(body) || !exactKeys(body, ROOT_KEYS)
