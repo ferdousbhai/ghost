@@ -1,0 +1,3 @@
+{"type":"session.mcp_server_status_changed","ephemeral":true,"data":{"serverName":"github-mcp-server","status":"pending"}}
+{"type":"session.mcp_server_status_changed","ephemeral":true,"data":{"serverName":"github-mcp-server","status":"connected","configSource":"builtin"}}
+{"type":"session.mcp_servers_loaded","ephemeral":true,"data":{"servers":[{"name":"github-mcp-server","status":"connected","source":"builtin"}]}}

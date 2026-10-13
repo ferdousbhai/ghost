@@ -379,7 +379,7 @@ const sessionSummary = (name) => (s) => {
     preview: s.preview ?? (first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null),
     harness: s.harness ?? null,
     updatedAt: s.updatedAt,
-    messageCount: s.messages.length,
+    messageCount: s.messages.filter((message) => message.role !== "resources").length,
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
     running: answering.has(turnKey(name, s.id)),
@@ -676,12 +676,13 @@ function followTurn(res, log, from) {
  * Drive scripted events into the turn. Returns the reply text, or null if
  * the turn was stopped.
  */
-async function pump(log, events) {
+async function pump(log, events, onStart) {
   let reply = "";
   for (const event of events) {
     if (log.stopped) return null;
     if (event.type === "text_end") reply = event.content;
     send(log, event);
+    if (event.type === "start") onStart?.();
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   return reply;
@@ -722,6 +723,13 @@ async function streamTurn(res, name, body) {
   const logReply = (reply) => existing && append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
+  const reportResources = () => {
+    const harness = existing?.harness ?? draftHarness.get(key) ?? "claude";
+    const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
+    const summary = `${harness} · Run resources\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost`;
+    send(log, { type: "resources", run: randomUUID(), harness, resources, summary });
+    if (existing) append(existing, { role: "resources", content: textParts(summary) });
+  };
   let stopped = false;
   try {
     if (prompt.startsWith("!")) {
@@ -736,7 +744,7 @@ async function streamTurn(res, name, body) {
           : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
       }
     } else {
-      let reply = await pump(log, script(name, prompt));
+      let reply = await pump(log, script(name, prompt), reportResources);
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
@@ -755,6 +763,7 @@ async function streamTurn(res, name, body) {
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
+        reportResources();
         reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }

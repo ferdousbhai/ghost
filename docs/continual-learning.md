@@ -1,8 +1,10 @@
 # Continual learning
 
-Status: **design for owner review; nothing here is implemented.**
-Implementation waits until the owner's Mac Studios arrive (decided
-2026-09-29).
+Status: **deferred design, not implemented**. The September 29 plan waits
+for the owner's Mac Studios. It predates the October 3 move to owner-installed
+harnesses; its core learner and node protocol require a revised implementation
+plan against `CONTRACTS.md` before work begins. The approved plan below describes
+proposed APIs and runtime seams; none exist in the current implementation.
 
 **Goal for v1:** every ghost is a continual learning agent. It learns from
 its own experience, the stream of what it observes, what it does, and what
@@ -235,42 +237,17 @@ with a per-node bearer token.
   are first-class, because for many owners they are the only option.
   Registering one states that the provider can see what is in its memory.
 
-## Runtime simplification
+## Runtime integration needs revision
 
-A ghost's model is now always its node, which speaks one OpenAI-compatible
-dialect. Everything that exists to support many providers and models goes.
-The candidates, to be confirmed file by file when this is built:
+The original deletion target was embedded pi's provider catalogue, logins,
+model picker, model roles, and environment scrubbing. All have already gone
+with the harness-only runtime. They cannot justify a new learner or model
+client today. A revised design must explain what an owner-installed harness
+and a separate node can own, what Ghost must own, and what it replaces.
 
-- **Provider logins:**
-  - `ghost login`/`logout` and the `/login`, `/providers`, and account
-    routes;
-  - `login-command.ts` and `token-store.ts` (≈ 700 lines);
-  - pi's `.pi/auth.json` flow.
-- **Model choice:**
-  - `ghost model` and `/model`, `GET /models`, and the HUD model picker;
-  - `bindDefaultChatModelIfUnset` and the free-model onboarding path;
-  - most of `models.json` provider policy (`models.ts`,
-    `model-selection.ts`, `model-config-view.ts`, runtime
-    `model-routing.ts`: ≈ 830 lines).
-- **Model roles:** there is one model per ghost, and no separate small
-  model. Titles, greetings, and `ghostd hook-complete` all call the
-  ghost's own model on its node, with its adapter applied.
-  - `smol_model` goes, along with the roles concept in `models.json`.
-  - The cheapest-model ranking in daemon and runtime `smol.ts` goes
-    (≈ 270 lines).
-  - These calls send no learn header, so they are not learning steps: they
-    sit outside any conversation's stream.
-- **pi's provider catalogue:** the Anthropic, OpenAI, Google, AWS Bedrock,
-  and other SDKs that pi-ai pulls in, tens of MB in `node_modules`.
-  - What the daemon needs from pi is the agent loop, the session JSONL, the
-    file, search, and Bash tools, steering and branching, and the extension
-    events.
-  - Whether pi's agent core takes a single OpenAI-compatible stream without
-    pi-ai's provider set is checked in `node_modules` first. If it does not,
-    the pi patch grows to cut the set.
-- **`env-scrub.ts`:** its purpose was keeping ambient provider credentials
-  out of pi. It is re-examined, not assumed deleted, because delegated
-  harnesses rely on the scrubbed environment.
+The experience stream above also assumes removed Ghost features (`ask`,
+branching, reanswers, and direct tool-loop events). Reconcile those observation
+sources with the current harness event seam before implementing the critic.
 
 ## Evaluation
 
@@ -362,20 +339,13 @@ files are 0600 in the ghost home. Tests:
 - **Node conformance, crash safety, wiring, privacy.** Wiring includes a
   turn failing cleanly when the node is unreachable.
 
-## Build order (after the Studios arrive)
+## Next decision
 
-1. `idbd.ts`, `swift-td.ts`, and their tests.
-2. `PROTOCOL.md`, a stub node, and the conformance test. Check how much of
-   pi survives with a single OpenAI-compatible stream.
-3. `ghost-node` on MLX: generation, features, and adapter state. Measure
-   step time and memory, then choose the base model, adapter rank, and
-   depth.
-4. Runtime simplification: the node becomes the only model path, and
-   logins, the picker, and the provider catalogue are deleted.
-5. Critic in ghostd: tap, watches, slots, state, status, and the contract
-   and survival rows.
-6. Actor: toy tests on the node, then real turns, checkpoints, and rollback.
-7. HUD row and onboarding (register a node first).
+After the Studios arrive, measure a node's generation and adapter-update cost,
+choose the reward and prediction heads, and revise the runtime boundary.
+Then define the node protocol, conformance tests, state lifecycle, and rollout
+order together. The historical algorithm sketch above is not an executable
+implementation checklist.
 
 ## Open questions
 

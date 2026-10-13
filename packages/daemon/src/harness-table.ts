@@ -13,6 +13,7 @@ import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord, xdgBaseDir } from "@ghost/extensions";
+import { resourceNames, unreportedResources, codexSkillNames, type RunResources } from "./run-resources.js";
 
 export interface HarnessMcpServer {
   readonly name: string;
@@ -44,6 +45,7 @@ export type HarnessEvent =
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
+  | { readonly type: "resources"; readonly resources: RunResources }
   /** The model answering, as the harness names it; `provider` and `effort` where it says. */
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
   | { readonly type: "error"; readonly message: string };
@@ -53,10 +55,10 @@ export interface HarnessRow {
   /** The reasoning effort its launch asks for, when it sets one. */
   readonly effort?: string;
   /**
-   * What a pass ran on, read from the session record the harness wrote, for
-   * a harness whose output never says (see CONTRACTS.md, "Harnesses").
+   * Display-only facts missing from stdout, read from the harness's own
+   * session record (see CONTRACTS.md, "Harnesses").
    */
-  ranOn?(session: string, env: Readonly<Record<string, string | undefined>>): Promise<Extract<HarnessEvent, { type: "model" }> | null>;
+  inspectSession?(session: string, env: Readonly<Record<string, string | undefined>>, startedAt?: string): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>>;
   launch(input: HarnessTurnInput): HarnessLaunch;
   /** A parser for one turn's stdout, fed line by line. */
   parser(): (line: string) => HarnessEvent[];
@@ -153,6 +155,17 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
     if (typeof event.session_id === "string" && event.type === "system" && event.subtype === "init") {
       out.push({ type: "session", id: event.session_id });
       if (typeof event.model === "string") out.push({ type: "model", model: event.model });
+      if (event.skills !== undefined || event.plugins !== undefined || event.mcp_servers !== undefined) {
+        out.push({ type: "resources", resources: {
+          skills: resourceNames(event.skills),
+          extensions: resourceNames(Array.isArray(event.plugins) ? event.plugins.map((plugin) => record(plugin).name) : undefined),
+          mcpServers: resourceNames(Array.isArray(event.mcp_servers)
+            && resourceNames(event.mcp_servers.map((server) => record(server).name)) !== null
+            && event.mcp_servers.every((server) => typeof record(server).status === "string")
+            ? event.mcp_servers.filter((server) => record(server).status === "connected").map((server) => record(server).name)
+            : undefined),
+        } });
+      }
     }
     if (event.type === "stream_event") {
       const inner = record(event.event);
@@ -348,17 +361,18 @@ async function codexRollout(root: string, session: string): Promise<string | nul
 }
 
 /**
- * The model and effort of a Codex session's latest turn, from its rollout
+ * The model/effort and rendered skill catalog of Codex's latest turn, from its rollout
  * file (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-…-<session>.jsonl`): `exec
  * --json` names neither. A resumed session keeps its first day's file, so the
  * date directories are searched newest first.
  */
-async function codexRanOn(
+async function codexSessionFacts(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
-): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
+  startedAt?: string,
+): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>> {
   const rollout = await codexRollout(join(env.CODEX_HOME || join(env.HOME ?? "", ".codex"), "sessions"), session);
-  if (!rollout) return null;
+  if (!rollout) return [];
   // A long session's rollout runs to a hundred megabytes: `session_meta` is its
   // first line and the latest `turn_context` is near its end, so read only those.
   const file = await open(rollout, "r");
@@ -370,6 +384,11 @@ async function codexRanOn(
     const provider = meta?.type === "session_meta" ? record(meta.payload).model_provider : undefined;
     let end = size;
     let carry = Buffer.alloc(0);
+    let model: Extract<HarnessEvent, { type: "model" }> | null = null;
+    let skills: string[] | null = null;
+    let sawSkills = false;
+    let currentTurn = false;
+    let skillSearchBytes = 0;
     while (end > 0) {
       const start = Math.max(0, end - 1024 * 1024);
       const chunk = Buffer.alloc(end - start);
@@ -379,21 +398,35 @@ async function codexRanOn(
       const first = start > 0 ? window.indexOf(0x0a) + 1 : 0;
       const lines = window.subarray(first).toString("utf8").split("\n");
       for (let index = lines.length - 1; index >= 0; index -= 1) {
-        if (!lines[index]?.includes('"turn_context"')) continue;
-        const entry = json(lines[index] ?? "");
+        const line = lines[index] ?? "";
+        if (!line.includes('"turn_context"') && !line.includes('"world_state"')) continue;
+        const entry = json(line);
         const payload = record(entry?.payload);
-        if (entry?.type !== "turn_context" || typeof payload.model !== "string") continue;
-        return {
-          type: "model",
-          model: payload.model,
-          ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
-          ...(typeof provider === "string" ? { provider } : {}),
-        };
+        if (entry?.type === "turn_context" && model === null && typeof payload.model === "string") {
+          model = {
+            type: "model", model: payload.model,
+            ...(typeof payload.effort === "string" ? { effort: payload.effort } : {}),
+            ...(typeof provider === "string" ? { provider } : {}),
+          };
+          currentTurn = startedAt === undefined || (typeof entry.timestamp === "string" && Date.parse(entry.timestamp) >= Date.parse(startedAt));
+        }
+        if (entry?.type === "world_state" && !sawSkills) {
+          const state = record(payload.state);
+          if (Object.hasOwn(state, "host_skills") || payload.full === true) {
+            sawSkills = true;
+            skills = codexSkillNames(record(state.host_skills).body);
+          }
+        }
       }
+      if (model !== null) skillSearchBytes += chunk.length;
+      if (model !== null && (sawSkills || !currentTurn || skillSearchBytes >= 8 * 1024 * 1024)) break;
       carry = window.subarray(0, first);
       end = start;
     }
-    return null;
+    return [
+      ...(model ? [model] : []),
+      ...(currentTurn && sawSkills ? [{ type: "resources" as const, resources: { ...unreportedResources(), skills } }] : []),
+    ];
   } finally {
     await file.close();
   }
@@ -404,10 +437,10 @@ async function codexRanOn(
  * message, from its database (`$XDG_DATA_HOME/opencode/opencode.db`): `run
  * --format json` names none of them.
  */
-async function opencodeRanOn(
+async function opencodeSessionFacts(
   session: string,
   env: Readonly<Record<string, string | undefined>>,
-): Promise<Extract<HarnessEvent, { type: "model" }> | null> {
+): Promise<Array<Extract<HarnessEvent, { type: "model" | "resources" }>>> {
   const { Database } = await import("bun:sqlite");
   const path = join(xdgBaseDir(env, "XDG_DATA_HOME", env.HOME ?? ""), "opencode", "opencode.db");
   const db = new Database(path, { readonly: true });
@@ -416,14 +449,14 @@ async function opencodeRanOn(
     for (const { data } of rows) {
       const message = json(data);
       if (message?.role !== "assistant" || typeof message.modelID !== "string") continue;
-      return {
+      return [{
         type: "model",
         model: message.modelID,
         ...(typeof message.providerID === "string" ? { provider: message.providerID } : {}),
         ...(typeof message.variant === "string" ? { effort: message.variant } : {}),
-      };
+      }];
     }
-    return null;
+    return [];
   } finally {
     db.close();
   }
@@ -478,10 +511,36 @@ function opencodeParser(): (line: string) => HarnessEvent[] {
 
 /** Copilot `--output-format json`: dotted session events. */
 function copilotParser(): (line: string) => HarnessEvent[] {
+  let resources = unreportedResources();
   return (line) => {
     const event = json(line);
     if (!event) return [];
     const data = record(event.data);
+    if (typeof event.agentId !== "string") {
+      const inventories = {
+        "session.skills_loaded": ["skills", data.skills, "name", "enabled", true],
+        "session.extensions_loaded": ["extensions", data.extensions, "id", "status", "running"],
+        "session.mcp_servers_loaded": ["mcpServers", data.servers, "name", "status", "connected"],
+      } as const;
+      const inventory = Object.hasOwn(inventories, str(event.type)) ? inventories[event.type as keyof typeof inventories] : undefined;
+      if (inventory) {
+        const [field, rows, name, status, loaded] = inventory;
+        const names = Array.isArray(rows) && resourceNames(rows.map((row) => record(row)[name])) !== null
+          && rows.every((row) => typeof record(row)[status] === typeof loaded)
+          ? resourceNames(rows.filter((row) => record(row)[status] === loaded).map((row) => record(row)[name])) : null;
+        resources = { ...resources, [field]: names };
+        return [{ type: "resources", resources }];
+      }
+      if (resources.mcpServers !== null && ["session.mcp_server_status_changed", "session.mcp_server_removed", "session.mcp_server_needs_reconnect"].includes(str(event.type))) {
+        const names = resourceNames([data.serverName]);
+        if (names === null || (event.type === "session.mcp_server_status_changed" && typeof data.status !== "string")) return [];
+        const name = names[0] as string;
+        const connected = resources.mcpServers.filter((server) => server !== name);
+        if (event.type === "session.mcp_server_status_changed" && data.status === "connected") connected.push(name);
+        resources = { ...resources, mcpServers: connected };
+        return [{ type: "resources", resources }];
+      }
+    }
     switch (event.type) {
       case "model.call_start":
         return typeof data.model === "string" ? [{ type: "model", model: data.model }] : [];
@@ -609,7 +668,7 @@ const ROWS: readonly HarnessRow[] = [
       ],
     }),
     parser: codexParser,
-    ranOn: codexRanOn,
+    inspectSession: codexSessionFacts,
   },
   {
     id: "grok",
@@ -659,12 +718,12 @@ const ROWS: readonly HarnessRow[] = [
       };
     },
     parser: opencodeParser,
-    ranOn: opencodeRanOn,
+    inspectSession: opencodeSessionFacts,
   },
   {
     id: "pi",
     effort: EFFORT,
-    // pi has no MCP client; its own tools and extensions are the owner's.
+    // This row leaves MCP to Pi's own settings; Ghost's servers are not forwarded.
     launch: (turn) => ({
       argv: ["pi", "-p", "--mode", "json", "--thinking", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),

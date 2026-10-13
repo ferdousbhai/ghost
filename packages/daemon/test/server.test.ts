@@ -697,6 +697,7 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(types).toEqual([
       "start",
       "harness",
+      "resources",
       "tool_execution_start",
       "tool_execution_end",
       "text_start",
@@ -1272,9 +1273,10 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
       total: number;
       truncated: boolean;
     };
-    expect(transcript).toMatchObject({ id: "conv-1", total: 2, truncated: false });
+    expect(transcript).toMatchObject({ id: "conv-1", total: 3, truncated: false });
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "Who are you?" }]],
+      ["resources", [{ type: "text", text: "fake · Run resources\nSkills: not reported\nExtensions/plugins: not reported\nConnected MCP servers: not reported" }]],
       ["assistant", [{ type: "text", text: "I set type for a living." }]],
     ]);
   });
@@ -1283,12 +1285,12 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     const base = await serve(replies("one", "two"));
     await postTurn(base, turnBody("conv-1", "first"));
     await postTurn(base, turnBody("conv-1", "second"));
-    const page = await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?limit=1&offset=2`)).json() as {
+    const page = await (await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?limit=1&offset=3`)).json() as {
       messages: Array<{ role: string; content: unknown }>;
       total: number;
       truncated: boolean;
     };
-    expect(page).toMatchObject({ total: 4, truncated: true });
+    expect(page).toMatchObject({ total: 6, truncated: true });
     expect(page.messages).toEqual([expect.objectContaining({ role: "user", content: [{ type: "text", text: "second" }] })]);
     for (const query of ["limit=many", "offset=later"]) {
       const response = await fetch(`${base}/api/ghosts/casper/sessions/conv-1/transcript?${query}`);

@@ -1,0 +1,1 @@
+{"type":"system","subtype":"init","session_id":"claude-probe","claude_code_version":"2.1.296","skills":["resource-audit-marker","cloudmail"],"plugins":[{"name":"keep-going"},{"name":"clangd-lsp"}],"mcp_servers":[]}

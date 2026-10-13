@@ -12,6 +12,8 @@ import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import { readPinState } from "../src/pins.js";
 import { readReadState } from "../src/reads.js";
+import { resourceSummary, unreportedResources } from "../src/run-resources.js";
+const unknownNotice = ["resources", [{ type: "text", text: resourceSummary("fake", unreportedResources()) }]];
 import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
@@ -105,8 +107,10 @@ describe("a turn", () => {
     expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("fake");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
+      unknownNotice,
       ["assistant", [{ type: "text", text: "pong" }]],
       ["user", [{ type: "text", text: "again" }]],
+      unknownNotice,
       ["assistant", [{ type: "text", text: "pong again" }]],
     ]);
   });
@@ -124,7 +128,7 @@ describe("a turn", () => {
 
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_start", id: "t1", toolName: "Bash" }));
     expect(events).toContainEqual(expect.objectContaining({ type: "tool_execution_end", id: "t1", isError: true, summary: "exit 1" }));
-    const assistant = (await sessions.readTranscript("casper", "c1")).messages[1];
+    const assistant = (await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant");
     expect(assistant?.content).toEqual([
       { type: "toolCall", id: "t1", name: "Bash", arguments: { command: "false" }, failed: true },
       { type: "text", text: "It failed." },
@@ -139,7 +143,54 @@ describe("a turn", () => {
 
     expect(events.at(-1)).toMatchObject({ type: "error", errorMessage: "connection reset" });
     expect(second.calls()).toEqual([]);
-    expect((await sessions.readTranscript("casper", "c1")).messages[1]).toMatchObject({ errorMessage: "connection reset" });
+    expect((await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant")).toMatchObject({ errorMessage: "connection reset" });
+  });
+});
+
+describe("run resources", () => {
+  it("updates the live and persisted snapshot from attributed post-pass session facts", async () => {
+    const fake = harness([{ events: [{ type: "session", id: "native-1" }, { type: "text", block: "r", delta: "OK" }] }]);
+    const asked: Array<{ session: string; since: string | undefined }> = [];
+    Object.assign(fake.row, { inspectSession: async (session: string, _env: unknown, since?: string) => {
+      asked.push({ session, since });
+      return [{ type: "resources", resources: { skills: ["marker"], extensions: null, mcpServers: null } }];
+    } });
+    const sessions = host({ harnesses: [fake] });
+    const events = await turn(sessions, "hello");
+    const snapshots = events.filter((event) => event.type === "resources");
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]?.run).toBe(snapshots[1]?.run);
+    expect(asked[0]).toMatchObject({ session: "native-1", since: expect.stringMatching(/^\d{4}-/) });
+    const logged = (await readLog(sessionDir(), "c1"))!.filter((entry) => entry.type === "resources");
+    expect(logged).toHaveLength(1);
+    expect(logged[0]?.resources.skills).toEqual(["marker"]);
+    expect((await sessions.readTranscript("casper", "c1")).messages[1]?.content)
+      .toEqual([{ type: "text", text: resourceSummary("fake", { skills: ["marker"], extensions: null, mcpServers: null }) }]);
+  });
+
+  it("keeps each fallback and resumed run separate, without claiming configured resources loaded", async () => {
+    const first = harness([{ events: [
+      { type: "resources", resources: { skills: ["mail"], extensions: ["review"], mcpServers: [] } },
+      { type: "error", message: "not signed in" },
+    ] }], "first");
+    const second = harness(replies("one", "two"), "second");
+    const sessions = host({ harnesses: [first, second] });
+    const events = await turn(sessions, "hello");
+    const reports = events.filter((event) => event.type === "resources");
+    expect(reports).toHaveLength(3);
+    expect(reports[0]?.run).toBe(reports[1]?.run);
+    expect(reports[2]?.run).not.toBe(reports[0]?.run);
+    expect(reports[1]?.resources.skills).toEqual(["mail"]);
+    expect(reports[2]?.resources).toEqual(unreportedResources());
+    await turn(sessions, "again");
+    const entries = (await readLog(sessionDir(), "c1"))!;
+    const snapshots = entries.filter((entry) => entry.type === "resources");
+    expect(snapshots.map((entry) => entry.harness)).toEqual(["first", "second", "second"]);
+    expect(new Set(snapshots.map((entry) => entry.run)).size).toBe(3);
+    expect(snapshots[2]?.resources).toEqual(unreportedResources());
+    expect((await sessions.listSessions("casper"))[0]?.messageCount).toBe(4);
+    expect(second.calls()[0]?.prompt).not.toContain("Run resources");
+    expect((await sessions.readTranscript("casper", "c1")).messages.filter((message) => message.role === "resources")).toHaveLength(3);
   });
 });
 
@@ -174,9 +225,9 @@ describe("harness choice", () => {
     const asked: string[] = [];
     Object.assign(quiet.row, {
       effort: "low",
-      ranOn: async (session: string) => {
+      inspectSession: async (session: string) => {
         asked.push(session);
-        return { type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" };
+        return [{ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "medium" }];
       },
     });
     const sessions = host({ harnesses: [quiet] });
@@ -320,7 +371,7 @@ describe("queued follow-ups and aborts", () => {
     expect(events.at(-1)).toEqual({ type: "done" });
     const { messages } = await sessions.readTranscript("casper", "c1", {});
     expect(messages.map((message) => [message.role, message.errorMessage ?? null])).toEqual([
-      ["user", null], ["assistant", "crashed"], ["user", null], ["assistant", null],
+      ["user", null], ["resources", null], ["assistant", "crashed"], ["user", null], ["resources", null], ["assistant", null],
     ]);
   });
 
@@ -494,7 +545,7 @@ describe("owner commands and hooks", () => {
       expect.objectContaining({ type: "done" }),
     ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
-    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
+    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "resources", "assistant", "hook", "resources", "assistant"]);
     const [before, first, continued] = stop.inputs();
     expect(before).toMatchObject({ type: "before_prompt", prompt: "do it", turn_id: expect.any(String) });
     expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: false });
@@ -736,7 +787,9 @@ describe("the idle handoff", () => {
     const { messages } = await sessions.readTranscript("casper", "c1");
     expect(messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ship it" }]],
+      unknownNotice,
       ["assistant", [{ type: "text", text: "done" }]],
+      unknownNotice,
       ["handoff", [{ type: "text", text: "Updated plan.md" }]],
     ]);
     // The handoff is not news: the listing still dates the conversation by its reply.
@@ -812,7 +865,7 @@ describe("the idle handoff", () => {
     ]);
     const { messages } = await sessions.readTranscript("casper", "c1");
     expect(messages.map((message) => message.role)).toEqual([
-      "user", "assistant", "handoff", "auto", "assistant", "handoff", "auto", "assistant", "handoff",
+      "user", "resources", "assistant", "resources", "handoff", "auto", "resources", "assistant", "resources", "handoff", "auto", "resources", "assistant", "resources", "handoff",
     ]);
   });
 
