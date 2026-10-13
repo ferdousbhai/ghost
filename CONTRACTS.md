@@ -591,7 +591,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   Desktop toasts belong to the shell service, not stop hooks. Completed turns,
   and terminal failures notify unless their conversation is
   being viewed in the focused, visible chat panel. Only that chat marks replies
-  read. Cancellation is quiet. Toasts use
+  read. Focus is the HUD's own Qt window state, not a compositor title cache.
+  Cancellation is quiet. Toasts use
   the conversation title and a reply/error excerpt, replace live toasts
   per ghost and conversation using the notification server’s IDs, and open that
   conversation through a summon payload

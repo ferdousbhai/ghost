@@ -15,7 +15,7 @@ private HOME, seeds this checkout's plugin into that HOME's
 `~/.config/omarchy/plugins/`, and summons it over shell IPC. The isolation
 stops at the runtime boundary, not the source tree: the plugin is symlinked in
 place, not copied, and the owner's own
-`~/.config/omarchy/plugins/ferdousbhai.ghost` is a symlink to a checkout too.
+`~/.config/omarchy/plugins/ferdousbhai.ghost` may point at a different install.
 Editing that checkout does **not** hot-reload the owner's live HUD — a running
 omarchy-shell keeps the QML it already loaded, and neither a save, a
 `rescanPlugins`, nor `omarchy plugin disable`+`enable` replaces it (see
@@ -133,6 +133,18 @@ the mock, opened on `casper`.
 pnpm --filter @ghost/omarchy lint     # qmllint over every QML file
 ```
 
+With the preview's private environment exported and its window visible, run
+the native focus regression from `packages/shell`:
+
+```sh
+quickshell -p "$PWD/focus-probe.qml"
+```
+
+It opens two windows inside the nested compositor and checks focused Chat,
+unfocused Chat, and focused Board. It refuses a non-preview runtime or live port.
+Unlike a mocked compositor title, Qt's own window focus reflects actual input
+focus even when Hyprland's client cache has not populated its title.
+
 `qmllint` needs the `qs.*` modules Quickshell synthesises at runtime resolved
 by hand, which is what the `.qmllint/qs -> ../qml` symlink and `-I .qmllint`
 are for. Use `/usr/lib/qt6/bin/qmllint`, never `/usr/bin/qmllint` — on Arch the
@@ -184,3 +196,10 @@ tests ran on the nested Wayland display and covered host tooltip delegation,
 click dismissal, pointer exit, and hiding the widget.
 The click follow-up also exercises `triggerPress` through `bar.shell`; actual
 pointer clicks in the nested bar closed and reopened the panel.
+
+Validation follow-up (2026-10-13, isolated preview): actual FileView writes
+preserved Markdown, merged disjoint disk edits, blocked close/switch on a
+conflict or permission-denied save, protected empty external files, and
+saved retained typing after permissions recovered. Live HUD checks preserved
+unread state in Board, unfocused Chat, and a narrow workbench; returning to
+focused Chat marked read. Resources opened only from the harness action.

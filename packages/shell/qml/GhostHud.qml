@@ -123,9 +123,7 @@ FloatingWindow {
     }
 
     function focused(): bool {
-        const top = Hyprland.activeToplevel;
-        const title = top && top.lastIpcObject ? String(top.lastIpcObject["title"] || "") : "";
-        return new RegExp(hud.titlePattern).test(title);
+        return hud.contentItem.Window.active;
     }
 
     /** Each pane fetches its own data when it becomes visible. */
