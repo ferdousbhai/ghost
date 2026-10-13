@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handoffContext, logState, transcriptMessages, type LogEntry } from "../src/conversation-log.js";
+import { handoffContext, logState, transcriptMessages, latestRunResources, type LogEntry } from "../src/conversation-log.js";
 import { codexSkillNames, resourceNames, resourceSummary, unreportedResources } from "../src/run-resources.js";
 
 describe("run resources", () => {
@@ -35,6 +35,26 @@ describe("run resources", () => {
     expect(handoffContext(entries)).toBe("Owner: hello");
     expect(transcriptMessages(entries)).toHaveLength(1);
     entries.push({ type: "resources", at: "later", run: "r2", harness: "codex", resources: { skills: ["mail"], extensions: null, mcpServers: [] }, summary: "old noisy summary" });
-    expect(transcriptMessages(entries)[1]?.content).toEqual([{ type: "text", text: "codex · Run resources\nSkills: mail" }]);
+    expect(transcriptMessages(entries)).toHaveLength(1);
+  });
+});
+
+describe("latest run resource snapshot", () => {
+  const reply = (harness = "codex", error?: string): LogEntry => ({ type: "assistant", at: "now", harness, content: [], ...(error ? { error } : {}) });
+  const inventory = (skills: string[] | null, harness = "codex"): LogEntry => ({ type: "resources", at: "now", run: "r", harness,
+    resources: { skills, extensions: null, mcpServers: null }, summary: "old summary" });
+
+  it("reads legacy pre-reply records without exposing them as messages", () => {
+    const entries = [inventory(["mail"]), reply()];
+    expect(latestRunResources(entries)?.resources.skills).toEqual(["mail"]);
+    expect(transcriptMessages(entries).map(message => message.role)).toEqual(["assistant"]);
+    expect(latestRunResources([inventory(["mail"], "pi"), reply()])).toBeNull();
+  });
+
+  it("clears stale evidence on success, but retains dated evidence after failure", () => {
+    const entries = [reply(), inventory(["mail"])];
+    expect(latestRunResources([...entries, reply("pi", "not signed in")])?.resources.skills).toEqual(["mail"]);
+    expect(latestRunResources([...entries, reply(), inventory(null)])?.resources.skills).toBeNull();
+    expect(latestRunResources([...entries, reply()])).toBeNull();
   });
 });

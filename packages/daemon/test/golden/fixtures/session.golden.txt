@@ -67,6 +67,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"Written down.","type":"text_delta"}
 {"content":"Written down.","contentIndex":0,"type":"text_end"}
+{"at":"<timestamp>","harness":"fake","resources":{"extensions":null,"mcpServers":null,"skills":null},"run":"<run>","summary":"Last successful run: fake\n<timestamp>\n\nSupplied by Ghost\nInstructions: Ghost character and policy\n\nNo named resources reported by this run.","supplied":{"instructions":["Ghost character and policy"],"mcpServers":[]},"type":"resources"}
 {"type":"done"}
 
 ------------------------------------------------------------------------------
@@ -130,6 +131,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
 {"contentIndex":0,"type":"text_start"}
 {"contentIndex":0,"delta":"That you want short answers.","type":"text_delta"}
 {"content":"That you want short answers.","contentIndex":0,"type":"text_end"}
+{"at":"<timestamp>","harness":"fake","resources":{"extensions":null,"mcpServers":null,"skills":null},"run":"<run>","summary":"Last successful run: fake\n<timestamp>\n\nSupplied by Ghost\nInstructions: Ghost character and policy\n\nNo named resources reported by this run.","supplied":{"instructions":["Ghost character and policy"],"mcpServers":[]},"type":"resources"}
 {"type":"done"}
 
 ------------------------------------------------------------------------------
@@ -209,6 +211,23 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
       "role": "assistant"
     }
   ],
+  "resources": {
+    "at": "<timestamp>",
+    "harness": "fake",
+    "resources": {
+      "extensions": null,
+      "mcpServers": null,
+      "skills": null
+    },
+    "run": "<run>",
+    "summary": "Last successful run: fake\n<timestamp>\n\nSupplied by Ghost\nInstructions: Ghost character and policy\n\nNo named resources reported by this run.",
+    "supplied": {
+      "instructions": [
+        "Ghost character and policy"
+      ],
+      "mcpServers": []
+    }
+  },
   "total": 4,
   "truncated": false
 }

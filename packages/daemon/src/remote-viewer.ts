@@ -88,7 +88,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .user .pics:last-child { margin-bottom: -.15rem; }
   .pics a { display: block; flex: 1 1 8rem; max-width: 100%; }
   .pics img { display: block; width: 100%; max-height: 18rem; object-fit: cover; border-radius: .7rem; background: var(--deep); }
-  .resources { color: var(--dim); font: .75rem/1.5 var(--mono); white-space: pre-wrap; }
+  #resource-panel { background: var(--surface); color: var(--fg); border: 1px solid var(--line); border-radius: .7rem; max-width: min(42rem, 90vw); }
+  #resource-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 65dvh; overflow: auto; }
   .assistant { color: var(--fg); }
   .assistant.pending::after { content: ""; display: inline-block; width: .55rem; height: 1.05em; vertical-align: text-bottom; background: var(--amber); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -142,9 +143,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
+  <button id="resources" type="button">Resources</button>
   <div class="pick"><select id="session" aria-label="Conversation"></select></div>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
+<dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
 <main id="log"></main>
 <div id="status" role="status"></div>
 <form id="composer" hidden>
@@ -237,14 +240,25 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const texts = bubbles(m.content);
       if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\\n\\n")));
       else if (m.role === "assistant") for (const text of texts) log.append(assistantBubble(text));
-      else if (m.role === "resources") log.append(resourceNotice(texts.join("\\n\\n")));
     }
     if (!log.childElementCount) empty();
     log.scrollTop = stick ? log.scrollHeight : top;
   }
 
-  function resourceNotice(text) {
-    const el = document.createElement("div"); el.className = "resources"; el.textContent = text; return el;
+  let resourceGeneration = 0;
+  async function showResources() {
+    const generation = ++resourceGeneration, targetGhost = ghost, targetSession = session;
+    const panel = $("resource-panel"), text = $("resource-text");
+    text.textContent = "Loading resources…";
+    if (!panel.open) panel.showModal();
+    if (!ghost || !session || session === draft) { text.textContent = "No successful run resources available."; return; }
+    try {
+      const body = await api("/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript?limit=1");
+      if (generation === resourceGeneration && targetGhost === ghost && targetSession === session)
+        text.textContent = body.resources?.summary || "No successful run resources available.";
+    } catch (error) {
+      if (generation === resourceGeneration) text.textContent = error.message;
+    }
   }
 
   async function loadTranscript(keep = false) {
@@ -380,8 +394,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             replies.at(-1).classList.remove("pending");
             replies.push(replyBubble());
             parts.length = 0; renderedTexts = 0;
-          } else if (ev.type === "resources" && ev.summary) {
-            log.append(resourceNotice(ev.summary));
           }
           else if (ev.type === "text_start") parts.push({ type: "text", text: "" });
           else if (ev.type === "text_delta") {
@@ -422,10 +434,14 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   };
   $("composer").onsubmit = (e) => { e.preventDefault(); send().catch(show); };
   $("camera").onclick = () => $("file").click();
+  $("resources").onclick = showResources;
+  $("resource-close").onclick = () => $("resource-panel").close();
+  $("resource-panel").onclose = () => { resourceGeneration++; };
   $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file").value = ""; };
-  $("ghost").onchange = () => { ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
-  $("session").onchange = () => { session = $("session").value; clearTray(); loadTranscript().catch(show); };
+  $("ghost").onchange = () => { $("resource-panel").close(); ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
+  $("session").onchange = () => { $("resource-panel").close(); session = $("session").value; clearTray(); loadTranscript().catch(show); };
   $("new").onclick = () => {
+    $("resource-panel").close();
     if (streaming || !ghost) return;
     if (session !== draft || !draft) draft = session = mint();
     clearTray(); loadSessions().catch(show);

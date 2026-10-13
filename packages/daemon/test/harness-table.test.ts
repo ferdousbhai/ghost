@@ -34,6 +34,16 @@ const TURN: HarnessTurnInput = {
   mcp: [{ name: "ghost", config: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } }],
 };
 
+describe("resource provenance", () => {
+  it.each(["claude", "codex", "grok", "copilot", "opencode", "agy", "cursor-agent", "crush"])("%s reports only forwarded MCP names", id => {
+    const launch = harnessRow(id)!.launch(TURN);
+    expect(launch.suppliedMcp).toEqual(["ghost"]);
+  });
+  it.each(["pi", "omp", "muse"])("%s does not claim to forward Ghost MCP", id => {
+    expect(harnessRow(id)!.launch(TURN).suppliedMcp ?? []).toEqual([]);
+  });
+});
+
 describe("parsers over recorded output", () => {
   it("claude: streamed text deltas, one Bash call, the session id", () => {
     const events = parse("claude", "claude.jsonl");
@@ -116,6 +126,11 @@ describe("parsers over recorded output", () => {
     expect(reply(events)).toContain("ZEPHYR");
     expect(tools(events)).toEqual([["start", "bash"], ["end", false]]);
     expect(events.find((event) => event.type === "session")).toBeDefined();
+  });
+
+  it("claude init carries a named native tool inventory", () => {
+    const events = harnessRow("claude")!.parser()(JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: ["Bash", "Read"] }));
+    expect(events).toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null, tools: ["Bash", "Read"] } });
   });
 
   // Lines trimmed from 2026-10-04 probes; the recorded fixtures predate the fields.

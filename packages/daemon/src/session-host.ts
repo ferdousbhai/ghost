@@ -31,6 +31,7 @@ import {
   logPath,
   logState,
   listedLog,
+  latestRunResources,
   newConversationEntry,
   readLog,
   requireConversationId,
@@ -77,7 +78,7 @@ import {
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
-import { resourceSummary, unreportedResources } from "./run-resources.js";
+import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "./run-resources.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
@@ -182,6 +183,7 @@ export interface SessionSummary {
 }
 
 export interface Transcript {
+  resources: RunResourceSnapshot | null;
   id: string;
   messages: TranscriptMessage[];
   total: number;
@@ -712,6 +714,7 @@ export class SessionHost {
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
           ...(result.model?.effort ?? row.effort ? { effort: result.model?.effort ?? row.effort } : {}),
         }, ...(result.resources ? [result.resources] : [])]);
+        if (result.resources) stream.emit(result.resources);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
       lastError = result.error;
@@ -845,10 +848,10 @@ export class SessionHost {
       const stderr = exit.stderr.trim().split("\n").slice(-6).join("\n");
       error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
     }
-    const summary = resourceSummary(row.id, resources);
-    const notice = error === null && summary ? { type: "resources" as const, at, run, harness: row.id, resources, summary } : undefined;
-    if (notice) stream.emit({ type: "resources", run, harness: row.id, resources, summary });
-    return { content, error, aborted: false, produced, model, resources: notice };
+    const snapshot = error === null ? { type: "resources" as const, at: new Date().toISOString(), run, harness: row.id, resources,
+      supplied: { instructions: ["Ghost character and policy"], mcpServers: [...launch.suppliedMcp ?? []] }, summary: "" } : undefined;
+    if (snapshot) snapshot.summary = snapshotSummary(snapshot);
+    return { content, error, aborted: false, produced, model, resources: snapshot };
   }
 
   private async beforePrompt(
@@ -1268,6 +1271,7 @@ export class SessionHost {
     const messages = all.slice(offset, offset + limit);
     return {
       id,
+      resources: latestRunResources(entries),
       messages,
       total: all.length,
       truncated: offset > 0 || offset + messages.length < all.length,

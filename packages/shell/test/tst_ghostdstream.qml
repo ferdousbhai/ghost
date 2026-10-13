@@ -77,18 +77,14 @@ TestCase {
         compare(failedSpy.count, 0);
     }
 
-    function test_resourcesFollowSuccessfulReplyWithoutReplacingNotificationText(): void {
+    function test_resourcesStayOutOfChatAndCompletionNotification(): void {
         const turn = openTurn("resources", null);
-        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "empty", summary: "" });
-        compare(turn.state.rows.filter(row => row.role === "resources").length, 0);
         Ghostd.handleTurnEvent(turn.state, { type: "text_start", contentIndex: 0 });
         Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 0, delta: "Answer" });
         Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: mail" });
-        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: mail, calendar" });
-        compare(turn.state.rows.length, 3);
+        Ghostd.flushTurn(turn.state, true);
+        compare(turn.state.rows.length, 2);
         compare(turn.state.rows[1].text, "Answer");
-        compare(turn.state.rows[2].text, "Skills: mail, calendar");
-        compare(Ghostd.transcript.get(2).text, "Skills: mail, calendar");
         finishedSpy.clear();
         Ghostd.handleTurnEvent(turn.state, { type: "done" });
         compare(finishedSpy.count, 1);

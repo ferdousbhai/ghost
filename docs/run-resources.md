@@ -1,13 +1,21 @@
 # Per-run resource reporting
 
-Ghost reports evidence from the answering harness, not a scan of installed
-skills, plugin directories, or enabled MCP configuration. Each attempt starts
-unknown, including fallback and resumed attempts. Only successful passes with
-named resources produce a notice, after the reply; unknown and empty fields
-are omitted. Internally `null` means unknown and `[]` explicitly empty. Old
-transcripts are reprojected with the same filtering. A skill catalog can
-contain descriptions rather than full skill bodies; this is not a token-cost
-estimate or a list of skills actually invoked.
+The harness menu's **Resources…**, the tailnet viewer, and `ghost show
+--resources` inspect the latest successful run without adding messages to chat.
+Ghost-supplied instructions and forwarded MCP names are separate from
+harness-reported skills, plugins, tools, connected MCP servers, context files,
+and prompt templates. Only categories with evidence are shown. Current
+parsers report skills/plugins/MCP as described below and compatible Claude
+init tool names; other categories remain unknown until native output supplies
+evidence. No scanner or second discovery process is used.
+
+Every successful run replaces the snapshot, including unknown inventories;
+failed attempts retain the dated last successful run. A catalog is availability,
+not proof of loaded skill bodies or a complete prompt/token-cost report.
+Legacy resource records remain inspectable but never render as chat messages.
+The MCP navbar manages only this ghost's additional configuration; it does not
+edit harness-owned settings or prove a server connected. Pi/OMP forwarding
+behavior is unchanged.
 
 ## Agent audit — 2026-10-13
 

@@ -968,6 +968,36 @@ Singleton {
         return true;
     }
 
+    property bool inspectingResources: false
+    property var runResources: null
+    property bool resourcesLoading: false
+    property string resourcesError: ""
+    property var resourcesRequest: null
+
+    function clearRunResources(): void {
+        root.retire(root, "resourcesRequest");
+        root.runResources = null;
+        root.resourcesLoading = false;
+        root.resourcesError = "";
+        root.inspectingResources = false;
+    }
+
+    function fetchRunResources(): void {
+        const ghost = root.activeGhost;
+        const session = root.currentSessionId;
+        root.runResources = null;
+        root.resourcesError = "";
+        root.retire(root, "resourcesRequest");
+        if (ghost === "" || session === "") { root.resourcesLoading = false; return; }
+        root.resourcesLoading = true;
+        root.request(root, "resourcesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/sessions/" + encodeURIComponent(session) + "/transcript?limit=1", null, function (xhr, body) {
+                root.resourcesLoading = false;
+                if (xhr.status === 200 && body) root.runResources = body.resources || null;
+                else root.resourcesError = "Could not load resources. Try refreshing.";
+            }, () => ghost === root.activeGhost && session === root.currentSessionId);
+    }
+
     function fetchHarnesses(): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.harnessMutation !== null) return;
@@ -2430,19 +2460,9 @@ Singleton {
         case "harness":
             state.activity = "starting:" + (event.harness || "");
             break;
-        case "resources": {
-            if (!event.summary) break;
-            const id = "resources:" + event.run;
-            const index = state.rows.findIndex(row => row.entryId === id);
-            if (index >= 0) {
-                root.setTurnRow(state, index, "text", String(event.summary || ""));
-            } else {
-                root.flushTurn(state, true);
-                root.appendTurnRow(state, { role: "resources", text: String(event.summary),
-                    entryId: id, toolActivity: [], error: "", pending: false });
-            }
+        case "resources":
+            if (root.inspectingResources) root.fetchRunResources();
             break;
-        }
         case "text_start":
             root.textPart(state, event.contentIndex);
             state.presentationDirty = true;

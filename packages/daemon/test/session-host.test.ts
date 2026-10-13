@@ -12,7 +12,6 @@ import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import { readPinState } from "../src/pins.js";
 import { readReadState } from "../src/reads.js";
-import { resourceSummary } from "../src/run-resources.js";
 import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
@@ -161,8 +160,10 @@ describe("run resources", () => {
     const logged = (await readLog(sessionDir(), "c1"))!.filter((entry) => entry.type === "resources");
     expect(logged).toHaveLength(1);
     expect(logged[0]?.resources.skills).toEqual(["marker"]);
-    expect((await sessions.readTranscript("casper", "c1")).messages[2]?.content)
-      .toEqual([{ type: "text", text: resourceSummary("fake", { skills: ["marker"], extensions: null, mcpServers: null }) }]);
+    const transcript = await sessions.readTranscript("casper", "c1", { limit: 1 });
+    expect(transcript.messages).toHaveLength(1);
+    expect(transcript.resources?.resources.skills).toEqual(["marker"]);
+    expect(transcript.resources?.summary).toContain("Reported by harness\nSkills: marker");
   });
 
   it("does not publish an inventory when a pass fails after producing text", async () => {
@@ -187,13 +188,16 @@ describe("run resources", () => {
     const sessions = host({ harnesses: [first, second] });
     const events = await turn(sessions, "hello");
     const reports = events.filter((event) => event.type === "resources");
-    expect(reports).toEqual([]);
+    expect(reports).toHaveLength(1);
+    expect(reports[0]?.harness).toBe("second");
     await turn(sessions, "again");
     const entries = (await readLog(sessionDir(), "c1"))!;
-    expect(entries.filter((entry) => entry.type === "resources")).toEqual([]);
+    expect(entries.filter((entry) => entry.type === "resources")).toHaveLength(2);
     expect((await sessions.listSessions("casper"))[0]?.messageCount).toBe(4);
     expect(second.calls()[0]?.prompt).not.toContain("Run resources");
-    expect((await sessions.readTranscript("casper", "c1")).messages.filter((message) => message.role === "resources")).toEqual([]);
+    const transcript = await sessions.readTranscript("casper", "c1");
+    expect(transcript.resources?.resources.skills).toBeNull();
+    expect(transcript.messages.map(message => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
   });
 });
 

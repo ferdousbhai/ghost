@@ -10,7 +10,7 @@ import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
-import { resourceSummary, type RunResources } from "./run-resources.js";
+import { snapshotSummary, type RunResourceSnapshot } from "./run-resources.js";
 
 export const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
@@ -29,7 +29,7 @@ export interface ToolCallPart {
 export type AssistantPart = { readonly type: "text"; readonly text: string } | ToolCallPart;
 
 export type LogEntry =
-  | { readonly type: "resources"; readonly at: string; readonly run: string; readonly harness: string; readonly resources: RunResources; readonly summary: string }
+  | ({ readonly type: "resources" } & RunResourceSnapshot)
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
   /** `origin` is absent for an owner message; `auto` is ghostd's next-work prompt. */
   | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" }
@@ -251,7 +251,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
 }
 
 export interface TranscriptMessage {
-  role: "user" | "assistant" | "hook" | "handoff" | "auto" | "resources";
+  role: "user" | "assistant" | "hook" | "handoff" | "auto";
   content: readonly AssistantPart[];
   entryId: string;
   contentTruncated?: true;
@@ -285,9 +285,6 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         entryId,
         ...(entry.error ? { errorMessage: entry.error } : {}),
       };
-    } else if (entry.type === "resources") {
-      const summary = resourceSummary(entry.harness, entry.resources);
-      if (summary) message = { role: "resources", content: [{ type: "text", text: summary }], entryId };
     } else if (entry.type === "handoff") {
       message = {
         role: "handoff",
@@ -386,4 +383,28 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
  */
 export function conversationEnvironment(ghostName: string, id: string): { GHOST: string; GHOST_SESSION: string } {
   return { GHOST: ghostName, GHOST_SESSION: id };
+}
+
+/** Latest successful pass, including legacy snapshots written before the reply. */
+export function latestRunResources(entries: readonly LogEntry[]): RunResourceSnapshot | null {
+  let latest: RunResourceSnapshot | null = null;
+  let pending: Extract<LogEntry, { type: "resources" }> | null = null;
+  let previous: LogEntry | undefined;
+  for (const entry of entries) {
+    if (entry.type === "user" || entry.type === "harness") pending = null;
+    if (entry.type === "resources") {
+      if ((previous?.type === "assistant" || previous?.type === "handoff") && !previous.error && previous.harness === entry.harness) {
+        latest = entry;
+      } else pending = entry;
+    } else if (entry.type === "assistant" || entry.type === "handoff") {
+      if (!entry.error) latest = pending?.harness === entry.harness ? pending : null;
+      pending = null;
+    }
+    previous = entry;
+  }
+  if (!latest) return null;
+  const { run, harness, at, resources, supplied } = latest;
+  const snapshot = { run, harness, at, resources, ...(supplied ? { supplied } : {}), summary: "" };
+  snapshot.summary = snapshotSummary(snapshot);
+  return snapshot;
 }

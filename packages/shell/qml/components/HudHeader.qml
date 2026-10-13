@@ -1,6 +1,7 @@
 pragma ComponentBehavior: Bound
 
 import QtQuick
+import QtQuick.Window
 import "../services"
 
 // The HUD's top line: who is present, which agent CLI answers the open
@@ -10,6 +11,7 @@ Item {
 
     /** The harness picker is up. */
     property bool pickerOpen: false
+    property bool resourcesOpen: false
 
     /** The picker closed; the keyboard has nowhere to be. */
     signal refocused()
@@ -21,14 +23,18 @@ Item {
             root.closePicker();
             return;
         }
+        root.resourcesOpen = false;
+        Ghostd.clearRunResources();
         root.pickerOpen = true;
         Ghostd.fetchHarnesses();
         picker.forceActiveFocus();
     }
 
     function closePicker(): void {
-        if (!root.pickerOpen) return;
+        if (!root.pickerOpen && !root.resourcesOpen) return;
         root.pickerOpen = false;
+        root.resourcesOpen = false;
+        Ghostd.clearRunResources();
         root.refocused();
     }
 
@@ -299,6 +305,18 @@ Item {
                 }
             }
 
+            PickerAction {
+                objectName: "harnessResources"
+                text: "Resources…"
+                onActivated: {
+                    root.closePicker();
+                    root.resourcesOpen = true;
+                    Ghostd.inspectingResources = true;
+                    Ghostd.fetchRunResources();
+                    inspector.forceActiveFocus();
+                }
+            }
+
             Text {
                 objectName: "harnessError"
                 visible: Ghostd.harnessError !== ""
@@ -308,6 +326,55 @@ Item {
                 color: Theme.danger
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeCaption
+            }
+        }
+    }
+
+    Rectangle {
+        id: inspector
+        objectName: "resourceInspector"
+        visible: root.resourcesOpen
+        focus: root.resourcesOpen
+        anchors.top: parent.bottom
+        anchors.right: parent.right
+        width: Math.min(Theme.ch(72), root.width)
+        height: Math.min(480, Math.max(180, (root.Window.window ? root.Window.window.height : 600) - 120))
+        radius: Theme.radius
+        color: Theme.surface
+        border.color: Theme.border
+        Keys.onEscapePressed: root.closePicker()
+        MouseArea { anchors.fill: parent }
+        Row {
+            id: resourceActions
+            x: Theme.gap
+            y: Theme.gap
+            spacing: Theme.pad
+            Text { text: "Resources"; color: Theme.foreground; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSizeSmall }
+            PickerAction { objectName: "resourcesRefresh"; text: "Refresh"; onActivated: Ghostd.fetchRunResources() }
+            PickerAction { objectName: "resourcesClose"; text: "Close"; onActivated: root.closePicker() }
+        }
+        Flickable {
+            anchors.top: resourceActions.bottom
+            anchors.topMargin: Theme.pad
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.margins: Theme.gap
+            contentHeight: resourceText.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            Text {
+                id: resourceText
+                objectName: "resourceInspectorText"
+                width: parent.width
+                text: Ghostd.resourcesLoading ? "Loading resources…"
+                    : Ghostd.resourcesError || (Ghostd.runResources ? Ghostd.runResources.summary
+                    : "No successful run resources available.")
+                textFormat: Text.PlainText
+                wrapMode: Text.Wrap
+                color: Theme.foreground
+                font.family: Theme.fontFamily
+                font.pixelSize: Theme.fontSizeSmall
             }
         }
     }

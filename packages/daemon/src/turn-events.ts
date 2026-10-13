@@ -5,13 +5,13 @@
  */
 import { requireConversationId } from "./conversation-log.js";
 import { GhostError } from "./ghosts.js";
-import type { RunResources } from "./run-resources.js";
+import type { RunResourceSnapshot } from "./run-resources.js";
 
 export type TurnEvent =
   | { type: "start" }
   /** A pass starting on this harness: the first, or the next after one failed. */
   | { type: "harness"; harness: string }
-  | { type: "resources"; run: string; harness: string; resources: RunResources; summary: string }
+  | ({ type: "resources" } & RunResourceSnapshot)
   /** The follow-ups still waiting, sent whenever one is queued or starts. */
   | { type: "queue"; followUp: string[] }
   | {

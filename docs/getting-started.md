@@ -148,13 +148,14 @@ picks, per turn, the one already carrying the conversation, then the ghost's
 ghost harnesses          # which agents are installed and which have room
 ```
 
-After a successful run, **Run resources** names reported skills, plugins,
-and connected MCP servers in the HUD, tailnet transcript, and `ghost say`
-stderr (`-q` suppresses it). Unknown and empty fields are omitted; failed or
-unreported runs show no notice. Codex reports its catalog after the pass.
-A listed skill can mean its description is available, not that its full body
-entered context. See [agent coverage](run-resources.md). Notices never enter
-the model's prompt.
+Open **Resources…** from the harness menu to inspect the latest successful
+run. It separates instructions and MCP toolsets supplied by Ghost from the
+skills, plugins, tools, and other resources reported by the harness. Missing
+categories are omitted; availability does not prove content entered context.
+The tailnet viewer has the same on-demand view, and `ghost show --resources`
+prints it in the terminal. Resources never appear as chat messages.
+See [agent coverage](run-resources.md). The MCP navbar editor manages the
+additional servers configured for this ghost, not the harness's own settings.
 
 In the HUD, the harness label beside the conversation title opens a picker:
 choose an agent for this conversation, then "use <agent>" makes it the ghost's

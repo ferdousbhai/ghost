@@ -363,6 +363,7 @@ const transcriptOf = (s, params) => {
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
+    resources: s.resources || null,
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
@@ -728,9 +729,11 @@ async function streamTurn(res, name, body) {
   const reportResources = () => {
     const harness = existing?.harness ?? draftHarness.get(key) ?? "claude";
     const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
-    const summary = `${harness} · Run resources\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost`;
-    send(log, { type: "resources", run: randomUUID(), harness, resources, summary });
-    if (existing) append(existing, { role: "resources", content: textParts(summary) });
+    const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
+      supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
+      summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: ghost\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost` };
+    send(log, { type: "resources", ...snapshot });
+    if (existing) existing.resources = snapshot;
   };
   let stopped = false;
   try {

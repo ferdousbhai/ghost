@@ -163,8 +163,8 @@ Rectangle {
 
                 Text {
                     Layout.fillWidth: true
-                    text: "Tools for " + (Ghostd.activeGhost || "this ghost")
-                        + ". Secret values are write-only."
+                    text: "Additional servers for " + (Ghostd.activeGhost || "this ghost")
+                        + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence. Secret values are write-only."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall
