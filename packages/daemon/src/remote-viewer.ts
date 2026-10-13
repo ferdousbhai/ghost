@@ -372,12 +372,18 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
       const parts = [];
+      let renderedTexts = 0;
       const resources = new Map();
       try {
         for await (const ev of turnEvents(r, conversation)) {
           const stick = nearBottom();
           if (ev.type === "resources") {
             if (!resources.has(ev.run)) {
+              if (parts.length) {
+                replies.at(-1).classList.remove("pending");
+                replies.push(replyBubble());
+                parts.length = 0; renderedTexts = 0;
+              }
               const notice = resourceNotice(""); resources.set(ev.run, notice);
               replies.at(-1).before(notice);
             }
@@ -389,10 +395,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
             const texts = bubbles(parts);
             // Words mean the call before them is over.
             if (texts.length) activity.remove();
-            if (texts.length > replies.length) {
+            if (texts.length > renderedTexts && renderedTexts > 0) {
               replies.at(-1).classList.remove("pending");
               replies.push(replyBubble());
             }
+            renderedTexts = texts.length;
             if (texts.length) replies.at(-1).replaceChildren(renderMarkdown(texts.at(-1), document));
           } else if (ev.type === "tool_execution_start") {
             parts.push({ type: "toolCall" });

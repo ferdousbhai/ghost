@@ -64,6 +64,42 @@ describe("remote viewer markdown", () => {
 });
 
 describe("remote viewer transcript", () => {
+  test("continued runs keep notices and reply segments in stream order", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    const nodes: Array<{ textContent: string; className: string }> = [];
+    const element = (textContent = "") => ({
+      textContent, className: "", classList: { add() {}, remove() {} },
+      before(other: { textContent: string; className: string }) { nodes.splice(nodes.indexOf(this), 0, other); },
+      after() {}, remove() {},
+      replaceChildren(text: string) { this.textContent = text; },
+    });
+    const events = [
+      { type: "resources", run: "r1", summary: "first inventory" },
+      { type: "text_start" }, { type: "text_delta", delta: "first answer" },
+      { type: "resources", run: "r2", summary: "second inventory" },
+      { type: "text_start" }, { type: "text_delta", delta: "second answer" },
+      { type: "resources", run: "r2", summary: "updated inventory" },
+      { type: "tool_execution_start", toolName: "bash" },
+      { type: "text_start" }, { type: "text_delta", delta: "after tool" },
+    ];
+    const context = {
+      prompt: { value: "hello" }, pending: [], ghost: "casper", session: "c1", draft: null, streaming: false,
+      show() {}, refresh() {}, seg: encodeURIComponent,
+      fetch: async () => ({ ok: true }), grow() {}, clearTray() {},
+      log: { querySelector: () => null, append: (el: ReturnType<typeof element>) => nodes.push(el) },
+      userBubble: element, assistantBubble: element, resourceNotice: element,
+      document: { createElement: () => element() }, follow() {}, nearBottom: () => true,
+      turnEvents: async function* () { yield* events; },
+      bubbles: (parts: Array<{ type: string; text: string }>) => parts.filter(p => p.type === "text").map(p => p.text).filter(Boolean),
+      renderMarkdown: (text: string) => text, loadSessions() {},
+    };
+    const send = new Function(...Object.keys(context), `${source}; return send;`)(...Object.values(context));
+    await send();
+    expect(nodes.map(n => n.textContent)).toEqual([
+      "hello", "first inventory", "first answer", "updated inventory", "second answer", "after tool",
+    ]);
+  });
+
   test("a long conversation opens on its newest page", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function loadTranscript\([^)]*\) \{[\s\S]*?\n {2}\}/)?.[0];
     expect(source).toBeDefined();

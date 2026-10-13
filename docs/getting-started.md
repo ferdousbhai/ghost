@@ -235,9 +235,7 @@ and any skill you installed untouched.
 ## 9. Optional, once you are talking
 
 - **Lend the ghost your browser.** It has none until you pair the
-  [Ghost extension](https://github.com/ferdousbhai/ghost-chromium-extension)
-  (submitted to the Chrome Web Store 2026-09-21, not yet listed; until then,
-  the release zip loaded unpacked). In its side panel's
+  [Ghost extension](https://chromewebstore.google.com/detail/ghost/hiikecmfleghkggknndabdkmlmnohpbm). In its side panel's
   menu choose **Ghost on this machine…**, then open the HUD and press Allow
   when it shows the same code. Read the extension's README first — the ghost
   acts in the session you are signed into.
