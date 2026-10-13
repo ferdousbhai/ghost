@@ -196,7 +196,9 @@ describe("parsers over recorded output", () => {
     }))).toEqual([{ type: "model", model: "muse-spark-1.3-contributor", provider: "meta" }]);
   });
 
-  it("grok and copilot: inventories captured in native 2026-10-13 probes", () => {
+  it("claude, grok and copilot: inventories captured in native 2026-10-13 probes", () => {
+    expect(parse("claude", "claude-init-resources.jsonl").find((event) => event.type === "resources"))
+      .toEqual({ type: "resources", resources: { skills: ["resource-audit-marker", "cloudmail"], extensions: ["keep-going", "clangd-lsp"], mcpServers: [] } });
     expect(parse("grok", "grok-init-resources.jsonl").find((event) => event.type === "resources"))
       .toEqual({ type: "resources", resources: { skills: ["cloud-calendar", "cloudmail", "built-in-browser"], extensions: null, mcpServers: [] } });
     expect(parse("copilot", "copilot-resources.jsonl"))
