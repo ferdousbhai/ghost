@@ -114,7 +114,7 @@ TestCase {
     }
 
     function test_aSendRefusedAsBusyQueuesIntoTheRunningTurn(): void {
-        // ghostd started a next-work turn this HUD has not heard of yet.
+        // Another client started a turn this HUD has not heard of yet.
         Ghostd.send("look at this too");
         requests("POST", /\/api\/ghosts\/casper\/messages$/)[0].complete(409, {
             error: { code: "session_busy", message: "This ghost is already answering in this conversation." }

@@ -10,7 +10,7 @@ import { spawn } from "node:child_process";
 // streamed turn. Paths inside the ghost home never leak into transcripts.
 const here = dirname(fileURLToPath(import.meta.url));
 const mockPath = resolve(here, "../../dev/mock-ghostd.mjs");
-const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--next-work", "60", "--stop-hook", "0.5", "--cut-bytes", "1000"], {
+const child = spawn(process.execPath, [mockPath, "--port", "0", "--tool-steps", "2", "--stop-hook", "0.5", "--cut-bytes", "1000"], {
   stdio: ["ignore", "ignore", "pipe"],
 });
 
@@ -83,7 +83,7 @@ try {
   assert.equal(sessionsResponse.status, 200);
   const { sessions } = await sessionsResponse.json();
   assert.deepEqual(Object.keys(sessions[0]), [
-    "id", "title", "preview", "harness", "updatedAt", "messageCount", "pinned", "unread", "running", "continuesAt",
+    "id", "title", "preview", "harness", "updatedAt", "messageCount", "pinned", "unread", "running",
   ]);
 
   // Pinning lifts a conversation above newer ones, and unpinning puts it back.
@@ -190,19 +190,7 @@ try {
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
   assert.ok(!turnEvents.includes('"toolcall_'));
 
-  // A turn's end starts a next-work countdown, and the owner's next turn cancels it.
-  const traceRow = async () => (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
-    .sessions.find((session) => session.id === "mock-trace-probe");
-  assert.equal(typeof (await traceRow()).continuesAt, "string");
-  const nextTurn = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ prompt: "one more thing", sessionId: "mock-trace-probe" }),
-  });
-  assert.equal((await traceRow()).continuesAt, null);
-  await nextTurn.text();
-
-  // Stopping during a stop hook must end the turn without scheduling next work.
+  // Stopping during a stop hook must end the turn without starting another pass.
   const stoppedId = "mock-stopped-hook";
   let stoppedResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
     method: "POST",
@@ -239,7 +227,6 @@ try {
     const row = (await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions`)).json())
       .sessions.find((session) => session.id === stoppedId);
     if (!row.running) {
-      assert.equal(row.continuesAt, null);
       break;
     }
     if (tries === 99) throw new Error("stopped mock turn did not settle");

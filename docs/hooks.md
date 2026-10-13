@@ -62,11 +62,8 @@ the reply already reads as finished, and only a continuation shows.
 All non-empty `before_prompt` contexts are combined. The first `session_stop`
 handler that requests a continuation wins.
 
-Ghost registers no built-in hooks. The top-level `builtin` object sets ghostd's
-idle chain instead (`CONTRACTS.md`, "Background work and hooks"), which runs
-none of them. Both are whole numbers: `handoff_idle_seconds` (default 180; 0
-turns the whole chain off) and `next_work_turns` (default 100; 0 ends it after
-the handoff). The Hooks pane edits both.
+Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
+Legacy top-level `builtin` settings are ignored.
 
 `ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
@@ -165,9 +162,8 @@ latest instruction is the hook's reason rather than a repeat of `owner_prompt`.
 ([`conversation-log.ts`](../packages/daemon/src/conversation-log.ts)), one JSON
 object per line, so a hook can review the whole owner turn, not just the
 current pass: an owner message is `{"type":"user","text"}` with no `origin`; a
-follow-up, hook continuation, or ghostd's next-work prompt carries `origin`
-`"follow_up"`, `"hook"`, or `"auto"`, and an idle handoff is a
-`{"type":"handoff"}` entry. It
+follow-up or hook continuation carries `origin` `"follow_up"` or `"hook"`.
+Historical logs may also contain `origin: "auto"` or `{"type":"handoff"}`. It
 is untrusted content exactly like `messages`.
 
 Exit 0 with no output or `{}` accepts the pass. Either response below requests a

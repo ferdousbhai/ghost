@@ -424,12 +424,6 @@ Singleton {
     property var renameGhostSnapshot: null
     property var renameSessionRequest: null
     property var sessionsRequest: null
-    property var nextWorkCancelRequest: null
-    /** When ghostd starts the open conversation's next-work turn, from the listing; "" when none counts down. */
-    readonly property string continuesAt: {
-        const open = root.sessions.find(session => session && session.id === root.currentSessionId);
-        return open && typeof open.continuesAt === "string" ? open.continuesAt : "";
-    }
     property var eventsRequest: null
     property string eventsGhost: ""
     property int eventsConsumed: 0
@@ -2253,7 +2247,7 @@ Singleton {
 
     /**
      * ghostd was already running a turn here this HUD had not heard of (a
-     * next-work turn just started): the prompt becomes its follow-up, and the
+     * another client started a turn): the prompt becomes its follow-up, and the
      * listing says what runs.
      */
     function joinRunningTurn(state: var, prompt: string): void {
@@ -2279,16 +2273,6 @@ Singleton {
         // Another client's turn still shows until the listing ends it, which
         // reloads what it left.
         root.cancelTurn(state);
-    }
-
-    /** Cancel the open conversation's next-work countdown; the listing it announces clears the bar. */
-    function cancelNextWork(): void {
-        if (root.continuesAt === "" || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "nextWorkCancelRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(root.currentSessionId) + "/continuation", null, function () {
-                root.fetchSessions(ghost);
-            });
     }
 
     function cancelTurn(state: var): void {

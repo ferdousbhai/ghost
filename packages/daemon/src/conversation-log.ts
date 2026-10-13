@@ -31,7 +31,7 @@ export type AssistantPart = { readonly type: "text"; readonly text: string } | T
 export type LogEntry =
   | ({ readonly type: "resources" } & RunResourceSnapshot)
   | { readonly type: "conversation"; readonly v: number; readonly id: string; readonly createdAt: string }
-  /** `origin` is absent for an owner message; `auto` is ghostd's next-work prompt. */
+  /** `origin` is absent for an owner message; `auto` marks historical next-work prompts. */
   | { readonly type: "user"; readonly at: string; readonly text: string; readonly origin?: "follow_up" | "hook" | "auto" }
   | {
     readonly type: "assistant";
@@ -327,17 +327,6 @@ export function handoffContext(entries: readonly LogEntry[]): string | null {
   let text = lines.join("\n\n");
   if (text.length > HANDOFF_CONTEXT_CHARS) text = `…${text.slice(-HANDOFF_CONTEXT_CHARS)}`;
   return text;
-}
-
-/** Next-work turns ghostd has started since the owner last wrote, which `next_work_turns` bounds. */
-export function autoTurnsSinceOwner(entries: readonly LogEntry[]): number {
-  let count = 0;
-  for (const entry of entries) {
-    if (entry.type === "user" && entry.origin === "auto") count += 1;
-    // The owner wrote: a message, a queued follow-up, or a `!command`.
-    else if (entry.type === "command" || (entry.type === "user" && entry.origin !== "hook")) count = 0;
-  }
-  return count;
 }
 
 /** Owner `!` commands since the harness last ran, which it has not seen. */

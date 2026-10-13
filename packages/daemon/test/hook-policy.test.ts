@@ -41,7 +41,7 @@ describe("shared hook policy", () => {
     ] });
     expect(hookStatus(commands).hooks[1]?.name).toBe("Named context");
     for (const invalid of [
-      { hooks: { other: [] } }, { builtin: { memory_upkeep: {} } },
+      { hooks: { other: [] } },
       { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },
     ]) expect(() => parseHooksDocument(invalid, path)).toThrow();
   });

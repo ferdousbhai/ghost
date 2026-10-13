@@ -119,35 +119,11 @@ TestCase {
         return browser;
     }
 
-    // ghostd's idle settings show their defaults and save into builtin,
-    // leaving the command hooks as they were.
-    function test_idleSettingsSaveIntoBuiltin(): void {
+    function test_noAutomaticWorkSettings(): void {
         const browser = editableBrowser();
-        const turns = findChild(browser, "hookBuiltin-next_work_turns");
-        compare(findChild(browser, "hookBuiltin-handoff_idle_seconds").text, "180");
-        compare(turns.text, "100");
-
-        turns.text = "0";
-        turns.accepted();
-        compare(tc.requests.length, 1);
-        compare(JSON.parse(tc.requests[0].body), {
-            hooks: configDocument().hooks,
-            builtin: { next_work_turns: 0 }
-        });
-        tc.requests[0].complete(200, { path: Ghostd.hookConfigPath, document: JSON.parse(tc.requests[0].body) });
-        tryVerify(function () { return findChild(browser, "hookBuiltin-next_work_turns").text === "0"; });
-    }
-
-    // A refused idle setting shows the file's value again, not what was typed.
-    function test_refusedIdleSettingShowsTheFilesValue(): void {
-        const browser = editableBrowser();
-        const turns = findChild(browser, "hookBuiltin-next_work_turns");
-        turns.text = "20000";
-        turns.accepted();
-        compare(tc.requests.length, 1);
-        tc.requests[0].complete(400, { error: { code: "bad_request", message: "builtin.next_work_turns must be an integer in [0, 10000]." } });
-        verify(Ghostd.hookConfigError !== "");
-        compare(turns.text, "100");
+        Ghostd.hookConfig = { hooks: configDocument().hooks, builtin: { next_work_turns: 100 } };
+        verify(findChild(browser, "hookBuiltin-next_work_turns") === null);
+        verify(findChild(browser, "hookBuiltin-handoff_idle_seconds") === null);
     }
 
     function test_commandHookIsEditedInPlaceAndTheFileIsReplacedWhole(): void {

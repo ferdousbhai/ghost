@@ -238,7 +238,6 @@ FloatingWindow {
             event.accepted = true;
             if (hud.pending !== null) hud.dismissPending();
             else if (Ghostd.working) Ghostd.cancel();
-            else if (Ghostd.continuesAt !== "") Ghostd.cancelNextWork();
             else if (hud.workbenchOpen) Workbench.close();
             else event.accepted = false;
         }
@@ -383,10 +382,6 @@ FloatingWindow {
                         ActivityLine {
                             Layout.fillWidth: true
                             maxHeight: Math.max(90, Math.floor(hud.height * 0.28))
-                        }
-
-                        NextWorkLine {
-                            Layout.fillWidth: true
                         }
 
                         QueueLine {

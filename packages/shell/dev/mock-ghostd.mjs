@@ -39,8 +39,6 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
-/** Seconds a next-work countdown shows after each reply (the handoff is skipped); 0 shows none. */
-const NEXT_WORK_MS = Math.max(0, Number(opt("--next-work", "0")) || 0) * 1000;
 /** Where a turn response is cut and resumed, as ghostd cuts at about 1 MB; smaller to exercise it. */
 const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576);
 /** How long a session_stop hook decides after each reply; 0 runs none. */
@@ -384,7 +382,6 @@ const sessionSummary = (name) => (s) => {
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
     running: answering.has(turnKey(name, s.id)),
-    continuesAt: s.continuesAt ?? null,
   };
 };
 
@@ -456,15 +453,6 @@ function hooksDocumentProblem(document) {
   const path = HOOKS_CONFIG_PATH;
   if (document === null || typeof document !== "object" || Array.isArray(document)) {
     return `${path} must contain a JSON object.`;
-  }
-  const builtin = document.builtin;
-  if (builtin !== undefined) {
-    if (builtin === null || typeof builtin !== "object" || Array.isArray(builtin)) return `${path}: "builtin" must be an object.`;
-    const maxima = { handoff_idle_seconds: 86_400, next_work_turns: 10_000 };
-    for (const [key, value] of Object.entries(builtin)) {
-      if (!(key in maxima)) return `${path}: unsupported builtin key ${JSON.stringify(key)}.`;
-      if (!Number.isInteger(value) || value < 0 || value > maxima[key]) return `${path}: builtin.${key} must be an integer in [0, ${maxima[key]}].`;
-    }
   }
   const hooks = document.hooks;
   if (hooks === undefined) return null;
@@ -708,11 +696,6 @@ async function streamTurn(res, name, body) {
     existing = { id: sessionId, title: null, updatedAt: now, messages: [] };
     store.set(sessionId, existing);
   }
-  // As ghostd's does, a new turn cancels a counting-down next-work turn.
-  if (existing?.continuesAt) {
-    clearTimeout(existing.continuation);
-    existing.continuesAt = null;
-  }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
   // As in ghostd, the first owner text previews it, a `!command` included.
   if (existing) existing.preview ??= firstLine(prompt);
@@ -792,19 +775,6 @@ async function streamTurn(res, name, body) {
     activeTurns.delete(key);
     // Every end announces, as ghostd's does: stopped, failed, or done.
     if (existing) publishConversationUpdated(name, sessionId);
-    // --next-work: the countdown ghostd shows after an idle handoff, then its
-    // turn; as in ghostd, none follows a turn the owner stopped.
-    if (existing && NEXT_WORK_MS > 0 && !prompt.startsWith("!") && !stopped) {
-      existing.continuesAt = new Date(Date.now() + NEXT_WORK_MS).toISOString();
-      existing.continuation = setTimeout(() => {
-        existing.continuesAt = null;
-        append(existing, { role: "handoff", content: textParts("Updated plan.md") });
-        append(existing, { role: "auto", content: textParts("What should we work on next?") });
-        append(existing, { role: "assistant", content: textParts("Next, the **colophon**: it still names the old press.") });
-        publishConversationUpdated(name, sessionId);
-      }, NEXT_WORK_MS);
-      publishConversationUpdated(name, sessionId);
-    }
   }
   recordTurn(name, sessionId, prompt);
 }
@@ -1194,15 +1164,6 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     return json(res, 200, transcriptOf(s, url.searchParams));
-  }
-  if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "continuation" && req.method === "DELETE") {
-    const s = ghostSessions(name).get(routeConversation(parts));
-    if (s?.continuesAt) {
-      clearTimeout(s.continuation);
-      s.continuesAt = null;
-      publishConversationUpdated(name, s.id);
-    }
-    return json(res, 200, { cancelled: true });
   }
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "stop" && req.method === "POST") {
     const turn = activeTurns.get(turnKey(name, routeConversation(parts)));

@@ -28,7 +28,7 @@ Item {
     required property int rowIndex
 
     readonly property bool mine: root.speaker === "user"
-    // A stop hook's continuation, the idle handoff, or ghostd's next-work prompt: a dim line, not a message.
+    // A stop-hook continuation or historical handoff/auto entry: a dim line, not a message.
     readonly property bool hookNotice: root.speaker === "hook" || root.speaker === "handoff" || root.speaker === "auto"
     // A prompt's image lines are drawn as pictures, not printed.
     readonly property var promptParts: root.mine ? Attachments.split(root.body) : ({ text: root.body, images: [] })

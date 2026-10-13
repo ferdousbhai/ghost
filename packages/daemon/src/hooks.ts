@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  DEFAULT_BUILTIN_SETTINGS, hookStatus, parseCommandResult, parseHooksDocument,
+  hookStatus, parseCommandResult, parseHooksDocument,
   runBeforePromptHooks, runSessionStopHooks,
-  type BuiltinSettings, type CommandHook, type CommandResult, type GhostBeforePromptEvent,
+  type CommandHook, type CommandResult, type GhostBeforePromptEvent,
   type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
   type GhostSessionStopResult,
@@ -187,7 +187,6 @@ function runCommandHook(
 export class GhostHookRunner {
   private readonly logger: Logger;
   private commands: CommandHook[];
-  private builtinSettings: BuiltinSettings;
   private readonly commandRunner: NonNullable<GhostHookRunnerOptions["commandRunner"]>;
   private commandConfig?: GhostHookCommandConfig;
   private readonly configWrites = new Map<string, Promise<unknown>>();
@@ -195,13 +194,11 @@ export class GhostHookRunner {
   constructor(
     options: GhostHookRunnerOptions & {
       commands?: CommandHook[];
-      builtin?: BuiltinSettings;
       commandConfig?: GhostHookCommandConfig;
     } = {},
   ) {
     this.logger = options.logger ?? silentLogger;
     this.commands = options.commands ?? [];
-    this.builtinSettings = options.builtin ?? DEFAULT_BUILTIN_SETTINGS;
     this.commandConfig = options.commandConfig;
     this.commandRunner = options.commandRunner ?? runCommandHook;
   }
@@ -213,11 +210,6 @@ export class GhostHookRunner {
       ...parseHooksDocument(document, path),
       commandConfig: { path, document: document as Record<string, unknown> },
     });
-  }
-
-  /** ghostd's idle handoff and next-work settings, as `hooks.json` last set them. */
-  builtin(): BuiltinSettings {
-    return this.builtinSettings;
   }
 
   /** The admitted `hooks.json`, or undefined for a runner built without one. */
@@ -235,13 +227,12 @@ export class GhostHookRunner {
   async replaceConfig(document: unknown): Promise<GhostHookCommandConfig> {
     const config = this.commandConfig;
     if (!config) throw new Error("This hook runner has no configuration file.");
-    const { commands, builtin } = parseHooksDocument(document, config.path);
+    const { commands } = parseHooksDocument(document, config.path);
     const admitted = document as Record<string, unknown>;
     return serializeByKey(this.configWrites, config.path, async () => {
       await mkdir(dirname(config.path), { recursive: true });
       await writePrivateJsonAtomic(config.path, admitted);
       this.commands = commands;
-      this.builtinSettings = builtin;
       this.commandConfig = { path: config.path, document: admitted };
       return this.commandConfig;
     });

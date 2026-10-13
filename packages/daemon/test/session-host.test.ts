@@ -12,7 +12,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import { readPinState } from "../src/pins.js";
 import { readReadState } from "../src/reads.js";
-import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
+import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
 import { makeTempGhosts, seedGhost, tempDir, type TempGhosts } from "./helpers/fixtures.js";
@@ -656,22 +656,6 @@ describe("choosing the agent", () => {
     await turn(sessions, "hello", "c2");
     expect(first.calls().map((c) => c.prompt)).toContain("hello");
   });
-  it("a switch stops a running idle handoff before changing the carrying harness", async () => {
-    const first = harness([], "first");
-    const held = first.gate("handoff");
-    first.setTurns([...replies("done"), { gate: held.path }, ...replies("unused")]);
-    const second = harness(replies("new harness"), "second");
-    const sessions = host({ harnesses: [first, second], hooks: idle(20, 0) });
-    await turn(sessions, "start");
-    await waitFor(() => first.calls().length === 2);
-
-    await sessions.chooseHarness("casper", "c1", "second");
-    held.release();
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
-    expect(text(await turn(sessions, "continue"))).toBe("new harness");
-  });
-
   it("a running turn cannot have its harness switched underneath it", async () => {
     const first = harness([], "first");
     const held = first.gate("turn");
@@ -778,157 +762,18 @@ describe("conversation metadata", () => {
   });
 });
 
-/** A hook runner with only ghostd's idle settings: handoff after `ms`, then up to `turns` next-work turns. */
-function idle(ms: number, turns: number): GhostHookRunner {
-  return new GhostHookRunner({ builtin: { handoffIdleMs: ms, nextWorkTurns: turns } });
-}
-
-describe("the idle handoff", () => {
-  it("resumes the conversation's session once it sits idle and logs the reply as one handoff row", async () => {
-    const fake = harness(replies("done", "Updated plan.md"));
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
-    await turn(sessions, "ship it");
-    await waitFor(() => fake.calls().length === 2);
-    expect(fake.calls()[1]).toMatchObject({ prompt: HANDOFF_PROMPT, resume: true });
-    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).includes('"type":"handoff"'));
-    const { messages } = await sessions.readTranscript("casper", "c1");
-    expect(messages.map((message) => [message.role, message.content])).toEqual([
-      ["user", [{ type: "text", text: "ship it" }]],
-      ["assistant", [{ type: "text", text: "done" }]],
-      ["handoff", [{ type: "text", text: "Updated plan.md" }]],
-    ]);
-    // The handoff is not news: the listing still dates the conversation by its reply.
-    const reply = (await readLog(sessionDir(), "c1"))?.findLast((entry) => entry.type === "assistant");
-    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.updatedAt).toBe(reply?.at);
-  });
-
-  it("gives way to the owner: a new turn stops a running handoff and nothing is logged for it", async () => {
-    const fake = harness([]);
-    const held = fake.gate("handoff");
-    fake.setTurns([...replies("done"), { gate: held.path }, ...replies("next answer")]);
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
-    await turn(sessions, "ship it");
-    await waitFor(() => fake.calls().length === 2);
-    expect(text(await turn(sessions, "one more thing"))).toBe("next answer");
-    expect(fake.calls()[2]?.prompt).toBe("one more thing");
-    expect((await readLog(sessionDir(), "c1"))?.some((entry) => entry.type === "handoff")).toBe(false);
-  });
-
-  it("schedules nothing after a turn the owner stopped: the owner is present", async () => {
-    const fake = harness([]);
-    const first = fake.gate("first");
-    fake.setTurns([{ gate: first.path, ...replies("done")[0] }, { gate: fake.gate("never").path }, ...replies("unexpected")]);
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 5) });
-    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "start", emit: () => {} });
-    await waitFor(() => fake.calls().length === 1);
-    // The follow-up's pass resumes a session that has replied, so a handoff could run after it.
-    await sessions.queueMessage("casper", "c1", "and wait");
-    first.release();
-    await waitFor(() => fake.calls().length === 2);
-    sessions.stopTurn("casper", "c1");
-    await running;
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fake.calls()).toHaveLength(2);
-  });
-
-  it("counts down no next-work turn when the owner writes as a handoff is logged", async () => {
-    const fake = harness(replies("done", "noted", "answer", "noted again", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 400 });
-    await turn(sessions, "ship it");
-    let owner: Promise<TurnEvent[]> | undefined;
-    sessions.subscribeConversationEvents("casper", () => {
-      if (!owner && readFileSync(logPath(sessionDir(), "c1"), "utf8").includes('"type":"handoff"')) owner = turn(sessions, "I'm back");
-    });
-    await waitFor(() => owner !== undefined);
-    expect(text(await (owner as Promise<TurnEvent[]>))).toBe("answer");
-    // The owner's turn schedules its own handoff; a countdown left by the first would take its place.
-    await waitFor(() => fake.calls().length === 4);
-    expect(fake.calls()[3]?.prompt).toBe(HANDOFF_PROMPT);
-  });
-
-  it("refuses a turn when shutdown begins while it waits out a running handoff", async () => {
-    const fake = harness([]);
-    const held = fake.gate("handoff");
-    fake.setTurns([...replies("done"), { gate: held.path }, ...replies("unexpected")]);
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 0) });
-    await turn(sessions, "ship it");
-    await waitFor(() => fake.calls().length === 2);
-    const admitted = sessions.admitTurn("casper", { sessionId: "c1", prompt: "late" });
-    sessions.beginShutdown();
-    await expect(admitted).rejects.toMatchObject({ code: "shutting_down" });
-  });
-
-  it("keeps the ghost working after each handoff, up to next_work_turns since the owner wrote", async () => {
-    const fake = harness(replies("done", "noted", "idea one", "noted", "idea two", "noted", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 2), nextWorkCountdownMs: 20 });
-    await turn(sessions, "ship it");
-    await waitFor(() => fake.calls().length === 6);
-    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).split('"type":"handoff"').length === 4);
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fake.calls().map((call) => call.prompt)).toEqual([
-      "ship it", HANDOFF_PROMPT, NEXT_WORK_PROMPT, HANDOFF_PROMPT, NEXT_WORK_PROMPT, HANDOFF_PROMPT,
-    ]);
-    const { messages } = await sessions.readTranscript("casper", "c1");
-    expect(messages.map((message) => message.role)).toEqual([
-      "user", "assistant", "handoff", "auto", "assistant", "handoff", "auto", "assistant", "handoff",
-    ]);
-  });
-
-  it("starts no next-work turn after a failed handoff", async () => {
-    const fake = harness([...replies("done"), { exit: 1, stderr: "out of quota" }, ...replies("unexpected")]);
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 20 });
-    await turn(sessions, "ship it");
-    await waitFor(() => (readFileSync(logPath(sessionDir(), "c1"), "utf8")).includes('"type":"handoff"'));
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(fake.calls()).toHaveLength(2);
-    expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.continuesAt).toBeNull();
-  });
-
-  it("reads the settings when a step starts, so turning the chain off stops one already scheduled", async () => {
+describe("idle conversations", () => {
+  it("ignores legacy automatic-work settings after an owner turn", async () => {
     const dir = tempDir();
     cleanups.push(dir.cleanup);
     const config = join(dir.path, "hooks.json");
-    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1 } }));
-    const hooks = GhostHookRunner.fromConfig(config);
+    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1, next_work_turns: 100 } }));
     const fake = harness(replies("done", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks });
+    const sessions = host({ harnesses: [fake], hooks: GhostHookRunner.fromConfig(config) });
     await turn(sessions, "ship it");
-    await hooks.replaceConfig({ builtin: { handoff_idle_seconds: 0 } });
     await new Promise((resolve) => setTimeout(resolve, 1_300));
     expect(fake.calls()).toHaveLength(1);
-  });
-
-  it("starts no next-work turn once handoff_idle_seconds turns the chain off during its countdown", async () => {
-    const dir = tempDir();
-    cleanups.push(dir.cleanup);
-    const config = join(dir.path, "hooks.json");
-    writeFileSync(config, JSON.stringify({ builtin: { handoff_idle_seconds: 1 } }));
-    const hooks = GhostHookRunner.fromConfig(config);
-    const fake = harness(replies("done", "noted", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks, nextWorkCountdownMs: 300 });
-    await turn(sessions, "ship it");
-    const row = async () => (await sessions.listSessions("casper")).find((listed) => listed.id === "c1");
-    for (let tries = 0; !(await row())?.continuesAt; tries += 1) {
-      if (tries > 400) throw new Error("no countdown");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await hooks.replaceConfig({ builtin: { handoff_idle_seconds: 0 } });
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    expect(fake.calls()).toHaveLength(2);
-  });
-
-  it("lists the countdown, and the owner's cancel stops the next-work turn", async () => {
-    const fake = harness(replies("done", "noted", "unexpected"));
-    const sessions = host({ harnesses: [fake], hooks: idle(20, 5), nextWorkCountdownMs: 60_000 });
-    await turn(sessions, "ship it");
-    const row = async () => (await sessions.listSessions("casper")).find((listed) => listed.id === "c1");
-    for (let tries = 0; !(await row())?.continuesAt; tries += 1) {
-      if (tries > 200) throw new Error("no countdown");
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    await sessions.cancelNextWork("casper", "c1");
-    expect((await row())?.continuesAt).toBeNull();
-    expect(fake.calls()).toHaveLength(2);
+    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant"]);
   });
 });
 

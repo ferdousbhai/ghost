@@ -177,72 +177,6 @@ Rectangle {
         }
     }
 
-    // One of ghostd's idle settings, saved when Enter or a click elsewhere
-    // leaves a whole number that differs from the file's.
-    component BuiltinSetting: Row {
-        id: setting
-        property string label
-        property string key
-        readonly property int value: HookConfig.builtinValue(Ghostd.hookConfig, setting.key)
-
-        /** Show the file's value: after a reload, a refused write, or a field left unchanged. */
-        function show(): void {
-            valueInput.text = String(setting.value);
-        }
-
-        function commit(): void {
-            const typed = Number(valueInput.text.trim());
-            if (Number.isInteger(typed) && typed >= 0 && typed !== setting.value && root.editable && !root.busy)
-                Ghostd.writeHookConfig(HookConfig.withBuiltin(Ghostd.hookConfig, setting.key, typed));
-            else setting.show();
-        }
-
-        onValueChanged: setting.show()
-        spacing: Theme.gap
-
-        Connections {
-            target: Ghostd
-
-            function onHookConfigWriteFinished(): void {
-                setting.show();
-            }
-        }
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: setting.label
-            textFormat: Text.PlainText
-            color: Theme.foregroundDim
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSizeSmall
-        }
-
-        Rectangle {
-            width: Theme.pad * 4
-            height: valueInput.implicitHeight + Theme.gap / 2
-            radius: Theme.radius / 2
-            color: Theme.film(0.05)
-            border.width: 1
-            border.color: valueInput.activeFocus ? Theme.amber(0.55) : Theme.border
-
-            InlineRename {
-                id: valueInput
-                objectName: "hookBuiltin-" + setting.key
-                anchors.fill: parent
-                anchors.leftMargin: Theme.gap / 2
-                anchors.rightMargin: Theme.gap / 2
-                verticalAlignment: TextInput.AlignVCenter
-                placeholder: ""
-                text: String(setting.value)
-                enabled: root.editable && !root.busy
-                inputMethodHints: Qt.ImhDigitsOnly
-                Accessible.name: setting.label
-                onCommitted: setting.commit()
-                onFocusLost: setting.commit()
-                onCancelled: setting.show()
-            }
-        }
-    }
 
     Column {
         id: header
@@ -317,23 +251,6 @@ Rectangle {
             }
         }
 
-        // ghostd's own idle behavior: the handoff that keeps the documents
-        // current, then the turns that keep the ghost working. 0 turns one off.
-        Flow {
-            width: parent.width
-            spacing: Theme.pad
-            visible: Ghostd.hookConfigLoaded
-
-            BuiltinSetting {
-                label: "Hand off after idle (s, 0 off)"
-                key: "handoff_idle_seconds"
-            }
-
-            BuiltinSetting {
-                label: "Then keep working, turns (0 off)"
-                key: "next_work_turns"
-            }
-        }
     }
 
     Rectangle {

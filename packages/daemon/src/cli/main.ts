@@ -77,7 +77,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "stop",
     usage: "stop [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Stop a conversation's running turn, or cancel its next-work countdown.",
+    summary: "Stop a conversation's running turn.",
     example: "ghost stop -s cli-abc",
     positionals: [0, 0],
     run: stopCommand,

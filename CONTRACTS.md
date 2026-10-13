@@ -374,36 +374,10 @@ a host bound; `owner_prompt` and `turn_id` identify one owner request across
 its continuations.
 `ghostd hook-complete` gives a hook one completion from the ghost's
 preferred harness ([`hook-complete.ts`](packages/daemon/src/hook-complete.ts)).
-A ghost keeps its notes in the
-owner's documents with its file tools, and they are the state a later session
-resumes from. So that they never trail a conversation, and so the ghost keeps
-working once keep-going lets a turn stop, ghostd runs one built-in idle chain
-([`session-host.ts`](packages/daemon/src/session-host.ts)), set by the
-`builtin` section of `hooks.json` (`handoff_idle_seconds` and
-`next_work_turns`, defined in [`docs/hooks.md`](docs/hooks.md)):
-
-1. **Handoff.** `handoff_idle_seconds` after a turn that ran a harness and
-   was not stopped by the owner, with no turn since, it resumes the
-   conversation's own harness session, in its directory, with
-   `HANDOFF_PROMPT`. It runs no hooks, streams to no client, and is not a
-   running turn in the listing. Its reply is one `handoff` log entry, which
-   the transcript shows as a `handoff` message and a new harness's carried
-   context leaves out.
-2. **Next work.** After a handoff that did not fail, while fewer than
-   `next_work_turns` `auto` prompts follow the owner's last message, it then lists `continuesAt` for 15 s
-   (`NEXT_WORK_COUNTDOWN_MS`) and starts an ordinary turn,
-   `NEXT_WORK_PROMPT`, logged as a user entry with `origin: "auto"` (an
-   `auto` transcript message). Its end starts the chain again.
-
-A new turn or harness switch in the conversation, its deletion, or the ghost's
-move or shutdown stops a pending or running step first; `DELETE …/continuation` (and `ghost
-stop` when no turn runs) stops only a countdown. Each step reads the settings
-when it starts, so turning one off also stops a step already scheduled.
-
-Every `session_stop` and `before_prompt` behavior is a `hooks.json` command the
-owner chooses. Ghost has no in-process hook registration to be the other kind,
-so a status row carries only its event, name, and description; the `builtin`
-section of that file holds only the idle chain's two settings above.
+Ghost starts no automatic idle handoff or next-work turns. Only owner requests,
+schedules, and explicit owner command hooks initiate work. Legacy `builtin`
+settings in `hooks.json` are ignored; command hooks remain active. Historical
+`handoff` and `auto` log entries remain readable.
 
 ## Daemon HTTP API
 
@@ -439,17 +413,16 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
-| `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A switch cancels its idle handoff or next-work countdown; a running turn refuses it with `409 session_busy`. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
+| `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An agent a turn would pass over is refused, `409 harness_not_installed` or `harness_no_room` with the window, never silently ignored. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
-| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, continuesAt }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not; `continuesAt` is when a counting-down next-work turn starts, else null. |
+| `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `handoff` message is the idle handoff's one-line reply, or `Failed: <reason>`, and an `auto` message is ghostd's next-work prompt. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
-| `DELETE /sessions/:id/continuation` | Cancel the conversation's next-work countdown; `{ cancelled: true }` whether or not one was pending. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |

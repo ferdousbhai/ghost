@@ -37,7 +37,6 @@ node dev/mock-ghostd.mjs --port 17717
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
 # --stall-stream (stream never settles), --update (a newer release is out),
 # --stop-hook S (a stop hook decides for S seconds after each reply),
-# --next-work S (a next-work countdown of S seconds after each reply),
 # --cut-bytes N (cut each turn response after N bytes, as ghostd does at ~1 MB).
 
 # Terminal 2: the one supported HUD preview command.
