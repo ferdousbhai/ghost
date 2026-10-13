@@ -650,7 +650,8 @@ Browser tabs stay open across idle periods; only explicit close and lifecycle
 teardown retire the workspace. Browser element refs survive repeated finds
 and tab listings until navigation or tab selection invalidates them. Each backend
 page operation reports `no_page` when no tab is open, after checking relay
-availability; Ghost adds no preflight relay call.
+availability. Ghost avoids redundant page preflights; navigation-sensitive
+actions retain a before-page read.
 
 ## Harness and lifecycle invariants
 
