@@ -2431,13 +2431,15 @@ Singleton {
             state.activity = "starting:" + (event.harness || "");
             break;
         case "resources": {
+            if (!event.summary) break;
             const id = "resources:" + event.run;
             const index = state.rows.findIndex(row => row.entryId === id);
             if (index >= 0) {
                 root.setTurnRow(state, index, "text", String(event.summary || ""));
             } else {
-                root.insertTurnBreakFor(state, "resources", String(event.summary || ""));
-                root.setTurnRow(state, state.rows.length - 2, "entryId", id);
+                root.flushTurn(state, true);
+                root.appendTurnRow(state, { role: "resources", text: String(event.summary),
+                    entryId: id, toolActivity: [], error: "", pending: false });
             }
             break;
         }

@@ -2,8 +2,10 @@
 
 Ghost reports evidence from the answering harness, not a scan of installed
 skills, plugin directories, or enabled MCP configuration. Each attempt starts
-unknown, including fallback and resumed attempts. **Not reported** means
-unknown; **none** means an explicitly empty inventory. A skill catalog can
+unknown, including fallback and resumed attempts. Only successful passes with
+named resources produce a notice, after the reply; unknown and empty fields
+are omitted. Internally `null` means unknown and `[]` explicitly empty. Old
+transcripts are reprojected with the same filtering. A skill catalog can
 contain descriptions rather than full skill bodies; this is not a token-cost
 estimate or a list of skills actually invoked.
 

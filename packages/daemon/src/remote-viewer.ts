@@ -373,21 +373,15 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       follow(true);
       const parts = [];
       let renderedTexts = 0;
-      const resources = new Map();
       try {
         for await (const ev of turnEvents(r, conversation)) {
           const stick = nearBottom();
-          if (ev.type === "resources") {
-            if (!resources.has(ev.run)) {
-              if (parts.length) {
-                replies.at(-1).classList.remove("pending");
-                replies.push(replyBubble());
-                parts.length = 0; renderedTexts = 0;
-              }
-              const notice = resourceNotice(""); resources.set(ev.run, notice);
-              replies.at(-1).before(notice);
-            }
-            resources.get(ev.run).textContent = ev.summary;
+          if (ev.type === "harness" && parts.length) {
+            replies.at(-1).classList.remove("pending");
+            replies.push(replyBubble());
+            parts.length = 0; renderedTexts = 0;
+          } else if (ev.type === "resources" && ev.summary) {
+            log.append(resourceNotice(ev.summary));
           }
           else if (ev.type === "text_start") parts.push({ type: "text", text: "" });
           else if (ev.type === "text_delta") {

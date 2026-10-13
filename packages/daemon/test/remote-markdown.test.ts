@@ -64,7 +64,7 @@ describe("remote viewer markdown", () => {
 });
 
 describe("remote viewer transcript", () => {
-  test("continued runs keep notices and reply segments in stream order", async () => {
+  test("successful runs append their inventory after their reply segments", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];
     const nodes: Array<{ textContent: string; className: string }> = [];
     const element = (textContent = "") => ({
@@ -74,13 +74,14 @@ describe("remote viewer transcript", () => {
       replaceChildren(text: string) { this.textContent = text; },
     });
     const events = [
-      { type: "resources", run: "r1", summary: "first inventory" },
+      { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "first answer" },
-      { type: "resources", run: "r2", summary: "second inventory" },
+      { type: "resources", run: "r1", summary: "first inventory" },
+      { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "second answer" },
-      { type: "resources", run: "r2", summary: "updated inventory" },
       { type: "tool_execution_start", toolName: "bash" },
       { type: "text_start" }, { type: "text_delta", delta: "after tool" },
+      { type: "resources", run: "r2", summary: "second inventory" },
     ];
     const context = {
       prompt: { value: "hello" }, pending: [], ghost: "casper", session: "c1", draft: null, streaming: false,
@@ -96,7 +97,7 @@ describe("remote viewer transcript", () => {
     const send = new Function(...Object.keys(context), `${source}; return send;`)(...Object.values(context));
     await send();
     expect(nodes.map(n => n.textContent)).toEqual([
-      "hello", "first inventory", "first answer", "updated inventory", "second answer", "after tool",
+      "hello", "first answer", "first inventory", "second answer", "after tool", "second inventory",
     ]);
   });
 

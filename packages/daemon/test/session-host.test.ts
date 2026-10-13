@@ -12,8 +12,7 @@ import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
 import { readPinState } from "../src/pins.js";
 import { readReadState } from "../src/reads.js";
-import { resourceSummary, unreportedResources } from "../src/run-resources.js";
-const unknownNotice = ["resources", [{ type: "text", text: resourceSummary("fake", unreportedResources()) }]];
+import { resourceSummary } from "../src/run-resources.js";
 import { HANDOFF_PROMPT, NEXT_WORK_PROMPT, SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
@@ -107,10 +106,8 @@ describe("a turn", () => {
     expect((await sessions.listSessions("casper")).find((row) => row.id === "c1")?.harness).toBe("fake");
     expect(transcript.messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ping" }]],
-      unknownNotice,
       ["assistant", [{ type: "text", text: "pong" }]],
       ["user", [{ type: "text", text: "again" }]],
-      unknownNotice,
       ["assistant", [{ type: "text", text: "pong again" }]],
     ]);
   });
@@ -158,17 +155,30 @@ describe("run resources", () => {
     const sessions = host({ harnesses: [fake] });
     const events = await turn(sessions, "hello");
     const snapshots = events.filter((event) => event.type === "resources");
-    expect(snapshots).toHaveLength(2);
-    expect(snapshots[0]?.run).toBe(snapshots[1]?.run);
+    expect(snapshots).toHaveLength(1);
+    expect(events.findIndex(event => event.type === "resources")).toBeGreaterThan(events.findLastIndex(event => event.type === "text_end"));
     expect(asked[0]).toMatchObject({ session: "native-1", since: expect.stringMatching(/^\d{4}-/) });
     const logged = (await readLog(sessionDir(), "c1"))!.filter((entry) => entry.type === "resources");
     expect(logged).toHaveLength(1);
     expect(logged[0]?.resources.skills).toEqual(["marker"]);
-    expect((await sessions.readTranscript("casper", "c1")).messages[1]?.content)
+    expect((await sessions.readTranscript("casper", "c1")).messages[2]?.content)
       .toEqual([{ type: "text", text: resourceSummary("fake", { skills: ["marker"], extensions: null, mcpServers: null }) }]);
   });
 
-  it("keeps each fallback and resumed run separate, without claiming configured resources loaded", async () => {
+  it("does not publish an inventory when a pass fails after producing text", async () => {
+    const fake = harness([{ events: [
+      { type: "resources", resources: { skills: ["mail"], extensions: [], mcpServers: [] } },
+      { type: "text", block: "r", delta: "partial" },
+      { type: "error", message: "connection reset" },
+    ] }]);
+    const sessions = host({ harnesses: [fake] });
+    const events = await turn(sessions, "hello");
+    expect(events.at(-1)?.type).toBe("error");
+    expect(events.some(event => event.type === "resources")).toBe(false);
+    expect((await readLog(sessionDir(), "c1"))!.some(entry => entry.type === "resources")).toBe(false);
+  });
+
+  it("omits failed fallback inventories and unknown resumed runs", async () => {
     const first = harness([{ events: [
       { type: "resources", resources: { skills: ["mail"], extensions: ["review"], mcpServers: [] } },
       { type: "error", message: "not signed in" },
@@ -177,20 +187,13 @@ describe("run resources", () => {
     const sessions = host({ harnesses: [first, second] });
     const events = await turn(sessions, "hello");
     const reports = events.filter((event) => event.type === "resources");
-    expect(reports).toHaveLength(3);
-    expect(reports[0]?.run).toBe(reports[1]?.run);
-    expect(reports[2]?.run).not.toBe(reports[0]?.run);
-    expect(reports[1]?.resources.skills).toEqual(["mail"]);
-    expect(reports[2]?.resources).toEqual(unreportedResources());
+    expect(reports).toEqual([]);
     await turn(sessions, "again");
     const entries = (await readLog(sessionDir(), "c1"))!;
-    const snapshots = entries.filter((entry) => entry.type === "resources");
-    expect(snapshots.map((entry) => entry.harness)).toEqual(["first", "second", "second"]);
-    expect(new Set(snapshots.map((entry) => entry.run)).size).toBe(3);
-    expect(snapshots[2]?.resources).toEqual(unreportedResources());
+    expect(entries.filter((entry) => entry.type === "resources")).toEqual([]);
     expect((await sessions.listSessions("casper"))[0]?.messageCount).toBe(4);
     expect(second.calls()[0]?.prompt).not.toContain("Run resources");
-    expect((await sessions.readTranscript("casper", "c1")).messages.filter((message) => message.role === "resources")).toHaveLength(3);
+    expect((await sessions.readTranscript("casper", "c1")).messages.filter((message) => message.role === "resources")).toEqual([]);
   });
 });
 
@@ -371,7 +374,7 @@ describe("queued follow-ups and aborts", () => {
     expect(events.at(-1)).toEqual({ type: "done" });
     const { messages } = await sessions.readTranscript("casper", "c1", {});
     expect(messages.map((message) => [message.role, message.errorMessage ?? null])).toEqual([
-      ["user", null], ["resources", null], ["assistant", "crashed"], ["user", null], ["resources", null], ["assistant", null],
+      ["user", null], ["assistant", "crashed"], ["user", null], ["assistant", null],
     ]);
   });
 
@@ -545,7 +548,7 @@ describe("owner commands and hooks", () => {
       expect.objectContaining({ type: "done" }),
     ]);
     expect(fake.calls()[1]?.prompt).toBe("Stop hook feedback:\nverify it");
-    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "resources", "assistant", "hook", "resources", "assistant"]);
+    expect((await sessions.readTranscript("casper", "c1")).messages.map((message) => message.role)).toEqual(["user", "assistant", "hook", "assistant"]);
     const [before, first, continued] = stop.inputs();
     expect(before).toMatchObject({ type: "before_prompt", prompt: "do it", turn_id: expect.any(String) });
     expect(first).toMatchObject({ type: "session_stop", owner_prompt: "do it", turn_id: before?.turn_id, stop_hook_active: false });
@@ -787,9 +790,7 @@ describe("the idle handoff", () => {
     const { messages } = await sessions.readTranscript("casper", "c1");
     expect(messages.map((message) => [message.role, message.content])).toEqual([
       ["user", [{ type: "text", text: "ship it" }]],
-      unknownNotice,
       ["assistant", [{ type: "text", text: "done" }]],
-      unknownNotice,
       ["handoff", [{ type: "text", text: "Updated plan.md" }]],
     ]);
     // The handoff is not news: the listing still dates the conversation by its reply.
@@ -865,7 +866,7 @@ describe("the idle handoff", () => {
     ]);
     const { messages } = await sessions.readTranscript("casper", "c1");
     expect(messages.map((message) => message.role)).toEqual([
-      "user", "resources", "assistant", "resources", "handoff", "auto", "resources", "assistant", "resources", "handoff", "auto", "resources", "assistant", "resources", "handoff",
+      "user", "assistant", "handoff", "auto", "assistant", "handoff", "auto", "assistant", "handoff",
     ]);
   });
 

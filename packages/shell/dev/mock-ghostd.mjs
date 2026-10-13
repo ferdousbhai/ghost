@@ -676,13 +676,12 @@ function followTurn(res, log, from) {
  * Drive scripted events into the turn. Returns the reply text, or null if
  * the turn was stopped.
  */
-async function pump(log, events, onStart) {
+async function pump(log, events) {
   let reply = "";
   for (const event of events) {
     if (log.stopped) return null;
     if (event.type === "text_end") reply = event.content;
     send(log, event);
-    if (event.type === "start") onStart?.();
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   return reply;
@@ -720,9 +719,12 @@ async function streamTurn(res, name, body) {
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
   // "Turn aborted.", a --fail one with its error.
-  const logReply = (reply) => existing && append(existing, reply === null
+  const logReply = (reply) => {
+    if (existing) append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
+    if (reply !== null && !failing) reportResources();
+  };
   const reportResources = () => {
     const harness = existing?.harness ?? draftHarness.get(key) ?? "claude";
     const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
@@ -744,7 +746,7 @@ async function streamTurn(res, name, body) {
           : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
       }
     } else {
-      let reply = await pump(log, script(name, prompt), reportResources);
+      let reply = await pump(log, script(name, prompt));
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
@@ -763,7 +765,6 @@ async function streamTurn(res, name, body) {
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
-        reportResources();
         reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }

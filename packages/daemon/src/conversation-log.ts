@@ -10,7 +10,7 @@ import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
-import type { RunResources } from "./run-resources.js";
+import { resourceSummary, type RunResources } from "./run-resources.js";
 
 export const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
@@ -286,7 +286,8 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
         ...(entry.error ? { errorMessage: entry.error } : {}),
       };
     } else if (entry.type === "resources") {
-      message = { role: "resources", content: [{ type: "text", text: entry.summary }], entryId };
+      const summary = resourceSummary(entry.harness, entry.resources);
+      if (summary) message = { role: "resources", content: [{ type: "text", text: summary }], entryId };
     } else if (entry.type === "handoff") {
       message = {
         role: "handoff",

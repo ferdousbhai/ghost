@@ -148,18 +148,13 @@ picks, per turn, the one already carrying the conversation, then the ghost's
 ghost harnesses          # which agents are installed and which have room
 ```
 
-Each run shows a **Run resources** notice in the HUD and tailnet transcript,
-and on stderr with `ghost say` (`-q` suppresses it). It names the skills,
-extensions/plugins, and connected MCP servers that the harness reports for
-that run, including fallback attempts. **Not reported** is unknown, not an
-empty inventory; **none** means the harness explicitly reported an empty list.
-Claude and Grok report inventories in startup events; Copilot reports fields
-when its corresponding loaded-resource events appear. Codex's skill catalog
-is read from that run's own context record after the pass. Missing fields stay
-**not reported**, including agents without inventory evidence on their headless
-path. See [agent coverage and probe evidence](run-resources.md). A listed skill
-can mean its description is available, not that its full body has entered context.
-The notice itself is display-only and adds nothing to the model's prompt.
+After a successful run, **Run resources** names reported skills, plugins,
+and connected MCP servers in the HUD, tailnet transcript, and `ghost say`
+stderr (`-q` suppresses it). Unknown and empty fields are omitted; failed or
+unreported runs show no notice. Codex reports its catalog after the pass.
+A listed skill can mean its description is available, not that its full body
+entered context. See [agent coverage](run-resources.md). Notices never enter
+the model's prompt.
 
 In the HUD, the harness label beside the conversation title opens a picker:
 choose an agent for this conversation, then "use <agent>" makes it the ghost's

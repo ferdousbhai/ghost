@@ -37,6 +37,7 @@ import {
   transcriptMessages,
   unseenCommands,
   type AssistantPart,
+  type LogEntry,
   type TranscriptMessage,
 } from "./conversation-log.js";
 import { resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
@@ -216,6 +217,7 @@ interface LiveTurn {
 
 /** One harness pass: what it said and did, and how it ended. */
 interface PassResult {
+  readonly resources?: Extract<LogEntry, { type: "resources" }>;
   readonly content: AssistantPart[];
   readonly error: string | null;
   readonly aborted: boolean;
@@ -709,7 +711,7 @@ export class SessionHost {
           ...(result.model ? { model: result.model.model } : {}),
           ...(result.model?.provider ? { provider: result.model.provider } : {}),
           ...(result.model?.effort ?? row.effort ? { effort: result.model?.effort ?? row.effort } : {}),
-        }]);
+        }, ...(result.resources ? [result.resources] : [])]);
         return result.error === null ? null : this.failure(stream, harness, result.error, result.aborted);
       }
       lastError = result.error;
@@ -747,8 +749,6 @@ export class SessionHost {
     const run = randomUUID();
     const at = new Date().toISOString();
     let resources = unreportedResources();
-    const reportResources = () => stream.emit({ type: "resources", run, harness: row.id, resources, summary: resourceSummary(row.id, resources) });
-    reportResources();
     const content: AssistantPart[] = [];
     const tools = new Map<string, { name: string; part: number }>();
     // The text block streaming now and its logged part, the last one while it is open,
@@ -807,7 +807,6 @@ export class SessionHost {
         }
         case "resources":
           resources = event.resources;
-          reportResources();
           return;
         case "model":
           model = event;
@@ -840,14 +839,16 @@ export class SessionHost {
         if (fact.type === "resources" || model === null) onEvent(fact);
       }
     }
-    await appendLog(sessionDir, id, [{ type: "resources", at, run, harness: row.id, resources, summary: resourceSummary(row.id, resources) }]);
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
     if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };
     if (error === null && exit.code !== 0) {
       const stderr = exit.stderr.trim().split("\n").slice(-6).join("\n");
       error = stderr || `${row.id} exited with ${exit.code === null ? `signal ${exit.signal}` : `status ${exit.code}`}.`;
     }
-    return { content, error, aborted: false, produced, model };
+    const summary = resourceSummary(row.id, resources);
+    const notice = error === null && summary ? { type: "resources" as const, at, run, harness: row.id, resources, summary } : undefined;
+    if (notice) stream.emit({ type: "resources", run, harness: row.id, resources, summary });
+    return { content, error, aborted: false, produced, model, resources: notice };
   }
 
   private async beforePrompt(
@@ -969,7 +970,7 @@ export class SessionHost {
             harness: row.id,
             text,
             ...(result.error ? { error: result.error } : {}),
-          }]);
+          }, ...(result.resources ? [result.resources] : [])]);
           this.announce(ghost.name, id);
           // A failed handoff means the harness is not answering; a next-work turn would fail too.
           next = !result.error && !this.shuttingDown && this.hooks.builtin().nextWorkTurns > autoTurnsSinceOwner(entries);

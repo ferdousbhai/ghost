@@ -10,9 +10,10 @@ describe("run resources", () => {
     for (const invalid of [[""], ["\nsecret"], ["a".repeat(257)], Array(257).fill("mail"), [{}]]) {
       expect(resourceNames(invalid)).toBeNull();
     }
-    expect(resourceSummary("pi", unreportedResources())).toContain("Skills: not reported");
+    expect(resourceSummary("pi", unreportedResources())).toBe("");
+    expect(resourceSummary("pi", { skills: [], extensions: [], mcpServers: [] })).toBe("");
     expect(resourceSummary("claude", { skills: [], extensions: ["review"], mcpServers: [] }))
-      .toContain("Skills: none\nExtensions/plugins: review\nConnected MCP servers: none");
+      .toBe("claude · Run resources\nExtensions/plugins: review");
   });
 
   it("extracts only names in Codex's rendered catalog section", () => {
@@ -32,6 +33,8 @@ describe("run resources", () => {
     ];
     expect(logState(entries)).toMatchObject({ activeAt: "before", messageCount: 1 });
     expect(handoffContext(entries)).toBe("Owner: hello");
-    expect(transcriptMessages(entries)[1]).toMatchObject({ role: "resources", content: [{ type: "text", text: "inventory" }] });
+    expect(transcriptMessages(entries)).toHaveLength(1);
+    entries.push({ type: "resources", at: "later", run: "r2", harness: "codex", resources: { skills: ["mail"], extensions: null, mcpServers: [] }, summary: "old noisy summary" });
+    expect(transcriptMessages(entries)[1]?.content).toEqual([{ type: "text", text: "codex · Run resources\nSkills: mail" }]);
   });
 });

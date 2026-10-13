@@ -231,8 +231,8 @@ names are parsed from its `### Available skills` section, not reconstructed
 from skill directories; missing or malformed catalogs remain unknown. After
 finding the latest model record, catalog lookup reads at most 8 MiB backwards;
 a catalog beyond that display-only read budget remains unknown. Nothing
-from that inspection enters handoff context. The owner should always be able to see what answered. Each pass also records
-and streams a `resources` snapshot `{ run, harness, resources: { skills,
+from that inspection enters handoff context. The owner should always be able to see what answered. A successful pass with named resources records
+and streams one final `resources` snapshot `{ run, harness, resources: { skills,
 extensions, mcpServers }, summary }`. Lists contain only names reported by that
 run's harness; `null` means not reported, `[]` means explicitly none. Claude's
 init reports skills, plugins, and connected MCP servers; Grok's init reports
@@ -248,7 +248,9 @@ checked versions and probe limitations are in
 files or launch configuration, and skill availability does not mean its full
 body has entered context. The snapshot starts unknown and is updated by the
 harness's report, never carried from an earlier run, including fallbacks and
-resumes. The transcript projects one `resources` notice per pass, excluded from
+resumes. Failed, aborted, and wholly unknown or empty inventories produce no
+notice. Summaries omit unknown and empty fields. A useful notice follows its
+pass's reply, excluded from
 handoff prompts, message counts, and activity timestamps. The HUD, terminal,
 and tailnet viewer render the same plain-text summary. This adds no route,
 setting, dependency, or discovery implementation: the existing parser, log,
@@ -466,7 +468,7 @@ remote access is the tailnet viewer alone.
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
-on each fallback), `resources` (that pass's inventory snapshot, updated when reported), `text_*`, `thinking` (the harness's reasoning, as
+on each fallback), `resources` (a successful pass's final nonempty inventory), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), and `session_stop_continued` events, and exactly one

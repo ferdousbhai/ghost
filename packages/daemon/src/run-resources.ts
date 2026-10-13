@@ -34,6 +34,10 @@ export function codexSkillNames(body: unknown): string[] | null {
 }
 
 export function resourceSummary(harness: string, resources: RunResources): string {
-  const list = (names: string[] | null) => names === null ? "not reported" : names.length ? names.join(", ") : "none";
-  return `${harness} · Run resources\nSkills: ${list(resources.skills)}\nExtensions/plugins: ${list(resources.extensions)}\nConnected MCP servers: ${list(resources.mcpServers)}`;
+  const lines = [
+    ["Skills", resources.skills],
+    ["Extensions/plugins", resources.extensions],
+    ["Connected MCP servers", resources.mcpServers],
+  ].flatMap(([label, names]) => Array.isArray(names) && names.length ? [`${label}: ${names.join(", ")}`] : []);
+  return lines.length ? `${harness} · Run resources\n${lines.join("\n")}` : "";
 }
