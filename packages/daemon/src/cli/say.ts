@@ -108,6 +108,9 @@ export async function sayCommand(
       }
       if (event.type === "harness") harnessStarted = true;
       else if (event.type === "tool_execution_start" && !harnessStarted) ownerCommand = true;
+      if (event.type === "resources" && secondary && typeof event.summary === "string") {
+        ctx.runtime.stderr.write(`${event.summary}\n`);
+      }
       if (event.type === "limit_reached") {
         const limit = event as unknown as { harness?: string; kind?: string };
         const kind = String(limit.kind ?? "limit").replace("_", " ");

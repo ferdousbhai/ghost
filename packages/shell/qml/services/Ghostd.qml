@@ -1107,6 +1107,7 @@ Singleton {
     function cloneTranscriptRow(row: var): var {
         return {
             role: String(row.role || ""),
+            entryId: String(row.entryId || ""),
             text: String(row.text || ""),
             toolActivity: Array.isArray(row.toolActivity) ? row.toolActivity.slice() : [],
             error: String(row.error || ""),
@@ -2429,6 +2430,17 @@ Singleton {
         case "harness":
             state.activity = "starting:" + (event.harness || "");
             break;
+        case "resources": {
+            const id = "resources:" + event.run;
+            const index = state.rows.findIndex(row => row.entryId === id);
+            if (index >= 0) {
+                root.setTurnRow(state, index, "text", String(event.summary || ""));
+            } else {
+                root.insertTurnBreakFor(state, "resources", String(event.summary || ""));
+                root.setTurnRow(state, state.rows.length - 2, "entryId", id);
+            }
+            break;
+        }
         case "text_start":
             root.textPart(state, event.contentIndex);
             state.presentationDirty = true;

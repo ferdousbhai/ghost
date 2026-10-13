@@ -135,6 +135,8 @@ export class Normalizer {
         out[key] = "<time>";
       } else if (DURATION_KEYS.has(key)) {
         out[key] = "<duration>";
+      } else if (key === "run") {
+        out[key] = "<run>";
       } else if (ENTRY_ID_KEYS.has(key)) {
         out[key] = typeof raw === "string" ? this.entryId(raw) : this.entryId(null);
       } else {

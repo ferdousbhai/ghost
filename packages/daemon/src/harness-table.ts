@@ -13,6 +13,7 @@ import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord, xdgBaseDir } from "@ghost/extensions";
+import { resourceNames, type RunResources } from "./run-resources.js";
 
 export interface HarnessMcpServer {
   readonly name: string;
@@ -44,6 +45,7 @@ export type HarnessEvent =
   | { readonly type: "tool_start"; readonly id: string; readonly name: string; readonly args: unknown }
   | { readonly type: "tool_end"; readonly id: string; readonly isError: boolean; readonly output?: string }
   | { readonly type: "session"; readonly id: string }
+  | { readonly type: "resources"; readonly resources: RunResources }
   /** The model answering, as the harness names it; `provider` and `effort` where it says. */
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
   | { readonly type: "error"; readonly message: string };
@@ -153,6 +155,17 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
     if (typeof event.session_id === "string" && event.type === "system" && event.subtype === "init") {
       out.push({ type: "session", id: event.session_id });
       if (typeof event.model === "string") out.push({ type: "model", model: event.model });
+      if (event.skills !== undefined || event.plugins !== undefined || event.mcp_servers !== undefined) {
+        out.push({ type: "resources", resources: {
+          skills: resourceNames(event.skills),
+          extensions: resourceNames(Array.isArray(event.plugins) ? event.plugins.map((plugin) => record(plugin).name) : undefined),
+          mcpServers: resourceNames(Array.isArray(event.mcp_servers)
+            && resourceNames(event.mcp_servers.map((server) => record(server).name)) !== null
+            && event.mcp_servers.every((server) => typeof record(server).status === "string")
+            ? event.mcp_servers.filter((server) => record(server).status === "connected").map((server) => record(server).name)
+            : undefined),
+        } });
+      }
     }
     if (event.type === "stream_event") {
       const inner = record(event.event);

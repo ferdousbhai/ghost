@@ -77,6 +77,22 @@ TestCase {
         compare(failedSpy.count, 0);
     }
 
+    function test_resourcesUpdateOneNoticePerRunAndStaySeparateFromReplies(): void {
+        const turn = openTurn("resources", null);
+        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: not reported" });
+        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: mail" });
+        compare(turn.state.rows.filter(row => row.role === "resources").length, 1);
+        compare(turn.state.rows[1].text, "Skills: mail");
+        compare(Ghostd.transcript.get(1).text, "Skills: mail");
+        Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r2", summary: "Skills: not reported" });
+        compare(turn.state.rows.filter(row => row.role === "resources").length, 2);
+        Ghostd.handleTurnEvent(turn.state, { type: "text_start", contentIndex: 0 });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 0, delta: "Answer" });
+        Ghostd.flushTurn(turn.state, true);
+        compare(turn.state.rows[turn.state.rows.length - 1].text, "Answer");
+        compare(turn.state.rows[1].text, "Skills: mail");
+    }
+
     function test_aTurnThatCannotResumeFailsOnce(): void {
         const resumed = [];
         const turn = cutTurn("cut-gone", resumed);

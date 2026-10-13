@@ -76,6 +76,7 @@ import {
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath, type TrashPathResult } from "./trash.js";
+import { resourceSummary, unreportedResources } from "./run-resources.js";
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
@@ -743,6 +744,11 @@ export class SessionHost {
     const launch = row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch.files);
 
+    const run = randomUUID();
+    const at = new Date().toISOString();
+    let resources = unreportedResources();
+    const reportResources = () => stream.emit({ type: "resources", run, harness: row.id, resources, summary: resourceSummary(row.id, resources) });
+    reportResources();
     const content: AssistantPart[] = [];
     const tools = new Map<string, { name: string; part: number }>();
     // The text block streaming now and its logged part, the last one while it is open,
@@ -798,6 +804,10 @@ export class SessionHost {
           stream.emit({ type: "tool_execution_end", id: event.id, toolName: tool.name, isError: event.isError, ...(summary ? { summary } : {}) });
           return;
         }
+        case "resources":
+          resources = event.resources;
+          reportResources();
+          return;
         case "model":
           model = event;
           return;
@@ -823,6 +833,7 @@ export class SessionHost {
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
+    await appendLog(sessionDir, id, [{ type: "resources", at, run, harness: row.id, resources, summary: resourceSummary(row.id, resources) }]);
     if (model === null && session !== null && row.ranOn) model = await row.ranOn(session, env).catch(() => null);
     if (signal.aborted) return { content, error: "Turn aborted.", aborted: true, produced, model };
     if (exit.spawnError) return { content, error: `${row.id} could not start: ${exit.spawnError}`, aborted: false, produced, model };

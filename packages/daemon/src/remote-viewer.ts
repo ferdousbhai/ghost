@@ -88,6 +88,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .user .pics:last-child { margin-bottom: -.15rem; }
   .pics a { display: block; flex: 1 1 8rem; max-width: 100%; }
   .pics img { display: block; width: 100%; max-height: 18rem; object-fit: cover; border-radius: .7rem; background: var(--deep); }
+  .resources { color: var(--dim); font: .75rem/1.5 var(--mono); white-space: pre-wrap; }
   .assistant { color: var(--fg); }
   .assistant.pending::after { content: ""; display: inline-block; width: .55rem; height: 1.05em; vertical-align: text-bottom; background: var(--amber); animation: blink 1s steps(2) infinite; }
   @keyframes blink { 50% { opacity: 0; } }
@@ -236,9 +237,14 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const texts = bubbles(m.content);
       if (m.role === "user" && texts.length) log.append(userBubble(texts.join("\\n\\n")));
       else if (m.role === "assistant") for (const text of texts) log.append(assistantBubble(text));
+      else if (m.role === "resources") log.append(resourceNotice(texts.join("\\n\\n")));
     }
     if (!log.childElementCount) empty();
     log.scrollTop = stick ? log.scrollHeight : top;
+  }
+
+  function resourceNotice(text) {
+    const el = document.createElement("div"); el.className = "resources"; el.textContent = text; return el;
   }
 
   async function loadTranscript(keep = false) {
@@ -366,10 +372,18 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       const activity = document.createElement("div"); activity.className = "activity";
       follow(true);
       const parts = [];
+      const resources = new Map();
       try {
         for await (const ev of turnEvents(r, conversation)) {
           const stick = nearBottom();
-          if (ev.type === "text_start") parts.push({ type: "text", text: "" });
+          if (ev.type === "resources") {
+            if (!resources.has(ev.run)) {
+              const notice = resourceNotice(""); resources.set(ev.run, notice);
+              replies.at(-1).before(notice);
+            }
+            resources.get(ev.run).textContent = ev.summary;
+          }
+          else if (ev.type === "text_start") parts.push({ type: "text", text: "" });
           else if (ev.type === "text_delta") {
             parts.at(-1).text += ev.delta;
             const texts = bubbles(parts);

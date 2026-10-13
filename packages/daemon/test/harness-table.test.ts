@@ -128,6 +128,23 @@ describe("parsers over recorded output", () => {
       .toEqual([{ type: "model", model: "gpt-6-astra", provider: "openai-codex", effort: "low" }]);
   });
 
+  it("claude: reports only inventory names, with disconnected MCP servers excluded", () => {
+    const parse = harnessRow("claude")!.parser();
+    const events = parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s1",
+      skills: ["calendar", "mail", "mail"],
+      plugins: [{ name: "review", path: "/private/plugin" }],
+      mcp_servers: [{ name: "ghost", status: "connected", env: { TOKEN: "secret" } }, { name: "offline", status: "failed" }],
+    }));
+    expect(events.find((event) => event.type === "resources")).toEqual({ type: "resources", resources: {
+      skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"],
+    } });
+    expect(JSON.stringify(events)).not.toMatch(/private|secret|offline/);
+    expect(parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s2", skills: [], plugins: [] })))
+      .toContainEqual({ type: "resources", resources: { skills: [], extensions: [], mcpServers: null } });
+    expect(parse(JSON.stringify({ type: "system", subtype: "init", session_id: "s3", skills: ["ok", 7], plugins: [{ path: "/private" }] })))
+      .toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null } });
+  });
+
   // Lines trimmed from a 2026-10-04 codex-cli 0.160.0 rollout file.
   it("codex: the model, provider, and effort from the session's rollout file, newest day first", async () => {
     const home = mkdtempSync(join(tmpdir(), "ghost-codex-home-"));
