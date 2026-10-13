@@ -49,7 +49,8 @@ commands that finish the job, which are section 3 — do not skip it.
 
 Install the skills you need from
 [ghost-skills](https://github.com/ferdousbhai/ghost-skills#install-skills):
-Cloud Calendar, Cloudmail, the iCloud apps, Omacloud, and wacli. Ghost uses
+Cloud Calendar, Cloudmail, the iCloud apps, Omacloud, wacli, and Omdrop (on
+supported Apple Silicon Macs). Ghost uses
 these product CLIs through the harness's Bash/shell tool and native skill
 discovery; no additional daemon integration or MCP server is needed.
 
