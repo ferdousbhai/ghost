@@ -45,6 +45,24 @@ Either way the package only puts files in place; it creates nothing in your
 home and edits no configuration of yours. The post-install hook prints the
 commands that finish the job, which are section 3 — do not skip it.
 
+### Product skills through Bash
+
+Install the skills you need from
+[ghost-skills](https://github.com/ferdousbhai/ghost-skills#install-skills):
+Cloud Calendar, Cloudmail, the iCloud apps, Omacloud, and wacli. Ghost uses
+these product CLIs through the harness's Bash/shell tool and native skill
+discovery; no additional daemon integration or MCP server is needed.
+
+Each skill explains how to detect and install its missing CLI and use existing
+accounts. The owner completes sign-in windows and keeps passwords/recovery keys
+out of chat. Installing a package does not authorize sending messages, changing
+mail routing, or restoring/syncing files.
+
+Start a fresh harness session after installing a skill. For ghost-specific
+skills, link them under `~/ghosts/<name>/skills/`; Ghost exposes that directory
+as project skills in each conversation. Source checkouts are never loaded into
+a conversation automatically. No daemon restart is needed.
+
 ## 2. Where shared notes go
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
