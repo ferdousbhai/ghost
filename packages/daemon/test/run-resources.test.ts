@@ -40,21 +40,43 @@ describe("run resources", () => {
 });
 
 describe("latest run resource snapshot", () => {
-  const reply = (harness = "codex", error?: string): LogEntry => ({ type: "assistant", at: "now", harness, content: [], ...(error ? { error } : {}) });
-  const inventory = (skills: string[] | null, harness = "codex"): LogEntry => ({ type: "resources", at: "now", run: "r", harness,
-    resources: { skills, extensions: null, mcpServers: null }, summary: "old summary" });
+  const time = (second: number) => `2026-10-13T12:00:${String(second).padStart(2, "0")}.000Z`;
+  const reply = (second = 1, error?: string): Extract<LogEntry, { type: "assistant" }> => ({ type: "assistant", at: time(second), harness: "codex", content: [], ...(error ? { error } : {}) });
+  const inventory = (skills: string[] | null, second = 0, current = false): Extract<LogEntry, { type: "resources" }> => ({ type: "resources", at: time(second), run: "r", harness: "codex",
+    resources: { skills, extensions: null, mcpServers: null }, summary: "old summary",
+    ...(current ? { supplied: { instructions: [], mcpServers: [] } } : {}) });
 
   it("reads legacy pre-reply records without exposing them as messages", () => {
     const entries = [inventory(["mail"]), reply()];
     expect(latestRunResources(entries)?.resources.skills).toEqual(["mail"]);
     expect(transcriptMessages(entries).map(message => message.role)).toEqual(["assistant"]);
-    expect(latestRunResources([inventory(["mail"], "pi"), reply()])).toBeNull();
+    expect(latestRunResources([inventory(["mail"]), { ...reply(), harness: "pi" }])).toBeNull();
+  });
+
+  it("reads intermediate post-reply records using their run-start timestamp", () => {
+    expect(latestRunResources([reply(), inventory(["mail"])])?.resources.skills).toEqual(["mail"]);
+  });
+
+  it("does not attribute a failed legacy handoff to the preceding successful reply", () => {
+    const entries: LogEntry[] = [inventory(["good"]), reply(), inventory(["failed"], 2),
+      { type: "handoff", at: time(3), harness: "codex", text: "", error: "failed handoff" }];
+    expect(latestRunResources(entries)?.resources.skills).toEqual(["good"]);
+    expect(latestRunResources([inventory(["first"]), reply(), inventory(["second"], 2), reply(3)])?.resources.skills).toEqual(["second"]);
+  });
+
+  it.each([time(1), "invalid"])("omits ambiguous adjacent legacy timestamps: %s", at => {
+    const ambiguous = { ...inventory(["ambiguous"]), at };
+    const entries = [inventory(["trusted"]), reply(), ambiguous];
+    expect(latestRunResources(entries)?.resources.skills).toEqual(["trusted"]);
+    expect(latestRunResources([...entries, reply(3, "failed")])?.resources.skills).toEqual(["trusted"]);
+    expect(latestRunResources([...entries, reply(3)])).toBeNull();
   });
 
   it("clears stale evidence on success, but retains dated evidence after failure", () => {
-    const entries = [reply(), inventory(["mail"])];
-    expect(latestRunResources([...entries, reply("pi", "not signed in")])?.resources.skills).toEqual(["mail"]);
-    expect(latestRunResources([...entries, reply(), inventory(null)])?.resources.skills).toBeNull();
-    expect(latestRunResources([...entries, reply()])).toBeNull();
+    const entries = [reply(), inventory(["mail"], 1, true)];
+    expect(latestRunResources([...entries, reply(2, "not signed in")])?.resources.skills).toEqual(["mail"]);
+    expect(latestRunResources([...entries, reply(2), inventory(null, 2, true)])?.resources.skills).toBeNull();
+    expect(latestRunResources([...entries, reply(2)])).toBeNull();
+    expect(latestRunResources([inventory(["future"], 4), reply(3)])).toBeNull();
   });
 });

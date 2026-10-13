@@ -247,7 +247,9 @@ unread state, or activity timestamps. `GET …/transcript` includes the latest
 successful snapshot as `resources` independently of pagination, or `null`.
 The HUD harness menu and tailnet viewer expose a read-only Resources inspector;
 `ghost show --resources` prints it explicitly. Ordinary chat and CLI output
-remain quiet. Historical records are read without rewriting logs. The MCP
+remain quiet. Historical records are read without rewriting logs; legacy snapshots are
+associated using their run-start and reply timestamps, and ambiguous evidence
+is omitted. The MCP
 navbar editor manages only the ghost's additional configured servers; it is
 not a run inventory. This replaces per-turn notices and their rendering paths
 with on-demand inspection, using the existing parser, log, and transcript API.

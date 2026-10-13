@@ -393,11 +393,20 @@ export function latestRunResources(entries: readonly LogEntry[]): RunResourceSna
   for (const entry of entries) {
     if (entry.type === "user" || entry.type === "harness") pending = null;
     if (entry.type === "resources") {
-      if ((previous?.type === "assistant" || previous?.type === "handoff") && !previous.error && previous.harness === entry.harness) {
-        latest = entry;
-      } else pending = entry;
+      const adjacent = (previous?.type === "assistant" || previous?.type === "handoff")
+        && previous.harness === entry.harness ? previous : null;
+      const postReply = entry.supplied !== undefined
+        || (adjacent !== null && Date.parse(entry.at) < Date.parse(adjacent.at));
+      pending = null;
+      if (postReply) {
+        if (adjacent && !adjacent.error) latest = entry;
+      } else if (entry.supplied === undefined
+        && (adjacent === null || Date.parse(entry.at) > Date.parse(adjacent.at))) {
+        pending = entry;
+      }
     } else if (entry.type === "assistant" || entry.type === "handoff") {
-      if (!entry.error) latest = pending?.harness === entry.harness ? pending : null;
+      if (!entry.error) latest = pending?.harness === entry.harness
+        && Date.parse(pending.at) <= Date.parse(entry.at) ? pending : null;
       pending = null;
     }
     previous = entry;
