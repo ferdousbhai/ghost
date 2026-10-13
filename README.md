@@ -1,10 +1,10 @@
 # Ghost
 
-**Your ghost, on your machine.** A local assistant with its own character,
-running on [Omarchy](https://omarchy.org) through the agent CLIs you already
-use: each turn is a run of Claude Code, Codex, Grok, Copilot, OpenCode, pi, or
-another installed harness, on that agent's own sign-in and limits. If one
-cannot take a turn, Ghost tries the next.
+**An orchestration layer for all your agent harnesses.** Ghost runs locally
+on [Omarchy](https://omarchy.org), coordinating Claude Code, Codex, Grok,
+Copilot, OpenCode, pi, and other installed agent CLIs. Each harness keeps
+its own sign-in, tools, and limits. If one cannot take a turn, Ghost tries
+the next. Each ghost has its own character and conversation history.
 
 Talk to it in the desktop HUD or the terminal; both share one conversation
 history, and `ghost say` joins the most recent conversation:
@@ -30,10 +30,10 @@ Install and first conversation:
 [concepts](https://github.com/ferdousbhai/ghost/blob/master/docs/concepts.md);
 the stable boundaries are [CONTRACTS.md](CONTRACTS.md).
 
-Status: [v0.6.0](https://github.com/ferdousbhai/ghost/releases/tag/v0.6.0) is
-released and in Omarchy's package repository (`omarchy-pkg-add ghost`, or
-`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash`); the Install →
-AI menu entry is tracked in [#54](https://github.com/ferdousbhai/ghost/issues/54).
+Install from Omarchy's package repository with `omarchy pkg add ghost`, or
+use `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` to install
+and configure the daemon and desktop plugin. The Install → AI menu entry
+is tracked in [#54](https://github.com/ferdousbhai/ghost/issues/54).
 
 An app can bring its own UI: `ghost-runtime` installs the daemon/API, CLI, and
 desktop/browser automation without the HUD (`packaging/arch/README.md`,
