@@ -64,7 +64,7 @@ describe("remote viewer markdown", () => {
 });
 
 describe("remote viewer transcript", () => {
-  test("continued runs keep notices and reply segments in stream order", async () => {
+  test("resource metadata stays out of chat across continued runs", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];
     const nodes: Array<{ textContent: string; className: string }> = [];
     const element = (textContent = "") => ({
@@ -74,13 +74,14 @@ describe("remote viewer transcript", () => {
       replaceChildren(text: string) { this.textContent = text; },
     });
     const events = [
-      { type: "resources", run: "r1", summary: "first inventory" },
+      { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "first answer" },
-      { type: "resources", run: "r2", summary: "second inventory" },
+      { type: "resources", run: "r1", summary: "first inventory" },
+      { type: "harness", harness: "codex" },
       { type: "text_start" }, { type: "text_delta", delta: "second answer" },
-      { type: "resources", run: "r2", summary: "updated inventory" },
       { type: "tool_execution_start", toolName: "bash" },
       { type: "text_start" }, { type: "text_delta", delta: "after tool" },
+      { type: "resources", run: "r2", summary: "second inventory" },
     ];
     const context = {
       prompt: { value: "hello" }, pending: [], ghost: "casper", session: "c1", draft: null, streaming: false,
@@ -96,8 +97,31 @@ describe("remote viewer transcript", () => {
     const send = new Function(...Object.keys(context), `${source}; return send;`)(...Object.values(context));
     await send();
     expect(nodes.map(n => n.textContent)).toEqual([
-      "hello", "first inventory", "first answer", "updated inventory", "second answer", "after tool",
+      "hello", "first answer", "second answer", "after tool",
     ]);
+  });
+
+  test("resources load on demand and ignore a response from a previous conversation", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function showResources\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    const panel = { open: false, showModal() { this.open = true; } };
+    const text = { textContent: "" };
+    let resolveFirst!: (body: unknown) => void;
+    const paths: string[] = [];
+    const api = (path: string) => {
+      paths.push(path);
+      return paths.length === 1 ? new Promise(resolve => { resolveFirst = resolve; }) : Promise.resolve({ resources: { summary: "latest catalog" } });
+    };
+    const page = new Function("api", "seg", "$", `let ghost = "casper", session = "c1", draft = null, resourceGeneration = 0; ${source}; return { open: showResources, switchSession() { session = "c2"; resourceGeneration++; } };`)(
+      api, encodeURIComponent, (id: string) => id === "resource-panel" ? panel : text,
+    );
+    expect(paths).toEqual([]);
+    const first = page.open();
+    page.switchSession();
+    await page.open();
+    resolveFirst({ resources: { summary: "stale catalog" } });
+    await first;
+    expect(text.textContent).toBe("latest catalog");
+    expect(paths).toEqual(["/ghosts/casper/sessions/c1/transcript?limit=1", "/ghosts/casper/sessions/c2/transcript?limit=1"]);
   });
 
   test("a long conversation opens on its newest page", async () => {

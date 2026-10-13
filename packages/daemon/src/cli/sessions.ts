@@ -1,5 +1,5 @@
 import type { Transcript } from "../session-host.js";
-import { flagString, type ParsedCliArgs } from "./args.js";
+import { flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
 import { emit, relativeTime, table, truncate } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -32,7 +32,6 @@ function transcriptMarkdown(body: Transcript, ghost: string): string {
       : message.role === "hook" ? "Stop hook"
       : message.role === "handoff" ? "Handoff"
       : message.role === "auto" ? "Auto"
-      : message.role === "resources" ? "Run resources"
       : ghost;
     const lines = message.content.map((part) => part.type === "toolCall"
       ? `> ⚙ ${part.name}(${truncate(JSON.stringify(part.arguments ?? {}), 120)})`
@@ -53,6 +52,10 @@ export async function showCommand(
   if (offset) query.set("offset", offset);
   const suffix = query.size ? `?${query}` : "";
   const response = await ctx.client.request<Transcript>("GET", `${path}/transcript${suffix}`);
+  if (flagBoolean(parsed, "resources")) {
+    emit(ctx, response.body.resources, (snapshot) => snapshot ? `${snapshot.summary}\n` : "No successful run resources available.\n");
+    return 0;
+  }
   emit(ctx, response.body, (body) => {
     const markdown = transcriptMarkdown(body, name);
     return markdown ? `${markdown}\n` : "";

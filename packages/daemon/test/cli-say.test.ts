@@ -74,7 +74,7 @@ describe("ghost say", () => {
     });
   });
 
-  it("prints run resources separately from the answer and suppresses them in quiet mode", async () => {
+  it("keeps resource metadata out of ordinary and quiet output", async () => {
     const summary = "claude · Run resources\nSkills: mail\nExtensions/plugins: none\nConnected MCP servers: ghost";
     const fake = await fakeDaemon([
       { type: "resources", run: "r1", harness: "claude", resources: { skills: ["mail"], extensions: [], mcpServers: ["ghost"] }, summary },
@@ -82,7 +82,7 @@ describe("ghost say", () => {
     ]);
     const result = await runCli(["say", "hello", "--new", "-g", "casper"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(result.stdout).toBe("answer\n");
-    expect(result.stderr).toContain(summary);
+    expect(result.stderr).not.toContain(summary);
     const quiet = await runCli(["say", "hello", "--new", "-g", "casper", "-q"], { env: fake.env, home: "/tmp/ghost-cli-home" });
     expect(quiet.stdout).toBe("answer\n");
     expect(quiet.stderr).not.toContain(summary);

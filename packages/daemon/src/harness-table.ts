@@ -32,6 +32,7 @@ export interface HarnessTurnInput {
 }
 
 export interface HarnessLaunch {
+  readonly suppliedMcp?: readonly string[];
   readonly argv: readonly string[];
   readonly env?: Readonly<Record<string, string>>;
   /** Files written into the conversation directory before launch. */
@@ -155,9 +156,10 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
     if (typeof event.session_id === "string" && event.type === "system" && event.subtype === "init") {
       out.push({ type: "session", id: event.session_id });
       if (typeof event.model === "string") out.push({ type: "model", model: event.model });
-      if (event.skills !== undefined || event.plugins !== undefined || event.mcp_servers !== undefined) {
+      if (event.skills !== undefined || event.plugins !== undefined || event.mcp_servers !== undefined || event.tools !== undefined) {
         out.push({ type: "resources", resources: {
           skills: resourceNames(event.skills),
+          ...(event.tools !== undefined ? { tools: resourceNames(event.tools) } : {}),
           extensions: resourceNames(Array.isArray(event.plugins) ? event.plugins.map((plugin) => record(plugin).name) : undefined),
           mcpServers: resourceNames(Array.isArray(event.mcp_servers)
             && resourceNames(event.mcp_servers.map((server) => record(server).name)) !== null
@@ -636,6 +638,7 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // The prompt goes right after -p: --mcp-config takes a list.
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "claude", "-p", turn.prompt,
         "--output-format", "stream-json", "--verbose", "--include-partial-messages",
@@ -651,6 +654,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "codex",
     effort: EFFORT,
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "codex", "exec", ...(turn.resume ? ["resume", "--last"] : []),
         "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox",
@@ -675,6 +679,7 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // Grok reads no AGENTS.md; --rules appends the persona to its system prompt.
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "grok", "-p", turn.prompt,
         "--output-format", "streaming-messages-json", "--include-partial-messages",
@@ -688,6 +693,7 @@ const ROWS: readonly HarnessRow[] = [
   {
     id: "copilot",
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "copilot", "-p", turn.prompt, "--output-format", "json", "--allow-all",
         ...(turn.resume ? ["--continue"] : []),
@@ -709,6 +715,7 @@ const ROWS: readonly HarnessRow[] = [
           : { type: "local", command: [config.command, ...(config.args ?? [])], ...(config.env ? { environment: config.env } : {}), enabled: true };
       }
       return {
+        suppliedMcp: turn.mcp.map(server => server.name),
         argv: [
           "opencode", "run", "--format", "json", "--auto",
           ...(turn.resume && turn.sessionId ? ["--session", turn.sessionId] : []),
@@ -740,6 +747,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "agy",
     effort: EFFORT,
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "agy", "-p", turn.prompt, "--output-format", "stream-json", "--dangerously-skip-permissions", "--effort", EFFORT,
         ...(turn.resume ? ["--continue"] : []),
@@ -751,6 +759,7 @@ const ROWS: readonly HarnessRow[] = [
   {
     id: "cursor-agent",
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: [
         "cursor-agent", "-p", "--output-format", "stream-json", "--stream-partial-output",
         "--yolo", "--trust", "--approve-mcps",
@@ -766,6 +775,7 @@ const ROWS: readonly HarnessRow[] = [
     effort: EFFORT,
     // Crush keeps its sessions in the directory it runs in.
     launch: (turn) => ({
+      suppliedMcp: turn.mcp.map(server => server.name),
       argv: ["crush", "run", "-q", "--reasoning-effort", EFFORT, ...(turn.resume ? ["--continue"] : []), turn.prompt],
       files: turn.mcp.length > 0
         ? { "crush.json": writeJson({ mcp: Object.fromEntries(turn.mcp.map(({ name, config }) => [name,

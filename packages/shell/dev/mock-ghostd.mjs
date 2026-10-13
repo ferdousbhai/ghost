@@ -363,6 +363,7 @@ const transcriptOf = (s, params) => {
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
+    resources: s.resources || null,
     messages,
     total: s.messages.length,
     truncated: offset > 0 || offset + messages.length < s.messages.length,
@@ -676,13 +677,12 @@ function followTurn(res, log, from) {
  * Drive scripted events into the turn. Returns the reply text, or null if
  * the turn was stopped.
  */
-async function pump(log, events, onStart) {
+async function pump(log, events) {
   let reply = "";
   for (const event of events) {
     if (log.stopped) return null;
     if (event.type === "text_end") reply = event.content;
     send(log, event);
-    if (event.type === "start") onStart?.();
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
   return reply;
@@ -720,15 +720,20 @@ async function streamTurn(res, name, body) {
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
   // "Turn aborted.", a --fail one with its error.
-  const logReply = (reply) => existing && append(existing, reply === null
+  const logReply = (reply) => {
+    if (existing) append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
+    if (reply !== null && !failing) reportResources();
+  };
   const reportResources = () => {
     const harness = existing?.harness ?? draftHarness.get(key) ?? "claude";
     const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
-    const summary = `${harness} · Run resources\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost`;
-    send(log, { type: "resources", run: randomUUID(), harness, resources, summary });
-    if (existing) append(existing, { role: "resources", content: textParts(summary) });
+    const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
+      supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
+      summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: ghost\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost` };
+    send(log, { type: "resources", ...snapshot });
+    if (existing) existing.resources = snapshot;
   };
   let stopped = false;
   try {
@@ -744,7 +749,7 @@ async function streamTurn(res, name, body) {
           : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
       }
     } else {
-      let reply = await pump(log, script(name, prompt), reportResources);
+      let reply = await pump(log, script(name, prompt));
       logReply(reply);
       // After each pass a stop hook decides (never continuing, here); a queued
       // follow-up then runs: the daemon logs and announces it, says
@@ -763,7 +768,6 @@ async function streamTurn(res, name, body) {
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
-        reportResources();
         reply = await pump(log, textBlock(0, `Following up on **${text}**.`));
         logReply(reply);
       }

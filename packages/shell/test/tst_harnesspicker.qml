@@ -37,9 +37,10 @@ TestCase {
 
     function init(): void {
         tc.requests = [];
-        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/harness$/);
+        Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/(harness|transcript\?limit=1)$/);
         Ghostd.apiToken = "test-token";
         Ghostd.activeGhost = "casper";
+        Ghostd.clearRunResources();
         Ghostd.clearHarnessChoice();
         Ghostd.pendingHarnesses = ({});
         Ghostd.turnStates = ({});
@@ -50,6 +51,7 @@ TestCase {
 
     function cleanup(): void {
         Ghostd.requestFactory = null;
+        Ghostd.clearRunResources();
         Ghostd.clearHarnessChoice();
         Ghostd.harnessSessionRequest = null;
         Ghostd.pendingHarnesses = ({});
@@ -75,6 +77,36 @@ TestCase {
         verify(header.pickerOpen);
         tc.requests[0].complete(200, body || tc.choice());
         return header;
+    }
+
+    function test_resourcesAreOnDemandAndCloseWhenConversationChanges(): void {
+        const header = openPicker();
+        tc.click(header, "harnessResources");
+        verify(!header.pickerOpen);
+        verify(header.resourcesOpen);
+        compare(tc.requests.length, 2);
+        verify(tc.requests[1].url.endsWith("/sessions/a/transcript?limit=1"));
+        tc.requests[1].complete(200, { resources: { summary: "Supplied by Ghost\nMCP toolsets: ghost\n\nReported by harness\nSkills: mail" } });
+        verify(findChild(header, "resourceInspectorText").text.includes("Skills: mail"));
+        tc.click(header, "resourcesRefresh");
+        const oldRequest = tc.requests[2];
+        Ghostd.currentSessionId = "b";
+        verify(!header.resourcesOpen);
+        compare(Ghostd.runResources, null);
+        oldRequest.complete(200, { resources: { summary: "stale" } });
+        compare(Ghostd.runResources, null);
+    }
+
+    function test_emptyResourcesAndLoadFailureHaveQuietInspectorStates(): void {
+        const header = openPicker();
+        tc.click(header, "harnessResources");
+        tc.requests[1].complete(200, { resources: null });
+        compare(findChild(header, "resourceInspectorText").text, "No successful run resources available.");
+        tc.click(header, "resourcesRefresh");
+        tc.requests[2].complete(500, {});
+        verify(findChild(header, "resourceInspectorText").text.includes("Could not load resources"));
+        tc.click(header, "resourcesClose");
+        verify(!header.resourcesOpen);
     }
 
     function test_openingThePickerReadsTheAgents(): void {

@@ -231,29 +231,29 @@ names are parsed from its `### Available skills` section, not reconstructed
 from skill directories; missing or malformed catalogs remain unknown. After
 finding the latest model record, catalog lookup reads at most 8 MiB backwards;
 a catalog beyond that display-only read budget remains unknown. Nothing
-from that inspection enters handoff context. The owner should always be able to see what answered. Each pass also records
-and streams a `resources` snapshot `{ run, harness, resources: { skills,
-extensions, mcpServers }, summary }`. Lists contain only names reported by that
-run's harness; `null` means not reported, `[]` means explicitly none. Claude's
-init reports skills, plugins, and connected MCP servers; Grok's init reports
-skills and MCP servers. Copilot's `session.skills_loaded`,
-`session.extensions_loaded`, and `session.mcp_servers_loaded` events update
-their respective fields without clearing the others; only enabled skills,
-running extensions, and connected servers count. Subagent inventories are
-ignored. Later MCP status/removal/reconnect events update an already reported
-complete list, never turn partial evidence into an inventory. Codex's skill
-catalog is read after the pass as above. Other missing fields remain unknown;
-checked versions and probe limitations are in
-[`docs/run-resources.md`](docs/run-resources.md). Discovery is not inferred from installed
-files or launch configuration, and skill availability does not mean its full
-body has entered context. The snapshot starts unknown and is updated by the
-harness's report, never carried from an earlier run, including fallbacks and
-resumes. The transcript projects one `resources` notice per pass, excluded from
-handoff prompts, message counts, and activity timestamps. The HUD, terminal,
-and tailnet viewer render the same plain-text summary. This adds no route,
-setting, dependency, or discovery implementation: the existing parser, log,
-stream, and transcript carry evidence clients previously discarded; nothing
-could be deleted because no inventory view existed. Everything else — model, auth, tools, permissions, compaction, retries —
+from that inspection enters handoff context. The owner should always be able to see what answered. Every successful pass records and streams a `resources` snapshot with run id,
+harness, completion time, harness-reported name lists, and names supplied by
+Ghost. Unknown inventories replace older evidence; failed attempts leave the
+last successful snapshot. Only names cross the wire. Reported categories are
+skills, extensions/plugins, connected MCP servers, tools, context files, and
+prompt templates where native output provides evidence. Ghost-supplied
+instructions and forwarded MCP names are separate from reported connections.
+No scan of installed resources or model self-report substitutes for evidence.
+Skill availability does not prove its body entered context. Version coverage
+and limitations are in [`docs/run-resources.md`](docs/run-resources.md).
+
+Resources never become transcript messages, prompt context, message counts,
+unread state, or activity timestamps. `GET …/transcript` includes the latest
+successful snapshot as `resources` independently of pagination, or `null`.
+The HUD harness menu and tailnet viewer expose a read-only Resources inspector;
+`ghost show --resources` prints it explicitly. Ordinary chat and CLI output
+remain quiet. Historical records are read without rewriting logs; legacy snapshots are
+associated using their run-start and reply timestamps, and ambiguous evidence
+is omitted. The MCP
+navbar editor manages only the ghost's additional configured servers; it is
+not a run inventory. This replaces per-turn notices and their rendering paths
+with on-demand inspection, using the existing parser, log, and transcript API.
+Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
 The harness runs in the conversation directory with the conversation's
@@ -445,7 +445,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running, continuesAt }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not; `continuesAt` is when a counting-down next-work turn starts, else null. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `resources` message is a pass's harness-reported inventory summary; a `handoff` message is the idle handoff's one-line reply, or `Failed: <reason>`, and an `auto` message is ghostd's next-work prompt. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; a `handoff` message is the idle handoff's one-line reply, or `Failed: <reason>`, and an `auto` message is ghostd's next-work prompt. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
@@ -466,7 +466,7 @@ remote access is the tailnet viewer alone.
 The event union is the contract; clients must ignore unknown future event
 types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
-on each fallback), `resources` (that pass's inventory snapshot, updated when reported), `text_*`, `thinking` (the harness's reasoning, as
+on each fallback), `resources` (a successful pass's final resource snapshot, display-only), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
 waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
 running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), and `session_stop_continued` events, and exactly one

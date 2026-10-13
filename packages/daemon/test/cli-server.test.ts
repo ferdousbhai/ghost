@@ -60,6 +60,17 @@ describe("ghost CLI against a real daemon server", () => {
     ]);
   });
 
+  it("inspects resources explicitly without adding them to ordinary output", async () => {
+    const ordinary = await cli(["show", "-g", "casper", "-s", "conv-1"]);
+    expect(ordinary.stdout).not.toContain("Supplied by Ghost");
+    const inspected = await cli(["show", "--resources", "-g", "casper", "-s", "conv-1"]);
+    expect(inspected.code).toBe(0);
+    expect(inspected.stdout).toContain("Last successful run: fake");
+    expect(inspected.stdout).toContain("Supplied by Ghost\nInstructions: Ghost character and policy");
+    const json = await cli(["show", "--resources", "--json", "-g", "casper", "-s", "conv-1"]);
+    expect(JSON.parse(json.stdout)).toMatchObject({ harness: "fake", supplied: { mcpServers: [] } });
+  });
+
   it("lists sessions and reports status", async () => {
     const sessions = await cli(["sessions", "-g", "casper", "--json"]);
     expect(sessions.code).toBe(0);
