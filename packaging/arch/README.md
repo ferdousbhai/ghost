@@ -72,6 +72,9 @@ optional `npm` package provides.
 
 Machine skills are whatever each agent CLI discovers on its own; a ghost's own
 skills live in its home and are linked into each conversation directory.
+The repository's `skills/ghost-products` index, which points to each recommended
+product's own skill, is installed the same way (`npx skills add ferdousbhai/ghost -g`);
+the package does not ship it.
 
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost-runtime` package uses the

@@ -47,8 +47,9 @@ commands that finish the job, which are section 3 — do not skip it.
 
 ### Product skills through Bash
 
-Install the [ghost-skills](https://github.com/ferdousbhai/ghost-skills) index
-(`npx skills add ferdousbhai/ghost-skills -g`). It lists the recommended
+Install Ghost's product index skill,
+[`skills/ghost-products`](../skills/ghost-products/SKILL.md)
+(`npx skills add ferdousbhai/ghost -g`). It lists the recommended
 products (Cloudmail, Cloud Calendar, Cloud Contacts, Cloud Tasks, iCloud apps,
 Omacloud, gws for Drive/Docs/Sheets, wacli, and Omdrop) and installs each
 product's own skill from its repository when needed. Ghost uses
