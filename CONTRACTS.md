@@ -95,7 +95,8 @@ The checkout a ghost may edit is the clone the daemon was built from
 (`GET /api/status` `source.root`), and it is the same for every ghost on the
 machine: one daemon powers them all, so a self-edit powers all of them after a
 build and restart. A packaged install has no checkout. No per-ghost setting
-names one; the checkout's own skills, rules, and MCP never enter a session.
+names one; the checkout's own rules and MCP never enter a session, and of its
+skills only the shipped `skills/` do (see "Ghost-home resources").
 `settings.yml` names no cwd: every conversation runs in its own directory.
 
 ### Character and notes
@@ -115,9 +116,15 @@ by the owner. Nothing there is indexed or injected at session start.
 ### Ghost-home resources
 
 `character.md` is the one persona file, the owner's instructions for this
-ghost included; there is no ghost-home `AGENTS.md`. `skills/` is linked into each conversation directory as
-`.claude/skills` and `.agents/skills`, where harnesses look for project
-skills; machine skills are whatever each harness discovers itself. `mcp.json`
+ghost included; there is no ghost-home `AGENTS.md`. Each conversation directory
+gets `.claude/skills` and `.agents/skills`, where harnesses look for project
+skills, holding one link per skill: the skills Ghost ships (the repository's
+`skills/`, installed at `/usr/lib/ghost/skills`; a checkout links its own), then
+the ghost's `skills/`, which wins on a shared name. Links are refreshed every
+turn, so an upgrade or a removed skill takes effect on the next one. Ghost ships
+only skills no product ships itself: `ghost-products` indexes the recommended
+products, each of which installs its own skill. Machine skills are whatever
+each harness discovers itself. `mcp.json`
 rows that are enabled and valid are handed to the harness each turn (see
 "Harnesses"). A ghost home carries no executable extension code; the only
 hooks are the owner's `hooks.json` commands. Nothing is discovered from any

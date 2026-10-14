@@ -139,8 +139,8 @@ inside Ghost (it is the harness's).
 
 A ghost is extended with readable files, not code: its `character.md` (which
 also carries the owner's standing instructions), skills (linked into each conversation
-directory where harnesses look for project skills), and MCP servers in the
-ghost home. Machine skills are whatever each harness discovers on its own.
+directory where harnesses look for project skills, beside the few Ghost ships), and MCP
+servers in the ghost home. Machine skills are whatever each harness discovers on its own.
 Project settings belong to a delegated harness run with the project directory
 as its own cwd.
 

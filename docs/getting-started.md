@@ -47,12 +47,12 @@ commands that finish the job, which are section 3 — do not skip it.
 
 ### Product skills through Bash
 
-Install Ghost's product index skill,
-[`skills/ghost-products`](../skills/ghost-products/SKILL.md)
-(`npx skills add ferdousbhai/ghost -g`). It lists the recommended
-products (Cloudmail, Cloud Calendar, Cloud Contacts, Cloud Tasks, iCloud apps,
-Omacloud, gws for Drive/Docs/Sheets, wacli, and Omdrop) and installs each
-product's own skill from its repository when needed. Ghost uses
+Nothing to install: every conversation already has Ghost's product index,
+[`skills/ghost-products`](../skills/ghost-products/SKILL.md). It lists the
+recommended products (Cloudmail, Cloud Calendar, Cloud Contacts, Cloud Tasks,
+iCloud apps, Omacloud, gws for Drive/Docs/Sheets, wacli, and Omdrop); the ghost
+installs a product when needed, and the product installs its own skill
+(`<cli> skill install`). Ghost uses
 these product CLIs through the harness's Bash/shell tool and native skill
 discovery; no additional daemon integration or MCP server is needed.
 

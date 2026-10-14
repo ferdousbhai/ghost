@@ -54,7 +54,7 @@ The common defect here is a change that works on the path you tested and is miss
 - `packages/extensions/src/extensions/desktop.ts` — ghostd's bridge to [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop), the computer-use MCP server in its own repo
 - ghost-core is `packages/{daemon,extensions}`; ghost-omarchy is `packages/shell` plus the ghost-desktop repo; the browser extension is its own repository — sides, seams, and rule are contracted in `CONTRACTS.md` under Package boundaries
 - `docs/concepts.md` — decisions and deliberate absences; `docs/hooks.md` — the owner command-hook protocol
-- `skills/ghost-products/SKILL.md` — owner-installed index of recommended products; each product's skill lives in its own repo, so never copy one here, only fill gaps no product skill covers
+- `skills/` — skills Ghost ships, linked into every conversation (`prepareDirectory` in `session-host.ts`); `ghost-products/SKILL.md` is the index of recommended products; each product's skill lives in its own repo, so never copy one here, only fill gaps no product skill covers
 
 Comments describe how a thing is used and move with the code; they are for functions, not for every line of behavior.
 

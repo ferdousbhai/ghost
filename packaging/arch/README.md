@@ -65,16 +65,16 @@ file tools; the package installs nothing there and gates nothing on it.
 
 ## Optional integrations
 
-Skills, MCP servers, and CLI integrations are yours to install from upstream
-as the desktop user; the upstream installer then owns its files and updates,
-and Ghost packages none of them. Many are launched through `npx`, which the
-optional `npm` package provides.
+MCP servers, CLI integrations, and product skills are yours to install from
+upstream as the desktop user; the upstream installer then owns its files and
+updates. Many MCP servers are launched through `npx`, which the optional `npm`
+package provides.
 
-Machine skills are whatever each agent CLI discovers on its own; a ghost's own
-skills live in its home and are linked into each conversation directory.
-The repository's `skills/ghost-products` index, which points to each recommended
-product's own skill, is installed the same way (`npx skills add ferdousbhai/ghost -g`);
-the package does not ship it.
+The package ships Ghost's own skills under `/usr/lib/ghost/skills`, linked into
+every conversation directory with the ghost's own skills: `ghost-products`
+indexes the recommended products, and each product installs its own skill
+(`<cli> skill install`). Machine skills are whatever each agent CLI discovers on
+its own.
 
 This remains the rolling, checkout-only development package: `pnpm install`
 may populate its store during `build()`. The stable `ghost-runtime` package uses the

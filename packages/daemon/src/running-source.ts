@@ -103,3 +103,11 @@ export function resolveRunningSource(version: string, startDir: string): Running
   const root = findSourceRoot(startDir);
   return { version, root, commit: root === null ? null : readHeadCommit(root) };
 }
+
+/** Where the package installs the skills Ghost ships. */
+export const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
+
+/** The skills Ghost ships: the checkout's `skills/`, else the package's. */
+export function bundledSkillsDir(running: RunningSource): string {
+  return running.root === null ? PACKAGED_SKILLS : join(running.root, "skills");
+}

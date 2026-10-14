@@ -17,7 +17,7 @@ import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
 import { createRelayHub } from "./relay.js";
-import { resolveRunningSource } from "./running-source.js";
+import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
@@ -269,6 +269,7 @@ async function serveDaemon(
     ownerHome,
     scheduleUnitDir,
     runningSource,
+    bundledSkills: bundledSkillsDir(runningSource),
     logger,
     hooks,
     extensionOptions: {

@@ -117,6 +117,8 @@ export interface SessionHostOptions {
   defaultHarness?: () => Promise<string | null>;
   /** The environment harnesses run with; the daemon's own by default. */
   env?: NodeJS.ProcessEnv;
+  /** The skills Ghost ships (`skills/` of the checkout or package), linked into every conversation. */
+  bundledSkills?: string | null;
 }
 
 export interface RunTurnOptions {
@@ -264,6 +266,7 @@ export class SessionHost {
   private readonly defaultHarness: () => Promise<string | null>;
   private readonly rowOf: (id: string) => HarnessRow | null;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly bundledSkills: string | null;
   private readonly live = new Map<string, LiveTurn>();
   /** Each admitted turn's stop: the turn outlives its client, so only `stopTurn` or shutdown ends it early. */
   private readonly admissions = new Map<string, AbortController>();
@@ -289,6 +292,7 @@ export class SessionHost {
     this.extensionOptions = options.extensionOptions ?? {};
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
+    this.bundledSkills = options.bundledSkills ?? null;
     this.eligibleHarnesses = options.eligibleHarnesses ?? (() => this.omarchyEligible());
     this.harnessReport = options.harnessReport ?? (() => readHarnessReport(this.env, this.ownerHome));
     this.defaultHarness = options.defaultHarness ?? (() => omarchyDefaultAgent(this.env));
@@ -382,18 +386,31 @@ export class SessionHost {
   /**
    * Lay out the conversation directory a harness runs in: the persona as
    * `AGENTS.md` (and the `CLAUDE.md`/`GEMINI.md` names other harnesses read),
-   * and the ghost's skills where harnesses look for project skills.
+   * and one link per skill where harnesses look for project skills: the skills
+   * Ghost ships, then the ghost's own, which win on a shared name.
    */
   private async prepareDirectory(ghost: Ghost, dir: string, persona: string): Promise<void> {
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(join(dir, "AGENTS.md"), persona, { mode: 0o600 });
     for (const alias of ["CLAUDE.md", "GEMINI.md"]) await this.ensureLink(join(dir, alias), "AGENTS.md");
-    const skills = join(ghost.dir, "skills");
-    if (existsSync(skills)) {
-      for (const root of [".claude", ".agents"]) {
-        await mkdir(join(dir, root), { recursive: true });
-        await this.ensureLink(join(dir, root, "skills"), skills);
+    const skills = new Map<string, string>();
+    for (const root of [this.bundledSkills, join(ghost.dir, "skills")]) {
+      if (root === null) continue;
+      const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
+      for (const entry of entries) {
+        if (!entry.name.startsWith(".") && (entry.isDirectory() || entry.isSymbolicLink())) skills.set(entry.name, join(root, entry.name));
       }
+    }
+    for (const root of [".claude", ".agents"]) {
+      const linked = join(dir, root, "skills");
+      // Before per-skill links, the whole directory was one link to the ghost's skills.
+      await readlink(linked).then(() => rm(linked), () => undefined);
+      if (skills.size === 0 && !existsSync(linked)) continue;
+      await mkdir(linked, { recursive: true });
+      for (const entry of await readdir(linked, { withFileTypes: true })) {
+        if (entry.isSymbolicLink() && !skills.has(entry.name)) await rm(join(linked, entry.name));
+      }
+      for (const [name, target] of skills) await this.ensureLink(join(linked, name), target);
     }
   }
 
