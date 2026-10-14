@@ -28,6 +28,20 @@ if ! ln -sfnT /usr/share/ghost/plugin "$plugin_link" 2>/dev/null; then
   exit 1
 fi
 omarchy-shell shell rescanPlugins
+# Rescanning is asynchronous; wait for discovery before enabling the plugin.
+discovered=0
+for (( attempt = 0; attempt < 40; attempt++ )); do
+  if omarchy plugin list --json | jq -e 'any(.[]; .id == "ferdousbhai.ghost")' >/dev/null; then
+    discovered=1
+    break
+  fi
+  sleep 0.05
+done
+if (( ! discovered )); then
+  echo "The shell did not pick up the Ghost HUD plugin." >&2
+  echo "Ghost is installed and running; enable the HUD with:  omarchy plugin enable ferdousbhai.ghost" >&2
+  exit 1
+fi
 omarchy plugin enable ferdousbhai.ghost
 
 echo ""

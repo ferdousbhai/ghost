@@ -584,7 +584,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   `triggerPress(button)` so the host's drag-aware click forwarding toggles the
   panel on left click through the injected `bar.shell` facade. The package installs it
   to `/usr/share/ghost/plugin`; the per-user symlink into
-  `~/.config/omarchy/plugins/` belongs to the install script.
+  `~/.config/omarchy/plugins/` belongs to the install script, which waits for
+  shell discovery before enabling the plugin. Setup ends with `ghost new <name>`; harness sign-in is external.
   The plugin is distributed only by the `ghost` package, never as a
   `omarchy plugin add` git checkout: the window and the daemon are one product
   and must be the same version, and a second channel cannot hold that lock.

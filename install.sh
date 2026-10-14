@@ -51,6 +51,20 @@ if ! ln -sfnT /usr/share/ghost/plugin "$plugin_link" 2>/dev/null; then
 Move it aside and run this again:  mv $plugin_link{,.bak}"
 fi
 omarchy-shell shell rescanPlugins
+# Rescanning is asynchronous; wait for discovery before enabling the plugin.
+discovered=0
+for (( attempt = 0; attempt < 40; attempt++ )); do
+  if omarchy plugin list --json | jq -e 'any(.[]; .id == "ferdousbhai.ghost")' >/dev/null; then
+    discovered=1
+    break
+  fi
+  sleep 0.05
+done
+if (( ! discovered )); then
+  echo "The shell did not pick up the Ghost HUD plugin." >&2
+  echo "Ghost is installed and running; enable the HUD with:  omarchy plugin enable ferdousbhai.ghost" >&2
+  exit 1
+fi
 omarchy plugin enable ferdousbhai.ghost
 
 printf '\nGhost is installed, and in your app launcher.\n'
@@ -59,7 +73,4 @@ printf '\nGhost is installed, and in your app launcher.\n'
 # Omarchy 4 Lua config and ghost.conf for a .conf one.
 printf 'To summon it with Super + Ctrl + G, copy the sample your Hyprland config\n'
 printf 'uses from /usr/share/doc/ghost/shell-contrib/hyprland/.\n'
-# `ghost login` refuses before a ghost exists (cli/common.ts), so the order
-# matters and the last thing the installer prints should be the first thing
-# that works.
-printf '\nThen make a ghost and sign in:  ghost new <name> && ghost login <provider>\n'
+printf '\nThen make a ghost:  ghost new <name>   (its turns run on the agent CLIs you are signed into)\n'
