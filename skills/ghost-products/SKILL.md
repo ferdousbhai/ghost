@@ -13,7 +13,9 @@ it owns installation, setup, and usage.
 ## Get a product's skill
 
 Run through the harness's Bash/shell tool, with the owner's go-ahead (it adds
-instructions only, not the product):
+instructions only, not the product). When the product's CLI is installed, use
+its built-in installer (`<cli> skill install`, from the table); it keeps the
+skill matched to the installed version. Otherwise:
 
 ```bash
 npx skills add <source> -g -y
@@ -24,17 +26,17 @@ fresh session discovers it automatically) and follow its install section if the
 product's CLI is missing. Never install skills from sources other than these
 without the owner's approval.
 
-| Need | Product | `<source>` | Skill |
-| --- | --- | --- | --- |
-| Mail: own domains, plus linked HEY, Gmail, iCloud Mail | [Cloudmail](https://github.com/ferdousbhai/cloud-mail) | `ferdousbhai/cloud-mail` | `cloudmail` |
-| Calendars: iCloud, Google, HEY | [Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) | `ferdousbhai/cloud-calendar` | `cloud-calendar` |
-| Contacts: iCloud and Google | [Cloud Contacts](https://github.com/ferdousbhai/cloud-contacts) | `ferdousbhai/cloud-contacts` | `cloud-contacts` |
-| Tasks: iCloud Reminders and Google Tasks | [Cloud Tasks](https://github.com/ferdousbhai/cloud-tasks) | `ferdousbhai/cloud-tasks` | `cloud-tasks` |
-| iCloud Notes, Photos, Find My, Apple sign-in | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) | `ferdousbhai/icloud-for-omarchy` | `icloud` |
-| Encrypted file/settings sync, versions, machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) | `ferdousbhai/omacloud` | `omacloud` |
-| Google Drive, Docs, Sheets | [gws](https://github.com/googleworkspace/cli) | `googleworkspace/cli -s gws-shared gws-drive gws-docs gws-sheets` | `gws-*` |
-| WhatsApp history and requested sends | [wacli](https://github.com/openclaw/wacli) | `https://github.com/openclaw/openclaw/tree/main/extensions/whatsapp/skills/wacli` | `wacli` |
-| AirDrop with nearby Apple devices | [Omdrop](https://github.com/brentkearney/omdrop-plugin) | ships with the plugin (see below) | `omdrop` |
+| Need | Product | Built-in installer | `<source>` | Skill |
+| --- | --- | --- | --- | --- |
+| Mail: own domains, plus linked HEY, Gmail, iCloud Mail | [Cloudmail](https://github.com/ferdousbhai/cloud-mail) | `cloudmail skill install` | `ferdousbhai/cloud-mail` | `cloudmail` |
+| Calendars: iCloud, Google, HEY | [Cloud Calendar](https://github.com/ferdousbhai/cloud-calendar) | `cloud-calendar skill install` | `ferdousbhai/cloud-calendar` | `cloud-calendar` |
+| Contacts: iCloud and Google | [Cloud Contacts](https://github.com/ferdousbhai/cloud-contacts) | `cloud-contacts skill install` | `ferdousbhai/cloud-contacts` | `cloud-contacts` |
+| Tasks: iCloud Reminders and Google Tasks | [Cloud Tasks](https://github.com/ferdousbhai/cloud-tasks) | `cloud-tasks skill install` | `ferdousbhai/cloud-tasks` | `cloud-tasks` |
+| iCloud Notes, Photos, Find My, Apple sign-in | [iCloud for Omarchy](https://github.com/ferdousbhai/icloud-for-omarchy) | `icloud-session skill install` | `ferdousbhai/icloud-for-omarchy` | `icloud` |
+| Encrypted file/settings sync, versions, machine migration | [Omacloud](https://github.com/ferdousbhai/omacloud) | `omacloud skill install` | `ferdousbhai/omacloud` | `omacloud` |
+| Google Drive, Docs, Sheets | [gws](https://github.com/googleworkspace/cli) | none | `googleworkspace/cli -s gws-shared gws-drive gws-docs gws-sheets` | `gws-*` |
+| WhatsApp history and requested sends | [wacli](https://github.com/openclaw/wacli) | none | `https://github.com/openclaw/openclaw/tree/main/extensions/whatsapp/skills/wacli` | `wacli` |
+| AirDrop with nearby Apple devices | [Omdrop](https://github.com/brentkearney/omdrop-plugin) | `omdrop setup` (see below) | none | `omdrop` |
 
 ## Routing
 
