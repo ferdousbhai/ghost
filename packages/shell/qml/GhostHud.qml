@@ -242,9 +242,15 @@ FloatingWindow {
         // Ctrl+B toggles the whole left sidebar, editor-style; Ctrl+N starts a
         // conversation, as in any chat app. These reach the card by focus-chain
         // propagation even while the composer holds focus, since a plain
-        // TextEdit consumes neither.
+        // TextEdit consumes neither. The transcript's scroll keys come first
+        // (FollowingList.handleKey).
         Keys.onPressed: event => {
-            if (hud.currentSection !== "chat" || !(event.modifiers & Qt.ControlModifier)) return;
+            if (hud.currentSection !== "chat") return;
+            if (transcriptView.visible && transcriptView.handleKey(event)) {
+                event.accepted = true;
+                return;
+            }
+            if (!(event.modifiers & Qt.ControlModifier)) return;
             if (event.key === Qt.Key_B) hud.sidebarOpen = !hud.sidebarOpen;
             else if (event.key === Qt.Key_N) sidebar.startConversation();
             else return;
@@ -335,6 +341,7 @@ FloatingWindow {
                             spacing: Theme.gap
                             model: Ghostd.transcript
                             cacheBuffer: 400
+                            isMarked: index => Ghostd.transcript.get(index).role === "user"
 
                             delegate: Bubble {
                                 // One required property per ListModel role. A
@@ -390,9 +397,13 @@ FloatingWindow {
                             // Room for a real draft before it scrolls, never the
                             // whole pane: the transcript above must stay in view.
                             maxHeight: Math.max(160, Math.floor(hud.height * 0.4))
+                            transcript: transcriptView
                             onNewConversationRequested: sidebar.startConversation()
 
-                            onSubmitted: prompt => Ghostd.send(prompt)
+                            onSubmitted: prompt => {
+                                transcriptView.toEnd();
+                                Ghostd.send(prompt);
+                            }
                         }
                     }
 

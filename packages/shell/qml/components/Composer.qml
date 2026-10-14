@@ -26,6 +26,9 @@ Item {
     /** The tallest the field grows before it scrolls; the HUD sets it from its height. */
     property int maxHeight: 160
 
+    /** The FollowingList whose scroll keys win over the field's own (as in pi). */
+    property var transcript: null
+
     readonly property int trayHeight: tray.visible ? tray.height + Theme.gap / 2 : 0
 
     implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight) + root.trayHeight
@@ -310,7 +313,10 @@ Item {
 
                 Keys.onPressed: event => {
                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
-                    if (enter && !(event.modifiers & Qt.ShiftModifier)) {
+                    if (root.transcript !== null && root.transcript.visible
+                            && root.transcript.handleKey(event)) {
+                        event.accepted = true;
+                    } else if (enter && !(event.modifiers & Qt.ShiftModifier)) {
                         root.submit();
                         event.accepted = true;
                     } else if (event.matches(StandardKey.Paste)) {

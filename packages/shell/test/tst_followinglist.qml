@@ -23,6 +23,7 @@ TestCase {
             model: rows
             cacheBuffer: 400
             spacing: 6
+            isMarked: index => index % 50 === 0
             delegate: Text {
                 required property string body
                 width: view.width
@@ -103,5 +104,78 @@ TestCase {
         }
         tryVerify(() => list.atYEnd, 2000);
         verify(list.pinned);
+    }
+
+    function key(list: var, code: int, modifiers: int): bool {
+        return list.handleKey({ key: code, modifiers: modifiers });
+    }
+
+    function test_jump_label_shows_while_scrolled_up_and_returns_to_the_end(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        const jump = findChild(list, "jumpToLatest");
+        verify(jump !== null);
+        verify(!jump.visible);
+        verify(jump.parent === list, "the label must sit on the view, not scroll with the rows");
+        list.positionViewAtBeginning();
+        wait(50);
+        verify(jump.visible);
+        mouseClick(jump);
+        tryVerify(() => list.atYEnd, 2000);
+        verify(list.pinned);
+        verify(!jump.visible);
+        rows.append({ body: "a new reply" });
+        tryVerify(() => list.atYEnd, 2000);
+    }
+
+    function test_scrollbar_shows_only_while_scrolling(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        const bar = findChild(list, "scrollbar");
+        verify(bar !== null);
+        tryVerify(() => !bar.shown, 2000);
+        list.contentY -= 200;
+        verify(bar.shown);
+        tryVerify(() => !bar.shown, 2000);
+    }
+
+    function test_keys_page_and_jump_to_either_end(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        const before = list.contentY;
+        verify(key(list, Qt.Key_PageUp, 0));
+        verify(list.contentY < before);
+        verify(!list.pinned);
+        verify(key(list, Qt.Key_PageDown, 0));
+        verify(key(list, Qt.Key_PageDown, 0));
+        tryVerify(() => list.atYEnd, 2000);
+        verify(list.pinned);
+        verify(key(list, Qt.Key_Home, Qt.ControlModifier));
+        tryVerify(() => list.atYBeginning, 2000);
+        verify(key(list, Qt.Key_End, Qt.ControlModifier));
+        tryVerify(() => list.atYEnd, 2000);
+        verify(list.pinned);
+        verify(!key(list, Qt.Key_A, 0));
+        verify(!key(list, Qt.Key_Home, 0));
+    }
+
+    function test_steps_between_marked_rows(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        list.positionViewAtIndex(120, ListView.Beginning);
+        wait(50);
+        verify(key(list, Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier));
+        wait(50);
+        compare(list.topIndex(), 100);
+        verify(key(list, Qt.Key_Up, Qt.ControlModifier | Qt.ShiftModifier));
+        wait(50);
+        compare(list.topIndex(), 50);
+        verify(key(list, Qt.Key_Down, Qt.ControlModifier | Qt.ShiftModifier));
+        wait(50);
+        compare(list.topIndex(), 100);
     }
 }

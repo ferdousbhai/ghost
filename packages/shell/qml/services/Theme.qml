@@ -33,7 +33,8 @@ pragma ComponentBehavior: Bound
 //               Omarchy face. Naming the family here would pin it instead.
 //   the corners shell.toml publishes no radius, and
 //               default/hypr/looknfeel.lua sets `rounding = 0` for every
-//               window but a popped one. Square is the Omarchy shape.
+//               window but a popped one. The window frame stays square;
+//               the surfaces inside it round (see `radius`).
 //
 // Only the keys the theme author actually wrote are present in colors.toml —
 // Omarchy derives the rest (color0..15, bg/fg aliases, bright_* mixes) in
@@ -276,11 +277,11 @@ Singleton {
     readonly property string synKeyword: "#9d8cf5"
     readonly property string synFunction: "#d9c98a"
 
-    // Omarchy publishes no radius in shell.toml and rounds nothing in
-    // looknfeel.lua. Square is the chrome; `radius` stays so a future Omarchy
-    // radius has one place to land. Chat surfaces are Ghost's own: 16px for
-    // capsules and the composer, 12px for chips, 4px for the speaker tail.
-    readonly property int radius: 0
+    // Omarchy publishes no radius in shell.toml, so the chrome's is Ghost's
+    // own: cards and panels round at 10px and rows and small controls at half
+    // that, the way a native app's do. Chat surfaces: 16px for capsules and
+    // the composer, 12px for chips, 4px for the speaker tail.
+    readonly property int radius: 10
     readonly property int bubbleRadius: 16
     readonly property int bubbleRadiusSmall: 12
     readonly property int bubbleTailRadius: 4

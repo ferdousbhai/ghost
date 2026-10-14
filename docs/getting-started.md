@@ -183,6 +183,13 @@ Type, and:
 | `Esc` | dismiss a pending confirmation, then stop a running turn, then close the workbench — it never closes the window |
 | `Ctrl+B` | show or hide the ghosts/conversations sidebar |
 | `Ctrl+N` | start a new conversation (the composer's `+`) |
+| `PageUp` / `PageDown` | scroll the transcript a page |
+| `Ctrl+Home` / `Ctrl+End` | jump to the transcript's start / back to its end, following new output again |
+| `Ctrl+Shift+Up` / `Ctrl+Shift+Down` | jump to your previous / next message |
+
+The transcript follows new output only while you are at its end. Scrolled
+up, it stays put and shows **↓ Jump to latest message**; its scrollbar
+appears only while it moves or under the pointer.
 
 The rail on the right switches sections: **Chat**, **Board**,
 **Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
