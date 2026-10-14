@@ -8,36 +8,20 @@ commit with every consumer. Implementation detail belongs in code and tests.
 Ghost is an owner-local Omarchy application: one owner, one machine, any number
 of ghosts.
 
-The harness stays lean and extendable, and it gets there by subtraction: from
-2026-09-13 on, work here simplifies and never adds complexity. A change
-states what it deletes, or why nothing could be. A capability the runtime,
-the shell, Omarchy, or an installed CLI already provides is used, not
-rebuilt. An external component is adopted only when it replaces machinery of
-ours outright, never as a second backend beside it. New surface area (a tool,
-a route, a setting, a background loop) needs a constraint that nothing
-existing can meet, named in this file. The first existing thing is always an
-installed CLI plus a skill: Bash and the harness's skill discovery already
-reach every CLI on the machine, so a new built-in tool, route, or sidecar op
-has to beat that pair at something neither can do. What Omarchy ships is free to depend
-on; the install budget below is for everything else.
+Changes simplify: state what they delete or why nothing can be deleted.
+Prefer an installed CLI plus its skill, the harness, or Omarchy over a new
+Ghost tool, route, setting, or background loop. New surfaces need a constraint
+those cannot meet, documented here. An external component replaces our
+machinery rather than adding a parallel backend. Weigh dependencies by
+installed size as well as code saved; Omarchy-shipped facilities are available
+to reuse. Ask the owner before breaking these rules.
 
-Installed size is part of that budget. A dependency is weighed by what it
-adds to the install, not only by the code it saves, and a second
-implementation of something Ghost already has is paid for twice — once in
-branches, once in bytes. Ghost bundles no agent runtime for exactly this
-reason: a conversation turn is a headless run of an agent CLI the owner
-already has (Omarchy installs a dozen), on the owner's own subscription and
-limits, so Ghost owns the persona, the conversation log, and the choice of
-harness, and no model, loop, or credential (see "Harnesses" below and
-[`docs/concepts.md`](docs/concepts.md)).
-
-When a rule here fights the task, the
-answer is to say so and get the owner's decision, not to add a special case.
-[`docs/concepts.md`](docs/concepts.md) lists what is deliberately absent and
-what would have to change for each absence to end. `ghostd` owns sessions and state transitions; the Quickshell HUD,
-terminal client, Chromium relay, and `ghost-desktop` are clients or sidecars.
-The daemon listens on loopback unless the owner explicitly enables the built-in
-Tailscale Serve viewer.
+Ghost owns persona, shared history, and harness choice. Harnesses own models,
+credentials, permissions, tool loops, retries, and compaction.
+`ghostd` owns sessions and state transitions; HUD, CLI, relay, and
+`ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
+access is the explicit Tailscale Serve viewer. See [concepts](docs/concepts.md)
+for rationale.
 
 Durable state has three scopes:
 
@@ -258,8 +242,7 @@ remain quiet. Historical records are read without rewriting logs; legacy snapsho
 associated using their run-start and reply timestamps, and ambiguous evidence
 is omitted. The MCP
 navbar editor manages only the ghost's additional configured servers; it is
-not a run inventory. This replaces per-turn notices and their rendering paths
-with on-demand inspection, using the existing parser, log, and transcript API.
+not a run inventory.
 Everything else — model, auth, tools, permissions, compaction, retries —
 is the harness's own, configured by the owner exactly as when they run it.
 
@@ -526,37 +509,22 @@ client and process — else the connecting client plus that server process.
 
 ## Package boundaries
 
-Ghost is two sides of one product plus two separate products. **ghost-core**
-is everything a second interface could reuse: `packages/daemon` and
-`packages/extensions`. **ghost-omarchy** is the Omarchy-only surface:
-`packages/shell` (published as `@ghost/omarchy`; the directory name is
-historical) and `ghost-desktop`, its own repository. The sides meet only at named
-seams — the daemon's HTTP/SSE API (which the `ghost` CLI also speaks), the
-relay WebSocket protocol, and MCP over stdio with `ghost-desktop`'s PATH
-spawn — and core never imports the Omarchy side:
-`scripts/check-core-boundary.sh` (run by `pnpm lint`) proves it.
+**ghost-core** is `packages/daemon` and `packages/extensions`.
+**ghost-omarchy** is `packages/shell` (`@ghost/omarchy`) plus the separate
+`ghost-desktop` repository. Core never imports the Omarchy side;
+`scripts/check-core-boundary.sh` proves this during lint. Their seams are the
+authenticated HTTP/SSE API, relay WebSocket protocol, and desktop MCP stdio.
 
-`packages/extensions` holds the persona and system-prompt assembly, the
-ghost's tools (browser session, relay backend, desktop bridge), and the
-untrusted-content fence; the daemon holds hook and MCP config policy.
-Hosted SummonGhost vendors its own packed copy of the former
-`@ghost/runtime` package (its `SOURCE.json` names the commit) and owns it.
-
-The **relay extension** is a separate product in its own repository,
-[ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension),
-with its own version and store listing. It meets the daemon only at the relay
-WebSocket protocol (its `PROTOCOL.md`; the daemon's mirror is
-[`relay-protocol.ts`](packages/daemon/src/relay-protocol.ts)): neither side
-imports the other's source, Ghost does not bundle or install it, and only
-`PROTOCOL_VERSION` ties an extension release to a Ghost release. The daemon's
-conformance test ([`relay-extension.test.ts`](packages/daemon/test/relay-extension.test.ts))
-reads a checkout of the extension — `GHOST_CHROMIUM_EXTENSION_DIR`, else a
-sibling clone `../ghost-chromium-extension` — and skips loudly without one,
-so the gate is only complete with that clone beside this repository. That test
-is the agreement: it compares the clone's constants against
-`relay-protocol.ts`, so no release number is pinned in prose here. A relay
-change that breaks the pair turns the suite red; bumping `PROTOCOL_VERSION` on
-both sides in lockstep is what re-agrees them.
+The relay is a separate product:
+[ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension).
+Neither repository imports the other's source; Ghost neither bundles nor
+installs it. Only `PROTOCOL_VERSION`, not a release pin, ties the products.
+Its `PROTOCOL.md` is mirrored by
+[`relay-protocol.ts`](packages/daemon/src/relay-protocol.ts).
+The conformance test reads `GHOST_CHROMIUM_EXTENSION_DIR` or the sibling
+`../ghost-chromium-extension` clone and skips loudly without one: the gate
+is complete only with that checkout. Breaking protocol changes bump both
+versions together.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, `ghost-desktop`, user unit, and runtime docs/licenses;
@@ -566,8 +534,7 @@ that exact runtime version. The checkout variants are `ghost-runtime-dev` and
 existing graphical session without requiring Quickshell or installing Ghost UI.
 An app supplies its own UI over the same authenticated HTTP/SSE API. Adding or
 removing the UI neither stops the runtime nor changes ghost homes; removing the
-runtime preserves owner data. This replaces the inseparable desktop package,
-not the daemon, protocols, or graphical-session lifecycle.
+runtime preserves owner data.
 
 - [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
   ghost-home parsing, prompt construction, pure tools, browser/desktop clients,
@@ -582,10 +549,8 @@ not the daemon, protocols, or graphical-session lifecycle.
   `bar-widget` (the state dot) kinds. It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
-  root. The bar widget claims a whole host slot — the injected `bar.barSize`
-  across the bar, the host's 27px icon slot along it — because the host arranges
-  modules in a Row, which sets `x` and leaves `y` alone: anything shorter rides
-  above its neighbours instead of on their centre line. Hover text uses the
+  root. The bar widget fills the injected `bar.barSize` across the bar and
+  the host's 27px icon slot along it. Hover text uses the
   host's `bar.showTooltip`/`hideTooltip` API and `tooltipHovered` lifecycle;
   Omarchy owns its theme, sizing, and placement. The widget exposes
   `triggerPress(button)` so the host's drag-aware click forwarding toggles the

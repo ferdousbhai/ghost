@@ -17,33 +17,27 @@ The MCP navbar manages only this ghost's additional configuration; it does not
 edit harness-owned settings or prove a server connected. Pi/OMP forwarding
 behavior is unchanged.
 
-## Agent audit — 2026-10-13
+## Parser evidence
 
-Probes used scratch working directories with an inert `resource-audit-marker`
-skill, a request to reply `OK` without tools or changes, bounded process-group
-lifetimes, and no Ghost daemon. Initial Muse probes used its offline echo
-provider and private HOME/XDG paths. Initial Copilot probes used a release
-unpacked only under `/tmp`, not installed or added to PATH. After the owner
-set up authentication, the populated Copilot/OpenCode installations and
-Antigravity, Muse, Claude, Pi, Cursor, and OMP were rechecked. No tools were
-called in the successful model probes and Crush was skipped at the owner's
-request. Fixtures retain only relevant fields
-and shorten catalogs; they never retain credentials, plugin paths, or owner
-conversation content.
+The following native-output checks produced the reduced fixtures in
+`packages/daemon/test/fixtures/harness/` (2026-10-13). They establish parser
+coverage for those versions, not ongoing authentication or compatibility.
+Probes used scratch directories and inert skills; fixtures omit credentials,
+private paths, and owner conversation content. Schema-derived tests are labelled.
 
-| Agent / checked version | Evidence and reporting |
+| Harness / checked version | Supported evidence and limits |
 |---|---|
-| Claude 2.1.296 | An authenticated headless run succeeded and reported 45 skills (including the scratch marker), five plugins, and an explicitly empty MCP list in init. The parser returned all three inventory fields. The reduced fixture retains names only. |
-| Grok 1.0.52 | A successful headless probe emitted `skills` (names) and `mcp_servers` (explicitly empty) in `system/init`. Both are handled. No `plugins` field was reported, so extensions remain unknown. |
-| Copilot 1.0.96 | Successful headless probes, including the owner's installed binary after sign-in, emitted `session.mcp_servers_loaded` and status changes, with `github-mcp-server` connected. Its published schema and bundled runtime also define `session.skills_loaded` and `session.extensions_loaded`; the parser handles them if emitted, but neither appeared in these probes. Those fields therefore stay unknown, not empty. Only enabled skills, running extensions (source-qualified IDs), and connected MCP servers count. |
-| Codex 0.162.1 | `exec --json` emitted no inventory. The exact session's rollout did contain the rendered skill catalog in `world_state.state.host_skills.body`, including the scratch marker. Ghost reads names from that catalog after the pass, provided a fresh `turn_context` proves this attempt reached context construction. Plugins and MCP connections remain unknown: disabled plugin IDs and plugin recommendations are not evidence of loaded plugins. |
-| Cursor Agent 2026.10.01-e373342 | After completing sign-in, native `status` confirmed authentication and the scratch run succeeded. Init contained type/subtype/auth-source/cwd/session/model/permission fields, with no skill/plugin/MCP inventory, confirming the installed `7000.index.js` emitter. The shared parser would accept compatible inventory fields if a future version adds them; current inventory remains unknown. |
-| OMP 18.10.3 | After signing into its default profile's OpenAI Codex provider, the scratch run succeeded with `OK`. Its JSON stream contained a session header, advisor-cost event, and agent/turn/message events, with no resource inventory, confirming the inspected embedded `packages/coding-agent/src/modes/print-mode.ts`. RPC/internal resource-loader access is not evidence on Ghost's JSON print path. Inventory remains unknown. |
-| Antigravity 1.3.4 | After sign-in, the native run succeeded with `OK`; its stream was init/step-update/result. Init contained only cwd/tools/permission fields, not a skill/plugin inventory. The parsed inventory remains unknown. |
-| OpenCode 1.19.0 | After installation/sign-in, the native run succeeded with `OK`; JSON contained step-start/text/step-finish, no inventory. This confirms the inspected version-tagged `run.ts` path. The existing session DB inspection reads model metadata only. Remains unknown. |
-| Crush | Excluded from further checks at the owner's request. No runtime integration or installation was changed. |
-| Muse 1.4.7-R6101.1 | Both the offline echo probe and the subsequent authenticated model run succeeded with `OK` and emitted no inventory. The real-model run also emitted model configuration metadata. The binary's exported MSP schema offers session-scoped `skill/list` and `plugin/list`, but `mcpServer/list` is explicitly configuration/auth facts, not connection readiness. Those separate RPC surfaces are not Ghost's `exec --json` path. Remains unknown. |
-| Pi 1.2.0 | The configured Anthropic default returned an authentication error (despite CLI exit 0). A retry explicitly selecting the current session's ready OpenAI OAuth provider/model succeeded with `OK`, but the JSON header/events contained no inventory. No default or credential setting was changed; Ghost still has no inventory extraction for its JSON print path. Its current `--help` does expose native MCP support; the older claim that Pi has no MCP client was corrected. Ghost's Pi row still does not forward Ghost MCP servers. |
+| Claude 2.1.296 | Init reported skills, plugins, and explicit MCP inventory. Compatible init tool names are accepted. |
+| Grok 1.0.52 | Init reported skills and explicit MCP inventory; plugins unknown. |
+| Copilot 1.0.96 | Native MCP load/status events were observed. Skills/extensions events are schema-supported but were not emitted in the probe. Count enabled skills, running source-qualified extensions, and connected servers only; ignore subagent inventory. |
+| Codex 0.162.1 | JSON stdout had no inventory. The reported session's rendered skill catalog supplies names only when a fresh turn-context record attributes it to this run. Plugins/MCP remain unknown. |
+| Cursor Agent 2026.10.01-e373342 | Init had no inventory. Future compatible inventory fields can use the shared parser. |
+| OMP 18.10.3 | JSON print path emitted no inventory; internal resource-loader/RPC access is not evidence on that path. |
+| Antigravity 1.3.4 | Init/step/result stream had no skill/plugin inventory. |
+| OpenCode 1.19.0 | JSON step/text stream had no inventory; session DB inspection supplies model metadata only. |
+| Muse 1.4.7-R6101.1 | Offline and model runs emitted no inventory. Separate MSP list methods are not the exec path; MCP configuration/auth is not connection readiness. |
+| Pi 1.2.0 | Successful JSON print run emitted no inventory. Pi supports owner-configured MCP, but Ghost's row does not forward its servers. |
+| Crush | Not checked, at the owner's request. |
 
 ### Protocol evidence
 

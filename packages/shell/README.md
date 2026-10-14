@@ -9,61 +9,22 @@ The manifest declares three kinds: `service` (the daemon connection and the
 notifications a shut window would swallow), `panel` (the chat window), and
 `bar-widget` (the state dot). The HUD is a normal `FloatingWindow`
 (`xdg-toplevel`), so Hyprland owns tiling, focus, resizing, and workspace
-movement; it finds its own window by title, because a plugin's window carries
-the host shell's app-id. `SUPER+CTRL+G` is launch-or-focus, hiding only when
+movement; window rules use its title because a plugin window carries the host shell's
+app-id. Focus comes from Qt's own window state. `SUPER+CTRL+G` is launch-or-focus, hiding only when
 the focused HUD receives it again.
 
 Every QML import here is a relative path. Inside the host, `qs.` resolves to
 Omarchy's shell root, so `import qs.services` would bind these files to
 Omarchy's modules instead of ours.
 
-## Code map
+Installation and use: [getting started](../../docs/getting-started.md).
+Integration samples: [contrib](contrib/README.md).
+Preview and focused checks: [dev](dev/README.md).
+Cross-package behavior: [CONTRACTS.md](../../CONTRACTS.md).
 
-```text
-qml/manifest.json         plugin manifest: kinds and entry points
-qml/Service.qml           service kind: daemon connection, toasts, IPC
-qml/Panel.qml             panel kind: the host's open/close contract
-qml/GhostHud.qml          chat window
-qml/GhostBarWidget.qml    bar-widget kind: the mark in a host bar slot
-qml/components/           chat, queue, tools, routing, board, orb
-qml/services/Ghostd.qml   authenticated HTTP/SSE client and UI state
-contrib/                  Omarchy integration
-dev/                      isolated preview, mock daemon, checks
-```
-
-Install integration lives in [`contrib/README.md`](contrib/README.md). Preview
-and fixture options live in [`dev/README.md`](dev/README.md). Stable wire and
-storage behavior lives in [`CONTRACTS.md`](../../CONTRACTS.md).
-
-## UI boundaries
-
-- One `Ghostd` singleton serves HUD and in-process bar state. It parses
-  cumulative QML `XMLHttpRequest` SSE bodies directly, resuming a turn
-  response ghostd cut for size; request objects remain strongly owned until
-  terminal settlement.
-- The shell edits durable state only through authenticated daemon routes. It
-  never reads ghost homes or the owner's documents directly.
-- While streaming, Enter queues a follow-up that runs after the current pass,
-  and Shift+Enter inserts a newline.
-- The header names the harness (agent CLI) answering the open conversation
-  ("via claude", "harness: automatic" for a fresh draft). Clicking it lists the
-  installed harnesses from `GET /harness`, with reported usage shown for
-  information; a name runs this conversation's next turn on it. One
-  footer line says what new conversations start on: "use <harness>" makes this
-  conversation's harness the ghost's default, and "automatic" clears it back to
-  Omarchy's. Nothing in the shell picks a model or
-  signs in to a provider.
-- Plans and tasks live in the owner's documents; the shell has no jobs strip,
-  plan mode, or progress/todo projection.
-- Tool activity is transient beside the orb. Settled replies keep failed calls
-  visible by default; the complete trace is available behind the steps
-  disclosure, which the message reveals on hover along with its copy control. A turn that ran tools and said nothing keeps the count painted —
-  there is no text to hover over, so it is the whole row.
-- Context panels expose character, hooks, MCP, the board, remote access, and
-  connection state.
-- Dictation is Omarchy's Voxtype. The composer shows a toggle only while its
-  state file exists, hands focus back to the field after toggling, and says
-  when Voxtype is listening.
+The `Ghostd` singleton serves HUD and bar state over authenticated HTTP/SSE.
+Durable state changes use the daemon API; the workbench editor alone writes
+ordinary files at the owner's direction. Preview those writes in isolation.
 
 ## Theme
 
@@ -98,15 +59,9 @@ Only the ghost's own identity is fixed: the amber presence and rose failure
 colours, the spectral orb, and the code view, which stays dark in both Omarchy
 modes because a syntax palette tuned for dark ink turns to mud on paper.
 
-The orb is a phosphor matrix — square cells on a square grid, bright at the
-core and falling off to the rim, with motes walking the outer ring one cell at
-a time. It is made of the same stuff as the rest of the screen and stays the
-one lit thing in it. No two summonings look alike: `OrbSeed.js` takes the
-disc's falloff, its phosphor's place in the spectral band and its mote count
-from the ghost's name, so a ghost looks like itself across every conversation,
-and every cell's rhythm from the turn, so the same ghost never flickers the
-same way twice. Both are pure functions of their seed, which is what makes an
-orb testable and stops a redraw restyling it mid-turn.
+`OrbSeed.js` derives the phosphor orb's identity from the ghost's name and
+animation from the turn. Keep those functions deterministic so redraws do not
+change identity and fixtures remain reproducible.
 
 ## Verification
 

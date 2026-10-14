@@ -1,12 +1,9 @@
 # Desktop integration
 
-The files in this directory, and nothing else. Ghost's HUD is an
-[omarchy-shell](https://github.com/omacom/omarchy) plugin, so installing,
-summoning, and removing it are the plugin's own README —
-`/usr/share/ghost/plugin/README.md`, or
-[`../qml/README.md`](../qml/README.md) in a checkout. The plugin runs inside
-the shell Omarchy already starts: no unit, no second Quickshell process, no
-tray helper.
+The package installs the desktop entry, icons, and keybinding samples here.
+For installation and HUD use, follow
+[getting started](../../../docs/getting-started.md); installed runtime guidance
+is `/usr/share/doc/ghost/ARCH.md`.
 
 ## The summon key
 

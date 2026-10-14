@@ -1,81 +1,30 @@
 # Contributing
 
-Ghost is maintained by its owners and by the ghosts that run on it. A ghost
-reads this file from the clone its daemon runs from when it decides a change
-is worth offering upstream; a human contributor follows the same steps.
+Read [AGENTS.md](AGENTS.md) for working rules and [CONTRACTS.md](CONTRACTS.md)
+for shared guarantees. Check current issues and commits before starting.
 
-## What belongs upstream
+Owner-specific character, documents, configuration, and transcripts stay
+private. Upstream fixes must generalise without including owner data.
+[Concepts](docs/concepts.md) explains the product's deliberate boundaries.
 
-The ghost home under `~/ghosts/<name>/` is one owner's: character, notes,
-hooks, settings, skills. Nothing there is a pull request.
+## Workflow
 
-`packages/`, `CONTRACTS.md`, and `docs/` are every ghost's. A change there that
-does not encode one owner's preference is a candidate: a bug, contract drift
-between doc and code, a runtime surface that one adapter has and the other
-lacks, a policy line that turned out to be wrong in use. `docs/concepts.md`
-lists what is deliberately absent; a PR that adds one of those needs the reason
-the absence no longer holds.
+Follow the owner's authorized workflow. Work in this repository currently
+commits directly to `master`; do not open task PRs. External contributors use
+a topic branch and a fork. A ghost needs owner authorization to publish under
+their GitHub identity; an existing instruction to push is sufficient.
 
-## Once, by the owner
+1. Preserve concurrent edits. Never stash, restore, or discard a peer's work.
+2. Update contracts and all affected consumers together. Add a focused test
+   for behavior changes; run the affected tests and package typecheck.
+3. Commit the problem, change, and reason. Justify any prompt-budget increase
+   in the message. A ghost-authored change can identify its harness in a trailer.
+4. Push only within the authorized scope. Master pushes require the full
+   `pnpm verify` gate after the final commit; never bypass the hook.
+5. If using a PR, describe the resulting behavior and validation, then remove
+   its worktree and branches after merge.
 
-The PR is opened under the owner's GitHub identity, so the owner sets that up:
-
-```sh
-gh auth login
-cd ~/src/ghost
-gh repo fork --remote --remote-name fork
-```
-
-After this, `origin` is `ferdousbhai/ghost` and `fork` is the owner's copy.
-An owner who can push to `ferdousbhai/ghost` itself skips the fork: topic
-branches go to `origin`, and `fork` below reads `origin`.
-
-## Every time
-
-1. Start from current master, so the fix is against what upstream has and not
-   against what the clone had when it was made:
-
-   ```sh
-   git fetch origin
-   git switch -c <topic> origin/master
-   ```
-
-   Check `git log origin/master` and the open issues first. The bug may already
-   be fixed or already filed.
-
-2. Read `CLAUDE.md` and `CONTRACTS.md`. A change that crosses a package
-   boundary or the wire changes `CONTRACTS.md` in the same commit, and a
-   harness-shaped change is one row of `harness-table.ts`, tested against that
-   harness's real output.
-
-3. Edit, then run the touched package's tests and `typecheck`. Behavior
-   changes ship with a focused test. Raising a ceiling in
-   `packages/daemon/test/prompt-budget.test.ts` is justified in the commit
-   message.
-
-4. Commit with the reason in the message. If the committer is a ghost, say so
-   in a trailer, with what it was running:
-
-   ```
-   Ghost: <name> on <harness>, ghostd <version> <commit>
-   ```
-
-5. A ghost shows the owner the branch and asks before pushing. The push and
-   the PR are outward-facing and carry the owner's name. Then:
-
-   ```sh
-   git push -u fork <topic>
-   gh pr create --repo ferdousbhai/ghost --fill
-   ```
-
-   The PR body says what was wrong, what changed, and how it was verified,
-   and it carries no owner detail from notes, transcripts, or the ghost home.
-
-6. Adopt the change locally by the self-maintenance loop: `pnpm build` and a
-   restart from the topic branch, or wait for it to land on master and
-   rebase. The runbook is [docs/self-maintenance.md](docs/self-maintenance.md).
-
-## Review
-
-Maintainers review ghost PRs like any other. A PR whose reasoning is only in
-a ghost's transcript is asked to put the reasoning in the description.
+A source build does not update a packaged install. Deploy and verify using
+[the maintenance runbook](docs/self-maintenance.md), with runtime and HUD from
+one version. Test changes against scratch state and the isolated HUD preview,
+never the owner's live ghost or desktop.

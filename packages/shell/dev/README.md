@@ -156,50 +156,23 @@ misspelled properties.
 None. Treat QML import and signal warnings as findings; a missing service import
 can prevent notifications from loading even when the panel itself opens.
 
-## What was verified live, and what was not
+## Manual verification
 
-Verified on this machine (Omarchy 4.0.0.alpha, Hyprland 0.56.2, Quickshell
-0.3.0, Qt 6.11.2):
+Use this preview for changes involving focus, layout, notifications, or file
+writes; mocked unit tests alone cannot prove those behaviors. Check the
+surfaces affected by the change:
 
-- Streaming `XMLHttpRequest` — `readyState 3` fires once per network chunk for
-  both GET and POST, with cumulative `responseText`. Measured headlessly
-  against a chunked SSE server before any UI existed. Qt rebuilds that body
-  on every chunk (about 46% of a core at 8 MB), which is why ghostd cuts a
-  turn response at about 1 MB and the HUD resumes it.
-- Config load with zero QML errors; `qs ipc show`/`call`/`prop get`.
-- A full turn end to end against the mock: roster fetch, POST, SSE parse, tool
-  activity, markdown render, terminal `done`, notification.
-- The HUD surface under Hyprland: layer, geometry (`hyprctl layers`), theme
-  colours, focus grab, Esc.
-- **The bar widget in the owner's own bar**, after `omarchy-restart-shell`:
-  `omarchy-shell shell debugBarGeometry` reports it filling a 27x26 host slot
-  level with its neighbours.
+- Focused Chat marks replies read; Board, unfocused Chat, and a narrow
+  workbench hiding Chat preserve unread state.
+- Resources open on demand and add no chat messages.
+- Notifications replace their prior server ID and open the originating
+  conversation when clicked.
+- File edits preserve Markdown, merge disjoint external edits, and block
+  close/switch on conflicts or failed saves. Include an empty external file
+  and recovery after a permission-denied save.
+- The bar widget fills its host slot; hover, exit, and clicks use host APIs.
+- Test theme changes and multiple outputs in an isolated environment when
+  the change affects them; do not infer coverage from a single-output run.
 
-Not verified live:
-
-- **Theme switching.** The `theme.name` watch is reasoned from
-  `omarchy-theme-set`'s implementation (`rm -rf` + `mv`, then `echo >
-  theme.name`), not observed — switching themes would have restyled the
-  developer's whole desktop.
-- **Multi-monitor.** One output here. As a normal toplevel the HUD is placed by
-  Hyprland on the focused workspace, and `focuswindow class:ghost` (the "focus"
-  half of launch-or-focus) pulls an already-open window across outputs — neither
-  path was exercised against a second monitor.
-
-Notification follow-up (isolated preview, 2026-09-18): inspected the toast,
-verified server-ID replacement, and invoked its click action from another
-ghost’s Board view to return to the originating conversation.
-
-Bar tooltip follow-up (isolated preview, 2026-09-18): hovered the mascot and
-confirmed `casper · idle` fits the host-themed tooltip. The focused bar-widget
-tests ran on the nested Wayland display and covered host tooltip delegation,
-click dismissal, pointer exit, and hiding the widget.
-The click follow-up also exercises `triggerPress` through `bar.shell`; actual
-pointer clicks in the nested bar closed and reopened the panel.
-
-Validation follow-up (2026-10-13, isolated preview): actual FileView writes
-preserved Markdown, merged disjoint disk edits, blocked close/switch on a
-conflict or permission-denied save, protected empty external files, and
-saved retained typing after permissions recovered. Live HUD checks preserved
-unread state in Board, unfocused Chat, and a narrow workbench; returning to
-focused Chat marked read. Resources opened only from the harness action.
+Record results with the change being reviewed, rather than accumulating dated
+validation claims here.

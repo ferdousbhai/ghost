@@ -1,12 +1,9 @@
 # Getting started
 
-Ten minutes from a bare Omarchy machine to a named ghost answering you in the
-HUD and in the terminal. Every command below is the real one; nothing here is
-a placeholder.
+Install Ghost, create a persona, and talk in the HUD or terminal.
 
 For what the pieces *are*, read [concepts.md](concepts.md) after — or instead
 of — this page.
-
 
 ## 0. What you need
 
@@ -31,19 +28,12 @@ Open the Omarchy menu, then **Install → AI → Ghost**. Until that entry ships
 curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash
 ```
 
-To work on Ghost itself, build the rolling checkout package instead — see
-[`packaging/arch/README.md`](../packaging/arch/README.md) for what it installs,
-why each dependency is there, and the upgrade and uninstall paths:
+For checkout development, use the
+[rolling package recipe](../packaging/arch/README.md). Install matching runtime
+and UI packages together; a workspace build alone does not update the app.
 
-```sh
-git clone https://github.com/ferdousbhai/ghost.git
-cd ghost/packaging/arch && makepkg --cleanbuild
-sudo pacman -U ghost-dev-*.pkg.tar.zst
-```
-
-Either way the package only puts files in place; it creates nothing in your
-home and edits no configuration of yours. The post-install hook prints the
-commands that finish the job, which are section 3 — do not skip it.
+The installer configures this login. Installing the package directly only
+puts files in place; finish setup in section 3.
 
 ### Product skills through Bash
 
@@ -77,19 +67,17 @@ calls for it.
 ### Bring your own UI
 
 For a remote desktop with an app-provided UI, install `ghost-runtime` instead of
-`ghost`. It includes the daemon/API, CLI, `ghost-desktop`, and browser relay,
+`ghost`. It includes the daemon/API, CLI, `ghost-desktop`, and browser-relay support,
 without Ghost's HUD, launcher, icons, or Quickshell dependency. Start only
 `ghostd.service`; the graphical-session and authentication requirements below
 still apply. See [runtime install and UI removal](../packaging/arch/README.md#runtime-with-your-own-ui).
 
-## 3. Start the services
+## 3. Confirm setup
 
-```sh
-systemctl --user enable --now ghostd.service
-ln -sfn /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
-omarchy-shell shell rescanPlugins && omarchy plugin enable ferdousbhai.ghost
-systemctl --user status ghostd.service --no-pager
-```
+The one-line installer already starts the daemon and links/enables the HUD.
+If you installed the package directly, run that installer to finish setup;
+it waits for plugin discovery before enabling it. Runtime-only installs need
+just `systemctl --user enable --now ghostd.service`.
 
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit
@@ -172,8 +160,8 @@ ghost switch claude      # run this conversation's next turn on claude
 A switched conversation's new agent is handed the conversation so far. The
 preference lives in the ghost's `settings.yml` as `harness: codex`.
 
-An agent that cannot take a turn — not signed in, out of quota — hands it to
-the next, which is given the conversation so far. The model, sign-in, tools,
+An agent that fails before replying or starting a tool hands the turn to the
+next, with the conversation so far. A later failure ends the turn with an error. The model, sign-in, tools,
 and permissions are that agent's own, configured as you would for yourself;
 Ghost has no model picker or provider login. For the hard questions, a ghost
 also delegates from Bash to a specialist (`ghost delegate claude -- -p …`).
@@ -275,7 +263,7 @@ and any skill you installed untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, link it into `~/.config/omarchy/plugins/` and `omarchy-shell shell rescanPlugins`. |
+| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, rerun the installer to link it, wait for discovery, and enable it. |
 | A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
