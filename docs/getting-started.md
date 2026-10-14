@@ -47,11 +47,11 @@ commands that finish the job, which are section 3 — do not skip it.
 
 ### Product skills through Bash
 
-Install the skills you need from
-[ghost-skills](https://github.com/ferdousbhai/ghost-skills#install-skills):
-Cloud Calendar, Cloudmail, Cloud Contacts, Cloud Tasks, the remaining iCloud apps,
-Omacloud, wacli, and Omdrop (on supported Apple Silicon Macs). Drive/Docs/Sheets
-use the scoped Google Workspace skill. Ghost uses
+Install the [ghost-skills](https://github.com/ferdousbhai/ghost-skills) index
+(`npx skills add ferdousbhai/ghost-skills -g`). It lists the recommended
+products (Cloudmail, Cloud Calendar, Cloud Contacts, Cloud Tasks, iCloud apps,
+Omacloud, gws for Drive/Docs/Sheets, wacli, and Omdrop) and installs each
+product's own skill from its repository when needed. Ghost uses
 these product CLIs through the harness's Bash/shell tool and native skill
 discovery; no additional daemon integration or MCP server is needed.
 
