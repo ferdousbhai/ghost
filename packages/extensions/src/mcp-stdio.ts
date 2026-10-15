@@ -80,7 +80,7 @@ export async function serveMcpTools(server: McpToolServer, input: Readable, writ
       .then(
         (result) => controller.signal.aborted || reply(id, { result }),
         (error: { code?: number; message?: string }) =>
-          controller.signal.aborted || reply(id, { error: { code: error.code ?? -32603, message: error.message ?? String(error) } }),
+          controller.signal.aborted || reply(id, { error: { code: typeof error.code === "number" ? error.code : -32603, message: error.message ?? String(error) } }),
       )
       .finally(() => running.delete(id));
   }

@@ -101,7 +101,6 @@ FloatingWindow {
         // as invalid Lua.
         Hyprland.dispatch('hl.dsp.focus({ window = "title:' + hud.titlePattern + '" })');
         Ghostd.refresh();
-        Ghostd.refreshRelay();
         Dictation.refresh();
         hud.showSection("chat");
     }
@@ -153,15 +152,6 @@ FloatingWindow {
     function clearPendingError(): void {
         if (hud.pendingSession !== "") Ghostd.sessionsError = "";
         if (hud.pendingGhost !== "") Ghostd.ghostDeleteError = "";
-    }
-
-    // The pairing prompt has no event stream; a cheap unauthenticated poll
-    // while the HUD is up is what makes it appear.
-    Timer {
-        interval: 3000
-        repeat: true
-        running: hud.shown && Ghostd.reachable
-        onTriggered: Ghostd.refreshRelay()
     }
 
     Binding {
@@ -482,27 +472,6 @@ FloatingWindow {
             onDismissed: hud.dismissPending()
         }
 
-        // The relay asking to pair shows a six-digit code in its popup. The
-        // same code here is the whole check: Allow only on a match.
-        ConfirmDialog {
-            id: pairDialog
-
-            readonly property string code: Ghostd.relayPairing ? Ghostd.relayPairing.code : ""
-
-            anchors.fill: parent
-            open: Ghostd.relayPairing !== null
-            title: "Let a browser pair?"
-            body: "A Chromium extension wants to drive tabs for your ghosts. "
-                + "Its popup shows code " + pairDialog.code.slice(0, 3) + " "
-                + pairDialog.code.slice(3) + ". Allow only if that matches."
-            confirmText: "Allow"
-            cancelText: "Deny"
-            destructive: false
-            busy: Ghostd.relayResolving
-            error: Ghostd.relayError
-            onConfirmed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, true)
-            onDismissed: if (pairDialog.code !== "") Ghostd.resolveRelayPairing(pairDialog.code, false)
-        }
 
         // Banishing a ghost is the same question one notch louder: the daemon
         // wants the name echoed back byte for byte, so the dialog collects it.

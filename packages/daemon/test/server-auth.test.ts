@@ -230,17 +230,14 @@ describe("the two deliberate exemptions", () => {
     expect(response.headers.get("access-control-allow-methods")).toContain("DELETE");
   });
 
-  it("serves /api/relay/status unauthenticated, and it still leaks nothing", async () => {
+  it("does not exempt the retired relay endpoint from authentication", async () => {
     const base = await serve();
-    const response = await fetch(`${base}/api/relay/status`);
-    expect(response.status).toBe(200);
-    const text = await response.text();
-    expect(text).not.toMatch(/[0-9a-f]{64}/);
+    expect((await fetch(`${base}/api/relay/status`)).status).toBe(401);
   });
 
   it("does not extend that exemption to a foreign origin's other requests", async () => {
     const base = await serve();
-    // The status route is open on purpose; nothing next to it is.
+    // Retired routes have no authentication exemption.
     expect((await fetch(`${base}/api/relay`)).status).toBe(401);
     expect((await fetch(`${base}/api/relay/status/extra`)).status).toBe(401);
   });
@@ -258,7 +255,7 @@ describe("the API token store", () => {
     await rm(dir, { recursive: true, force: true });
   });
 
-  it("sits beside the relay token under XDG state", () => {
+  it("lives under XDG state", () => {
     expect(apiToken.defaultPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
       .toBe("/xdg/state/ghost/api-token");
     expect(apiToken.defaultPath({}, "/home/x"))
@@ -277,11 +274,6 @@ describe("the API token store", () => {
     expect(apiToken.read({ path })).toBe(first.token);
   });
 
-  it("does not share a file with the relay token — one leak must not be two", () => {
-    expect(apiToken.defaultPath({}, "/home/x")).not.toBe(
-      join("/home/x", ".local", "state", "ghost", "relay-token"),
-    );
-  });
 });
 
 describe("ghostd api-token", () => {

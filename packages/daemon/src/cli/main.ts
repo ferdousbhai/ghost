@@ -14,7 +14,6 @@ import {
   characterCommand,
   readCommand,
   boardCommand,
-  browserCommand,
   remoteCommand,
   renameCommand,
   harnessCommand,
@@ -203,14 +202,6 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost board",
     positionals: [0, 0],
     run: boardCommand,
-  },
-  {
-    verb: "browser",
-    usage: "browser [status|allow <code>|deny <code>] [--json] [-q]",
-    summary: "Show the Chromium relay, or answer a browser asking to pair.",
-    example: "ghost browser allow 482913",
-    positionals: [0, 2],
-    run: browserCommand,
   },
   {
     verb: "remote",

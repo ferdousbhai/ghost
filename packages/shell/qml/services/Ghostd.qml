@@ -12,7 +12,7 @@ pragma Singleton
 // Auth: the daemon binds loopback, which is not the same as being private —
 // every browser on this machine can reach 127.0.0.1 too, and a page the user
 // visits could otherwise drive a ghost with a form post (issue #485). So every
-// /api route but relay/status wants `Authorization: Bearer <token>`, where the
+// private /api route wants `Authorization: Bearer <token>`, where the
 // token is a 0600 file the daemon mints at startup. We can read a file; a web
 // page cannot. Nothing here opens a request directly — `request()` (or, for
 // the two event streams, `dispatch()`) does, so the header and the rotation
@@ -663,49 +663,6 @@ Singleton {
                     : root.describeError(xhr, "GET board");
             }
         });
-    }
-
-    // The browser relay's pairing prompt is daemon-global as well. GhostHud
-    // polls it only while shown: the code the extension popup displays has to
-    // match the one here, and that is what makes Allow safe to click.
-    /** `{code}` while a browser is waiting for Allow, else null. */
-    property var relayPairing: null
-    property bool relayResolving: false
-    property string relayError: ""
-    property var relayRequest: null
-
-    /** The pending pairing from a relay status body, or null. */
-    function relayPairingFrom(body: var): var {
-        if (!body || typeof body !== "object" || Array.isArray(body)) return null;
-        const pairing = body.pairing;
-        if (!pairing || typeof pairing !== "object" || typeof pairing.code !== "string"
-                || !/^[0-9]{6}$/.test(pairing.code)) return null;
-        return { code: pairing.code };
-    }
-
-    function refreshRelay(): void {
-        if (root.relayResolving || root.relayRequest) return;
-        root.request(root, "relayRequest", "GET", "/api/relay/status", null, function (xhr, body) {
-            root.relayPairing = xhr.status === 200 ? root.relayPairingFrom(body) : null;
-        });
-    }
-
-    /** Answer the pairing whose code the owner can see. */
-    function resolveRelayPairing(code: string, allow: bool): void {
-        if (root.relayResolving || typeof code !== "string" || code === ""
-                || typeof allow !== "boolean") return;
-        root.retire(root, "relayRequest");
-        root.relayResolving = true;
-        root.relayError = "";
-        root.request(root, "relayRequest", "POST", "/api/relay/pair", { code: code, allow: allow },
-            function (xhr, body) {
-                root.relayResolving = false;
-                // A 404 is expired, or answered from the CLI: either way it is gone.
-                if (xhr.status === 200 || xhr.status === 404)
-                    root.relayPairing = xhr.status === 200 ? root.relayPairingFrom(body) : null;
-                else
-                    root.relayError = root.describeError(xhr, (allow ? "allow" : "deny") + " browser pairing");
-            });
     }
 
     function refresh(): void {

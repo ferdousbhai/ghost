@@ -26,12 +26,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # The daemon's relay conformance test reads a sibling clone of the
-      # extension (CONTRACTS.md) and skips without one.
-      - uses: actions/checkout@v4
-        with:
-          repository: ferdousbhai/ghost-chromium-extension
-          path: .ci/ghost-chromium-extension
       - uses: actions/cache@v4
         with:
           path: .cache/native/${{ matrix.arch }}

@@ -39,8 +39,8 @@ or todo API.
 
 - The HUD is an omarchy-shell plugin, sharing the desktop's theme and lifecycle.
   Ghost has no second shell process or tray helper.
-- Browser automation uses the opt-in relay in the owner's visible Chromium
-  session. It has no hidden browser or second backend.
+- Browser automation uses the installed agent-browser CLI through Bash in
+  the owner's signed-in Chromium, with separate tabs for concurrent tasks.
 - Computer use is the separate `ghost-desktop` MCP server. Prefer a CLI or
   browser action when available; desktop input can disturb the owner's focus.
 - Dictation uses Omarchy's Voxtype. Ghost adds no speech stack.

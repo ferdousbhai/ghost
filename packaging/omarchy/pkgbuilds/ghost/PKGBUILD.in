@@ -32,7 +32,7 @@ checkdepends=(
   'ripgrep'
 )
 _runtime_optdepends=(
-  'chromium: the browser the relay drives, and the browser-relay smoke test'
+  'chromium: optional signed-in browser automation with agent-browser'
   'npm: npx-launched MCP servers'
 )
 options=('!debug' '!strip')

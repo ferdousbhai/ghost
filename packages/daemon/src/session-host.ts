@@ -20,7 +20,7 @@ import {
 } from "@ghost/extensions";
 import { readAttachment, saveAttachment } from "./attachments.js";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
-import { closeBrowserSession, errorMessage, FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
+import { errorMessage, FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
 import {
   appendLog,
   conversationDir,
@@ -40,7 +40,7 @@ import {
   type LogEntry,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { resolveGhostExtensions, type GhostExtensionOptions } from "./extensions.js";
+import { resolveGhostExtensions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
@@ -103,7 +103,6 @@ export interface SessionHostOptions {
   runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
   logger?: Logger;
-  extensionOptions?: GhostExtensionOptions;
   hooks?: GhostHookRunner;
   /**
    * The harnesses a turn may run on, in Omarchy's order; production reads
@@ -259,7 +258,6 @@ export class SessionHost {
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly logger: Logger;
-  private readonly extensionOptions: GhostExtensionOptions;
   private readonly hooks: GhostHookRunner;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
   private readonly harnessReport: () => Promise<HarnessReport>;
@@ -289,7 +287,6 @@ export class SessionHost {
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.logger = options.logger ?? silentLogger;
-    this.extensionOptions = options.extensionOptions ?? {};
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
     this.bundledSkills = options.bundledSkills ?? null;
@@ -979,7 +976,7 @@ export class SessionHost {
   private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
     let tools = this.tools.get(ghost.dir);
     if (!tools) {
-      tools = collectGhostExtension(resolveGhostExtensions(this.extensionOptions, ghost.dir));
+      tools = collectGhostExtension(resolveGhostExtensions());
       tools.catch(() => this.tools.delete(ghost.dir));
       this.tools.set(ghost.dir, tools);
     }
@@ -1240,11 +1237,6 @@ export class SessionHost {
 
   /** Release what the daemon holds under a home that is about to move. */
   private async quiesce(ghost: Ghost, outcome: "deleted" | "renamed"): Promise<void> {
-    try {
-      await closeBrowserSession(ghost.dir);
-    } catch {
-      throw new GhostError("browser_cleanup_pending", "The ghost's browser session did not close. Restore the browser relay and retry.", 503);
-    }
     try {
       await sweepGhostSchedules(ghost.name, {
         unitDir: this.scheduleUnitDir,

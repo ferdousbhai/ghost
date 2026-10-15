@@ -2,12 +2,7 @@
 # The ghost-core / ghost-omarchy split, proved on every lint run.
 #
 # ghost-core (daemon, extensions) is everything a second interface could
-# reuse. The browser extension is a separate product in its own repository
-# (github.com/ferdousbhai/ghost-chromium-extension) that meets core only at
-# the relay WebSocket protocol. Core meets the Omarchy side (@ghost/omarchy, and
-# ghost-desktop, the computer-use MCP server in its own repository) only at the
-# seams CONTRACTS.md names — the daemon HTTP/SSE API, the relay WebSocket
-# protocol, and MCP over stdio with ghost-desktop's PATH spawn — so core must
+# reuse. Core meets Omarchy only through HTTP/SSE and desktop MCP stdio, so it must
 # never depend on or import Omarchy-side code, and the Omarchy side must never
 # import core sources (it consumes the API and protocols instead). The root
 # manifest pins ghost-desktop only so the runtime build can bundle it; that is

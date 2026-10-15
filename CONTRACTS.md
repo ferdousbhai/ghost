@@ -18,7 +18,7 @@ to reuse. Ask the owner before breaking these rules.
 
 Ghost owns persona, shared history, and harness choice. Harnesses own models,
 credentials, permissions, tool loops, retries, and compaction.
-`ghostd` owns sessions and state transitions; HUD, CLI, relay, and
+`ghostd` owns sessions and state transitions; HUD, CLI, and
 `ghost-desktop` are clients or sidecars. The daemon is loopback-only; remote
 access is the explicit Tailscale Serve viewer. See [concepts](docs/concepts.md)
 for rationale.
@@ -145,9 +145,9 @@ directory to recoverable Trash in one rename; there is no fork.
 
 ### Machine-owned artifacts
 
-- Screenshots use the Omarchy/XDG Pictures directory and exact
-  `ghost-<ghost>-{screen|browser}-<timestamp>.png` names. Retention touches only
-  those names.
+- Desktop screenshots follow ghost-desktop's host contract. Bash browser
+  screenshots use the owner's requested destination or XDG Pictures directory.
+  Ghost keeps no browser screenshot retention manager.
 - Downloads are owned by the owner's Chromium configuration.
 - Scheduled work is a systemd user `.timer`/`.service` pair named
   `ghost-timer-v1-<name-length>-<ghost>-<slug>`. Ghost prompts author persistent
@@ -261,7 +261,7 @@ the conversation's own, a harness's "continue the most recent session here" is
 the conversation's resume; opencode and muse, whose continue is not
 cwd-scoped, are resumed by the session id they reported. Each turn also
 receives the `ghost` MCP server (`ghost mcp serve -g <ghost> -s <id>`, the
-ghost's browser and desktop tools) and the ghost's enabled `mcp.json` rows,
+ghost's desktop tools) and the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
 mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
@@ -378,8 +378,7 @@ settings in `hooks.json` are ignored; command hooks remain active. Historical
 ## Daemon HTTP API
 
 `ghostd` is the only session owner. All `/api/*` routes require the bearer token
-from Ghost's mode-0600 XDG-state token file, except `GET /api/relay/status`
-(deliberately open relay liveness; it carries no secret), explicitly public
+from Ghost's mode-0600 XDG-state token file, except explicitly public
 viewer assets, and authenticated tailnet requests. Loopback CORS allows only the exact
 HUD/client methods and headers. Errors are
 `{ "error": { "code": string, "message": string } }` with a meaningful HTTP
@@ -398,8 +397,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET /api/hooks` | Redacted hook status. |
-| `GET /api/relay/status` | Unauthenticated relay liveness; carries no secret. `pairing` is `{ code }` while an unpaired browser waits for Allow, else `null`. |
-| `POST /api/relay/pair` | Owner answers the pending pairing: `{ code, allow }`. Allow hands the relay token to that browser over its socket; a stale code is `404 pairing_not_found`. |
 | `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
@@ -418,7 +415,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
-| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (browser and desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
+| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
@@ -525,18 +522,8 @@ client and process — else the connecting client plus that server process.
 **ghost-omarchy** is `packages/shell` (`@ghost/omarchy`) plus the separate
 `ghost-desktop` repository. Core never imports the Omarchy side;
 `scripts/check-core-boundary.sh` proves this during lint. Their seams are the
-authenticated HTTP/SSE API, relay WebSocket protocol, and desktop MCP stdio.
+authenticated HTTP/SSE API and desktop MCP stdio.
 
-The relay is a separate product:
-[ghost-chromium-extension](https://github.com/ferdousbhai/ghost-chromium-extension).
-Neither repository imports the other's source; Ghost neither bundles nor
-installs it. Only `PROTOCOL_VERSION`, not a release pin, ties the products.
-Its `PROTOCOL.md` is mirrored by
-[`relay-protocol.ts`](packages/daemon/src/relay-protocol.ts).
-The conformance test reads `GHOST_CHROMIUM_EXTENSION_DIR` or the sibling
-`../ghost-chromium-extension` clone and skips loudly without one: the gate
-is complete only with that checkout. Breaking protocol changes bump both
-versions together.
 
 The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, `ghost-desktop`, user unit, and runtime docs/licenses;
@@ -549,7 +536,7 @@ removing the UI neither stops the runtime nor changes ghost homes; removing the
 runtime preserves owner data.
 
 - [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
-  ghost-home parsing, prompt construction, pure tools, browser/desktop clients,
+  ghost-home parsing, prompt construction, pure tools, desktop clients,
   and the `extension-api.ts` seam. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
   authentication, conversations, the harness table, MCP, hooks, lifecycle,
@@ -597,23 +584,6 @@ runtime preserves owner data.
   field, whatever the draft or state, until the next command; Voxtype reports
   no failed transcription, so the HUD shows none. Ghost ships no speech stack
   of its own.
-- The [Ghost relay extension](https://github.com/ferdousbhai/ghost-chromium-extension)
-  is the opt-in MV3 relay into the owner's Chromium, its own product in its
-  own repository (seam: its `PROTOCOL.md`). It also drives those tabs for its
-  own side-panel chat, on the owner's OpenRouter account, with no ghost
-  installed; that mode is off the wire, but two of its rules are visible to a
-  ghost. A workspace id beginning `local:` is the panel's, so a request naming
-  the other side's tab is refused `invalid_input` by name (ghost-to-ghost stays
-  `no_page`), and a ghostd incarnation change retires only ghost-owned claims.
-  An unpaired extension dials
-  `/relay` with a six-digit code (`RELAY_PAIR_SUBPROTOCOL_PREFIX`) instead of a
-  token; the owner allows that code in the HUD or with `ghost browser allow`,
-  and the daemon answers with a `paired` frame carrying the token (`pairing`
-  frames every ping interval keep the waiting worker alive). Pairing and
-  workspace ownership are capability-scoped; there is no second browser
-  backend. Client text
-  frames are capped at `MAX_RELAY_MESSAGE_BYTES`
-  ([`relay.ts`](packages/daemon/src/relay.ts)) before JSON parsing.
 - [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop) is Hyprland computer use as a stdio MCP server
   with two tools, `desktop_look` (never changes the desktop) and `desktop_act`
   (ordered steps); any MCP client can run it. It is its own repository with
@@ -638,12 +608,14 @@ runtime preserves owner data.
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).
 
-Browser tabs stay open across idle periods; only explicit close and lifecycle
-teardown retire the workspace. Browser element refs survive repeated finds
-and tab listings until navigation or tab selection invalidates them. Each backend
-page operation reports `no_page` when no tab is open, after checking relay
-availability. Ghost avoids redundant page preflights; navigation-sensitive
-actions retain a before-page read.
+Browser automation belongs to the installed `agent-browser` CLI and its skill,
+invoked through the harness's Bash tool. Ghost exposes no browser MCP tool,
+relay, pairing API, or browser lifecycle manager. One owner-wide session
+(`owner`) shares the signed-in Chromium over loopback CDP. Conversations use
+separate tabs; cooperating callers lock tab selection and each operation with
+one owner-wide `flock`. Tabs and CLI state survive Ghost restarts, rename and
+deletion; explicitly close a task's tabs when finished, never the owner's
+browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
 
 ## Harness and lifecycle invariants
 

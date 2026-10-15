@@ -10,7 +10,7 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import type { IncomingMessage } from "node:http";
 import { promisify } from "node:util";
-import { LOOPBACK_ADDRESSES } from "./relay-protocol.js";
+import { LOOPBACK_ADDRESSES } from "./loopback.js";
 
 const exec = promisify(execFile);
 

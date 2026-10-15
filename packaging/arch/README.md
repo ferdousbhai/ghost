@@ -1,7 +1,7 @@
 # Checkout package recipe
 
 `PKGBUILD` builds two rolling packages: `ghost-runtime-dev` (daemon, CLI,
-relay, and desktop automation) and `ghost-dev` (the Omarchy UI). They provide
+desktop automation) and `ghost-dev` (the Omarchy UI). They provide
 and conflict with stable `ghost-runtime` and `ghost`, respectively. The UI
 requires the exact matching runtime version.
 `/usr/bin/ghostd` and `/usr/bin/ghost` are fixed launchers for ordinary
@@ -23,8 +23,7 @@ makepkg --cleanbuild
 sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
 ```
 
-The chroot command expects the CI inputs: the relay checkout at
-`.ci/ghost-chromium-extension` and, on ARM, the checksum-verified upstream Bun
+The chroot command expects, on ARM, the checksum-verified upstream Bun
 binary at `.ci/bun/bun`. The workflow prepares these before invoking it.
 
 ## Runtime with your own UI
@@ -41,12 +40,12 @@ sudo pacman -S ghost
 ```
 
 The runtime package has no Ghost QML, desktop entry, icons, or Quickshell
-requirement. It retains screen/desktop tools and the opt-in browser relay, so
+requirement. It retains screen/desktop tools and Bash browser automation, so
 it still requires the supported Hyprland graphical environment. This is an
 install without the Ghost HUD, not a replacement desktop-automation backend.
 The daemon remains bound to the graphical session and loopback. An app uses the
 existing bearer-authenticated HTTP/SSE API; it must render and answer pending
-`ask` questions and handle browser pairing through the API or `ghost` CLI.
+questions through conversation replies.
 Use an SSH tunnel or the existing Tailscale boundary for access from another
 machine; installing only the runtime does not expose the API publicly.
 
@@ -93,9 +92,7 @@ build and promotion (see [the release README](../release/README.md)).
 The HUD is installed at `/usr/share/ghost/plugin` as an omarchy-shell plugin.
 The package does not write into a user's config directory, so linking it into
 `~/.config/omarchy/plugins/` and enabling it is the step the install script prints for the owner to run.
-The browser extension is its own product and is not in this package: install
-Ghost for Chromium from the Chrome Web Store or from
-<https://github.com/ferdousbhai/ghost-chromium-extension>. Computer use is
+Browser automation uses the optional agent-browser CLI through Bash. Computer use is
 `ghost-desktop`, a stdio MCP server bundled like `ghostd`; any MCP client can run
 it, not only Ghost.
 
@@ -158,8 +155,5 @@ For a real service-context check on a graphical Arch login, run:
 ```
 
 It uses `/usr/bin/ghost status --json` to verify that the terminal client can
-authenticate to the active packaged daemon, then reads `/api/relay/status` to
-verify the browser relay endpoint is serving from it. Ghost launches no browser
-of its own — the relay dials out of a Chromium the owner started — so there is
-no launch policy to probe. CI chroots do not run a graphical user manager, so
-this stays a release-machine check.
+authenticate to the active packaged daemon. CI chroots do not run a graphical
+user manager, so this stays a release-machine check.

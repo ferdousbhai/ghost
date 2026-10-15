@@ -68,7 +68,7 @@ ghost can offer to install Recall, which indexes only the folders you choose.
 ### Bring your own UI
 
 For a remote desktop with an app-provided UI, install `ghost-runtime` instead of
-`ghost`. It includes the daemon/API, CLI, `ghost-desktop`, and browser-relay support,
+`ghost`. It includes the daemon/API, CLI, `ghost-desktop`, and a Bash browser skill,
 without Ghost's HUD, launcher, icons, or Quickshell dependency. Start only
 `ghostd.service`; the graphical-session and authentication requirements below
 still apply. See [runtime install and UI removal](../packaging/arch/README.md#runtime-with-your-own-ui).
@@ -232,8 +232,7 @@ codes.
 | `~/.config/ghost/hooks.json` | hook configuration, also editable from the HUD's Hooks pane |
 | `~/.config/ghost/cli.json` | the `ghost use` default, private to your login |
 | `~/.local/state/ghost/api-token` | the daemon bearer token |
-| `~/.local/state/ghost/relay-token` | the browser-relay pairing token |
-| XDG Pictures | `ghost-<ghost>-{screen,browser}-<timestamp>.png` screenshots |
+| XDG Pictures | screenshots (desktop host contract; browser destinations chosen through Bash) |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
 `GHOSTD_API_TOKEN_FILE` / `GHOSTD_RELAY_TOKEN_FILE` the token files.
@@ -247,11 +246,9 @@ and any skill you installed untouched.
 
 ## 9. Optional, once you are talking
 
-- **Lend the ghost your browser.** It has none until you pair the
-  [Ghost extension](https://chromewebstore.google.com/detail/ghost/hiikecmfleghkggknndabdkmlmnohpbm). In its side panel's
-  menu choose **Ghost on this machine…**, then open the HUD and press Allow
-  when it shows the same code. Read the extension's README first — the ghost
-  acts in the session you are signed into.
+- **Use websites.** Install agent-browser and follow the shipped
+  [web-browser skill](../skills/web-browser/SKILL.md) for signed-in Chromium
+  setup, shared-session tab locking, and cleanup.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
   Install → AI → Dictation, which sets up Voxtype). With the composer focused,
   hold `F9` and speak, or click the mic at the right of the composer; the

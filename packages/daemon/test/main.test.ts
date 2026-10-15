@@ -65,7 +65,6 @@ describe("ghostd help", () => {
     expect(output).not.toContain("ghostd import");
     expect(output).not.toContain("ghostd login");
     for (const command of [
-      "relay-token",
       "api-token",
       "remote",
       "hook-complete",
@@ -112,11 +111,9 @@ describe("waitForShutdownSignal", () => {
       const waiting = waitForShutdownSignal({
         listening: {
           server: { close() { console.log("CLOSED"); }, closeIdleConnections() {} },
-          relay: undefined,
           close: async () => { console.log("LISTENER"); },
         },
         host: { beginShutdown() { console.log("ABORTED"); }, disposeAll: async () => {} },
-        browsers: { async closeAll() { console.log("BROWSERS"); } },
         logger: { info() {}, warn() {} },
       });
       console.log("READY");
@@ -133,30 +130,26 @@ describe("waitForShutdownSignal", () => {
     await output.waitFor("READY");
     expect(spawnSync("/usr/bin/kill", ["-TERM", String(child.pid)]).status).toBe(0);
     await output.waitFor("DONE");
-    for (const step of ["CLOSED", "ABORTED", "BROWSERS", "LISTENER"]) expect(output.read()).toContain(step);
+    for (const step of ["CLOSED", "ABORTED", "LISTENER"]) expect(output.read()).toContain(step);
     await expect(exited).resolves.toBe(0);
   });
 });
 
 describe("closeDaemonResources", () => {
-  it("retires browser sessions before closing their live relay", async () => {
+  it("disposes sessions and closes the listener", async () => {
     const events: string[] = [];
     await closeDaemonResources({
       listening: {
         server: {} as never,
-        relay: undefined,
         close: async () => { events.push("listener"); },
       },
       host: {
         beginShutdown() {},
         disposeAll: async () => { events.push("host"); },
       },
-      browsers: {
-        closeAll: async () => { events.push("browsers"); },
-      },
     });
 
-    expect(events.indexOf("browsers")).toBeLessThan(events.indexOf("listener"));
+    expect(events).toEqual(expect.arrayContaining(["host", "listener"]));
   });
 
   it("attempts every stage and reports every cleanup failure", async () => {
@@ -164,7 +157,6 @@ describe("closeDaemonResources", () => {
     const closing = closeDaemonResources({
       listening: {
         server: {} as never,
-        relay: undefined,
         close: async () => {
           events.push("listener");
           throw new Error("listener close failed");
@@ -177,24 +169,17 @@ describe("closeDaemonResources", () => {
           throw new Error("host close failed");
         },
       },
-      browsers: {
-        closeAll: async () => {
-          events.push("browsers");
-          throw new Error("browser close failed");
-        },
-      },
     });
 
     await expect(closing).rejects.toMatchObject({
       name: "AggregateError",
       errors: expect.arrayContaining([
         expect.objectContaining({ message: "host close failed" }),
-        expect.objectContaining({ message: "browser close failed" }),
         expect.objectContaining({ message: "listener close failed" }),
       ]),
     });
-    expect(events).toEqual(expect.arrayContaining(["host", "browsers", "listener"]));
-    expect(events.indexOf("browsers")).toBeLessThan(events.indexOf("listener"));
+    expect(events).toEqual(expect.arrayContaining(["host", "listener"]));
+    expect(events).toEqual(expect.arrayContaining(["host", "listener"]));
   });
 });
 

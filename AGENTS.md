@@ -1,6 +1,6 @@
 # ghost
 
-Local Omarchy-native AI persona with file-backed state, a daemon API, desktop shell, browser relay, and computer-use MCP server.
+Local Omarchy-native AI persona with file-backed state, a daemon API, desktop shell, Bash browser automation, and computer-use MCP server.
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md`; an in-place edit of `CLAUDE.md` turns the link into a diverging copy.
 
@@ -14,9 +14,7 @@ Local Omarchy-native AI persona with file-backed state, a daemon API, desktop sh
 - **ghost** — one persona; **ghost home** — its directory under `~/ghosts/<name>/` (layout in `CONTRACTS.md`).
 - **harness** — an agent CLI the owner already has (claude, codex, grok, pi, …); each conversation turn is one headless run of one, a row of `harness-table.ts`.
 - **daemon** (`ghostd`) — the HTTP API that owns conversations; **HUD** — the Quickshell omarchy-shell plugin that talks to it.
-- **relay** — the opt-in Chromium extension, its own repository. Never bare
-  "extension": `packages/extensions/` is the ghost's own tools (served over
-  `ghost mcp serve`), a different thing. **ghost-desktop** — the computer-use MCP server (`desktop_look`,
+- **ghost-desktop** — the computer-use MCP server (`desktop_look`,
   `desktop_act`); any MCP client can run it.
 
 ## Taste
@@ -39,7 +37,7 @@ If a rule here fights the task in front of you, say so loudly and get sign-off b
 
 The common defect here is a change that works on the path you tested and is missing everywhere else. Before calling work done, walk this list and say which entries applied:
 
-- **Surfaces.** Daemon API, HUD (QML), relay extension, `ghost-desktop` (its own repo; bump the pin in the root `package.json`). A behavior reachable from one is usually reachable from another.
+- **Surfaces.** Daemon API, HUD (QML), `ghost-desktop` (its own repo; bump the pin in the root `package.json`). A behavior reachable from one is usually reachable from another.
 - **Contracts.** Anything crossing a package boundary or the wire is in `CONTRACTS.md`. Change it first; the consumers follow in the same commit.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Pin needs unpin. A one-way door is a bug.
 - **Prompt-visible policy.** The self-maintenance, scheduled-work, and similar policy sections, and the `ghost help <topic>` recipes they point at (`help-topics.ts`), are contract text the ghost acts on, not prose about the code. A change to restart, drain, unit naming, or CLI flags must keep those recipes true in the same commit. Every sentence the ghost reads is paid for on every turn: say each fact once, in the fewest exact words, cross-reference another section rather than restate it, and set the section's ceiling in `prompt-budget.test.ts` to its exact new size so growth is always a decision.

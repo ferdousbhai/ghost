@@ -42,7 +42,7 @@ pkgname = ghost-runtime-dev
 	depends = systemd
 	depends = wl-clipboard
 	depends = wtype>=0.4
-	optdepends = chromium: the browser the relay drives, and the browser-relay smoke test
+	optdepends = chromium: optional signed-in browser automation with agent-browser
 	optdepends = npm: npx-launched MCP servers
 	provides = ghost-runtime=0.0.1.r100.g0c04ce7-1
 	conflicts = ghost-runtime

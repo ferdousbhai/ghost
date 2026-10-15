@@ -1,8 +1,7 @@
 /**
  * The machinery behind ghostd's machine-local secrets.
  *
- * Two of them exist — the browser relay's pairing token and the HTTP API's
- * bearer token — and they want identical treatment: 32 random bytes as hex, in
+ * The HTTP API's bearer token uses 32 random bytes as hex, in
  * a mode-0600 file inside a 0700 directory under XDG *state* (machine-local,
  * regenerable, and nothing a user should be hand-editing), minted on first
  * need, compared in constant time, and printed by a `ghostd` subcommand that
@@ -416,12 +415,4 @@ export const apiToken = createTokenStore({
   command: "api-token",
   purpose: "Local API clients read this file directly; this printout is for"
     + " debugging and scripts.",
-});
-
-/** The relay's pairing token, pasted into the relay extension's popup. */
-export const relayToken = createTokenStore({
-  filename: "relay-token",
-  envVar: "GHOSTD_RELAY_TOKEN_FILE",
-  command: "relay-token",
-  purpose: "Paste this into the Ghost relay extension's popup to pair it.",
 });

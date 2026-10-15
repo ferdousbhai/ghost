@@ -77,17 +77,17 @@ async function replaceTool(name: string, execute: (...args: never[]) => Promise<
 }
 
 describe("ghost mcp serve", () => {
-  it("lists the ghost's browser and desktop tools, and nothing it no longer serves", async () => {
+  it("lists the ghost's desktop tools, and nothing it no longer serves", async () => {
     const { tools } = await (await connect()).listTools();
     const names = tools.map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["ghost_browser", "desktop_look", "desktop_act"]));
+    expect(names).toEqual(expect.arrayContaining(["desktop_look", "desktop_act"]));
     expect(names).not.toContain("ask");
-    expect(tools.find((tool) => tool.name === "ghost_browser")?.inputSchema).toMatchObject({ type: "object" });
+    expect(names).not.toContain("ghost_browser");
   });
 
   it("stops when the harness ends stdin, aborting a call still in flight", async () => {
     let aborted = false;
-    await replaceTool("ghost_browser", async (_params: never, signal: never) => {
+    await replaceTool("desktop_look", async (_params: never, signal: never) => {
       const abort = signal as AbortSignal | undefined;
       await new Promise<void>((resolve) => {
         if (abort?.aborted) resolve();
@@ -105,7 +105,7 @@ describe("ghost mcp serve", () => {
     send({ id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "harness", version: "1" } } });
     await until(() => (stdout.includes('"id":1') ? true : null));
     send({ method: "notifications/initialized" });
-    send({ id: 2, method: "tools/call", params: { name: "ghost_browser", arguments: { action: "tabs" } } });
+    send({ id: 2, method: "tools/call", params: { name: "desktop_look", arguments: { action: "tabs" } } });
     await new Promise((resolve) => setTimeout(resolve, 200));
     child.stdin.end();
     child.stdout.destroy();
@@ -120,29 +120,23 @@ describe("ghost mcp serve", () => {
     expect((await daemon.host.listSessions("casper")).find((session) => session.id === "fresh-1"))
       .toMatchObject({ running: true, messageCount: 0 });
     const { tools } = await (await connect("fresh-1")).listTools();
-    expect(tools.map((tool) => tool.name)).toContain("ghost_browser");
+    expect(tools.map((tool) => tool.name)).toContain("desktop_look");
   });
 
-  it("returns a tool's own failure as a tool error", async () => {
-    const harness = await connect();
-    const browser = await harness.callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
-    expect(browser.isError).toBe(true);
-    // No relay is paired here: the browser tool's own refusal.
-    expect(JSON.stringify(browser.content)).toMatch(/relay/iu);
-    const direct = await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
-    expect(browser.content).toEqual(direct.content);
+  it("rejects the retired browser tool", async () => {
+    await expect((await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } })).rejects.toThrow(/tool/i);
   });
 
   it("names each serve process as its own caller, so harnesses take turns on the desktop", async () => {
     const callers: Array<string | undefined> = [];
-    await replaceTool("ghost_browser", async (_params: never, _signal: never, ctx: never) => {
+    await replaceTool("desktop_look", async (_params: never, _signal: never, ctx: never) => {
       callers.push((ctx as { caller?: string }).caller);
       return { content: [{ type: "text", text: "ok" }] };
     });
-    await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
-    await (await connect()).callTool({ name: "ghost_browser", arguments: { action: "tabs" } });
-    await daemon.host.callSessionTool("casper", "conv-1", "ghost_browser", { action: "tabs" });
-    await daemon.host.callSessionTool("casper", null, "ghost_browser", { action: "tabs" });
+    await (await connect()).callTool({ name: "desktop_look", arguments: { action: "tabs" } });
+    await (await connect()).callTool({ name: "desktop_look", arguments: { action: "tabs" } });
+    await daemon.host.callSessionTool("casper", "conv-1", "desktop_look", { action: "tabs" });
+    await daemon.host.callSessionTool("casper", null, "desktop_look", { action: "tabs" });
     expect(callers[0]).toMatch(/^harness [0-9a-f]{8}$/u);
     expect(callers[1]).toMatch(/^harness [0-9a-f]{8}$/u);
     expect(callers[1]).not.toBe(callers[0]);

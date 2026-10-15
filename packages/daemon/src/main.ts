@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { apiToken, relayToken } from "./token-store.js";
+import { apiToken } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
@@ -10,13 +10,12 @@ import {
   type DaemonConfig,
   type DaemonConfigOverrides,
 } from "./config.js";
-import { closeAllBrowserSessions, openGhostHome } from "@ghost/extensions";
+import { openGhostHome } from "@ghost/extensions";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
 import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.js";
 import { McpCatalog } from "./mcp-catalog.js";
-import { createRelayHub } from "./relay.js";
 import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
 import { remoteCommand } from "./remote-command.js";
@@ -32,15 +31,11 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
-  ghostd relay-token [--rotate] [--quiet]
   ghostd api-token [--rotate] [--quiet]
   ghostd remote [on|off|status]
   ghostd hook-complete
 
 Subcommands:
-  relay-token              Print the browser-relay pairing token (minting one on
-                           first run) to paste into the Chromium extension.
-                           --rotate mints a new one and invalidates the old.
   api-token                Print the bearer token local API clients present
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
@@ -73,14 +68,13 @@ export interface ParsedArgs {
 }
 
 export interface ShutdownSignalOptions {
-  listening: Pick<ListeningServer, "server" | "relay" | "close">;
+  listening: Pick<ListeningServer, "server" | "close">;
   host: Pick<SessionHost, "beginShutdown" | "disposeAll">;
-  browsers: { closeAll(): Promise<void> };
   logger: Pick<Logger, "info" | "warn">;
 }
 
 export async function closeDaemonResources(
-  options: Pick<ShutdownSignalOptions, "listening" | "host" | "browsers">,
+  options: Pick<ShutdownSignalOptions, "listening" | "host">,
 ): Promise<void> {
   const failures: unknown[] = [];
   const attempt = async (close: () => Promise<void>): Promise<void> => {
@@ -90,10 +84,7 @@ export async function closeDaemonResources(
       failures.push(error);
     }
   };
-  // Session teardown is independent, so start it immediately. Browser teardown
-  // is ordered: its protocol close needs the relay that listening.close() owns.
   const host = attempt(() => options.host.disposeAll());
-  await attempt(() => options.browsers.closeAll());
   await attempt(() => options.listening.close());
   await host;
   if (failures.length > 0) {
@@ -189,7 +180,6 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state, and remote touches config and Tailscale Serve.
-  if (argv[0] === "relay-token") return relayToken.command(argv.slice(1));
   if (argv[0] === "api-token") return apiToken.command(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "hook-complete") return hookCompleteCommand(argv.slice(1));
@@ -258,12 +248,6 @@ async function serveDaemon(
     return 1;
   }
 
-  // One relay hub, shared: the server exposes /relay over it and the session
-  // host uses it as the browser backend's transport, so a ghost drives the
-  // very browser the extension is connected to. `undefined` when GHOSTD_RELAY
-  // is off — there is no second browser to fall back to, so `ghost_browser`
-  // then reports that none is reachable.
-  const relay = createRelayHub({ logger });
   const host = new SessionHost({
     registry,
     ownerHome,
@@ -272,9 +256,6 @@ async function serveDaemon(
     bundledSkills: bundledSkillsDir(runningSource),
     logger,
     hooks,
-    extensionOptions: {
-      ...(relay ? { relayTransport: relay } : {}),
-    },
   });
   const mcp = new McpCatalog({ registry });
   const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
@@ -290,7 +271,6 @@ async function serveDaemon(
       logger,
       port: config.port,
       address: config.host,
-      ...(relay ? { relay } : {}),
       remote: new RemoteAccess(config.remote),
       remoteServe,
     });
@@ -319,14 +299,11 @@ async function serveDaemon(
     source: runningSource.root,
     config: config.configPath,
     hooks: hooksPath,
-    // Never the token; `ghostd relay-token` is the only way to see it.
-    relay: listening.relay ? `ws://${config.host}:${listening.port}/relay` : "off",
   });
 
   await waitForShutdownSignal({
     listening,
     host,
-    browsers: { closeAll: closeAllBrowserSessions },
     logger,
   });
 

@@ -5,6 +5,8 @@ import { createServer, type Server } from "node:net";
  * below the ephemeral range (Linux: 32768+), so a port-0 listener elsewhere
  * cannot be given the same number between our probe and their bind.
  */
+export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
 const PORT_FLOOR = 20_000;
 const PORT_CEILING = 29_999;
 
@@ -49,10 +51,10 @@ export async function waitUntilServing(
       throw new Error(`daemon exited before listening (${child.exitCode})`);
     }
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/relay/status`, {
+      const response = await fetch(`http://127.0.0.1:${port}/api/status`, {
         signal: AbortSignal.timeout(2_000),
       });
-      if (response.status === 200) return;
+      if (response.status === 200 || response.status === 401) return;
     } catch {
       // The listener is not ready yet.
     }

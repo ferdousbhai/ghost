@@ -36,7 +36,6 @@ import {
   type TurnEvent,
   type TurnResumeEvent,
 } from "./turn-events.js";
-import { attachRelay, type RelayHub } from "./relay.js";
 import type { RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
 import { errorMessage, isRecord } from "@ghost/extensions";
@@ -50,10 +49,8 @@ export interface ServerOptions {
   hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
-  /** The browser relay; without one the endpoint is left out. */
-  relay?: RelayHub;
   /**
-   * The bearer token every `/api` route but `GET /api/relay/status` requires.
+   * The bearer token every private `/api` route requires.
    *
    * Omitted (the production default) it is read from — and minted into —
    * `$XDG_STATE_HOME/ghost/api-token`, so a client that reads that file is
@@ -78,7 +75,6 @@ export interface ListeningServer {
   server: Server;
   port: number;
   address: string;
-  relay: RelayHub | undefined;
   close(): Promise<void>;
 }
 
@@ -338,12 +334,11 @@ function resolveApiToken(
   return minted.token;
 }
 
-/** The server, plus what `close()` needs: streams to end and the relay to hang up. */
-function createDaemonServer(options: ServerOptions): { server: Server; liveStreams: Set<ServerResponse>; relay: RelayHub | undefined } {
+/** The server, plus what `close()` needs: streams to end. */
+function createDaemonServer(options: ServerOptions): { server: Server; liveStreams: Set<ServerResponse> } {
   const logger = options.logger ?? silentLogger;
   const maxBodyBytes = options.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
   const liveStreams = new Set<ServerResponse>();
-  const relay = options.relay;
   const apiToken = resolveApiToken(options.apiToken, logger);
   const remote = options.remote ?? null;
   const remoteServe = options.remoteServe;
@@ -364,9 +359,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     const admitted = { identity: undefined };
     if (apiToken === null) return admitted;
     if (segments[0] !== "api") return admitted;
-    // Deliberately open: it carries no secret, and a client with no token yet
-    // may still need to ask whether the relay is up.
-    if (segments[1] === "relay" && segments[2] === "status" && segments.length === 3) return admitted;
 
     // A page served by this daemon is loopback, or same-host through
     // `tailscale serve`; anything else is a cross-site page.
@@ -1002,27 +994,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       const enabled = booleanField(await readJsonObjectBody(request, maxBodyBytes), "enabled");
       jsonResponse(response, 200, await remoteServe.setEnabled(enabled));
     }),
-    // The one `/api` path exempt from the bearer token and the origin check, so
-    // anything it returns is readable by anything that can reach the port.
-    route("GET", "api/relay/status", ({ response }) => {
-      jsonResponse(response, 200, relay
-        ? { enabled: true, ...relay.status() }
-        : { enabled: false, connected: false, reason: "The relay is off (GHOSTD_RELAY)." });
-    }),
-    route("POST", "api/relay/pair", async ({ request, response }) => {
-      if (!relay) {
-        throw new GhostError("not_found", "The relay is off (GHOSTD_RELAY).", 404);
-      }
-      const body = await readJsonObjectBody(request, maxBodyBytes) as { code?: unknown; allow?: unknown };
-      if (typeof body.code !== "string" || typeof body.allow !== "boolean") {
-        throw new GhostError("invalid_request", '"code" must be the pairing code shown in the browser and "allow" a boolean.', 400);
-      }
-      const outcome = relay.resolvePairing(body.code.trim(), body.allow);
-      if (outcome === "unknown") {
-        throw new GhostError("pairing_not_found", "No browser is waiting to pair with that code.", 404);
-      }
-      jsonResponse(response, 200, { outcome, ...relay.status() });
-    }),
     route("GET PUT", "api/hooks/config", ({ method, request, response }) => handleHookConfig(method, request, response)),
     route("GET", "api/hooks", ({ response }) => {
       jsonResponse(response, 200, publicHookStatus(options.hooks?.status() ?? { active: false, total: 0, events: [], hooks: [] }));
@@ -1149,13 +1120,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     });
   });
 
-  if (relay) {
-    attachRelay(server, relay);
-  } else {
-    // Without a relay there is no upgrade handler, and Node leaves an unhandled
-    // upgrade socket open forever. Hang up rather than leaking it.
-    server.on("upgrade", (_request, socket) => socket.destroy());
-  }
+  server.on("upgrade", (_request, socket) => socket.destroy());
 
   server.on("close", () => {
     for (const log of turnLogs.values()) {
@@ -1165,7 +1130,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }
     turnLogs.clear();
   });
-  return { server, liveStreams, relay };
+  return { server, liveStreams };
 }
 
 export async function startDaemonServer(
@@ -1173,7 +1138,7 @@ export async function startDaemonServer(
 ): Promise<ListeningServer> {
   const address = options.address ?? "127.0.0.1";
   assertLoopback(address);
-  const { server, liveStreams, relay } = createDaemonServer(options);
+  const { server, liveStreams } = createDaemonServer(options);
   await new Promise<void>((resolvePromise, rejectPromise) => {
     server.once("error", rejectPromise);
     server.listen(options.port, address, () => {
@@ -1186,11 +1151,7 @@ export async function startDaemonServer(
     server,
     port: bound.port,
     address,
-    relay,
     close: async () => {
-      // Hang up on the browser before closing the listener: a live WebSocket is
-      // an open connection, and `server.close()` waits for those.
-      await relay?.close();
       await new Promise<void>((resolvePromise, rejectPromise) => {
         for (const stream of liveStreams) {
           if (!stream.writableEnded) stream.end();

@@ -1,15 +1,6 @@
 import type { GhostToolResult } from "../extension-api.js";
 import { detectInjection, fenceUntrusted } from "../untrusted.js";
 
-export interface GhostExtensionOptions {
-  /**
-   * The ghost home this extension serves. One process hosts several ghosts at
-   * once, so the home may never come from module scope or a process-global env
-   * var — both are shared across them.
-   */
-  readonly home: string;
-}
-
 /** A plain text tool result. Tool *failures* throw; they never return here. */
 export function textResult<TDetails>(
   text: string,

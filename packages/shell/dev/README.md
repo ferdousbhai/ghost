@@ -106,8 +106,7 @@ stop the mock separately.
   sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
   enable/disable, and confirmed deletion without ever returning the seeded
   secret values. Remote exercises the Tailscale viewer lifecycle, including the
-  off, on, and `--remote-problem` states. `--relay-pairing 482913` starts with
-  a browser waiting for Allow, so the pairing prompt is on screen.
+  off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.
 - On `ask`: the spectral summoning orb naming the tool call it is inside of,

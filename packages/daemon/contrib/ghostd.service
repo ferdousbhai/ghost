@@ -2,7 +2,7 @@
 Description=Ghost daemon (ghostd)
 Documentation=https://github.com/ferdousbhai/ghost
 # ghost-desktop inherits the compositor environment from the user manager,
-# and the browser relay dials in from the owner's own Chromium session. Keep the
+# and browser automation uses an external CLI through Bash. Keep the
 # daemon in the graphical session so it cannot start early with a permanently
 # incomplete WAYLAND_DISPLAY/Hyprland environment.
 PartOf=graphical-session.target
@@ -45,11 +45,10 @@ ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 RestrictSUIDSGID=yes
-# Ghost launches no browser of its own: the relay drives the Chromium the owner
-# already started. A ghost may still run `chromium` from its shell when none is
+# Browser automation attaches to the owner's Chromium over CDP. A ghost may still run `chromium` from its shell when none is
 # open — and that child would land in this unit's cgroup, where KillMode=mixed
 # and SendSIGKILL would take the owner's browser down with `systemctl --user
-# restart ghostd`. The browser tool therefore tells the ghost to start it
+# restart ghostd`. The browser skill therefore tells the ghost to start it
 # detached (`systemd-run --user --scope`). These properties stay because a
 # Chromium that does end up here must still be able to build its sandbox
 # namespaces; NoNewPrivileges remains compatible with them.

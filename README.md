@@ -16,7 +16,7 @@ ghost say "Continue that thought."
 ```
 
 What Ghost adds to a harness: the persona, a history that survives switching
-agents, a browser relay into the owner's Chromium, computer use on the
+agents, browser automation through agent-browser and Bash, computer use on the
 desktop (`ghost-desktop`, an MCP server any client can run), the ghost's MCP
 servers and skills, owner hooks, and scheduled work through systemd timers.
 Notes are Markdown in the owner's Documents directory, never indexed or
