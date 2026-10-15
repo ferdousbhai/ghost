@@ -295,6 +295,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     events?.close();
     if (!ghost) return;
     events = new EventSource("/api/ghosts/" + seg(ghost) + "/events");
+    let connected = false;
+    events.onopen = () => {
+      if (connected && !streaming) loadSessions().catch(show);
+      connected = true;
+    };
     events.onmessage = (e) => { if (!streaming) loadSessions(JSON.parse(e.data).id).catch(show); };
   }
 

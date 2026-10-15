@@ -21,7 +21,7 @@ afterEach(async () => {
   temp = null;
 });
 
-async function setup(): Promise<string> {
+async function setup(streamCutBytes?: number): Promise<string> {
   temp = makeTempGhosts();
   temp.registry.ensureRoot();
   harness = fakeHarness(replies("hello"));
@@ -38,6 +38,7 @@ async function setup(): Promise<string> {
     host,
     port: 0,
     apiToken: null,
+    streamCutBytes,
   });
   return `http://127.0.0.1:${listening.port}`;
 }
@@ -181,6 +182,22 @@ describe("GET /api/ghosts/:name/events", () => {
 
     controller.abort();
     await expect(reader.closed).rejects.toBeDefined();
+  });
+
+  it("rotates bounded responses and lets a reconnect fetch current state", async () => {
+    const base = await setup(150);
+    const response = await fetch(`${base}/api/ghosts/casper/events`);
+    await postTurn(base);
+    const body = await response.text();
+    expect(body).toContain("conversation-updated");
+    const internals = host as unknown as { listeners: Map<string, Set<unknown>> };
+    expect(internals.listeners.has("casper")).toBe(false);
+    const controller = new AbortController();
+    const reconnected = await fetch(`${base}/api/ghosts/casper/events`, { signal: controller.signal });
+    expect(reconnected.status).toBe(200);
+    expect((await host!.listSessions("casper"))[0]).toMatchObject({ id: "conv-1", running: false });
+    controller.abort();
+    await expect(reconnected.body!.getReader().closed).rejects.toBeDefined();
   });
 
   it("starts no turn and unregisters a dropped client", async () => {

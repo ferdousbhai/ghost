@@ -13,6 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import type { ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
@@ -23,6 +24,7 @@ import {
   type ListeningServer,
   type ServerOptions,
 } from "../src/server.js";
+import { TurnBuffer } from "../src/turn-buffer.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness, type FakeTurn } from "./helpers/fake-harness.js";
 import { makeTempGhosts, parseSseStream, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -712,11 +714,11 @@ describe("POST /api/ghosts/:name/messages", () => {
     expect(text).toBe("I set type for a living.");
   });
 
-  it("cuts a long turn into responses that resume where the last one ended", async () => {
-    const deltas = Array.from({ length: 60 }, (_, index) => `${String(index).padStart(2, "0")}${"x".repeat(98)}`);
+  it.each([100, 20_000])("resumes a long turn with %i-character deltas across memory and spooled replay", async (size) => {
+    const deltas = Array.from({ length: 60 }, (_, index) => `${String(index).padStart(2, "0")}${"é".repeat(size)}`);
     const base = await serve([{
       events: deltas.map((delta) => ({ type: "text" as const, block: "a", delta })),
-    }], { streamCutBytes: 2_000 });
+    }], { streamCutBytes: Math.max(2_000, size * 8) });
     const first = await postTurn(base, TURN_BODY);
     const responses: Array<Array<TurnEvent | TurnResumeEvent>> = [first.events];
     for (let last = responses.at(-1)?.at(-1); last?.type === "resume"; last = responses.at(-1)?.at(-1)) {
@@ -730,12 +732,52 @@ describe("POST /api/ghosts/:name/messages", () => {
     const events = responses.flatMap((batch) => batch.filter((event): event is TurnEvent => event.type !== "resume"));
     expect(events.filter((event) => event.type === "done" || event.type === "error")).toEqual([{ type: "done" }]);
     expect(events.at(-1)).toEqual({ type: "done" });
-    expect(events.filter((event) => event.type === "text_delta").map((event) => event.delta)).toEqual(deltas);
+    expect(events.filter((event) => event.type === "text_delta").map((event) => event.delta.slice(0, 2))).toEqual(deltas.map(delta => delta.slice(0, 2)));
+    expect(events.filter((event) => event.type === "text_delta").every(event => deltas.includes(event.delta))).toBe(true);
     expect(events.filter((event) => event.type === "start")).toHaveLength(1);
     // Every response but the last ends in its resume frame, the only one it has.
     for (const batch of responses.slice(0, -1)) {
       expect(batch.filter((event) => event.type === "resume")).toEqual([batch.at(-1)]);
     }
+  });
+
+  it("terminates cleanly when replay storage fails", async () => {
+    const base = await serve(replies("answer"));
+    const failure = vi.spyOn(TurnBuffer.prototype, "push").mockImplementationOnce(() => { throw new Error("storage full"); });
+    try {
+      const { events } = await postTurn(base, TURN_BODY);
+      expect(events).toEqual([{ type: "error", reason: "error", errorMessage: "Could not retain the turn stream; read the transcript." }]);
+      await vi.waitFor(() => expect(host!.queuedMessages("casper", TURN_BODY.sessionId).streaming).toBe(false));
+    } finally { failure.mockRestore(); }
+  });
+
+  it("waits for socket drain while the harness completes independently", async () => {
+    const base = await serve(replies("completed behind a slow client"));
+    let response: ServerResponse | undefined;
+    let blocked = true;
+    let dataWrites = 0;
+    listening!.server.on("request", (_request, outgoing) => {
+      response = outgoing;
+      const write = outgoing.write.bind(outgoing);
+      vi.spyOn(outgoing, "write").mockImplementation((chunk) => {
+        const accepted = write(chunk);
+        if (String(chunk).startsWith("data:")) {
+          dataWrites++;
+          return !blocked && accepted;
+        }
+        return accepted;
+      });
+    });
+    const pending = postTurn(base, TURN_BODY);
+    await vi.waitFor(() => {
+      expect(dataWrites).toBe(1);
+      expect(host!.queuedMessages("casper", TURN_BODY.sessionId).streaming).toBe(false);
+    });
+    blocked = false;
+    response!.emit("drain");
+    const { events } = await pending;
+    expect(events.at(-1)).toEqual({ type: "done" });
+    expect(events.filter(event => event.type === "text_delta").map(event => event.delta).join("")).toBe("completed behind a slow client");
   });
 
   it("refuses to resume a turn it does not know or past where the turn has reached", async () => {

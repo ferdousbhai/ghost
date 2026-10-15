@@ -6,9 +6,10 @@
  * own transcript for resume; this log is what the HUD, `ghost show`, and a
  * harness switch read, so it is the one history that outlives any harness.
  */
-import { appendFile, mkdir, readFile, stat } from "node:fs/promises";
+import { appendFile, mkdir, open, stat, type FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { join } from "node:path";
+import { BoundedCache } from "./bounded-cache.js";
 import { GhostError } from "./ghosts.js";
 import { snapshotSummary, type RunResourceSnapshot } from "./run-resources.js";
 
@@ -107,22 +108,26 @@ export async function appendLog(sessionDir: string, id: string, entries: readonl
 
 /** Every well-formed entry; a torn last line from a crash is skipped. */
 export async function readLog(sessionDir: string, id: string): Promise<LogEntry[] | null> {
-  let text: string;
+  let file: FileHandle;
   try {
-    text = await readFile(logPath(sessionDir, id), "utf8");
+    file = await open(logPath(sessionDir, id), "r");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
   const entries: LogEntry[] = [];
-  for (const line of text.split("\n")) {
-    if (line.trim() === "") continue;
-    try {
-      const entry = JSON.parse(line) as LogEntry;
-      if (entry && typeof entry === "object" && typeof entry.type === "string") entries.push(entry);
-    } catch {
-      // A partial line is what a crash mid-append leaves; the rest stands.
+  try {
+    for await (const line of file.readLines({ autoClose: false })) {
+      if (line.trim() === "") continue;
+      try {
+        const entry = JSON.parse(line) as LogEntry;
+        if (entry && typeof entry === "object" && typeof entry.type === "string") entries.push(entry);
+      } catch {
+        // A partial line is what a crash mid-append leaves; the rest stands.
+      }
     }
+  } finally {
+    await file.close();
   }
   return entries;
 }
@@ -261,14 +266,22 @@ export interface TranscriptMessage {
 function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
   const status = entry.exitCode === 0 ? "" : `\n\n(exit ${entry.exitCode ?? "signal"})`;
   // A fence longer than any backtick run inside, so output holding ``` stays code.
-  const fence = "`".repeat(Math.max(3, ...[...entry.output.matchAll(/`+/g)].map((run) => run[0].length + 1)));
+  let fenceLength = 3;
+  for (const run of entry.output.matchAll(/`+/g)) fenceLength = Math.max(fenceLength, run[0].length + 1);
+  const fence = "`".repeat(fenceLength);
   return `${fence}\n${entry.output.trimEnd()}\n${fence}${status}`;
 }
 
 /** The renderable messages, in order; harness and title records are not messages. */
-export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMessage[] {
+export function transcriptPage(entries: readonly LogEntry[], offset = 0, limit = Infinity): { messages: TranscriptMessage[]; total: number } {
   const messages: TranscriptMessage[] = [];
+  let total = 0;
   entries.forEach((entry, index) => {
+    const count = entry.type === "command" ? (entry.excluded ? 0 : 2)
+      : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" ? 1 : 0;
+    const first = total;
+    total += count;
+    if (count === 0 || first >= offset + limit || total <= offset) return;
     const entryId = `e${index}`;
     let message: TranscriptMessage | null = null;
     if (entry.type === "user") {
@@ -293,7 +306,8 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
       };
     } else if (entry.type === "command" && !entry.excluded) {
       // The owner's `!command`, then its output, as the live turn showed them.
-      messages.push({ role: "user", content: [{ type: "text", text: `!${entry.command}` }], entryId });
+      if (first >= offset) messages.push({ role: "user", content: [{ type: "text", text: `!${entry.command}` }], entryId });
+      if (first + 1 >= offset + limit) return;
       message = {
         role: "assistant",
         content: [{ type: "text", text: commandText(entry) }],
@@ -302,7 +316,7 @@ export function transcriptMessages(entries: readonly LogEntry[]): TranscriptMess
     }
     if (message) messages.push(message);
   });
-  return messages;
+  return { messages, total };
 }
 
 function assistantText(content: readonly AssistantPart[]): string {
@@ -342,13 +356,12 @@ export function unseenCommands(entries: readonly LogEntry[]): string | null {
   return commands.length > 0 ? commands.join("\n\n") : null;
 }
 
-const listedLogs = new Map<string, { size: number; mtimeMs: number; state: LogState }>();
+const listedLogs = new BoundedCache<string, { size: number; mtimeMs: number; ctimeMs: number; ino: number; dev: number; state: LogState }>();
 
 /**
  * A log's state and last change, for listing conversations: its last entry
  * from the owner or the ghost, so an idle handoff neither reorders the list nor
- * marks it unread. The log only grows, so it is parsed again only once its size
- * or mtime moves.
+ * marks it unread. Reparse only when the file identity or metadata changes.
  */
 export async function listedLog(sessionDir: string, id: string): Promise<{ state: LogState; updatedAt: string } | null> {
   const file = logPath(sessionDir, id);
@@ -356,13 +369,14 @@ export async function listedLog(sessionDir: string, id: string): Promise<{ state
   try {
     info = await stat(file);
   } catch {
+    listedLogs.delete(file);
     return null;
   }
   let listed = listedLogs.get(file);
-  if (listed?.size !== info.size || listed.mtimeMs !== info.mtimeMs) {
+  if (listed?.size !== info.size || listed.mtimeMs !== info.mtimeMs || listed.ctimeMs !== info.ctimeMs || listed.ino !== info.ino || listed.dev !== info.dev) {
     const entries = await readLog(sessionDir, id);
     if (!entries) return null;
-    listed = { size: info.size, mtimeMs: info.mtimeMs, state: logState(entries) };
+    listed = { size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino, dev: info.dev, state: logState(entries) };
     listedLogs.set(file, listed);
   }
   return { state: listed.state, updatedAt: listed.state.activeAt ?? info.mtime.toISOString() };

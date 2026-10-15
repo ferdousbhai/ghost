@@ -284,7 +284,8 @@ A turn takes no input mid-run: text queued while it runs (`/queue`, `ghost say
 queued follow-up outranks a stop hook: no `session_stop` is asked while one
 waits, and one sent while the hook runs replaces its continuation.
 A turn outlives its client: a dropped stream stops only the listening, and
-`POST /sessions/:id/stop` or daemon shutdown is the only early end.
+`POST /sessions/:id/stop` or daemon shutdown cancels it; an internal runtime
+or replay-storage failure ends it in error.
 Aborting a turn signals the harness's process group, SIGTERM then SIGKILL,
 and nothing else. Reading images and choosing the model are the harness's;
 Ghost only stores an attached image where the harness can open it.
@@ -404,7 +405,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
-| `GET /api/ghosts/:name/events` | Conversation invalidation SSE; clients refetch affected state. |
+| `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
@@ -443,7 +444,10 @@ one ever-growing body: its last frame is then `resume` `{ turn, from }`, not a
 terminal, and the turn runs on. The client continues by opening
 `GET /sessions/:id/stream?turn=…&from=…`, which is itself cut the same way;
 counting `start` as event 0, the events across all responses are each sent
-once, in order, ending in the one terminal.
+once, in order, ending in the one terminal. Large turn replay buffers spill to private,
+unlinked files under `$XDG_CACHE_HOME/ghost` (default `~/.cache/ghost`), rather
+than the usually memory-backed `/tmp`. They are released after the resume grace
+period (once attached readers finish) or server shutdown, and are not history.
 
 ### `ghost` CLI
 

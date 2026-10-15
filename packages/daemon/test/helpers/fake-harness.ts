@@ -44,6 +44,7 @@ export interface FakeHarness {
 }
 
 const SCRIPT = `
+import { once } from "node:events";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 const [turnsPath, counterPath, logPath, prompt, resume, sessionId, mcp] = process.argv.slice(2);
 const n = existsSync(counterPath) ? Number(readFileSync(counterPath, "utf8")) : 0;
@@ -57,7 +58,9 @@ appendFileSync(logPath, JSON.stringify({
 const turns = JSON.parse(readFileSync(turnsPath, "utf8"));
 const turn = turns[Math.min(n, turns.length - 1)] ?? {};
 if (turn.gate) while (!existsSync(turn.gate)) await new Promise((r) => setTimeout(r, 10));
-for (const event of turn.events ?? []) process.stdout.write(JSON.stringify(event) + "\\n");
+for (const event of turn.events ?? []) {
+  if (!process.stdout.write(JSON.stringify(event) + "\\n")) await once(process.stdout, "drain");
+}
 if (turn.stderr) process.stderr.write(turn.stderr);
 process.exit(turn.exit ?? 0);
 `;

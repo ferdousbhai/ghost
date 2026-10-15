@@ -110,7 +110,7 @@ describe("parsers over recorded output", () => {
     expect(command("/usr/bin/bash -lc 'pnpm --filter @ghost/omarchy test'")).toBe("pnpm --filter @ghost/omarchy test");
     expect(command(String.raw`/usr/bin/bash -lc "rg -n \"mic|composer\" -g '*.qml' | head"`))
       .toBe(`rg -n "mic|composer" -g '*.qml' | head`);
-    expect(command(String.raw`/usr/bin/bash -lc "sed -e 's|"'^dir=.*|x|'"' f"`)).toBe("sed -e 's|^dir=.*|x|' f");
+    expect(command(`/usr/bin/bash -lc "sed -e 's|"'^dir=.*|x|'"' f"`)).toBe("sed -e 's|^dir=.*|x|' f");
     expect(command("/usr/bin/bash -lc 'unterminated")).toBe("/usr/bin/bash -lc 'unterminated");
     expect(command("ls -la")).toBe("ls -la");
   });
@@ -178,6 +178,10 @@ describe("parsers over recorded output", () => {
       expect(await row?.inspectSession?.("thread-a", { CODEX_HOME: home }))
         .toEqual([{ type: "model", model: "gpt-6.1-sol", provider: "openai", effort: "low" }]);
       expect(await row?.inspectSession?.("thread-c", { CODEX_HOME: home })).toEqual([]);
+      rmSync(join(home, "sessions", "2026/09/30"), { recursive: true });
+      write("2026/10/05", "thread-a", "rediscovered-model");
+      expect(await row?.inspectSession?.("thread-a", { CODEX_HOME: home }))
+        .toEqual([{ type: "model", model: "rediscovered-model", provider: "openai", effort: "low" }]);
       // A long rollout is read from its ends: the newest turn_context sits
       // behind megabytes of later entries, across the reader's 1 MiB windows.
       const filler = JSON.stringify({ type: "response_item", payload: { text: "x".repeat(4096) } });

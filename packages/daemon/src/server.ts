@@ -1,3 +1,4 @@
+import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
@@ -69,7 +70,7 @@ export interface ServerOptions {
   remote?: RemoteAccess | null;
   /** Owns the Tailscale Serve exposure and its QR code; omitted, the `/api/remote` routes 404. */
   remoteServe?: RemoteServe;
-  /** Where a turn response is cut and continued (CONTRACTS.md, "Turn wire"); about 1 MB by default. */
+  /** Response size for turn continuation and invalidation reconnects; about 1 MB by default. */
   streamCutBytes?: number;
 }
 
@@ -93,8 +94,10 @@ interface TurnLog {
   readonly ghost: string;
   readonly conversation: string;
   /** Each event SSE-encoded; once `ended`, the last is the terminal. */
-  readonly frames: string[];
+  readonly frames: TurnBuffer;
+  expiry?: ReturnType<typeof setTimeout>;
   ended: boolean;
+  failure?: string;
   readonly followers: Set<() => void>;
 }
 
@@ -510,25 +513,27 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       liveStreams.delete(response);
       connection.release();
     };
+    const finish = () => {
+      cleanup();
+      if (!response.writableEnded) response.end();
+    };
+    let written = 0;
+    const write = (frame: string) => {
+      if (closed || response.writableEnded) return;
+      const accepted = response.write(frame);
+      written += Buffer.byteLength(frame);
+      if (!accepted || written >= streamCutBytes) finish();
+    };
     unsubscribe = options.host.subscribeConversationEvents(
       ghostName,
-      (event) => {
-        if (!closed && !response.writableEnded) {
-          response.write(encodeSseEvent(event));
-        }
-      },
-      () => {
-        cleanup();
-        if (!response.writableEnded) response.end();
-      },
+      (event) => write(encodeSseEvent(event)),
+      finish,
     );
     response.writeHead(200, SSE_HEADERS);
-    response.write(SSE_KEEPALIVE_COMMENT);
     liveStreams.add(response);
-    keepalive = setInterval(() => {
-      if (!closed && !response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
-    }, SSE_KEEPALIVE_INTERVAL_MS);
     connection.signal.addEventListener("abort", cleanup, { once: true });
+    write(SSE_KEEPALIVE_COMMENT);
+    if (!closed) keepalive = setInterval(() => write(SSE_KEEPALIVE_COMMENT), SSE_KEEPALIVE_INTERVAL_MS);
   };
 
   const handleReadCharacter = async (
@@ -745,12 +750,19 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     conversation: string,
     run: (emit: (event: TurnEvent) => void) => Promise<void>,
   ): TurnLog => {
-    const log: TurnLog = { id: randomUUID(), ghost, conversation, frames: [], ended: false, followers: new Set() };
+    const log: TurnLog = { id: randomUUID(), ghost, conversation, frames: new TurnBuffer(), ended: false, followers: new Set() };
     turnLogs.set(log.id, log);
     const append = (event: TurnEvent): void => {
       if (log.ended) return;
-      if (event.type === "done" || event.type === "error") log.ended = true;
-      log.frames.push(encodeSseEvent(event));
+      try {
+        log.frames.push(encodeSseEvent(event));
+        if (event.type === "done" || event.type === "error") log.ended = true;
+      } catch (error) {
+        log.ended = true;
+        log.failure = encodeSseEvent({ type: "error", reason: "error", errorMessage: "Could not retain the turn stream; read the transcript." });
+        logger.error("turn replay storage failed", { error: errorMessage(error) });
+        try { options.host.stopTurn(ghost, conversation); } catch { /* The turn may already have settled. */ }
+      }
       for (const follower of [...log.followers]) follower();
     };
     void run(append).then(
@@ -761,7 +773,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       // a failure outside it (the first log write, or an owner command).
       (error: unknown) => append({ type: "error", reason: "error", errorMessage: errorMessage(error) }),
     ).finally(() => {
-      setTimeout(() => turnLogs.delete(log.id), RESUME_GRACE_MS).unref();
+      if (!turnLogs.has(log.id)) return;
+      log.expiry = setTimeout(() => {
+        turnLogs.delete(log.id);
+        if (log.followers.size === 0) log.frames.dispose();
+      }, RESUME_GRACE_MS);
+      log.expiry.unref();
     });
     return log;
   };
@@ -781,16 +798,20 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       // in-repo SSE parsers skip frames without a `data:` line, so a comment
       // costs nothing on the far end.
       const keepalive = setInterval(() => {
-        if (!response.writableEnded) response.write(SSE_KEEPALIVE_COMMENT);
+        if (!response.writableEnded && !response.writableNeedDrain) response.write(SSE_KEEPALIVE_COMMENT);
       }, SSE_KEEPALIVE_INTERVAL_MS);
       liveStreams.add(response);
       let next = from;
       let written = 0;
       let finished = false;
+      let blocked = false;
+      const drain = (): void => { blocked = false; pump(); };
       const finish = (): void => {
         if (finished) return;
         finished = true;
         log.followers.delete(pump);
+        if (!turnLogs.has(log.id) && log.followers.size === 0) log.frames.dispose();
+        response.off("drain", drain);
         clearInterval(keepalive);
         liveStreams.delete(response);
         connection.release();
@@ -802,10 +823,24 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
           finish();
           return;
         }
+        if (log.failure) {
+          response.write(log.failure);
+          finish();
+          return;
+        }
+        if (blocked) return;
         while (next < log.frames.length) {
-          const frame = log.frames[next++] as string;
-          response.write(frame);
-          written += frame.length;
+          let frame: string;
+          try {
+            frame = log.frames.at(next++);
+          } catch (error) {
+            logger.error("turn replay read failed", { error: errorMessage(error) });
+            response.write(encodeSseEvent({ type: "error", reason: "error", errorMessage: "Could not replay the turn stream; read the transcript." }));
+            finish();
+            return;
+          }
+          blocked = !response.write(frame);
+          written += Buffer.byteLength(frame);
           // Never cut after the terminal: there is nothing left to resume.
           if (written >= streamCutBytes && !(log.ended && next === log.frames.length)) {
             const resume: TurnResumeEvent = { type: "resume", turn: log.id, from: next };
@@ -813,9 +848,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
             finish();
             return;
           }
+          if (blocked) return;
         }
         if (log.ended) finish();
       };
+      response.on("drain", drain);
       connection.signal.addEventListener("abort", finish, { once: true });
       log.followers.add(pump);
       pump();
@@ -1120,6 +1157,14 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     server.on("upgrade", (_request, socket) => socket.destroy());
   }
 
+  server.on("close", () => {
+    for (const log of turnLogs.values()) {
+      log.ended = true;
+      clearTimeout(log.expiry);
+      log.frames.dispose();
+    }
+    turnLogs.clear();
+  });
   return { server, liveStreams, relay };
 }
 

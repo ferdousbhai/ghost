@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { handoffContext, logState, transcriptMessages, latestRunResources, type LogEntry } from "../src/conversation-log.js";
+import { handoffContext, logState, transcriptPage, latestRunResources, type LogEntry } from "../src/conversation-log.js";
 import { codexSkillNames, resourceNames, resourceSummary, unreportedResources } from "../src/run-resources.js";
 
 describe("run resources", () => {
@@ -33,9 +33,9 @@ describe("run resources", () => {
     ];
     expect(logState(entries)).toMatchObject({ activeAt: "before", messageCount: 1 });
     expect(handoffContext(entries)).toBe("Owner: hello");
-    expect(transcriptMessages(entries)).toHaveLength(1);
+    expect(transcriptPage(entries).messages).toHaveLength(1);
     entries.push({ type: "resources", at: "later", run: "r2", harness: "codex", resources: { skills: ["mail"], extensions: null, mcpServers: [] }, summary: "old noisy summary" });
-    expect(transcriptMessages(entries)).toHaveLength(1);
+    expect(transcriptPage(entries).messages).toHaveLength(1);
   });
 });
 
@@ -49,7 +49,7 @@ describe("latest run resource snapshot", () => {
   it("reads legacy pre-reply records without exposing them as messages", () => {
     const entries = [inventory(["mail"]), reply()];
     expect(latestRunResources(entries)?.resources.skills).toEqual(["mail"]);
-    expect(transcriptMessages(entries).map(message => message.role)).toEqual(["assistant"]);
+    expect(transcriptPage(entries).messages.map(message => message.role)).toEqual(["assistant"]);
     expect(latestRunResources([inventory(["mail"]), { ...reply(), harness: "pi" }])).toBeNull();
   });
 

@@ -9,8 +9,9 @@
  * continue is cwd-scoped. A harness whose continue is not names its session
  * in its output, and the host hands that id back (`sessionFrom`).
  */
-import { open, readdir } from "node:fs/promises";
+import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { BoundedCache } from "./bounded-cache.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { isRecord, xdgBaseDir } from "@ghost/extensions";
 import { resourceNames, unreportedResources, codexSkillNames, type RunResources } from "./run-resources.js";
@@ -340,13 +341,21 @@ function piParser(): (line: string) => HarnessEvent[] {
   };
 }
 
-/** A rollout file never moves, so each session's is searched for once. */
-const codexRollouts = new Map<string, string>();
+/** Remember recent rollout paths without retaining every session seen by the daemon. */
+const codexRollouts = new BoundedCache<string, string>();
 
 async function codexRollout(root: string, session: string): Promise<string | null> {
   const key = join(root, session);
   const known = codexRollouts.get(key);
-  if (known) return known;
+  if (known) {
+    try {
+      await stat(known);
+      return known;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      codexRollouts.delete(key);
+    }
+  }
   const newest = async (dir: string) => (await readdir(dir).catch(() => [])).sort().reverse();
   for (const year of await newest(root)) {
     for (const month of await newest(join(root, year))) {

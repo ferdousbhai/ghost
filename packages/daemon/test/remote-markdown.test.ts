@@ -63,6 +63,31 @@ describe("remote viewer markdown", () => {
   });
 });
 
+describe("remote viewer invalidations", () => {
+  test("refetches state on reconnect while leaving an active turn to its own stream", () => {
+    const source = REMOTE_VIEWER_HTML.match(/function watch\(\) \{[\s\S]*?\n {2}\}/)?.[0];
+    let loads = 0;
+    let connection: { onopen: () => void } | undefined;
+    class EventSource {
+      onopen = () => {};
+      constructor() { connection = this; }
+    }
+    const page = new Function("EventSource", "loadSessions", "show", "seg", `
+      let events; const ghost = "casper"; let streaming = false;
+      ${source};
+      return { watch, setStreaming(value) { streaming = value; } };
+    `)(EventSource, async () => { loads++; }, () => {}, encodeURIComponent) as { watch: () => void; setStreaming: (value: boolean) => void };
+    page.watch();
+    connection!.onopen();
+    expect(loads).toBe(0);
+    connection!.onopen();
+    expect(loads).toBe(1);
+    page.setStreaming(true);
+    connection!.onopen();
+    expect(loads).toBe(1);
+  });
+});
+
 describe("remote viewer transcript", () => {
   test("resource metadata stays out of chat across continued runs", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];

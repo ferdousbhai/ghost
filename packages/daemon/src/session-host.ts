@@ -34,7 +34,7 @@ import {
   newConversationEntry,
   readLog,
   requireConversationId,
-  transcriptMessages,
+  transcriptPage,
   unseenCommands,
   type AssistantPart,
   type LogEntry,
@@ -753,6 +753,7 @@ export class SessionHost {
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
+      content[open.part] = { type: "text", text: open.text };
       stream.emit({ type: "text_end", contentIndex: open.index, content: open.text });
       open = null;
     };
@@ -775,7 +776,6 @@ export class SessionHost {
             stream.emit({ type: "text_start", contentIndex: open.index });
           }
           open.text += event.delta;
-          content[open.part] = { type: "text", text: open.text };
           stream.emit({ type: "text_delta", contentIndex: open.index, delta: event.delta });
           return;
         }
@@ -1149,16 +1149,16 @@ export class SessionHost {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(sessionId ?? "default");
     const entries = (await readLog(ghostPaths(ghost.dir).sessionDir, id)) ?? [];
-    const all = transcriptMessages(entries);
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
-    const offset = Math.min(clamp(options.offset, 0, Number.MAX_SAFE_INTEGER), all.length);
-    const messages = all.slice(offset, offset + limit);
+    const requestedOffset = clamp(options.offset, 0, Number.MAX_SAFE_INTEGER);
+    const { messages, total } = transcriptPage(entries, requestedOffset, limit);
+    const offset = Math.min(requestedOffset, total);
     return {
       id,
       resources: latestRunResources(entries),
       messages,
-      total: all.length,
-      truncated: offset > 0 || offset + messages.length < all.length,
+      total,
+      truncated: offset > 0 || offset + messages.length < total,
     };
   }
 
