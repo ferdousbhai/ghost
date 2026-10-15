@@ -42,6 +42,10 @@ the directory. A ghost searches it on demand, as a task needs
 (`ghost help memory`). Recall, an optional product of its own
 (`ghost-products`), may index folders the owner selects; its hits are derived,
 possibly stale candidates, and the source file is authoritative.
+`ghost sessions --semantic QUERY` optionally ranks current conversation titles
+and previews through `recall rank`; it does not read transcripts or index notes.
+Missing, incompatible, or unresponsive Recall falls back to title/preview text
+matching with a warning. Normal session listing never contacts Recall.
 
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.

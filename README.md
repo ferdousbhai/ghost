@@ -40,3 +40,9 @@ desktop/browser automation without the HUD (`packaging/arch/README.md`,
 `/usr/share/doc/ghost/ARCH.md` once installed).
 
 License: Apache-2.0
+
+## Optional Recall search
+
+Use `ghost sessions --semantic QUERY` to rank the current ghost’s conversation titles and previews. Transcripts and notes are not indexed by this command.
+
+Recall is an optional extra. Normal operation never contacts it. Missing, incompatible, busy, or warming-up Recall leaves title/preview text matching available. Requests run in the background with a bounded wait. This project does not install Recall, download embedding weights, or start its own model runtime. When enabled, the owner-local Recall service owns one shared model cache and inference worker; records stay on this machine.

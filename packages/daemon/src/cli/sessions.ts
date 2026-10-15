@@ -1,3 +1,4 @@
+import { rankRecords } from "../recall.js";
 import type { Transcript } from "../session-host.js";
 import { flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { listSessions, resolveGhost, resolveTarget } from "./common.js";
@@ -9,8 +10,24 @@ export async function sessionsCommand(
   ctx: CliContext,
 ): Promise<number> {
   const name = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const sessions = await listSessions(ctx.client, name);
-  emit(ctx, { sessions }, () => {
+  let sessions = await listSessions(ctx.client, name);
+  const query = flagString(parsed, "semantic");
+  let meaning = false;
+  let warning: string | undefined;
+  if (query) {
+    const ids = await rankRecords(`ghost:${name}`, query, sessions.map((session) => ({
+      id: session.id, title: (session.title ?? "").slice(0, 1000), text: (session.preview ?? "").slice(0, 4000),
+    })));
+    if (ids === null) {
+      sessions = sessions.filter((session) => `${session.title ?? ""} ${session.preview ?? ""}`.toLowerCase().includes(query.toLowerCase()));
+      warning = "Recall unavailable or warming up; showing text matches.";
+    } else {
+      const byId = new Map(sessions.map((session) => [session.id, session]));
+      sessions = ids.flatMap((id) => { const session = byId.get(id); return session ? [session] : []; });
+      meaning = true;
+    }
+  }
+  emit(ctx, query ? { sessions, meaning, ...(warning ? { warning } : {}) } : { sessions }, () => {
     const rows = sessions.map((session) => [
       session.id,
       truncate(session.title ?? session.preview ?? "—", 42),
@@ -19,7 +36,7 @@ export async function sessionsCommand(
       [session.running ? "running" : "", session.unread ? "unread" : "", session.pinned ? "pinned" : ""].filter(Boolean).join(","),
     ]);
     return {
-      human: rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : "",
+      human: (warning ? `${warning}\n` : "") + (rows.length > 0 ? `${table(rows, ["ID", "TITLE", "UPDATED", "MESSAGES", "STATE"])}\n` : ""),
       quiet: sessions.map((session) => session.id).join("\n") + (sessions.length ? "\n" : ""),
     };
   });
