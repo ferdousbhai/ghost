@@ -314,19 +314,22 @@ function assistantText(content: readonly AssistantPart[]): string {
  * the newest `HANDOFF_CONTEXT_CHARS`, owner and ghost lines labelled.
  */
 export function handoffContext(entries: readonly LogEntry[]): string | null {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.type === "user") lines.push(`${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`);
+  let context = "";
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!entry) continue;
+    let line: string | null = null;
+    if (entry.type === "user") line = `${entry.origin === "hook" ? "Hook" : entry.origin === "auto" ? "Ghost" : "Owner"}: ${entry.text}`;
     if (entry.type === "assistant") {
       const text = assistantText(entry.content).trim();
-      if (text) lines.push(`You: ${text}`);
+      if (text) line = `You: ${text}`;
     }
-    if (entry.type === "command" && !entry.excluded) lines.push(`Owner ran \`${entry.command}\`:\n${entry.output}`);
+    if (entry.type === "command" && !entry.excluded) line = `Owner ran \`${entry.command}\`:\n${entry.output}`;
+    if (line === null) continue;
+    context = context ? `${line}\n\n${context}` : line;
+    if (context.length > HANDOFF_CONTEXT_CHARS) return `…${context.slice(-HANDOFF_CONTEXT_CHARS)}`;
   }
-  if (lines.length === 0) return null;
-  let text = lines.join("\n\n");
-  if (text.length > HANDOFF_CONTEXT_CHARS) text = `…${text.slice(-HANDOFF_CONTEXT_CHARS)}`;
-  return text;
+  return context || null;
 }
 
 /** Owner `!` commands since the harness last ran, which it has not seen. */
