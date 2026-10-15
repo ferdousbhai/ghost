@@ -14,7 +14,9 @@ Install the CLI with `mise use -g agent-browser@0.39.1` when missing; it attache
 to existing Chromium, so do not download another browser. Read `agent-browser skills get core --full` for its version-matched skill.
 
 Chromium must run with `--remote-debugging-port=9222` and a non-default
-`--user-data-dir`, reachable only on loopback. Hosted desktops provision this.
+`--user-data-dir`, reachable only on loopback. Pin `--profile-directory` to
+the owner's existing profile so startup bypasses the profile picker. Hosted
+desktops provision this.
 On an existing desktop, explain the required restart and profile change before
 changing browser configuration. Preserve existing flags and sign-ins; never
 kill by name, move a live profile, or silently switch to an empty profile.
@@ -47,12 +49,18 @@ export BROWSER_TAB="task-${GHOST:-agent}-${GHOST_SESSION:-$(cat /proc/sys/kernel
 
 Create your task tab once with `locked ab tab new --label "$BROWSER_TAB" about:blank`.
 Then use `browser open https://example.com`, `browser snapshot -i`,
-`browser click @e3`, `browser fill @e4 "text"`, `browser upload @e5 /path/file`,
-and `browser screenshot /absolute/path.png`. Choose the owner's XDG Pictures
+`browser find role button click --name "Save"`, `browser fill '#email' "text"`,
+`browser upload 'input[type=file]' /path/file`, and
+`browser screenshot /absolute/path.png`. Choose the owner's XDG Pictures
 or requested destination for screenshots and XDG Downloads for downloads.
-Take a fresh snapshot after navigation or page changes. Refs belong to their
-tab; never use another task's refs. Hold the lock for an entire multi-command
-sequence when its intermediate state must not change.
+
+Use semantic or CSS selectors between calls. Selecting a tab clears snapshot
+refs, even when reselecting the same tab: `browser click @e3` cannot reuse a
+previous `browser snapshot` ref. Refs work only inside one locked sequence
+that selects the tab once, snapshots, then acts through `ab` without another
+selection. Never carry refs across lock releases or use another task's refs.
+Use `set -e` inside multi-command sequences, or `batch --bail`, so a failed
+step stops the sequence. Take a fresh snapshot after page changes.
 
 If a tab is gone, fail and explicitly create a replacement; never fall back
 to whichever tab is active. After an agent-browser daemon restart, labels may

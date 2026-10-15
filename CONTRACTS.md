@@ -615,8 +615,10 @@ invoked through the harness's Bash tool. Ghost exposes no browser MCP tool,
 relay, pairing API, or browser lifecycle manager. One owner-wide session
 (`owner`) shares the signed-in Chromium over loopback CDP. Conversations use
 separate tabs; cooperating callers lock tab selection and each operation with
-one owner-wide `flock`. Tabs and CLI state survive Ghost restarts, rename and
-deletion; explicitly close a task's tabs when finished, never the owner's
+one owner-wide `flock`. Tab selection invalidates snapshot refs; separate
+operations use semantic or CSS selectors. Ref-based sequences hold the lock
+from selection and snapshot through action without reselecting. Tabs and CLI
+state survive Ghost restarts, rename and deletion; explicitly close a task's tabs when finished, never the owner's
 browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
 
 ## Harness and lifecycle invariants

@@ -19,17 +19,6 @@ actual="$(
   exit 1
 }
 
-pnpm_bin="$(
-  cd -- "$source_root"
-  pnpm exec sh -c 'command -v pnpm'
-)"
-pnpm_bin="$(realpath "$pnpm_bin")"
-[[ -f "$pnpm_bin" && -x "$pnpm_bin" ]] || {
-  printf 'prepared pnpm engine is not an executable file: %s\n' \
-    "$pnpm_bin" >&2
-  exit 1
-}
-[[ "$(npm_config_manage_package_manager_versions=false \
-  "$pnpm_bin" --version)" == "$required" ]]
-
-printf 'Prepared pnpm %s at %s\n' "$required" "$pnpm_bin"
+# The launcher may delegate to the pinned engine. Its own path/version need
+# not match: pnpm 12's `exec` resolves the launcher, not the delegated binary.
+printf 'Prepared pnpm %s\n' "$actual"

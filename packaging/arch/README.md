@@ -77,7 +77,8 @@ package provides.
 
 The package ships Ghost's own skills under `/usr/lib/ghost/skills`, linked into
 every conversation directory with the ghost's own skills: `ghost-products`
-indexes the recommended products, and each product installs its own skill
+indexes the recommended products; `web-browser` teaches shared Chromium
+sessions and task tabs. Each product installs its own skill
 (`<cli> skill install`). Machine skills are whatever each agent CLI discovers on
 its own.
 

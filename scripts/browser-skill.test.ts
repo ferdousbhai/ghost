@@ -31,7 +31,7 @@ fi
     const skill = await readFile(new URL("../skills/web-browser/SKILL.md", import.meta.url), "utf8");
     const recipe = /```sh\n([\s\S]+?)\n```/.exec(skill)?.[1];
     expect(recipe).toBeDefined();
-    const run = (tab: string) => exec("bash", ["-c", `${recipe}\nexport BROWSER_TAB="$TEST_TAB"\nfor i in {1..5}; do browser snapshot -i || exit; done`], {
+    const run = (tab: string) => exec("bash", ["-c", `${recipe}\nexport BROWSER_TAB="$TEST_TAB"\nfor i in {1..5}; do browser fill '#email' "$TEST_TAB" || exit; done`], {
       env: { ...process.env, PATH: `${bin}:/usr/bin:/bin`, XDG_RUNTIME_DIR: dir, TEST_TAB: tab },
     });
     await Promise.all([run("a"), run("b")]);
