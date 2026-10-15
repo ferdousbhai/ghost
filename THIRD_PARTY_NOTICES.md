@@ -2,8 +2,7 @@
 
 ## Lucide
 
-The shell mascot and Chromium extension icon assets use Lucide's `ghost`,
-`copy`, and `pencil` glyphs.
+The shell assets use Lucide's `ghost`, `copy`, and `pencil` glyphs.
 
 ISC License
 
@@ -23,13 +22,9 @@ OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
 ## Oh My Pi
 
-Ghost no longer depends on Oh My Pi. Two pieces of Ghost's own code were
-ported from it under the MIT license: the `mcp.json` configuration shape
-(`packages/daemon/src/mcp-config-policy.ts`), and the daemon side of the browser
-relay (`packages/daemon/src/relay.ts`) from its `browser-relay` package. (The
-Chromium extension, also ported from that package, carries the same notice in
-its own repository.) The first is from Oh My Pi commit
-`160ed439ac0df594347e7d7018b813a7ffdb5e81`.
+The `mcp.json` configuration shape (`packages/daemon/src/mcp-config-policy.ts`)
+was ported from Oh My Pi commit `160ed439ac0df594347e7d7018b813a7ffdb5e81`
+under the MIT license. Ghost does not depend on Oh My Pi.
 
 MIT License
 

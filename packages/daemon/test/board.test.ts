@@ -17,7 +17,7 @@ describe("board", () => {
       "",
       "Some intro text nobody cares about.",
       "## Now",
-      "- [ ] Ship the relay pairing",
+      "- [ ] Ship the browser guide",
       "  handed off from Claude at 40% weekly",
       "  - next: verify on a second machine",
       "- [x] Cut v0.1.1",
@@ -30,7 +30,7 @@ describe("board", () => {
     expect(board.truncated).toBe(false);
     expect(board.columns.map((column) => column.title)).toEqual(["Now", "Later", "Done"]);
     expect(board.columns[0]?.cards).toEqual([
-      { text: "Ship the relay pairing", done: false, notes: ["handed off from Claude at 40% weekly", "next: verify on a second machine"] },
+      { text: "Ship the browser guide", done: false, notes: ["handed off from Claude at 40% weekly", "next: verify on a second machine"] },
       { text: "Cut v0.1.1", done: true, notes: [] },
     ]);
     expect(board.columns[1]?.cards).toEqual([{ text: "Board in the HUD", notes: [] }]);

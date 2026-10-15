@@ -12,8 +12,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The browser extension lives in its own repository and versions on its own;
-# PROTOCOL_VERSION is the only pin between it and a Ghost release.
 manifests=(
   package.json
   packages/daemon/package.json

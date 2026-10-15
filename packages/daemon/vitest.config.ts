@@ -11,7 +11,7 @@ export default defineConfig({
     // Tests point process-global env (XDG dirs) at scratch state; run files
     // serially so they never race.
     fileParallelism: false,
-    // Bun-native dependencies (SQLite/WebSocket) must stay in the Bun host;
+    // Bun-native dependencies (SQLite) must stay in the Bun host;
     // Vitest's default fork pool relaunches workers through Node semantics.
     pool: "threads",
   },

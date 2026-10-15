@@ -140,7 +140,7 @@ If only the runtime is installed, name only `ghost-runtime`.
 That removes package-owned files only.
 
 `smoke.sh <root> <runtime|ui>` validates each disjoint staged package tree, including daemon startup metadata,
-the ghost-desktop bundle, desktop entry, Chromium manifest, Quickshell assets,
+the ghost-desktop bundle, desktop entry, Quickshell assets,
 and graphical-session service binding. `package()` runs it before producing the
 archive. `pnpm verify` is the gate: the pre-push hook refuses a master push
 until it has passed on that exact tree, and the `Native packages` workflow
@@ -151,7 +151,7 @@ Releases are cut locally.
 For a real service-context check on a graphical Arch login, run:
 
 ```sh
-/usr/lib/ghost/package-smoke/service-browser-smoke.sh
+/usr/lib/ghost/package-smoke/service-smoke.sh
 ```
 
 It uses `/usr/bin/ghost status --json` to verify that the terminal client can

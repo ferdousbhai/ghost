@@ -57,7 +57,7 @@ if [[ "$component" == runtime ]]; then
     /usr/lib/ghost/skills/ghost-products/SKILL.md
   )
   executables=(/usr/bin/ghostd /usr/bin/ghost /usr/bin/ghost-desktop
-    /usr/lib/ghost/package-smoke/service-browser-smoke.sh)
+    /usr/lib/ghost/package-smoke/service-smoke.sh)
   absent=(/usr/share/ghost/plugin /usr/share/applications/ghost.desktop
     /usr/share/icons /usr/share/doc/ghost/shell-contrib)
 else

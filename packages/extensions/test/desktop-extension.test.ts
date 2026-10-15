@@ -39,6 +39,8 @@ describe("desktop tools", () => {
     expect(calls).toEqual(["conversation c1"]);
     expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining('<untrusted source="desktop"') });
     expect(result.content[1]).toEqual(image);
+    expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("[injection-warning:") });
+    expect(result.details).toMatchObject({ images: 1, injectionFlagged: true });
   });
 
 

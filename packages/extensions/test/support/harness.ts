@@ -4,16 +4,14 @@
  * logic, deterministically.
  */
 import type {
-  AnyGhostToolDefinition,
+  GhostToolDefinition,
   GhostExtensionAPI,
   GhostExtensionFactory,
   GhostToolResult,
 } from "../../src/extension-api.js";
 
-type AnyTool = AnyGhostToolDefinition;
-
 export interface Harness {
-  readonly tools: Map<string, AnyTool>;
+  readonly tools: Map<string, GhostToolDefinition>;
   toolNames(): string[];
   call(
     name: string,
@@ -23,13 +21,13 @@ export interface Harness {
 }
 
 export async function loadExtension(factory: GhostExtensionFactory): Promise<Harness> {
-  const tools = new Map<string, AnyTool>();
+  const tools = new Map<string, GhostToolDefinition>();
 
-  const api = {
-    registerTool(tool: AnyTool) {
+  const api: GhostExtensionAPI = {
+    registerTool(tool: GhostToolDefinition) {
       tools.set(tool.name, tool);
     },
-  } as unknown as GhostExtensionAPI;
+  };
 
   await factory(api);
 

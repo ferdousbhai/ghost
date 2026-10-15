@@ -15,8 +15,7 @@
  * by that ghost before deletion or rename publishes a reusable name.
  *
  * The versioned, length-delimited prefix and slug grammar are the ownership
- * contract. Units are swept by name, never by pattern-matching content, the
- * same rule screenshot retention follows.
+ * contract. Units are swept by name, never by pattern-matching content.
  */
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";

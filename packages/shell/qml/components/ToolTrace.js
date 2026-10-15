@@ -127,6 +127,7 @@ function fallback(activity, completed) {
             return completed ? "Looked through a window" : "Looking through a window";
         return completed ? "Checked the desktop" : "Checking the desktop";
     }
+    // Historical transcripts still carry this retired tool name.
     case "ghost_browser": {
         const action = argument(activity, "action");
         const url = argument(activity, "url");

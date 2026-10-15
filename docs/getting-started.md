@@ -235,7 +235,7 @@ codes.
 | XDG Pictures | screenshots (desktop host contract; browser destinations chosen through Bash) |
 
 `GHOSTS_ROOT` moves the ghosts root, `GHOSTD_CONFIG` the config file, and
-`GHOSTD_API_TOKEN_FILE` / `GHOSTD_RELAY_TOKEN_FILE` the token files.
+`GHOSTD_API_TOKEN_FILE` the API token file.
 `GHOSTD_HOST` and `GHOSTD_PORT` move the endpoint the daemon binds and the CLI
 and HUD dial (`127.0.0.1:7717` by default; the daemon refuses a non-loopback
 host).

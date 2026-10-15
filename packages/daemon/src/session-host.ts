@@ -14,6 +14,7 @@ import { join, resolve } from "node:path";
 import {
   buildGhostSystemPrompt,
   collectGhostExtension,
+  createDesktopExtension,
   openGhostHome,
   resolveDocumentsDirectory,
   type CollectedGhostExtension,
@@ -40,7 +41,6 @@ import {
   type LogEntry,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { resolveGhostExtensions } from "./extensions.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
@@ -976,7 +976,7 @@ export class SessionHost {
   private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
     let tools = this.tools.get(ghost.dir);
     if (!tools) {
-      tools = collectGhostExtension(resolveGhostExtensions());
+      tools = collectGhostExtension(createDesktopExtension());
       tools.catch(() => this.tools.delete(ghost.dir));
       this.tools.set(ghost.dir, tools);
     }

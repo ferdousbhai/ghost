@@ -6,7 +6,7 @@ import { preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./
 import type { CliContext } from "./types.js";
 
 /**
- * `ghost mcp serve`: the ghost's own tools (browser, desktop) as a stdio MCP
+ * `ghost mcp serve`: the ghost's desktop tools as a stdio MCP
  * server, for the harness carrying a conversation and for a run `ghost
  * delegate` launched. The conversation is fixed at start (`-s`, then
  * `$GHOST_SESSION`); every call runs in the daemon.

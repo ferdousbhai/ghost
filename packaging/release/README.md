@@ -27,7 +27,7 @@ closure. Ghost and its MCP support remain bundled for offline use.
 Bundles are minified with function and class names preserved for diagnostics;
 the full license closure stays in the payload.
 QML, the desktop
-helper, browser extension, services, launchers, licenses, and docs come from the
+helper, services, launchers, licenses, and docs come from the
 same sanitized source snapshot, so a stable package cannot mix an old UI with a
 new daemon or client.
 
@@ -79,9 +79,6 @@ and otherwise installs the `ghost` package from Omarchy's repository with
 [`test-installer.sh`](test-installer.sh), which the gate runs, checks its
 syntax and holds the docs and the release notes to one spelling of the
 public one-liner.
-
-The browser extension lives in its own repository; `PROTOCOL_VERSION` is the
-only pin between it and a Ghost release.
 
 ## Omarchy's recipe
 

@@ -273,7 +273,6 @@ export async function startRealDaemonHarness(
   process.env.GHOSTD_CONFIG = join(xdgConfigHome, "ghost", "config.json");
   process.env.GHOSTD_HOOKS = join(xdgConfigHome, "ghost", "hooks.json");
   process.env.GHOSTD_API_TOKEN_FILE = join(xdgStateHome, "ghost", "api-token");
-  process.env.GHOSTD_RELAY = "off";
 
   let harness: FakeHarness | null = null;
   let host: SessionHost | null = null;

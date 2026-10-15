@@ -24,4 +24,4 @@ export { serveMcpTools } from "./mcp-stdio.js";
 
 export { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
 
-export { createGhostExtension } from "./extensions/index.js";
+export { createDesktopExtension } from "./extensions/desktop.js";

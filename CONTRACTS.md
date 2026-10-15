@@ -34,7 +34,7 @@ Durable state has three scopes:
   each harness's credentials, settings, and own session store stay in the
   machine facility that owns them.
 
-The Documents directory is resolved like the screenshot directory:
+The Documents directory is resolved from
 `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; never a
 hard-coded path. It is persistent owner context, not a Ghost-owned store: Ghost
 neither indexes it nor injects any part of it, and the system prompt only names
@@ -114,7 +114,9 @@ skills, holding one link per skill: the skills Ghost ships (the repository's
 the ghost's `skills/`, which wins on a shared name. Links are refreshed every
 turn, so an upgrade or a removed skill takes effect on the next one. Ghost ships
 only skills no product ships itself: `ghost-products` indexes the recommended
-products, each of which installs its own skill. Machine skills are whatever
+products, each of which installs its own skill. `web-browser` adds the
+owner-wide session and task-tab locking recipe to agent-browser's own guide.
+Machine skills are whatever
 each harness discovers itself. `mcp.json`
 rows that are enabled and valid are handed to the harness each turn (see
 "Harnesses"). A ghost home carries no executable extension code; the only
@@ -148,7 +150,8 @@ directory to recoverable Trash in one rename; there is no fork.
 - Desktop screenshots follow ghost-desktop's host contract. Bash browser
   screenshots use the owner's requested destination or XDG Pictures directory.
   Ghost keeps no browser screenshot retention manager.
-- Downloads are owned by the owner's Chromium configuration.
+- Browser downloads belong to agent-browser and Chromium; the Bash caller
+  chooses the owner's requested destination or XDG Downloads directory.
 - Scheduled work is a systemd user `.timer`/`.service` pair named
   `ghost-timer-v1-<name-length>-<ghost>-<slug>`. Ghost prompts author persistent
   units; rename/delete retire units owned by that prefix. See
@@ -174,7 +177,7 @@ ghost home directory, which moves as one unit.
 | Each harness's own session store | the harness's; survives | not moved: the next turn in a moved conversation starts a fresh harness session handed the log | not removed | unchanged | unchanged | preserved |
 | `settings.yml`, `mcp.json` | survives | moves with the home | to Trash with the home | unchanged | unchanged | preserved |
 | Timers `ghost-timer-v1-*` | unaffected; systemd owns them | stopped and removed before the rename completes | stopped and removed before the delete completes | unchanged | persistent units unchanged; `$XDG_RUNTIME_DIR` units are tmpfs | preserved |
-| Screenshots in the XDG Pictures directory | survive | not moved; filenames keep the old ghost name | not removed | unchanged | unchanged | preserved |
+| Screenshots in the XDG Pictures directory | survive | not moved or renamed | not removed | unchanged | unchanged | preserved |
 | The clone the daemon runs from | untouched | untouched | untouched | it is the source | unchanged | unchanged |
 | The running build | re-execs the same build | unchanged | unchanged | replaced | a packaged install under `/usr` rolls back; a build from a clone under the home does not | replaced |
 
@@ -524,7 +527,6 @@ client and process — else the connecting client plus that server process.
 `scripts/check-core-boundary.sh` proves this during lint. Their seams are the
 authenticated HTTP/SSE API and desktop MCP stdio.
 
-
 The Arch install has two packages built from the same release: `ghost-runtime`
 owns the daemon, CLI, `ghost-desktop`, user unit, and runtime docs/licenses;
 `ghost` owns the HUD, desktop launcher, icons, and shell snippets and depends on
@@ -630,7 +632,7 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
 - Control files are bounded, validated, atomically replaced, and fail closed on
   links, malformed bytes, identity changes, ambiguous recovery, or incomplete
   fsync.
-- Browser/session/process teardown tracks exact captured owners and PIDs: a
+- Session/process teardown tracks exact captured owners and PIDs: a
   turn's harness is the process group ghostd spawned. Settled passes close
   inherited pipes and emit no late events; cancellation kills surviving members
   of that group even after its leader exits. Normal completion leaves detached

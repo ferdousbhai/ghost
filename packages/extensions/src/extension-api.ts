@@ -5,10 +5,8 @@
  * tool registration. The daemon serves the collected tools to a conversation's
  * harness over MCP (`ghost mcp serve`); the extensions import no harness.
  *
- * Parameter schemas are TypeBox JSON Schema documents (`typebox` v1), which
- * every runtime and provider consumes as plain JSON.
+ * Parameter schemas are JSON Schema documents passed through from the MCP server.
  */
-import type { Static, TSchema } from "typebox";
 
 export type GhostToolContent =
   | { readonly type: "text"; readonly text: string }
@@ -29,38 +27,30 @@ export interface GhostToolContext {
   readonly caller?: string | undefined;
 }
 
-export interface GhostToolDefinition<
-  TParams extends TSchema = TSchema,
-  TDetails = unknown,
-> {
+export interface GhostToolDefinition<TDetails = unknown> {
   /** Tool name as the model calls it. */
   name: string;
   /** Description for the model. */
   description: string;
-  /** JSON Schema for the arguments, built with TypeBox. */
-  parameters: TParams;
+  /** JSON Schema for the arguments. */
+  parameters: Record<string, unknown>;
   execute(
-    params: Static<TParams>,
+    params: Record<string, unknown>,
     signal: AbortSignal | undefined,
     ctx: GhostToolContext,
   ): Promise<GhostToolResult<TDetails>>;
 }
 
 export interface GhostExtensionAPI {
-  registerTool<TParams extends TSchema>(
-    definition: GhostToolDefinition<TParams>,
-  ): void;
+  registerTool(definition: GhostToolDefinition): void;
 }
 
 export type GhostExtensionFactory = (
   api: GhostExtensionAPI,
 ) => void | Promise<void>;
 
-/** A registered tool with its parameter type erased, as a runtime holds it. */
-export type AnyGhostToolDefinition = GhostToolDefinition<TSchema, unknown>;
-
 export interface CollectedGhostExtension {
-  readonly tools: Map<string, AnyGhostToolDefinition>;
+  readonly tools: Map<string, GhostToolDefinition>;
 }
 
 /**
@@ -69,13 +59,13 @@ export interface CollectedGhostExtension {
 export async function collectGhostExtension(
   factory: GhostExtensionFactory,
 ): Promise<CollectedGhostExtension> {
-  const tools = new Map<string, AnyGhostToolDefinition>();
+  const tools = new Map<string, GhostToolDefinition>();
   const api: GhostExtensionAPI = {
     registerTool(definition) {
       if (tools.has(definition.name)) {
         throw new Error(`Ghost tool ${JSON.stringify(definition.name)} is registered twice.`);
       }
-      tools.set(definition.name, definition as AnyGhostToolDefinition);
+      tools.set(definition.name, definition);
     },
   };
   await factory(api);
