@@ -308,6 +308,20 @@ if (( shell_ready == 0 )); then
   exit 1
 fi
 
+plugin_ready=0
+for _ in {1..120}; do
+  if qs -p "$config_path" ipc call shell listPlugins 2>/dev/null | \
+    node -e 'let s=""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => { try { process.exit(JSON.parse(s).some(p => p.id === process.argv[1]) ? 0 : 1); } catch { process.exit(1); } });' "$plugin_id"; then
+    plugin_ready=1
+    break
+  fi
+  sleep 0.1
+done
+if (( plugin_ready == 0 )); then
+  echo "preview: plugin was not discovered" >&2
+  sed -n '1,200p' "$preview_root/quickshell.log" >&2
+  exit 1
+fi
 qs -p "$config_path" ipc call shell summon "$plugin_id" '{}' >/dev/null
 sleep "${GHOST_PREVIEW_SETTLE_SECONDS:-1}"
 
