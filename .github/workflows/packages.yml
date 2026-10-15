@@ -17,16 +17,16 @@ jobs:
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
           - arch: aarch64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .cache/native/${{ matrix.arch }}
           key: native-${{ matrix.arch }}-${{ hashFiles('pnpm-lock.yaml') }}
@@ -47,7 +47,7 @@ jobs:
           unzip -j /tmp/bun-linux-aarch64.zip bun-linux-aarch64/bun -d .ci/bun
       - name: Build, check and smoke-test the package
         run: sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ghost-${{ matrix.arch }}
           path: |
