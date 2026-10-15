@@ -94,7 +94,7 @@ TestCase {
     }
 
     function test_chromeAndChatSurfacesRound(): void {
-        compare(Theme.radius, 10);
+        compare(Theme.radius, 8);
         compare(Theme.bubbleRadius, 16);
         compare(Theme.bubbleRadiusSmall, 12);
         compare(Theme.bubbleTailRadius, 4);

@@ -1,11 +1,4 @@
-// ActionButton — the pane button: a label on a film, brighter when primary,
-// rose-bordered when it destroys something. Enter/Space and a click are the
-// same gesture.
-//
-// The label is set in small bold capitals because that is what a button looks
-// like everywhere else in this world: omarchy.org and summonghost.com both
-// uppercase theirs at weight 700. In a fixed-width face it also separates an
-// action from the prose around it without a second typeface to do it with.
+// Compact pane actions share the desktop accent and show keyboard focus.
 import QtQuick
 import "../services"
 
@@ -19,12 +12,14 @@ Rectangle {
 
     implicitWidth: buttonLabel.implicitWidth + Theme.controlPaddingX * 2
     implicitHeight: Theme.controlHeight
-    radius: Theme.radius
+    radius: Theme.controlRadius
     color: button.primary
-        ? (buttonArea.containsMouse ? Theme.amber(0.20) : Theme.amber(0.13))
-        : (buttonArea.containsMouse ? Theme.film(0.09) : Theme.film(0.05))
-    border.width: button.primary || button.danger ? 1 : 0
-    border.color: button.danger ? Theme.rose(0.30) : Theme.amber(0.28)
+        ? Qt.alpha(Theme.accent, buttonArea.containsMouse ? 0.20 : 0.12)
+        : (buttonArea.containsMouse ? Qt.alpha(Theme.foreground, 0.07) : "transparent")
+    border.width: button.activeFocus || button.primary || button.danger ? 1 : 0
+    border.color: button.activeFocus ? Theme.accent
+        : button.danger ? Qt.alpha(Theme.danger, 0.35) : Qt.alpha(Theme.accent, 0.35)
+    opacity: button.enabled ? 1 : 0.45
     activeFocusOnTab: true
 
     Accessible.role: Accessible.Button
@@ -36,12 +31,10 @@ Rectangle {
         text: button.label
         color: !button.enabled ? Theme.foregroundFaint
             : (button.danger ? Theme.danger
-                : (button.primary ? Theme.ghostAmberBright : Theme.foreground))
+                : (button.primary ? Theme.accent : Theme.foreground))
         font.family: Theme.fontFamily
         font.pixelSize: Theme.fontSizeSmall
-        font.weight: Font.Bold
-        font.capitalization: Font.AllUppercase
-        font.letterSpacing: 0.5
+        font.weight: Font.Medium
     }
 
     MouseArea {

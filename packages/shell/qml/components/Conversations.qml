@@ -145,14 +145,20 @@ Item {
             width: root.width
             height: Theme.controlHeight
             radius: Theme.radius / 2
-            // Selection reads from the row itself — a stronger film plus the
-            // bright title — the way Roster.qml lights its active ghost. Amber
-            // stays reserved for state that is not "you are looking at this".
-            color: entry.active ? Theme.film(0.14)
-                : (entryArea.containsMouse ? Theme.film(0.06) : "transparent")
-            // The amber ring is the roster's own "you are typing a name here".
+            // A quiet accent identifies the active row; a full outline marks rename focus.
+            color: entry.active ? Qt.alpha(Theme.accent, 0.12)
+                : (entryArea.containsMouse ? Qt.alpha(Theme.foreground, 0.04) : "transparent")
             border.width: entry.editing ? 1 : 0
-            border.color: Theme.amber(0.50)
+            border.color: Theme.accent
+            Rectangle {
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: 2
+                height: parent.height * 0.6
+                radius: 1
+                visible: entry.active
+                color: Theme.accent
+            }
 
             // Both paths matter: the row may already exist when the rename
             // starts, or be rebuilt by a re-list while it is running.
@@ -345,7 +351,9 @@ Item {
             Layout.fillWidth: true
             Layout.preferredHeight: Theme.controlHeight
             radius: Theme.radius / 2
-            color: searchInput.activeFocus ? Theme.film(0.10) : Theme.film(0.06)
+            color: Qt.alpha(Theme.foreground, 0.025)
+            border.width: 1
+            border.color: searchInput.activeFocus ? Theme.accent : Theme.border
 
             Behavior on color {
                 enabled: !Theme.reducedMotion

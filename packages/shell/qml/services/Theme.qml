@@ -193,19 +193,13 @@ Singleton {
     function controlBorder(state: string, alphaKey: string): color {
         const tint = root.shellColor("controls." + state + "-border",
             root.shellColor("controls.normal-border", root.foreground));
-        return Qt.rgba(tint.r, tint.g, tint.b, root.shellNumber(alphaKey, 0.4));
+        return Qt.rgba(tint.r, tint.g, tint.b, root.shellNumber(alphaKey, 0.14));
     }
 
-    // The canvas is the theme's own background, the same colour Omarchy gives
-    // its bar and popups, so the HUD sits in the desktop rather than beside it.
-    // Its two neighbours are the published steps either side: `dark_background`
-    // recesses a well or a rail, `lighter_background` raises a card. Both modes
-    // come out of the same three keys, so a light Omarchy theme needs no
-    // second palette here.
+    // Quiet surfaces keep the active palette's hue; dividers carry hierarchy.
     readonly property color background: root.pick("background")
-    readonly property color surface: root.pick("lighter_background")
-    /** The recessed step. The name predates the mapping; wells and rails use it. */
-    readonly property color surfaceDeep: root.pick("dark_background")
+    readonly property color surface: root.blend(root.background, root.foreground, 0.035)
+    readonly property color surfaceDeep: root.blend(root.background, root.foreground, 0.018)
     readonly property color foregroundBright: root.pick("bright_foreground")
     readonly property color foreground: root.pick("foreground")
     // Derived rather than taken from `dark_foreground`: that key is a theme's
@@ -278,10 +272,10 @@ Singleton {
     readonly property string synFunction: "#d9c98a"
 
     // Omarchy publishes no radius in shell.toml, so the chrome's is Ghost's
-    // own: cards and panels round at 10px and rows and small controls at half
-    // that, the way a native app's do. Chat surfaces: 16px for capsules and
+    // own: cards and panels round at 8px and small controls at 6px. Chat surfaces: 16px for capsules and
     // the composer, 12px for chips, 4px for the speaker tail.
-    readonly property int radius: 10
+    readonly property int radius: 8
+    readonly property int controlRadius: 6
     readonly property int bubbleRadius: 16
     readonly property int bubbleRadiusSmall: 12
     readonly property int bubbleTailRadius: 4
