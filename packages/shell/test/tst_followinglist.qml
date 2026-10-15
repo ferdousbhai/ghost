@@ -141,6 +141,22 @@ TestCase {
         tryVerify(() => !bar.shown, 2000);
     }
 
+    function test_pressing_minimum_size_thumb_does_not_jump(): void {
+        const list = createTemporaryObject(listComponent, tc);
+        fill(list);
+        tryVerify(() => list.atYEnd, 2000);
+        list.positionViewAtIndex(200, ListView.Beginning);
+        wait(100);
+        const bar = findChild(list, "scrollbar");
+        const thumb = findChild(list, "scrollbarThumb");
+        verify(bar !== null && thumb !== null);
+        compare(thumb.height, 24);
+        const before = list.contentY;
+        mousePress(bar, bar.width / 2, thumb.y + thumb.height / 2);
+        verify(Math.abs(list.contentY - before) < 1, "pressing the thumb must not scroll");
+        mouseRelease(bar, bar.width / 2, thumb.y + thumb.height / 2);
+    }
+
     function test_keys_page_and_jump_to_either_end(): void {
         const list = createTemporaryObject(listComponent, tc);
         fill(list);

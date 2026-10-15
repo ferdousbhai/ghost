@@ -29,8 +29,10 @@ case $version in
   *) echo "$QMLLINT is '$version', expected Qt 6" >&2; exit 1 ;;
 esac
 
+# Direct-file linting needs the singleton registrations explicitly; -I alone
+# finds imports but does not register the file being linted as a singleton.
 echo "$QMLLINT ($version)"
-exec "$QMLLINT" -I .qmllint \
+exec "$QMLLINT" -I .qmllint -i qml/services/qmldir \
   qml/GhostHud.qml \
   qml/Panel.qml \
   qml/Service.qml \

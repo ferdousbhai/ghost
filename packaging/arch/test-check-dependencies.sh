@@ -7,6 +7,7 @@ set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
+bash -n "$script_dir/arch-run.sh" "$script_dir/build-native.sh"
 temp_base="${GHOST_ARCH_DEPENDENCY_TEST_ROOT:-${TMPDIR:-/tmp}}"
 mkdir -p "$temp_base"
 work="$(mktemp -d "$temp_base/ghost-arch-dependencies.XXXXXX")"

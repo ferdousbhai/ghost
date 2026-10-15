@@ -19,7 +19,13 @@ Build the checkout package without installing it:
 
 ```sh
 makepkg --cleanbuild
+# CI uses a disposable native Arch root (requires arch-install-scripts and root):
+sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
 ```
+
+The chroot command expects the CI inputs: the relay checkout at
+`.ci/ghost-chromium-extension` and, on ARM, the checksum-verified upstream Bun
+binary at `.ci/bun/bun`. The workflow prepares these before invoking it.
 
 ## Runtime with your own UI
 
@@ -142,7 +148,7 @@ and graphical-session service binding. `package()` runs it before producing the
 archive. `pnpm verify` is the gate: the pre-push hook refuses a master push
 until it has passed on that exact tree, and the `Native packages` workflow
 builds this PKGBUILD (which runs the same checks) in clean Arch Linux x86_64
-and Arch Linux ARM aarch64 containers on every pull request and master push.
+and Arch Linux ARM aarch64 chroots on every pull request and master push.
 Releases are cut locally.
 
 For a real service-context check on a graphical Arch login, run:
@@ -155,5 +161,5 @@ It uses `/usr/bin/ghost status --json` to verify that the terminal client can
 authenticate to the active packaged daemon, then reads `/api/relay/status` to
 verify the browser relay endpoint is serving from it. Ghost launches no browser
 of its own — the relay dials out of a Chromium the owner started — so there is
-no launch policy to probe. CI containers do not run a graphical user manager, so
+no launch policy to probe. CI chroots do not run a graphical user manager, so
 this stays a release-machine check.

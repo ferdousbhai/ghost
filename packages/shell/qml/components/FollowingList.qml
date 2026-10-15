@@ -152,9 +152,12 @@ ListView {
             anchors.rightMargin: 2
             width: wide ? 8 : 4
             radius: width / 2
-            y: Math.max(0, Math.min(parent.height - height,
-                root.visibleArea.yPosition * parent.height))
-            height: Math.max(24, root.visibleArea.heightRatio * parent.height)
+            objectName: "scrollbarThumb"
+            // Use the same usable track as moveTo, including the minimum thumb.
+            readonly property real fraction: root.contentHeight > root.height
+                ? Math.max(0, Math.min(1, (root.contentY - root.originY) / (root.contentHeight - root.height))) : 0
+            y: fraction * (parent.height - height)
+            height: Math.min(parent.height, Math.max(24, root.visibleArea.heightRatio * parent.height))
             color: Theme.film(wide ? 0.45 : 0.28)
         }
 
