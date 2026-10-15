@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { isHelpTopic } from "../src/help-topics.js";
 import { renderOwnerContextPolicy } from "../src/prompt-policy.js";
 
 describe("owner context policy", () => {
@@ -8,5 +9,11 @@ describe("owner context policy", () => {
     expect(policy).toContain("shared by every ghost on this machine");
     expect(policy).not.toContain("SKILL.md");
     expect(policy).not.toContain(".agents/skills");
+  });
+
+  it("points at a lookup recipe `ghost help` prints", () => {
+    const pointer = /`ghost help (\w+)`/u.exec(renderOwnerContextPolicy("/home/owner/Documents"))?.[1];
+    expect(pointer).toBe("memory");
+    expect(isHelpTopic(pointer ?? "")).toBe(true);
   });
 });

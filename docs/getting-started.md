@@ -60,9 +60,10 @@ a conversation automatically. No daemon restart is needed.
 
 Nothing to install. Your XDG Documents directory (`xdg-user-dir DOCUMENTS`,
 usually `~/Documents`) is the owner-shared scope: every ghost reads and writes
-it with its harness's native file tools, its own notes included. Ghost does
-not index the directory or read any of it until a request
-calls for it.
+it with its harness's native file tools, its own notes included, kept in
+your existing project and topic folders. Ghost does not index the directory
+or read any of it until a request calls for it. For search by meaning, a
+ghost can offer to install Recall, which indexes only the folders you choose.
 
 ### Bring your own UI
 
@@ -254,8 +255,10 @@ and any skill you installed untouched.
 - **Talk instead of typing.** Install Omarchy's dictation (the Omarchy menu,
   Install → AI → Dictation, which sets up Voxtype). With the composer focused,
   hold `F9` and speak, or click the mic at the right of the composer; the
-  composer says when it is listening. Ghost adds nothing else: no speech
-  stack, no voice of its own.
+  composer says when it is listening, and `Esc` or its `×` discards the
+  recording or transcription. A ghost can also transcribe an audio file with
+  Voxtype (`ghost help dictation`). Ghost adds nothing else: no
+  speech stack, no voice of its own.
 - **Show it a picture.** Paste (`Ctrl+V`) or drop an image on the composer;
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.

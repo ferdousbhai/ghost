@@ -28,8 +28,8 @@ Durable state has three scopes:
 - **Ghost-private:** character, conversations, settings, and runtime
   sidecars live in one ghost home.
 - **Owner-shared:** notes, knowledge, decisions, plans, and tasks live in the
-  owner's XDG Documents directory, which every ghost reads and writes with its
-  runtime's native file and search tools.
+  owner's XDG Documents directory, in its project and topic folders, which
+  every ghost reads and writes with its runtime's native file and search tools.
 - **External:** browser downloads, screenshots, systemd user timers, and
   each harness's credentials, settings, and own session store stay in the
   machine facility that owns them.
@@ -37,8 +37,11 @@ Durable state has three scopes:
 The Documents directory is resolved like the screenshot directory:
 `XDG_DOCUMENTS_DIR`, then `user-dirs.dirs`, then `~/Documents`; never a
 hard-coded path. It is persistent owner context, not a Ghost-owned store: Ghost
-neither indexes it nor injects any part of it at session start, and the system
-prompt only names the directory.
+neither indexes it nor injects any part of it, and the system prompt only names
+the directory. A ghost searches it on demand, as a task needs
+(`ghost help memory`). Recall, an optional product of its own
+(`ghost-products`), may index folders the owner selects; its hits are derived,
+possibly stale candidates, and the source file is authoritative.
 
 Document content is unaffected by creating, renaming, deleting, or
 uninstalling a ghost.
@@ -95,7 +98,7 @@ There is no ghost-private memory store. A ghost's notes — owner facts,
 decisions, tasks, and its own reflections — are Markdown files under the
 owner's Documents directory itself, written and
 read with the harness's native file tools, shared by every ghost and readable
-by the owner. Nothing there is indexed or injected at session start.
+by the owner ([Product boundary](#product-boundary) says what may index it).
 
 ### Ghost-home resources
 
@@ -456,11 +459,12 @@ state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
 HUD reaches is a named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, the agent a ghost prefers (`ghost harness`)
-and a conversation runs on (`ghost switch`), MCP, hooks, remote, status,
-skill), so a
+and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
+status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
-`self`, `harnesses`, `background`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+`self`, `harnesses`, `background`, `memory`) and optional ones it does not
+(`dictation`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
 and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the
@@ -580,9 +584,15 @@ runtime preserves owner data.
   exception is the workbench file editor, which writes ordinary files at the
   owner's explicit direction. A conflict or failed save blocks closing,
   switching files, and opening the external editor until resolved.
-  Dictation is Omarchy's Voxtype: the shell runs
-  `voxtype record toggle` and reads `$XDG_RUNTIME_DIR/voxtype/state`; Ghost
-  ships no speech stack of its own.
+  Dictation is Omarchy's Voxtype: the shell reads
+  `$XDG_RUNTIME_DIR/voxtype/state`, focuses the composer, then runs
+  `voxtype record start` when idle or `stop` when recording; the mic is
+  disabled while transcribing. Esc in the composer or its cancel control runs
+  `voxtype record cancel` while recording or transcribing. A command that
+  exits nonzero, crashes, or never starts shows as status text above the
+  field, whatever the draft or state, until the next command; Voxtype reports
+  no failed transcription, so the HUD shows none. Ghost ships no speech stack
+  of its own.
 - The [Ghost relay extension](https://github.com/ferdousbhai/ghost-chromium-extension)
   is the opt-in MV3 relay into the owner's Chromium, its own product in its
   own repository (seam: its `PROTOCOL.md`). It also drives those tabs for its

@@ -1,14 +1,14 @@
 /**
  * The long recipes a ghost needs only when it does one particular thing:
  * writing a timer, editing or restarting itself, handing work to another
- * harness. The system prompt points at them by name and `ghost help <topic>`
- * prints them, so their cost lands on the turn that needs them and not on
+ * harness, finding a note, transcribing audio. The system prompt points at
+ * them by name and `ghost help <topic>` prints them, so their cost lands on the turn that needs them and not on
  * every turn of every ghost. The text is still contract text the ghost acts
  * on: keep it exact, and keep the prompt's pointer sentences in step.
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -105,8 +105,35 @@ function background(): string[] {
   ];
 }
 
+function memory(): string[] {
+  return [
+    "# Memory",
+    "Your durable memory is the owner's documents directory (Owner context): Markdown in its existing project and topic folders, with `board.md` at its root. Ghost injects and indexes none of it; look things up whenever a task needs them, from the first turn on.",
+    "Known names or terms: guess the folder from its name, then `rg -n -i '<term>' <folder>`, widening to the whole directory only if that finds nothing.",
+    "Unknown wording or location: search by meaning with Recall through its `recall` skill (the `ghost-products` skill gets it, with the owner's go-ahead); without it, use filenames and `rg`. Read the passages of the few relevant hits, then the source file itself before relying on one: an index can be stale.",
+    "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
+    "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
+    "Saving: put a stable fact, decision, or correction in the existing folder it belongs to, updating the note that covers it; start a folder only for a new project or topic.",
+    "A workflow you finished and will repeat (its steps, commands, and pitfalls) is a skill, not a note: write `skills/<name>/SKILL.md`, with `name` and `description` frontmatter, beside your character file; it is available from your next turn.",
+  ];
+}
+
+function dictation(): string[] {
+  return [
+    "# Dictation and audio files",
+    "Speech is Omarchy's Voxtype (`command -v voxtype`); Ghost adds no speech stack, voice loop, or text-to-speech. Check `voxtype transcribe --help` before relying on a flag.",
+    "Transcribe an audio file: `voxtype transcribe` takes 16 kHz mono WAV, so convert anything else first:",
+    "```sh",
+    "ffmpeg -i <input> -ar 16000 -ac 1 /tmp/<name>.wav",
+    "voxtype -q transcribe /tmp/<name>.wav",
+    "```",
+    "Read the output before using it: not every line is transcript.",
+    "The HUD composer starts, stops, and cancels the owner's dictation (`voxtype record start|stop|cancel`; Esc cancels). Only when the owner asks, turn spoken \"submit\" on with `voxtype config set text.smart_auto_submit true` or off with `voxtype config set text.smart_auto_submit false`, then `systemctl --user restart voxtype`.",
+  ];
+}
+
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation }[topic]();
   return `${lines.join("\n")}\n`;
 }

@@ -196,6 +196,15 @@ describe("ghost help", () => {
     expect(codes.code).toBe(0);
     for (const { code } of EXIT_CODES) expect(codes.stdout).toContain(`  ${code}  `);
   });
+
+  it("prints the memory and dictation recipes offline and lists them in its usage", async () => {
+    for (const topic of ["memory", "dictation"]) {
+      const result = await runCli(["help", topic], { env: {}, home: "/tmp/ghost-cli-unit" });
+      expect(result.code, topic).toBe(0);
+      expect(result.stdout, topic).toMatch(/^# /u);
+    }
+    expect((await runCli(["help", "help"])).stdout).toContain("memory|dictation");
+  });
 });
 
 describe("CLI API adaptation", () => {

@@ -1,8 +1,9 @@
 pragma ComponentBehavior: Bound
 
 // The input field. Enter sends (or queues a follow-up while the ghost is
-// working), Shift+Enter opens a new line, Esc bubbles up to the HUD so a
-// half-typed prompt is never a reason you can't dismiss. An image pasted or
+// working), Shift+Enter opens a new line, Esc cancels dictation in progress
+// and otherwise bubbles up to the HUD so a half-typed prompt is never a reason
+// you can't dismiss. An image pasted or
 // dropped here rides along: it shows in the tray above the field until it is
 // sent or taken off, and Send names it in the message (see Attachments.js).
 //
@@ -30,8 +31,11 @@ Item {
     property var transcript: null
 
     readonly property int trayHeight: tray.visible ? tray.height + Theme.gap / 2 : 0
+    readonly property int statusHeight: dictationFailure.visible
+        ? dictationFailure.implicitHeight + Theme.gap / 2 : 0
 
-    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight) + root.trayHeight
+    implicitHeight: Math.min(Math.max(field.implicitHeight + Theme.pad, 48), root.maxHeight)
+        + root.trayHeight + root.statusHeight
 
     function take(): void {
         field.forceActiveFocus();
@@ -171,6 +175,26 @@ Item {
         }
     }
 
+    // A failed `voxtype record` command, above the field so a draft or a
+    // dictation in progress never hides it.
+    Text {
+        id: dictationFailure
+        objectName: "dictationFailure"
+
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.topMargin: root.trayHeight
+        visible: Dictation.failure !== ""
+        text: Dictation.failure
+        color: Theme.danger
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSizeSmall
+        wrapMode: Text.Wrap
+        Accessible.role: Accessible.AlertMessage
+        Accessible.name: text
+    }
+
     // Focus halo: the warm bloom the old app put behind a focused input. It
     // sits outside the surface bounds and under it, so it never tints the film.
     RadialGradient {
@@ -196,8 +220,9 @@ Item {
         id: surface
 
         anchors.fill: parent
-        anchors.rightMargin: micButton.visible ? micButton.width + Theme.gap : 0
-        anchors.topMargin: root.trayHeight
+        anchors.rightMargin: (micButton.visible ? micButton.width + Theme.gap : 0)
+            + (cancelDictation.visible ? cancelDictation.width + Theme.gap : 0)
+        anchors.topMargin: root.trayHeight + root.statusHeight
         radius: Theme.bubbleRadius
         color: field.activeFocus ? Theme.film(0.07) : Theme.film(0.05)
         border.width: 1
@@ -281,6 +306,7 @@ Item {
 
             TextEdit {
                 id: field
+                objectName: "composerField"
 
                 width: parent.width
                 focus: true
@@ -313,7 +339,10 @@ Item {
 
                 Keys.onPressed: event => {
                     const enter = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
-                    if (root.transcript !== null && root.transcript.visible
+                    if (event.key === Qt.Key_Escape && Dictation.cancellable) {
+                        Dictation.cancel();
+                        event.accepted = true;
+                    } else if (root.transcript !== null && root.transcript.visible
                             && root.transcript.handleKey(event)) {
                         event.accepted = true;
                     } else if (enter && !(event.modifiers & Qt.ShiftModifier)) {
@@ -346,25 +375,82 @@ Item {
         }
     }
 
-    // Voxtype types into the focused field, so return focus after toggling.
+    // Voxtype types into the focused window, so the field takes focus before
+    // a command goes out.
+    function dictate(): void {
+        field.forceActiveFocus();
+        Dictation.toggle();
+    }
+
+    function cancelDictating(): void {
+        field.forceActiveFocus();
+        Dictation.cancel();
+    }
+
+    Rectangle {
+        id: cancelDictation
+        objectName: "cancelDictation"
+        anchors.right: micButton.left
+        anchors.rightMargin: Theme.gap
+        anchors.verticalCenter: surface.verticalCenter
+        width: Theme.controlHeight
+        height: width
+        radius: width / 2
+        visible: Dictation.cancellable
+        color: cancelArea.containsMouse ? Theme.rose(0.85) : Theme.film(0.10)
+        border.width: 1
+        border.color: Theme.film(0.20)
+        activeFocusOnTab: true
+        Accessible.role: Accessible.Button
+        Accessible.name: Dictation.recording ? "Cancel dictation" : "Cancel transcription"
+
+        Text {
+            anchors.centerIn: parent
+            text: "×"
+            color: Theme.foregroundBright
+            font.family: Theme.fontFamily
+            font.pixelSize: Theme.fontSize
+        }
+
+        MouseArea {
+            id: cancelArea
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.cancelDictating()
+        }
+
+        Keys.onPressed: event => {
+            if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                    || event.key === Qt.Key_Space) {
+                root.cancelDictating();
+                event.accepted = true;
+            }
+        }
+    }
+
     Rectangle {
         id: micButton
+        objectName: "dictationButton"
         anchors.right: parent.right
         anchors.verticalCenter: surface.verticalCenter
         width: Theme.controlHeight + Theme.pad
         height: width
         radius: width / 2
         visible: Dictation.available
+        enabled: Dictation.toggleable
         color: Dictation.recording ? Theme.ghostAmber : Theme.film(0.10)
         border.width: 1
         border.color: Dictation.recording ? Theme.ghostAmberBright : Theme.film(0.20)
         activeFocusOnTab: true
         Accessible.role: Accessible.Button
-        Accessible.name: Dictation.recording ? "Stop dictation" : "Start dictation"
+        Accessible.name: Dictation.recording ? "Stop dictation"
+            : Dictation.state === "transcribing" ? "Transcribing" : "Start dictation"
 
         GhostGlyph {
             anchors.centerIn: parent
             size: Theme.fontSize + 4
+            opacity: micButton.enabled ? 1 : 0.4
             path: "M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3zM19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"
             tint: Dictation.recording ? Theme.background :
                 (micArea.containsMouse ? Theme.ghostAmberBright : Theme.foregroundBright)
@@ -383,17 +469,13 @@ Item {
             anchors.fill: parent
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: {
-                Dictation.toggle();
-                field.forceActiveFocus();
-            }
+            onClicked: root.dictate()
         }
 
         Keys.onPressed: event => {
             if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
                     || event.key === Qt.Key_Space) {
-                Dictation.toggle();
-                field.forceActiveFocus();
+                root.dictate();
                 event.accepted = true;
             }
         }

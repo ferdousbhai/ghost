@@ -5,7 +5,7 @@ const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", 
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "memory", "dictation"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });
@@ -69,5 +69,32 @@ describe("ghost help topics", () => {
     expect(text).toContain("never read, type, or store a credential");
     expect(text).toContain("`--wait` alone is not proof");
     expect(text).toContain("after `ghost harnesses` confirms it is installed");
+  });
+
+  it("memory: exact search first, Recall for unknown wording, the source file over any index", () => {
+    const text = renderHelpTopic("memory", INPUT);
+    expect(text).toContain("`board.md` at its root");
+    expect(text).toContain("rg -n -i '<term>' <folder>");
+    expect(text).toContain("Recall through its `recall` skill");
+    expect(text).toContain("without it, use filenames and `rg`");
+    expect(text).toContain("then the source file itself before relying on one");
+    expect(text).toContain("whenever a task needs them, from the first turn on");
+    expect(text).toContain("keep both claims and tell the owner which is uncertain");
+    expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
+    expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
+    expect(text).toContain("`skills/<name>/SKILL.md`");
+  });
+
+  it("dictation: transcribes audio with the installed Voxtype and toggles spoken submit only on request", () => {
+    const text = renderHelpTopic("dictation", INPUT);
+    expect(text).toContain("ffmpeg -i <input> -ar 16000 -ac 1 /tmp/<name>.wav");
+    expect(text).toContain("voxtype -q transcribe /tmp/<name>.wav");
+    expect(text).toContain("Read the output before using it");
+    expect(text).not.toContain("Processing");
+    expect(text).not.toMatch(/video/iu);
+    expect(text).toContain("Only when the owner asks");
+    expect(text).toContain("`voxtype config set text.smart_auto_submit true`");
+    expect(text).toContain("`voxtype config set text.smart_auto_submit false`");
+    expect(text).toContain("`systemctl --user restart voxtype`");
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: ghost-products
-description: Index of the recommended products for mail, calendars, contacts, tasks/reminders, iCloud Notes/Photos/Find My, encrypted file and settings sync, AirDrop, WhatsApp, and Google Drive/Docs/Sheets. Use when the owner needs one of these and its product skill is not loaded, to pick the right product, install it, and have it install its own skill.
+description: Index of the recommended products for mail, calendars, contacts, tasks/reminders, iCloud, file sync, AirDrop, WhatsApp, Google Drive/Docs/Sheets, and local file search by meaning. Use when the owner needs one of these and its product skill is not loaded, to pick, install, or diagnose the product and have it install its own skill.
 ---
 
 # Ghost products
@@ -33,6 +33,7 @@ that command in their terminal.
 | AirDrop with nearby Apple devices | [Omdrop](https://github.com/brentkearney/omdrop-plugin) (`omdrop`) | see below; its setup installs the skill |
 | Google Drive, Docs, Sheets | [gws](https://github.com/googleworkspace/cli) (`gws`, skills `gws-*`) | `npm install -g @googleworkspace/cli`; skill: see below |
 | WhatsApp history and requested sends | [wacli](https://github.com/openclaw/wacli) (`wacli`) | see below |
+| Local search by meaning or exact text: documents, screenshots, photos, audio, video, code | [Recall for Omarchy](https://github.com/ferdousbhai/recall-for-omarchy) (`recall`) | `curl -fsSL https://ferdousbhai.com/recall/install.sh \| bash` as the owner, not root; see below |
 
 ## Routing
 
@@ -41,6 +42,25 @@ Gmail through Cloudmail, Google/iCloud calendars through Cloud Calendar,
 contacts through Cloud Contacts, reminders/tasks through Cloud Tasks. Use the
 gws skills only for Drive, Docs, and Sheets. Provider CLIs (`gws`, `hey`,
 `icloud-session`) are dependencies those products manage.
+
+## When a product fails
+
+Let the product say what is wrong: its skill, `<cli> --help`, and any status
+or doctor command they name tell a missing binary or skill (install above)
+from expired auth or a stopped service, whose remedy the product's skill owns.
+Use the CLI for structured work, an already configured MCP server where it
+fits better, the browser for what neither covers, desktop control last. Before
+retrying a failed change through another interface, check whether it took
+effect, so it never happens twice.
+
+## Recall
+
+The installer asks before adding packages through `omarchy pkg add`; with no
+terminal, rerun it with `bash -s -- --yes` once the owner agrees. It also adds
+a Super+Ctrl+Shift+F binding to `~/.config/hypr/bindings.lua` (backed up;
+`RECALL_NO_KEYBINDING=1` skips it) and installs the `recall` skill. Nothing is
+indexed until the owner picks folders, which first downloads about 865 MB of
+models. Add index folders only when the owner asked for that scope.
 
 ## Products without a built-in skill installer
 

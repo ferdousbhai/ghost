@@ -9,8 +9,7 @@
  * Each ceiling is the exact rendered size at the time it was set, so any added
  * character fails here. The way to raise one is to lower another or to justify
  * it in the commit message that raises it. Only the stable text is budgeted —
- * the memory index, the skills index, and the declarative project section are
- * derived per ghost and are out of scope.
+ * the character body is the ghost's own and is out of scope.
  */
 import { describe, expect, it } from "vitest";
 import { buildGhostSystemPrompt } from "@ghost/extensions";
@@ -37,9 +36,9 @@ const RUNNING: RunningSource = {
 };
 
 /**
- * `characterPolicySection` and `memorySection` are internal to the prompt
- * builder, so they are measured where they are shipped: in a prompt built with
- * an unwritten character, split back into its `## `-headed sections.
+ * `characterPolicySection` is internal to the prompt builder, so it is measured
+ * where it is shipped: in a prompt built with an unwritten character, split
+ * back into its `## `-headed sections.
  */
 function promptSection(heading: string): string {
   const prompt = buildGhostSystemPrompt({
@@ -76,7 +75,7 @@ const CEILINGS: Record<string, number> = {
   "Computer use": 301,
   "Other harnesses": 273,
   "Background work": 216,
-  "Owner context": 722,
+  "Owner context": 715,
   "Scheduled work": 221,
   "Self-maintenance": 390,
   "First meeting": 317,
