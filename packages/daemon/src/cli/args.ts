@@ -1,3 +1,6 @@
+import { parseArgs as parseNodeArgs } from "node:util";
+import { errorMessage } from "../errors.js";
+
 export class ArgsError extends Error {
   constructor(message: string) {
     super(message);
@@ -8,7 +11,6 @@ export class ArgsError extends Error {
 export interface ArgsSpec {
   boolean?: readonly string[];
   value?: readonly string[];
-  aliases?: Readonly<Record<string, string>>;
 }
 
 export interface ParsedCliArgs {
@@ -16,68 +18,26 @@ export interface ParsedCliArgs {
   flags: Record<string, boolean | string>;
 }
 
-const COMMON_ALIASES: Readonly<Record<string, string>> = {
-  h: "help",
-  q: "quiet",
-  g: "ghost",
-  s: "session",
-  m: "message",
-  v: "version",
-};
+const SHORT: Readonly<Record<string, string>> = { help: "h", quiet: "q", ghost: "g", session: "s", message: "m", version: "v" };
 
-function canonicalFlag(raw: string, aliases: Readonly<Record<string, string>>): string {
-  return aliases[raw] ?? raw;
-}
-
+/** `--help`, `--json`, and `--quiet` plus the spec's flags; anything else is an ArgsError. */
 export function parseArgs(argv: readonly string[], spec: ArgsSpec = {}): ParsedCliArgs {
-  const boolean = new Set(["help", "json", "quiet", ...(spec.boolean ?? [])]);
-  const value = new Set([...(spec.value ?? [])]);
-  const aliases = { ...COMMON_ALIASES, ...(spec.aliases ?? {}) };
-  const positionals: string[] = [];
-  const flags: Record<string, boolean | string> = {};
-  let terminated = false;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index] as string;
-    if (terminated || arg === "-" || !arg.startsWith("-") || arg === "") {
-      positionals.push(arg);
-      continue;
-    }
-    if (arg === "--") {
-      terminated = true;
-      continue;
-    }
-
-    let rawName: string;
-    let inlineValue: string | undefined;
-    if (arg.startsWith("--")) {
-      const equal = arg.indexOf("=");
-      rawName = arg.slice(2, equal < 0 ? undefined : equal);
-      if (equal >= 0) inlineValue = arg.slice(equal + 1);
-    } else {
-      if (arg.length !== 2) throw new ArgsError(`Unknown option: ${arg}`);
-      rawName = arg.slice(1);
-    }
-    const name = arg.startsWith("--") ? rawName : canonicalFlag(rawName, aliases);
-    if (boolean.has(name)) {
-      if (inlineValue !== undefined) throw new ArgsError(`--${name} does not take a value.`);
-      flags[name] = true;
-      continue;
-    }
-    if (!value.has(name)) throw new ArgsError(`Unknown option: ${arg}`);
-    let flagValue = inlineValue;
-    if (flagValue === undefined) {
-      flagValue = argv[index + 1];
-      if (flagValue === undefined || (flagValue.startsWith("-") && flagValue !== "-")) {
-        throw new ArgsError(`${arg} requires a value.`);
-      }
-      index += 1;
-    }
-    if (flagValue === "") throw new ArgsError(`${arg} requires a value.`);
-    flags[name] = flagValue;
+  const option = (type: "boolean" | "string") => (name: string) =>
+    [name, { type, ...(SHORT[name] ? { short: SHORT[name] } : {}) }] as const;
+  const options = Object.fromEntries([
+    ...["help", "json", "quiet", ...(spec.boolean ?? [])].map(option("boolean")),
+    ...(spec.value ?? []).map(option("string")),
+  ]);
+  let parsed: { values: Record<string, unknown>; positionals: string[] };
+  try {
+    parsed = parseNodeArgs({ args: [...argv], options, strict: true, allowPositionals: true });
+  } catch (error) {
+    throw new ArgsError(errorMessage(error));
   }
-
-  return { positionals, flags };
+  for (const [name, value] of Object.entries(parsed.values)) {
+    if (value === "") throw new ArgsError(`--${name} requires a value.`);
+  }
+  return { positionals: parsed.positionals, flags: { ...parsed.values } as Record<string, boolean | string> };
 }
 
 export function flagBoolean(parsed: ParsedCliArgs, name: string): boolean {

@@ -11,6 +11,7 @@ import {
   type DaemonConfigOverrides,
 } from "./config.js";
 import { openGhostHome } from "./home.js";
+import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
@@ -112,64 +113,35 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
 
 class UsageError extends Error {}
 
-function requireValue(argv: string[], index: number, flag: string): string {
-  const value = argv[index];
-  if (value === undefined || value.startsWith("-")) {
-    throw new UsageError(`${flag} requires a value.`);
-  }
-  return value;
-}
-
 export function parseArgs(argv: string[]): ParsedArgs {
-  const overrides: DaemonConfigOverrides = {};
-  let logLevel: LogLevel = "info";
-  let help = false;
-  let version = false;
-
-  for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index] as string;
-    switch (arg) {
-      case "-h":
-      case "--help":
-        help = true;
-        break;
-      case "-v":
-      case "--version":
-        version = true;
-        break;
-      case "-p":
-      case "--port": {
-        index += 1;
-        const raw = requireValue(argv, index, arg);
-        const port = Number(raw);
-        if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-          throw new UsageError(`Invalid port: ${raw}`);
-        }
-        overrides.port = port;
-        break;
-      }
-      case "--ghosts-root":
-        index += 1;
-        overrides.ghostsRoot = requireValue(argv, index, arg);
-        break;
-      case "--config":
-        index += 1;
-        overrides.configPath = requireValue(argv, index, arg);
-        break;
-      case "--log-level": {
-        index += 1;
-        const value = requireValue(argv, index, arg);
-        if (!["debug", "info", "warn", "error"].includes(value)) {
-          throw new UsageError(`Invalid log level: ${value}`);
-        }
-        logLevel = value as LogLevel;
-        break;
-      }
-      default:
-        throw new UsageError(`Unknown option: ${arg}`);
-    }
+  let values: { help?: boolean; version?: boolean; port?: string; "ghosts-root"?: string; config?: string; "log-level"?: string };
+  try {
+    ({ values } = parseNodeArgs({
+      args: argv,
+      options: {
+        help: { type: "boolean", short: "h" },
+        version: { type: "boolean", short: "v" },
+        port: { type: "string", short: "p" },
+        "ghosts-root": { type: "string" },
+        config: { type: "string" },
+        "log-level": { type: "string" },
+      },
+      strict: true,
+    }));
+  } catch (error) {
+    throw new UsageError(errorMessage(error));
   }
-  return { overrides, logLevel, help, version };
+  const overrides: DaemonConfigOverrides = {};
+  if (values.port !== undefined) {
+    const port = Number(values.port);
+    if (!Number.isInteger(port) || port < 0 || port > 65_535) throw new UsageError(`Invalid port: ${values.port}`);
+    overrides.port = port;
+  }
+  if (values["ghosts-root"] !== undefined) overrides.ghostsRoot = values["ghosts-root"];
+  if (values.config !== undefined) overrides.configPath = values.config;
+  const logLevel = values["log-level"] ?? "info";
+  if (!["debug", "info", "warn", "error"].includes(logLevel)) throw new UsageError(`Invalid log level: ${logLevel}`);
+  return { overrides, logLevel: logLevel as LogLevel, help: values.help === true, version: values.version === true };
 }
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {

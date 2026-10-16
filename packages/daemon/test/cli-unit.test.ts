@@ -146,8 +146,9 @@ describe("CLI argv parser", () => {
   it("keeps a lone dash positional and rejects unknown flags", () => {
     expect(parseArgs(["-"]).positionals).toEqual(["-"]);
     expect(() => parseArgs(["--wat"])).toThrow(ArgsError);
-    expect(() => parseArgs(["--ghost", "--json"], { value: ["ghost"] })).toThrow("--ghost requires a value");
-    expect(() => parseArgs(["--ghost="], { value: ["ghost"] })).toThrow("--ghost= requires a value");
+    expect(() => parseArgs(["--ghost", "--json"], { value: ["ghost"] })).toThrow("'--ghost' argument is ambiguous");
+    expect(() => parseArgs(["--ghost"], { value: ["ghost"] })).toThrow("argument missing");
+    expect(() => parseArgs(["--ghost="], { value: ["ghost"] })).toThrow("--ghost requires a value");
     expect(parseArgs(["--q", "model", "-q"], { value: ["q"] })).toEqual({
       positionals: [],
       flags: { q: "model", quiet: true },

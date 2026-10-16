@@ -42,7 +42,7 @@ describe("parseArgs", () => {
   });
 
   it("rejects nonsense rather than guessing", () => {
-    expect(() => parseArgs(["--port"])).toThrowError(/requires a value/);
+    expect(() => parseArgs(["--port"])).toThrowError(/argument missing/);
     expect(() => parseArgs(["--port", "70000"])).toThrowError(/Invalid port/);
     expect(() => parseArgs(["--log-level", "loud"])).toThrowError(/Invalid log level/);
     expect(() => parseArgs(["--wat"])).toThrowError(/Unknown option/);
@@ -83,7 +83,7 @@ describe("ghostd help", () => {
     } finally {
       write.mockRestore();
     }
-    expect(errorOutput).toContain("Unknown option: import");
+    expect(errorOutput).toContain("Unexpected argument 'import'");
   });
 });
 
