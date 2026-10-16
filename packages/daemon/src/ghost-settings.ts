@@ -3,11 +3,10 @@
  * home only. Ghost reads and writes one key in it, `harness`; nothing
  * ambient (environment overlays, machine-wide files) is consulted.
  */
-import { existsSync } from "node:fs";
 import { isMap, parse as parseYaml, parseDocument } from "yaml";
 import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "./record.js";
-import { isMissingPrivateFile, MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
+import { readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
 
 export interface GhostSettings {
   getString(path: string): string | undefined;
@@ -32,30 +31,8 @@ function ghostSettingsFrom(document: unknown): GhostSettings {
 }
 
 export function loadGhostSettings(homeDir: string): GhostSettings {
-  const paths = ghostPaths(homeDir);
-  let text: string;
-  try {
-    text = readPrivateFileText(paths.settingsFile);
-  } catch (error) {
-    if (isMissingPrivateFile(error)) return ghostSettingsFrom({});
-    if (error instanceof PrivateReadError) {
-      if (error.refusal === "too_large") {
-        throw new Error(
-          `Ghost settings file ${JSON.stringify(paths.settingsFile)} exceeds its ${MAX_PRIVATE_FILE_BYTES}-byte limit.`,
-          { cause: error },
-        );
-      }
-      // Name the file and the refusal: the bare "read refused" message is
-      // unactionable at ghost startup (a symlinked or concurrently rewritten
-      // settings.yml lands here).
-      throw new Error(
-        `Ghost settings file ${JSON.stringify(paths.settingsFile)} could not be read safely (${error.refusal}).`,
-        { cause: error },
-      );
-    }
-    throw error;
-  }
-  return ghostSettingsFrom(parseYaml(text));
+  const text = readPrivateFileText(ghostPaths(homeDir).settingsFile);
+  return ghostSettingsFrom(text === null ? {} : parseYaml(text));
 }
 
 /**
@@ -64,7 +41,7 @@ export function loadGhostSettings(homeDir: string): GhostSettings {
  */
 export async function writeGhostSetting(homeDir: string, key: string, value: string | null): Promise<void> {
   const { settingsFile } = ghostPaths(homeDir);
-  const document = parseDocument(existsSync(settingsFile) ? readPrivateFileText(settingsFile) : "");
+  const document = parseDocument(readPrivateFileText(settingsFile) ?? "");
   if (document.errors.length > 0) {
     throw new Error(`Ghost settings file ${JSON.stringify(settingsFile)} is not valid YAML; fix it by hand first.`);
   }

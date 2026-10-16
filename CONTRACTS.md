@@ -619,9 +619,10 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
   queued follow-ups into its live turn are the explicit exception.
 - Home rename/delete, MCP mutation, and conversation deletion use explicit
   leases and publish only durable state.
-- Control files are bounded, validated, atomically replaced, and fail closed on
-  links, malformed bytes, identity changes, ambiguous recovery, or incomplete
-  fsync.
+- Control files are bounded (1 MiB), validated, and replaced atomically by
+  rename; malformed bytes are refused, and a symlinked file is followed like
+  any other. Every process involved runs as the owner, so ghostd defends
+  against corruption, not against the owner's own processes.
 - Session/process teardown tracks exact captured owners and PIDs: a
   turn's harness is the process group ghostd spawned. Settled passes close
   inherited pipes and emit no late events; cancellation kills surviving members

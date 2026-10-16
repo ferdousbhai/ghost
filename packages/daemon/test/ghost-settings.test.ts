@@ -48,7 +48,7 @@ describe("loadGhostSettings", () => {
     home = mkdtempSync(join(tmpdir(), "ghost-settings-"));
     const paths = ghostPaths(home);
     writeFileSync(paths.settingsFile, `# ${"x".repeat(MAX_PRIVATE_FILE_BYTES)}\n`, "utf8");
-    expect(() => loadGhostSettings(home!)).toThrow(/byte limit/);
+    expect(() => loadGhostSettings(home!)).toThrow(/settings.yml exceeds the 1 MiB limit/);
   });
 
   it("writes one key, keeping the owner's other keys and comments, and leaves no `{}` behind", async () => {

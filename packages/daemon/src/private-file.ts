@@ -1,116 +1,30 @@
 /**
- * Confined reads and atomic writes for ghost-home files that hold, or once
- * held, a secret.
- *
- * One implementation, because it is one rule: a private file is read through a
- * descriptor whose identity cannot change under the reader, capped, and decoded
- * fatally. Callers translate a refusal into their own typed error rather than
- * restating the rule.
+ * Reads and atomic writes for the small files ghostd keeps in a ghost home
+ * and its own state: capped at 1 MiB and decoded strictly on read, written
+ * private (0600) through a temporary file and one rename.
  */
 import { randomUUID } from "node:crypto";
+import { readFileSync, statSync } from "node:fs";
 import { rename, rm, writeFile } from "node:fs/promises";
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
-  type BigIntStats,
-} from "node:fs";
 
 export const MAX_PRIVATE_FILE_BYTES = 1_048_576;
 
-export type PrivateReadRefusal = "open" | "unsafe" | "too_large" | "changed" | "encoding";
-
-export class PrivateReadError extends Error {
-  readonly refusal: PrivateReadRefusal;
-
-  constructor(refusal: PrivateReadRefusal, cause?: unknown) {
-    super(`Private file read refused: ${refusal}.`, cause === undefined ? {} : { cause });
-    this.name = "PrivateReadError";
-    this.refusal = refusal;
-  }
-}
-
-export type PrivateReadProbe = (stage: "opened" | "read", path: string) => void;
-
-function validPrivateDescriptor(stats: BigIntStats): boolean {
-  return stats.isFile() && stats.nlink === 1n && stats.size >= 0n;
-}
-
-/**
- * The stat fields that must all match for two descriptors to be the same file,
- * unchanged, between an admission check and the read that trusts it.
- */
-function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
-  return left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
-    && left.nlink === right.nlink
-    && left.mode === right.mode;
-}
-
-function samePrivateFileState(left: BigIntStats, right: BigIntStats): boolean {
-  return validPrivateDescriptor(left) && validPrivateDescriptor(right) && sameFileIdentity(left, right);
-}
-
-/** Read one stable private pathname: no symlink, one link, at most 1 MiB, UTF-8. */
-export function readPrivateFileText(path: string, probe?: PrivateReadProbe): string {
-  let fd: number;
+/** The file's text, or null when it does not exist; past 1 MiB or invalid UTF-8 throws, naming the file. */
+export function readPrivateFileText(path: string): string | null {
+  let size: number;
   try {
-    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    size = statSync(path).size;
   } catch (error) {
-    throw new PrivateReadError("open", error);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
   }
+  if (size > MAX_PRIVATE_FILE_BYTES) throw new Error(`${path} exceeds the 1 MiB limit.`);
   try {
-    const before = fstatSync(fd, { bigint: true });
-    if (!validPrivateDescriptor(before)) throw new PrivateReadError("unsafe");
-    if (before.size > BigInt(MAX_PRIVATE_FILE_BYTES)) throw new PrivateReadError("too_large");
-    probe?.("opened", path);
-
-    const admittedSize = Number(before.size);
-    const bytes = Buffer.allocUnsafe(admittedSize);
-    let offset = 0;
-    while (offset < admittedSize) {
-      const count = readSync(fd, bytes, offset, admittedSize - offset, offset);
-      if (count === 0) break;
-      offset += count;
-    }
-    const overflow = Buffer.allocUnsafe(1);
-    const grew = readSync(fd, overflow, 0, 1, offset) !== 0;
-    probe?.("read", path);
-
-    const after = fstatSync(fd, { bigint: true });
-    let current: BigIntStats;
-    try {
-      current = lstatSync(path, { bigint: true });
-    } catch (error) {
-      throw new PrivateReadError("changed", error);
-    }
-    if (offset !== admittedSize
-      || grew
-      || !samePrivateFileState(before, after)
-      || !samePrivateFileState(after, current)) {
-      throw new PrivateReadError("changed");
-    }
-    try {
-      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch (error) {
-      throw new PrivateReadError("encoding", error);
-    }
-  } finally {
-    closeSync(fd);
+    return new TextDecoder("utf-8", { fatal: true }).decode(readFileSync(path));
+  } catch (error) {
+    if (error instanceof TypeError) throw new Error(`${path} is not valid UTF-8.`);
+    throw error;
   }
-}
-
-/** A read that failed only because the file is not there. */
-export function isMissingPrivateFile(error: unknown): boolean {
-  return error instanceof PrivateReadError
-    && error.refusal === "open"
-    && (error.cause as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
 }
 
 /**

@@ -10,7 +10,6 @@ import {
   type DaemonConfig,
   type DaemonConfigOverrides,
 } from "./config.js";
-import { openGhostHome } from "./home.js";
 import { parseArgs as parseNodeArgs } from "node:util";
 import { errorMessage } from "./errors.js";
 import { GhostRegistry } from "./ghosts.js";
@@ -205,14 +204,6 @@ async function serveDaemon(
     dirname(fileURLToPath(import.meta.url)),
   );
   registry.ensureRoot();
-  try {
-    await Promise.all(registry.list().map((ghost) => openGhostHome(ghost.dir).ensure()));
-  } catch (error) {
-    logger.error("could not ensure a ghost home layout", {
-      error: errorMessage(error),
-    });
-    return 1;
-  }
 
   const host = new SessionHost({
     registry,

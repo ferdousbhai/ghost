@@ -3,12 +3,10 @@ import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
 import { isRecord } from "./record.js";
+import { errorMessage } from "./errors.js";
 import { mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
-  isMissingPrivateFile,
-  PrivateReadError,
   readPrivateFileText,
-  type PrivateReadProbe,
 } from "./private-file.js";
 
 import { sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
@@ -34,8 +32,6 @@ export interface McpCatalogOptions {
   registry: GhostRegistry;
   /** Test seam after home resolution and before catalog bytes are read. */
   readProbe?: (home: string) => void | Promise<void>;
-  /** Synchronous adversarial seam inside the pinned private-file read. */
-  privateReadProbe?: PrivateReadProbe;
   /** Test seam around the locked atomic config writer. */
   writer?: Partial<McpCatalogWriter>;
 }
@@ -96,18 +92,14 @@ function unreadable(reason: string): McpFileRead {
 }
 
 /** Read and parse the ghost's `mcp.json`; a missing file has no rows. */
-function readMcpFile(home: string, probe?: PrivateReadProbe): McpFileRead {
-  let text: string;
+function readMcpFile(home: string): McpFileRead {
+  let text: string | null;
   try {
-    text = readPrivateFileText(join(home, MCP_FILE), probe);
+    text = readPrivateFileText(join(home, MCP_FILE));
   } catch (error) {
-    if (isMissingPrivateFile(error)) return { rows: [], skipped: [] };
-    return unreadable(error instanceof PrivateReadError && error.refusal === "too_large"
-      ? "MCP config exceeds the 1 MiB limit"
-      : error instanceof PrivateReadError && error.refusal === "encoding"
-        ? "MCP config is not valid UTF-8"
-        : "MCP config could not be read or parsed.");
+    return unreadable(errorMessage(error));
   }
+  if (text === null) return { rows: [], skipped: [] };
   let document: unknown;
   try {
     document = JSON.parse(text);
@@ -141,19 +133,17 @@ export class McpCatalog {
   private readonly registry: GhostRegistry;
   private readonly writer: McpCatalogWriter;
   private readonly readProbe: NonNullable<McpCatalogOptions["readProbe"]>;
-  private readonly privateReadProbe: McpCatalogOptions["privateReadProbe"];
 
   constructor(options: McpCatalogOptions) {
     this.registry = options.registry;
     this.writer = { ...defaultWriter, ...options.writer };
     this.readProbe = options.readProbe ?? (() => {});
-    this.privateReadProbe = options.privateReadProbe;
   }
 
   private async read(ghostName: string): Promise<McpFileRead & { path: string }> {
     const home = this.registry.get(ghostName).dir;
     await this.readProbe(home);
-    return { ...readMcpFile(home, this.privateReadProbe), path: join(home, MCP_FILE) };
+    return { ...readMcpFile(home), path: join(home, MCP_FILE) };
   }
 
   private async row(ghostName: string, name: string): Promise<{ row: McpServerRow; path: string }> {
