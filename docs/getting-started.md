@@ -260,7 +260,7 @@ and any skill you installed untouched.
 - **Show it a picture.** Paste (`Ctrl+V`) or drop an image on the composer;
   it waits above the field, `×` to take it off, until you send.
 - **Hooks.** [hooks.md](hooks.md); a ghost can write its own with `ghost hooks`.
-- **Remote access.** `ghostd remote status` (or the HUD's Remote access pane)
+- **Remote access.** `ghost remote` (or the HUD's Remote access pane)
   controls the opt-in Tailscale Serve viewer. Guests are read-only. On a
   phone, `+` starts a conversation and the camera attaches photos; dictate
   with the keyboard's own mic.

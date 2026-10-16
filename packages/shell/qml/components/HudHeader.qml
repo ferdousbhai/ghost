@@ -208,13 +208,12 @@ Item {
 
                     width: pickerColumn.width
                     height: Theme.controlHeight
-                    color: chooseArea.containsMouse && harnessRow.modelData.eligible ? Theme.film(0.07) : "transparent"
+                    color: chooseArea.containsMouse ? Theme.film(0.07) : "transparent"
 
                     MouseArea {
                         id: chooseArea
                         objectName: "harnessChoose-" + harnessRow.modelData.id
                         anchors.fill: parent
-                        enabled: harnessRow.modelData.eligible
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: root.choose(harnessRow.modelData.id)
@@ -231,21 +230,9 @@ Item {
                         Text {
                             id: harnessName
                             text: (harnessRow.current ? "• " : "  ") + harnessRow.modelData.id
-                            color: !harnessRow.modelData.eligible ? Theme.foregroundFaint
-                                : (harnessRow.current ? Theme.ghostAmberBright : Theme.foreground)
+                            color: harnessRow.current ? Theme.ghostAmberBright : Theme.foreground
                             font.family: Theme.fontFamily
                             font.pixelSize: Theme.fontSizeSmall
-                        }
-
-                        Text {
-                            width: Math.max(0, parent.width - harnessName.implicitWidth - Theme.gap)
-                            visible: !harnessRow.modelData.eligible && harnessRow.modelData.reason !== ""
-                            text: harnessRow.modelData.reason
-                            elide: Text.ElideRight
-                            color: Theme.foregroundFaint
-                            font.family: Theme.fontFamily
-                            font.pixelSize: Theme.fontSizeCaption
-                            anchors.verticalCenter: parent.verticalCenter
                         }
                     }
                 }

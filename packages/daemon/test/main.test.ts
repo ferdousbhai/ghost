@@ -66,7 +66,6 @@ describe("ghostd help", () => {
     expect(output).not.toContain("ghostd login");
     for (const command of [
       "api-token",
-      "remote",
       "hook-complete",
     ]) {
       expect(output).toContain(`ghostd ${command}`);

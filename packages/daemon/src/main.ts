@@ -19,7 +19,6 @@ import { createLogger, stderrLogSink, type Logger, type LogLevel } from "./log.j
 import { McpCatalog } from "./mcp-catalog.js";
 import { bundledSkillsDir, resolveRunningSource } from "./running-source.js";
 import { DAEMON_VERSION } from "./version.js";
-import { remoteCommand } from "./remote-command.js";
 import { RemoteServe } from "./remote-serve.js";
 import { startDaemonServer, type ListeningServer } from "./server.js";
 import { SessionHost } from "./session-host.js";
@@ -32,7 +31,6 @@ const USAGE = `ghostd — your ghost, on your machine
 Usage:
   ghostd [options]
   ghostd api-token [--quiet]
-  ghostd remote [on|off|status]
   ghostd hook-complete
 
 Subcommands:
@@ -40,8 +38,6 @@ Subcommands:
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
                            401. To replace it, delete the file and restart.
-  remote                   Show or change the daemon's tailnet exposure through
-                           Tailscale Serve. Defaults to status.
   hook-complete            Command-hook bridge. Reads ghost_home and prompt as
                            JSON on stdin and writes one completion from the
                            ghost's preferred harness as JSON on stdout.
@@ -178,9 +174,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
-  // only XDG state, and remote touches config and Tailscale Serve.
+  // only XDG state.
   if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
-  if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "hook-complete") return hookCompleteCommand(argv.slice(1));
 
   let parsed: ParsedArgs;

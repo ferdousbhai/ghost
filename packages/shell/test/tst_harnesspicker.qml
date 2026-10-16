@@ -26,9 +26,9 @@ TestCase {
     function choice(overrides: var): var {
         return Object.assign({
             harnesses: [
-                { id: "claude", eligible: true, reason: null, usage: null },
-                { id: "codex", eligible: false, reason: "weekly window is full", usage: null },
-                { id: "pi", eligible: true, reason: null, usage: null }
+                { id: "claude", usage: null },
+                { id: "codex", usage: null },
+                { id: "pi", usage: null }
             ],
             ghostDefault: null,
             omarchyDefault: "claude"
@@ -120,8 +120,7 @@ TestCase {
         compare(Ghostd.harnessChoice.harnesses.length, 3);
         compare(Ghostd.harnessChoice.omarchyDefault, "claude");
         verify(findChild(header, "harnessPicker").visible);
-        verify(!findChild(header, "harnessChoose-codex").enabled);
-        verify(findChild(header, "harnessChoose-pi").enabled);
+        verify(findChild(header, "harnessChoose-codex").enabled);
     }
 
     function test_aFailedReadShowsQuietlyInThePicker(): void {

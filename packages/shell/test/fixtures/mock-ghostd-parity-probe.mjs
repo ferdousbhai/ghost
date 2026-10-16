@@ -116,8 +116,7 @@ try {
   });
   const harnessChoice = await (await fetch(harnessUrl)).json();
   assert.deepEqual(Object.keys(harnessChoice), ["harnesses", "ghostDefault", "omarchyDefault"]);
-  assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "eligible", "reason", "effort", "usage"]);
-  assert.ok(harnessChoice.harnesses.every((h) => h.eligible === true && h.reason === null));
+  assert.deepEqual(Object.keys(harnessChoice.harnesses[0]), ["id", "effort", "usage"]);
   assert.equal(harnessChoice.ghostDefault, null);
   assert.equal((await (await putJson(harnessUrl, { harness: "pi" })).json()).ghostDefault, "pi");
   assert.equal((await (await putJson(harnessUrl, { harness: null })).json()).ghostDefault, null);

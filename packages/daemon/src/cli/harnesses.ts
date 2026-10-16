@@ -22,15 +22,11 @@ export async function harnessesCommand(_parsed: ParsedCliArgs, ctx: CliContext):
     throw new CliError(EXIT_CODE.failure, `cannot list harnesses: ${errorMessage(error)}`);
   }
   emit(ctx, report, (body) => {
-    const rows = body.harnesses.map((harness) => [
-      harness.id,
-      harness.eligible ? "eligible" : `no: ${harness.reason}`,
-      windows(harness),
-    ]);
+    const rows = body.harnesses.map((harness) => [harness.id, windows(harness)]);
     const human = rows.length === 0
       ? "No agent CLI Omarchy knows is installed.\n"
       : `${table(rows)}\nrefresh: ${body.refresh}\n`;
-    const quiet = body.harnesses.filter((harness) => harness.eligible).map((harness) => `${harness.id}\n`).join("");
+    const quiet = body.harnesses.map((harness) => `${harness.id}\n`).join("");
     return { human, quiet };
   });
   return EXIT_CODE.success;

@@ -402,7 +402,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
 | `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
-| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, eligible, reason, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
+| `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
 | `GET /sessions/:id/stream?turn=:turn&from=:n` | The rest of a cut turn stream (turn wire below), from its event `n` on. A turn stays resumable until a minute after it ends; after that, or for a turn this daemon never ran, `404 turn_not_found`, and the client reads the transcript instead. |
@@ -475,10 +475,10 @@ owner's own install. Each is
 joined with its
 Omarchy usage record, `$XDG_STATE_HOME/omarchy/agents/usage/<id>.json` (falling
 back to `~/.local/state`). `--json` prints `{harnesses, refresh}`: each harness
-is `{id, eligible, reason, usage}`, and `usage` is `null` without a record,
+is `{id, usage}`, and `usage` is `null` without a record,
 else `{updatedAt, stale, status, windows}` with each window `{label, percent,
 resetsAt}`, `percent` a 0–1 fraction used. All installed harnesses are eligible
-regardless of usage; `reason` is null.
+regardless of usage.
 A record's `ready` only says Omarchy has data to show, so it
 decides nothing. A window whose reset has
 passed is dropped. `stale` marks a record older than 15 minutes; the verb never

@@ -121,7 +121,7 @@ export function onlyHarnesses(...harnesses: FakeHarness[]): {
   return {
     eligibleHarnesses: async () => harnesses.map((harness) => harness.id),
     harnessReport: async () => ({
-      harnesses: harnesses.map((harness) => ({ id: harness.id, eligible: true, reason: null, usage: null })),
+      harnesses: harnesses.map((harness) => ({ id: harness.id, usage: null })),
       refresh: "omarchy agent usage update",
     }),
     harnessRows: (id) => rows.get(id) ?? null,

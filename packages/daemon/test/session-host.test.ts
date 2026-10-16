@@ -665,7 +665,7 @@ describe("choosing the agent", () => {
     writeFileSync(settings, "# the owner's note\nother: kept\n");
 
     expect(await sessions.listHarnesses("casper")).toMatchObject({
-      harnesses: [{ id: "first", eligible: true, effort: null }, { id: "second", eligible: true, effort: null }],
+      harnesses: [{ id: "first", effort: null }, { id: "second", effort: null }],
       ghostDefault: null,
       omarchyDefault: "first",
     });
@@ -727,7 +727,7 @@ describe("choosing the agent", () => {
       harnesses: [fake],
       harnessReport: async () => {
         reports += 1;
-        return { harnesses: [{ id: "fake", eligible: true, reason: null, usage: null }], refresh: "omarchy agent usage update" };
+        return { harnesses: [{ id: "fake", usage: null }], refresh: "omarchy agent usage update" };
       },
     });
     await sessions.listHarnesses("casper");

@@ -36,7 +36,7 @@ describe("parseOmarchyAgents", () => {
 
 describe("assessHarness", () => {
   it("is eligible without a usage record", () => {
-    expect(assessHarness("pi", null, NOW)).toEqual({ id: "pi", eligible: true, reason: null, usage: null });
+    expect(assessHarness("pi", null, NOW)).toEqual({ id: "pi", usage: null });
   });
 
   it("is eligible with room in every window", () => {
@@ -44,7 +44,6 @@ describe("assessHarness", () => {
       { label: "Session (5-hour)", percent: 0.4, resetsAt: LATER },
       { label: "Weekly (7-day)", percent: 0.89, resetsAt: LATER },
     ]), NOW);
-    expect(harness.eligible).toBe(true);
     expect(harness.usage).toEqual({
       updatedAt: FRESH,
       stale: false,
@@ -60,14 +59,13 @@ describe("assessHarness", () => {
     const harness = assessHarness("claude", record([
       { label: "Session (5-hour)", percent: 0.93, resetsAt: LATER },
     ]), NOW);
-    expect(harness).toMatchObject({ eligible: true, reason: null, usage: { windows: [{ percent: 0.93 }] } });
+    expect(harness).toMatchObject({ usage: { windows: [{ percent: 0.93 }] } });
   });
 
   it("drops a window whose reset has passed instead of trusting its stale percent", () => {
     const harness = assessHarness("grok", record([
       { label: "Weekly", percent: 1, resetsAt: "2026-09-26T11:00:00Z" },
     ]), NOW);
-    expect(harness.eligible).toBe(true);
     expect(harness.usage?.windows).toEqual([]);
   });
 
@@ -76,23 +74,23 @@ describe("assessHarness", () => {
       ready: false,
       authHelpText: "Run `claude auth login` to restore authoritative usage.",
     }), NOW);
-    expect(harness).toMatchObject({ eligible: true, reason: null, usage: { status: null } });
+    expect(harness).toMatchObject({ usage: { status: null } });
   });
 
   it("keeps an unmeasured harness eligible and carries Omarchy's note", () => {
     const harness = assessHarness("codex", record([], { usageStatusText: "Codex limits unavailable" }), NOW);
-    expect(harness).toMatchObject({ eligible: true, usage: { status: "Codex limits unavailable", windows: [] } });
+    expect(harness).toMatchObject({ usage: { status: "Codex limits unavailable", windows: [] } });
   });
 
   it("flags a stale record without changing eligibility", () => {
     const old = new Date(NOW - STALE_AFTER_MS - 1).toISOString();
     const harness = assessHarness("claude", record([], { updatedAt: old }), NOW);
-    expect(harness).toMatchObject({ eligible: true, usage: { stale: true } });
+    expect(harness).toMatchObject({ usage: { stale: true } });
   });
 
   it("ignores malformed windows", () => {
     const harness = assessHarness("claude", record([null, { label: "x" }, { percent: 0.99 }]), NOW);
-    expect(harness).toMatchObject({ eligible: true, usage: { windows: [] } });
+    expect(harness).toMatchObject({ usage: { windows: [] } });
   });
 });
 
@@ -100,7 +98,7 @@ it("does not gate a stale weekly report ahead of pace", () => {
   const harness = assessHarness("claude", record([
     { label: "Weekly (7-day)", percent: 1, resetsAt: new Date(NOW + 7 * 24 * 3_600_000).toISOString() },
   ], { updatedAt: new Date(NOW - STALE_AFTER_MS - 1).toISOString() }), NOW);
-  expect(harness).toMatchObject({ eligible: true, reason: null, usage: { stale: true, windows: [{ percent: 1 }] } });
+  expect(harness).toMatchObject({ usage: { stale: true, windows: [{ percent: 1 }] } });
 });
 
 describe("ghost harnesses", () => {
@@ -148,17 +146,12 @@ describe("ghost harnesses", () => {
     const result = await runCli(["harnesses", "--json"], { env, home: root });
     expect(result.stderr).toBe("");
     expect(result.code).toBe(0);
-    const body = JSON.parse(result.stdout) as { harnesses: Array<{ id: string; eligible: boolean; reason: string | null }>; refresh: string };
-    expect(body.harnesses.map((harness) => [harness.id, harness.eligible])).toEqual([
-      ["pi", true],
-      ["claude", true],
-      ["codex", true],
-    ]);
-    expect(body.harnesses[1]?.reason).toBeNull();
+    const body = JSON.parse(result.stdout) as { harnesses: Array<{ id: string }>; refresh: string };
+    expect(body.harnesses.map((harness) => harness.id)).toEqual(["pi", "claude", "codex"]);
     expect(body.refresh).toBe("omarchy agent usage update");
   });
 
-  it("-q prints only the eligible ids", async () => {
+  it("-q prints only the ids", async () => {
     const env = machine();
     const result = await runCli(["harnesses", "-q"], { env, home: root });
     expect(result.stdout).toBe("pi\nclaude\ncodex\n");
@@ -167,8 +160,7 @@ describe("ghost harnesses", () => {
   it("renders a readable table", async () => {
     const env = machine();
     const result = await runCli(["harnesses"], { env, home: root });
-    expect(result.stdout).toContain("claude  eligible");
-    expect(result.stdout).toContain("pi      eligible");
+    expect(result.stdout).toContain("claude  Session (5-hour) 95%");
     expect(result.stdout).toContain("no usage record");
     expect(result.stdout).toContain("refresh: omarchy agent usage update");
   });

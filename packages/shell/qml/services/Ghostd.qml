@@ -365,7 +365,7 @@ Singleton {
 
     // The agent picker: GET /harness for the active ghost, the ghost's default
     // (PUT /harness), and one conversation's next agent (PUT .../harness).
-    /** `{ harnesses: [{ id, eligible, reason, effort }], ghostDefault, omarchyDefault }`, or null until read. */
+    /** `{ harnesses: [{ id, effort }], ghostDefault, omarchyDefault }`, or null until read. */
     property var harnessChoice: null
     property string harnessError: ""
     /** conversationKey -> the agent the owner picked, until a listing reports it. */
@@ -873,8 +873,6 @@ Singleton {
         return {
             harnesses: body.harnesses.filter(h => h && name(h.id) !== null).map(h => ({
                 id: h.id,
-                eligible: h.eligible !== false,
-                reason: typeof h.reason === "string" ? h.reason : "",
                 effort: typeof h.effort === "string" ? h.effort : ""
             })),
             ghostDefault: name(body.ghostDefault),

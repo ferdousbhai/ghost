@@ -924,7 +924,7 @@ describe("PUT /api/ghosts/:name/sessions/:id/pin", () => {
     const ghostHarness = (init?: RequestInit) => fetch(`${base}/api/ghosts/casper/harness`, init);
     const put = (body: unknown): RequestInit => ({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
-    expect(await (await ghostHarness()).json()).toMatchObject({ harnesses: [{ id: "fake", eligible: true }], ghostDefault: null });
+    expect(await (await ghostHarness()).json()).toMatchObject({ harnesses: [{ id: "fake" }], ghostDefault: null });
     expect(await (await ghostHarness(put({ harness: "fake" }))).json()).toMatchObject({ ghostDefault: "fake" });
     expect(await (await ghostHarness(put({ harness: null }))).json()).toMatchObject({ ghostDefault: null });
     expect((await ghostHarness(put({ harness: "nope" }))).status).toBe(400);

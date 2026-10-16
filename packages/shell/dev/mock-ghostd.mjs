@@ -50,16 +50,16 @@ const STOP_HOOK_MS = Math.max(0, Number(opt("--stop-hook", "0")) || 0) * 1000;
  */
 const MOCK_HARNESSES = [
   {
-    id: "claude", eligible: true, reason: null, effort: "low",
+    id: "claude", effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "5h", percent: 0.42, resetsAt: new Date(Date.now() + 7_200_000).toISOString() }] },
   },
   {
-    id: "codex", eligible: true, reason: null, effort: "low",
+    id: "codex", effort: "low",
     usage: { updatedAt: new Date().toISOString(), stale: false, status: "ok",
       windows: [{ label: "weekly", percent: 1, resetsAt: new Date(Date.now() + 172_800_000).toISOString() }] },
   },
-  { id: "pi", eligible: true, reason: null, effort: "low", usage: null },
+  { id: "pi", effort: "low", usage: null },
 ];
 const OMARCHY_DEFAULT_HARNESS = "claude";
 /** ghost name -> its own default agent; absent means automatic. */

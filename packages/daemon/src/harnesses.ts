@@ -27,8 +27,6 @@ export interface HarnessUsage {
 
 export interface Harness {
   id: string;
-  eligible: boolean;
-  reason: string | null;
   /** Null when Omarchy keeps no usage record for this harness. */
   usage: HarnessUsage | null;
 }
@@ -57,7 +55,7 @@ function text(value: unknown): string | null {
 /** Installed harnesses stay eligible; Omarchy usage records are informational. */
 export function assessHarness(id: string, record: unknown, now: number): Harness {
   if (!record || typeof record !== "object") {
-    return { id, eligible: true, reason: null, usage: null };
+    return { id, usage: null };
   }
   const row = record as Record<string, unknown>;
   const updatedAt = text(row.updatedAt);
@@ -79,7 +77,7 @@ export function assessHarness(id: string, record: unknown, now: number): Harness
     status: text(row.usageStatusText),
     windows,
   };
-  return { id, eligible: true, reason: null, usage };
+  return { id, usage };
 }
 
 /** The executable `name` resolves to on `env.PATH`, or null. */
@@ -191,9 +189,9 @@ export async function accountEnv(harness: string, env: NodeJS.ProcessEnv): Promi
   }
 }
 
-/** The ids of the report's eligible harnesses, in Omarchy's order. */
+/** The ids of the report's harnesses, in Omarchy's order; every installed one is eligible. */
 export function eligibleIds(report: HarnessReport): string[] {
-  return report.harnesses.filter((harness) => harness.eligible).map((harness) => harness.id);
+  return report.harnesses.map((harness) => harness.id);
 }
 
 /** Omarchy's default agent (`omarchy default agent`), or null when none is chosen. */
