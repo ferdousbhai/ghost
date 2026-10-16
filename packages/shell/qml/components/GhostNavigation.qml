@@ -171,9 +171,9 @@ FocusScope {
                     anchors.rightMargin: 3
                     anchors.top: parent.top
                     anchors.topMargin: 3
-                    width: Math.max(14, hookCount.implicitWidth + 6)
-                    height: 14
-                    radius: 7
+                    width: Math.max(height, hookCount.implicitWidth + 6)
+                    height: hookCount.implicitHeight + 2
+                    radius: height / 2
                     color: Theme.ghostAmberBright
 
                     Text {
@@ -183,7 +183,7 @@ FocusScope {
                         textFormat: Text.PlainText
                         color: Theme.background
                         font.family: Theme.fontFamily
-                        font.pixelSize: 9
+                        font.pixelSize: Theme.fontSizeCaption
                         font.weight: Font.Bold
                     }
                 }

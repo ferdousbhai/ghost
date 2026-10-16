@@ -151,7 +151,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: "Additional servers for " + (Ghostd.activeGhost || "this ghost")
-                        + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence. Secret values are write-only."
+                        + ". Enabled servers are offered to supported harnesses on their next run. Resources shows run evidence."
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeSmall

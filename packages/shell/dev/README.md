@@ -100,12 +100,10 @@ stop the mock separately.
   rail floating at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`. Hooks shows the
-  daemon-global redacted catalog: bounded labels, lifecycle triggers, and
-  the loaded count. It never returns hook commands, paths, prompts,
-  or injected context, and opening it does not create a conversation. MCP lists
-  sanitized stdio, HTTP, and SSE fixtures and exercises add, full replacement,
-  enable/disable, and confirmed deletion without ever returning the seeded
-  secret values. Remote exercises the Tailscale viewer lifecycle, including the
+  owner's `hooks.json` handlers with their lifecycle triggers and the loaded
+  count, and opening it does not create a conversation. MCP lists stdio, HTTP,
+  and SSE fixtures as stored and exercises add, full replacement,
+  enable/disable, and confirmed deletion. Remote exercises the Tailscale viewer lifecycle, including the
   off, on, and `--remote-problem` states.
   The mock's temporary ghost fixtures make every pane live without touching
   `~/ghosts`.

@@ -314,9 +314,7 @@ Singleton {
 
     property bool establishedConnection: false
 
-    // Only the active ghost's visible `<ghost-home>/mcp.json` is represented
-    // here. GET
-    // is sanitized; secret-bearing values are write-only through mutations.
+    // The active ghost's `<ghost-home>/mcp.json` servers, as stored.
     property var mcpServers: []
     property var mcpSkipped: []
     property bool mcpLoading: false

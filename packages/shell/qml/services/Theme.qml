@@ -158,8 +158,11 @@ Singleton {
     function fontSizeFor(token: string, ratio: real): int {
         return Math.max(1, Math.round(root.shellNumber("font." + token, root.fontBase * ratio)));
     }
-    readonly property int fontSizeCaption: root.fontSizeFor("caption", 10 / 12)
-    readonly property int fontSizeSmall: root.fontSizeFor("body-small", 11 / 12)
+    // Ghost reads at one step above Omarchy's two smallest tokens: its quiet
+    // text is still content (notes, descriptions, status), and 10px monospace
+    // is a label size, not a reading size. A theme that pins a token still wins.
+    readonly property int fontSizeCaption: root.fontSizeFor("body-small", 11 / 12)
+    readonly property int fontSizeSmall: root.fontSizeFor("body", 1)
     readonly property int fontSize: root.fontSizeFor("body", 1)
     readonly property int fontSizeSubtitle: root.fontSizeFor("subtitle", 13 / 12)
     readonly property int fontSizeTitle: root.fontSizeFor("title", 14 / 12)
@@ -203,12 +206,33 @@ Singleton {
     readonly property color foregroundBright: root.pick("bright_foreground")
     readonly property color foreground: root.pick("foreground")
     // Derived rather than taken from `dark_foreground`: that key is a theme's
-    // decorative dim, free to sit at any contrast, and body copy that fades
-    // into the background is the one failure this file has always guarded
-    // against. Walking the text colour toward the canvas keeps the theme's hue
-    // and a predictable ladder.
-    readonly property color foregroundDim: root.blend(root.foreground, root.background, 0.35)
-    readonly property color foregroundFaint: root.blend(root.foreground, root.background, 0.55)
+    // decorative dim, free to sit at any contrast. Each step walks the text
+    // colour toward the canvas, keeping the theme's hue, but only as far as
+    // the step's contrast floor allows on this theme: a fixed fraction that
+    // reads fine on a high-contrast theme fades past legibility on a soft one.
+    // Both floors clear WCAG AA (4.5:1) for small text, measured against the
+    // canvas lightened by the amber tint the HUD lays under selected rows.
+    readonly property color foregroundDim: root.quieter(0.35, 5)
+    readonly property color foregroundFaint: root.quieter(0.55, 4.5)
+
+    function luminance(value: color): real {
+        const channel = c => c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+        return 0.2126 * channel(value.r) + 0.7152 * channel(value.g) + 0.0722 * channel(value.b);
+    }
+    function contrast(a: color, b: color): real {
+        const la = root.luminance(a);
+        const lb = root.luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+    /** `foreground` faded toward the canvas by at most `most`, keeping `floor`:1 contrast. */
+    function quieter(most: real, floor: real): color {
+        const canvas = root.blend(root.background, Qt.color("#fbbf24"), 0.07);
+        let amount = most;
+        while (amount > 0 && root.contrast(root.blend(root.foreground, root.background, amount), canvas) < floor) {
+            amount = Math.max(0, amount - 0.01);
+        }
+        return root.blend(root.foreground, root.background, amount);
+    }
 
     // Chrome states, straight from [controls]: one colour, four alphas.
     readonly property color hover: root.controlFill("hover-cursor")
@@ -254,7 +278,7 @@ Singleton {
     // so an open file reads as part of this app rather than an embedded IDE.
     readonly property color editorBackground: "#131720"
     readonly property color editorGutterBackground: "#0f131b"
-    readonly property color editorGutterText: "#4d5666"
+    readonly property color editorGutterText: "#7a8496"
     readonly property color editorBorder: "#1d232e"
     readonly property color editorForeground: "#d3d8e0"
     readonly property color editorSelection: "#2a3a55"
