@@ -39,12 +39,8 @@ export async function remoteCommand(
   }
   try {
     const config = loadConfig({ env: options.env ?? process.env, home: options.home ?? homedir() });
-    const remote = new RemoteServe(config.port, {
-      ...config.remote,
-      configPath: config.configPath,
-      ...(options.run ? { run: options.run } : {}),
-    });
-    const status = action === "status" ? await remote.status() : await remote.setEnabled(action === "on");
+    const remote = new RemoteServe(config.port, { ...config.remote, ...(options.run ? { run: options.run } : {}) });
+    const status = action === "status" ? await remote.status() : action === "on" ? await remote.enable() : await remote.disable();
     if (action === "on" && status.url && !status.problem) stdout(`${status.url}\n`);
     else if (action === "off" && !status.problem) stdout("Remote access is off.\n");
     else stdout(statusScreen(status));

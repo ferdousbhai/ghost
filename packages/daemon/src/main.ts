@@ -257,7 +257,7 @@ async function serveDaemon(
     hooks,
   });
   const mcp = new McpCatalog({ registry });
-  const remoteServe = new RemoteServe(config.port, { ...config.remote, configPath: config.configPath });
+  const remoteServe = new RemoteServe(config.port, config.remote);
 
   let listening: ListeningServer;
   try {
@@ -281,12 +281,6 @@ async function serveDaemon(
     });
     await host.disposeAll();
     return 1;
-  }
-
-  if (config.remote.enabled) {
-    const status = await remoteServe.ensure();
-    if (status.url && !status.problem) logger.info("remote access ready", { url: status.url });
-    else logger.warn("remote access is unavailable", { problem: status.problem });
   }
 
   logger.info("listening", {

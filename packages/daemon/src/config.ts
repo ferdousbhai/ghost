@@ -3,18 +3,13 @@
  * defaults would silently move the owner's ghosts instead of telling them.
  */
 import { readFileSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { writePrivateJsonAtomic } from "./private-file.js";
-import { serializeByKey } from "./promise-chain.js";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
 import { errorMessage, xdgBaseDir } from "@ghost/extensions";
 import { isRecord } from "@ghost/extensions";
 
-export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests"> & {
-  enabled: boolean;
-};
+export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests">;
 
 export type RemoteConfigFile = Partial<RemoteConfig>;
 
@@ -115,12 +110,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     }
     const raw = file.remote as Record<string, unknown>;
     const remote: RemoteConfigFile = {};
-    if (raw.enabled !== undefined) {
-      if (typeof raw.enabled !== "boolean") {
-        throw new Error(`${path}: "remote.enabled" must be a boolean.`);
-      }
-      remote.enabled = raw.enabled;
-    }
     if (raw.owner !== undefined) {
       if (typeof raw.owner !== "string" || !raw.owner.trim()) throw new Error(`${path}: "remote.owner" must be a login.`);
       remote.owner = raw.owner;
@@ -172,32 +161,8 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     port,
     host,
     ghostsRoot: resolve(expandHome(rawRoot, home)),
-    remote: { ...file?.remote, enabled: file?.remote?.enabled ?? false },
+    remote: { ...file?.remote },
     configPath,
     hooksPath,
   };
-}
-
-
-const configWrites = new Map<string, Promise<unknown>>();
-
-/** Merge a config patch, one section deep, without discarding fields this daemon version does not understand. */
-export function writeConfigFile(path: string, patch: Partial<DaemonConfigFile>): Promise<void> {
-  return serializeByKey(configWrites, path, async () => {
-    let existing: Record<string, unknown> = {};
-    try {
-      const parsed = JSON.parse(await readFile(path, "utf8")) as unknown;
-      if (!isRecord(parsed)) throw new Error(`${path} must contain a JSON object.`);
-      existing = parsed;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    const merged: Record<string, unknown> = { ...existing };
-    for (const [key, value] of Object.entries(patch)) {
-      if (value === undefined) continue;
-      merged[key] = isRecord(value) && isRecord(existing[key]) ? { ...existing[key], ...value } : value;
-    }
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    await writePrivateJsonAtomic(path, merged);
-  });
 }

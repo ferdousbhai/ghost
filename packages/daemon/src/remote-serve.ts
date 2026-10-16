@@ -4,9 +4,9 @@
  * daemon, so the viewer at `/` is reachable at the node's tailnet name with
  * the caller's identity stamped (see tailscale-identity.ts). Status is read
  * from Tailscale on every call; the one thing remembered is an operator
- * refusal, because only a write attempt can reveal it.
+ * refusal, because only a write attempt can reveal it. Tailscale keeps a
+ * `--bg` Serve entry across restarts, so Ghost stores no on/off of its own.
  */
-import { writeConfigFile } from "./config.js";
 import {
   type CommandResult,
   type CommandRunner,
@@ -44,8 +44,6 @@ export interface RemoteStatus {
 export interface RemoteServeOptions {
   owner?: string;
   guests?: "read-only" | "none";
-  /** Where `setEnabled` persists `remote.enabled`; omitted, the choice is not written. */
-  configPath?: string;
   /** Test seams over `tailscale` and `qrencode`. */
   run?: CommandRunner;
   qrRun?: CommandRunner;
@@ -108,7 +106,6 @@ export class RemoteServe {
   private readonly qrRun: CommandRunner;
   private readonly owner: string | null;
   private readonly guests: "read-only" | "none";
-  private readonly configPath: string | undefined;
   /** The last Serve refusal for lack of the operator right; cleared by the next accepted write. */
   private operatorProblem: RemoteProblem | null = null;
 
@@ -118,7 +115,6 @@ export class RemoteServe {
     this.qrRun = options.qrRun ?? commandRunner("qrencode");
     this.owner = options.owner?.trim() || null;
     this.guests = options.guests ?? "read-only";
-    this.configPath = options.configPath;
   }
 
   async status(): Promise<RemoteStatus> {
@@ -177,21 +173,6 @@ export class RemoteServe {
     const current = await this.status();
     if (!current.scheme) return current;
     return this.write(current, ["serve", `--${current.scheme}=${PORT[current.scheme]}`, "off"]);
-  }
-
-  /** Apply the owner's choice and, when a config path is known, persist it as `remote.enabled`. */
-  async setEnabled(enabled: boolean): Promise<RemoteStatus> {
-    const status = enabled ? await this.enable() : await this.disable();
-    if (this.configPath) await writeConfigFile(this.configPath, { remote: { enabled } });
-    return status;
-  }
-
-  /** Re-apply a configured exposure after a start: a no-op when it is already on the right scheme. */
-  async ensure(): Promise<RemoteStatus> {
-    const current = await this.status();
-    if (current.state === "unavailable") return current;
-    const wanted: Scheme = current.tailscale.certs ? "https" : "http";
-    return current.scheme === wanted ? current : this.enable();
   }
 
   async qrSvg(url: string): Promise<string> {

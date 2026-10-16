@@ -959,7 +959,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         return;
       }
       const enabled = booleanField(await readJsonObjectBody(request, maxBodyBytes), "enabled");
-      jsonResponse(response, 200, await remoteServe.setEnabled(enabled));
+      jsonResponse(response, 200, await (enabled ? remoteServe.enable() : remoteServe.disable()));
     }),
     route("GET PUT", "api/hooks/config", ({ method, request, response }) => handleHookConfig(method, request, response)),
     route("GET", "api/hooks", ({ response }) => {

@@ -20,7 +20,7 @@ function configPath(): string {
 }
 
 describe("remoteCommand", () => {
-  it("enables Serve, preserves config, and prints the resulting URL", async () => {
+  it("enables Serve, leaves the config file alone, and prints the resulting URL", async () => {
     const path = configPath();
     writeFileSync(path, JSON.stringify({ future: true, remote: { guests: "none" } }));
     let output = "";
@@ -33,7 +33,7 @@ describe("remoteCommand", () => {
     expect(output).toBe("https://ghostbox.example.ts.net/\n");
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({
       future: true,
-      remote: { guests: "none", enabled: true },
+      remote: { guests: "none" },
     });
   });
 

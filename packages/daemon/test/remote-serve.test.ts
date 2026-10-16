@@ -86,13 +86,10 @@ describe("RemoteServe mutations", () => {
     expect(await remote.enable()).toMatchObject({ state: "on", tailscale: { operator: true }, problem: null });
   });
 
-  it("re-applies Serve only when the scheme the tailnet supports changed", async () => {
-    const fake = fakeTailscale({ certs: false, scheme: "http" });
+  it("moves an HTTP entry to HTTPS when re-enabled on a tailnet that gained certificates", async () => {
+    const fake = fakeTailscale({ certs: true, scheme: "http" });
     const remote = new RemoteServe(7717, { run: fake.run });
-    await remote.ensure();
-    expect(fake.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([]);
-    fake.certs = true;
-    await remote.ensure();
+    await remote.enable();
     expect(fake.calls.filter((args) => args[0] === "serve" && args[1] !== "status")).toEqual([
       ["serve", "--http=80", "off"],
       ["serve", "--bg", "--https=443", FAKE_TARGET],

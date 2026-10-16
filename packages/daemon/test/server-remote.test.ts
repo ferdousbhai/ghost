@@ -1,5 +1,3 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
@@ -74,8 +72,8 @@ class FakeRemoteServe extends RemoteServe {
   readonly mutations: boolean[] = [];
   current: RemoteStatus;
 
-  constructor(enabled: boolean, configPath: string) {
-    super(7717, { configPath, run: async () => { throw new Error("fake runner should not be called"); } });
+  constructor(enabled: boolean) {
+    super(7717, { run: async () => { throw new Error("fake runner should not be called"); } });
     this.current = remoteStatus(enabled);
   }
 
@@ -100,11 +98,11 @@ class FakeRemoteServe extends RemoteServe {
   }
 }
 
-/** A server over a fake RemoteServe that persists `remote.enabled` into the temp root. */
+/** A server over a fake RemoteServe. */
 async function serveFake(enabled: boolean): Promise<{ fake: FakeRemoteServe; base: string }> {
   let fake!: FakeRemoteServe;
-  const base = await serve({}, (root) => {
-    fake = new FakeRemoteServe(enabled, join(root, "config.json"));
+  const base = await serve({}, () => {
+    fake = new FakeRemoteServe(enabled);
     return fake;
   });
   return { fake, base };
@@ -211,7 +209,7 @@ describe("tailnet identity", () => {
 });
 
 describe("remote management", () => {
-  it("gets status and persists owner POST changes", async () => {
+  it("gets status and applies owner POST changes", async () => {
     const { fake, base } = await serveFake(false);
     const headers = { authorization: `Bearer ${TOKEN}` };
 
@@ -225,8 +223,6 @@ describe("remote management", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(remoteStatus(true));
     expect(fake.mutations).toEqual([true]);
-    expect(JSON.parse(readFileSync(join(temp!.root, "config.json"), "utf8")))
-      .toEqual({ remote: { enabled: true } });
   });
 
   it("rejects malformed changes and guest writes", async () => {
