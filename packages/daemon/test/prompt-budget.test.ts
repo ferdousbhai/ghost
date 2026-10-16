@@ -12,8 +12,7 @@
  * the character body is the ghost's own and is out of scope.
  */
 import { describe, expect, it } from "vitest";
-import { buildGhostSystemPrompt } from "@ghost/extensions";
-import { FIRST_MEETING_SECTION } from "@ghost/extensions";
+import { buildGhostSystemPrompt, FIRST_MEETING_SECTION } from "../src/persona.js";
 import {
   BACKGROUND_WORK_POLICY,
   HARNESS_LIMITS_POLICY,

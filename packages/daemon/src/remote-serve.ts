@@ -13,7 +13,7 @@ import {
   commandRunner,
   readTailscaleNode,
 } from "./tailscale-identity.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "./errors.js";
 
 export interface RemoteProblem {
   code: string;

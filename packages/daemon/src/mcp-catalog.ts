@@ -2,7 +2,7 @@ import { isAbsolute, join, resolve } from "node:path";
 import { GhostError, type GhostRegistry } from "./ghosts.js";
 import { addMCPServer, removeMCPServer, updateMCPServer } from "./mcp-config.js";
 import type { MCPServerConfig, MCPStdioServerConfig } from "./mcp-config-policy.js";
-import { isRecord } from "@ghost/extensions";
+import { isRecord } from "./record.js";
 import { mcpServerValidationErrors } from "./mcp-config-policy.js";
 import {
   isMissingPrivateFile,

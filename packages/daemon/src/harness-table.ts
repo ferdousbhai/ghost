@@ -13,7 +13,8 @@ import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";
-import { isRecord, xdgBaseDir } from "@ghost/extensions";
+import { isRecord } from "./record.js";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 import { resourceNames, unreportedResources, codexSkillNames, type RunResources } from "./run-resources.js";
 
 export interface HarnessMcpServer {

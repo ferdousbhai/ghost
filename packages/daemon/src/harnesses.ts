@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
-import { xdgBaseDir } from "@ghost/extensions";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 const exec = promisify(execFile);
 

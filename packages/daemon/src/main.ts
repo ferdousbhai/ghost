@@ -10,7 +10,8 @@ import {
   type DaemonConfig,
   type DaemonConfigOverrides,
 } from "./config.js";
-import { openGhostHome } from "@ghost/extensions";
+import { openGhostHome } from "./home.js";
+import { errorMessage } from "./errors.js";
 import { GhostRegistry } from "./ghosts.js";
 import { GhostHookRunner } from "./hooks.js";
 import { hookCompleteCommand } from "./hook-complete.js";
@@ -25,7 +26,6 @@ import { SessionHost } from "./session-host.js";
 import {
   resolveScheduleUnitDirectory,
 } from "./schedules.js";
-import { errorMessage } from "@ghost/extensions";
 
 const USAGE = `ghostd — your ghost, on your machine
 

@@ -40,7 +40,7 @@ import {
   type CommandDocumentation,
 } from "./usage.js";
 import { watchCommand } from "./watch.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
 
 interface Command extends CommandDocumentation {
   positionals: readonly [minimum: number, maximum: number];

@@ -1,5 +1,5 @@
 /** Pure MCP row policy; hosts supply environment and storage. */
-import { isRecord } from "@ghost/extensions";
+import { isRecord } from "./record.js";
 interface MCPServerConfigBase {
   enabled?: boolean;
 }

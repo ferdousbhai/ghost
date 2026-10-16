@@ -8,7 +8,7 @@ import { EXIT_CODE } from "./client.js";
 import { ghostCli } from "./main.js";
 import { emit } from "./output.js";
 import type { CliContext, CliWritable, GhostCliOptions } from "./types.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
 
 class Sink implements CliWritable {
   value = "";

@@ -3,7 +3,7 @@ import type { ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import { emit, relativeTime, table } from "./output.js";
 import type { CliContext } from "./types.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
 
 function windows(harness: Harness): string {
   if (!harness.usage) return "no usage record";

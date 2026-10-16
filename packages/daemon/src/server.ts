@@ -16,12 +16,12 @@ import { requireConversationId } from "./conversation-log.js";
 import type {
   McpCatalog,
 } from "./mcp-catalog.js";
-import { MAX_CHARACTER_BODY_LENGTH, openGhostHome,
-  resolveDocumentsDirectory,
-} from "@ghost/extensions";
+import { MAX_CHARACTER_BODY_LENGTH, openGhostHome } from "./home.js";
+import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
+import { errorMessage } from "./errors.js";
+import { isRecord } from "./record.js";
 import {
   GhostError,
-  fromExtensionError,
   type GhostRegistry,
 } from "./ghosts.js";
 import type { GhostHookRunner } from "./hooks.js";
@@ -38,7 +38,6 @@ import {
 } from "./turn-events.js";
 import type { RunningSource } from "./running-source.js";
 import type { SessionHost } from "./session-host.js";
-import { errorMessage, isRecord } from "@ghost/extensions";
 
 export interface ServerOptions {
   registry: GhostRegistry;
@@ -1056,12 +1055,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
           if (!response.writableEnded) response.end();
           return;
         }
-        const failure = fromExtensionError(error);
-        if (failure instanceof GhostError) {
-          errorResponse(response, failure.status, failure.code, failure.message);
+        if (error instanceof GhostError) {
+          errorResponse(response, error.status, error.code, error.message);
           // Answer and hang up rather than reading the rest of a body we
           // have already refused.
-          if (failure.status === 413) response.once("finish", () => request.destroy());
+          if (error.status === 413) response.once("finish", () => request.destroy());
           return;
         }
         logger.error("request failed", {

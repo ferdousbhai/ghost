@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The ghost-core / ghost-omarchy split, proved on every lint run.
 #
-# ghost-core (daemon, extensions) is everything a second interface could
+# ghost-core (the daemon) is everything a second interface could
 # reuse. Core meets Omarchy only through HTTP/SSE and desktop MCP stdio, so it must
 # never depend on or import Omarchy-side code, and the Omarchy side must never
 # import core sources (it consumes the API and protocols instead). The root
@@ -12,20 +12,19 @@ cd -- "$(git rev-parse --show-toplevel)"
 
 fail=0
 
-for manifest in packages/daemon/package.json packages/extensions/package.json; do
-  if [[ -f "$manifest" ]] && grep -Eq '"(@ghost/(omarchy|shell)|ghost-desktop)"' "$manifest"; then
-    printf 'core-boundary: %s depends on the Omarchy side\n' "$manifest" >&2
-    fail=1
-  fi
-done
+manifest=packages/daemon/package.json
+if grep -Eq '"(@ghost/(omarchy|shell)|ghost-desktop)"' "$manifest"; then
+  printf 'core-boundary: %s depends on the Omarchy side\n' "$manifest" >&2
+  fail=1
+fi
 
 if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/(omarchy|shell)|ghost-desktop)" \
-    packages/daemon/src packages/extensions/src 2>/dev/null; then
+    packages/daemon/src 2>/dev/null; then
   printf 'core-boundary: core imports the Omarchy side (see above)\n' >&2
   fail=1
 fi
 
-if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|@ghost/extensions|(\\.\\./)+(daemon|extensions)/)" \
+if grep -rEn --include='*.qml' --include='*.js' --include='*.mjs' --include='*.ts' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/daemon|(\\.\\./)+daemon/)" \
     packages/shell 2>/dev/null; then
   printf 'core-boundary: the Omarchy side imports core sources (see above)\n' >&2
   fail=1

@@ -50,7 +50,7 @@ if [[ "$current" != "$version" ]]; then
     printf 'not a release version: %s\n' "$version" >&2
     exit 1
   }
-  for manifest in package.json packages/daemon/package.json packages/extensions/package.json \
+  for manifest in package.json packages/daemon/package.json \
       packages/shell/package.json packages/shell/qml/manifest.json; do
     sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$manifest"
   done

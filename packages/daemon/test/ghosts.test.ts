@@ -9,7 +9,7 @@ import {
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError, ghostPaths, isGhostHome, isValidGhostName } from "../src/ghosts.js";
-import { isSeededCharacter } from "@ghost/extensions";
+import { isSeededCharacter } from "../src/persona.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
 
 let temp: TempGhosts | null = null;

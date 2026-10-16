@@ -11,14 +11,12 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import {
-  buildGhostSystemPrompt,
-  openGhostHome,
-  resolveDocumentsDirectory,
-} from "@ghost/extensions";
+import { buildGhostSystemPrompt, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
+import { openGhostHome } from "./home.js";
+import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
+import { errorMessage } from "./errors.js";
 import { readAttachment, saveAttachment } from "./attachments.js";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
-import { errorMessage, FIRST_MEETING_SECTION, isSeededCharacter } from "@ghost/extensions";
 import {
   appendLog,
   conversationDir,

@@ -12,7 +12,7 @@ import { isGhostHome } from "./ghosts.js";
 import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import { harnessRow, SUPPORTED_HARNESSES, type HarnessRow } from "./harness-table.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "./errors.js";
 
 export const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
 export const HOOK_COMPLETE_TIMEOUT_MS = 180_000;

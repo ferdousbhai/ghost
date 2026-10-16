@@ -11,9 +11,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
-import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "@ghost/extensions";
+import { CHARACTER_FILENAME } from "./home.js";
+import { SEEDED_CHARACTER } from "./persona.js";
+import { GhostError } from "./errors.js";
 
+export { GhostError };
 
 export interface Ghost {
   name: string;
@@ -29,33 +31,6 @@ const GHOST_SETTINGS_FILENAME = "settings.yml";
  * whitespace, no percent-encoding games.
  */
 const GHOST_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-
-export class GhostError extends Error {
-  readonly code: string;
-  readonly status: number;
-  constructor(code: string, message: string, status: number) {
-    super(message);
-    this.name = "GhostError";
-    this.code = code;
-    this.status = status;
-  }
-}
-
-const EXTENSION_ERROR_STATUS: Record<string, number> = {
-  not_found: 404,
-  conflict: 409,
-};
-
-/**
- * Re-throw a `@ghost/extensions` error as the daemon's, keeping its code and
- * message so a client sees what the home writer actually refused.
- */
-/** A ghost tool's error as the daemon answers it; anything else passes through. */
-export function fromExtensionError(error: unknown): unknown {
-  return isExtensionGhostError(error)
-    ? new GhostError(error.code, error.message, EXTENSION_ERROR_STATUS[error.code] ?? 400)
-    : error;
-}
 
 export function isValidGhostName(name: string): boolean {
   if (!GHOST_NAME_PATTERN.test(name)) return false;

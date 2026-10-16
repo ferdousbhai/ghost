@@ -6,7 +6,8 @@ import type { SessionSummary } from "../session-host.js";
 import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE, notFound, type DaemonClient } from "./client.js";
 import type { CliContext, CliRuntime, CliStdin } from "./types.js";
-import { errorMessage, xdgBaseDir } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
+import { xdgBaseDir } from "../xdg-user-dirs.js";
 
 export async function stdinText(stdin: CliStdin): Promise<string> {
   if (typeof stdin === "string") return stdin;

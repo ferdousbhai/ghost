@@ -2,7 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { resolveDocumentsDirectory } from "../src/xdg-user-dirs.js";
-import { createTempDir } from "./support/fixture.js";
+import { createTempDir } from "./helpers/home-fixture.js";
 
 let workspace: { dir: string; cleanup(): Promise<void> };
 

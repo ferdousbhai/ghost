@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { LimitReachedEvent } from "./turn-events.js";
 import type { UsageWindow } from "./harnesses.js";
-import { xdgBaseDir } from "@ghost/extensions";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 /** Past this size the log moves to `handoffs.jsonl.1`, replacing the previous one. */
 export const HANDOFF_LOG_LIMIT_BYTES = 1024 * 1024;

@@ -15,7 +15,7 @@ import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "./errors.js";
 
 const MAX_HOOK_OUTPUT_BYTES = 1024 * 1024;
 

@@ -3,7 +3,7 @@ import { loadConfig } from "../config.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
 
 /**
  * A control request is a small JSON round-trip the daemon answers immediately,

@@ -1,4 +1,4 @@
-import { isRecord } from "@ghost/extensions";
+import { isRecord } from "./record.js";
 import { expandEnvVarsDeep, type MCPHttpServerConfig, type MCPServerConfig, type MCPSseServerConfig, type MCPStdioServerConfig } from "./mcp-config-policy.js";
 export type McpTransport = "stdio" | "http" | "sse";
 

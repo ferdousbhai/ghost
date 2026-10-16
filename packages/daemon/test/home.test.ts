@@ -5,7 +5,7 @@ import {
   MAX_CHARACTER_BODY_LENGTH,
   openGhostHome,
 } from "../src/home.js";
-import { createGhostFixture, type GhostFixture } from "./support/fixture.js";
+import { createGhostFixture, type GhostFixture } from "./helpers/home-fixture.js";
 
 let fixture: GhostFixture;
 let home: GhostHome;

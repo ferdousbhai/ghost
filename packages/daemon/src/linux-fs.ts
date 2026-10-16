@@ -14,7 +14,7 @@ function invalidPath(label: string, path: string, reason: string): GhostError {
   return new GhostError(
     "invalid_path",
     `${label} ${JSON.stringify(path)} ${reason}.`,
-    { path },
+    400,
   );
 }
 

@@ -6,7 +6,7 @@ import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
 import type { CliContext } from "./types.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "../errors.js";
 
 /** Enough trailing output to find a harness's limit message. */
 const TAIL_CHARS = 8192;

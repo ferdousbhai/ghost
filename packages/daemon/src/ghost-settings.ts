@@ -6,7 +6,7 @@
 import { existsSync } from "node:fs";
 import { isMap, parse as parseYaml, parseDocument } from "yaml";
 import { ghostPaths } from "./ghosts.js";
-import { isRecord } from "@ghost/extensions";
+import { isRecord } from "./record.js";
 import { isMissingPrivateFile, MAX_PRIVATE_FILE_BYTES, PrivateReadError, readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
 
 export interface GhostSettings {

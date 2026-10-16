@@ -1,4 +1,4 @@
-import { isRecord } from "@ghost/extensions";
+import { isRecord } from "./record.js";
 const GHOST_HOOK_HANDLER_TIMEOUT_MS = 30_000;
 
 export interface GhostHookEventBase {

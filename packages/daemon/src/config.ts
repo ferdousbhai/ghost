@@ -6,8 +6,9 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
-import { errorMessage, xdgBaseDir } from "@ghost/extensions";
-import { isRecord } from "@ghost/extensions";
+import { errorMessage } from "./errors.js";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
+import { isRecord } from "./record.js";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests">;
 

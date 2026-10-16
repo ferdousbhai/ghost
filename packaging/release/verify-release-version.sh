@@ -11,7 +11,6 @@ const sourceRoot = process.argv[1];
 const manifests = [
   "package.json",
   "packages/daemon/package.json",
-  "packages/extensions/package.json",
   "packages/shell/package.json",
   "packages/shell/qml/manifest.json",
 ];

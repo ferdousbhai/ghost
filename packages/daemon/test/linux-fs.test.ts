@@ -5,7 +5,7 @@ import {
   descriptorPath,
   openConfinedDirectory,
 } from "../src/linux-fs.js";
-import { createTempDir } from "./support/fixture.js";
+import { createTempDir } from "./helpers/home-fixture.js";
 
 let workspace: { dir: string; cleanup(): Promise<void> };
 

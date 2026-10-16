@@ -162,7 +162,7 @@ export class GhostHome {
         "limit_exceeded",
         `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
         + `it contains ${body.length}. Shorten the file before starting a session.`,
-        { length: body.length, limit: MAX_CHARACTER_BODY_LENGTH },
+        400,
       );
     }
     return { body };
@@ -178,7 +178,7 @@ export class GhostHome {
         "limit_exceeded",
         `${CHARACTER_FILENAME} may be at most ${MAX_CHARACTER_BODY_LENGTH} characters; `
         + `that body is ${input.body.length}. Nothing was written.`,
-        { length: input.body.length, limit: MAX_CHARACTER_BODY_LENGTH },
+        400,
       );
     }
     await withFileMutationQueue(this.characterPath, async () => {

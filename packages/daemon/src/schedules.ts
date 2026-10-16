@@ -27,7 +27,7 @@ import {
   type CommandRunner,
 } from "./tailscale-identity.js";
 import { silentLogger, type Logger } from "./log.js";
-import { xdgBaseDir } from "@ghost/extensions";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 /** Versioned so the original ambiguous `ghost-timer-<ghost>-` form stays inert. */
 const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";

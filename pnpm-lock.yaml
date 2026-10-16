@@ -18,9 +18,6 @@ importers:
 
   packages/daemon:
     dependencies:
-      '@ghost/extensions':
-        specifier: workspace:*
-        version: link:../extensions
       yaml:
         specifier: ^2.9.0
         version: 2.9.0
@@ -36,21 +33,6 @@ importers:
         version: 5.9.3
       vitest:
         specifier: ^3.1.4
-        version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
-
-  packages/extensions:
-    devDependencies:
-      '@types/bun':
-        specifier: ^1.3.14
-        version: 1.4.0
-      '@types/node':
-        specifier: ^22.15.3
-        version: 22.20.1
-      typescript:
-        specifier: ^5.9.3
-        version: 5.9.3
-      vitest:
-        specifier: ^3.2.4
         version: 3.2.7(@types/node@22.20.1)(jiti@2.7.0)(lightningcss@1.32.0)(yaml@2.9.0)
 
   packages/shell: {}

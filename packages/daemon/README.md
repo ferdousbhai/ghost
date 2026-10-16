@@ -15,7 +15,6 @@ Install workspace dependencies from the repository root, then run focused
 checks from this package:
 
 ```sh
-pnpm --filter @ghost/extensions build
 pnpm --filter @ghost/daemon typecheck
 pnpm --filter @ghost/daemon test
 ```

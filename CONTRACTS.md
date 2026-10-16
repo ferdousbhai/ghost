@@ -94,7 +94,7 @@ skills only the shipped `skills/` do (see "Ghost-home resources").
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
 with a heading naming the persona. Its complete body, bounded by
-`MAX_CHARACTER_BODY_LENGTH` in [`home.ts`](packages/extensions/src/home.ts),
+`MAX_CHARACTER_BODY_LENGTH` in [`home.ts`](packages/daemon/src/home.ts),
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
@@ -514,7 +514,7 @@ client, so each harness pass is its own caller.
 
 ## Package boundaries
 
-**ghost-core** is `packages/daemon` and `packages/extensions`.
+**ghost-core** is `packages/daemon`.
 **ghost-omarchy** is `packages/shell` (`@ghost/omarchy`) plus the separate
 `ghost-desktop` repository. Core never imports the Omarchy side;
 `scripts/check-core-boundary.sh` proves this during lint. Their seams are the
@@ -530,10 +530,8 @@ An app supplies its own UI over the same authenticated HTTP/SSE API. Adding or
 removing the UI neither stops the runtime nor changes ghost homes; removing the
 runtime preserves owner data.
 
-- [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
-  ghost-home parsing and prompt construction. It imports no daemon or UI.
-- [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
-  authentication, conversations, the harness table, MCP, hooks, lifecycle,
+- [`packages/daemon`](packages/daemon/src/main.ts) owns ghost homes and the
+  persona prompt, configuration, authentication, conversations, the harness table, MCP, hooks, lifecycle,
   HTTP, and the `ghost` CLI. Bun is the production runtime.
 - [`packages/shell`](packages/shell/qml/manifest.json) is the `@ghost/omarchy`
   package: an omarchy-shell plugin, id `ferdousbhai.ghost`, declaring `service`

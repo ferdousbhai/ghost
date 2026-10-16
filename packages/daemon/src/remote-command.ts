@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { loadConfig } from "./config.js";
 import { RemoteServe, type RemoteStatus } from "./remote-serve.js";
 import type { CommandRunner } from "./tailscale-identity.js";
-import { errorMessage } from "@ghost/extensions";
+import { errorMessage } from "./errors.js";
 
 export interface RemoteCommandOptions {
   env?: NodeJS.ProcessEnv;
