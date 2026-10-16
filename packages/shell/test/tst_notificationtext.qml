@@ -24,4 +24,14 @@ TestCase {
         verify(args.includes("--replace-id=0"));
         verify(args.includes("--urgency=critical"));
     }
+
+    function test_markdownReadsAsPlainText(): void {
+        const reply = "## Done\n\nYou said: **Show me a list** and `inline code`.\n\n"
+            + "- first *item*\n2. second\n> quoted [link](https://example.com) ![chart](a.png)\n"
+            + "```js\nconst x = 1;\n```\nsnake_case_name stays";
+        const args = NotificationText.command("casper", "s", "**Bold** title", reply, "normal", 0);
+        compare(args[args.length - 2], "casper · Bold title");
+        compare(args[args.length - 1], "Done You said: Show me a list and inline code. first item second "
+            + "quoted link chart const x = 1; snake_case_name stays");
+    }
 }
