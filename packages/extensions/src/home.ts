@@ -25,7 +25,6 @@ import {
   openConfinedDirectory,
   openConfinedFile,
   openRegularFileNoFollow,
-  withDescriptorLock,
 } from "./linux-fs.js";
 
 export { CHARACTER_FILENAME, MAX_CHARACTER_BODY_LENGTH };
@@ -86,7 +85,7 @@ async function atomicWriteFile(
   path: string,
   content: string | Uint8Array,
 ): Promise<void> {
-  // This opens the directory itself, so it also locks and closes it.
+  // Concurrent writers each publish a complete file by rename; the last one wins.
   const directory = await openConfinedDirectory(
     homeDir,
     dirname(path),
@@ -95,7 +94,7 @@ async function atomicWriteFile(
   const name = basename(path);
   const temporaryName = `.${name}.write-${process.pid}-${randomUUID()}`;
   let handle: FileHandle | undefined;
-  const publish = async (): Promise<void> => {
+  try {
     const existingMode = await existingFileMode(directory, name, "Write path");
     const mode = existingMode ?? 0o666;
     const temporary = descriptorPath(directory, temporaryName);
@@ -120,9 +119,6 @@ async function atomicWriteFile(
       await unlink(temporary).catch(() => undefined);
       throw error;
     }
-  };
-  try {
-    await withDescriptorLock(directory, publish);
   } finally {
     await directory.close();
   }

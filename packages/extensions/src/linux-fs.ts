@@ -2,7 +2,6 @@
 import { constants } from "node:fs";
 import { mkdir, open, type FileHandle } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
-import { dlopen, FFIType } from "bun:ffi";
 import { GhostError } from "./errors.js";
 
 const DIRECTORY_FLAGS = constants.O_RDONLY
@@ -11,18 +10,6 @@ const DIRECTORY_FLAGS = constants.O_RDONLY
 const REGULAR_FILE_FLAGS = constants.O_RDONLY
   | constants.O_NONBLOCK
   | constants.O_NOFOLLOW;
-const LOCK_EX = 2;
-const LOCK_NB = 4;
-const LOCK_UN = 8;
-const LOCK_RETRY_MS = 10;
-
-const libc = dlopen("libc.so.6", {
-  flock: {
-    args: [FFIType.i32, FFIType.i32],
-    returns: FFIType.i32,
-  },
-});
-
 function invalidPath(label: string, path: string, reason: string): GhostError {
   return new GhostError(
     "invalid_path",
@@ -147,35 +134,4 @@ export async function openConfinedFile(
   } finally {
     await parent.close();
   }
-}
-
-export async function withDescriptorLock<T>(
-  descriptor: FileHandle,
-  action: () => Promise<T>,
-  timeoutMs = 30_000,
-): Promise<T> {
-  const started = Date.now();
-  while (libc.symbols.flock(descriptor.fd, LOCK_EX | LOCK_NB) !== 0) {
-    if (Date.now() - started >= timeoutMs) {
-      throw new GhostError(
-        "conflict",
-        `Timed out waiting ${timeoutMs}ms for a filesystem mutation lock.`,
-        { timeoutMs },
-      );
-    }
-    await new Promise((resolveDelay) => setTimeout(resolveDelay, LOCK_RETRY_MS));
-  }
-  let actionFailed = false;
-  let actionError: unknown;
-  let result: T | undefined;
-  try {
-    result = await action();
-  } catch (error) {
-    actionFailed = true;
-    actionError = error;
-  }
-  const unlockFailed = libc.symbols.flock(descriptor.fd, LOCK_UN) !== 0;
-  if (actionFailed) throw actionError;
-  if (unlockFailed) throw new Error("Could not release a filesystem mutation lock.");
-  return result as T;
 }
