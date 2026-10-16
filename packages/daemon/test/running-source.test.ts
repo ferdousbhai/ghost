@@ -1,11 +1,22 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findSourceRoot, readHeadCommit, resolveRunningSource } from "../src/running-source.js";
 
-const COMMIT = "0123456789abcdef0123456789abcdef01234567";
-const OTHER = "89abcdef0123456789abcdef0123456789abcdef";
+/** Make `root` a git repository with one commit, and return that commit. */
+function gitCommit(root: string): string {
+  const git = (...args: string[]) => execFileSync("git", ["-C", root, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+  }).trim();
+  if (!existsSync(join(root, ".git"))) {
+    git("init", "-q");
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x");
+  }
+  return git("rev-parse", "HEAD");
+}
 
 let scratch: string | null = null;
 
@@ -61,55 +72,12 @@ describe("finding the running source root", () => {
 });
 
 describe("reading the head commit", () => {
-  it("follows HEAD to a loose ref", () => {
+  it("asks git, and is null rather than a throw when git cannot say", () => {
     const base = tempRoot();
     const root = workspace(join(base, "checkout"));
-    mkdirSync(join(root, ".git", "refs", "heads"), { recursive: true });
-    writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/master\n", "utf8");
-    writeFileSync(join(root, ".git", "refs", "heads", "master"), `${COMMIT}\n`, "utf8");
-    expect(readHeadCommit(root)).toBe(COMMIT);
-  });
-
-  it("falls back to packed-refs when the loose ref is absent", () => {
-    const base = tempRoot();
-    const root = workspace(join(base, "checkout"));
-    mkdirSync(join(root, ".git"), { recursive: true });
-    writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/master\n", "utf8");
-    writeFileSync(
-      join(root, ".git", "packed-refs"),
-      `# pack-refs with: peeled fully-peeled sorted\n${OTHER} refs/heads/other\n${COMMIT} refs/heads/master\n`,
-      "utf8",
-    );
-    expect(readHeadCommit(root)).toBe(COMMIT);
-  });
-
-  it("reads a detached HEAD as the commit itself", () => {
-    const base = tempRoot();
-    const root = workspace(join(base, "checkout"));
-    mkdirSync(join(root, ".git"), { recursive: true });
-    writeFileSync(join(root, ".git", "HEAD"), `${COMMIT}\n`, "utf8");
-    expect(readHeadCommit(root)).toBe(COMMIT);
-  });
-
-  it("reads a worktree's own HEAD against the refs of its common dir", () => {
-    const base = tempRoot();
-    const root = workspace(join(base, "worktree"));
-    const commonDir = join(base, "main", ".git");
-    const gitDir = join(commonDir, "worktrees", "wt");
-    mkdirSync(join(commonDir, "refs", "heads"), { recursive: true });
-    mkdirSync(gitDir, { recursive: true });
-    writeFileSync(join(root, ".git"), `gitdir: ${gitDir}\n`, "utf8");
-    writeFileSync(join(gitDir, "commondir"), "../..\n", "utf8");
-    writeFileSync(join(gitDir, "HEAD"), "ref: refs/heads/topic\n", "utf8");
-    writeFileSync(join(commonDir, "refs", "heads", "topic"), `${COMMIT}\n`, "utf8");
-    expect(readHeadCommit(root)).toBe(COMMIT);
-  });
-
-  it("is null rather than a throw when nothing can be read", () => {
-    const base = tempRoot();
-    const root = workspace(join(base, "checkout"));
-    mkdirSync(join(root, ".git"), { recursive: true });
     expect(readHeadCommit(root)).toBeNull();
+    expect(gitCommit(root)).toMatch(/^[0-9a-f]{40,64}$/);
+    expect(readHeadCommit(root)).toBe(gitCommit(root));
     expect(readHeadCommit(join(base, "missing"))).toBeNull();
   });
 });
@@ -127,13 +95,11 @@ describe("resolveRunningSource", () => {
   it("reports the checkout root and its commit", () => {
     const base = tempRoot();
     const root = workspace(join(base, "checkout"));
-    mkdirSync(join(root, ".git", "refs", "heads"), { recursive: true });
-    writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/master\n", "utf8");
-    writeFileSync(join(root, ".git", "refs", "heads", "master"), `${COMMIT}\n`, "utf8");
+    const commit = gitCommit(root);
     expect(resolveRunningSource("0.0.1", join(root, "packages", "daemon"))).toEqual({
       version: "0.0.1",
       root,
-      commit: COMMIT,
+      commit,
     });
   });
 });
