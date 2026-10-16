@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { apiToken } from "./token-store.js";
+import { apiTokenCommand } from "./token-store.js";
 import { isDirectInvocation } from "./direct-invocation.js";
 import { homedir } from "node:os";
 import { dirname } from "node:path";
@@ -31,7 +31,7 @@ const USAGE = `ghostd — your ghost, on your machine
 
 Usage:
   ghostd [options]
-  ghostd api-token [--rotate] [--quiet]
+  ghostd api-token [--quiet]
   ghostd remote [on|off|status]
   ghostd hook-complete
 
@@ -39,7 +39,7 @@ Subcommands:
   api-token                Print the bearer token local API clients present
                            (minting one on first run). The shell reads the file
                            itself; this is for curl, scripts, and diagnosing a
-                           401. --rotate mints a new one and invalidates the old.
+                           401. To replace it, delete the file and restart.
   remote                   Show or change the daemon's tailnet exposure through
                            Tailscale Serve. Defaults to status.
   hook-complete            Command-hook bridge. Reads ghost_home and prompt as
@@ -179,7 +179,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
 export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // Subcommands own their narrower persistence lifecycle. Token commands touch
   // only XDG state, and remote touches config and Tailscale Serve.
-  if (argv[0] === "api-token") return apiToken.command(argv.slice(1));
+  if (argv[0] === "api-token") return apiTokenCommand(argv.slice(1));
   if (argv[0] === "remote") return remoteCommand(argv.slice(1));
   if (argv[0] === "hook-complete") return hookCompleteCommand(argv.slice(1));
 

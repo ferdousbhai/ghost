@@ -36,7 +36,7 @@ Singleton {
         + (root.host.indexOf(":") >= 0 ? "[" + root.host + "]" : root.host)
         + ":" + root.port
 
-    // Same resolution the daemon does (packages/daemon/src/api-token.ts): an
+    // Same resolution the daemon does (packages/daemon/src/token-store.ts): an
     // explicit override, else $XDG_STATE_HOME/ghost/api-token, else the XDG
     // default. A relative XDG_STATE_HOME is not a state home, so it is ignored.
     readonly property string tokenPath: {
@@ -530,8 +530,8 @@ Singleton {
      * request headers; `body` is a string, or null for a bodyless request.
      *
      * Callers install their onreadystatechange handler *before* calling this —
-     * we wrap it, because a 401 is not necessarily fatal. `ghostd api-token
-     * --rotate` can replace the secret while the shell is running, so the first
+     * we wrap it, because a 401 is not necessarily fatal. deleting the
+     * token file and restarting ghostd replaces the secret while the shell runs, so the first
      * 401 re-reads the file and replays the request once; only then does the
      * caller's handler see it. The replay is deferred with callLater rather
      * than reopening the XHR from inside its own callback.

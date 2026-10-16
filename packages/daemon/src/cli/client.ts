@@ -1,4 +1,4 @@
-import { apiToken } from "../token-store.js";
+import { apiTokenPath, readApiToken } from "../token-store.js";
 import { loadConfig } from "../config.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
 import { describeErrorBody } from "./output.js";
@@ -109,8 +109,8 @@ export class DaemonClient {
     }
     const host = config.host === "::1" ? "[::1]" : config.host;
     this.baseUrl = `http://${host}:${config.port}`;
-    this.tokenPath = apiToken.defaultPath(runtime.env, runtime.home);
-    this.#tokenValue = apiToken.read({ env: runtime.env, home: runtime.home });
+    this.tokenPath = apiTokenPath(runtime.env, runtime.home);
+    this.#tokenValue = readApiToken(this.tokenPath);
   }
 
   async #fetch(
@@ -123,17 +123,13 @@ export class DaemonClient {
     headers.set("accept", headers.get("accept") ?? "application/json");
     if (this.#tokenValue) headers.set("authorization", `Bearer ${this.#tokenValue}`);
     const timeout = new AbortController();
-    // 0 waits as long as the daemon does: a tool call may be a question for the owner.
-    const timer = timeoutMs > 0 ? setTimeout(() => timeout.abort(), timeoutMs) : undefined;
-    const signal = init.signal
-      ? AbortSignal.any([init.signal, timeout.signal])
-      : timeout.signal;
+    const timer = setTimeout(() => timeout.abort(), timeoutMs);
     let response: Response;
     try {
       response = await this.#runtime.fetch(`${this.baseUrl}${path}`, {
         ...init,
         headers,
-        signal,
+        signal: timeout.signal,
       });
     } catch (error) {
       throw networkError(error);
@@ -142,7 +138,7 @@ export class DaemonClient {
     }
     if (response.status === 401 && retry) {
       await response.body?.cancel().catch(() => undefined);
-      this.#tokenValue = apiToken.read({ env: this.#runtime.env, home: this.#runtime.home });
+      this.#tokenValue = readApiToken(this.tokenPath);
       return this.#fetch(path, init, false, timeoutMs);
     }
     return response;
@@ -152,16 +148,14 @@ export class DaemonClient {
     method: string,
     path: string,
     body?: unknown,
-    options: { timeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<CliResponse<T>> {
     const response = await this.#fetch(path, {
       method,
-      ...(options.signal ? { signal: options.signal } : {}),
       ...(body === undefined ? {} : {
         body: JSON.stringify(body),
         headers: { "content-type": "application/json" },
       }),
-    }, true, options.timeoutMs);
+    });
     const parsed = await responseBody(response);
     if (!response.ok) throw statusError(response.status, parsed, this.tokenPath);
     return { status: response.status, body: parsed as T };

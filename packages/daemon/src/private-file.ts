@@ -42,7 +42,6 @@ function validPrivateDescriptor(stats: BigIntStats): boolean {
 /**
  * The stat fields that must all match for two descriptors to be the same file,
  * unchanged, between an admission check and the read that trusts it.
- * `token-store.ts` spells out the same rule.
  */
 function sameFileIdentity(left: BigIntStats, right: BigIntStats): boolean {
   return left.dev === right.dev

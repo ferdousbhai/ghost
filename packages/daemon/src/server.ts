@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { readBoard } from "./board.js";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { apiToken as apiTokenStore, tokenMatches } from "./token-store.js";
+import { apiTokenPath, ensureApiToken, tokenMatches } from "./token-store.js";
 import { MAX_ATTACHMENT_BYTES } from "./attachments.js";
 import { assertLoopback } from "./config.js";
 import { REMOTE_MANIFEST, REMOTE_VIEWER_CSP, REMOTE_VIEWER_HTML } from "./remote-viewer.js";
@@ -326,11 +326,10 @@ function resolveApiToken(
     return null;
   }
   if (configured !== undefined) return configured;
-  const minted = apiTokenStore.readOrCreate();
+  const path = apiTokenPath();
+  const minted = ensureApiToken(path);
   // The path, never the token: `ghostd api-token` is the only way to see it.
-  logger.info(minted.created ? "minted the API token" : "API token loaded", {
-    path: minted.path,
-  });
+  logger.info(minted.created ? "minted the API token" : "API token loaded", { path });
   return minted.token;
 }
 

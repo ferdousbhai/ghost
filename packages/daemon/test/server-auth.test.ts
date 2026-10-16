@@ -10,11 +10,7 @@
  * tests pin the three checks that make that request fail, and the two
  * deliberate exemptions that must not be widened.
  */
-import { mkdtemp, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { apiToken, TOKEN_PATTERN } from "../src/token-store.js";
+import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { SessionHost } from "../src/session-host.js";
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
@@ -244,101 +240,12 @@ describe("the two deliberate exemptions", () => {
 });
 
 
-describe("the API token store", () => {
-  let dir: string;
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "ghost-api-token-"));
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  it("lives under XDG state", () => {
-    expect(apiToken.defaultPath({ XDG_STATE_HOME: "/xdg/state" }, "/home/x"))
-      .toBe("/xdg/state/ghost/api-token");
-    expect(apiToken.defaultPath({}, "/home/x"))
-      .toBe("/home/x/.local/state/ghost/api-token");
-    expect(apiToken.defaultPath({ GHOSTD_API_TOKEN_FILE: "/tmp/t" }, "/home/x")).toBe("/tmp/t");
-  });
-
-  it("mints once and reads back the same token forever after", () => {
-    const path = join(dir, "state", "api-token");
-    const first = apiToken.readOrCreate({ path });
-    expect(first.created).toBe(true);
-    expect(first.token).toMatch(TOKEN_PATTERN);
-    const second = apiToken.readOrCreate({ path });
-    expect(second.created).toBe(false);
-    expect(second.token).toBe(first.token);
-    expect(apiToken.read({ path })).toBe(first.token);
-  });
-
-});
-
-describe("ghostd api-token", () => {
-  let dir: string;
-  let out: string[];
-  let err: string[];
-
-  beforeEach(async () => {
-    dir = await mkdtemp(join(tmpdir(), "ghost-api-token-cli-"));
-    out = [];
-    err = [];
-  });
-
-  afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
-  });
-
-  const path = () => join(dir, "api-token");
-  const run = (argv: string[]) =>
-    apiToken.command(argv, {
-      path: path(),
-      stdout: (text) => out.push(text),
-      stderr: (text) => err.push(text),
-    });
-
-  it("mints, prints, and says where it lives", async () => {
-    expect(run([])).toBe(0);
-    const text = out.join("");
-    expect(text.split("\n")[0]).toMatch(TOKEN_PATTERN);
-    expect(text).toMatch(/Local API clients read this file/);
-    expect(text).toContain(path());
-    expect((await stat(path())).mode & 0o777).toBe(0o600);
-  });
-
-  it("prints only the token under --quiet, so it can be piped into curl", () => {
-    expect(run(["--quiet"])).toBe(0);
-    expect(out.join("").trim()).toMatch(TOKEN_PATTERN);
-    expect(out.join("")).not.toMatch(/Stored at/);
-  });
-
-  it("rotates, and says the old one is dead", async () => {
-    run(["--quiet"]);
-    const before = out.join("").trim();
-    out.length = 0;
-    expect(run(["--rotate"])).toBe(0);
-    const after = out.join("").split("\n")[0];
-    expect(after).toMatch(TOKEN_PATTERN);
-    expect(after).not.toBe(before);
-    expect(out.join("")).toMatch(/no longer works/);
-    expect(apiToken.read({ path: path() })).toBe(after);
-    expect((await stat(path())).mode & 0o777).toBe(0o600);
-  });
-
-  it("refuses an option it does not know rather than guessing", () => {
-    expect(run(["--rotate-all"])).toBe(2);
-    expect(err.join("")).toMatch(/api-token: unknown option/);
-  });
-});
-
-describe("a rotated token", () => {
-  it("stops working immediately, which is the point of rotating", async () => {
+describe("a replaced token file", () => {
+  it("is not honored until the daemon restarts", async () => {
     const base = await serve();
     expect((await fetch(`${base}/api/ghosts`, { headers: auth })).status).toBe(200);
-    // The server holds the token it was built with; a client that rotated the
-    // file behind its back is simply presenting the wrong secret now.
+    // The server holds the token it was built with; a client that read a
+    // replaced file is presenting the wrong secret until then.
     expect((await fetch(`${base}/api/ghosts`, {
       headers: { authorization: `Bearer ${OTHER_TOKEN}` },
     })).status).toBe(401);

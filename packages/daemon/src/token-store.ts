@@ -1,76 +1,21 @@
 /**
- * The machinery behind ghostd's machine-local secrets.
- *
- * The HTTP API's bearer token uses 32 random bytes as hex, in
- * a mode-0600 file inside a 0700 directory under XDG *state* (machine-local,
- * regenerable, and nothing a user should be hand-editing), minted on first
- * need, compared in constant time, and printed by a `ghostd` subcommand that
- * can also rotate them.
- *
- * Only three things differ between the two: the file name, the environment
- * variable that overrides its path, and the sentence the CLI prints to say
- * what the secret is for. Those are the parameters; everything else lives
- * here, so a hardening fix applied once applies to both.
+ * The HTTP API's bearer token: 32 random bytes as hex in a mode-0600 file
+ * under XDG state, minted by the daemon when missing and read by the CLI and
+ * HUD. The daemon holds the token it started with, so replacing it is
+ * delete-and-restart.
  */
-import {
-  closeSync,
-  constants,
-  fchmodSync,
-  fstatSync,
-  fsyncSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  renameSync,
-  unlinkSync,
-  writeSync,
-  type BigIntStats,
-  type Stats,
-} from "node:fs";
+import { closeSync, constants, fstatSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 
-const TOKEN_BYTES = 32;
-const TOKEN_FILE_BYTES = TOKEN_BYTES * 2 + 1;
-const TOKEN_CREATE_ATTEMPTS = 50;
-const TOKEN_CREATE_RETRY_MS = 2;
-const tokenCreateSleep = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
+const TOKEN_FILE = /^([0-9a-f]{64})\n$/;
 export const TOKEN_PATTERN = /^[0-9a-f]{64}$/;
 
-export interface TokenStoreOptions {
-  env?: NodeJS.ProcessEnv;
-  home?: string;
-  path?: string;
-}
-
-export interface TokenCommandOptions extends TokenStoreOptions {
-  stdout?: (text: string) => void;
-  stderr?: (text: string) => void;
-}
-
-export interface TokenStoreSpec {
-  filename: string;
-  envVar: string;
-  command: string;
-  /** One line saying what the secret is for, printed above the storage note. */
-  purpose: string;
-}
-
-export interface TokenStore {
-  defaultPath(env?: NodeJS.ProcessEnv, home?: string): string;
-  readOrCreate(options?: TokenStoreOptions): { token: string; path: string; created: boolean };
-  read(options?: TokenStoreOptions): string | undefined;
-  rotate(options?: TokenStoreOptions): { token: string; path: string };
-  command(argv?: readonly string[], options?: TokenCommandOptions): number;
-}
-
 /**
- * Constant-time comparison. Both callers answer a failed presentation
- * immediately, so a naive `===` would leak the token a byte at a time to
- * anything that can time a loopback socket — which, on a machine running a
- * browser, is everything.
+ * Constant-time comparison. A failed presentation is answered immediately, so
+ * a naive `===` would leak the token a byte at a time to anything that can
+ * time a loopback socket.
  */
 export function tokenMatches(expected: string, presented: string): boolean {
   const a = Buffer.from(expected, "utf8");
@@ -79,340 +24,79 @@ export function tokenMatches(expected: string, presented: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-function mintToken(): string {
-  return randomBytes(TOKEN_BYTES).toString("hex");
+/** `$GHOSTD_API_TOKEN_FILE`, else `$XDG_STATE_HOME/ghost/api-token`, else under `~/.local/state`. */
+export function apiTokenPath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
+  const explicit = env.GHOSTD_API_TOKEN_FILE?.trim();
+  if (explicit) return explicit;
+  const xdg = env.XDG_STATE_HOME?.trim();
+  return join(xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "state"), "ghost", "api-token");
 }
 
-function validateTokenDirectory(path: string): boolean {
-  const directory = dirname(path);
-  let stats: BigIntStats;
+/** The token, or undefined when the file does not exist; anything else wrong with it throws. */
+export function readApiToken(path: string): string | undefined {
+  let descriptor: number;
   try {
-    stats = lstatSync(directory, { bigint: true });
+    descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (error) {
-    if (isErrno(error, "ENOENT")) return false;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     throw error;
   }
-  if (!stats.isDirectory() || stats.isSymbolicLink()) {
-    throw new Error(`Token directory ${directory} is not a real directory.`);
-  }
-  if ((stats.mode & 0o777n) !== 0o700n) {
-    throw new Error(`Token directory ${directory} must have mode 0700.`);
-  }
-  return true;
-}
-
-function ensureTokenDirectory(path: string): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  validateTokenDirectory(path);
-}
-
-function isErrno(error: unknown, code: string): boolean {
-  return (error as NodeJS.ErrnoException | null)?.code === code;
-}
-
-function malformedToken(path: string): Error {
-  return new Error(`Token file ${path} is malformed; rotate it explicitly to replace it.`);
-}
-
-class IncompleteTokenError extends Error {
-  constructor(path: string) {
-    super(malformedToken(path).message);
-    this.name = "IncompleteTokenError";
-  }
-}
-
-function invalidTokenEntry(path: string, entry: Stats): Error {
-  if (entry.isSymbolicLink()) {
-    return new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
-  }
-  return new Error(`Token file ${path} is not a regular file.`);
-}
-
-function isIncompletePublishedToken(path: string): boolean {
-  let entry: BigIntStats;
   try {
-    entry = lstatSync(path, { bigint: true });
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return false;
-    throw error;
-  }
-  return entry.isFile()
-    && !entry.isSymbolicLink()
-    && entry.nlink === 1n
-    && entry.size < BigInt(TOKEN_FILE_BYTES);
-}
-
-function openToken(path: string): number | undefined {
-  const flags = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK;
-  try {
-    return openSync(path, flags);
-  } catch (error) {
-    if (isErrno(error, "ELOOP")) {
-      throw new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
-    }
-    if (!isErrno(error, "ENOENT")) throw error;
-  }
-
-  let entry: Stats;
-  try {
-    entry = lstatSync(path);
-  } catch (error) {
-    if (isErrno(error, "ENOENT")) return undefined;
-    throw error;
-  }
-  if (!entry.isFile() || entry.isSymbolicLink()) throw invalidTokenEntry(path, entry);
-
-  // An exclusive creator can win after the first open reports ENOENT. Admit
-  // that one winner exactly once; a second race is surfaced rather than spun.
-  try {
-    return openSync(path, flags);
-  } catch (error) {
-    if (isErrno(error, "ELOOP")) {
-      throw new Error(`Token file ${path} is a symbolic link; rotate it explicitly to replace it.`);
-    }
-    throw error;
+    const stats = fstatSync(descriptor);
+    if (!stats.isFile()) throw new Error(`Token file ${path} is not a regular file.`);
+    if ((stats.mode & 0o077) !== 0) throw new Error(`Token file ${path} must be readable only by its owner (mode 0600).`);
+    const token = TOKEN_FILE.exec(readFileSync(descriptor, "ascii"))?.[1];
+    if (!token) throw new Error(`Token file ${path} is malformed; delete it and restart ghostd.`);
+    return token;
+  } finally {
+    closeSync(descriptor);
   }
 }
 
 /**
- * The same descriptor-identity rule as `sameFileIdentity` in `private-file.ts`,
- * spelled out rather than imported: the concurrency tests load this module raw
- * in Node (`node --eval` + `import "…/token-store.ts"`), which cannot resolve a
- * sibling `.js` specifier, so this file imports nothing but `node:` builtins.
+ * The token, minted when missing. A complete file is published with `link`,
+ * which fails when another process published first; that one's token wins.
  */
-function sameTokenFileState(left: BigIntStats, right: BigIntStats): boolean {
-  return right.isFile()
-    && !right.isSymbolicLink()
-    && left.dev === right.dev
-    && left.ino === right.ino
-    && left.size === right.size
-    && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
-    && left.nlink === right.nlink
-    && left.mode === right.mode;
-}
-
-function readToken(path: string): string | undefined {
-  if (!validateTokenDirectory(path)) return undefined;
-  let descriptor: number | undefined;
+export function ensureApiToken(path: string): { token: string; created: boolean } {
+  const existing = readApiToken(path);
+  if (existing) return { token: existing, created: false };
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const token = randomBytes(32).toString("hex");
+  writeFileSync(temporary, `${token}\n`, { mode: 0o600, flag: "wx" });
   try {
-    descriptor = openToken(path);
+    linkSync(temporary, path);
+    return { token, created: true };
   } catch (error) {
-    // Exclusive creation publishes an empty inode before its owner can correct
-    // a restrictive inherited umask. Retry only that bounded, lstat-proven
-    // short single-link regular file; never soften unsafe entry rejection.
-    if ((isErrno(error, "EACCES") || isErrno(error, "EPERM"))
-      && isIncompletePublishedToken(path)) {
-      throw new IncompleteTokenError(path);
-    }
-    throw error;
-  }
-  if (descriptor === undefined) return undefined;
-  let bytes: Buffer;
-  try {
-    const before = fstatSync(descriptor, { bigint: true });
-    if (!before.isFile() || before.nlink !== 1n) {
-      throw new Error(`Token file ${path} must be a single-link regular file.`);
-    }
-    if (before.size < BigInt(TOKEN_FILE_BYTES)) throw new IncompleteTokenError(path);
-    if ((before.mode & 0o777n) !== 0o600n) {
-      throw new Error(`Token file ${path} must have mode 0600.`);
-    }
-    if (before.size > BigInt(TOKEN_FILE_BYTES)) throw malformedToken(path);
-
-    bytes = Buffer.alloc(TOKEN_FILE_BYTES + 1);
-    let length = 0;
-    while (length < bytes.length) {
-      const count = readSync(descriptor, bytes, length, bytes.length - length, length);
-      if (count === 0) break;
-      length += count;
-    }
-    const after = fstatSync(descriptor, { bigint: true });
-    let current: BigIntStats;
-    try {
-      current = lstatSync(path, { bigint: true });
-    } catch {
-      throw new Error(`Token file ${path} changed while it was read.`);
-    }
-    if (length !== TOKEN_FILE_BYTES
-      || !sameTokenFileState(before, after)
-      || !sameTokenFileState(after, current)) {
-      throw new Error(`Token file ${path} changed while it was read.`);
-    }
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    return { token: readApiToken(path) as string, created: false };
   } finally {
-    closeSync(descriptor);
+    unlinkSync(temporary);
   }
-  if (bytes[TOKEN_FILE_BYTES - 1] !== 0x0a) throw malformedToken(path);
-  const tokenBytes = bytes.subarray(0, TOKEN_FILE_BYTES - 1);
-  for (const byte of tokenBytes) {
-    const lowercaseHex = (byte >= 0x30 && byte <= 0x39) || (byte >= 0x61 && byte <= 0x66);
-    if (!lowercaseHex) throw malformedToken(path);
-  }
-  return tokenBytes.toString("utf8");
 }
 
-function createToken(path: string, token: string): void {
-  const descriptor = openSync(
-    path,
-    constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
-    0o600,
-  );
+/** `ghostd api-token [--quiet]`: print the token, minting it on first run. */
+export function apiTokenCommand(
+  argv: readonly string[],
+  options: { path?: string; stdout?: (text: string) => void; stderr?: (text: string) => void } = {},
+): number {
+  const write = options.stdout ?? ((text) => process.stdout.write(text));
+  const fail = options.stderr ?? ((text) => process.stderr.write(text));
+  const unknown = argv.find((arg) => arg !== "--quiet" && arg !== "-q");
+  if (unknown !== undefined) {
+    fail(`api-token: unknown option ${unknown}\n`);
+    return 2;
+  }
+  const path = options.path ?? apiTokenPath();
   try {
-    // A restrictive umask may clear creation bits. Set the exact mode through
-    // the inode we own before complete token bytes can become readable; no
-    // pathname metadata mutation may invalidate a concurrent reader afterward.
-    fchmodSync(descriptor, 0o600);
-    const bytes = Buffer.from(`${token}\n`, "ascii");
-    let offset = 0;
-    while (offset < bytes.length) {
-      const written = writeSync(
-        descriptor,
-        bytes,
-        offset,
-        bytes.length - offset,
-        offset,
-      );
-      if (written === 0) throw new Error(`Token file ${path} could not be written completely.`);
-      offset += written;
-    }
-    fsyncSync(descriptor);
-  } finally {
-    closeSync(descriptor);
+    const { token } = ensureApiToken(path);
+    write(argv.length > 0
+      ? `${token}\n`
+      : `${token}\n\nLocal API clients read this file directly; this printout is for debugging and scripts.\n`
+        + `Stored at ${path} (mode 0600). To replace it, delete the file and restart ghostd.\n`);
+    return 0;
+  } catch (error) {
+    fail(`api-token: ${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
   }
 }
-
-function replaceToken(path: string, token: string): void {
-  const temporary = `${path}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`;
-  try {
-    createToken(temporary, token);
-    renameSync(temporary, path);
-  } catch (cause) {
-    try {
-      unlinkSync(temporary);
-    } catch {
-      // Preserve the write/rename failure; a cleanup error is secondary.
-    }
-    throw cause;
-  }
-}
-
-export function createTokenStore(spec: TokenStoreSpec): TokenStore {
-  const defaultPath = (
-    env: NodeJS.ProcessEnv = process.env,
-    home: string = homedir(),
-  ): string => {
-    const explicit = env[spec.envVar]?.trim();
-    if (explicit) return explicit;
-    const xdg = env.XDG_STATE_HOME?.trim();
-    const base = xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "state");
-    return join(base, "ghost", spec.filename);
-  };
-
-  const resolvePath = (options: TokenStoreOptions): string => {
-    if (options.path) return options.path;
-    return defaultPath(options.env ?? process.env, options.home ?? homedir());
-  };
-
-  const read = (options: TokenStoreOptions = {}): string | undefined => {
-    const path = resolvePath(options);
-    return readToken(path);
-  };
-
-  /**
-   * Synchronous on purpose: it is read while building the server, and a race
-   * between two callers each writing a different token would silently unpair
-   * whatever was holding the old one.
-   */
-  const readOrCreate = (
-    options: TokenStoreOptions = {},
-  ): { token: string; path: string; created: boolean } => {
-    const path = resolvePath(options);
-    for (let attempt = 0; attempt < TOKEN_CREATE_ATTEMPTS; attempt += 1) {
-      let existing: string | undefined;
-      try {
-        existing = read({ ...options, path });
-      } catch (error) {
-        // `wx` publishes the inode before its one synchronous write completes.
-        // Only that bounded wrong-length state is retryable; a linked, replaced,
-        // wrong-mode, or exact-length malformed file remains an immediate error.
-        if (!(error instanceof IncompleteTokenError) || attempt === TOKEN_CREATE_ATTEMPTS - 1) {
-          throw error;
-        }
-        Atomics.wait(tokenCreateSleep, 0, 0, TOKEN_CREATE_RETRY_MS);
-        continue;
-      }
-      if (existing) return { token: existing, path, created: false };
-
-      ensureTokenDirectory(path);
-      const token = mintToken();
-      try {
-        createToken(path, token);
-        return { token, path, created: true };
-      } catch (error) {
-        if (isErrno(error, "EEXIST")) {
-          // Another daemon or CLI won the exclusive create. Loop so its token
-          // is returned; never overwrite it with the losing process's value.
-          Atomics.wait(tokenCreateSleep, 0, 0, TOKEN_CREATE_RETRY_MS);
-          continue;
-        }
-        throw error;
-      }
-    }
-    throw new Error(
-      `Token file ${path} did not settle after ${TOKEN_CREATE_ATTEMPTS} concurrent create attempts.`,
-    );
-  };
-
-  const rotate = (options: TokenStoreOptions = {}): { token: string; path: string } => {
-    const path = resolvePath(options);
-    ensureTokenDirectory(path);
-    const token = mintToken();
-    replaceToken(path, token);
-    return { token, path };
-  };
-
-  const command = (
-    argv: readonly string[] = [],
-    options: TokenCommandOptions = {},
-  ): number => {
-    const write = options.stdout ?? ((text) => process.stdout.write(text));
-    const fail = options.stderr ?? ((text) => process.stderr.write(text));
-    let rotating = false;
-    let quiet = false;
-    for (const arg of argv) {
-      if (arg === "--rotate") rotating = true;
-      else if (arg === "--quiet" || arg === "-q") quiet = true;
-      else {
-        fail(`${spec.command}: unknown option ${arg}\n`);
-        return 2;
-      }
-    }
-    try {
-      const { token, path } = rotating ? rotate(options) : readOrCreate(options);
-      if (quiet) {
-        write(`${token}\n`);
-        return 0;
-      }
-      write(
-        `${token}\n\n`
-        + `${spec.purpose}\n`
-        + `Stored at ${path} (mode 0600).${rotating ? " The previous token no longer works." : ""}\n`,
-      );
-      return 0;
-    } catch (error) {
-      fail(`${spec.command}: ${error instanceof Error ? error.message : String(error)}\n`);
-      return 1;
-    }
-  };
-
-  return { defaultPath, read, readOrCreate, rotate, command };
-}
-
-/** The HTTP API's bearer token. Local API clients read the file directly. */
-export const apiToken = createTokenStore({
-  filename: "api-token",
-  envVar: "GHOSTD_API_TOKEN_FILE",
-  command: "api-token",
-  purpose: "Local API clients read this file directly; this printout is for"
-    + " debugging and scripts.",
-});

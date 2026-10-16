@@ -95,6 +95,7 @@ It prints the daemon URL, `reachable yes`, `authenticated yes`, the token file
 path, the ghost count, and remote-access state. The bearer token is minted on
 first run at `~/.local/state/ghost/api-token` (mode 0600); the HUD and CLI read
 that file themselves, and `ghostd api-token` prints it for curl or debugging.
+To replace it, delete the file and `systemctl --user restart ghostd`.
 
 **Summon key.** Packaging deliberately never edits `~/.config/hypr` or
 `~/.config/omarchy`. To bind `SUPER+CTRL+G`, copy the snippet you need from
