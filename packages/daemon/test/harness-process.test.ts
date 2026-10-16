@@ -95,3 +95,32 @@ it.each(["inherit", "ignore"] as const)("kills the stopped leader's surviving pr
     rmSync(directory, { recursive: true, force: true });
   }
 }, 10_000);
+
+
+it("delivers newline-free stdout while the child is still running", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "ghost-harness-chunks-"));
+  const gate = join(directory, "received");
+  const script = join(directory, "child.cjs");
+  writeFileSync(script, `
+    const fs = require("node:fs");
+    process.stdout.write("start🐈");
+    const timer = setInterval(() => {
+      if (!fs.existsSync(${JSON.stringify(gate)})) return;
+      clearInterval(timer);
+      process.stdout.write("finish");
+    }, 5);
+  `);
+  let output = "";
+  try {
+    const result = await runHarness({
+      launch: { argv: [process.execPath, script] }, cwd: directory, env: process.env,
+      signal: AbortSignal.timeout(3000),
+      onStdout: (chunk) => {
+        output += chunk;
+        if (output.includes("start🐈")) writeFileSync(gate, "ready");
+      },
+    });
+    expect(result.code).toBe(0);
+    expect(output).toBe("start🐈finish");
+  } finally { rmSync(directory, { recursive: true, force: true }); }
+}, 10_000);

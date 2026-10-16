@@ -28,11 +28,10 @@ import {
   logPath,
   logState,
   listedLog,
-  latestRunResources,
   newConversationEntry,
   readLog,
   requireConversationId,
-  transcriptPage,
+  readTranscriptPage,
   unseenCommands,
   type AssistantPart,
   type LogEntry,
@@ -886,6 +885,7 @@ export class SessionHost {
   private async runOwnerCommand(ghost: Ghost, id: string, command: string, excluded: boolean, stream: AdmittedTurnOptions, signal: AbortSignal): Promise<void> {
     const toolId = `bash-${Date.now().toString(36)}`;
     stream.emit({ type: "tool_execution_start", id: toolId, toolName: "bash", arguments: { command }, cwd: this.ownerHome });
+    // Raw chunks avoid retaining a whole newline-free line before the tail limit.
     // The log keeps the last 100 KB; a chatty command is trimmed in batches,
     // and the card's summary is sent at most every 100 ms, not per line.
     let output = "";
@@ -898,10 +898,8 @@ export class SessionHost {
       launch: { argv: ["bash", "-c", command] },
       cwd: this.ownerHome,
       env: { ...this.env, ...conversationEnvironment(ghost.name, id) },
-      parse: (line) => [{ type: "text", block: "out", delta: `${line}\n` }],
-      onEvent: (event) => {
-        if (event.type !== "text") return;
-        output += event.delta;
+      onStdout: (chunk) => {
+        output += chunk;
         if (output.length > 200_000) output = output.slice(-100_000);
         update ??= setTimeout(sendUpdate, 100);
       },
@@ -1084,14 +1082,13 @@ export class SessionHost {
   ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(sessionId ?? "default");
-    const entries = (await readLog(ghostPaths(ghost.dir).sessionDir, id)) ?? [];
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
     const requestedOffset = clamp(options.offset, 0, Number.MAX_SAFE_INTEGER);
-    const { messages, total } = transcriptPage(entries, requestedOffset, limit);
+    const { messages, total, resources } = await readTranscriptPage(ghostPaths(ghost.dir).sessionDir, id, requestedOffset, limit);
     const offset = Math.min(requestedOffset, total);
     return {
       id,
-      resources: latestRunResources(entries),
+      resources,
       messages,
       total,
       truncated: offset > 0 || offset + messages.length < total,

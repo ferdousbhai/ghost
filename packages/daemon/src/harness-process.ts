@@ -25,14 +25,18 @@ export interface HarnessExit {
   readonly spawnError?: string;
 }
 
-export interface HarnessRunOptions {
+interface HarnessProcessOptions {
   readonly launch: HarnessLaunch;
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly parse: (line: string) => HarnessEvent[];
-  readonly onEvent: (event: HarnessEvent) => void;
   readonly signal: AbortSignal;
 }
+
+/** Harness protocols are JSONL; owner shell output is streamed as raw chunks. */
+export type HarnessRunOptions = HarnessProcessOptions & (
+  | { readonly parse: (line: string) => HarnessEvent[]; readonly onEvent: (event: HarnessEvent) => void; readonly onStdout?: never }
+  | { readonly onStdout: (chunk: string) => void; readonly parse?: never; readonly onEvent?: never }
+);
 
 /** Write the launch's files into the conversation directory. */
 export async function writeLaunchFiles(cwd: string, files: Readonly<Record<string, string>> | undefined): Promise<void> {
@@ -86,12 +90,13 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
 
     let pending = "";
     const feed = (line: string): void => {
-      if (settled || line.trim() === "") return;
+      if (settled || !options.parse || !options.onEvent || line.trim() === "") return;
       for (const event of options.parse(line)) options.onEvent(event);
     };
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", (chunk: string) => {
       if (settled) return;
+      if (options.onStdout) { options.onStdout(chunk); return; }
       pending += chunk;
       let newline = pending.indexOf("\n");
       while (newline >= 0) {

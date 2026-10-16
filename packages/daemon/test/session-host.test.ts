@@ -497,6 +497,16 @@ describe("owner commands and hooks", () => {
     expect(call?.prompt).toContain("printed-c1");
   });
 
+  it("bounds a newline-free owner command's output and preserves its actual trailing bytes", async () => {
+    const sessions = host({ harnesses: [harness([])] });
+    await turn(sessions, "!printf '%0600000d' 0; printf tail");
+    const entry = (await readLog(sessionDir(), "c1"))?.find((item) => item.type === "command");
+    if (entry?.type !== "command") throw new Error("Owner command was not logged.");
+    expect(entry.output).toHaveLength(100_000);
+    expect(entry.output.endsWith("tail")).toBe(true);
+    expect(entry.output).not.toContain("\n");
+  });
+
   it("stops a running `!command`", async () => {
     const sessions = host({ harnesses: [harness([])] });
     const events: TurnEvent[] = [];

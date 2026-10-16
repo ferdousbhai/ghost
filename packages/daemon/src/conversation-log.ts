@@ -103,7 +103,19 @@ export async function appendLog(sessionDir: string, id: string, entries: readonl
   if (entries.length === 0) return;
   await mkdir(conversationDir(sessionDir, id), { recursive: true, mode: 0o700 });
   const lines = entries.map((entry) => `${JSON.stringify(boundedEntry(entry))}\n`).join("");
-  await appendFile(logPath(sessionDir, id), lines, { mode: 0o600 });
+  const path = logPath(sessionDir, id);
+  const indexed = logIndexes.get(path);
+  const before = indexed ? await stat(path).catch(() => null) : null;
+  await appendFile(path, lines, { mode: 0o600 });
+  if (indexed && before) {
+    const after = await stat(path).catch(() => null);
+    const expected = indexed.appended?.to ?? indexed.info;
+    if (after && sameSnapshot(before, expected) && sameFile(before, after) && after.size === before.size + Buffer.byteLength(lines)) {
+      indexed.appended = { from: indexed.appended?.from ?? before, to: after };
+    } else {
+      logIndexes.delete(path);
+    }
+  }
 }
 
 /** Every well-formed entry; a torn last line from a crash is skipped. */
@@ -193,7 +205,7 @@ export function derivedTitle(text: string): string | null {
   return title.charAt(0).toUpperCase() + title.slice(1);
 }
 
-export function logState(entries: readonly LogEntry[]): LogState {
+function logStateAccumulator() {
   let title: string | null = null;
   let preview: string | null = null;
   let derived: string | null = null;
@@ -205,7 +217,7 @@ export function logState(entries: readonly LogEntry[]): LogState {
   let harnessStarted = false;
   let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   let activeAt: string | null = null;
-  for (const entry of entries) {
+  const append = (entry: LogEntry) => {
     if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources") activeAt = entry.at;
     switch (entry.type) {
       case "title":
@@ -251,8 +263,14 @@ export function logState(entries: readonly LogEntry[]): LogState {
       default:
         break;
     }
-  }
-  return { title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt };
+  };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
+}
+
+export function logState(entries: readonly LogEntry[]): LogState {
+  const state = logStateAccumulator();
+  for (const entry of entries) state.append(entry);
+  return state.value();
 }
 
 export interface TranscriptMessage {
@@ -277,8 +295,7 @@ export function transcriptPage(entries: readonly LogEntry[], offset = 0, limit =
   const messages: TranscriptMessage[] = [];
   let total = 0;
   entries.forEach((entry, index) => {
-    const count = entry.type === "command" ? (entry.excluded ? 0 : 2)
-      : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" ? 1 : 0;
+    const count = messageCount(entry);
     const first = total;
     total += count;
     if (count === 0 || first >= offset + limit || total <= offset) return;
@@ -356,30 +373,195 @@ export function unseenCommands(entries: readonly LogEntry[]): string | null {
   return commands.length > 0 ? commands.join("\n\n") : null;
 }
 
-const listedLogs = new BoundedCache<string, { size: number; mtimeMs: number; ctimeMs: number; ino: number; dev: number; state: LogState }>();
+interface IndexedEntry {
+  start: number;
+  end: number;
+  ordinal: number;
+  first: number;
+  count: number;
+}
+interface LogIndex {
+  info: Stats;
+  ordinal: number;
+  total: number;
+  newlineEnded: boolean;
+  summary: ReturnType<typeof logStateAccumulator>;
+  resources: ReturnType<typeof resourceAccumulator>;
+  appended?: { from: Stats; to: Stats };
+}
+interface IndexedLogSnapshot {
+  info: Stats;
+  state: LogState;
+  total: number;
+  resources: RunResourceSnapshot | null;
+  entries: readonly IndexedEntry[] | undefined;
+  entryCount: number;
+}
+// Summaries remain cheap for long lists; only sixteen logs retain historical offsets.
+const logIndexes = new BoundedCache<string, LogIndex>();
+const offsetIndexes = new BoundedCache<string, { index: LogIndex; entries: IndexedEntry[] }>(16);
 
-/**
- * A log's state and last change, for listing conversations: its last entry
- * from the owner or the ghost, so an idle handoff neither reorders the list nor
- * marks it unread. Reparse only when the file identity or metadata changes.
- */
-export async function listedLog(sessionDir: string, id: string): Promise<{ state: LogState; updatedAt: string } | null> {
-  const file = logPath(sessionDir, id);
-  let info: Stats;
+function indexSnapshot(index: LogIndex, entries?: IndexedEntry[]): IndexedLogSnapshot {
+  return { info: index.info, state: index.summary.value(), total: index.total,
+    resources: index.resources.value(), entries, entryCount: entries?.length ?? 0 };
+}
+const indexing = new Map<string, Promise<IndexedLogSnapshot | null>>();
+
+function sameFile(a: Stats, b: Stats): boolean {
+  return a.ino === b.ino && a.dev === b.dev;
+}
+function sameSnapshot(a: Stats, b: Stats): boolean {
+  return sameFile(a, b) && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
+function messageCount(entry: LogEntry): number {
+  return entry.type === "command" ? (entry.excluded ? 0 : 2)
+    : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" ? 1 : 0;
+}
+function parseEntry(bytes: Buffer): LogEntry | null {
   try {
-    info = await stat(file);
+    const entry = JSON.parse(bytes.toString("utf8")) as LogEntry;
+    return entry && typeof entry === "object" && typeof entry.type === "string" ? entry : null;
   } catch {
-    listedLogs.delete(file);
     return null;
   }
-  let listed = listedLogs.get(file);
-  if (listed?.size !== info.size || listed.mtimeMs !== info.mtimeMs || listed.ctimeMs !== info.ctimeMs || listed.ino !== info.ino || listed.dev !== info.dev) {
-    const entries = await readLog(sessionDir, id);
-    if (!entries) return null;
-    listed = { size: info.size, mtimeMs: info.mtimeMs, ctimeMs: info.ctimeMs, ino: info.ino, dev: info.dev, state: logState(entries) };
-    listedLogs.set(file, listed);
+}
+
+async function scanIndex(file: FileHandle, index: LogIndex, from: number, entries?: IndexedEntry[]): Promise<void> {
+  const buffer = Buffer.alloc(64 * 1024);
+  let position = from;
+  let lineStart = from;
+  const empty = Buffer.alloc(0);
+  let tail = empty;
+  const accept = (bytes: Buffer, end: number) => {
+    const entry = parseEntry(bytes);
+    if (!entry) return;
+    const count = messageCount(entry);
+    if (count) entries?.push({ start: lineStart, end, ordinal: index.ordinal, first: index.total, count });
+    index.ordinal += 1;
+    index.total += count;
+    index.summary.append(entry);
+    index.resources.append(entry);
+  };
+  while (position < index.info.size) {
+    const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, index.info.size - position), position);
+    if (!bytesRead) break;
+    const chunk = buffer.subarray(0, bytesRead);
+    let start = 0;
+    for (;;) {
+      const newline = chunk.indexOf(10, start);
+      if (newline < 0) break;
+      const end = position + newline + 1;
+      const part = chunk.subarray(start, newline);
+      accept(tail.length ? Buffer.concat([tail, part]) : part, end);
+      tail = empty;
+      lineStart = end;
+      start = newline + 1;
+    }
+    if (start < bytesRead) tail = Buffer.concat([tail, chunk.subarray(start)]);
+    position += bytesRead;
   }
-  return { state: listed.state, updatedAt: listed.state.activeAt ?? info.mtime.toISOString() };
+  index.newlineEnded = lineStart === index.info.size;
+  if (tail.length) accept(tail, position);
+}
+
+async function updateIndex(path: string, needOffsets: boolean): Promise<IndexedLogSnapshot | null> {
+  let file: FileHandle;
+  try { file = await open(path, "r"); }
+  catch (error) {
+    logIndexes.delete(path);
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  try {
+    const info = await file.stat();
+    let index = logIndexes.get(path);
+    const cachedOffsets = offsetIndexes.get(path);
+    let entries = cachedOffsets && cachedOffsets.index === index ? cachedOffsets.entries : undefined;
+    if (index && sameSnapshot(index.info, info) && (!needOffsets || entries)) return indexSnapshot(index, entries);
+    const extend = index?.newlineEnded && index.appended && (!needOffsets || entries)
+      && sameSnapshot(index.info, index.appended.from) && sameSnapshot(info, index.appended.to);
+    const from = extend && index ? index.info.size : 0;
+    if (!extend || !index) {
+      index = { info, ordinal: 0, total: 0, newlineEnded: true,
+        summary: logStateAccumulator(), resources: resourceAccumulator() };
+      entries = [];
+    }
+    index.info = info;
+    index.appended = undefined;
+    try { await scanIndex(file, index, from, entries); }
+    catch (error) { logIndexes.delete(path); offsetIndexes.delete(path); throw error; }
+    logIndexes.set(path, index);
+    if (entries) offsetIndexes.set(path, { index, entries });
+    return indexSnapshot(index, entries);
+  } finally { await file.close(); }
+}
+
+function indexedLog(path: string, needOffsets = true): Promise<IndexedLogSnapshot | null> {
+  const pending = indexing.get(path);
+  if (pending) return pending.then((index) => needOffsets && index && !index.entries ? indexedLog(path, true) : index);
+  const work = updateIndex(path, needOffsets).finally(() => { indexing.delete(path); });
+  indexing.set(path, work);
+  return work;
+}
+
+/** Seek only the requested messages once the disposable index is current. */
+export async function readTranscriptPage(sessionDir: string, id: string, offset: number, limit: number): Promise<{
+  messages: TranscriptMessage[]; total: number; resources: RunResourceSnapshot | null;
+}> {
+  const path = logPath(sessionDir, id);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const index = await indexedLog(path);
+    if (!index) return { messages: [], total: 0, resources: null };
+    let file: FileHandle;
+    try { file = await open(path, "r"); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      logIndexes.delete(path);
+      continue;
+    }
+    try {
+      if (!sameSnapshot(index.info, await file.stat())) { logIndexes.delete(path); continue; }
+      const messages: TranscriptMessage[] = [];
+      const entries = index.entries ?? [];
+      let invalid = false;
+      let low = 0;
+      let high = index.entryCount;
+      while (low < high) {
+        const middle = Math.floor((low + high) / 2);
+        const entry = entries[middle] as IndexedEntry;
+        if (entry.first + entry.count <= offset) low = middle + 1;
+        else high = middle;
+      }
+      for (let n = low; n < index.entryCount; n++) {
+        const record = entries[n] as IndexedEntry;
+        if (record.first >= offset + limit) break;
+        const bytes = Buffer.alloc(record.end - record.start);
+        let read = 0;
+        while (read < bytes.length) {
+          const chunk = await file.read(bytes, read, bytes.length - read, record.start + read);
+          if (!chunk.bytesRead) break;
+          read += chunk.bytesRead;
+        }
+        const entry = parseEntry(bytes.subarray(0, read));
+        if (!entry) { invalid = true; break; }
+        const page = transcriptPage([entry], Math.max(0, offset - record.first), offset + limit - Math.max(offset, record.first));
+        messages.push(...page.messages.map((message) => ({ ...message, entryId: message.entryId.replace(/^e0/u, `e${record.ordinal}`) })));
+      }
+      if (invalid || !sameSnapshot(index.info, await file.stat())) { logIndexes.delete(path); continue; }
+      return { messages, total: index.total, resources: index.resources };
+    } finally { await file.close(); }
+  }
+  // A continuously changing external writer should not turn a read into an endless retry.
+  const entries = (await readLog(sessionDir, id)) ?? [];
+  return { ...transcriptPage(entries, offset, limit), resources: latestRunResources(entries) };
+}
+
+/** Summary/list reads and transcript pages share one disposable file index. */
+export async function listedLog(sessionDir: string, id: string): Promise<{ state: LogState; updatedAt: string } | null> {
+  const indexed = await indexedLog(logPath(sessionDir, id), false);
+  if (!indexed) return null;
+  const state = indexed.state;
+  return { state, updatedAt: state.activeAt ?? indexed.info.mtime.toISOString() };
 }
 
 /**
@@ -392,11 +574,11 @@ export function conversationEnvironment(ghostName: string, id: string): { GHOST:
 }
 
 /** Latest successful pass, including legacy snapshots written before the reply. */
-export function latestRunResources(entries: readonly LogEntry[]): RunResourceSnapshot | null {
+function resourceAccumulator() {
   let latest: RunResourceSnapshot | null = null;
   let pending: Extract<LogEntry, { type: "resources" }> | null = null;
-  let previous: LogEntry | undefined;
-  for (const entry of entries) {
+  let previous: Pick<Extract<LogEntry, { type: "assistant" | "handoff" }>, "type" | "harness" | "at" | "error"> | undefined;
+  const append = (entry: LogEntry) => {
     if (entry.type === "user" || entry.type === "harness") pending = null;
     if (entry.type === "resources") {
       const adjacent = (previous?.type === "assistant" || previous?.type === "handoff")
@@ -415,11 +597,21 @@ export function latestRunResources(entries: readonly LogEntry[]): RunResourceSna
         && Date.parse(pending.at) <= Date.parse(entry.at) ? pending : null;
       pending = null;
     }
-    previous = entry;
-  }
+    previous = entry.type === "assistant" || entry.type === "handoff"
+      ? { type: entry.type, harness: entry.harness, at: entry.at, error: entry.error } : undefined;
+  };
+  const value = (): RunResourceSnapshot | null => {
   if (!latest) return null;
   const { run, harness, at, resources, supplied } = latest;
   const snapshot = { run, harness, at, resources, ...(supplied ? { supplied } : {}), summary: "" };
   snapshot.summary = snapshotSummary(snapshot);
   return snapshot;
+  };
+  return { append, value };
+}
+
+export function latestRunResources(entries: readonly LogEntry[]): RunResourceSnapshot | null {
+  const resources = resourceAccumulator();
+  for (const entry of entries) resources.append(entry);
+  return resources.value();
 }
