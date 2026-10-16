@@ -66,19 +66,14 @@ through `render-arch-package.sh` and builds both packages from it with
 do not exist yet), creates the annotated tag, and publishes the GitHub
 release carrying:
 
-- `install.sh`, which is what `https://ferdousbhai.com/ghost/install.sh`
-  redirects to;
 - `ghost-<version>.tar.gz`;
 - `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
 - `SHA256SUMS`.
 
-The installer itself is [`install.sh`](../../install.sh) at the repository
-root: on Omarchy it runs `omarchy-install-ai-ghost` when Omarchy ships it,
-and otherwise installs the `ghost` package from Omarchy's repository with
-`omarchy-pkg-add` and starts it for this login.
-[`test-installer.sh`](test-installer.sh), which the gate runs, checks its
-syntax and holds the docs and the release notes to one spelling of the
-public one-liner.
+Users install the `ghost` package from Omarchy's repository. The
+Install → AI → Ghost entry contributed to Omarchy is
+[`omarchy-install-ai-ghost`](../omarchy/bin/omarchy-install-ai-ghost);
+[`test-installer.sh`](test-installer.sh), which the gate runs, checks it.
 
 ## Omarchy's recipe
 

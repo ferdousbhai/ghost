@@ -30,10 +30,10 @@ Install and first conversation:
 [concepts](https://github.com/ferdousbhai/ghost/blob/master/docs/concepts.md);
 the stable boundaries are [CONTRACTS.md](CONTRACTS.md).
 
-Install from Omarchy's package repository with `omarchy pkg add ghost`, or
-use `curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash` to install
-and configure the daemon and desktop plugin. The Install → AI menu entry
-is tracked in [#54](https://github.com/ferdousbhai/ghost/issues/54).
+Install from Omarchy's package repository with `omarchy pkg add ghost`, then
+start it for this login ([getting started](docs/getting-started.md#3-confirm-setup)).
+The Install → AI menu entry, which does both, is tracked in
+[#54](https://github.com/ferdousbhai/ghost/issues/54).
 
 An app can bring its own UI: `ghost-runtime` installs the daemon/API, CLI, and
 desktop/browser automation without the HUD (`packaging/arch/README.md`,

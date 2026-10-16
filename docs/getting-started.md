@@ -20,20 +20,18 @@ of — this page.
 ## 1. Install the package
 
 Open the Omarchy menu, then **Install → AI → Ghost**. Until that entry ships
-([#54](https://github.com/ferdousbhai/ghost/issues/54)), one line installs the
-`ghost` package from Omarchy's repository and starts it for this login, and
-`omarchy update` keeps it current:
+([#54](https://github.com/ferdousbhai/ghost/issues/54)), install the `ghost`
+package from Omarchy's repository; `omarchy update` keeps it current:
 
 ```sh
-curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash
+omarchy pkg add ghost
 ```
 
 For checkout development, use the
 [rolling package recipe](../packaging/arch/README.md). Install matching runtime
 and UI packages together; a workspace build alone does not update the app.
 
-The installer configures this login. Installing the package directly only
-puts files in place; finish setup in section 3.
+The package only puts files in place; section 3 starts Ghost for this login.
 
 ### Product skills through Bash
 
@@ -75,10 +73,20 @@ still apply. See [runtime install and UI removal](../packaging/arch/README.md#ru
 
 ## 3. Confirm setup
 
-The one-line installer already starts the daemon and links/enables the HUD.
-If you installed the package directly, run that installer to finish setup;
-it waits for plugin discovery before enabling it. Runtime-only installs need
-just `systemctl --user enable --now ghostd.service`.
+The Install → AI → Ghost entry starts the daemon and links and enables the
+HUD. After `omarchy pkg add ghost`, do the same for this login:
+
+```sh
+systemctl --user enable --now ghostd.service
+mkdir -p ~/.config/omarchy/plugins
+ln -sfnT /usr/share/ghost/plugin ~/.config/omarchy/plugins/ferdousbhai.ghost
+omarchy-shell shell rescanPlugins
+omarchy plugin enable ferdousbhai.ghost
+```
+
+The rescan finishes in the background; if `omarchy plugin enable` doesn't
+find the plugin yet, run it again. Runtime-only installs need just the first
+line.
 
 `ghostd.service` is `PartOf=graphical-session.target`: it comes up with your
 compositor and dies with it, and binds `127.0.0.1:7717`. The HUD is not a unit

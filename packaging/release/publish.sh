@@ -95,9 +95,6 @@ GHOST_RELEASE_WORK_ROOT="$work" \
     "$out/ghost-runtime-$version-linux-any.tar.zst" \
     "$source_root" "$version" any "$commit" "$epoch"
 rm -rf -- "$work"
-# The installer is an artifact like the archives, and one that users pipe to
-# bash, so it is staged before the manifest is written and SHA256SUMS covers it.
-install -m 755 -- "$source_root/install.sh" "$out/install.sh"
 bash "$script_root/write-sha256sums.sh" "$out"
 
 source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
@@ -125,16 +122,13 @@ if (( dry_run )); then
   exit 0
 fi
 
-# install.sh ships with the release because ferdousbhai.com/ghost/install.sh
-# redirects to the latest one.
 git tag -a "$tag" -m "ghost $version" "$commit"
 git push origin "$tag"
 gh release create "$tag" \
   --repo "$repository" \
   --title "ghost $version" \
-  --notes "Install on Omarchy: \`curl -fsSL https://ferdousbhai.com/ghost/install.sh | bash\` installs the \`ghost\` package from Omarchy's repository. Also the source and runtime inputs Omarchy builds that package from. If you installed Ghost with the one-liner before Omarchy shipped it and \`omarchy update\` now fails on ghost.db, run the one-liner once more: it removes the old [ghost] repository." \
+  --notes "Install on Omarchy: \`omarchy pkg add ghost\`, from Omarchy's package repository. These are the source and runtime inputs Omarchy builds that package from." \
   -- \
-  "$out/install.sh" \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
   "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
