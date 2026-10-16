@@ -1156,7 +1156,10 @@ Singleton {
     function setTurnRow(state: var, index: int, propertyName: string, value: var): void {
         if (index < 0 || index >= state.rows.length) return;
         state.rows[index] = Object.assign({}, state.rows[index], ({ [propertyName]: value }));
-        if (root.isActiveTurn(state)) transcriptModel.setProperty(index, propertyName, value);
+        // set(), not setProperty(): setProperty drops a list of calls into a
+        // nested-list role ("Can't create role for unsupported data type"),
+        // so a live row's tool cards never reached the view.
+        if (root.isActiveTurn(state)) transcriptModel.set(index, ({ [propertyName]: value }));
     }
 
     function replaceTurnRows(state: var, rows: var): void {

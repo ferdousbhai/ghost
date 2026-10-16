@@ -319,6 +319,26 @@ TestCase {
         compare(turn.state.rows[2].toolActivity.length, 0);
     }
 
+    // The view reads the transcript model, not the turn state: a live row's
+    // calls have to land there too, the failed one still failed.
+    function test_liveCallsReachTheTranscriptModel(): void {
+        const turn = openTurn("tool-model", null);
+        Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 0, content: "Checking." });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c1", toolName: "bash", arguments: { command: "which x" }
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "tool_execution_end", id: "c1", isError: true });
+        Ghostd.handleTurnEvent(turn.state, {
+            type: "tool_execution_start", id: "c2", toolName: "Read", arguments: { file_path: "/b" }
+        });
+        Ghostd.handleTurnEvent(turn.state, { type: "text_end", contentIndex: 1, content: "Done." });
+
+        const calls = Ghostd.transcript.get(1).toolActivity;
+        compare(calls.count, 2);
+        compare(calls.get(0).status, "failed");
+        compare(calls.get(1).status, "complete");
+    }
+
     // Blank text between calls cuts nothing, as a restored transcript reads it.
     function test_blankTextBetweenCallsIsNoMessage(): void {
         const turn = openTurn("blank-between", null);

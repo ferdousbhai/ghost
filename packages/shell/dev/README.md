@@ -34,6 +34,7 @@ cd packages/shell
 # Terminal 1: two ghosts, owned temporary context, and canned streamed replies.
 node dev/mock-ghostd.mjs --port 17717
 # Shape a preview: --slow (30ms deltas), --tool-steps N,
+# --tool-error (the first tool call fails),
 # --fail (turn ends in an error), --omit-terminal (no terminal event),
 # --stall-stream (stream never settles),
 # --stop-hook S (a stop hook decides for S seconds after each reply),

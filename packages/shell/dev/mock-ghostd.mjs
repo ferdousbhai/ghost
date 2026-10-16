@@ -39,6 +39,8 @@ const HOST = "127.0.0.1";
 const SESSION_CWD = homedir();
 const DELTA_MS = flag("--slow") ? 30 : 12;
 const TOOL_STEPS = Math.max(1, Math.min(100, Number(opt("--tool-steps", "1")) || 1));
+/** The first tool call fails, as a nonzero exit does, so its card stays in the reading column. */
+const TOOL_ERROR = flag("--tool-error");
 /** Where a turn response is cut and resumed, as ghostd cuts at about 1 MB; smaller to exercise it. */
 const CUT_BYTES = Math.max(1, Number(opt("--cut-bytes", "1048576")) || 1_048_576);
 /** How long a session_stop hook decides after each reply; 0 runs none. */
@@ -481,9 +483,9 @@ const readBody = (req) =>
   });
 
 /** A finished tool call: the start/end pair the daemon brackets every call with. */
-function* toolCall(id, toolName, args, summary) {
+function* toolCall(id, toolName, args, summary, isError = false) {
   yield { type: "tool_execution_start", id, toolName, arguments: args, cwd: SESSION_CWD };
-  yield { type: "tool_execution_end", id, toolName, isError: false, summary };
+  yield { type: "tool_execution_end", id, toolName, isError, summary };
 }
 
 function* textBlock(contentIndex, text) {
@@ -526,7 +528,7 @@ function* script(name, prompt) {
   // (qml/services/TurnBlocks.js).
   yield* textBlock(contentIndex++, "Checking what I remember about that");
   // Tool calls take no content index; the daemon numbers text blocks only.
-  yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) }, "Note checked");
+  yield* toolCall("call_1", "Grep", { pattern: prompt.slice(0, 24) }, TOOL_ERROR ? "" : "Note checked", TOOL_ERROR);
   for (let step = 1; step < TOOL_STEPS; step++) {
     const toolName = step % 3 === 0 ? "Grep" : (step % 3 === 1 ? "Read" : "Glob");
     yield* toolCall(`call_long_${step}`, toolName,
