@@ -40,6 +40,8 @@ describe("shared hook policy", () => {
       { event: "before_prompt", count: 2 }, { event: "session_stop", count: 3 },
     ] });
     expect(hookStatus(commands).hooks[1]?.name).toBe("Named context");
+    // Public status names hooks; it never carries their commands.
+    for (const hook of hookStatus(commands).hooks) expect(Object.keys(hook).sort()).toEqual(["description", "event", "name"]);
     for (const invalid of [
       { hooks: { other: [] } },
       { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },
