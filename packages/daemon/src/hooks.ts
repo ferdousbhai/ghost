@@ -1,4 +1,3 @@
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
@@ -10,7 +9,7 @@ import {
   type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
   type GhostSessionStopResult,
 } from "./hook-policy.js";
-import { PIPE_DRAIN_MS } from "./harness-process.js";
+import { runHarness } from "./harness-process.js";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
 import { writePrivateJsonAtomic } from "./private-file.js";
@@ -38,160 +37,36 @@ function readCommandHooksDocument(path: string): unknown {
   }
 }
 
-function runCommandHook(
-  hook: CommandHook,
-  event: GhostHookEvent,
-): Promise<CommandResult> {
-  return new Promise((resolve) => {
-    if (event.signal.aborted) {
-      resolve({
-        exitCode: null,
-        stdout: "",
-        stderr: "",
-        aborted: true,
-        timedOut: false,
-        overflowed: false,
-        executionFailed: false,
-      });
-      return;
-    }
-    let child: ChildProcessWithoutNullStreams;
-    try {
-      child = spawn(hook.command, {
-        cwd: event.cwd,
-        env: process.env,
-        shell: "/bin/bash",
-        // A separate POSIX process group lets cancellation own the shell and
-        // every descendant which inherited its stdout/stderr pipes.
-        detached: true,
-        stdio: ["pipe", "pipe", "pipe"],
-      }) as ChildProcessWithoutNullStreams;
-    } catch {
-      resolve({
-        exitCode: null,
-        stdout: "",
-        stderr: "",
-        aborted: false,
-        timedOut: false,
-        overflowed: false,
-        executionFailed: true,
-      });
-      return;
-    }
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
-    let settled = false;
-    let timedOut = false;
-    let overflowed = false;
-    let aborted = false;
-    let executionFailed = false;
-    let stopping = false;
-    let killTimer: NodeJS.Timeout | undefined;
-    let drainTimer: NodeJS.Timeout | undefined;
-
-    const append = (chunks: Buffer[], chunk: Buffer, used: number): number => {
-      const remaining = Math.max(0, MAX_HOOK_OUTPUT_BYTES - used);
-      if (remaining > 0) chunks.push(chunk.subarray(0, remaining));
-      return used + chunk.length;
-    };
-    const signalTree = (signal: NodeJS.Signals) => {
-      try {
-        if (child.pid !== undefined) process.kill(-child.pid, signal);
-        else child.kill(signal);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-          try {
-            child.kill(signal);
-          } catch {
-            // The close/error event remains the authoritative drain boundary.
-          }
-        }
-      }
-    };
-
-    const finish = (exitCode: number | null) => {
-      if (settled) return;
-      settled = true;
-      if (stopping) signalTree("SIGKILL");
-      if (drainTimer) clearTimeout(drainTimer);
-      child.stdin.destroy();
-      child.stdout.destroy();
-      child.stderr.destroy();
-      clearTimeout(timer);
-      if (killTimer) clearTimeout(killTimer);
-      event.signal.removeEventListener("abort", onAbort);
-      resolve({
-        exitCode,
-        stdout: Buffer.concat(stdoutChunks).toString("utf8"),
-        stderr: Buffer.concat(stderrChunks).toString("utf8"),
-        aborted,
-        timedOut,
-        overflowed,
-        executionFailed,
-      });
-    };
-    const stop = () => {
-      if (stopping) return;
-      stopping = true;
-      signalTree("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!settled) signalTree("SIGKILL");
-      }, 2_000);
-      killTimer.unref();
-    };
-    const onAbort = () => {
-      aborted = true;
-      stop();
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stop();
-    }, hook.timeoutMs);
-    timer.unref();
-    event.signal.addEventListener("abort", onAbort, { once: true });
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      if (settled) return;
-      stdoutBytes = append(stdoutChunks, chunk, stdoutBytes);
-      if (stdoutBytes > MAX_HOOK_OUTPUT_BYTES) {
-        overflowed = true;
-        stop();
-      }
-    });
-    child.stderr.on("data", (chunk: Buffer) => {
-      if (settled) return;
-      stderrBytes = append(stderrChunks, chunk, stderrBytes);
-      if (stderrBytes > MAX_HOOK_OUTPUT_BYTES) {
-        overflowed = true;
-        stop();
-      }
-    });
-    child.on("error", () => {
-      executionFailed = true;
-      stderrChunks.length = 0;
-      finish(null);
-    });
-    // A descendant in its own session (`setsid job &`) keeps the pipes open
-    // past the hook and out of reach of stop(); the hook ends with its shell.
-    child.on("exit", (code) => {
-      if (settled) return;
-      drainTimer = setTimeout(() => finish(code), PIPE_DRAIN_MS);
-      drainTimer.unref();
-    });
-    child.on("close", (code) => finish(code));
-    child.stdin.on("error", () => {
-      // A hook may exit without reading stdin; its process exit still decides
-      // whether this is a block or a non-blocking failure.
-    });
-    try {
-      child.stdin.end(JSON.stringify({ ...event, signal: undefined }));
-    } catch {
-      executionFailed = true;
-      stop();
-    }
+/**
+ * One hook command in bash, as its own process group: the event as JSON on
+ * stdin, ended on abort, timeout, or more than 1 MB of stdout.
+ */
+async function runCommandHook(hook: CommandHook, event: GhostHookEvent): Promise<CommandResult> {
+  const timeout = AbortSignal.timeout(hook.timeoutMs);
+  const overflow = new AbortController();
+  let stdout = "";
+  let bytes = 0;
+  const exit = await runHarness({
+    launch: { argv: ["/bin/bash", "-c", hook.command] },
+    cwd: event.cwd,
+    env: process.env,
+    signal: AbortSignal.any([event.signal, timeout, overflow.signal]),
+    stdin: JSON.stringify({ ...event, signal: undefined }),
+    onStdout: (chunk) => {
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > MAX_HOOK_OUTPUT_BYTES) overflow.abort();
+      else stdout += chunk;
+    },
   });
+  return {
+    exitCode: exit.code,
+    stdout,
+    stderr: exit.stderr,
+    aborted: event.signal.aborted,
+    timedOut: timeout.aborted,
+    overflowed: overflow.signal.aborted,
+    executionFailed: exit.spawnError !== undefined,
+  };
 }
 
 export class GhostHookRunner {

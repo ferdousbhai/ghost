@@ -4,7 +4,8 @@
  * normalized events, and the whole group ended on abort. ghostd kills only
  * the group it spawned.
  */
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable, Writable } from "node:stream";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { HarnessEvent, HarnessLaunch } from "./harness-table.js";
@@ -30,6 +31,8 @@ interface HarnessProcessOptions {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly signal: AbortSignal;
+  /** Written to the process's stdin, which is then closed; omitted, stdin is /dev/null. */
+  readonly stdin?: string;
 }
 
 /** Harness protocols are JSONL; owner shell output is streamed as raw chunks. */
@@ -59,6 +62,7 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
       settled = true;
       if (options.signal.aborted) signalGroup("SIGKILL");
       if (drainTimer) clearTimeout(drainTimer);
+      child.stdin?.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
       options.signal.removeEventListener("abort", abort);
@@ -68,9 +72,12 @@ export function runHarness(options: HarnessRunOptions): Promise<HarnessExit> {
     const child = spawn(command, args, {
       cwd: options.cwd,
       env: { ...options.env, ...options.launch.env },
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: [options.stdin === undefined ? "ignore" : "pipe", "pipe", "pipe"],
       detached: true,
-    });
+    }) as ChildProcessByStdio<Writable | null, Readable, Readable>;
+    // A process may exit without reading its stdin; its exit still decides.
+    child.stdin?.on("error", () => {});
+    child.stdin?.end(options.stdin);
     let killTimer: NodeJS.Timeout | undefined;
     const signalGroup = (signal: NodeJS.Signals): void => {
       if (child.pid === undefined) return;

@@ -75,10 +75,11 @@ surface, not portable ghost data.
 There is no second hook mechanism. A ghost home carries no executable
 extension code; everything a hook does is a command in `hooks.json`.
 
-Each machine command runs in an owned process group. Abort, timeout, or the
-bounded 1 MiB stdout/stderr limit terminates the whole descendant tree (TERM,
-then KILL after the grace period) and drains its pipes before the lifecycle
-boundary returns. A hook ends with its own process: output still arriving 2 s
+Each machine command runs in an owned process group, the same way a harness
+does. Abort, timeout, or more than 1 MiB of stdout terminates the whole
+descendant tree (TERM, then KILL after 3 s) and drains its pipes before the
+lifecycle boundary returns; the last 8 KiB of stderr is kept for a block
+reason. A hook ends with its own process: output still arriving 2 s
 after it exits is dropped, so a descendant that left the group (`setsid job &`)
 and still holds the pipes cannot hold the daemon's hook promise open. Synchronous spawn failures, process-start
 errors, and unexpected command-runner rejection are generically logged and
