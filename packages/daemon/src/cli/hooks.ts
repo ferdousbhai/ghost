@@ -3,7 +3,7 @@ import { ArgsError, type ParsedCliArgs } from "./args.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
-type HookStatus = { active: boolean; total: number; hooks: Array<{ event: string; source: string; name: string; description: string }> };
+type HookStatus = { active: boolean; total: number; hooks: Array<{ event: string; name: string; description: string }> };
 
 /** `ghost hooks [status|show|set <file>]` over the daemon's `hooks.json`. */
 export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
@@ -29,7 +29,7 @@ export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
     if (action !== "status") return `${JSON.stringify(result, null, 2)}\n`;
     const status = result as HookStatus;
     return status.hooks.length > 0
-      ? `${table(status.hooks.map((hook) => [hook.event, hook.source, hook.name, hook.description]), ["EVENT", "SOURCE", "NAME", "DESCRIPTION"])}\n`
+      ? `${table(status.hooks.map((hook) => [hook.event, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
       : "No hooks configured.\n";
   });
   return 0;

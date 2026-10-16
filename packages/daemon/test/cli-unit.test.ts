@@ -253,6 +253,21 @@ describe("CLI API adaptation", () => {
     expect(response.stdout).toBe("off (Tailscale is not running)\n");
   });
 
+  it("ghost hooks status prints each hook's event, name, and description", async () => {
+    const fetch: CliFetch = async () => jsonResponse({
+      active: true,
+      total: 1,
+      events: [{ event: "session_stop", count: 1 }],
+      hooks: [{ event: "session_stop", name: "Review", description: "Reviews the pass." }],
+    });
+    const response = await runCli(["hooks"], { env: { GHOSTD_PORT: "7718" }, home: "/tmp/ghost-cli-unit", fetch });
+    expect(response.stdout.split("\n").map((line) => line.trim().split(/\s{2,}/))).toEqual([
+      ["EVENT", "NAME", "DESCRIPTION"],
+      ["session_stop", "Review", "Reviews the pass."],
+      [""],
+    ]);
+  });
+
   it("reports the running daemon's version, commit, and source root", async () => {
     const fetch: CliFetch = async (input) => {
       const path = new URL(input).pathname;
