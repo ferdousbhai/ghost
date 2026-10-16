@@ -10,8 +10,7 @@ import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
-import { readPinState } from "../src/pins.js";
-import { readReadState } from "../src/reads.js";
+import { readPins, readReads } from "../src/sidecars.js";
 import { SessionHost, type SessionHostOptions } from "../src/session-host.js";
 import type { TurnEvent } from "../src/turn-events.js";
 import { fakeHarness, onlyHarnesses, replies, type FakeHarness } from "./helpers/fake-harness.js";
@@ -747,13 +746,13 @@ describe("conversation metadata", () => {
       sessions.setPinned("casper", "c1", true),
       sessions.setPinned("casper", "c2", true),
     ]);
-    expect((await readPinState(sessionDir())).pinned.sort()).toEqual(["c1", "c2"]);
+    expect((await readPins(sessionDir())).sort()).toEqual(["c1", "c2"]);
 
     await Promise.all([
       sessions.markRead("casper", "c1"),
       sessions.markRead("casper", "c2"),
     ]);
-    expect(Object.keys((await readReadState(sessionDir())).reads).sort()).toEqual(["c1", "c2"]);
+    expect(Object.keys((await readReads(sessionDir()))).sort()).toEqual(["c1", "c2"]);
   });
 
   it("refuses metadata changes and conversation deletion while the ghost home is moving", async () => {

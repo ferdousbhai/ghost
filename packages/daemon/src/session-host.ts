@@ -58,8 +58,7 @@ import type { MCPServerConfig } from "./mcp-config-policy.js";
 import { expandMcpServerConfig } from "./mcp-catalog-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
-import { pinsPath, readPinState, writePins } from "./pins.js";
-import { readsPath, readReadState, writeReads } from "./reads.js";
+import { pinsPath, readPins, readReads, readsPath, writePins, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
 import {
@@ -966,8 +965,8 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const [ids, pins, reads] = await Promise.all([
       this.conversationIds(sessionDir),
-      readPinState(sessionDir),
-      readReadState(sessionDir),
+      readPins(sessionDir),
+      readReads(sessionDir),
     ]);
     const listed = await Promise.all(ids.map(async (id) => ({ id, log: await listedLog(sessionDir, id) })));
     const rows: SessionSummary[] = [];
@@ -977,7 +976,7 @@ export class SessionHost {
       // An owner command logs when it ends, so a running one is listed before anything is.
       const running = this.admissions.has(keyOf(ghost.name, id));
       if (state.messageCount === 0 && state.title === null && !running) continue;
-      const readAt = reads.reads[id];
+      const readAt = reads[id];
       rows.push({
         id,
         title: state.title,
@@ -988,7 +987,7 @@ export class SessionHost {
         effort: state.effort,
         updatedAt,
         messageCount: state.messageCount,
-        pinned: pins.pinned.includes(id),
+        pinned: pins.includes(id),
         unread: readAt === undefined || updatedAt > readAt,
         running,
       });
@@ -1011,7 +1010,7 @@ export class SessionHost {
       const { sessionDir } = ghostPaths(ghost.dir);
       await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
         const existing = new Set(await this.conversationIds(sessionDir));
-        const kept = (await readPinState(sessionDir)).pinned.filter((pin) => pin !== id && existing.has(pin));
+        const kept = (await readPins(sessionDir)).filter((pin) => pin !== id && existing.has(pin));
         await writePins(sessionDir, pinned ? [...kept, id] : kept);
       });
       this.announce(ghost.name, id);
@@ -1026,7 +1025,7 @@ export class SessionHost {
       const readAt = openedAt.toISOString();
       await serializeByKey(this.metadataWrites, readsPath(sessionDir), async () => {
         const existing = new Set(await this.conversationIds(sessionDir));
-        const kept = Object.fromEntries(Object.entries((await readReadState(sessionDir)).reads).filter(([read]) => existing.has(read)));
+        const kept = Object.fromEntries(Object.entries(await readReads(sessionDir)).filter(([read]) => existing.has(read)));
         await writeReads(sessionDir, { ...kept, [id]: readAt });
       });
       this.announce(ghost.name, id);
@@ -1107,7 +1106,7 @@ export class SessionHost {
         const { sessionDir } = ghostPaths(ghost.dir);
         await trashPath(conversationDir(sessionDir, id), this.trashEnv());
         await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
-          const pins = (await readPinState(sessionDir)).pinned;
+          const pins = await readPins(sessionDir);
           if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
         });
         this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
