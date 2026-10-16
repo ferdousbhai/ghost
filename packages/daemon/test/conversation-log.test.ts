@@ -126,10 +126,12 @@ describe("indexed conversation reads", () => {
     }
   });
 
-  it("rebuilds for truncation, replacement and external growing rewrites", async () => {
+  it("rebuilds for truncation and replacement", async () => {
     const root = await scratch();
     const path = logPath(root, "s");
-    for (const entries of [[user("first")], [user("entirely different and longer"), user("second")], []]) {
+    // An in-place rewrite that grows the file reads as an append: ghostd is
+    // the log's only writer, and it only appends.
+    for (const entries of [[user("entirely different and longer"), user("second")], [user("first")], []]) {
       await writeFile(path, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n");
       expect(await readTranscriptPage(root, "s", 0, 10)).toEqual({ ...transcriptPage(entries), resources: null });
       expect((await listedLog(root, "s"))?.state).toEqual(logState(entries));

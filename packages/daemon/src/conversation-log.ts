@@ -6,7 +6,7 @@
  * own transcript for resume; this log is what the HUD, `ghost show`, and a
  * harness switch read, so it is the one history that outlives any harness.
  */
-import { appendFile, mkdir, open, stat, type FileHandle } from "node:fs/promises";
+import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
@@ -103,19 +103,7 @@ export async function appendLog(sessionDir: string, id: string, entries: readonl
   if (entries.length === 0) return;
   await mkdir(conversationDir(sessionDir, id), { recursive: true, mode: 0o700 });
   const lines = entries.map((entry) => `${JSON.stringify(boundedEntry(entry))}\n`).join("");
-  const path = logPath(sessionDir, id);
-  const indexed = logIndexes.get(path);
-  const before = indexed ? await stat(path).catch(() => null) : null;
-  await appendFile(path, lines, { mode: 0o600 });
-  if (indexed && before) {
-    const after = await stat(path).catch(() => null);
-    const expected = indexed.appended?.to ?? indexed.info;
-    if (after && sameSnapshot(before, expected) && sameFile(before, after) && after.size === before.size + Buffer.byteLength(lines)) {
-      indexed.appended = { from: indexed.appended?.from ?? before, to: after };
-    } else {
-      logIndexes.delete(path);
-    }
-  }
+  await appendFile(logPath(sessionDir, id), lines, { mode: 0o600 });
 }
 
 /** Every well-formed entry; a torn last line from a crash is skipped. */
@@ -387,7 +375,6 @@ interface LogIndex {
   newlineEnded: boolean;
   summary: ReturnType<typeof logStateAccumulator>;
   resources: ReturnType<typeof resourceAccumulator>;
-  appended?: { from: Stats; to: Stats };
 }
 interface IndexedLogSnapshot {
   info: Stats;
@@ -409,9 +396,6 @@ const indexing = new Map<string, Promise<IndexedLogSnapshot | null>>();
 
 function sameFile(a: Stats, b: Stats): boolean {
   return a.ino === b.ino && a.dev === b.dev;
-}
-function sameSnapshot(a: Stats, b: Stats): boolean {
-  return sameFile(a, b) && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
 }
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
@@ -477,9 +461,11 @@ async function updateIndex(path: string, needOffsets: boolean): Promise<IndexedL
     let index = logIndexes.get(path);
     const cachedOffsets = offsetIndexes.get(path);
     let entries = cachedOffsets && cachedOffsets.index === index ? cachedOffsets.entries : undefined;
-    if (index && sameSnapshot(index.info, info) && (!needOffsets || entries)) return indexSnapshot(index, entries);
-    const extend = index?.newlineEnded && index.appended && (!needOffsets || entries)
-      && sameSnapshot(index.info, index.appended.from) && sameSnapshot(info, index.appended.to);
+    // ghostd only ever appends, so the same file grown past a whole last
+    // line is read from where the index stopped; anything else is reindexed.
+    const extend = index !== undefined && sameFile(index.info, info) && info.size >= index.info.size
+      && index.newlineEnded && (!needOffsets || entries !== undefined);
+    if (extend && index && info.size === index.info.size) return indexSnapshot(index, entries);
     const from = extend && index ? index.info.size : 0;
     if (!extend || !index) {
       index = { info, ordinal: 0, total: 0, newlineEnded: true,
@@ -487,7 +473,6 @@ async function updateIndex(path: string, needOffsets: boolean): Promise<IndexedL
       entries = [];
     }
     index.info = info;
-    index.appended = undefined;
     try { await scanIndex(file, index, from, entries); }
     catch (error) { logIndexes.delete(path); offsetIndexes.delete(path); throw error; }
     logIndexes.set(path, index);
@@ -509,51 +494,42 @@ export async function readTranscriptPage(sessionDir: string, id: string, offset:
   messages: TranscriptMessage[]; total: number; resources: RunResourceSnapshot | null;
 }> {
   const path = logPath(sessionDir, id);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const index = await indexedLog(path);
-    if (!index) return { messages: [], total: 0, resources: null };
-    let file: FileHandle;
-    try { file = await open(path, "r"); }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      logIndexes.delete(path);
-      continue;
-    }
-    try {
-      if (!sameSnapshot(index.info, await file.stat())) { logIndexes.delete(path); continue; }
-      const messages: TranscriptMessage[] = [];
-      const entries = index.entries ?? [];
-      let invalid = false;
-      let low = 0;
-      let high = index.entryCount;
-      while (low < high) {
-        const middle = Math.floor((low + high) / 2);
-        const entry = entries[middle] as IndexedEntry;
-        if (entry.first + entry.count <= offset) low = middle + 1;
-        else high = middle;
-      }
-      for (let n = low; n < index.entryCount; n++) {
-        const record = entries[n] as IndexedEntry;
-        if (record.first >= offset + limit) break;
-        const bytes = Buffer.alloc(record.end - record.start);
-        let read = 0;
-        while (read < bytes.length) {
-          const chunk = await file.read(bytes, read, bytes.length - read, record.start + read);
-          if (!chunk.bytesRead) break;
-          read += chunk.bytesRead;
-        }
-        const entry = parseEntry(bytes.subarray(0, read));
-        if (!entry) { invalid = true; break; }
-        const page = transcriptPage([entry], Math.max(0, offset - record.first), offset + limit - Math.max(offset, record.first));
-        messages.push(...page.messages.map((message) => ({ ...message, entryId: message.entryId.replace(/^e0/u, `e${record.ordinal}`) })));
-      }
-      if (invalid || !sameSnapshot(index.info, await file.stat())) { logIndexes.delete(path); continue; }
-      return { messages, total: index.total, resources: index.resources };
-    } finally { await file.close(); }
+  const index = await indexedLog(path);
+  if (!index) return { messages: [], total: 0, resources: null };
+  // Indexed records stay where they are while the log grows, so a page reads
+  // them in place; a log trashed since it was indexed reads as empty.
+  let file: FileHandle;
+  try {
+    file = await open(path, "r");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { messages: [], total: 0, resources: null };
+    throw error;
   }
-  // A continuously changing external writer should not turn a read into an endless retry.
-  const entries = (await readLog(sessionDir, id)) ?? [];
-  return { ...transcriptPage(entries, offset, limit), resources: latestRunResources(entries) };
+  try {
+    const messages: TranscriptMessage[] = [];
+    const entries = index.entries ?? [];
+    let low = 0;
+    let high = index.entryCount;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      const entry = entries[middle] as IndexedEntry;
+      if (entry.first + entry.count <= offset) low = middle + 1;
+      else high = middle;
+    }
+    for (let n = low; n < index.entryCount; n++) {
+      const record = entries[n] as IndexedEntry;
+      if (record.first >= offset + limit) break;
+      const bytes = Buffer.alloc(record.end - record.start);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, record.start);
+      const entry = parseEntry(bytes.subarray(0, bytesRead));
+      if (!entry) continue;
+      const page = transcriptPage([entry], Math.max(0, offset - record.first), offset + limit - Math.max(offset, record.first));
+      messages.push(...page.messages.map((message) => ({ ...message, entryId: message.entryId.replace(/^e0/u, `e${record.ordinal}`) })));
+    }
+    return { messages, total: index.total, resources: index.resources };
+  } finally {
+    await file.close();
+  }
 }
 
 /** Summary/list reads and transcript pages share one disposable file index. */

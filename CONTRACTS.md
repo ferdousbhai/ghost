@@ -135,7 +135,9 @@ object per line — the conversation header, owner and follow-up and hook
 messages, the assistant's text and tool calls (a failed call marked
 `failed`, a failed turn carrying `error`), the owner's `!` commands, title
 records, `harness` records naming the harness that took over and the
-session id it reported, per-run `resources` records, and historical `handoff` records. A torn last line is skipped. The log is the history
+session id it reported, per-run `resources` records, and historical `handoff` records. A torn last line is skipped. ghostd is the log's
+only writer and only appends; an in-place edit by anything else is unsupported.
+The log is the history
 every client reads; each harness's own transcript is its resume state, never
 imported as conversation history. The display-only session metadata inspection
 below is the one exception to reading it. A conversation is listed once a message lands or the owner
