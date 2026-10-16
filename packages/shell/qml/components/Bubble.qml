@@ -253,20 +253,6 @@ Item {
             anchors.margins: root.contentInset
             spacing: Theme.gap / 2
 
-            Repeater {
-                id: activityCards
-                // A zero-item Repeater is still a Column child of height 0,
-                // and Column still puts spacing around it — a phantom gap
-                // above every prompt that has no tool cards.
-                visible: activityCards.count > 0
-                model: root.shownActivities
-                delegate: ToolCard {
-                    required property var modelData
-                    width: content.width
-                    activity: modelData
-                }
-            }
-
             // The images a prompt carried, each opening full size on click.
             Flow {
                 id: pictures
@@ -460,6 +446,22 @@ Item {
                             onClicked: root.toolsOpen = !root.toolsOpen
                         }
                     }
+                }
+            }
+
+            Repeater {
+                id: activityCards
+                // A row's text comes before its calls (text after a call
+                // opens the next row), so the cards follow the text.
+                // A zero-item Repeater is still a Column child of height 0,
+                // and Column still puts spacing around it — a phantom gap
+                // above every prompt that has no tool cards.
+                visible: activityCards.count > 0
+                model: root.shownActivities
+                delegate: ToolCard {
+                    required property var modelData
+                    width: content.width
+                    activity: modelData
                 }
             }
 
