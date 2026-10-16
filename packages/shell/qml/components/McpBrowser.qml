@@ -1,9 +1,7 @@
 pragma ComponentBehavior: Bound
 
-// Manage the active ghost's visible mcp.json servers. The catalog is intentionally
-// sanitized: credentials are described only as configured key names/counts.
-// Editing is a full replacement, so any hidden values must be re-entered and
-// explicitly acknowledged before the UI will send the new JSON.
+// Manage the active ghost's mcp.json servers. Editing replaces a server's
+// whole configuration, starting from the stored JSON.
 import QtQuick
 import QtQuick.Layouts
 import "../services"
@@ -20,7 +18,6 @@ Rectangle {
     property string editorType: "stdio"
     property string editorJson: ""
     property string editorError: ""
-    property bool hiddenValuesAcknowledged: false
     property string pendingDeleteName: ""
 
     readonly property var servers: Array.isArray(Ghostd.mcpServers)
@@ -28,8 +25,6 @@ Rectangle {
     readonly property var filteredServers: McpConfig.filtered(root.servers, root.searchText)
     readonly property var selectedServer: root.findServer(root.selectedName)
     readonly property bool selectedDisabled: !!root.selectedServer && root.selectedServer.enabled === false
-    readonly property bool editingHiddenValues: !root.adding && root.selectedServer
-        && McpConfig.hasHiddenValues(root.selectedServer)
 
     implicitWidth: Theme.pad * 50
     implicitHeight: Theme.pad * 34
@@ -55,7 +50,6 @@ Rectangle {
         root.editorType = "stdio";
         root.editorJson = McpConfig.template(null, root.editorType);
         root.editorError = "";
-        root.hiddenValuesAcknowledged = false;
     }
 
     function beginEdit(): void {
@@ -66,14 +60,12 @@ Rectangle {
         root.editorType = McpConfig.transport(root.selectedServer);
         root.editorJson = McpConfig.template(root.selectedServer, root.editorType);
         root.editorError = "";
-        root.hiddenValuesAcknowledged = false;
     }
 
     function cancelEdit(): void {
         if (Ghostd.mcpMutating) return;
         root.editorOpen = false;
         root.editorError = "";
-        root.hiddenValuesAcknowledged = false;
     }
 
     function selectTransport(type: string): void {
@@ -81,17 +73,12 @@ Rectangle {
         root.editorType = type;
         root.editorJson = McpConfig.template(root.adding ? null : root.selectedServer, type);
         root.editorError = "";
-        root.hiddenValuesAcknowledged = false;
     }
 
     function save(): void {
         const name = root.editorName.trim();
         if (name === "") {
             root.editorError = "Give the server a name.";
-            return;
-        }
-        if (root.editingHiddenValues && !root.hiddenValuesAcknowledged) {
-            root.editorError = "Confirm that every hidden value has been re-entered.";
             return;
         }
         const parsed = McpConfig.parse(root.editorJson, root.editorType);
@@ -455,32 +442,6 @@ Rectangle {
                                 }
                             }
 
-                            Rectangle {
-                                width: parent.width
-                                height: hiddenDetail.implicitHeight + Theme.pad
-                                visible: root.selectedServer
-                                    && McpConfig.hasHiddenValues(root.selectedServer)
-                                radius: Theme.radius
-                                color: Theme.amber(0.07)
-                                border.width: 1
-                                border.color: Theme.amber(0.16)
-
-                                Text {
-                                    id: hiddenDetail
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: Theme.pad / 2
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: Theme.pad / 2
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "Configured but hidden: " + McpConfig.hiddenParts(root.selectedServer).join(" · ")
-                                        + ". Values never leave the daemon."
-                                    color: Theme.foregroundDim
-                                    font.family: Theme.fontFamily
-                                    font.pixelSize: Theme.fontSizeSmall
-                                    wrapMode: Text.WordWrap
-                                }
-                            }
-
                             Column {
                                 width: parent.width
                                 visible: Ghostd.mcpSkipped.length > 0
@@ -523,8 +484,8 @@ Rectangle {
                             Text {
                                 width: parent.width
                                 text: root.adding
-                                    ? "Paste the complete MCP configuration. Secret values are sent only when you save."
-                                    : "GET never returns credentials. This editor starts from safe fields only and replaces the complete configuration."
+                                    ? "Paste the complete MCP configuration."
+                                    : "Saving replaces the complete configuration."
                                 color: Theme.foregroundDim
                                 font.family: Theme.fontFamily
                                 font.pixelSize: Theme.fontSizeSmall
@@ -623,55 +584,6 @@ Rectangle {
                                         wrapMode: TextEdit.WrapAnywhere
                                         selectByMouse: true
                                     }
-                                }
-                            }
-
-                            Rectangle {
-                                width: parent.width
-                                height: acknowledgeText.implicitHeight + Theme.pad
-                                visible: root.editingHiddenValues
-                                radius: Theme.radius
-                                color: Theme.amber(0.07)
-                                border.width: 1
-                                border.color: Theme.amber(0.18)
-
-                                Row {
-                                    anchors.left: parent.left
-                                    anchors.leftMargin: Theme.pad / 2
-                                    anchors.right: parent.right
-                                    anchors.rightMargin: Theme.pad / 2
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    spacing: Theme.gap
-
-                                    Rectangle {
-                                        width: 18; height: 18; radius: 3
-                                        color: root.hiddenValuesAcknowledged
-                                            ? Theme.amber(0.22) : Theme.film(0.05)
-                                        border.width: 1
-                                        border.color: root.hiddenValuesAcknowledged
-                                            ? Theme.ghostAmber : Theme.border
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: root.hiddenValuesAcknowledged ? "✓" : ""
-                                            color: Theme.ghostAmberBright
-                                            font.pixelSize: Theme.fontSizeSmall
-                                        }
-                                    }
-                                    Text {
-                                        id: acknowledgeText
-                                        width: parent.width - 18 - parent.spacing
-                                        text: "I re-entered every hidden argument, environment value, header, URL query value, and credential this server needs."
-                                        color: Theme.foreground
-                                        font.family: Theme.fontFamily
-                                        font.pixelSize: Theme.fontSizeSmall
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    enabled: !Ghostd.mcpMutating
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: root.hiddenValuesAcknowledged = !root.hiddenValuesAcknowledged
                                 }
                             }
 

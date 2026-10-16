@@ -9,13 +9,11 @@ import {
   readPrivateFileText,
 } from "./private-file.js";
 
-import { sanitizeMcpServerConfig } from "./mcp-catalog-policy.js";
-import type { McpServerConfigView } from "./mcp-catalog-policy.js";
 export interface McpServerView {
   name: string;
   enabled: boolean;
   path: "mcp.json";
-  config: McpServerConfigView;
+  config: MCPServerConfig;
 }
 
 export interface McpCatalogSkipped {
@@ -123,7 +121,7 @@ export function readEnabledMcp(home: string): McpServerRow[] {
 }
 
 /**
- * CRUD and sanitized discovery for the ghost's `mcp.json`. Every method
+ * CRUD and discovery for the ghost's `mcp.json`. Every method
  * expects the caller to hold the ghost home's identity lease.
  *
  * No method discovers MCP configuration outside the ghost home. That negative
@@ -157,7 +155,7 @@ export class McpCatalog {
     const { rows, skipped } = await this.read(ghostName);
     const servers: McpServerView[] = rows.filter((row) => row.errors.length === 0).map((row) => {
       const config = row.config as MCPServerConfig;
-      return { name: row.name, enabled: config.enabled !== false, path: MCP_FILE, config: sanitizeMcpServerConfig(config) };
+      return { name: row.name, enabled: config.enabled !== false, path: MCP_FILE, config };
     });
     servers.sort((left, right) => left.name.localeCompare(right.name));
     skipped.sort((left, right) => left.path.localeCompare(right.path));

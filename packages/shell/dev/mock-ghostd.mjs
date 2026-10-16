@@ -168,11 +168,7 @@ function publishConversationUpdated(name, id, updatedAt = new Date().toISOString
   }
 }
 
-// The mock stores only what ghostd's GET /mcp returns: each server's
-// sanitized view (sanitizeMcpServerConfig in the daemon's
-// mcp-catalog-policy.ts), with key names and counts but never argument,
-// environment, header, or URL-query values. The daemon's redaction is not
-// repeated here; a write keeps the minimal view `mcpView` derives.
+// The mock stores each server's configuration as ghostd's GET /mcp serves it.
 const mcpStore = new Map();
 
 function ghostMcp(name) {
@@ -183,34 +179,25 @@ function ghostMcp(name) {
         config: {
           type: "stdio",
           command: "npx",
+          args: ["-y", "@example/files-mcp", "/tmp/demo"],
           cwd: "/tmp/demo",
           envPolicy: "literal",
-          argumentCount: 3,
-          environment: { keys: ["MCP_DEMO_TOKEN"], configured: true },
+          env: { MCP_DEMO_TOKEN: "demo-token" },
         },
       }],
       ["project-api", {
         enabled: true,
         config: {
           type: "http",
-          url: "https://example.com/mcp?token=%5Bconfigured%5D",
+          url: "https://example.com/mcp?token=demo",
           headerPolicy: "origin-locked",
-          headers: { keys: ["Authorization"], configured: true },
+          headers: { Authorization: "Bearer demo" },
         },
       }],
       ["legacy-events", { enabled: false, config: { type: "sse", url: "https://example.com/events" } }],
     ]));
   }
   return mcpStore.get(name);
-}
-
-/** A written config as a minimal sanitized view: no value of it is kept. */
-function mcpView(config) {
-  const keys = (value) => (value && typeof value === "object"
-    ? { keys: Object.keys(value).sort(), configured: true } : undefined);
-  return config.type === "http" || config.type === "sse"
-    ? { type: config.type, url: config.url.replace(/[?#].*$/u, ""), headers: keys(config.headers) }
-    : { type: "stdio", command: config.command, argumentCount: config.args?.length ?? 0, environment: keys(config.env) };
 }
 
 function mcpSnapshot(name) {
@@ -978,7 +965,7 @@ const mockServer = createServer(async (req, res) => {
       });
     }
     // Like ghostd: a newly added server starts disabled unless the row says otherwise.
-    ghostMcp(name).set(serverName, { enabled: body.config.enabled === true, config: mcpView(body.config) });
+    ghostMcp(name).set(serverName, { enabled: body.config.enabled === true, config: body.config });
     return json(res, 201, mcpSnapshot(name));
   }
   if (parts[3] === "mcp" && parts.length >= 5) {
@@ -997,7 +984,7 @@ const mockServer = createServer(async (req, res) => {
         });
       }
       // Like ghostd: the written config replaces the row, `enabled` included.
-      servers.set(serverName, { enabled: body.config.enabled !== false, config: mcpView(body.config) });
+      servers.set(serverName, { enabled: body.config.enabled !== false, config: body.config });
       return json(res, 200, mcpSnapshot(name));
     }
     if (parts.length === 6 && parts[5] === "enabled" && req.method === "PUT") {

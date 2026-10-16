@@ -11,10 +11,10 @@ TestCase {
         config: {
             type: "stdio",
             command: "mcp-local",
-            argumentCount: 2,
-            environment: { keys: ["API_TOKEN"], configured: true },
+            args: ["--port", "9000"],
+            env: { API_TOKEN: "secret" },
             cwd: "packages/local-server",
-            envPolicy: "literal"
+            enabled: false
         }
     })
     readonly property var remoteServer: ({
@@ -22,40 +22,17 @@ TestCase {
         enabled: true,
         config: {
             type: "http",
-            url: "https://example.com/mcp?token=%5Bconfigured%5D",
-            headers: { keys: ["Authorization"], configured: true },
+            url: "https://example.com/mcp?token=abc",
+            headers: { Authorization: "Bearer abc" },
             headerPolicy: "origin-locked"
         }
     })
 
-    function test_detectsHiddenValues(): void {
-        verify(Mcp.hasHiddenValues(localServer));
-        verify(Mcp.hasHiddenValues(remoteServer));
-        compare(Mcp.configuredKeys(remoteServer.config.headers).join(","), "Authorization");
-    }
-
-    function test_hiddenPartsMatchHasHiddenValues(): void {
-        const plain = { config: { type: "http", url: "https://example.com/mcp" } };
-        verify(!Mcp.hasHiddenValues(plain));
-        compare(Mcp.hiddenParts(plain).length, 0);
-
-        compare(Mcp.hiddenParts(remoteServer).join(" · "),
-            "headers: Authorization · URL query values");
-    }
-
-    function test_replacementTemplateContainsOnlySafeFields(): void {
-        const local = JSON.parse(Mcp.template(localServer, "stdio"));
-        compare(local.command, "mcp-local");
-        compare(local.enabled, false);
-        compare(local.cwd, "packages/local-server");
-        compare(local.envPolicy, "literal");
-        verify(local.args === undefined);
-        verify(local.env === undefined);
-
-        const remote = JSON.parse(Mcp.template(remoteServer, "http"));
-        compare(remote.url, "https://example.com/mcp");
-        compare(remote.headerPolicy, "origin-locked");
-        verify(remote.headers === undefined);
+    function test_editingStartsFromTheStoredConfiguration(): void {
+        compare(JSON.parse(Mcp.template(localServer, "stdio")), localServer.config);
+        compare(JSON.parse(Mcp.template(remoteServer, "http")), remoteServer.config);
+        compare(JSON.parse(Mcp.template(remoteServer, "sse")).type, "sse");
+        compare(JSON.parse(Mcp.template(null, "stdio")).command, "npx");
     }
 
     function test_validatesTransportAndRequiredFields(): void {
@@ -66,19 +43,10 @@ TestCase {
         verify(!Mcp.parse("[]", "stdio").ok);
     }
 
-    function test_refusesSanitizedMarkers(): void {
-        const parsed = Mcp.parse(
-            '{"type":"http","url":"https://example.com/mcp?token=[configured]"}',
-            "http"
-        );
-        verify(!parsed.ok);
-        verify(parsed.error.indexOf("real value") >= 0);
-    }
-
-    function test_filtersSafeMetadata(): void {
+    function test_summarizesAndFilters(): void {
+        compare(Mcp.summary(localServer), "mcp-local --port 9000");
+        compare(Mcp.summary(remoteServer), "https://example.com/mcp?token=abc");
         compare(Mcp.filtered([localServer, remoteServer], "api_token")[0].name, "local");
-        compare(Mcp.filtered([localServer, remoteServer], "packages/local")[0].name, "local");
-        compare(Mcp.filtered([localServer, remoteServer], "origin-locked")[0].name, "remote");
         compare(Mcp.filtered([localServer, remoteServer], "origin-locked")[0].name, "remote");
         compare(Mcp.filtered([localServer, remoteServer], "missing").length, 0);
     }

@@ -5,7 +5,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostError } from "../src/ghosts.js";
 import { McpCatalog, normalizeMcpStdioCwd } from "../src/mcp-catalog.js";
@@ -13,18 +12,6 @@ import { expandMcpServerConfig as expandWithEnvironment } from "../src/mcp-catal
 
 const expandMcpServerConfig = (config: Parameters<typeof expandWithEnvironment>[0]) => expandWithEnvironment(config, process.env);
 import { makeTempGhosts, seedGhost, type TempGhosts } from "./helpers/fixtures.js";
-
-interface McpUrlSanitizerVector {
-  name: string;
-  input: string;
-  expected: string;
-  sentinels: string[];
-}
-
-const mcpUrlSanitizerVectors = JSON.parse(readFileSync(fileURLToPath(new URL(
-  "../../shell/test/fixtures/mcp-url-sanitizer-vectors.json",
-  import.meta.url,
-)), "utf8")) as McpUrlSanitizerVector[];
 
 let temp: TempGhosts | null = null;
 
@@ -143,107 +130,18 @@ describe("McpCatalog ghost-only discovery", () => {
     expect(snapshot.servers.some((server) => server.name === "ambient")).toBe(false);
   });
 
-  it("redacts header, environment, argument, userinfo, and query values", async () => {
+  it("serves each server's stored configuration as written", async () => {
     const { catalog, home } = setup();
-    writeJson(home, "mcp.json", {
-      mcpServers: {
-        remote: {
-          type: "http",
-          url: "https://owner:url-password@example.com/mcp?api_key=url-secret&region=eu#url-fragment-secret",
-          headers: { Authorization: "Bearer header-secret", "X-Api-Key": "header-key-secret" },
-          headerPolicy: "origin-locked",
-        },
-        local: {
-          type: "stdio",
-          command: "mcp-server",
-          args: ["--token", "argument-secret"],
-          env: { API_TOKEN: "environment-secret", SAFE_SETTING: "also-not-returned" },
-          envPolicy: "literal",
-          cwd: "packages/local-server",
-        },
-      },
-    });
-
-    const snapshot = await catalog.listLeased("casper");
-    const serialized = JSON.stringify(snapshot);
-
-    for (const secret of [
-      "url-password",
-      "url-secret",
-      "url-fragment-secret",
-      "header-secret",
-      "header-key-secret",
-      "argument-secret",
-      "environment-secret",
-      "also-not-returned",
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(snapshot.servers.find((server) => server.name === "remote")?.config).toEqual({
+    const remote = {
       type: "http",
-      url: "https://example.com/mcp?api_key=%5Bconfigured%5D&region=%5Bconfigured%5D",
+      url: "https://example.com/mcp?api_key=url-secret",
+      headers: { Authorization: "Bearer header-secret" },
       headerPolicy: "origin-locked",
-      headers: { keys: ["Authorization", "X-Api-Key"], configured: true },
-    });
-    expect(snapshot.servers.find((server) => server.name === "local")?.config).toEqual({
-      type: "stdio",
-      command: "mcp-server",
-      cwd: "packages/local-server",
-      envPolicy: "literal",
-      argumentCount: 2,
-      environment: { keys: ["API_TOKEN", "SAFE_SETTING"], configured: true },
-    });
-  });
-
-  it("fails closed for malformed templated URLs with credential-bearing components", async () => {
-    const { catalog, home } = setup();
-    const hostTemplate = "$" + "{MCP_HOST_TEMPLATE}";
-    writeJson(home, "mcp.json", {
-      mcpServers: {
-        templated: {
-          type: "sse",
-          url: `https://MCP_URL_USERNAME_SENTINEL:MCP_URL_PASSWORD_SENTINEL@${hostTemplate}/mcp?token=MCP_URL_QUERY_SENTINEL#MCP_URL_FRAGMENT_SENTINEL`,
-        },
-      },
-    });
-
-    const snapshot = await catalog.listLeased("casper");
-    const serialized = JSON.stringify(snapshot);
-
-    expect(snapshot.servers[0]?.config).toEqual({
-      type: "sse",
-      url: "[configured]",
-    });
-    for (const sentinel of [
-      "MCP_URL_USERNAME_SENTINEL",
-      "MCP_URL_PASSWORD_SENTINEL",
-      "MCP_URL_QUERY_SENTINEL",
-      "MCP_URL_FRAGMENT_SENTINEL",
-    ]) {
-      expect(serialized).not.toContain(sentinel);
-    }
-  });
-
-  it("matches the shared safe-display URL vectors", async () => {
-    const { catalog, home } = setup();
-    writeJson(home, "mcp.json", {
-      mcpServers: Object.fromEntries(mcpUrlSanitizerVectors.map((vector, index) => [
-        `url-vector-${index}`,
-        { type: "http", url: vector.input },
-      ])),
-    });
-
-    const snapshot = await catalog.listLeased("casper");
-    const serialized = JSON.stringify(snapshot);
-    for (const [index, vector] of mcpUrlSanitizerVectors.entries()) {
-      expect(
-        snapshot.servers.find((server) => server.name === `url-vector-${index}`)?.config,
-        vector.name,
-      ).toMatchObject({ type: "http", url: vector.expected });
-      for (const sentinel of vector.sentinels) {
-        expect(serialized, `${vector.name}: ${sentinel}`).not.toContain(sentinel);
-      }
-    }
+    };
+    writeJson(home, "mcp.json", { mcpServers: { remote } });
+    expect((await catalog.listLeased("casper")).servers).toEqual([
+      { name: "remote", enabled: true, path: "mcp.json", config: remote },
+    ]);
   });
 
   it("reports malformed files and rows without hiding valid siblings", async () => {

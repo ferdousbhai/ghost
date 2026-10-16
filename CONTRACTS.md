@@ -382,7 +382,9 @@ HUD/client methods and headers. Errors are
 status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
-boundary. The configured owner has full access; admitted guests are read-only.
+boundary. The configured owner has full access; admitted guests are read-only,
+and are refused the routes marked owner-only, which show file paths, hook
+commands, or MCP credentials.
 Remote access never broadens a ghost's local tool authority.
 
 Route parsing, validation, status codes, and reverse states are executable in
@@ -394,14 +396,14 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET /api/hooks` | Redacted hook status. |
-| `GET\|PUT /api/hooks/config` | Read or atomically replace the admitted `hooks.json`. |
+| `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
-| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Sanitized MCP catalog, mutation, and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
+| `GET\|POST\|PUT\|DELETE /api/ghosts/:name/mcp…` | Owner-only. The ghost's `mcp.json` servers as stored, credentials included, and their mutation and enablement. A server added through this API starts disabled unless its row says `enabled: true`; the next turn hands enabled rows to the harness, which connects them. |
 | `GET\|PUT /api/ghosts/:name/harness` | `{ harnesses: [{id, effort, usage}], ghostDefault, omarchyDefault }`: the installed agents Ghost has a row for, with the effort its launch asks for (null where the owner's setting stands) and Omarchy's usage, the ghost's preferred agent (`settings.yml` `harness`, null for automatic), and Omarchy's default. `PUT { harness: id \| null }` sets or clears the preference, keeping the file's other keys; an id with no row is `400 unknown_harness`. |
 | `PUT /sessions/:id/harness` | `{ harness: id }` → `{ id, harness }`: the conversation's next turn runs on that agent, handed the conversation so far; a conversation with no message yet may be pointed first. A running turn refuses it with `409 session_busy`. An uninstalled agent is refused with `409 harness_not_installed`. |
 | `POST /api/ghosts/:name/messages` | `{ prompt, sessionId? }` → one turn as the turn wire below; a missing `sessionId` is the conversation `default`. |
@@ -495,7 +497,8 @@ commands. There are no plan or todo commands.
 Ghost has no model, provider, or credential of its own: each harness reads its
 sign-in from its own configuration exactly as when the owner runs it by hand,
 and its environment is the daemon's own, unscrubbed. Credential values never
-enter logs or API responses.
+enter logs; the only API response that carries them is the owner's own MCP
+configuration.
 
 Ghosts run unthrottled. Harness limits surface as typed errors, and the
 harness's own retry and fallback behavior applies; Ghost's one contribution is
@@ -629,8 +632,8 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
   of that group even after its leader exits. Normal completion leaves detached
   background jobs alone. No cleanup may kill by
   pattern or remove a broad directory.
-- Logs redact secrets and private payloads. Journal identity fields are `GHOST`
-  and `CONVERSATION`; other structured fields remain in `MESSAGE`.
+- Logs redact secrets and private payloads. A log line's structured fields,
+  ghost and conversation included, are JSON in its journal `MESSAGE`.
 - Package install/upgrade gates Ghost on nothing owner-level: no application,
   CLI, or machine skill is required before enabling the services.
 - Package removal preserves ghost homes, XDG config/state, owner documents, and any owner-installed machine skill.

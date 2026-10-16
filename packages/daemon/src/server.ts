@@ -681,6 +681,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     return remoteServe;
   };
   const serverOf = (params: Record<string, string>) => decodePathSegment(params.server ?? "");
+  /** A route a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. */
+  const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
+    if (context.admission.identity?.role === "guest") {
+      throw new GhostError("owner_only", "Only the owner may see this.", 403);
+    }
+    return handle(context);
+  };
 
   const routes: Route<RequestContext>[] = [
     route("GET", "", ({ response }) => {
@@ -723,7 +730,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       const remote = requireRemoteServe();
       jsonResponse(response, 200, await (booleanField(await body(), "enabled") ? remote.enable() : remote.disable()));
     }),
-    route("GET PUT", "api/hooks/config", handleHookConfig),
+    route("GET PUT", "api/hooks/config", ownerOnly(handleHookConfig)),
     route("GET", "api/hooks", ({ response }) => {
       jsonResponse(response, 200, options.hooks?.status() ?? { active: false, total: 0, events: [], hooks: [] });
     }),
@@ -732,16 +739,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/board", async ({ response }) => {
       jsonResponse(response, 200, await readBoard(resolveDocumentsDirectory(process.env, homedir())));
     }),
-    route("GET", "api/status", ({ response, admission }) => {
-      // `root` is a filesystem path, so the whole row is the owner's alone.
-      if (admission.identity?.role === "guest") {
-        throw new GhostError("owner_only", "Daemon source paths are visible only to the owner.", 403);
-      }
+    route("GET", "api/status", ownerOnly(({ response }) => {
       jsonResponse(response, 200, {
         version: options.runningSource?.version ?? null,
         source: { commit: options.runningSource?.commit ?? null, root: options.runningSource?.root ?? null },
       });
-    }),
+    })),
     route("GET", "api/ghosts", ({ response }) => jsonResponse(response, 200, options.registry.list())),
     route("POST", "api/ghosts", async ({ response, body }) => {
       const ghost = options.host.createGhost(stringField(await body(), "name"));
@@ -818,10 +821,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       }
       jsonResponse(response, 200, await options.host.queueMessage(ghost, id, text.trim()));
     }),
-    route("GET", "api/ghosts/:ghost/mcp", async ({ ghost, response }) => {
+    route("GET", "api/ghosts/:ghost/mcp", ownerOnly(async ({ ghost, response }) => {
       const mcp = requireMcp();
       jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.listLeased(ghost)));
-    }),
+    })),
     route("POST", "api/ghosts/:ghost/mcp", async ({ ghost, response, body }) => {
       const mcp = requireMcp();
       const document = await body();
