@@ -128,6 +128,14 @@ describe("parsers over recorded output", () => {
     expect(events.find((event) => event.type === "session")).toBeDefined();
   });
 
+  it("pi: an auto-retry follows the error it recovers from", () => {
+    const pi = harnessRow("pi")!.parser();
+    expect(pi(JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "Connection error." } })))
+      .toContainEqual({ type: "error", message: "Connection error." });
+    expect(pi(JSON.stringify({ type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: "Connection error." })))
+      .toEqual([{ type: "retry" }]);
+  });
+
   it("claude init carries a named native tool inventory", () => {
     const events = harnessRow("claude")!.parser()(JSON.stringify({ type: "system", subtype: "init", session_id: "s", tools: ["Bash", "Read"] }));
     expect(events).toContainEqual({ type: "resources", resources: { skills: null, extensions: null, mcpServers: null, tools: ["Bash", "Read"] } });

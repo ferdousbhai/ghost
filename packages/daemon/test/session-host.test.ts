@@ -138,6 +138,22 @@ describe("a turn", () => {
     ]);
   });
 
+  // pi reports a failed request, then retries it itself: the retry's answer stands.
+  it("answers when the harness recovers from an error by retrying", async () => {
+    const fake = harness([{ events: [
+      { type: "error", message: "Connection error." },
+      { type: "retry" },
+      { type: "text", block: "r", delta: "ok" },
+    ] }]);
+    const sessions = host({ harnesses: [fake] });
+    const events = await turn(sessions, "hello");
+
+    expect(events.at(-1)?.type).toBe("done");
+    const assistant = (await sessions.readTranscript("casper", "c1")).messages.find((message) => message.role === "assistant");
+    expect(assistant?.content).toEqual([{ type: "text", text: "ok" }]);
+    expect(assistant).not.toHaveProperty("errorMessage");
+  });
+
   it("ends in an error, not a fallback, when the harness failed after answering", async () => {
     const first = harness([{ events: [{ type: "text", block: "a", delta: "partial" }, { type: "error", message: "connection reset" }] }], "first");
     const second = harness(replies("unused"), "second");

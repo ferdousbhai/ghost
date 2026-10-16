@@ -51,7 +51,9 @@ export type HarnessEvent =
   | { readonly type: "resources"; readonly resources: RunResources }
   /** The model answering, as the harness names it; `provider` and `effort` where it says. */
   | { readonly type: "model"; readonly model: string; readonly provider?: string; readonly effort?: string }
-  | { readonly type: "error"; readonly message: string };
+  | { readonly type: "error"; readonly message: string }
+  /** The harness retries after the error it reported, so that error no longer ends the pass. */
+  | { readonly type: "retry" };
 
 export interface HarnessRow {
   readonly id: string;
@@ -317,6 +319,7 @@ function piParser(): (line: string) => HarnessEvent[] {
       if (update.type === "text_delta") return [{ type: "text", block, delta: str(update.delta) }];
       if (update.type === "thinking_delta") return [{ type: "thinking", block, delta: str(update.delta) }];
     }
+    if (event.type === "auto_retry_start") return [{ type: "retry" }];
     if (event.type === "tool_execution_start") {
       return [{ type: "tool_start", id: str(event.toolCallId), name: str(event.toolName), args: event.args ?? {} }];
     }

@@ -773,6 +773,9 @@ export class SessionHost {
         case "error":
           error = event.message;
           return;
+        case "retry":
+          error = null;
+          return;
       }
     };
 
