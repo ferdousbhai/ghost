@@ -46,41 +46,28 @@ TestCase {
     }
 
     function init(): void {
-        Ghostd.retireHooksRequest();
+        Ghostd.retire(Ghostd, "hookConfigRequest");
         tc.requests = [];
         Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/api\/hooks/);
         Ghostd.hookConfig = {
             hooks: {
-                session_stop: [{ hooks: [{ type: "command", command: "/bin/hostile" }] }]
+                session_stop: [{ hooks: [{
+                    type: "command", command: "/bin/hostile", name: hostileName, description: hostileDescription
+                }] }]
             }
         };
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
         Ghostd.hookConfigLoaded = true;
         Ghostd.hookConfigError = "";
-        Ghostd.activeHooks = [{
-            event: "session_stop",
-            name: hostileName,
-            description: hostileDescription
-        }];
-        Ghostd.activeHookCount = 1;
-        Ghostd.hooksLoaded = true;
-        Ghostd.hooksLoading = false;
-        Ghostd.hooksStale = false;
-        Ghostd.hooksError = "";
     }
 
     function cleanup(): void {
-        Ghostd.retireHooksRequest();
+        Ghostd.retire(Ghostd, "hookConfigRequest");
         Ghostd.retire(Ghostd, "hookConfigMutation");
         Ghostd.requestFactory = null;
         Ghostd.hookConfig = null;
         Ghostd.hookConfigLoaded = false;
         Ghostd.hookConfigError = "";
-        Ghostd.activeHooks = [];
-        Ghostd.activeHookCount = 0;
-        Ghostd.hooksLoaded = false;
-        Ghostd.hooksStale = false;
-        Ghostd.hooksError = "";
     }
 
     function test_daemonLabelsRemainLiteralPlainText(): void {
@@ -99,18 +86,14 @@ TestCase {
         compare(name.text, hostileName);
         compare(description.text, hostileDescription);
 
-        Ghostd.hooksError = "<img src=\"https://resource.invalid/error.png\"> literal error";
+        Ghostd.hookConfigError = "<img src=\"https://resource.invalid/error.png\"> literal error";
         const error = findChild(browser, "hooksErrorText");
         verify(error !== null);
         compare(error.textFormat, Text.PlainText);
-        compare(error.text, Ghostd.hooksError);
+        compare(error.text, Ghostd.hookConfigError);
     }
 
     function editableBrowser(): var {
-        Ghostd.activeHooks = [
-            { event: "session_stop", name: "Review", description: "Reviews the pass." }
-        ];
-        Ghostd.activeHookCount = 1;
         Ghostd.hookConfig = configDocument();
         Ghostd.hookConfigPath = "/owner/.config/ghost/hooks.json";
         const browser = createTemporaryObject(browserComponent, tc);
@@ -181,16 +164,15 @@ TestCase {
             path: "/owner/.config/ghost/hooks.json",
             document: JSON.parse(tc.requests[0].body)
         });
-        // An admitted write re-reads the status.
-        compare(tc.requests.length, 2);
-        compare(tc.requests[1].method, "GET");
-        verify(tc.requests[1].url.endsWith("/api/hooks"));
+        // The admitted document is the live hook set; nothing else is read.
+        compare(tc.requests.length, 1);
         compare(Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].command, "/bin/context");
+        compare(Ghostd.activeHookCount, 2);
 
         // The first card's delete prunes its event, leaving the rest of the file.
         mouseClick(findChild(browser, "hookDeleteButton"));
-        compare(tc.requests.length, 3);
-        compare(JSON.parse(tc.requests[2].body), configDocument());
+        compare(tc.requests.length, 2);
+        compare(JSON.parse(tc.requests[1].body), configDocument());
     }
 
     function hookCards(browser: var): var {

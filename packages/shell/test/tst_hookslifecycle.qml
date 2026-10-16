@@ -10,23 +10,20 @@ TestCase {
 
     property var requests: []
 
-    function status(name: string): var {
+    readonly property string path: "/owner/.config/ghost/hooks.json"
+
+    function config(name: string): var {
         return {
-            active: true,
-            total: 2,
-            events: [
-                { event: "before_prompt", count: 1 },
-                { event: "session_stop", count: 1 }
-            ],
-            hooks: [
-                { event: "before_prompt", name, description: "Adds bounded context." },
-                {
-                    event: "session_stop",
-                    name: "Review",
-                    description: "Reviews the assistant pass."
-                }
-            ]
+            path: tc.path,
+            document: { hooks: {
+                before_prompt: [{ hooks: [{ type: "command", command: "/bin/context", name }] }],
+                session_stop: [{ hooks: [{ type: "command", command: "/bin/review", name: "Review" }] }]
+            } }
         };
+    }
+
+    function firstName(): string {
+        return Ghostd.hookConfig.hooks.before_prompt[0].hooks[0].name;
     }
 
     function init(): void {
@@ -52,107 +49,88 @@ TestCase {
     }
 
     function cleanup(): void {
-        Ghostd.retireHooksRequest();
+        Ghostd.retire(Ghostd, "hookConfigRequest");
         Ghostd.requestFactory = null;
         Ghostd.beginHooksConnectionEpoch();
     }
 
     function test_initialLoadingReadyAndEmptyStates(): void {
-        Ghostd.fetchHooks(false);
+        Ghostd.fetchHookConfig(false);
         compare(requests.length, 1);
         compare(requests[0].method, "GET");
-        verify(requests[0].url.endsWith("/api/hooks"));
+        verify(requests[0].url.endsWith("/api/hooks/config"));
         compare(requests[0].headers.Authorization, "Bearer test-token");
-        verify(Ghostd.hooksLoading);
-        verify(!Ghostd.hooksLoaded);
+        verify(Ghostd.hookConfigLoading);
+        verify(!Ghostd.hookConfigLoaded);
         compare(Ghostd.currentSessionId, "");
         compare(Object.keys(Ghostd.sessionIds).length, 0);
 
-        requests[0].complete(200, status("Prompt policy"));
-        verify(!Ghostd.hooksLoading);
-        verify(Ghostd.hooksLoaded);
+        requests[0].complete(200, config("Prompt policy"));
+        verify(!Ghostd.hookConfigLoading);
+        verify(Ghostd.hookConfigLoaded);
         compare(Ghostd.activeHookCount, 2);
-        compare(Ghostd.activeHooks[0].name, "Prompt policy");
+        compare(firstName(), "Prompt policy");
 
-        Ghostd.fetchHooks(true);
+        Ghostd.fetchHookConfig(true);
         compare(requests.length, 2);
-        requests[1].complete(200, {
-            active: false,
-            total: 0,
-            events: [],
-            hooks: []
-        });
-        verify(Ghostd.hooksLoaded);
+        requests[1].complete(200, { path: tc.path, document: { hooks: {} } });
+        verify(Ghostd.hookConfigLoaded);
         compare(Ghostd.activeHookCount, 0);
-        compare(Ghostd.activeHooks.length, 0);
     }
 
-    function test_refreshKeepsLastGoodCatalogOnHttpOrSchemaError(): void {
-        Ghostd.fetchHooks(false);
-        requests[0].complete(200, status("Verified"));
+    function test_refreshKeepsLastGoodConfigOnHttpOrSchemaError(): void {
+        Ghostd.fetchHookConfig(false);
+        requests[0].complete(200, config("Verified"));
 
-        Ghostd.fetchHooks(true);
-        compare(Ghostd.activeHooks[0].name, "Verified");
-        verify(Ghostd.hooksLoading);
-        requests[1].complete(503, {
-            error: { code: "shutting_down", message: "Try again." }
-        });
-        verify(Ghostd.hooksLoaded);
-        verify(Ghostd.hooksStale);
-        compare(Ghostd.activeHooks[0].name, "Verified");
-        verify(Ghostd.hooksError.indexOf("503") >= 0);
+        Ghostd.fetchHookConfig(true);
+        requests[1].complete(503, { error: { code: "shutting_down", message: "Try again." } });
+        verify(Ghostd.hookConfigLoaded);
+        compare(firstName(), "Verified");
+        verify(Ghostd.hookConfigError.indexOf("503") >= 0);
 
-        Ghostd.fetchHooks(true);
-        const malformed = status("Untrusted replacement");
-        malformed.total = 99;
-        requests[2].complete(200, malformed);
-        verify(Ghostd.hooksLoaded);
-        verify(Ghostd.hooksStale);
-        compare(Ghostd.activeHooks[0].name, "Verified");
-        compare(Ghostd.hooksError, "ghostd sent malformed hook status");
+        Ghostd.fetchHookConfig(true);
+        requests[2].complete(200, { path: "", document: [] });
+        compare(firstName(), "Verified");
+        compare(Ghostd.hookConfigError, "ghostd sent a malformed hook configuration");
     }
 
     function test_forceRetiresOutOfOrderCallback(): void {
-        Ghostd.fetchHooks(false);
+        Ghostd.fetchHookConfig(false);
         const stale = requests[0];
-        Ghostd.fetchHooks(true);
+        Ghostd.fetchHookConfig(true);
         verify(stale.aborted);
-        stale.complete(200, status("Stale"));
-        compare(Ghostd.activeHooks.length, 0);
-        requests[1].complete(200, status("Current"));
-        compare(Ghostd.activeHooks[0].name, "Current");
+        stale.complete(200, config("Stale"));
+        compare(Ghostd.hookConfig, null);
+        requests[1].complete(200, config("Current"));
+        compare(firstName(), "Current");
     }
 
     function test_statusZeroResetsStartupEpochAndReconnectsCleanly(): void {
         const before = Ghostd.hooksEpoch;
-        Ghostd.fetchHooks(false);
+        Ghostd.fetchHookConfig(false);
         const stale = requests[0];
         stale.complete(0, "");
         compare(Ghostd.hooksEpoch, before + 1);
-        compare(Ghostd.hooksRequest, null);
-        verify(!Ghostd.hooksLoading);
-        verify(!Ghostd.hooksLoaded);
-        compare(Ghostd.activeHooks.length, 0);
+        compare(Ghostd.hookConfigRequest, null);
+        verify(!Ghostd.hookConfigLoaded);
+        compare(Ghostd.hookConfig, null);
 
-        stale.complete(200, status("Too late"));
-        compare(Ghostd.activeHooks.length, 0);
+        stale.complete(200, config("Too late"));
+        compare(Ghostd.hookConfig, null);
 
-        // A healthy daemon response elsewhere starts a fresh catalog request.
+        // A healthy daemon response elsewhere starts a fresh read. It is
+        // deferred with Qt.callLater, so poll; the timeout is a deadlock guard.
+        // `reachable` is shared by every test file on this singleton, so a
+        // status-0 socket from another connection can drop it while this test
+        // yields; re-latch it rather than lose the premise.
         Ghostd.reachable = true;
-        // The catalog request is deferred with Qt.callLater, so poll for it;
-        // the timeout is a deadlock guard, not an expected wait. `reachable` is
-        // machine-wide state on a singleton every test file shares, so a
-        // status-0 socket belonging to some other connection can drop it at any
-        // point this test yields — which would leave the catalog waiting on an
-        // edge that never comes back. Re-latch it rather than lose the premise.
         tryVerify(function () {
             if (!Ghostd.reachable) Ghostd.reachable = true;
             return requests.length === 2;
-        }, 30000, "reachability should start exactly one fresh catalog request");
-        compare(requests.length, 2);
-        requests[1].complete(200, status("After reconnect"));
-        verify(Ghostd.hooksLoaded);
-        compare(Ghostd.activeHooks[0].name, "After reconnect");
+        }, 30000, "reachability should start exactly one fresh hooks read");
+        requests[1].complete(200, config("After reconnect"));
+        verify(Ghostd.hookConfigLoaded);
+        compare(firstName(), "After reconnect");
     }
 
     function test_configIsReadWrittenAndRefusedThroughTheDaemon(): void {
@@ -186,13 +164,11 @@ TestCase {
             verify(!Ghostd.hookConfigBusy);
             compare(finished, [true]);
             compare(Object.keys(Ghostd.hookConfig.hooks).length, 0);
-            // An admitted write is live at once, so the status is re-read.
-            compare(requests.length, 3);
-            compare(requests[2].method, "GET");
-            verify(requests[2].url.endsWith("/api/hooks"));
+            // An admitted write is the live hook set; nothing else is read.
+            compare(requests.length, 2);
 
             Ghostd.writeHookConfig({ hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } });
-            requests[3].complete(400, {
+            requests[2].complete(400, {
                 error: {
                     code: "invalid_request",
                     message: "/owner/.config/ghost/hooks.json: hooks.session_stop[0].hooks[0] must be a command hook with a non-empty NUL-free command."
@@ -202,7 +178,7 @@ TestCase {
             verify(Ghostd.hookConfigError.indexOf("hooks.session_stop[0].hooks[0]") === 0
                 || Ghostd.hookConfigError.indexOf("hooks.json: hooks.session_stop[0]") > 0);
             compare(Object.keys(Ghostd.hookConfig.hooks).length, 0);
-            compare(requests.length, 4);
+            compare(requests.length, 3);
         } finally {
             Ghostd.hookConfigWriteFinished.disconnect(watcher);
         }
@@ -218,16 +194,16 @@ TestCase {
         compare(requests.length, 1);
     }
 
-    function test_ghostAndSessionChangesDoNotOwnCatalog(): void {
-        Ghostd.fetchHooks(false);
-        requests[0].complete(200, status("Machine global"));
+    function test_ghostAndSessionChangesDoNotOwnHooks(): void {
+        Ghostd.fetchHookConfig(false);
+        requests[0].complete(200, config("Machine global"));
         const epoch = Ghostd.hooksEpoch;
 
         Ghostd.activeGhost = "moaning-myrtle";
         Ghostd.currentSessionId = "thread-2";
 
         compare(Ghostd.hooksEpoch, epoch);
-        compare(Ghostd.activeHooks[0].name, "Machine global");
+        compare(firstName(), "Machine global");
         compare(requests.length, 1);
     }
 }

@@ -150,7 +150,7 @@ describe("GhostHookRunner", () => {
     expect(JSON.parse(readFileSync(config, "utf8"))).toEqual(first);
     expect(runner.hasHandlers("session_stop")).toBe(true);
     expect(ghostSessionStopContinuation(await runner.emitSessionStop(event()))).toBe("Revise.");
-    expect(runner.status().hooks.map(({ name }) => name)).toEqual(["Reviewer"]);
+    expect(runner.config()?.document).toEqual(first);
 
     const invalid = { hooks: { session_stop: [{ hooks: [{ type: "command", command: "" }] }] } };
     await expect(runner.replaceConfig(invalid)).rejects.toThrow(/non-empty NUL-free command/u);

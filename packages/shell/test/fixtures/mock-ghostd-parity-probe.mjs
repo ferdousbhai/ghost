@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 // The mock daemon must answer the routes the HUD relies on with the daemon's
-// exact shapes: hooks status, the MCP catalog, the roster, a transcript, and a
+// exact shapes: hooks.json, the MCP catalog, the roster, a transcript, and a
 // streamed turn. Paths inside the ghost home never leak into transcripts.
 const here = dirname(fileURLToPath(import.meta.url));
 const mockPath = resolve(here, "../../dev/mock-ghostd.mjs");
@@ -32,33 +32,13 @@ try {
     });
   });
 
-  const hooksResponse = await fetch(`http://127.0.0.1:${port}/api/hooks`, {
+  const hooksResponse = await fetch(`http://127.0.0.1:${port}/api/hooks/config`, {
     headers: { authorization: "Bearer mock-parity" },
   });
   assert.equal(hooksResponse.status, 200);
-  const hooks = await hooksResponse.json();
-  assert.deepEqual(Object.keys(hooks), ["active", "total", "events", "hooks"]);
-  assert.equal(hooks.active, true);
-  assert.equal(hooks.total, 2);
-  assert.deepEqual(hooks.events, [
-    { event: "before_prompt", count: 1 },
-    { event: "session_stop", count: 1 },
-  ]);
-  assert.equal(hooks.hooks.length, hooks.total);
-  assert.deepEqual(Object.keys(hooks.hooks[0]), ["event", "name", "description"]);
-  const serializedHooks = JSON.stringify(hooks);
-  for (const forbidden of [
-    "command", "commands", "args", "arguments", "path", "paths", "prompt", "prompts",
-    "context", "contexts", "error", "errors", "scheduler",
-  ]) {
-    assert.ok(!serializedHooks.includes(`"${forbidden}"`));
-  }
-  const hooksPost = await fetch(`http://127.0.0.1:${port}/api/hooks`, {
-    method: "POST",
-    headers: { authorization: "Bearer mock-parity" },
-  });
-  assert.equal(hooksPost.status, 405);
-  assert.equal((await hooksPost.json()).error.code, "method_not_allowed");
+  assert.deepEqual(Object.keys(await hooksResponse.json()), ["path", "document"]);
+  const retiredStatus = await fetch(`http://127.0.0.1:${port}/api/hooks`);
+  assert.equal(retiredStatus.status, 404);
   const perGhostHooks = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/hooks`);
   assert.equal(perGhostHooks.status, 404);
 

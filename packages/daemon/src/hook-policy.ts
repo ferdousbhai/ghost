@@ -44,28 +44,10 @@ export interface GhostSessionStopResult {
 export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent;
 export type GhostHookResult = GhostBeforePromptResult | GhostSessionStopResult;
 
-export interface GhostHookEventStatus {
-  event: GhostHookEvent["type"];
-  count: number;
-}
-
-export interface GhostHookStatusItem {
-  event: GhostHookEvent["type"];
-  name: string;
-  description: string;
-}
-
 /** The admitted `hooks.json` document and where it lives. */
 export interface GhostHookCommandConfig {
   path: string;
   document: Record<string, unknown>;
-}
-
-export interface GhostHookStatus {
-  active: boolean;
-  total: number;
-  events: GhostHookEventStatus[];
-  hooks: GhostHookStatusItem[];
 }
 
 export interface CommandHook {
@@ -249,22 +231,6 @@ export function parseCommandResult(
     });
     return undefined;
   }
-}
-
-export function hookStatus(commands: readonly CommandHook[]): GhostHookStatus {
-  const eventOrder = ["before_prompt", "session_stop"] as const;
-  const events = eventOrder.map((event) => ({
-    event,
-    count: commands.filter((command) => command.eventName === event).length,
-  })).filter(({ count }) => count > 0);
-  const hooks: GhostHookStatusItem[] = [];
-  for (const event of eventOrder) {
-    for (const hook of commands.filter((command) => command.eventName === event)) {
-      hooks.push({ event, name: hook.name, description: hook.description });
-    }
-  }
-  const total = events.reduce((sum, event) => sum + event.count, 0);
-  return { active: total > 0, total, events, hooks };
 }
 
 export async function runBeforePromptHooks(

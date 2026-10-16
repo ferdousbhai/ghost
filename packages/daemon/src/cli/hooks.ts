@@ -1,9 +1,8 @@
 import { readFileSync } from "node:fs";
+import { parseHooksDocument, type GhostHookCommandConfig } from "../hook-policy.js";
 import { ArgsError, type ParsedCliArgs } from "./args.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
-
-type HookStatus = { active: boolean; total: number; hooks: Array<{ event: string; name: string; description: string }> };
 
 /** `ghost hooks [status|show|set <file>]` over the daemon's `hooks.json`. */
 export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
@@ -11,8 +10,6 @@ export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   let body: unknown;
   switch (action) {
     case "status":
-      body = (await ctx.client.request("GET", "/api/hooks")).body;
-      break;
     case "show":
       body = (await ctx.client.request("GET", "/api/hooks/config")).body;
       break;
@@ -27,9 +24,10 @@ export async function hooksCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   }
   emit(ctx, body, (result) => {
     if (action !== "status") return `${JSON.stringify(result, null, 2)}\n`;
-    const status = result as HookStatus;
-    return status.hooks.length > 0
-      ? `${table(status.hooks.map((hook) => [hook.event, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
+    const { path, document } = result as GhostHookCommandConfig;
+    const hooks = parseHooksDocument(document, path).commands;
+    return hooks.length > 0
+      ? `${table(hooks.map((hook) => [hook.eventName, hook.name, hook.description]), ["EVENT", "NAME", "DESCRIPTION"])}\n`
       : "No hooks configured.\n";
   });
   return 0;

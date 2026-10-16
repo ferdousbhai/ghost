@@ -21,14 +21,6 @@ TestCase {
         };
     }
 
-    function status(): var {
-        return [
-            { event: "before_prompt", name: "Before-prompt command hook", description: "Context." },
-            { event: "session_stop", name: "Review", description: "Reviews." },
-            { event: "session_stop", name: "Session-stop command hook", description: "Default." }
-        ];
-    }
-
     function test_parseConfigAcceptsOnlyPathAndObjectDocument(): void {
         compare(HookConfig.parseConfig(JSON.stringify({ path: "/p/hooks.json", document: {} })).path, "/p/hooks.json");
         compare(HookConfig.parseConfig(JSON.stringify({ path: "", document: {} })), null);
@@ -36,28 +28,21 @@ TestCase {
         compare(HookConfig.parseConfig("not json"), null);
     }
 
-    function test_cardsPairStatusRowsWithHandlersInEventOrder(): void {
-        const cards = HookConfig.cards(status(), document());
+    function test_cardsFollowTheDocumentWithTheDaemonsDefaults(): void {
+        const cards = HookConfig.cards(document());
         compare(cards.map(function (card) { return card.name; }), [
             "Before-prompt command hook",
             "Review",
             "Session-stop command hook"
         ]);
+        compare(cards[0].description, "Adds context before the owner prompt is sent.");
+        compare(cards[2].description, "Runs after the assistant pass and may continue it.");
         compare(cards[1].key, "config:session_stop:0:0");
         compare(cards[2].key, "config:session_stop:0:1");
         compare(cards[1].fields.command, "/bin/review");
         compare(cards[1].fields.timeout, "5");
         compare(cards[2].fields.name, "");
-    }
-
-    function test_cardsFallBackToTheDocumentWhenStatusDisagrees(): void {
-        const stale = status().slice(0, 1);
-        const cards = HookConfig.cards(stale, document());
-        compare(cards.length, 3);
-        compare(cards[0].name, "Command hook");
-        compare(cards[1].name, "Review");
-        compare(cards[2].name, "Command hook");
-        compare(HookConfig.cards([], null).length, 0);
+        compare(HookConfig.cards(null).length, 0);
     }
 
     function test_withHandlerKeepsUnknownKeysAndDropsEmptiedOptionals(): void {

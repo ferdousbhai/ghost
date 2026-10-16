@@ -83,14 +83,6 @@ describe("the bearer token", () => {
     const response = await fetch(`${base}/api/ghosts`, { headers: auth });
     expect(response.status).toBe(200);
     expect(await response.json()).toHaveLength(1);
-    const hooks = await fetch(`${base}/api/hooks`, { headers: auth });
-    expect(hooks.status).toBe(200);
-    expect(await hooks.json()).toEqual({
-      active: false,
-      total: 0,
-      events: [],
-      hooks: [],
-    });
   });
 
   it("accepts the scheme case-insensitively, as RFC 7235 requires", async () => {
@@ -109,7 +101,7 @@ describe("the bearer token", () => {
       "/api/ghosts/casper/models",
       "/api/ghosts/casper/providers",
       "/api/ghosts/casper/sessions/pi%3Adraft/project/draft",
-      "/api/hooks",
+      "/api/hooks/config",
       "/api/nonsense",
     ]) {
       expect((await fetch(`${base}${path}`)).status, path).toBe(401);

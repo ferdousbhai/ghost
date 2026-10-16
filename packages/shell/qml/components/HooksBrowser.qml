@@ -6,10 +6,9 @@ pragma ComponentBehavior: Bound
 // reason and nothing is half-written. Model context stays private either way.
 //
 // While a card is being edited the list is frozen on the cards it had, so a
-// status refresh cannot rebuild the delegates under the caret.
+// refresh cannot rebuild the delegates under the caret.
 import QtQuick
 import "../services"
-import "../services/HookStatus.js" as HookStatus
 import "../services/HookConfig.js" as HookConfig
 
 Rectangle {
@@ -23,15 +22,14 @@ Rectangle {
     /** What the last commit sent, so a refused write can hand the fields back. */
     property var lastAttempt: null
 
-    readonly property var liveCards: HookConfig.cards(Ghostd.activeHooks, Ghostd.hookConfig)
+    readonly property var liveCards: HookConfig.cards(Ghostd.hookConfig)
     readonly property bool editing: root.editingKey !== ""
     readonly property bool drafting: root.editingKey === HookConfig.DRAFT_KEY
     readonly property var cards: root.editing ? root.frozenCards : root.liveCards
     readonly property var rows: root.drafting ? [HookConfig.draftCard()].concat(root.cards) : root.cards
     readonly property bool busy: Ghostd.hookConfigBusy
     readonly property bool editable: Ghostd.hookConfigLoaded && Ghostd.hookConfigAvailable
-    readonly property string error: Ghostd.hookConfigError !== ""
-        ? Ghostd.hookConfigError : Ghostd.hooksError
+    readonly property string error: Ghostd.hookConfigError
 
     implicitWidth: Theme.pad * 48
     implicitHeight: Theme.pad * 34
@@ -39,7 +37,6 @@ Rectangle {
     clip: true
 
     function load(force: bool): void {
-        Ghostd.fetchHooks(force);
         Ghostd.fetchHookConfig(force);
     }
 
@@ -243,9 +240,9 @@ Rectangle {
 
                 ActionButton {
                     objectName: "hooksRefreshButton"
-                    label: Ghostd.hooksLoading ? "Refreshing" : "Refresh"
-                    enabled: !Ghostd.hooksLoading && !root.editing
-                    Accessible.description: "Reload hook status and configuration"
+                    label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
+                    enabled: !Ghostd.hookConfigLoading && !root.editing
+                    Accessible.description: "Reload hooks.json"
                     onClicked: root.load(true)
                 }
             }
@@ -305,11 +302,11 @@ Rectangle {
         anchors.rightMargin: Theme.pad * 2
         anchors.top: errorBanner.bottom
         anchors.topMargin: Theme.pad * 2
-        visible: !Ghostd.hooksLoaded && root.rows.length === 0
-        text: Ghostd.hooksLoading ? "Loading lifecycle hooks…"
-            : (Ghostd.hooksError === ""
-                ? "Hook status has not loaded yet."
-                : "Hook status is unavailable. Retry when ghostd is answering.")
+        visible: !Ghostd.hookConfigLoaded && root.rows.length === 0
+        text: Ghostd.hookConfigLoading ? "Loading lifecycle hooks…"
+            : (Ghostd.hookConfigError === ""
+                ? "Hooks have not loaded yet."
+                : "Hooks are unavailable. Retry when ghostd is answering.")
         textFormat: Text.PlainText
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily
@@ -327,7 +324,7 @@ Rectangle {
         anchors.rightMargin: Theme.pad * 2
         anchors.top: errorBanner.bottom
         anchors.topMargin: Theme.pad * 2
-        visible: Ghostd.hooksLoaded && root.rows.length === 0
+        visible: Ghostd.hookConfigLoaded && root.rows.length === 0
         text: root.editable
             ? "No lifecycle hooks are loaded. Add a command hook with + New."
             : "No lifecycle hooks are loaded by the daemon."
@@ -375,7 +372,7 @@ Rectangle {
             Accessible.role: Accessible.ListItem
             Accessible.name: hookCard.draft ? "New command hook" : hookCard.modelData.name
             Accessible.description: hookCard.modelData.description + ". "
-                + HookStatus.trigger(hookCard.event)
+                + HookConfig.trigger(hookCard.event)
 
             Behavior on color {
                 enabled: !Theme.reducedMotion
@@ -482,7 +479,7 @@ Rectangle {
                 Text {
                     objectName: "hookTrigger"
                     width: parent.width
-                    text: HookStatus.trigger(hookCard.event)
+                    text: HookConfig.trigger(hookCard.event)
                     textFormat: Text.PlainText
                     color: Theme.ghostAmber
                     font.family: Theme.fontFamily
@@ -515,7 +512,7 @@ Rectangle {
                         spacing: Theme.gap / 2
 
                         Repeater {
-                            model: HookStatus.EVENT_ORDER
+                            model: HookConfig.EVENT_ORDER
 
                             Rectangle {
                                 id: chip
@@ -530,13 +527,13 @@ Rectangle {
                                 border.color: chip.chosen ? Theme.amber(0.55) : Theme.border
 
                                 Accessible.role: Accessible.RadioButton
-                                Accessible.name: HookStatus.label(chip.modelData)
+                                Accessible.name: HookConfig.label(chip.modelData)
                                 Accessible.checked: chip.chosen
 
                                 Text {
                                     id: chipLabel
                                     anchors.centerIn: parent
-                                    text: HookStatus.label(chip.modelData)
+                                    text: HookConfig.label(chip.modelData)
                                     textFormat: Text.PlainText
                                     color: chip.chosen ? Theme.ghostAmberBright : Theme.foregroundDim
                                     font.family: Theme.fontFamily
@@ -620,12 +617,7 @@ Rectangle {
         anchors.bottom: parent.bottom
         anchors.bottomMargin: Theme.pad
         visible: root.rows.length > 0
-        text: Ghostd.hooksStale
-            ? "Showing the last verified status."
-            : root.editable
-                ? "Command hooks are yours, in " + Ghostd.hookConfigPath
-                    + ". Model context stays private."
-                : "Only labels, triggers, and timing are shown. Model context stays private."
+        text: "Command hooks are yours, in " + Ghostd.hookConfigPath + ". Model context stays private."
         textFormat: Text.PlainText
         color: Theme.foregroundFaint
         font.family: Theme.fontFamily

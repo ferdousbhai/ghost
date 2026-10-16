@@ -208,10 +208,11 @@ is ignored.
 
 ## Status
 
-Authenticated `GET /api/hooks` returns only `{ active, total, events, hooks }`.
-Event rows contain `{ event, count }`; hook rows contain
-`{ event, name, description }`. Commands, source paths, arguments, prompts,
-injected context, and errors never cross that route.
+The hooks that run are exactly the handlers in the `hooks.json` the daemon
+admitted, which the owner-only `GET /api/hooks/config` returns as
+`{ path, document }`; `ghost hooks` and the HUD's Hooks pane read it there.
+A handler without a `name` or `description` is shown with the defaults
+above.
 
 ## Editing
 

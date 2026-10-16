@@ -457,28 +457,6 @@ function hooksDocumentProblem(document) {
   return null;
 }
 
-function hooksStatus() {
-  const rows = [];
-  for (const event of HOOK_EVENTS) {
-    for (const group of hooksDocument.hooks?.[event] ?? []) {
-      for (const handler of group.hooks) {
-        const trigger = event === "before_prompt" ? "Before-prompt" : "Session-stop";
-        rows.push({
-          event,
-          name: handler.name ?? `${trigger} command hook`,
-          description: handler.description ?? (event === "before_prompt"
-            ? "Adds context before the owner prompt is sent."
-            : "Runs after the assistant pass and may continue it."),
-        });
-      }
-    }
-  }
-  const events = HOOK_EVENTS
-    .map((event) => ({ event, count: rows.filter((row) => row.event === event).length }))
-    .filter(({ count }) => count > 0);
-  return { active: rows.length > 0, total: rows.length, events, hooks: rows };
-}
-
 const svg = (res, body) => {
   res.writeHead(200, {
     "content-type": "image/svg+xml",
@@ -769,13 +747,6 @@ const mockServer = createServer(async (req, res) => {
     hooksDocument = body;
     return json(res, 200, { path: HOOKS_CONFIG_PATH, document: hooksDocument });
   }
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "hooks") {
-    if (req.method !== "GET") return json(res, 405, {
-      error: { code: "method_not_allowed", message: `${req.method} is not allowed here.` },
-    });
-    return json(res, 200, hooksStatus());
-  }
-
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "remote") {
     if (req.method === "GET") return json(res, 200, remoteSnapshot());
     if (req.method !== "POST") return json(res, 405, {

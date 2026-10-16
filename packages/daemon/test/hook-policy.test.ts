@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  ghostSessionStopContinuation, hookStatus, parseCommandResult, parseHooksDocument,
+  ghostSessionStopContinuation, parseCommandResult, parseHooksDocument,
   runBeforePromptHooks, runSessionStopHooks,
   type CommandResult, type GhostBeforePromptEvent, type GhostSessionStopEvent,
 } from "../src/hook-policy.js";
@@ -36,12 +36,7 @@ describe("shared hook policy", () => {
       ["session_stop", "accept", 30000], ["session_stop", "continue", 30000],
       ["session_stop", "unreached", 30000],
     ]);
-    expect(hookStatus(commands)).toMatchObject({ active: true, total: 5, events: [
-      { event: "before_prompt", count: 2 }, { event: "session_stop", count: 3 },
-    ] });
-    expect(hookStatus(commands).hooks[1]?.name).toBe("Named context");
-    // Public status names hooks; it never carries their commands.
-    for (const hook of hookStatus(commands).hooks) expect(Object.keys(hook).sort()).toEqual(["description", "event", "name"]);
+    expect(commands[1]?.name).toBe("Named context");
     for (const invalid of [
       { hooks: { other: [] } },
       { hooks: { before_prompt: [{ hooks: [{ type: "command", command: "a\0b" }] }] } },

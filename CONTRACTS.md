@@ -397,7 +397,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 
 | Route | Contract |
 |---|---|
-| `GET /api/hooks` | Redacted hook status. |
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |

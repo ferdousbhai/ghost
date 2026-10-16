@@ -45,7 +45,7 @@ export interface ServerOptions {
   /** What runs this daemon. Omitted, `GET /api/status` reports it as unknown. */
   runningSource?: RunningSource;
   mcp?: McpCatalog;
-  hooks?: Pick<GhostHookRunner, "status" | "config" | "replaceConfig">;
+  hooks?: Pick<GhostHookRunner, "config" | "replaceConfig">;
   logger?: Logger;
   maxBodyBytes?: number;
   /**
@@ -731,9 +731,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, await (booleanField(await body(), "enabled") ? remote.enable() : remote.disable()));
     }),
     route("GET PUT", "api/hooks/config", ownerOnly(handleHookConfig)),
-    route("GET", "api/hooks", ({ response }) => {
-      jsonResponse(response, 200, options.hooks?.status() ?? { active: false, total: 0, events: [], hooks: [] });
-    }),
     // The owner's board.md, parsed. Guests may read it: it is the one owner
     // document meant to be looked at, and it is read-only here.
     route("GET", "api/board", async ({ response }) => {

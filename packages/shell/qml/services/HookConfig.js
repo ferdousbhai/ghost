@@ -1,5 +1,4 @@
 .pragma library
-.import "HookStatus.js" as HookStatus
 
 // The owner's hooks.json as the Hooks pane edits it. The daemon's document is
 // `{ hooks: { <event>: [ { hooks: [ handler, ... ] }, ... ] } }`, where a
@@ -9,9 +8,24 @@
 // daemon's loader is the only validator: a refused document comes back as its
 // message, never as a rule re-implemented here.
 
-const EVENT_ORDER = HookStatus.EVENT_ORDER;
+const EVENT_ORDER = ["before_prompt", "session_stop"];
 const DRAFT_KEY = "draft";
-const isObject = HookStatus.isObject;
+
+function isObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function label(event) {
+    if (event === "before_prompt") return "Before prompt";
+    if (event === "session_stop") return "Session stop";
+    return "";
+}
+
+function trigger(event) {
+    if (event === "before_prompt") return "Before each owner prompt";
+    if (event === "session_stop") return "After each assistant pass";
+    return "";
+}
 
 function text(value) {
     return value === undefined || value === null ? "" : String(value);
@@ -95,28 +109,26 @@ function fieldsOf(handler) {
     return fields;
 }
 
-/**
- * The pane's rows, one per hooks.json handler. They come from the document,
- * which is what an edit changes; the daemon emits its status rows in the
- * order it read the file, so the n-th status row resolves the n-th handler's
- * display name and description (the daemon fills defaults the file leaves
- * out). When the two disagree — a status fetch that failed after a write —
- * the document wins and the row shows what the file says.
- */
-function cards(statusHooks, document) {
-    const statusRows = Array.isArray(statusHooks) ? statusHooks : [];
-    const entries = handlers(document);
-    const aligned = statusRows.length === entries.length && entries.every(function (entry, index) {
-        return statusRows[index].event === entry.event;
-    });
-    return entries.map(function (entry, i) {
-        const status = aligned ? statusRows[i] : null;
+// The daemon's display defaults for a handler that names or describes nothing.
+function defaultName(event) {
+    return (event === "before_prompt" ? "Before-prompt" : "Session-stop") + " command hook";
+}
+
+function defaultDescription(event) {
+    return event === "before_prompt"
+        ? "Adds context before the owner prompt is sent."
+        : "Runs after the assistant pass and may continue it.";
+}
+
+/** The pane's rows, one per hooks.json handler, in file order. */
+function cards(document) {
+    return handlers(document).map(function (entry) {
         const fields = fieldsOf(entry.handler);
         return card({
             key: "config:" + entry.event + ":" + entry.groupIndex + ":" + entry.handlerIndex,
             event: entry.event,
-            name: status ? status.name : (fields.name === "" ? "Command hook" : fields.name),
-            description: status ? status.description : fields.description,
+            name: fields.name.trim() === "" ? defaultName(entry.event) : fields.name.trim(),
+            description: fields.description.trim() === "" ? defaultDescription(entry.event) : fields.description.trim(),
             fields,
             groupIndex: entry.groupIndex,
             handlerIndex: entry.handlerIndex

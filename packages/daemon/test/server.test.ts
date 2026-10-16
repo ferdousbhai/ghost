@@ -185,46 +185,9 @@ describe("GET /api/ghosts", () => {
   });
 });
 
-describe("GET /api/hooks", () => {
-  it("returns the exact empty daemon-global projection when no runner is supplied", async () => {
-    const base = await serve();
-    const response = await fetch(`${base}/api/hooks`);
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      active: false,
-      total: 0,
-      events: [],
-      hooks: [],
-    });
-  });
-
-  it("rejects non-GET methods without invoking the status projection", async () => {
-    const status = vi.fn(() => ({
-      active: false,
-      total: 0,
-      events: [],
-      hooks: [],
-    }));
-    const base = await serve(undefined, { hooks: { ...noHooksFile, status } });
-    const response = await fetch(`${base}/api/hooks`, { method: "POST" });
-    expect(response.status).toBe(405);
-    expect(await response.json()).toEqual({
-      error: { code: "method_not_allowed", message: "POST is not allowed here." },
-    });
-    expect(status).not.toHaveBeenCalled();
-  });
-});
-
 describe("/api/hooks/config", () => {
-  const empty = () => ({
-    active: false,
-    total: 0,
-    events: [],
-    hooks: [],
-  });
-
   it("is absent when the runner has no configuration file", async () => {
-    const base = await serve(undefined, { hooks: { ...noHooksFile, status: empty } });
+    const base = await serve(undefined, { hooks: noHooksFile });
     const response = await fetch(`${base}/api/hooks/config`);
     expect(response.status).toBe(404);
   });
@@ -240,7 +203,7 @@ describe("/api/hooks/config", () => {
       return { path, document };
     });
     const base = await serve(undefined, {
-      hooks: { status: empty, config: () => ({ path, document }), replaceConfig },
+      hooks: { config: () => ({ path, document }), replaceConfig },
     });
 
     const read = await fetch(`${base}/api/hooks/config`);

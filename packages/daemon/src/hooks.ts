@@ -2,11 +2,11 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
-  hookStatus, parseCommandResult, parseHooksDocument,
+  parseCommandResult, parseHooksDocument,
   runBeforePromptHooks, runSessionStopHooks,
   type CommandHook, type CommandResult, type GhostBeforePromptEvent,
   type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
-  type GhostHookResult, type GhostHookStatus, type GhostSessionStopEvent,
+  type GhostHookResult, type GhostSessionStopEvent,
   type GhostSessionStopResult,
 } from "./hook-policy.js";
 import { runHarness } from "./harness-process.js";
@@ -155,10 +155,6 @@ export class GhostHookRunner {
 
   hasHandlers(event: GhostHookEvent["type"]): boolean {
     return this.commands.some((hook) => hook.eventName === event);
-  }
-
-  status(): GhostHookStatus {
-    return hookStatus(this.commands);
   }
 
   async emitBeforePrompt(

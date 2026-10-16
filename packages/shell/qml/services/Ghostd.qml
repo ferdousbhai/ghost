@@ -21,7 +21,6 @@ import Quickshell
 import Quickshell.Io
 import QtQuick
 import "GhostRename.js" as GhostRename
-import "HookStatus.js" as HookStatus
 import "HookConfig.js" as HookConfig
 import "TurnBlocks.js" as TurnBlocks
 import "Attachments.js" as Attachments
@@ -155,11 +154,6 @@ Singleton {
     // Hook status and configuration are daemon-global, independent of any
     // ghost or conversation.
 
-    function retireHooksRequest(): void {
-        root.retire(root, "hooksRequest");
-        root.hooksLoading = false;
-    }
-
     /** Take the daemon's `{ path, document }` as the current hooks.json; false when the body is not that. */
     function adoptHookConfig(xhr: var): bool {
         const config = HookConfig.parseConfig(xhr.responseText);
@@ -174,12 +168,6 @@ Singleton {
 
     function beginHooksConnectionEpoch(): void {
         root.hooksEpoch += 1;
-        root.retireHooksRequest();
-        root.activeHooks = [];
-        root.activeHookCount = 0;
-        root.hooksLoaded = false;
-        root.hooksStale = false;
-        root.hooksError = "";
         root.retire(root, "hookConfigRequest");
         root.hookConfig = null;
         root.hookConfigPath = "";
@@ -193,36 +181,6 @@ Singleton {
         // A true -> false transition resets through onReachableChanged. During
         // startup reachable is already false, so retire this epoch directly.
         if (epoch === root.hooksEpoch) root.beginHooksConnectionEpoch();
-    }
-
-    function fetchHooks(force: bool): void {
-        if (!force && (root.hooksLoaded || root.hooksLoading)) return;
-        if (root.hooksRequest) {
-            if (!force) return;
-            root.retireHooksRequest();
-        }
-        const epoch = root.hooksEpoch;
-        root.hooksLoading = true;
-        root.hooksStale = false;
-        root.hooksError = "";
-        root.request(root, "hooksRequest", "GET", "/api/hooks", null, function (xhr, body) {
-            root.hooksLoading = false;
-            const status = xhr.status === 200 ? HookStatus.normalize(body) : null;
-            if (status !== null) {
-                root.activeHooks = status.hooks;
-                root.activeHookCount = status.total;
-                root.hooksLoaded = true;
-                root.hooksStale = false;
-                root.hooksError = "";
-                root.reachable = true;
-            } else if (xhr.status === 0) {
-                root.failHooksTransport(epoch);
-            } else {
-                root.hooksStale = root.hooksLoaded;
-                root.hooksError = xhr.status === 200 ? "ghostd sent malformed hook status"
-                    : root.describeError(xhr, "GET hooks");
-            }
-        }, () => epoch === root.hooksEpoch);
     }
 
     /** Read the owner's hooks.json through the daemon. A 404 means the daemon has no file to edit. */
@@ -251,7 +209,7 @@ Singleton {
     /**
      * Replace the owner's hooks.json whole. The daemon's loader is the only
      * validator: a refused document comes back as its message and nothing
-     * changes; an admitted one is live at once, so the status is re-read.
+     * changes; an admitted one is live at once.
      */
     function writeHookConfig(document: var): void {
         if (root.hookConfigBusy || !root.hookConfigAvailable) return;
@@ -264,7 +222,6 @@ Singleton {
             if (xhr.status === 400) root.hookConfigError = root.refusal(xhr, "PUT hooks config");
             else if (xhr.status !== 200) root.hookConfigError = root.describeError(xhr, "PUT hooks config");
             root.hookConfigWriteFinished(ok);
-            if (ok) root.fetchHooks(true);
         });
     }
 
@@ -294,13 +251,8 @@ Singleton {
     property string remoteQrSource: ""
     readonly property bool remoteQrLoading: root.remoteQrRequest !== null
 
-    property var activeHooks: []
-    property int activeHookCount: 0
-    property bool hooksLoading: false
-    property bool hooksLoaded: false
-    /** A failed refresh may retain the last exact successful projection. */
-    property bool hooksStale: false
-    property string hooksError: ""
+    /** The handlers the daemon runs: every one in the hooks.json it admitted. */
+    readonly property int activeHookCount: HookConfig.handlers(root.hookConfig).length
     property int hooksEpoch: 0
     /** The owner's hooks.json as the daemon admitted it; null until read. */
     property var hookConfig: null
@@ -410,7 +362,6 @@ Singleton {
     property var characterWriteRequest: null
     property var remoteRequest: null
     property var remoteQrRequest: null
-    property var hooksRequest: null
     property var hookConfigRequest: null
     property var hookConfigMutation: null
     property var mcpRequest: null
@@ -494,7 +445,7 @@ Singleton {
         if (root.reachable) {
             root.establishedConnection = true;
             Qt.callLater(function () {
-                if (root.reachable) root.fetchHooks(false);
+                if (root.reachable) root.fetchHookConfig(false);
             });
         } else if (root.establishedConnection) {
             root.beginHooksConnectionEpoch();
@@ -504,7 +455,7 @@ Singleton {
     function retireClientRequests(): void {
         root.cancelAllTranscriptLoads();
         root.retireRemoteRequests();
-        root.retireHooksRequest();
+        root.retire(root, "hookConfigRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
@@ -664,7 +615,7 @@ Singleton {
     }
 
     function refresh(): void {
-        root.fetchHooks(false);
+        root.fetchHookConfig(false);
         root.retire(root, "listRequest");
         root.request(root, "listRequest", "GET", "/api/ghosts", null, function (xhr, list) {
             if (xhr.status !== 200) {
