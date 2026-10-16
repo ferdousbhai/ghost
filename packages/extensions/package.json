@@ -3,7 +3,7 @@
   "version": "0.6.1",
   "private": true,
   "license": "Apache-2.0",
-  "description": "Ghost's built-in extensions \u2014 the plain-file ghost home as an AI persona \u2014 plus the ghost-home/v2 reader/writer.",
+  "description": "The ghost-home reader/writer and the persona prompt it builds.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

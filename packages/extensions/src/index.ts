@@ -14,14 +14,4 @@ export {
   SEEDED_CHARACTER,
 } from "./persona.js";
 
-export {
-  collectGhostExtension,
-  type CollectedGhostExtension,
-  type GhostExtensionFactory,
-} from "./extension-api.js";
-
-export { serveMcpTools } from "./mcp-stdio.js";
-
 export { resolveDocumentsDirectory, xdgBaseDir } from "./xdg-user-dirs.js";
-
-export { createDesktopExtension } from "./extensions/desktop.js";

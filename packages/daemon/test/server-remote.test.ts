@@ -152,22 +152,6 @@ describe("tailnet identity", () => {
       .toEqual({ role: "owner" });
   });
 
-  it("runs ghost tools only for the machine-local token, never a tailnet owner", async () => {
-    const base = await serve();
-    const tools = `${base}/api/ghosts/casper/sessions/conv-1/tools`;
-    for (const [url, init] of [
-      [tools, {}],
-      [`${tools}/desktop_look`, { method: "POST", body: "{}" }],
-    ] as const) {
-      const response = await fetch(url, {
-        ...init,
-        headers: { ...asTailnet("owner@example.com"), "content-type": "application/json" },
-      });
-      expect(response.status).toBe(403);
-      expect(await response.json()).toMatchObject({ error: { code: "local_only" } });
-    }
-  });
-
   it("shows the owner what runs the daemon and refuses a guest the source path", async () => {
     const runningSource: RunningSource = {
       version: "1.4.0",

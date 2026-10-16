@@ -263,8 +263,8 @@ grok, which reads none of them, gets it as `--rules`. Because the directory is
 the conversation's own, a harness's "continue the most recent session here" is
 the conversation's resume; opencode and muse, whose continue is not
 cwd-scoped, are resumed by the session id they reported. Each turn also
-receives the `ghost` MCP server (`ghost mcp serve -g <ghost> -s <id>`, the
-ghost's desktop tools) and the ghost's enabled `mcp.json` rows,
+receives `ghost-desktop` as its `ghost` MCP server, when installed (the
+desktop tools), and the ghost's enabled `mcp.json` rows,
 `${VAR}`-expanded and with relative stdio `cwd`s resolved against the ghost
 home, in that harness's own dialect: a `--mcp-config` file, `-c
 mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
@@ -329,18 +329,12 @@ its pipes have been idle for 100ms, so a descendant holding them cannot hang
 the call. The verb exits with the harness's status (128 plus the signal number
 when a signal ended it, 127 when it could not start).
 
-A delegated harness can load the ghost's tools with `ghost mcp serve`, the
-same stdio MCP server every conversation turn gets, which proxies
-`tools/list` and `tools/call` to the `/sessions/:id/tools` routes, bound at
-start to `-s`, then `$GHOST_SESSION` (which `ghost delegate` passes through);
-an id not listed yet binds as given. Each serve process sends its own `caller` (the MCP client's
-name plus a per-process id) with every call, which keys the desktop lease.
-`ghost delegate` adds
-it to the two harnesses whose flags for it are known, unless the run already
-names an MCP config: `claude` gets `--allowedTools mcp__ghost --mcp-config
-<ghost server>` after its own arguments (both flags take lists, and a `--`
-in them leaves the run alone), `codex` gets `-c mcp_servers.ghost.command`
-and `.args` overrides ahead of them. That table is a deliberate exception to
+A delegated harness gets the same `ghost` server: `ghost delegate` adds
+`ghost-desktop` to the two harnesses whose flags for it are known, unless it
+is not installed or the run already names an MCP config: `claude` gets
+`--allowedTools mcp__ghost --mcp-config <ghost server>` after its own
+arguments (both flags take lists, and a `--` in them leaves the run alone),
+`codex` gets a `-c mcp_servers.ghost.command` override ahead of them. That table is a deliberate exception to
 the harness table's being the one adapter: two flags per harness, and it
 replaces a recipe every model had to copy exactly. Other harnesses load it
 themselves (an omp `mcp.json` row, or Pi's native MCP settings).
@@ -418,7 +412,6 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
-| `GET /sessions/:id/tools`, `POST /sessions/:id/tools/:name` | Machine-local token only (a tailnet caller, even the owner, gets 403 `local_only`). List the ghost's own tools (desktop, `{name, description, inputSchema}`), or run one with `{arguments, caller?}` → `{content, isError}`; a tool's failure is `isError` with its message. The harness reports its own calls in the turn stream. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
 | `GET\|POST /sessions/:id/queue` | Inspect (`{ streaming, followUp }`) or enqueue `{ text }` into a live turn; it runs as the next pass of the same stream, even after a pass that failed. A stop ends the turn without running it; the HUD hands its own queued text back to the composer. An idle conversation answers `409 session_not_streaming`; `ghost say --follow-up` then posts the text as a new turn instead. A running `!command` answers `409 session_busy`. |
 | `DELETE /sessions/:id` | Move the conversation directory to Trash. |
@@ -514,9 +507,9 @@ pointer and one focus, so every `desktop_act` call claims the desktop for its
 caller, and another caller's call fails `busy` naming the holder until the
 holder has been idle 15 s. The lease is a file under
 `$XDG_RUNTIME_DIR/ghost-desktop/`, shared by every `ghost-desktop` process of
-the user, so a ghost and a separately launched MCP client (Claude Code) take
-turns too. A caller is a call's `_meta.caller` — `ghost mcp serve` sends its
-client and process — else the connecting client plus that server process.
+the user, so two turns and a separately launched MCP client (Claude Code)
+take turns too. A caller is one `ghost-desktop` process, named after its
+client, so each harness pass is its own caller.
 `desktop_look` never claims and reports a foreign holder as `heldBy`.
 
 ## Package boundaries
@@ -538,8 +531,7 @@ removing the UI neither stops the runtime nor changes ghost homes; removing the
 runtime preserves owner data.
 
 - [`packages/extensions`](packages/extensions/src/index.ts) is runtime-neutral:
-  ghost-home parsing, prompt construction, pure tools, desktop clients,
-  and the `extension-api.ts` seam. It imports no daemon or UI.
+  ghost-home parsing and prompt construction. It imports no daemon or UI.
 - [`packages/daemon`](packages/daemon/src/main.ts) owns configuration,
   authentication, conversations, the harness table, MCP, hooks, lifecycle,
   HTTP, and the `ghost` CLI. Bun is the production runtime.
@@ -593,12 +585,10 @@ runtime preserves owner data.
   the runtime as `ghost-desktop` by
   [`build-runtime.sh`](packages/daemon/scripts/build-runtime.sh), so the
   package still ships it. What Ghost relies on is its README's host contract:
-  the two tool names, `_meta.caller` in, and `_meta.code` out on a failure.
-  ghostd spawns one per daemon on first use and serves its tools through
-  `ghost mcp serve`
-  ([`desktop.ts`](packages/extensions/src/extensions/desktop.ts)): its errors
-  reach the model word for word, because they carry the remedy; its text is
-  fenced as untrusted. No `ghost-desktop` on PATH means no desktop tools.
+  the two tool names, its untrusted-content fence, and errors written for the
+  model. Each harness pass runs its own, as the turn's `ghost` MCP server
+  (`$GHOST_DESKTOP`, else `ghost-desktop` from PATH); ghostd never calls it.
+  No `ghost-desktop` means no desktop tools.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
   refreshes enablement and explicitly restarts an active daemon to load its bundle. A release is cut locally

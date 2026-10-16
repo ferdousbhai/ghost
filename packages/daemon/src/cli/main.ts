@@ -157,8 +157,8 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "mcp",
-    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>|serve] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Inspect or change this ghost's MCP servers (new ones start disabled), or `serve` this conversation's own tools over stdio to a delegated harness.",
+    usage: "mcp [list|add <name> <config.json>|set <name> <config.json>|rm <name>|enable <name>|disable <name>] [-g <name>] [--json] [-q]",
+    summary: "Inspect or change this ghost's MCP servers (new ones start disabled).",
     example: "ghost mcp enable github",
     positionals: [0, 3],
     run: mcpCommand,
@@ -254,7 +254,7 @@ export const COMMANDS: readonly Command[] = [
   {
     verb: "delegate",
     usage: "delegate [--owner-named] <harness> -- <args...>",
-    summary: "Run an installed harness here and record the handoff; claude and codex runs get the ghost's own tools.",
+    summary: "Run an installed harness here and record the handoff; claude and codex runs get the ghost's desktop tools.",
     example: "cd ~/code/app && ghost delegate claude -- -p \"Fix the failing test\"",
     flags: DELEGATE_ARGS,
     positionals: [1, Number.POSITIVE_INFINITY],

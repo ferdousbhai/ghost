@@ -41,7 +41,6 @@ function host(options: Partial<SessionHostOptions> & { harnesses: FakeHarness[] 
   return new SessionHost({
     registry: temp.registry,
     ownerHome: temp.ownerHome,
-    scheduleCliPath: "/usr/bin/ghost",
     scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
     ...onlyHarnesses(...fakes),
     ...rest,
@@ -83,6 +82,15 @@ describe("a turn", () => {
     expect(call?.agents).toContain("You are Casper, a letterpress printer.");
     expect(call?.agents).toContain("## Character file");
     expect(existsSync(join(conversationDir(sessionDir(), "c1"), "CLAUDE.md"))).toBe(true);
+  });
+
+  it("serves ghost-desktop as the turn's ghost server, and no desktop tools without it", async () => {
+    const fake = harness(replies("one", "two"));
+    const sessions = host({ harnesses: [fake], env: { ...process.env, GHOST_DESKTOP: "/opt/ghost-desktop" } });
+    await turn(sessions, "first");
+    const without = host({ harnesses: [fake], env: { PATH: "/nonexistent" } });
+    await turn(without, "second");
+    expect(fake.calls().map((call) => call.mcp)).toEqual([["ghost"], []]);
   });
 
   it("re-renders the persona every turn, so a rewritten character is who the ghost is next", async () => {

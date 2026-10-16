@@ -1,7 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagString, type ParsedCliArgs } from "./args.js";
 import { ghostPath, resolveGhost } from "./common.js";
-import { mcpServeCommand } from "./mcp-serve.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -19,10 +18,9 @@ function renderSnapshot(body: unknown): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** `ghost mcp [list|add|set|rm|enable|disable] ...` over the ghost's `mcp.json`, or `serve`. */
+/** `ghost mcp [list|add|set|rm|enable|disable] ...` over the ghost's `mcp.json`. */
 export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const [action = "list", name, file] = parsed.positionals;
-  if (action === "serve") return mcpServeCommand(parsed, ctx);
   const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const base = ghostPath(ghost, "/mcp");
   const server = (): string => {
@@ -52,7 +50,7 @@ export async function mcpCommand(parsed: ParsedCliArgs, ctx: CliContext): Promis
       body = (await ctx.client.request("PUT", `${server()}/enabled`, { enabled: action === "enable" })).body;
       break;
     default:
-      throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, disable, or serve.`);
+      throw new ArgsError(`ghost mcp does not know "${action}"; use list, add, set, rm, enable, or disable.`);
   }
   emit(ctx, body, renderSnapshot);
   return 0;

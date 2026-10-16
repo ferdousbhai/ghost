@@ -31,7 +31,7 @@ const TURN: HarnessTurnInput = {
   resume: false,
   sessionId: null,
   persona: "You are Casper.",
-  mcp: [{ name: "ghost", config: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } }],
+  mcp: [{ name: "ghost", config: { command: "/usr/bin/ghost-desktop" } }],
 };
 
 describe("resource provenance", () => {
@@ -357,21 +357,21 @@ describe("launch lines", () => {
     expect(launch?.argv).toContain("--continue");
     expect(launch?.argv.slice(-2)).toEqual(["--mcp-config", ".ghost-mcp.json"]);
     expect(JSON.parse(launch?.files?.[".ghost-mcp.json"] ?? "{}")).toEqual({
-      mcpServers: { ghost: { command: "/usr/bin/ghost", args: ["mcp", "serve", "-s", "c1"] } },
+      mcpServers: { ghost: { command: "/usr/bin/ghost-desktop", args: [] } },
     });
   });
 
   it("codex resumes the directory's last session and takes MCP as config overrides", () => {
     const argv = harnessRow("codex")?.launch({ ...TURN, resume: true }).argv ?? [];
     expect(argv.slice(0, 4)).toEqual(["codex", "exec", "resume", "--last"]);
-    expect(argv).toContain('mcp_servers.ghost.command="/usr/bin/ghost"');
+    expect(argv).toContain('mcp_servers.ghost.command="/usr/bin/ghost-desktop"');
     expect(argv.slice(-2)).toEqual(["--", "-hello"]);
   });
 
   it("grok gets the persona as --rules, since it reads no AGENTS.md", () => {
     const launch = harnessRow("grok")?.launch(TURN);
     expect(launch?.argv).toEqual(expect.arrayContaining(["--rules", "You are Casper."]));
-    expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.ghost]\ncommand = "/usr/bin/ghost"');
+    expect(launch?.files?.[".grok/config.toml"]).toContain('[mcp_servers.ghost]\ncommand = "/usr/bin/ghost-desktop"');
   });
 
   it("opencode resumes by the session id it reported, not by directory", () => {
@@ -380,7 +380,7 @@ describe("launch lines", () => {
     const resumed = harnessRow("opencode")?.launch({ ...TURN, resume: true, sessionId: "ses_1" });
     expect(resumed?.argv).toEqual(expect.arrayContaining(["--session", "ses_1"]));
     expect(JSON.parse(resumed?.env?.OPENCODE_CONFIG_CONTENT ?? "{}")).toEqual({
-      mcp: { ghost: { type: "local", command: ["/usr/bin/ghost", "mcp", "serve", "-s", "c1"], enabled: true } },
+      mcp: { ghost: { type: "local", command: ["/usr/bin/ghost-desktop"], enabled: true } },
     });
   });
 });

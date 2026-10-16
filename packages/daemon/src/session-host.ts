@@ -13,11 +13,8 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import {
   buildGhostSystemPrompt,
-  collectGhostExtension,
-  createDesktopExtension,
   openGhostHome,
   resolveDocumentsDirectory,
-  type CollectedGhostExtension,
 } from "@ghost/extensions";
 import { readAttachment, saveAttachment } from "./attachments.js";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
@@ -43,7 +40,7 @@ import {
 } from "./conversation-log.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   harnessRow,
@@ -69,7 +66,6 @@ import { readsPath, readReadState, writeReads } from "./reads.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
 import {
-  ghostCliPath,
   SCHEDULED_WORK_POLICY,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
@@ -92,14 +88,13 @@ const TOOL_SUMMARY_MAX = 800;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
-/** The MCP server name ghost's own tools are served under. */
+/** The MCP server name `ghost-desktop` is served under; its tools are `mcp__ghost__desktop_*`. */
 export const GHOST_MCP_SERVER = "ghost";
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
   ownerHome?: string;
   scheduleUnitDir?: string;
-  scheduleCliPath?: string;
   runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
   logger?: Logger;
@@ -133,18 +128,6 @@ export interface AdmittedTurnOptions {
 export interface TurnAdmission {
   run(options: AdmittedTurnOptions): Promise<void>;
   release(): void;
-}
-
-/** A tool as `ghost mcp serve` lists it; `inputSchema` is JSON Schema. */
-export interface SessionToolDescriptor {
-  name: string;
-  description: string;
-  inputSchema: unknown;
-}
-
-export interface SessionToolResult {
-  content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }>;
-  isError: boolean;
 }
 
 export interface QueuedMessages {
@@ -254,7 +237,6 @@ export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
   private readonly scheduleUnitDir: string;
-  private readonly scheduleCliPath: string;
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
   private readonly logger: Logger;
@@ -275,7 +257,6 @@ export class SessionHost {
   private readonly leases = new Map<string, { count: number; drained?: () => void }>();
   private readonly metadataWrites = new Map<string, Promise<unknown>>();
   private readonly listeners = new Map<string, Set<{ listener: ConversationEventListener; close: () => void }>>();
-  private readonly tools = new Map<string, Promise<CollectedGhostExtension>>();
   private reportCache?: { at: number; report: Promise<HarnessReport> };
   private shuttingDown = false;
 
@@ -283,7 +264,6 @@ export class SessionHost {
     this.registry = options.registry;
     this.ownerHome = resolve(options.ownerHome ?? homedir());
     this.scheduleUnitDir = resolve(options.scheduleUnitDir ?? resolveScheduleUnitDirectory(this.ownerHome, {}));
-    this.scheduleCliPath = options.scheduleCliPath ?? ghostCliPath();
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
     this.logger = options.logger ?? silentLogger;
@@ -362,12 +342,10 @@ export class SessionHost {
     });
   }
 
-  /** The MCP servers a turn loads: ghost's own tools, then the ghost's enabled `mcp.json` rows. */
-  private async mcpServers(ghost: Ghost, id: string): Promise<HarnessMcpServer[]> {
-    const servers: HarnessMcpServer[] = [{
-      name: GHOST_MCP_SERVER,
-      config: { command: this.scheduleCliPath, args: ["mcp", "serve", "-g", ghost.name, "-s", id] },
-    }];
+  /** The MCP servers a turn loads: `ghost-desktop` when installed, then the ghost's enabled `mcp.json` rows. */
+  private async mcpServers(ghost: Ghost): Promise<HarnessMcpServer[]> {
+    const desktop = desktopCommand(this.env);
+    const servers: HarnessMcpServer[] = desktop ? [{ name: GHOST_MCP_SERVER, config: { command: desktop } }] : [];
     try {
       for (const server of readEnabledMcp(ghost.dir)) {
         if (server.name === GHOST_MCP_SERVER) continue;
@@ -375,7 +353,7 @@ export class SessionHost {
         servers.push({ name: server.name, config });
       }
     } catch (error) {
-      this.logger.warn("ghost mcp.json unreadable; turn runs with Ghost's tools only", { ghost: ghost.name, error: errorMessage(error) });
+      this.logger.warn("ghost mcp.json unreadable; turn runs without its own MCP servers", { ghost: ghost.name, error: errorMessage(error) });
     }
     return servers;
   }
@@ -728,7 +706,7 @@ export class SessionHost {
     const { sessionDir } = ghostPaths(ghost.dir);
     const dir = conversationDir(sessionDir, id);
     const account = accountEnv(row.id, this.env);
-    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost, id)]);
+    const [persona, mcp] = await Promise.all([this.renderPersona(ghost), this.mcpServers(ghost)]);
     await this.prepareDirectory(ghost, dir, persona);
     const launch = row.launch({ ...turn, persona, mcp });
     await writeLaunchFiles(dir, launch.files);
@@ -969,45 +947,6 @@ export class SessionHost {
     turn.followUps.push(text);
     turn.emit({ type: "queue", followUp: [...turn.followUps] });
     return this.queuedMessages(ghostName, sessionId);
-  }
-
-  // ── Ghost tools for `ghost mcp serve` ──────────────────────────────────
-
-  private ghostTools(ghost: Ghost): Promise<CollectedGhostExtension> {
-    let tools = this.tools.get(ghost.dir);
-    if (!tools) {
-      tools = collectGhostExtension(createDesktopExtension());
-      tools.catch(() => this.tools.delete(ghost.dir));
-      this.tools.set(ghost.dir, tools);
-    }
-    return tools;
-  }
-
-  async sessionTools(ghostName: string): Promise<SessionToolDescriptor[]> {
-    const tools = await this.ghostTools(this.registry.get(ghostName));
-    return [...tools.tools.values()].map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.parameters }));
-  }
-
-  async callSessionTool(
-    ghostName: string,
-    sessionId: string | null | undefined,
-    name: string,
-    args: unknown,
-    signal?: AbortSignal,
-    caller?: string,
-  ): Promise<SessionToolResult> {
-    const ghost = this.registry.get(ghostName);
-    const tool = (await this.ghostTools(ghost)).tools.get(name);
-    if (!tool) throw new GhostError("tool_not_found", `This ghost has no tool named ${JSON.stringify(name)}.`, 404);
-    const id = sessionId ? requireConversationId(sessionId) : null;
-    try {
-      const result = await tool.execute((args ?? {}) as never, signal, {
-        caller: caller ?? (id ? `conversation ${id}` : "a delegated run"),
-      });
-      return { content: result.content as SessionToolResult["content"], isError: false };
-    } catch (error) {
-      return { content: [{ type: "text", text: errorMessage(error) }], isError: true };
-    }
   }
 
   // ── Listing and metadata ──────────────────────────────────────────────
@@ -1251,7 +1190,6 @@ export class SessionHost {
         503,
       );
     }
-    this.tools.delete(ghost.dir);
   }
 
   async deleteGhost(ghostName: string): Promise<{ trash: string }> {

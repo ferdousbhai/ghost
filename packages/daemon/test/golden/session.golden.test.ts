@@ -66,7 +66,6 @@ describe("golden: session", () => {
       registry: temp.registry,
       ownerHome: temp.ownerHome,
       scheduleUnitDir,
-      scheduleCliPath: "/usr/bin/ghost",
       scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
       env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temp.ownerHome },
       ...onlyHarnesses(harness),

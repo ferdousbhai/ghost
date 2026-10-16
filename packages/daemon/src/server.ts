@@ -887,38 +887,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     await followTurn(request, response, log, from);
   };
 
-  /** `ghost mcp serve`'s backend: list this conversation's tools, or run one. */
-  const handleSessionTools = async (
-    { params, request, response, admission }: RequestContext,
-    toolName: string | undefined,
-  ): Promise<void> => {
-    // Running a tool acts on this desktop directly; a tailnet caller, even
-    // the owner, acts only through the ghost.
-    if (admission.identity) {
-      throw new GhostError("local_only", "Ghost tools run only for the machine-local token.", 403);
-    }
-    const ghostName = ghostOf(params);
-    const conversationId = conversationOf(params);
-    if (toolName === undefined) {
-      jsonResponse(response, 200, { tools: await options.host.sessionTools(ghostName) });
-      return;
-    }
-    const body = await readJsonObjectBody(request, maxBodyBytes);
-    const connection = abortOnClose(request, response);
-    try {
-      jsonResponse(response, 200, await options.host.callSessionTool(
-        ghostName,
-        conversationId,
-        toolName,
-        body.arguments ?? {},
-        connection.signal,
-        typeof body.caller === "string" ? body.caller.slice(0, 120) : undefined,
-      ));
-    } finally {
-      connection.release();
-    }
-  };
-
   const handleQueue = async (
     ghostName: string,
     conversationId: string,
@@ -1034,8 +1002,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/ghosts/:ghost/sessions/:id/attachments/:file", handleReadAttachment),
     route("GET", "api/ghosts/:ghost/sessions/:id/stream", handleTurnStream),
     route("GET", "api/ghosts/:ghost/sessions/:id/transcript", ({ params, url, response }) => handleTranscript(ghostOf(params), conversationOf(params), url, response)),
-    route("GET", "api/ghosts/:ghost/sessions/:id/tools", (context) => handleSessionTools(context, undefined)),
-    route("POST", "api/ghosts/:ghost/sessions/:id/tools/:tool", (context) => handleSessionTools(context, context.params.tool)),
     route("POST", "api/ghosts/:ghost/sessions/:id/stop", ({ params, response }) => {
       options.host.stopTurn(ghostOf(params), conversationOf(params));
       jsonResponse(response, 200, { stopped: true });

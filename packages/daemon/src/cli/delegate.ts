@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
-import { eligibleIds, readHarnessReport } from "../harnesses.js";
+import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
@@ -77,20 +77,20 @@ function run(id: string, args: string[], ctx: CliContext): Promise<RunResult> {
 
 export const DELEGATE_ARGS: ArgsSpec = { boolean: ["owner-named"], value: [] };
 
-const GHOST_MCP_CONFIG = JSON.stringify({ mcpServers: { ghost: { command: "ghost", args: ["mcp", "serve"] } } });
-
 /**
- * The harness's arguments plus `ghost mcp serve`, for the harnesses whose way
- * to load an MCP server is known, so a run can use the ghost's desktop. Left alone when the run already
- * names an MCP config, or (claude) when a `--` would make the flags text.
+ * The harness's arguments plus `ghost-desktop` (the `desktop` command) as its
+ * `ghost` MCP server, for the harnesses whose way to load one is known. Left
+ * alone without `ghost-desktop`, when the run already names an MCP config, or
+ * (claude) when a `--` would make the flags text.
  */
-export function withGhostTools(id: string, args: readonly string[]): string[] {
+export function withGhostTools(id: string, args: readonly string[], desktop: string | null): string[] {
+  if (!desktop) return [...args];
   const terminator = args.indexOf("--");
   const options = terminator < 0 ? args : args.slice(0, terminator);
   if (id === "claude" && terminator < 0
     && !options.some((arg) => arg === "--mcp-config" || arg.startsWith("--mcp-config="))) {
     // Both flags take a list, so they go last, after the task.
-    return [...args, "--allowedTools", "mcp__ghost", "--mcp-config", GHOST_MCP_CONFIG];
+    return [...args, "--allowedTools", "mcp__ghost", "--mcp-config", JSON.stringify({ mcpServers: { ghost: { command: desktop } } })];
   }
   const hasGhostConfig = options.some((arg, index) => {
     const value = arg === "-c" || arg === "--config"
@@ -99,7 +99,8 @@ export function withGhostTools(id: string, args: readonly string[]): string[] {
     return value !== undefined && /^mcp_servers\.ghost(?:\.|\s*=)/u.test(value);
   });
   if (id === "codex" && !hasGhostConfig) {
-    return ["-c", 'mcp_servers.ghost.command="ghost"', "-c", 'mcp_servers.ghost.args=["mcp","serve"]', ...args];
+    // A JSON string is a TOML basic string.
+    return ["-c", `mcp_servers.ghost.command=${JSON.stringify(desktop)}`, ...args];
   }
   return [...args];
 }
@@ -147,7 +148,7 @@ export async function delegateCommand(parsed: ParsedCliArgs, ctx: CliContext): P
   }
 
   const launched = Date.now();
-  const result = await run(id, withGhostTools(id, args), ctx);
+  const result = await run(id, withGhostTools(id, args, desktopCommand(ctx.runtime.env)), ctx);
   const failed = result.exit !== 0;
   record({
     exit: result.exit,

@@ -62,8 +62,8 @@ The empty `ExecStart=` is required: without it systemd appends rather than
 replaces. Apply with `systemctl --user daemon-reload && systemctl --user
 restart ghostd`.
 
-Computer use is a separate executable the daemon spawns once, `ghost-desktop`
-on PATH, or `$GHOST_DESKTOP` when set. It is its own repository,
+Computer use is a separate executable each harness pass runs as its `ghost`
+MCP server: `$GHOST_DESKTOP` when set, else `ghost-desktop` on PATH. It is its own repository,
 [ghost-desktop](https://github.com/ferdousbhai/ghost-desktop); to run a clone of it (Bun runs the source directly,
 no build), clone it to `~/src/ghost-desktop` and add a second launcher,
 
@@ -77,7 +77,7 @@ chmod 755 ~/.local/bin/ghost-desktop-dev
 ```
 
 and `Environment=GHOST_DESKTOP=%h/.local/bin/ghost-desktop-dev` under the same
-`[Service]` override. A daemon restart picks up a pull of that clone.
+`[Service]` override. The next turn picks up a pull of that clone.
 
 `ghostd.service` sets `ProtectSystem=strict` with `ReadWritePaths=%h %t`, so the
 clone must live under the owner's home. A checkout in `/opt` or `/srv` is
@@ -155,7 +155,7 @@ GHOSTS_ROOT="$task_canary_dir/ghosts" \
 GHOSTD_CONFIG="$task_canary_dir/config.json" \
 GHOSTD_HOOKS="$task_canary_dir/hooks.json" \
 XDG_STATE_HOME="$task_canary_dir/state" \
-GHOST_DESKTOP="$PWD/packages/daemon/test/helpers/fake-desktop.ts" \
+GHOST_DESKTOP=/usr/bin/false \
   bun packages/daemon/dist/main.js --port 7799
 ```
 
