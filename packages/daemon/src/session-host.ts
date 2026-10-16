@@ -121,9 +121,9 @@ export interface AdmittedTurnOptions {
   emit: (event: TurnEvent) => void;
 }
 
+/** An admitted turn: the conversation is held until `run` settles. */
 export interface TurnAdmission {
   run(options: AdmittedTurnOptions): Promise<void>;
-  release(): void;
 }
 
 export interface QueuedMessages {
@@ -511,22 +511,15 @@ export class SessionHost {
     if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
     const controller = new AbortController();
     this.admissions.set(key, controller);
-    let released = false;
-    const release = () => {
-      if (released) return;
-      released = true;
-      this.admissions.delete(key);
-    };
     return {
       run: async (stream) => {
         try {
           await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
         } finally {
-          release();
+          this.admissions.delete(key);
           this.announce(ghost.name, id);
         }
       },
-      release,
     };
   }
 

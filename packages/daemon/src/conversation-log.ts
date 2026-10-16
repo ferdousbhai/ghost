@@ -117,14 +117,10 @@ export async function readLog(sessionDir: string, id: string): Promise<LogEntry[
   }
   const entries: LogEntry[] = [];
   try {
+    // A partial line is what a crash mid-append leaves; the rest stands.
     for await (const line of file.readLines({ autoClose: false })) {
-      if (line.trim() === "") continue;
-      try {
-        const entry = JSON.parse(line) as LogEntry;
-        if (entry && typeof entry === "object" && typeof entry.type === "string") entries.push(entry);
-      } catch {
-        // A partial line is what a crash mid-append leaves; the rest stands.
-      }
+      const entry = parseEntry(Buffer.from(line));
+      if (entry) entries.push(entry);
     }
   } finally {
     await file.close();

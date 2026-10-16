@@ -648,13 +648,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
     });
-    const log = startTurnLog(ghost.name, parsed.sessionId ?? "default", async (emit) => {
-      try {
-        await admission.run({ emit });
-      } finally {
-        admission.release();
-      }
-    });
+    const log = startTurnLog(ghost.name, parsed.sessionId ?? "default", (emit) => admission.run({ emit }));
     await followTurn(request, response, log, 0);
   };
 
