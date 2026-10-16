@@ -84,8 +84,11 @@ GHOST_PREVIEW_SCREENSHOT=/tmp/ghost-hud.png \
   bash dev/preview.sh qml 17717
 ```
 
-Press Ctrl-C in the preview terminal to tear down everything it started, then
-stop the mock separately.
+Press Ctrl-C in the preview terminal, or send `TERM` to the PID the ready
+message prints, to tear down everything it started; then stop the mock
+separately. Use that printed PID rather than `$!` from a `setsid` launch:
+`setsid` forks when its caller leads a process group, so `$!` names a parent
+that has already exited and the preview keeps running.
 
 ### What you should see
 

@@ -330,6 +330,7 @@ echo "  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 echo "  WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 echo "  HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE"
 echo "  Hyprland pid=$hypr_pid; Quickshell pid=$quickshell_pid; mock port=$mock_port"
+echo "  stop with: kill -TERM $$"
 
 if [[ -n ${GHOST_PREVIEW_SCREENSHOT:-} ]]; then
   grim "$GHOST_PREVIEW_SCREENSHOT"
