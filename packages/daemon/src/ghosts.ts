@@ -1,16 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
-  chmodSync,
   existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { CHARACTER_FILENAME } from "./home.js";
 import { SEEDED_CHARACTER } from "./persona.js";
 import { GhostError } from "./errors.js";
@@ -88,58 +86,6 @@ export function ghostPaths(dir: string): {
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
     characterFile: join(home, CHARACTER_FILENAME),
   };
-}
-
-/**
- * Re-render the daemon-authored seed under its new name. Anything that differs
- * from the seed is owner-authored character and remains byte-for-byte.
- */
-function renamedSeed(text: string, previous: string, next: string): string | null {
-  return text === SEEDED_CHARACTER(previous) ? SEEDED_CHARACTER(next) : null;
-}
-
-/**
- * Stage a complete replacement beside `character.md`, without changing the
- * live file. The staging path travels with the home rename, so publishing it
- * afterwards is another same-filesystem rename and cannot expose a partial
- * character file.
- */
-function prepareRenamedSeed(dir: string, previous: string, next: string): string | null {
-  const file = ghostPaths(dir).characterFile;
-  let text: string;
-  try {
-    text = readFileSync(file, "utf8");
-  } catch {
-    // A ghost home with no readable persona is not a rename failure; the
-    // directory moved, which is what the rename was.
-    return null;
-  }
-  const replacement = renamedSeed(text, previous, next);
-  if (replacement === null) return null;
-
-  const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
-  const mode = statSync(file).mode & 0o777;
-  try {
-    writeFileSync(temporary, replacement, {
-      encoding: "utf8",
-      flag: "wx",
-      mode,
-    });
-    // Creation mode is filtered through umask; the atomic replacement should
-    // not quietly change the permissions of an owner-managed character file.
-    chmodSync(temporary, mode);
-  } catch (error) {
-    try {
-      rmSync(temporary, { force: true });
-    } catch (cleanupError) {
-      throw new AggregateError(
-        [error, cleanupError],
-        `${file} could not be prepared for rename and its temporary file could not be removed.`,
-      );
-    }
-    throw error;
-  }
-  return temporary;
 }
 
 export class GhostRegistry {
@@ -235,48 +181,19 @@ export class GhostRegistry {
         409,
       );
     }
-    const preparedCharacter = prepareRenamedSeed(ghost.dir, name, nextName);
+    renameSync(ghost.dir, target);
+    // The daemon-written seed names the ghost, so an untouched one is
+    // re-rendered under the new name; owner-authored text stays byte for byte.
+    // A failure here leaves the old name in the seed, not a half-renamed ghost.
+    const file = ghostPaths(target).characterFile;
     try {
-      renameSync(ghost.dir, target);
-    } catch (error) {
-      if (preparedCharacter !== null) {
-        try {
-          rmSync(preparedCharacter, { force: true });
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            `Ghost ${JSON.stringify(name)} was not moved, but its staged character file could not be removed.`,
-          );
-        }
+      if (readFileSync(file, "utf8") === SEEDED_CHARACTER(name)) {
+        const temporary = `${file}.${process.pid}.${randomUUID()}.tmp`;
+        writeFileSync(temporary, SEEDED_CHARACTER(nextName), { flag: "wx", mode: statSync(file).mode & 0o777 });
+        renameSync(temporary, file);
       }
-      throw error;
-    }
-    if (preparedCharacter !== null) {
-      const preparedName = basename(preparedCharacter);
-      const movedTemporary = join(target, preparedName);
-      try {
-        renameSync(movedTemporary, ghostPaths(target).characterFile);
-      } catch (error) {
-        try {
-          renameSync(target, ghost.dir);
-        } catch (rollbackError) {
-          throw new AggregateError(
-            [error, rollbackError],
-            `Ghost ${JSON.stringify(name)} moved to ${JSON.stringify(nextName)}, `
-              + "but its renamed character seed could not be published and the home move could not be rolled back.",
-          );
-        }
-        try {
-          rmSync(join(ghost.dir, preparedName), { force: true });
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [error, cleanupError],
-            `Ghost ${JSON.stringify(name)} was moved back after its renamed character seed could not be published, `
-              + "but the staged character file could not be removed.",
-          );
-        }
-        throw error;
-      }
+    } catch {
+      // The home moved, which is what the rename was.
     }
     return { name: nextName, dir: target };
   }

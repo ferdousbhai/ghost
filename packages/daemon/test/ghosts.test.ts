@@ -147,20 +147,20 @@ describe("GhostRegistry.rename", () => {
     expect(statSync(ghostPaths(renamed.dir).characterFile).mode & 0o777).toBe(0o640);
   });
 
-  it("leaves the old home and character untouched when a renamed seed cannot be prepared", () => {
+  it("keeps the move when the renamed seed cannot be written, with the old seed text", () => {
     temp = makeTempGhosts();
     temp.registry.ensureRoot();
     const dir = temp.registry.create("casper").dir;
     const before = readFileSync(ghostPaths(dir).characterFile, "utf8");
     chmodSync(dir, 0o500);
+    const moved = join(temp.root, "wisp");
 
     try {
-      expect(() => temp!.registry.rename("casper", "wisp")).toThrow();
-      expect(existsSync(dir)).toBe(true);
-      expect(existsSync(join(temp.root, "wisp"))).toBe(false);
-      expect(readFileSync(ghostPaths(dir).characterFile, "utf8")).toBe(before);
+      expect(temp.registry.rename("casper", "wisp")).toEqual({ name: "wisp", dir: moved });
+      expect(existsSync(dir)).toBe(false);
+      expect(readFileSync(ghostPaths(moved).characterFile, "utf8")).toBe(before);
     } finally {
-      chmodSync(dir, 0o700);
+      chmodSync(moved, 0o700);
     }
   });
 
