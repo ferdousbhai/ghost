@@ -110,9 +110,8 @@ describe("file work during whole-home moves", () => {
     const [added, deleted] = await Promise.all([add, deletion]);
     expect(added.status).toBe(201);
     expect(deleted.status).toBe(200);
-    const { trash } = await deleted.json() as { trash: string };
     expect(existsSync(join(temp.root, "casper"))).toBe(false);
-    const moved = JSON.parse(readFileSync(join(trash, "mcp.json"), "utf8")) as {
+    const moved = JSON.parse(readFileSync(join(temp.trashDir, "files", "casper", "mcp.json"), "utf8")) as {
       mcpServers: Record<string, unknown>;
     };
     expect(Object.keys(moved.mcpServers)).toEqual(["alpha"]);

@@ -2,13 +2,10 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { GhostError, ghostPaths, isGhostHome, isValidGhostName } from "../src/ghosts.js";
@@ -181,127 +178,6 @@ describe("GhostRegistry.rename", () => {
   });
 });
 
-const SHM = "/dev/shm";
-const shmIsAnotherFilesystem = (() => {
-  try {
-    return statSync(SHM).isDirectory() && statSync(SHM).dev !== statSync(tmpdir()).dev;
-  } catch {
-    return false;
-  }
-})();
-
-function readTrashInfo(path: string): { path: string; deletionDate: string } {
-  const text = readFileSync(path, "utf8");
-  expect(text.startsWith("[Trash Info]\n")).toBe(true);
-  const field = (key: string) =>
-    text.split("\n").find((line) => line.startsWith(`${key}=`))?.slice(key.length + 1) ?? "";
-  return { path: field("Path"), deletionDate: field("DeletionDate") };
-}
-
-describe("GhostRegistry.trash", () => {
-  it("moves the home into the XDG trash and takes the ghost out of the listing", () => {
-    temp = makeTempGhosts();
-    const dir = seedGhost(temp.root, { name: "casper" });
-    seedGhost(temp.root, { name: "mina" });
-    writeFileSync(join(dir, "keepsake.md"), "remember this\n", "utf8");
-
-    const { trash } = temp.registry.trash("casper", new Date(2026, 7, 24, 15, 30, 0));
-
-    expect(existsSync(dir)).toBe(false);
-    expect(trash).toBe(join(temp.trashDir, "files", "casper"));
-    // A move, never an rm: everything the ghost owned is still on disk.
-    expect(readFileSync(join(trash, "keepsake.md"), "utf8")).toBe("remember this\n");
-    expect(isGhostHome(trash)).toBe(true);
-    expect(temp.registry.list().map((ghost) => ghost.name)).toEqual(["mina"]);
-  });
-
-  it("writes a .trashinfo any trash tool can restore from", () => {
-    temp = makeTempGhosts();
-    const dir = seedGhost(temp.root, { name: "casper" });
-
-    temp.registry.trash("casper", new Date(2026, 7, 24, 15, 30, 0));
-
-    const info = readTrashInfo(join(temp.trashDir, "info", "casper.trashinfo"));
-    expect(decodeURIComponent(info.path)).toBe(dir);
-    // A URI path: separators raw, everything questionable percent-encoded.
-    expect(info.path.startsWith("/")).toBe(true);
-    expect(info.path).not.toMatch(/[^\w%/.~!*'()-]/);
-    // Local time, no zone suffix.
-    expect(info.deletionDate).toBe("2026-08-24T15:30:00");
-  });
-
-  it("suffixes a collision rather than overwriting an earlier copy", () => {
-    temp = makeTempGhosts();
-    const stamp = new Date(2026, 7, 24, 15, 30, 0);
-    seedGhost(temp.root, { name: "casper" });
-    const first = temp.registry.trash("casper", stamp);
-    seedGhost(temp.root, { name: "casper" });
-    const second = temp.registry.trash("casper", stamp);
-
-    expect(first.trash).toBe(join(temp.trashDir, "files", "casper"));
-    expect(second.trash).toBe(join(temp.trashDir, "files", "casper.2"));
-    expect(existsSync(first.trash)).toBe(true);
-    expect(existsSync(join(temp.trashDir, "info", "casper.trashinfo"))).toBe(true);
-    expect(existsSync(join(temp.trashDir, "info", "casper.2.trashinfo"))).toBe(true);
-  });
-
-  it("steps past an orphaned files/ entry instead of renaming onto it", () => {
-    temp = makeTempGhosts();
-    seedGhost(temp.root, { name: "casper" });
-    // Somebody else's trashed directory, with no .trashinfo naming it.
-    mkdirSync(join(temp.trashDir, "files", "casper"), { recursive: true });
-    writeFileSync(join(temp.trashDir, "files", "casper", "theirs.md"), "not ours\n", "utf8");
-
-    const { trash } = temp.registry.trash("casper");
-
-    expect(trash).toBe(join(temp.trashDir, "files", "casper.2"));
-    expect(readFileSync(join(temp.trashDir, "files", "casper", "theirs.md"), "utf8"))
-      .toBe("not ours\n");
-    // The claim on the name we did not take is released.
-    expect(existsSync(join(temp.trashDir, "info", "casper.trashinfo"))).toBe(false);
-  });
-
-  it.skipIf(!shmIsAnotherFilesystem)(
-    "falls back to <root>/.trash when the home trash is on another filesystem",
-    () => {
-      temp = makeTempGhosts();
-      const crossDeviceXdg = mkdtempSync(join(SHM, "ghostd-test-xdg-"));
-      process.env.XDG_DATA_HOME = crossDeviceXdg;
-      try {
-        seedGhost(temp.root, { name: "casper" });
-
-        const { trash } = temp.registry.trash("casper", new Date(2026, 7, 24, 15, 30, 0));
-
-        expect(trash).toBe(join(temp.root, ".trash", "casper-20260824-153000"));
-        expect(isGhostHome(trash)).toBe(true);
-        // No .trashinfo left describing a file that never reached the trash.
-        expect(existsSync(join(crossDeviceXdg, "Trash", "info", "casper.trashinfo"))).toBe(false);
-      } finally {
-        process.env.XDG_DATA_HOME = temp.xdgDataHome;
-        rmSync(crossDeviceXdg, { recursive: true, force: true });
-      }
-    },
-  );
-
-  it("refuses an unknown ghost and a name that would escape the root", () => {
-    temp = makeTempGhosts();
-    temp.registry.ensureRoot();
-    try {
-      temp.registry.trash("nobody");
-      expect.unreachable("trash should have thrown");
-    } catch (error) {
-      expect((error as GhostError).code).toBe("not_found");
-      expect((error as GhostError).status).toBe(404);
-    }
-    try {
-      temp.registry.trash("../escape");
-      expect.unreachable("trash should have thrown");
-    } catch (error) {
-      expect((error as GhostError).code).toBe("invalid_name");
-      expect((error as GhostError).status).toBe(400);
-    }
-  });
-});
 
 describe("GhostRegistry.get", () => {
   it("throws a 404-shaped error for an unknown ghost", () => {

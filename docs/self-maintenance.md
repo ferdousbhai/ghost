@@ -174,9 +174,10 @@ owner hooks from running. Every canary must use its own ghost root.
 - **Code.** `git revert <sha>` in the checkout, `pnpm build`, restart. The
   commit that broke it and the revert that fixed it are both in `git log`, and
   the reason for each restart is in `journalctl --user -u 'ghost-restart-*'`.
-- **A ghost home.** Deletion moves the whole directory to the freedesktop trash,
-  with a `.trash/` sibling as the fallback when the trash is on another
-  filesystem. Ghost never recursively removes a home, and neither should you.
+- **A ghost home.** Deletion moves the whole directory to the freedesktop trash
+  with `gio trash`, which refuses rather than copies across filesystems;
+  `gio trash --restore` puts it back. Ghost never recursively removes a home,
+  and neither should you.
 - **The system.** Omarchy wraps snapper: `omarchy-snapshot create` before a
   risky change, `omarchy-snapshot restore` to go back. Both need sudo, and
   `create` does nothing useful until snapper has a config.

@@ -4,7 +4,7 @@
  * conversation log keeps, and how it chooses and falls back between harnesses.
  */
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
@@ -777,8 +777,8 @@ describe("conversation metadata", () => {
     [row] = await sessions.listSessions("casper");
     expect(row).toMatchObject({ title: "Zine", pinned: true, unread: false });
 
-    const trashed = await sessions.deleteSession("casper", "c1");
-    expect(existsSync(trashed.trash)).toBe(true);
+    await sessions.deleteSession("casper", "c1");
+    expect(existsSync(join(temp.trashDir, "files", basename(conversationDir(sessionDir(), "c1"))))).toBe(true);
     expect(existsSync(conversationDir(sessionDir(), "c1"))).toBe(false);
     expect(await sessions.listSessions("casper")).toEqual([]);
   });

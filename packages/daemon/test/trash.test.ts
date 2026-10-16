@@ -1,83 +1,37 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { homeTrashDir, trashPath } from "../src/trash.js";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { trashPath } from "../src/trash.js";
 
-let roots: string[] = [];
+let root: string;
+let env: NodeJS.ProcessEnv;
 
-function root(name: string): string {
-  const path = join(tmpdir(), `ghost-trash-${name}-${crypto.randomUUID()}`);
-  mkdirSync(path, { recursive: true });
-  roots.push(path);
-  return path;
-}
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), "ghostd-trash-"));
+  env = { PATH: process.env.PATH, HOME: root, XDG_DATA_HOME: join(root, "data") };
+});
 
 afterEach(() => {
-  for (const path of roots) rmSync(path, { recursive: true, force: true });
-  roots = [];
+  rmSync(root, { recursive: true, force: true });
 });
 
 describe("trashPath", () => {
-  it("moves a file into freedesktop trash with an encoded origin", () => {
-    const sourceRoot = root("source");
-    const xdg = root("xdg");
-    const source = join(sourceRoot, "résumé note.md");
-    writeFileSync(source, "kept\n");
-
-    const result = trashPath(source, {
-      now: new Date(2026, 7, 24, 15, 30, 0),
-      env: { XDG_DATA_HOME: xdg },
-    });
-
-    expect(result).toEqual({
-      trash: join(xdg, "Trash", "files", "résumé note.md"),
-      kind: "freedesktop",
-    });
-    expect(existsSync(source)).toBe(false);
-    expect(readFileSync(result.trash, "utf8")).toBe("kept\n");
-    expect(readFileSync(join(xdg, "Trash", "info", "résumé note.md.trashinfo"), "utf8"))
-      .toContain(`Path=${encodeURIComponent(source).replaceAll("%2F", "/")}`);
+  it("moves a directory into the freedesktop Trash with a restorable .trashinfo, suffixing a second copy", async () => {
+    for (const _ of [1, 2]) {
+      mkdirSync(join(root, "casper"));
+      writeFileSync(join(root, "casper", "keepsake.md"), "remember this\n");
+      await trashPath(join(root, "casper"), env);
+      expect(existsSync(join(root, "casper"))).toBe(false);
+    }
+    const trash = join(root, "data", "Trash");
+    expect(readFileSync(join(trash, "files", "casper", "keepsake.md"), "utf8")).toBe("remember this\n");
+    expect(existsSync(join(trash, "files", "casper.2"))).toBe(true);
+    expect(readFileSync(join(trash, "info", "casper.trashinfo"), "utf8")).toContain(`Path=${join(root, "casper")}\n`);
   });
 
-  it("uses collision suffixes without overwriting an existing trash entry", () => {
-    const sourceRoot = root("source");
-    const xdg = root("xdg");
-    const first = join(sourceRoot, "memory.md");
-    writeFileSync(first, "first");
-    const firstResult = trashPath(first, { env: { XDG_DATA_HOME: xdg } });
-    writeFileSync(first, "second");
-    const secondResult = trashPath(first, { env: { XDG_DATA_HOME: xdg } });
-
-    expect(firstResult.trash).toBe(join(xdg, "Trash", "files", "memory.md"));
-    expect(secondResult.trash).toBe(join(xdg, "Trash", "files", "memory.md.2"));
-    expect(readFileSync(firstResult.trash, "utf8")).toBe("first");
-    expect(readFileSync(secondResult.trash, "utf8")).toBe("second");
-  });
-
-  it("moves a directory and everything below it", () => {
-    const sourceRoot = root("source");
-    const xdg = root("xdg");
-    const source = join(sourceRoot, "conversation");
-    mkdirSync(source);
-    writeFileSync(join(source, "turn.jsonl"), "{}\n");
-
-    const result = trashPath(source, { env: { XDG_DATA_HOME: xdg } });
-
-    expect(readFileSync(join(result.trash, "turn.jsonl"), "utf8")).toBe("{}\n");
-    expect(existsSync(source)).toBe(false);
-  });
-
-  it("resolves the home trash from an absolute XDG data home only", () => {
-    expect(homeTrashDir({ XDG_DATA_HOME: "/data" }, "/home/test"))
-      .toBe("/data/Trash");
-    expect(homeTrashDir({ XDG_DATA_HOME: "relative" }, "/home/test"))
-      .toBe("/home/test/.local/share/Trash");
+  it("says nothing was deleted when gio cannot trash the path", async () => {
+    await expect(trashPath(join(root, "missing"), env))
+      .rejects.toMatchObject({ code: "trash_failed", message: expect.stringContaining("nothing was deleted") });
   });
 });

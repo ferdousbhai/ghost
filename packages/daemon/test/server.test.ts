@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { ServerResponse } from "node:http";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { conversationDir, LOG_FILENAME } from "../src/conversation-log.js";
@@ -461,8 +461,7 @@ describe("ghost MCP routes", () => {
     move: "rename" | "delete",
   ): Promise<string> => {
     expect(response.status).toBe(200);
-    const body = await response.json() as { trash?: string };
-    return move === "rename" ? join(temp!.root, "wisp") : body.trash!;
+    return move === "rename" ? join(temp!.root, "wisp") : join(temp!.trashDir, "files", "casper");
   };
 
   const recreateOldName = async (base: string): Promise<string> => {
@@ -1215,12 +1214,12 @@ describe("DELETE /api/ghosts/:name/sessions/:id", () => {
       method: "DELETE",
     });
     expect(deleted.status).toBe(200);
-    const body = await deleted.json() as { ok: boolean; trash: string };
-    expect(body.ok).toBe(true);
+    expect(await deleted.json()).toEqual({ ok: true });
     const sessionDir = ghostPaths(join(temp!.root, "casper")).sessionDir;
     // The whole conversation directory moves, its log with it.
+    const trashed = join(temp!.trashDir, "files", basename(conversationDir(sessionDir, "conv-1")));
     expect(existsSync(conversationDir(sessionDir, "conv-1"))).toBe(false);
-    expect(existsSync(join(body.trash, LOG_FILENAME))).toBe(true);
+    expect(existsSync(join(trashed, LOG_FILENAME))).toBe(true);
     expect(await (await fetch(`${base}/api/ghosts/casper/sessions`)).json())
       .toEqual({ sessions: [] });
 
@@ -1240,13 +1239,11 @@ describe("DELETE /api/ghosts/:name", () => {
 
     const deleted = await fetch(`${base}/api/ghosts/casper?confirm=casper`, { method: "DELETE" });
     expect(deleted.status).toBe(200);
-    const body = await deleted.json() as { ok: boolean; trash: string };
-    expect(body.ok).toBe(true);
-    expect(body.trash).toBe(join(temp!.trashDir, "files", "casper"));
+    expect(await deleted.json()).toEqual({ ok: true });
     expect(existsSync(join(temp!.trashDir, "info", "casper.trashinfo"))).toBe(true);
     // A move, never an rm: the persona is still readable where it went.
     expect(existsSync(dir)).toBe(false);
-    expect(existsSync(join(body.trash, "character.md"))).toBe(true);
+    expect(existsSync(join(temp!.trashDir, "files", "casper", "character.md"))).toBe(true);
 
     expect(await (await fetch(`${base}/api/ghosts`)).json()).toEqual([]);
   });

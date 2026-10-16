@@ -1,124 +1,20 @@
 /**
- * Recoverable deletion for any user-owned path.
- *
- * The ordinary destination is the freedesktop home trash. When that trash is
- * on another filesystem, rename(2) cannot move the source there; in that case
- * the path moves into a hidden sibling trash (or the caller's explicit
- * fallback root). No code in this module copies and then unlinks data.
+ * Recoverable deletion: `gio trash` moves a path into the freedesktop Trash
+ * (the home trash, or its filesystem's `.Trash-$UID`) by rename, never by
+ * copy-then-delete. Where it cannot, it refuses and nothing is removed.
  */
-import {
-  existsSync,
-  mkdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
-import { xdgBaseDir } from "@ghost/extensions";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { GhostError } from "./ghosts.js";
 
-const pad2 = (value: number) => String(value).padStart(2, "0");
+const exec = promisify(execFile);
 
-function trashStamp(now: Date): string {
-  return `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`
-    + `-${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;
-}
-
-/** The freedesktop home trash, resolved at call time for XDG-aware tests. */
-export function homeTrashDir(
-  env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
-): string {
-  return join(xdgBaseDir(env, "XDG_DATA_HOME", home), "Trash");
-}
-
-function encodeTrashInfoPath(path: string): string {
-  return encodeURIComponent(path).replaceAll("%2F", "/");
-}
-
-function deletionDate(now: Date): string {
-  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`
-    + `T${pad2(now.getHours())}:${pad2(now.getMinutes())}:${pad2(now.getSeconds())}`;
-}
-
-export interface TrashPathOptions {
-  now?: Date;
-  fallbackRoot?: string;
-  env?: NodeJS.ProcessEnv;
-  home?: string;
-  /** Original lexical location for `.trashinfo` when `inputPath` is descriptor-relative. */
-  originalPath?: string;
-}
-
-export interface TrashPathResult {
-  trash: string;
-  /** Whether the path landed in the freedesktop trash or the EXDEV fallback. */
-  kind: "freedesktop" | "fallback";
-}
-
-/**
- * Move one file, directory, or symlink to recoverable trash.
- *
- * The `.trashinfo` file atomically claims a freedesktop trash name. A failed
- * move removes that claim. The EXDEV fallback is a same-filesystem rename into
- * a hidden sibling and therefore remains recoverable with an ordinary `mv`.
- */
-export function trashPath(
-  inputPath: string,
-  options: TrashPathOptions = {},
-): TrashPathResult {
-  const source = resolve(inputPath);
-  const original = resolve(options.originalPath ?? inputPath);
-  const now = options.now ?? new Date();
-  const trashDir = homeTrashDir(options.env, options.home);
-  const filesDir = join(trashDir, "files");
-  const infoDir = join(trashDir, "info");
-  for (const dir of [trashDir, filesDir, infoDir]) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-
-  const baseName = basename(source);
-  const info = `[Trash Info]\nPath=${encodeTrashInfoPath(original)}\n`
-    + `DeletionDate=${deletionDate(now)}\n`;
-  let trashName = baseName;
-  let infoPath = join(infoDir, `${trashName}.trashinfo`);
-  let target = join(filesDir, trashName);
-  for (let suffix = 2; ; suffix += 1) {
-    try {
-      writeFileSync(infoPath, info, { encoding: "utf8", flag: "wx", mode: 0o600 });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      trashName = `${baseName}.${suffix}`;
-      infoPath = join(infoDir, `${trashName}.trashinfo`);
-      target = join(filesDir, trashName);
-      continue;
-    }
-    if (!existsSync(target)) break;
-    unlinkSync(infoPath);
-    trashName = `${baseName}.${suffix}`;
-    infoPath = join(infoDir, `${trashName}.trashinfo`);
-    target = join(filesDir, trashName);
-  }
-
+export async function trashPath(path: string, env: NodeJS.ProcessEnv): Promise<void> {
   try {
-    renameSync(source, target);
-    return { trash: target, kind: "freedesktop" };
+    await exec("gio", ["trash", "--", path], { env });
   } catch (error) {
-    try {
-      unlinkSync(infoPath);
-    } catch {
-      // The rename error is authoritative.
-    }
-    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+    const { stderr, message } = error as { stderr?: string; message: string };
+    const reason = stderr?.trim().split("\n").at(-1) || message;
+    throw new GhostError("trash_failed", `Could not move ${path} to Trash; nothing was deleted. ${reason}`, 500);
   }
-
-  const fallbackRoot = resolve(options.fallbackRoot ?? join(dirname(source), ".trash"));
-  mkdirSync(fallbackRoot, { recursive: true, mode: 0o700 });
-  const fallbackBase = join(fallbackRoot, `${baseName}-${trashStamp(now)}`);
-  let fallbackTarget = fallbackBase;
-  for (let suffix = 2; existsSync(fallbackTarget); suffix += 1) {
-    fallbackTarget = `${fallbackBase}-${suffix}`;
-  }
-  renameSync(source, fallbackTarget);
-  return { trash: fallbackTarget, kind: "fallback" };
 }

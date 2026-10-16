@@ -13,9 +13,7 @@ import {
 import { basename, join, resolve } from "node:path";
 import { isGhostError as isExtensionGhostError } from "@ghost/extensions";
 import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "@ghost/extensions";
-import { trashPath } from "./trash.js";
 
-export { homeTrashDir } from "./trash.js";
 
 export interface Ghost {
   name: string;
@@ -24,14 +22,6 @@ export interface Ghost {
 
 export const GHOST_SESSIONS_DIRNAME = "sessions";
 const GHOST_SETTINGS_FILENAME = "settings.yml";
-
-/**
- * Where a deleted ghost goes when the freedesktop home trash is on another
- * filesystem (`EXDEV`) — a dot-directory inside the ghosts root, so `list()`
- * skips it and a trashed ghost is gone from the API while its files are still
- * on disk. The ordinary path is the home trash; see `GhostRegistry.trash`.
- */
-const GHOST_TRASH_DIRNAME = ".trash";
 
 /**
  * Ghost names are both URL path segments and directory names, so the
@@ -314,28 +304,5 @@ export class GhostRegistry {
       }
     }
     return { name: nextName, dir: target };
-  }
-
-  /**
-   * Move `<root>/<name>/` into the freedesktop home trash and return where it
-   * went — `<trash>/files/<name>`, with a `<trash>/info/<name>.trashinfo`
-   * recording where it came from. A deleted ghost is therefore an ordinary
-   * trashed directory: `gio trash --list`, `gio trash --restore`, and every
-   * file manager's Trash see it and can put it back.
-   *
-   * Deleting a ghost is a rename, never a recursive removal: the ghost home
-   * holds the only copy of a persona and its memory, and no HTTP
-   * route may be one bug away from erasing that. That also fixes the failure
-   * mode when the trash is on another filesystem — a cross-device `rename`
-   * raises `EXDEV`, and rather than degrade into copy-then-delete we fall back
-   * to `<root>/.trash/<name>-<stamp>/`, still a move.
-   */
-  trash(name: string, now: Date = new Date()): { trash: string } {
-    const ghost = this.get(name);
-    const trashed = trashPath(ghost.dir, {
-      now,
-      fallbackRoot: join(this.root, GHOST_TRASH_DIRNAME),
-    });
-    return { trash: trashed.trash };
   }
 }

@@ -72,7 +72,7 @@ import {
 } from "./schedules.js";
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
-import { trashPath, type TrashPathResult } from "./trash.js";
+import { trashPath } from "./trash.js";
 import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "./run-resources.js";
 
 
@@ -1099,7 +1099,7 @@ export class SessionHost {
   }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
-  async deleteSession(ghostName: string, sessionId: string | null | undefined): Promise<TrashPathResult> {
+  async deleteSession(ghostName: string, sessionId: string | null | undefined): Promise<void> {
     return this.withGhost(ghostName, async () => {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
@@ -1110,14 +1110,13 @@ export class SessionHost {
       this.reservedSessions.add(key);
       try {
         const { sessionDir } = ghostPaths(ghost.dir);
-        const trashed = trashPath(conversationDir(sessionDir, id), { env: this.env, home: this.ownerHome });
+        await trashPath(conversationDir(sessionDir, id), this.trashEnv());
         await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
           const pins = (await readPinState(sessionDir)).pinned;
           if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));
         });
-        this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id, trash: trashed.trash });
+        this.logger.info("trashed conversation", { ghost: ghost.name, conversation: id });
         this.announce(ghost.name, id);
-        return trashed;
       } finally {
         this.reservedSessions.delete(key);
       }
@@ -1192,15 +1191,19 @@ export class SessionHost {
     }
   }
 
-  async deleteGhost(ghostName: string): Promise<{ trash: string }> {
+  /** The environment `gio trash` resolves the owner's Trash from. */
+  private trashEnv(): NodeJS.ProcessEnv {
+    return { ...this.env, HOME: this.ownerHome };
+  }
+
+  async deleteGhost(ghostName: string): Promise<void> {
     const ghost = this.registry.get(ghostName);
     await this.reserve([ghost.name], "deleting it");
     try {
       await this.quiesce(ghost, "deleted");
-      const trashed = this.registry.trash(ghost.name);
+      await trashPath(ghost.dir, this.trashEnv());
       this.closeConversationEventStreams(ghost.name);
-      this.logger.info("trashed ghost", { ghost: ghost.name, trash: trashed.trash });
-      return trashed;
+      this.logger.info("trashed ghost", { ghost: ghost.name });
     } finally {
       this.reservedGhosts.delete(ghost.name);
     }

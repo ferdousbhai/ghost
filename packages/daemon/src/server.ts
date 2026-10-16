@@ -470,9 +470,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         400,
       );
     }
-    const { trash } = await options.host.deleteGhost(ghostName);
-    logger.info("ghost deleted", { ghost: ghostName, trash });
-    jsonResponse(response, 200, { ok: true, trash });
+    await options.host.deleteGhost(ghostName);
+    logger.info("ghost deleted", { ghost: ghostName });
+    jsonResponse(response, 200, { ok: true });
   };
 
   const handleListSessions = async (
@@ -559,8 +559,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     conversationId: string,
     response: ServerResponse,
   ): Promise<void> => {
-    const { trash } = await options.host.deleteSession(ghostName, conversationId);
-    jsonResponse(response, 200, { ok: true, trash });
+    await options.host.deleteSession(ghostName, conversationId);
+    jsonResponse(response, 200, { ok: true });
   };
 
   /**

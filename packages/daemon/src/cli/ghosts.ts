@@ -55,9 +55,6 @@ export async function ghostsCommand(
     "DELETE",
     ghostPath(name, `?confirm=${encodeURIComponent(name)}`),
   );
-  emit(ctx, response.body, (body) => {
-    const trash = (body as { trash?: unknown })?.trash;
-    return `trashed ${name}${typeof trash === "string" ? ` → ${trash}` : ""}\n`;
-  });
+  emit(ctx, response.body, () => `trashed ${name}; \`gio trash --list\` shows it\n`);
   return 0;
 }

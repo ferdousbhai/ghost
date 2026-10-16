@@ -76,8 +76,8 @@ The directory is the atomic lifecycle unit. Rename and deletion refuse a
 ghost with a conversation running, wait out file work already in flight,
 refuse new work until they finish, and move the whole home on the same
 filesystem.
-Deletion goes to freedesktop Trash, with a recoverable `.trash/` fallback for
-`EXDEV`; Ghost never recursively removes a home. Machine credentials, owner
+Deletion is `gio trash` into freedesktop Trash, a rename that refuses rather
+than copies; Ghost never recursively removes a home. Machine credentials, owner
 documents, screenshots, downloads, and timers are not moved with it.
 The lifecycle implementation and crash recovery are in
 [`session-host.ts`](packages/daemon/src/session-host.ts).
