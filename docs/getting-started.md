@@ -33,6 +33,16 @@ and UI packages together; a workspace build alone does not update the app.
 
 The package only puts files in place; section 3 starts Ghost for this login.
 
+If `omarchy update` fails on `ghost.db`, this machine still has the
+self-hosted `[ghost]` repository that installs from before Omarchy shipped
+Ghost added. Its releases are gone; remove it:
+
+```sh
+sudo sed -i '\#^Include = /etc/pacman.d/ghost.conf$#d' /etc/pacman.conf
+sudo rm -f /etc/pacman.d/ghost.conf
+rm -f ~/.config/omarchy/hooks/pre-refresh-pacman.d/ghost
+```
+
 ### Product skills through Bash
 
 Nothing to install: every conversation already has Ghost's product index,
