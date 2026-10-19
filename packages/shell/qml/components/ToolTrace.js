@@ -24,8 +24,8 @@ function argument(activity, key) {
     return typeof args[key] === "string" ? args[key].trim() : "";
 }
 
-function quoted(value) {
-    return "“" + compact(value, 80) + "”";
+function quoted(value, limit) {
+    return "“" + compact(value, limit) + "”";
 }
 
 /** The file a call names: `path`, or `file_path` in Claude Code's spelling. */
@@ -81,11 +81,11 @@ var VERBS = {
     }
 };
 
-function verbTrace(verb, activity, completed) {
+function verbTrace(verb, activity, completed, limit) {
     const raw = verb.of ? verb.of(activity) : argument(activity, verb.key);
     if (raw === "") return completed ? verb.alonePast : verb.alonePresent;
     return (completed ? verb.past : verb.present) + " "
-        + (verb.quote ? quoted(raw) : compact(raw, 80));
+        + (verb.quote ? quoted(raw, limit) : compact(raw, limit));
 }
 
 
@@ -113,10 +113,10 @@ function fileCwd(activity) {
 // A trace describes the purpose of the work, never the mechanism used to do
 // it. These fallbacks also keep restored transcripts useful: persisted tool
 // calls retain their arguments, while live result summaries do not.
-function fallback(activity, completed) {
+function fallback(activity, completed, limit) {
     const name = toolName(activity);
     const verb = VERBS[name];
-    if (verb) return verbTrace(verb, activity, completed);
+    if (verb) return verbTrace(verb, activity, completed, limit);
 
     switch (name) {
     case "desktop_look": {
@@ -136,7 +136,7 @@ function fallback(activity, completed) {
             return (completed ? "Opened " : "Opening ") + url;
         if (action === "find" && query !== "")
             return (completed ? "Looked for " : "Looking for ")
-                + quoted(query) + " on the page";
+                + quoted(query, limit) + " on the page";
         if (action === "read")
             return completed ? "Read the current page" : "Reading the current page";
         if (action === "type")
@@ -177,12 +177,18 @@ function resultIsRawContent(activity) {
     }
 }
 
+/**
+ * One sentence for a call. `expanded` is for a surface that wraps — an open
+ * card, the activity line — and keeps a command or path whole; a one-line
+ * surface gets a short argument it can elide.
+ */
 function text(activity, completed, failed, expanded) {
     activity = fields(activity);
     const limit = expanded ? 1200 : 180;
+    const argumentLimit = expanded ? limit : 80;
     const summary = !failed && resultIsRawContent(activity)
         ? "" : compact(activity.summary || "", limit);
-    const base = summary || fallback(activity, completed);
+    const base = summary || fallback(activity, completed, argumentLimit);
     if (failed && summary === "" && base !== "")
         return "Couldn’t complete: " + base;
     return base;

@@ -2,6 +2,7 @@ import QtQuick
 import QtTest
 import "../qml/components"
 import "../qml/services"
+import "../qml/components/ToolTrace.js" as ToolTrace
 
 TestCase {
     id: tc
@@ -173,6 +174,19 @@ TestCase {
         Ghostd.lastError = "ghostd is not answering";
         verify(line.visible);
         verify(line.failing);
+    }
+
+    // The line wraps, so a long command reaches it whole; only a one-line
+    // surface, a collapsed card, cuts it short.
+    function test_aLongCommandIsNotCutShort(): void {
+        const line = createTemporaryObject(lineComponent, tc);
+        verify(line !== null);
+        const command = "pnpm --filter @ghost/daemon test test/stream-lifecycle.test.ts "
+            + "--reporter=verbose --bail 1";
+        Ghostd.streaming = true;
+        Ghostd.toolActivities = [tool("bash", "running", { command: command })];
+        compare(line.phrase, "Running " + command);
+        verify(ToolTrace.text(Ghostd.toolActivities[0], false, false, false).endsWith("…"));
     }
 
     function test_longStatusWrapsAndCanBeReadToTheEnd(): void {
