@@ -85,7 +85,8 @@ describe("ghost help topics", () => {
     expect(text).toContain("only when the owner asks or a timer they approved runs it");
     expect(text).toContain("Trash with `gio trash`, never `rm`");
     expect(text).toContain("report each merged, rewritten, and trashed path");
-    expect(text).toContain("offer one, never install it unasked");
+    expect(text).toContain("daily timer (`ghost help timers`, `OnCalendar=daily`)");
+    expect(text).toContain("offer one once; never install it unasked");
     expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
     expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
     expect(text).toContain("`skills/<name>/SKILL.md`");
