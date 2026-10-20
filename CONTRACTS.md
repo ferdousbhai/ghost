@@ -103,6 +103,9 @@ decisions, tasks, and its own reflections — are Markdown files under the
 owner's Documents directory itself, written and
 read with the harness's native file tools, shared by every ghost and readable
 by the owner ([Product boundary](#product-boundary) says what may index it).
+Cleanup (merging, rewriting, and trashing stale notes) is an ordinary turn the
+owner asks for or schedules as a timer, following `ghost help memory`; Ghost
+runs no memory maintenance of its own.
 
 ### Ghost-home resources
 
