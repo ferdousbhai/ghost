@@ -80,6 +80,8 @@ describe("ghost help topics", () => {
     expect(text).toContain("then the source file itself before relying on one");
     expect(text).toContain("whenever a task needs them, from the first turn on");
     expect(text).toContain("keep both claims and tell the owner which is uncertain");
+    expect(text).toContain("dead end (what was tried, why it failed)");
+    expect(text).toContain("dating what you add");
     expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
     expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
     expect(text).toContain("`skills/<name>/SKILL.md`");
