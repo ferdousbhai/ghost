@@ -49,6 +49,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 
   dialog { max-width: min(46rem, 95vw); max-height: 85dvh; background: var(--deep); color: var(--fg); border: 1px solid var(--line); border-radius: .7rem; overflow: auto; }
   #routine-list article { border-top: 1px solid var(--line); padding: 1rem 0; overflow-wrap: anywhere; }
+  #routine-editor textarea { width: 100%; max-height: 25dvh; border: 1px solid var(--line); border-radius: .4rem; padding: .5rem; font-family: var(--mono); }
+  #routine-editor button { padding: .5rem; }
   #routine-list pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   #routine-panel button { padding: .4rem; border: 1px solid var(--line); border-radius: .4rem; margin-right: .4rem; }
   header {
@@ -153,6 +155,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
 <dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
+<dialog id="routine-editor"><h2 id="routine-editor-title"></h2><p id="routine-editor-error" role="status"></p><label>Timer unit<textarea id="routine-timer" rows="9"></textarea></label><label>Service unit<textarea id="routine-service" rows="9"></textarea></label><button id="routine-save" type="button">Save and reload</button> <button id="routine-discard" type="button">Discard draft</button></dialog>
 <dialog id="routine-panel"><button id="routine-close" type="button">Close</button> <button id="routine-refresh" type="button">Refresh</button><h2>Routines</h2><p>Pause stops future triggers; running work continues. Resume may catch up.</p><div id="routine-list" role="status"></div></dialog>
 <main id="log"></main>
 <div id="status" role="status"></div>
@@ -269,12 +272,39 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
           + "\\nLast run: " + (routine.lastRun || "never/unknown") + "\\nService: " + (routine.serviceActive || "unknown")
           + " · Result: " + (routine.result || "unknown") + "\\n" + routine.command;
         card.append(title, detail);
-        for (const [action, label] of [["pause", "Pause"], ["resume", "Resume"], ["run", "Run now"]]) {
+        for (const [action, label] of [["pause", "Pause"], ["resume", "Resume"], ["run", "Run now"], ["logs", "Logs"], ["edit", "Edit"], ["remove", "Remove"]]) {
           const button = document.createElement("button"); button.type = "button"; button.textContent = label;
           button.onclick = async () => {
             const buttons = list.querySelectorAll("button"); buttons.forEach((b) => { b.disabled = true; });
             try {
-              await api("/ghosts/" + seg(targetGhost) + "/routines/" + seg(routine.slug) + "/" + action,
+              const path = "/ghosts/" + seg(targetGhost) + "/routines/" + seg(routine.slug);
+              if (action === "logs") {
+                const logs = await api(path + "/logs");
+                if (ghost !== targetGhost || generation !== routineGeneration) return;
+                const output = document.createElement("pre"); output.textContent = (logs.truncated ? "Older log text truncated.\\n" : "") + logs.text;
+                card.append(output);
+                for (const id of logs.sessions) {
+                  const link = document.createElement("button"); link.textContent = "Open conversation";
+                  link.onclick = () => { $("routine-panel").close(); session = id; draft = null; loadSessions().catch(show); };
+                  card.append(link);
+                }
+                return;
+              }
+              if (action === "edit") {
+                const config = await api(path + "/config");
+                if (ghost !== targetGhost || generation !== routineGeneration) return;
+                routineDraft = { ghost: targetGhost, slug: routine.slug, revision: config.revision };
+                $("routine-editor-title").textContent = "Edit " + targetGhost + "/" + routine.slug;
+                $("routine-timer").value = config.timer; $("routine-service").value = config.service || "";
+                $("routine-editor-error").textContent = "";
+                $("routine-editor").showModal();
+                return;
+              }
+              if (action === "remove") {
+                if (!confirm("Remove " + routine.slug + "? Running work continues. A recovery checkpoint is kept.")) return;
+                const config = await api(path + "/config");
+                await api(path + "?revision=" + seg(config.revision), { method: "DELETE" });
+              } else await api(path + "/" + action,
                 { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
               if (ghost === targetGhost && panel.open) await showRoutines();
             } catch (error) {
@@ -287,10 +317,44 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
         }
         list.append(card);
       }
+      const recovered = await api("/ghosts/" + seg(targetGhost) + "/routines/recoveries");
+      if (generation !== routineGeneration || ghost !== targetGhost) return;
+      for (const checkpoint of recovered.recoveries) {
+        const card = document.createElement("article"), label = document.createElement("p"), restore = document.createElement("button");
+        label.textContent = checkpoint.slug + " · " + checkpoint.reason + " · " + checkpoint.createdAt;
+        restore.textContent = checkpoint.applicable ? "Restore paused" : "Source changed";
+        restore.disabled = !checkpoint.applicable;
+        restore.onclick = async () => {
+          restore.disabled = true;
+          try {
+            await api("/ghosts/" + seg(targetGhost) + "/routines/recoveries/" + seg(checkpoint.id) + "/restore",
+              { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+            if (ghost === targetGhost && panel.open) await showRoutines();
+          } catch (error) { label.textContent += " · " + error.message; restore.disabled = false; }
+        };
+        card.append(label, restore); list.append(card);
+      }
     } catch (error) {
       if (generation === routineGeneration && ghost === targetGhost) list.textContent = error.message;
     }
   }
+  let routineDraft = null;
+  $("routine-editor").oncancel = (event) => event.preventDefault();
+  $("routine-discard").onclick = () => { routineDraft = null; $("routine-editor").close(); };
+  $("routine-save").onclick = async () => {
+    if (!routineDraft) return;
+    const draft = routineDraft, save = $("routine-save"), discard = $("routine-discard");
+    save.disabled = discard.disabled = $("routine-timer").disabled = $("routine-service").disabled = true;
+    try {
+      await api("/ghosts/" + seg(draft.ghost) + "/routines/" + seg(draft.slug) + "/config", {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ revision: draft.revision, timer: $("routine-timer").value, service: $("routine-service").value }),
+      });
+      routineDraft = null; $("routine-editor").close();
+      if (ghost === draft.ghost && $("routine-panel").open) await showRoutines();
+    } catch (error) { $("routine-editor-error").textContent = error.message; }
+    finally { save.disabled = discard.disabled = $("routine-timer").disabled = $("routine-service").disabled = false; }
+  };
   $("routines").onclick = showRoutines;
   $("routine-refresh").onclick = showRoutines;
   $("routine-close").onclick = () => { ++routineGeneration; $("routine-panel").close(); };

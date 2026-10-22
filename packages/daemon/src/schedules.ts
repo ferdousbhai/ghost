@@ -156,7 +156,7 @@ export interface Routine {
   serviceActive: string;
 }
 
-async function scheduleCommand(run: CommandRunner, args: string[]): Promise<string> {
+export async function scheduleCommand(run: CommandRunner, args: string[]): Promise<string> {
   try {
     const result = await run(["--user", ...args]);
     requireCommandSuccess(result, "systemctl");
@@ -166,7 +166,7 @@ async function scheduleCommand(run: CommandRunner, args: string[]): Promise<stri
   }
 }
 
-function unitProperties(output: string): Map<string, Record<string, string>> {
+export function unitProperties(output: string): Map<string, Record<string, string>> {
   const units = new Map<string, Record<string, string>>();
   for (const block of output.trim().split(/\n\s*\n/u)) {
     const props: Record<string, string> = {};
@@ -227,4 +227,21 @@ export async function controlGhostRoutine(
   } else {
     await scheduleCommand(run, [action === "pause" ? "disable" : "enable", "--now", unit]);
   }
+}
+
+export async function readRoutineLogs(ghost: string, slug: string, options: ScheduleOptions, journal: CommandRunner = commandRunner("journalctl")) {
+  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
+  const stem = `${scheduleUnitPrefix(ghost)}${slug}`;
+  if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(`${stem}.timer`)) throw new GhostError("not_found", "No such routine.", 404);
+  let output: string;
+  try {
+    const result = await journal(["--user", "--unit", `${stem}.service`, "--no-pager", "--output=short-iso", "--lines=100"]);
+    requireCommandSuccess(result, "journalctl"); output = result.stdout;
+  } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${error instanceof Error ? error.message : String(error)}`, 503); }
+  const text = output.slice(-64000), sessions = new Set<string>();
+  for (const line of text.split("\n")) {
+    const match = /(?:Already accepted|Accepted): ([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/(event-[a-f0-9]{64})(?:\s|$)/u.exec(line);
+    if (match?.[1] === ghost && match[2]) sessions.add(match[2]);
+  }
+  return { text, truncated: output.length > text.length, sessions: [...sessions] };
 }

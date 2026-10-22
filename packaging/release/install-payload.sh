@@ -60,8 +60,8 @@ if [[ "$component" == runtime ]]; then
   install -Dm644 "$source_root/CONTRACTS.md" "$pkgdir/usr/share/doc/ghost/CONTRACTS.md"
   # The installed README, CONTRACTS.md, and ARCH.md link into docs/. Ship those
   # link targets so the relative references resolve inside the package.
-  for doc in hooks.md self-maintenance.md; do
-    install -Dm644 "$source_root/docs/$doc" "$pkgdir/usr/share/doc/ghost/docs/$doc"
+  for doc in "$source_root"/docs/*.md; do
+    install -Dm644 "$doc" "$pkgdir/usr/share/doc/ghost/docs/${doc##*/}"
   done
   install -Dm644 "$runtime_root/BUNDLED-LICENSES" \
     "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"

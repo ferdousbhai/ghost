@@ -323,6 +323,27 @@ persistent timers may catch up. Run now queues the service without changing the
 timer and returns before the work finishes. Refresh to inspect its state.
 Guests cannot inspect routines or control them.
 
-Creation and changes still use ordinary unit files (`ghost help timers`);
-open their paths from the HUD, then reload systemd after editing. Logs remain in
-`journalctl --user -u <service-unit>`; Ghost keeps no separate job history.
+Use **Edit sources** in the HUD or **Edit** on the phone to change the timer and
+service together. Saves verify the units, detect source conflicts, reload
+systemd, and keep a checkpoint. **Remove** also keeps a checkpoint. Recovery
+entries restore the old source paused; resume explicitly when ready.
+
+```sh
+ghost routines config daily-notes -g casper > routine.json
+# Edit timer/service in the JSON, preserving revision.
+ghost routines edit daily-notes routine.json -g casper
+ghost routines remove daily-notes -g casper
+ghost routines recoveries -g casper
+ghost routines restore <recovery-id> -g casper
+ghost routines logs daily-notes -g casper
+```
+
+The editor supports regular same-name unit pairs without drop-ins. Use native
+systemd tools for other arrangements. Checkpoints live under
+`.ghost-routine-recovery/` beside the user units; native file tools can inspect
+or move them to Trash. A stale checkpoint refuses to overwrite later edits.
+The Logs action reads bounded service journal output and links conversations
+named by event acceptance receipts. Journald remains the log store.
+
+Create new units with `ghost help timers`. Connect selected external events
+through `ghost help events` and [the external event guide](events.md).

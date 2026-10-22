@@ -1,3 +1,4 @@
+import { parseExternalEvent } from "./external-events.js";
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -756,6 +757,29 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
       jsonResponse(response, 200, { routines: await options.host.routines(ghost) });
     })),
+    route("GET", "api/ghosts/:ghost/routines/recoveries", ownerOnly(async ({ ghost, response }) => {
+      jsonResponse(response, 200, { recoveries: await options.host.routineRecoveries(ghost) });
+    })),
+    route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", ownerOnly(async ({ ghost, params, response, body }) => {
+      await body();
+      jsonResponse(response, 200, await options.host.restoreRoutine(ghost, decodePathSegment(params.recovery ?? "")));
+    })),
+    route("GET", "api/ghosts/:ghost/routines/:slug/logs", ownerOnly(async ({ ghost, params, response }) => {
+      jsonResponse(response, 200, await options.host.routineLogs(ghost, decodePathSegment(params.slug ?? "")));
+    })),
+    route("GET PUT", "api/ghosts/:ghost/routines/:slug/config", ownerOnly(async ({ ghost, params, method, response, body }) => {
+      const slug = decodePathSegment(params.slug ?? "");
+      if (method === "GET") jsonResponse(response, 200, await options.host.routineConfig(ghost, slug));
+      else {
+        const input = await body();
+        jsonResponse(response, 200, await options.host.saveRoutine(ghost, slug, {
+          timer: stringField(input, "timer"), service: stringField(input, "service"), revision: stringField(input, "revision"),
+        }));
+      }
+    })),
+    route("DELETE", "api/ghosts/:ghost/routines/:slug", ownerOnly(async ({ ghost, params, url, response }) => {
+      jsonResponse(response, 200, await options.host.removeRoutine(ghost, decodePathSegment(params.slug ?? ""), url.searchParams.get("revision") ?? ""));
+    })),
     route("POST", "api/ghosts/:ghost/routines/:slug/:action", ownerOnly(async ({ ghost, params, response, body }) => {
       await body();
       await options.host.controlRoutine(ghost, decodePathSegment(params.slug ?? ""), decodePathSegment(params.action ?? ""));
@@ -768,6 +792,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(context.response, 200, await options.host.setGhostHarness(context.ghost, await readHarnessBody(context, true)));
     }),
     route("POST", "api/ghosts/:ghost/messages", handleMessages),
+    route("POST", "api/ghosts/:ghost/events", ownerOnly(async ({ ghost, body, response }) => {
+      const accepted = await options.host.admitEvent(ghost, parseExternalEvent(await body()));
+      const admission = accepted.admission;
+      if (admission) startTurnLog(ghost, accepted.sessionId, (emit) => admission.run({ emit }));
+      jsonResponse(response, accepted.admission ? 202 : 200, { sessionId: accepted.sessionId, duplicate: accepted.admission === null });
+    })),
     route("GET", "api/ghosts/:ghost/events", handleConversationEvents),
     // The name is the home directory's name, so a rename moves the whole home
     // and every other route's `:ghost` changes with it.

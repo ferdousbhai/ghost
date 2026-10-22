@@ -148,6 +148,7 @@ export class DaemonClient {
     method: string,
     path: string,
     body?: unknown,
+    timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
   ): Promise<CliResponse<T>> {
     const response = await this.#fetch(path, {
       method,
@@ -155,7 +156,7 @@ export class DaemonClient {
         body: JSON.stringify(body),
         headers: { "content-type": "application/json" },
       }),
-    });
+    }, true, timeoutMs);
     const parsed = await responseBody(response);
     if (!response.ok) throw statusError(response.status, parsed, this.tokenPath);
     return { status: response.status, body: parsed as T };

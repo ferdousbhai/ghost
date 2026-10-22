@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
+import { stdinText, ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
@@ -122,20 +122,53 @@ export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   return 0;
 }
 
+export async function eventCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const [source, id, input] = parsed.positionals;
+  const instructions = flagString(parsed, "instructions");
+  if (!source || !id || !instructions) throw new ArgsError("ghost event needs source, id, and --instructions");
+  const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
+  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const result = (await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload })).body;
+  emit(ctx, result, () => `${result.duplicate ? "Already accepted" : "Accepted"}: ${ghost}/${result.sessionId}\n`);
+  return 0;
+}
+
 export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
-  const [action = "list", slug] = parsed.positionals;
-  if ((action === "list" && slug) || (action !== "list" && (!["pause", "resume", "run"].includes(action) || !slug))) {
-    throw new ArgsError("ghost routines takes list, pause <slug>, resume <slug>, or run <slug>");
+  const request = <T = unknown>(method: string, path: string, body?: unknown) => ctx.client.request<T>(method, path, body, 120000);
+  const [action = "list", slug, file] = parsed.positionals;
+  const noArg = ["list", "recoveries"].includes(action), oneArg = ["pause", "resume", "run", "config", "logs", "remove", "restore"].includes(action);
+  if ((noArg && slug) || (oneArg && (!slug || file)) || (action === "edit" && (!slug || !file)) || (!noArg && !oneArg && action !== "edit")) {
+    throw new ArgsError("ghost routines takes list, pause/resume/run/config/logs/remove <slug>, edit <slug> <file>, recoveries, or restore <id>");
   }
   const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
-  const path = ghostPath(ghost, "/routines");
-  if (action !== "list") {
-    const body = (await ctx.client.request("POST", `${path}/${encodeURIComponent(slug as string)}/${action}`, {})).body;
-    emit(ctx, body, () => `${ghost}/${slug}: ${action} accepted.\n`);
-  } else {
-    const body = (await ctx.client.request<{ routines: Routine[] }>("GET", path)).body;
+  const path = ghostPath(ghost, "/routines"), target = `${path}/${encodeURIComponent(slug ?? "")}`;
+  if (action === "list") {
+    const body = (await request<{ routines: Routine[] }>("GET", path)).body;
     emit(ctx, body, () => body.routines.length ? body.routines.map((r) =>
       `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n");
+  } else if (action === "logs") {
+    const result = (await request<{ text: string; truncated: boolean; sessions: string[] }>("GET", `${target}/logs`)).body;
+    emit(ctx, result, () => `${result.truncated ? "(older log text truncated)\n" : ""}${result.text}\n${result.sessions.map(id => `Conversation: ghost show -g ${ghost} -s ${id}`).join("\n")}\n`);
+  } else if (action === "config") {
+    const result = (await request("GET", `${target}/config`)).body;
+    emit(ctx, result, () => `${JSON.stringify(result, null, 2)}\n`);
+  } else if (action === "recoveries") {
+    const result = (await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", `${path}/recoveries`)).body;
+    emit(ctx, result, () => result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}`).join("\n") + "\n");
+  } else {
+    let result: unknown;
+    if (action === "edit") {
+      let config: unknown;
+      try { config = JSON.parse(file === "-" ? await stdinText(ctx.runtime.stdin) : readFileSync(file as string, "utf8")); }
+      catch { throw new ArgsError("Edit expects the JSON from ghost routines config, with timer, service, and revision."); }
+      result = (await request("PUT", `${target}/config`, config)).body;
+    } else if (action === "remove") {
+      const config = (await request<{ revision: string }>("GET", `${target}/config`)).body;
+      result = (await request("DELETE", `${target}?revision=${encodeURIComponent(config.revision)}`)).body;
+    } else {
+      result = (await request("POST", action === "restore" ? `${path}/recoveries/${encodeURIComponent(slug as string)}/restore` : `${target}/${action}`, {})).body;
+    }
+    emit(ctx, result, () => `${ghost}/${slug}: ${action} accepted.${(result as { recovery?: string }).recovery ? ` Recovery: ${(result as { recovery: string }).recovery}` : ""}\n`);
   }
   return 0;
 }

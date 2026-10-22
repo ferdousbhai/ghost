@@ -28,6 +28,9 @@ for component in runtime ui; do
   find "$work/$component" \( -type f -o -type l \) -printf '%P\n' \
     | LC_ALL=C sort > "$work/$component.files"
 done
+for doc in "$source_root"/docs/*.md; do
+  cmp "$doc" "$work/runtime/usr/share/doc/ghost/docs/${doc##*/}"
+done
 LC_ALL=C comm -12 "$work/runtime.files" "$work/ui.files" > "$work/shared.files"
 [[ ! -s "$work/shared.files" ]] || {
   printf 'runtime and UI packages own the same files\n' >&2

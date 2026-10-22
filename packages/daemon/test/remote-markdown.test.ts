@@ -231,7 +231,7 @@ describe("remote routine controls", () => {
   function routinePage(api: (path: string, init?: RequestInit) => Promise<unknown>) {
     const source = REMOTE_VIEWER_HTML.match(/async function showRoutines\(\) \{[\s\S]*?\n {2}\}/u)?.[0];
     expect(source).toBeDefined();
-    const panel = { open: false, showModal() { this.open = true; } };
+    const panel = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
     const makeNode = (tag: string): any => ({
       tag, textContent: "", children: [], disabled: false,
       append(...children: unknown[]) { this.children.push(...children); },
@@ -242,17 +242,23 @@ describe("remote routine controls", () => {
       },
     });
     const list = makeNode("div");
+    const editor = { open: false, showModal() { this.open = true; }, close() { this.open = false; } };
+    const nodes: Record<string, any> = { "routine-panel": panel, "routine-list": list, "routine-editor": editor };
+    const element = (id: string) => nodes[id] ??= makeNode(id);
+    const save = REMOTE_VIEWER_HTML.match(/\$\("routine-save"\)\.onclick = async \(\) => \{[\s\S]*?\n {2}\};/u)?.[0];
+    expect(save).toBeDefined();
     const page = new Function("api", "seg", "$", "document", `
-      let ghost = "casper", owner = true, routineGeneration = 0;
-      ${source}; return { open: showRoutines, switchGhost() { ghost = "other"; routineGeneration++; }, guest() { owner = false; } };
-    `)(api, encodeURIComponent, (id: string) => id === "routine-panel" ? panel : list, { createElement: makeNode });
-    return { page, panel, list };
+      let ghost = "casper", owner = true, routineGeneration = 0, routineDraft = null;
+      ${source}; ${save}; return { open: showRoutines, save() { return $("routine-save").onclick(); }, switchGhost() { ghost = "other"; routineGeneration++; }, guest() { owner = false; } };
+    `)(api, encodeURIComponent, element, { createElement: makeNode });
+    return { page, panel, list, editor, element };
   }
 
   test("shows routine state as text and routes actions to the owning ghost", async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = [];
     const { page, list } = routinePage(async (path, init) => {
       calls.push({ path, init });
+      if (path.endsWith("/recoveries")) return { recoveries: [] };
       return { routines: [{ ghost: "casper", slug: "daily", enabled: "disabled", active: "inactive",
         schedule: "OnCalendar=daily", nextRun: null, lastRun: null, serviceActive: "inactive", result: "",
         command: "<script>private command</script>" }] };
@@ -262,10 +268,37 @@ describe("remote routine controls", () => {
     expect(card.children[1].textContent).toContain("\nNext: unknown\nLast run: never/unknown");
     expect(card.children[1].textContent).toContain("<script>private command</script>");
     const buttons = card.querySelectorAll("button");
-    expect(buttons.map((button: any) => button.textContent)).toEqual(["Pause", "Resume", "Run now"]);
+    expect(buttons.map((button: any) => button.textContent)).toEqual(["Pause", "Resume", "Run now", "Logs", "Edit", "Remove"]);
     await buttons[0].onclick();
-    expect(calls[1]).toMatchObject({ path: "/ghosts/casper/routines/daily/pause", init: { method: "POST", body: "{}" } });
-    expect(calls[2]?.path).toBe("/ghosts/casper/routines");
+    expect(calls[2]).toMatchObject({ path: "/ghosts/casper/routines/daily/pause", init: { method: "POST", body: "{}" } });
+    expect(calls[3]?.path).toBe("/ghosts/casper/routines");
+  });
+
+  test("editing preserves the draft on conflict and closes only after an accepted save", async () => {
+    let fail = true;
+    const writes: unknown[] = [];
+    const { page, list, editor, element } = routinePage(async (path, init) => {
+      if (init?.method === "PUT") {
+        writes.push(JSON.parse(String(init.body)));
+        if (fail) throw new Error("Source changed");
+        return { recovery: "checkpoint" };
+      }
+      if (path.endsWith("/config")) return { timer: "[Timer]\nOnCalendar=daily", service: "[Service]\nExecStart=/usr/bin/true", revision: "original" };
+      if (path.endsWith("/recoveries")) return { recoveries: [] };
+      return { routines: [{ ghost: "casper", slug: "daily", enabled: "enabled", active: "active", schedule: "daily", command: "" }] };
+    });
+    await page.open();
+    await list.children[0].querySelectorAll("button").find((button: any) => button.textContent === "Edit").onclick();
+    expect(editor.open).toBe(true);
+    element("routine-timer").value = "[Timer]\nOnCalendar=weekly";
+    await page.save();
+    expect(editor.open).toBe(true);
+    expect(element("routine-editor-error").textContent).toBe("Source changed");
+    expect(element("routine-timer").value).toBe("[Timer]\nOnCalendar=weekly");
+    expect(writes[0]).toMatchObject({ timer: "[Timer]\nOnCalendar=weekly", revision: "original" });
+    fail = false;
+    await page.save();
+    expect(editor.open).toBe(false);
   });
 
   test("does not fetch for guests and drops an old ghost's delayed reply", async () => {

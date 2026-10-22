@@ -458,6 +458,8 @@ Singleton {
         root.retire(root, "hookConfigRequest");
         root.retire(root, "routinesRequest");
         root.retire(root, "routineActionRequest");
+        root.retire(root, "routineRecoveryRequest");
+        root.retire(root, "routineConfigRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
@@ -567,7 +569,13 @@ Singleton {
     property string routinesError: ""
     property var routinesRequest: null
     property var routineActionRequest: null
-    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null
+    property var routineRecoveries: []
+    property var routineRecoveryRequest: null
+    property var routineConfigRequest: null
+    signal routineConfigReady(string ghost, string slug, var config)
+    signal routineMutationFinished(bool ok)
+    signal routineLogsReady(string ghost, var logs)
+    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineConfigRequest !== null || routineRecoveryRequest !== null
 
     function refreshRoutines(): void {
         if (root.routinesRequest || root.activeGhost === "") return;
@@ -580,6 +588,49 @@ Singleton {
                 root.routines = body.routines;
                 root.routinesError = "";
             } else root.routinesError = root.describeError(xhr, "Read routines");
+        });
+    }
+
+    function refreshRoutineRecoveries(): void {
+        if (root.routineRecoveryRequest || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        root.request(root, "routineRecoveryRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/recoveries", null, function (xhr, body) {
+            if (root.activeGhost !== ghost) return;
+            if (xhr.status === 200 && body && Array.isArray(body.recoveries)) root.routineRecoveries = body.recoveries;
+            else root.routinesError = root.describeError(xhr, "Read routine recovery");
+        });
+    }
+
+    function fetchRoutineLogs(slug: string): void {
+        if (root.routineConfigRequest || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        root.request(root, "routineConfigRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
+            if (root.activeGhost !== ghost) return;
+            if (xhr.status === 200 && body && typeof body.text === "string" && Array.isArray(body.sessions)) root.routineLogsReady(ghost, body);
+            else root.routinesError = root.describeError(xhr, "Read routine logs");
+        });
+    }
+
+    function fetchRoutineConfig(slug: string): void {
+        if (root.routineConfigRequest || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        root.request(root, "routineConfigRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
+            if (root.activeGhost !== ghost) return;
+            if (xhr.status === 200 && body && typeof body.revision === "string" && typeof body.timer === "string") {
+                root.routinesError = "";
+                root.routineConfigReady(ghost, slug, body);
+            } else root.routinesError = root.describeError(xhr, "Read routine sources");
+        });
+    }
+
+    function mutateRoutine(ghost: string, suffix: string, method: string, payload: var): void {
+        if (root.routineActionRequest || ghost === "") return;
+        root.request(root, "routineActionRequest", method, "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + suffix, payload, function (xhr, body) {
+            if (root.activeGhost !== ghost) return;
+            const ok = xhr.status === 200;
+            if (ok) { root.routinesError = ""; root.refreshRoutines(); root.refreshRoutineRecoveries(); }
+            else root.routinesError = root.describeError(xhr, "Change routine");
+            root.routineMutationFinished(ok);
         });
     }
 

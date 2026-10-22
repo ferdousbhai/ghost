@@ -61,7 +61,7 @@ is the shell's: Ghost keeps no job table (see "Background work and hooks").
 
 ### Routine inspection and controls
 
-Systemd remains the only schedule store. `ghost routines [list|pause <slug>|resume <slug>|run <slug>]`
+Systemd remains the only schedule store. `ghost routines`
 and the HUD and tailnet owner view inspect persistent timers in the configured
 systemd user unit directory, using the exact owning ghost prefix. They expose
 systemd's calendar/monotonic expressions, next trigger and last service start, enablement,
@@ -83,8 +83,68 @@ and returns without waiting for the work. A timer targeting anything except its
 same-name owned service is inspectable but run is refused. Invalid slugs/actions
 are 400, missing timers 404, and systemd failures 503. Ghost lifecycle leases
 cover inspection/control so rename/delete waits for accepted operations.
-Creation, editing, removal, and logs use the existing timer recipe and native
-file/systemd/journal tools; this API neither edits units nor owns run history.
+`GET …/routines/:slug/config` returns `{ timer, service, revision }`, the two
+bounded UTF-8 unit sources and their SHA-256 revision (service is null if
+missing). `PUT` accepts the same
+shape, verifies both sources with systemd-analyze, checks the revision, pauses
+the timer while replacing files, reloads systemd, and restores its prior active
+state. Only regular, same-name unit pairs without drop-ins may be edited here;
+native tools handle other arrangements. Invalid source is 400, stale source is
+409. `DELETE …/routines/:slug?revision=…` disables/stops the timer and removes
+its pair, leaving any running service alone. Both mutations checkpoint the
+previous source under the private `.ghost-routine-recovery/` directory beside
+the units and return `{ recovery }`. No mutation discards an earlier checkpoint.
+Failures roll back source and timer state; a rollback failure names the retained
+checkpoint. `GET …/routines/recoveries` returns `{ recoveries }` with id, slug,
+createdAt, reason, and whether the current source matches the checkpoint's
+expected revision. `POST …/routines/recoveries/:recovery/restore` restores a
+checkpoint only against that expected revision, checkpoints the replaced source,
+and leaves the restored timer paused. Restore never silently re-enables work.
+CLI `routines config <slug>` prints editable JSON; `routines edit <slug> <file>`
+saves it, `remove <slug>` reads/checks the current revision before deletion,
+`recoveries` lists checkpoints, and `restore <id>` restores one. The HUD and
+phone owner view use the same routes and conflict handling. Changes, controls,
+and source reads are serialized per ghost. `GET …/routines/:slug/logs` and
+`routines logs <slug>` return the last 100
+service journal lines, capped at 64000 characters (`{ text, truncated, sessions }`).
+`sessions` lists event conversation IDs named by CLI acceptance receipts in
+those lines; clients link them to ordinary conversations. Other services have
+no inferred conversation link. These reads are owner-only; journald remains
+the log store. Creation remains native file/systemd work; Ghost owns no
+scheduler or job history.
+
+### External events
+
+An installed authenticated CLI/service selects events and calls
+`ghost event <source> <id> --instructions <owner-instructions> [payload|-]`.
+`POST /api/ghosts/:ghost/events` accepts `{ source, id, instructions, payload }`
+(strings; source 1–128, id 1–512, instructions 1–16384, payload at most 131072
+characters; the rendered prompt must also fit the 200000-character log bound).
+This owner-only intake reuses conversations because `ghost say`
+has no atomic deduplication; it adds no public listener or provider credential
+store. Each source/id hashes to one `event-<sha256>` conversation. Acceptance
+logs its prompt before returning `202 { sessionId, duplicate: false }`; the turn
+runs independently of the HTTP caller. Repeated matching delivery returns
+`200 { sessionId, duplicate: true }`, even after failure or daemon restart.
+Reusing an id with changed instructions/data is 409. Different events run in
+separate conversations; a repeated busy event is acknowledged without queuing
+another turn. Event data is explicitly untrusted and cannot become an owner
+`!command`. Source and id remain visible in its prompt/title; ordinary history,
+stop, failure reporting, and navigation apply to the event conversation.
+There is no automatic replay of an accepted event after a crash: inspect its
+conversation and explicitly continue it. Deleting the conversation removes its
+deduplication evidence, so a later replay may run again.
+
+Provider catch-up belongs to the installed service/CLI. `ghost help events`
+gives a `gh` polling recipe using systemd, an overlapping notification window,
+and stable notification/update ids. Fetch or delivery failure fails the native
+unit (journald records it); repeating the window retries unaccepted events and
+suppresses accepted ones. The owner sets catch-up duration and filters. Slack
+requires an existing authenticated Events API/Socket Mode bridge forwarding its
+stable event_id; Ghost supplies no Slack app, tokens, subscription, or bridge.
+Disconnecting the bridge or pausing/removing its systemd routine stops intake;
+reconnecting may replay provider history according to that provider's retention.
+No Ghost endpoint needs public exposure. See `docs/events.md`.
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -429,6 +489,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
+| `POST /api/ghosts/:ghost/events` | Owner-only [external event intake](#external-events); the GET event stream remains conversation invalidations. |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |

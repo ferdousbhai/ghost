@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { controlGhostRoutine, listGhostRoutines } from "../src/schedules.js";
+import { controlGhostRoutine, listGhostRoutines, readRoutineLogs } from "../src/schedules.js";
 import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteAccess, type CommandRunner } from "../src/tailscale-identity.js";
@@ -110,6 +110,16 @@ describe("systemd routine inspection and controls", () => {
     release(); await resume; await rename;
     expect(temp.registry.get("new-name").name).toBe("new-name");
   });
+  it("bounds journal reads to the owned service and links accepted event conversations", async () => {
+    const unitDir = await setup(), eventId = "event-" + "a".repeat(64);
+    const calls: string[][] = [];
+    const result = await readRoutineLogs("casper", "daily", { unitDir }, async (args) => {
+      calls.push([...args]); return { ...ok, stdout: "x".repeat(65000) + `\nAccepted: casper/${eventId}\nAccepted: other/event-${"b".repeat(64)}\n` };
+    });
+    expect(result.truncated).toBe(true); expect(result.text.length).toBe(64000);
+    expect(result.sessions).toEqual([eventId]);
+    expect(calls[0]).toEqual(["--user", "--unit", service, "--no-pager", "--output=short-iso", "--lines=100"]);
+  });
   it("CLI lists state and routes pause/resume/run to the addressed ghost", async () => {
     const unitDir = await setup();
     const routines = await listGhostRoutines("casper", { unitDir, run: manager([]) });
@@ -132,15 +142,26 @@ describe("systemd routine inspection and controls", () => {
   it("exposes owner inspection/control through HTTP and refuses guest access", async () => {
     const unitDir = await setup(), calls: string[][] = [];
     host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
-      scheduleCommandRunner: manager(calls), env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" } });
+      scheduleCommandRunner: manager(calls), scheduleVerifyRunner: async () => ok, scheduleJournalRunner: async () => ({ ...ok, stdout: "Finished routine" }), env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" } });
     server = await startDaemonServer({ registry: temp.registry, host, port: 0, apiToken: "test-token",
       remote: new RemoteAccess({ selfLogin: async () => "owner@example.com" }) });
     const path = `http://127.0.0.1:${server.port}/api/ghosts/casper/routines`;
     const owner = { "tailscale-user-login": "owner@example.com", "content-type": "application/json" };
     expect(await (await fetch(path, { headers: owner })).json()).toMatchObject({ routines: [{ slug: "daily" }] });
     expect((await fetch(`${path}/daily/run`, { method: "POST", headers: owner, body: "{}" })).status).toBe(200);
+    const config = await (await fetch(`${path}/daily/config`, { headers: owner })).json() as { revision: string; timer: string; service: string };
+    const saved = await fetch(`${path}/daily/config`, { method: "PUT", headers: owner,
+      body: JSON.stringify({ ...config, timer: "[Timer]\nOnCalendar=weekly\n", service: "[Service]\nExecStart=/usr/bin/true\n" }) });
+    expect(saved.status).toBe(200);
+    expect(await (await fetch(`${path}/daily/logs`, { headers: owner })).json()).toMatchObject({ text: "Finished routine", sessions: [] });
+    const updated = await (await fetch(`${path}/daily/config`, { headers: owner })).json() as { revision: string };
+    const removed = await fetch(`${path}/daily?revision=${updated.revision}`, { method: "DELETE", headers: owner });
+    expect(removed.status).toBe(200);
+    const { recovery } = await removed.json() as { recovery: string };
+    expect(await (await fetch(`${path}/recoveries`, { headers: owner })).json()).toMatchObject({ recoveries: expect.arrayContaining([expect.objectContaining({ id: recovery, applicable: true })]) });
+    expect((await fetch(`${path}/recoveries/${recovery}/restore`, { method: "POST", headers: owner, body: "{}" })).status).toBe(200);
     const count = calls.length;
-    for (const [url, method] of [[path, "GET"], [`${path}/daily/pause`, "POST"]]) {
+    for (const [url, method] of [[path, "GET"], [`${path}/daily/config`, "GET"], [`${path}/recoveries`, "GET"], [`${path}/daily/logs`, "GET"], [`${path}/daily/config`, "PUT"], [`${path}/daily`, "DELETE"], [`${path}/daily/pause`, "POST"]]) {
       expect((await fetch(url as string, { method, headers: { "tailscale-user-login": "guest@example.com" } })).status).toBe(403);
     }
     expect(calls).toHaveLength(count);

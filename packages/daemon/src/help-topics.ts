@@ -8,7 +8,7 @@
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation", "events"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -49,6 +49,7 @@ function timers(input: HelpTopicInput): string[] {
     "```",
     "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
+    "Edit with `ghost routines config <slug> > routine.json`, then `ghost routines edit <slug> routine.json`. Removal keeps a checkpoint: `ghost routines remove <slug>`; inspect `recoveries` and `restore <id>` to restore paused. The HUD and phone owner view provide the same actions. `ghost help events` connects selected external events with installed CLIs/services.",
     "Inspect with `ghost routines`; `ghost routines pause <slug>` stops future triggers, `resume <slug>` restores them (persistent timers may catch up), and `run <slug>` queues work without changing the timer. Pause leaves running work alone. Edit the unit files directly and reload systemd; inspect logs with `journalctl --user -u <unit>.service`.",
     "Timers fire only while the owner is logged in (the daemon runs in their graphical session).",
   ];
@@ -121,6 +122,29 @@ function memory(): string[] {
   ];
 }
 
+function events(input: HelpTopicInput): string[] {
+  return [
+    "# External events",
+    "Use an installed authenticated CLI/service to select events; Ghost stores no provider credentials and exposes no public webhook. Deliver payloads with `ghost event <source> <stable-id> --instructions '<owner instructions>' --ghost <ghost> -` on stdin.",
+    "One source/id means one conversation: replay is acknowledged without another turn, even after failure/restart. Changed data under the same id is refused. Distinct events get separate conversations. Inspect with `ghost show -s <event-session>`; stop or explicitly continue there. Deleting it also removes deduplication evidence.",
+    "GitHub: gh owns login (`gh auth login`); its notifications API needs notifications or repo scope. Poll with a systemd user timer (`ghost help timers`) and a oneshot Bash script like this; replace the repository and instructions deliberately:",
+    "```bash",
+    "set -euo pipefail",
+    "work=$(mktemp -d)",
+    `trap 'rm -rf -- "$work"' EXIT`,
+    "since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)",
+    `gh api --paginate --slurp -X GET notifications -f all=true -f participating=true -f since="$since" > "$work/raw.json"`,
+    `jq -c '.[][] | select(.repository.full_name == "OWNER/REPO") | {id: (.id + ":" + .updated_at), payload: {reason, repository: .repository.full_name, subject}}' "$work/raw.json" > "$work/events.jsonl"`,
+    "while IFS= read -r event; do",
+    `  id=$(jq -r '.id' <<< "$event")`,
+    `  jq -c '.payload' <<< "$event" | ghost event github "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' -`,
+    'done < "$work/events.jsonl"',
+    "```",
+    "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: failures fail the systemd unit, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
+    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Pause/remove the source's systemd routine or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See docs/events.md in the checkout or project documentation.",
+  ];
+}
+
 function dictation(): string[] {
   return [
     "# Dictation and audio files",
@@ -137,6 +161,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation, events: () => events(input) }[topic]();
   return `${lines.join("\n")}\n`;
 }

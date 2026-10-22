@@ -43,6 +43,18 @@ try {
     assert.equal((await routineState()).enabled, enabled);
   }
   assert.equal((await routineState()).serviceActive, "activating");
+  const config = await (await fetch(`${routinesUrl}/daily-notes/config`)).json();
+  const edit = await fetch(`${routinesUrl}/daily-notes/config`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...config, timer: config.timer.replace("daily", "weekly") }) });
+  assert.equal(edit.status, 200);
+  assert.equal((await routineState()).schedule, "OnCalendar=weekly");
+  const latestConfig = await (await fetch(`${routinesUrl}/daily-notes/config`)).json();
+  const removed = await (await fetch(`${routinesUrl}/daily-notes?revision=${latestConfig.revision}`, { method: "DELETE" })).json();
+  assert.equal((await (await fetch(routinesUrl)).json()).routines.length, 0);
+  const recoveryRows = (await (await fetch(`${routinesUrl}/recoveries`)).json()).recoveries;
+  assert.ok(recoveryRows.some(row => row.id === removed.recovery && row.applicable));
+  assert.equal((await fetch(`${routinesUrl}/recoveries/${removed.recovery}/restore`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" })).status, 200);
+  assert.equal((await routineState()).enabled, "disabled");
+
 
   const hooksResponse = await fetch(`http://127.0.0.1:${port}/api/hooks/config`, {
     headers: { authorization: "Bearer mock-parity" },

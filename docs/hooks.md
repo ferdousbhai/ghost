@@ -228,3 +228,9 @@ and tailnet owner view inspect and control systemd timers, as specified in
 [the routine contract](../CONTRACTS.md#routine-inspection-and-controls). Neither
 routine inspection nor pause/resume sends a prompt or runs a lifecycle hook;
 run now queues the existing service. If it starts a Ghost turn, normal hooks apply.
+
+External events enter through the owner-only delivery contract in
+[docs/events.md](events.md), not a hook boundary. Each accepted event starts a
+normal conversation turn with the normal hooks; duplicate delivery runs no
+hook or harness. Provider authentication/retries belong to the installed
+source service or CLI.

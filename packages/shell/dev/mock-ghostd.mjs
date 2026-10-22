@@ -15,12 +15,15 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
 const mockRoutines = new Map();
+const mockRoutineConfigs = new Map();
+const mockRoutineRecoveries = new Map();
+const routineRevision = (config) => createHash("sha256").update(JSON.stringify([config?.timer ?? null, config?.service ?? null])).digest("hex");
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name, fallback) => {
@@ -810,21 +813,72 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts[3] === "routines") {
     const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
-    const routine = mockRoutines.get(name) ?? {
-      ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
-      timerPath: join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath: join(GHOSTS_ROOT, "units", `${unit}.service`),
-      description: "Daily notes", schedule: "OnCalendar=daily", nextRun: "Fri 2026-10-23 00:00:00 EEST",
-      lastRun: null, enabled: "enabled", active: "active", command: "ghost say --new 'Tidy my notes'", result: "", serviceActive: "inactive",
-    };
     if (!mockRoutines.has(name)) {
+      const routine = {
+        ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
+        timerPath: join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath: join(GHOSTS_ROOT, "units", `${unit}.service`),
+        description: "Daily notes", schedule: "OnCalendar=daily", nextRun: "Fri 2026-10-23 00:00:00 EEST",
+        lastRun: null, enabled: "enabled", active: "active", command: "ghost say --new 'Tidy my notes'", result: "", serviceActive: "inactive",
+      };
+      const config = { timer: "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n",
+        service: `[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"\n` };
       mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
-      writeFileSync(routine.timerPath, "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n");
-      writeFileSync(routine.servicePath, `[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"\n`);
+      writeFileSync(routine.timerPath, config.timer); writeFileSync(routine.servicePath, config.service);
+      mockRoutines.set(name, routine); mockRoutineConfigs.set(name, config);
     }
-    mockRoutines.set(name, routine);
-    if (parts.length === 4 && req.method === "GET") return json(res, 200, { routines: [routine] });
+    const routine = mockRoutines.get(name), config = mockRoutineConfigs.get(name);
+    const checkpoint = (next, reason) => {
+      const id = randomUUID();
+      mockRoutineRecoveries.set(id, { ghost: name, slug: "daily-notes", createdAt: new Date().toISOString(), reason,
+        config: config ? { ...config } : null, routine: routine ? { ...routine } : null, expectedRevision: routineRevision(next) });
+      return id;
+    };
+    if (parts.length === 5 && parts[4] === "recoveries" && req.method === "GET") {
+      return json(res, 200, { recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
+        id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
+      })) });
+    }
+    if (parts.length === 7 && parts[4] === "recoveries" && parts[6] === "restore" && req.method === "POST") {
+      await readBody(req);
+      const saved = mockRoutineRecoveries.get(parts[5]);
+      if (!saved || saved.ghost !== name) return json(res, 404, { error: { message: "No such recovery" } });
+      if (saved.expectedRevision !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
+      const recovery = checkpoint(saved.config, "restore");
+      mockRoutineConfigs.set(name, saved.config);
+      mockRoutines.set(name, saved.routine ? { ...saved.routine, enabled: "disabled", active: "inactive", nextRun: null } : null);
+      if (saved.config) {
+        writeFileSync(join(GHOSTS_ROOT, "units", `${unit}.timer`), saved.config.timer);
+        writeFileSync(join(GHOSTS_ROOT, "units", `${unit}.service`), saved.config.service);
+      } else {
+        rmSync(join(GHOSTS_ROOT, "units", `${unit}.timer`), { force: true });
+        rmSync(join(GHOSTS_ROOT, "units", `${unit}.service`), { force: true });
+      }
+      return json(res, 200, { recovery });
+    }
+    if (parts.length === 4 && req.method === "GET") return json(res, 200, { routines: routine ? [routine] : [] });
+    if (!routine || parts[4] !== routine.slug) return json(res, 404, { error: { message: "No such routine" } });
+    if (parts.length === 6 && parts[5] === "logs" && req.method === "GET") return json(res, 200, { text: "Mock routine journal: completed successfully.", truncated: false, sessions: [] });
+    if (parts.length === 6 && parts[5] === "config" && req.method === "GET") return json(res, 200, { ...config, revision: routineRevision(config) });
+    if (parts.length === 6 && parts[5] === "config" && req.method === "PUT") {
+      const input = await readBody(req);
+      if (input.revision !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
+      if (typeof input.timer !== "string" || typeof input.service !== "string" || !input.timer.trim() || !input.service.trim()) return json(res, 400, { error: { message: "Invalid unit sources" } });
+      const next = { timer: input.timer, service: input.service }, recovery = checkpoint(next, "edit");
+      mockRoutineConfigs.set(name, next);
+      routine.schedule = input.timer.match(/^OnCalendar=.*$/m)?.[0] ?? "Schedule unavailable";
+      routine.command = input.service.match(/^ExecStart=(.*)$/m)?.[1] ?? "";
+      writeFileSync(routine.timerPath, input.timer); writeFileSync(routine.servicePath, input.service);
+      return json(res, 200, { recovery });
+    }
+    if (parts.length === 5 && req.method === "DELETE") {
+      if (url.searchParams.get("revision") !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
+      const recovery = checkpoint(null, "remove");
+      mockRoutineConfigs.set(name, null); mockRoutines.set(name, null);
+      rmSync(routine.timerPath, { force: true }); rmSync(routine.servicePath, { force: true });
+      return json(res, 200, { recovery });
+    }
     const action = parts[5];
-    if (parts.length === 6 && req.method === "POST" && parts[4] === routine.slug && ["pause", "resume", "run"].includes(action)) {
+    if (parts.length === 6 && req.method === "POST" && ["pause", "resume", "run"].includes(action)) {
       await readBody(req);
       if (action === "pause") { routine.enabled = "disabled"; routine.active = "inactive"; routine.nextRun = null; }
       if (action === "resume") { routine.enabled = "enabled"; routine.active = "active"; routine.nextRun = "Fri 2026-10-23 00:00:00 EEST"; }

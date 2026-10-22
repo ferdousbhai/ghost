@@ -6,6 +6,7 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
+import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promises";
@@ -64,10 +65,12 @@ import type { RunningSource } from "./running-source.js";
 import {
   SCHEDULED_WORK_POLICY,
   listGhostRoutines,
+  readRoutineLogs,
   controlGhostRoutine,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
 } from "./schedules.js";
+import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, type RoutineConfig } from "./routine-config.js";
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath } from "./trash.js";
@@ -95,6 +98,8 @@ export interface SessionHostOptions {
   scheduleUnitDir?: string;
   runningSource?: RunningSource;
   scheduleCommandRunner?: CommandRunner;
+  scheduleVerifyRunner?: CommandRunner;
+  scheduleJournalRunner?: CommandRunner;
   logger?: Logger;
   hooks?: GhostHookRunner;
   /**
@@ -237,6 +242,10 @@ export class SessionHost {
   private readonly scheduleUnitDir: string;
   private readonly runningSource: RunningSource | null;
   private readonly scheduleCommandRunner: CommandRunner | undefined;
+  private readonly scheduleVerifyRunner: CommandRunner | undefined;
+  private readonly scheduleJournalRunner: CommandRunner | undefined;
+  private readonly eventAdmissions = new Map<string, Promise<unknown>>();
+  private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
@@ -264,6 +273,8 @@ export class SessionHost {
     this.scheduleUnitDir = resolve(options.scheduleUnitDir ?? resolveScheduleUnitDirectory(this.ownerHome, {}));
     this.runningSource = options.runningSource ?? null;
     this.scheduleCommandRunner = options.scheduleCommandRunner;
+    this.scheduleVerifyRunner = options.scheduleVerifyRunner;
+    this.scheduleJournalRunner = options.scheduleJournalRunner;
     this.logger = options.logger ?? silentLogger;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
@@ -497,7 +508,7 @@ export class SessionHost {
 
   async admitTurn(
     ghostName: string,
-    options: Pick<RunTurnOptions, "sessionId" | "prompt">,
+    options: Pick<RunTurnOptions, "sessionId" | "prompt"> & { promptRecorded?: boolean },
   ): Promise<TurnAdmission> {
     const ghost = this.registry.get(ghostName);
     const id = requireConversationId(options.sessionId ?? "default");
@@ -516,13 +527,35 @@ export class SessionHost {
     return {
       run: async (stream) => {
         try {
-          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal));
+          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal, options.promptRecorded));
         } finally {
           this.admissions.delete(key);
           this.announce(ghost.name, id);
         }
       },
     };
+  }
+
+  async admitEvent(ghostName: string, event: ExternalEvent): Promise<{ sessionId: string; admission: TurnAdmission | null }> {
+    const sessionId = eventConversationId(event), prompt = eventPrompt(event);
+    return this.withGhost(ghostName, () => serializeByKey(this.eventAdmissions, keyOf(ghostName, sessionId), async () => {
+      const ghost = this.registry.get(ghostName), { sessionDir } = ghostPaths(ghost.dir);
+      const entries = await readLog(sessionDir, sessionId);
+      const firstPrompt = entries?.find((entry) => entry.type === "user");
+      if (firstPrompt?.type === "user") {
+        if (firstPrompt.text !== prompt) throw new GhostError("event_conflict", "This source/id already has different instructions or data.", 409);
+        return { sessionId, admission: null };
+      }
+      const admission = await this.admitTurn(ghostName, { sessionId, prompt, promptRecorded: true });
+      try {
+        await appendLog(sessionDir, sessionId, [
+          ...(entries === null ? [newConversationEntry(sessionId, new Date())] : []),
+          { type: "user", at: new Date().toISOString(), text: prompt },
+        ]);
+      } catch (error) { this.admissions.delete(keyOf(ghostName, sessionId)); throw error; }
+      this.announce(ghostName, sessionId);
+      return { sessionId, admission };
+    }));
   }
 
   /** One whole turn, as the server runs it; a failure outside its passes throws instead of emitting. */
@@ -537,6 +570,7 @@ export class SessionHost {
     command: ReturnType<typeof ownerCommand>,
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
+    promptRecorded = false,
   ): Promise<void> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -563,7 +597,7 @@ export class SessionHost {
           turnId = randomUUID();
           ownerPrompt = text;
         }
-        await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
+        if (!promptRecorded || origin !== undefined) await appendLog(sessionDir, id, [{ type: "user", at: new Date().toISOString(), text, ...(origin ? { origin } : {}) }]);
         // Other clients learn the turn is running with its prompt already readable.
         this.announce(ghost.name, id);
         let passPrompt = origin === "hook" ? `${STOP_HOOK_FEEDBACK_PREFIX}${text}` : text;
@@ -1090,19 +1124,27 @@ export class SessionHost {
     };
   }
 
-  async routines(ghost: string) {
-    return this.withGhost(ghost, () => {
+  private routineOperation<T>(ghost: string, action: (options: { unitDir: string; run?: CommandRunner; verify?: CommandRunner }) => Promise<T>): Promise<T> {
+    return this.withGhost(ghost, () => serializeByKey(this.routineChanges, ghost, async () => {
       this.registry.get(ghost);
-      return listGhostRoutines(ghost, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner });
-    });
+      return action({ unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner, verify: this.scheduleVerifyRunner });
+    }));
   }
 
-  async controlRoutine(ghost: string, slug: string, action: string): Promise<void> {
-    return this.withGhost(ghost, () => {
-      this.registry.get(ghost);
-      return controlGhostRoutine(ghost, slug, action, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner });
-    });
+  routineLogs(ghost: string, slug: string) { return this.routineOperation(ghost, (options) => readRoutineLogs(ghost, slug, options, this.scheduleJournalRunner)); }
+  routines(ghost: string) { return this.routineOperation(ghost, (options) => listGhostRoutines(ghost, options)); }
+  controlRoutine(ghost: string, slug: string, action: string) {
+    return this.routineOperation(ghost, (options) => controlGhostRoutine(ghost, slug, action, options));
   }
+  routineConfig(ghost: string, slug: string) { return this.routineOperation(ghost, (options) => readRoutineConfig(ghost, slug, options)); }
+  saveRoutine(ghost: string, slug: string, config: RoutineConfig) {
+    return this.routineOperation(ghost, (options) => saveRoutineConfig(ghost, slug, config, options));
+  }
+  removeRoutine(ghost: string, slug: string, expected: string) {
+    return this.routineOperation(ghost, (options) => removeRoutine(ghost, slug, expected, options));
+  }
+  routineRecoveries(ghost: string) { return this.routineOperation(ghost, (options) => listRoutineRecoveries(ghost, options)); }
+  restoreRoutine(ghost: string, id: string) { return this.routineOperation(ghost, (options) => restoreRoutine(ghost, id, options)); }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
   async deleteSession(ghostName: string, sessionId: string | null | undefined): Promise<void> {
