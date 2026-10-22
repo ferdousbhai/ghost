@@ -1,25 +1,6 @@
-/**
- * Scheduled work is a systemd user timer, and the timer is the only record of it.
- *
- * Ghost writes no scheduler. A schedule the owner can see in
- * `systemctl --user list-timers`, disable with `systemctl --user disable --now`,
- * and edit in an ordinary text file is more legible than one that lives inside
- * ghostd and is invisible until the HUD is open. Omarchy reaches the same
- * conclusion for its own artifacts: `omarchy-games-retro-install` writes one
- * `.desktop` file into the standard user directory, tells the system that owns
- * that directory, and stops — no daemon reconciles it afterwards.
- *
- * So a ghost authors its own units through `bash`, and the daemon keeps exactly
- * one obligation the desktop-file precedent does not have: a stray `.desktop`
- * file is inert, but a stray `.timer` fires. Deletion removes the timers owned
- * by that ghost before deletion or rename publishes a reusable name.
- *
- * The versioned, length-delimited prefix and slug grammar are the ownership
- * contract. Units are swept by name, never by pattern-matching content.
- */
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { isValidGhostName } from "./ghosts.js";
+import { GhostError, isValidGhostName } from "./ghosts.js";
 import { which } from "./harnesses.js";
 import {
   commandRunner,
@@ -113,7 +94,7 @@ export async function listGhostScheduleUnits(
     .sort();
 }
 
-export interface ScheduleSweepOptions {
+export interface ScheduleOptions {
   readonly unitDir: string;
   /** Test seam over `systemctl --user`. */
   readonly run?: CommandRunner;
@@ -132,7 +113,7 @@ export interface ScheduleSweepResult {
  */
 export async function sweepGhostSchedules(
   ghostName: string,
-  options: ScheduleSweepOptions,
+  options: ScheduleOptions,
 ): Promise<ScheduleSweepResult> {
   const logger = options.logger ?? silentLogger;
   const run = options.run ?? commandRunner("systemctl");
@@ -155,4 +136,95 @@ export async function sweepGhostSchedules(
   requireCommandSuccess(await run(["--user", "stop", `${prefix}*.timer`]), "systemctl stop");
   logger.info("swept ghost schedules", { ghost: ghostName, removed: units.length });
   return { removed: units };
+}
+
+export interface Routine {
+  ghost: string;
+  slug: string;
+  unit: string;
+  service: string;
+  timerPath: string;
+  servicePath: string;
+  description: string;
+  schedule: string;
+  nextRun: string | null;
+  lastRun: string | null;
+  enabled: string;
+  active: string;
+  command: string;
+  result: string;
+  serviceActive: string;
+}
+
+async function scheduleCommand(run: CommandRunner, args: string[]): Promise<string> {
+  try {
+    const result = await run(["--user", ...args]);
+    requireCommandSuccess(result, "systemctl");
+    return result.stdout;
+  } catch (error) {
+    throw new GhostError("routines_unavailable", `Could not access systemd routines: ${error instanceof Error ? error.message : String(error)}`, 503);
+  }
+}
+
+function unitProperties(output: string): Map<string, Record<string, string>> {
+  const units = new Map<string, Record<string, string>>();
+  for (const block of output.trim().split(/\n\s*\n/u)) {
+    const props: Record<string, string> = {};
+    for (const line of block.split("\n")) {
+      const equal = line.indexOf("=");
+      if (equal > 0) props[line.slice(0, equal)] = line.slice(equal + 1);
+    }
+    if (props.Id) units.set(props.Id, props);
+  }
+  return units;
+}
+
+export async function listGhostRoutines(ghost: string, options: ScheduleOptions): Promise<Routine[]> {
+  const prefix = scheduleUnitPrefix(ghost);
+  const timers = (await listGhostScheduleUnits(ghost, options.unitDir)).filter((unit) => unit.endsWith(".timer"));
+  if (!timers.length) return [];
+  const run = options.run ?? commandRunner("systemctl");
+  const timerProps = unitProperties(await scheduleCommand(run, [
+    "show", "--all", "--property=Id,Description,Unit,UnitFileState,ActiveState,TimersCalendar,TimersMonotonic,NextElapseUSecRealtime", ...timers,
+  ]));
+  const services = timers.map((unit) => unit.replace(/\.timer$/u, ".service"));
+  const serviceProps = unitProperties(await scheduleCommand(run, [
+    "show", "--all", "--property=Id,ExecStart,Result,ActiveState,ExecMainStartTimestamp", ...services,
+  ]));
+  return timers.map((unit, index) => {
+    const timer = timerProps.get(unit) ?? {};
+    const service = services[index] as string;
+    const state = (!timer.Unit || timer.Unit === service) ? serviceProps.get(service) ?? {} : {};
+    const timestamp = (value: string | undefined) => !value || value === "0" || value === "n/a" ? null : value;
+    return {
+      ghost, slug: unit.slice(prefix.length, -6), unit,
+      service: timer.Unit || service,
+      timerPath: join(options.unitDir, unit), servicePath: timer.Unit && timer.Unit !== service ? "" : join(options.unitDir, service),
+      description: timer.Description ?? "", schedule: [timer.TimersCalendar, timer.TimersMonotonic].filter(Boolean).join("; "),
+      nextRun: timestamp(timer.NextElapseUSecRealtime), lastRun: timestamp(state.ExecMainStartTimestamp),
+      enabled: timer.UnitFileState ?? "", active: timer.ActiveState ?? "",
+      command: state.ExecStart ?? "", result: timestamp(state.ExecMainStartTimestamp) && ["inactive", "failed"].includes(state.ActiveState ?? "") ? state.Result ?? "" : "", serviceActive: state.ActiveState ?? "",
+    };
+  });
+}
+
+export async function controlGhostRoutine(
+  ghost: string, slug: string, action: string, options: ScheduleOptions,
+): Promise<void> {
+  if (!isValidScheduleSlug(slug) || !["pause", "resume", "run"].includes(action)) {
+    throw new GhostError("invalid_routine", "Use a valid routine slug and pause, resume, or run.", 400);
+  }
+  const unit = `${scheduleUnitPrefix(ghost)}${slug}.timer`;
+  if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(unit)) {
+    throw new GhostError("not_found", "No such routine for this ghost.", 404);
+  }
+  const run = options.run ?? commandRunner("systemctl");
+  if (action === "run") {
+    const target = (await scheduleCommand(run, ["show", "--property=Unit", "--value", unit])).trim();
+    const service = unit.replace(/\.timer$/u, ".service");
+    if (target !== service) throw new GhostError("invalid_routine", "Run requires the timer's same-name owned service.", 400);
+    await scheduleCommand(run, ["start", "--no-block", service]);
+  } else {
+    await scheduleCommand(run, [action === "pause" ? "disable" : "enable", "--now", unit]);
+  }
 }

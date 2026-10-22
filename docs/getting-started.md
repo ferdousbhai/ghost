@@ -304,3 +304,25 @@ omarchy-restart-shell
 
 A rescan discovers a plugin; it does not replace QML the running shell has
 already loaded, so an upgraded HUD needs the shell restart.
+
+## Inspect scheduled work
+
+Open **Routines** in the HUD or the tailnet owner viewer, or run:
+
+```sh
+ghost routines -g casper
+ghost routines pause daily-notes -g casper
+ghost routines resume daily-notes -g casper
+ghost routines run daily-notes -g casper
+```
+
+The view reports the existing systemd user timers, their schedule, next trigger,
+last service start, and latest service result when available. Pause disables
+future triggers and leaves running work alone. Resume enables the timer;
+persistent timers may catch up. Run now queues the service without changing the
+timer and returns before the work finishes. Refresh to inspect its state.
+Guests cannot inspect routines or control them.
+
+Creation and changes still use ordinary unit files (`ghost help timers`);
+open their paths from the HUD, then reload systemd after editing. Logs remain in
+`journalctl --user -u <service-unit>`; Ghost keeps no separate job history.

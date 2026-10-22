@@ -20,6 +20,7 @@ import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
+const mockRoutines = new Map();
 const argv = process.argv.slice(2);
 const flag = (name) => argv.includes(name);
 const opt = (name, fallback) => {
@@ -806,6 +807,32 @@ const mockServer = createServer(async (req, res) => {
   const name = parts[2] ? decodeURIComponent(parts[2]) : "";
   const ghost = ghosts.find((g) => g.name === name);
   if (!ghost) return json(res, 404, { error: { message: `no ghost named ${name}`, code: "not_found" } });
+
+  if (parts[3] === "routines") {
+    const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
+    const routine = mockRoutines.get(name) ?? {
+      ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
+      timerPath: join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath: join(GHOSTS_ROOT, "units", `${unit}.service`),
+      description: "Daily notes", schedule: "OnCalendar=daily", nextRun: "Fri 2026-10-23 00:00:00 EEST",
+      lastRun: null, enabled: "enabled", active: "active", command: "ghost say --new 'Tidy my notes'", result: "", serviceActive: "inactive",
+    };
+    if (!mockRoutines.has(name)) {
+      mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
+      writeFileSync(routine.timerPath, "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n");
+      writeFileSync(routine.servicePath, `[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"\n`);
+    }
+    mockRoutines.set(name, routine);
+    if (parts.length === 4 && req.method === "GET") return json(res, 200, { routines: [routine] });
+    const action = parts[5];
+    if (parts.length === 6 && req.method === "POST" && parts[4] === routine.slug && ["pause", "resume", "run"].includes(action)) {
+      await readBody(req);
+      if (action === "pause") { routine.enabled = "disabled"; routine.active = "inactive"; routine.nextRun = null; }
+      if (action === "resume") { routine.enabled = "enabled"; routine.active = "active"; routine.nextRun = "Fri 2026-10-23 00:00:00 EEST"; }
+      if (action === "run") { routine.serviceActive = "activating"; routine.lastRun = new Date().toISOString(); }
+      return json(res, 200, { ok: true });
+    }
+    return json(res, 404, { error: { message: "No such routine" } });
+  }
 
   if (parts[3] === "events" && parts.length === 4 && req.method === "GET") {
     res.writeHead(200, {

@@ -63,6 +63,8 @@ import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
 import {
   SCHEDULED_WORK_POLICY,
+  listGhostRoutines,
+  controlGhostRoutine,
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
 } from "./schedules.js";
@@ -1086,6 +1088,20 @@ export class SessionHost {
       total,
       truncated: offset > 0 || offset + messages.length < total,
     };
+  }
+
+  async routines(ghost: string) {
+    return this.withGhost(ghost, () => {
+      this.registry.get(ghost);
+      return listGhostRoutines(ghost, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner });
+    });
+  }
+
+  async controlRoutine(ghost: string, slug: string, action: string): Promise<void> {
+    return this.withGhost(ghost, () => {
+      this.registry.get(ghost);
+      return controlGhostRoutine(ghost, slug, action, { unitDir: this.scheduleUnitDir, run: this.scheduleCommandRunner });
+    });
   }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */

@@ -456,6 +456,8 @@ Singleton {
         root.cancelAllTranscriptLoads();
         root.retireRemoteRequests();
         root.retire(root, "hookConfigRequest");
+        root.retire(root, "routinesRequest");
+        root.retire(root, "routineActionRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
@@ -559,6 +561,38 @@ Singleton {
         else xhr.send(body);
     }
 
+
+    property var routines: []
+    property string routinesGhost: ""
+    property string routinesError: ""
+    property var routinesRequest: null
+    property var routineActionRequest: null
+    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null
+
+    function refreshRoutines(): void {
+        if (root.routinesRequest || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        if (root.routinesGhost !== ghost) root.routines = [];
+        root.request(root, "routinesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines", null, function (xhr, body) {
+            if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
+            if (xhr.status === 200 && body && Array.isArray(body.routines)) {
+                root.routinesGhost = ghost;
+                root.routines = body.routines;
+                root.routinesError = "";
+            } else root.routinesError = root.describeError(xhr, "Read routines");
+        });
+    }
+
+    function controlRoutine(slug: string, action: string): void {
+        if (root.routineActionRequest || root.activeGhost === "") return;
+        const ghost = root.activeGhost;
+        root.request(root, "routineActionRequest", "POST", "/api/ghosts/" + encodeURIComponent(ghost)
+            + "/routines/" + encodeURIComponent(slug) + "/" + action, {}, function (xhr, body) {
+            if (root.activeGhost !== ghost) return;
+            if (xhr.status === 200) root.refreshRoutines();
+            else root.routinesError = root.describeError(xhr, "Control routine");
+        });
+    }
 
     // The owner's board: Documents/board.md, parsed by the daemon and shown
     // read-only. Polled while its pane is up; edits happen in the file.

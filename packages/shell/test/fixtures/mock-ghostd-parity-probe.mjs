@@ -32,6 +32,18 @@ try {
     });
   });
 
+  const routinesUrl = `http://127.0.0.1:${port}/api/ghosts/casper/routines`;
+  const routineState = async () => (await (await fetch(routinesUrl)).json()).routines[0];
+  assert.equal((await routineState()).enabled, "enabled");
+  for (const [action, enabled] of [["pause", "disabled"], ["resume", "enabled"], ["run", "enabled"]]) {
+    const response = await fetch(`${routinesUrl}/daily-notes/${action}`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    assert.equal(response.status, 200);
+    assert.equal((await routineState()).enabled, enabled);
+  }
+  assert.equal((await routineState()).serviceActive, "activating");
+
   const hooksResponse = await fetch(`http://127.0.0.1:${port}/api/hooks/config`, {
     headers: { authorization: "Bearer mock-parity" },
   });

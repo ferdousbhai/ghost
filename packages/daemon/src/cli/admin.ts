@@ -3,6 +3,7 @@ import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.j
 import { ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
+import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
 
 
@@ -118,5 +119,23 @@ export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
     : (await resolveTarget(ctx.client, ctx, parsed)).path;
   const body = (await ctx.client.request("PUT", `${path}/harness`, { harness: id })).body as { id: string; harness: string };
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
+  return 0;
+}
+
+export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
+  const [action = "list", slug] = parsed.positionals;
+  if ((action === "list" && slug) || (action !== "list" && (!["pause", "resume", "run"].includes(action) || !slug))) {
+    throw new ArgsError("ghost routines takes list, pause <slug>, resume <slug>, or run <slug>");
+  }
+  const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
+  const path = ghostPath(ghost, "/routines");
+  if (action !== "list") {
+    const body = (await ctx.client.request("POST", `${path}/${encodeURIComponent(slug as string)}/${action}`, {})).body;
+    emit(ctx, body, () => `${ghost}/${slug}: ${action} accepted.\n`);
+  } else {
+    const body = (await ctx.client.request<{ routines: Routine[] }>("GET", path)).body;
+    emit(ctx, body, () => body.routines.length ? body.routines.map((r) =>
+      `${r.ghost}/${r.slug} · ${r.enabled || "unknown"} · ${r.active || "unknown"}\n  ${r.schedule || "Schedule unavailable"}\n  Next: ${r.nextRun ?? "unknown"} · Last: ${r.lastRun ?? "never/unknown"}\n  Service: ${r.serviceActive || "unknown"} · Result: ${r.result || "unknown"}\n  ${r.command}\n  ${r.timerPath}\n  ${r.servicePath}\n  Logs: journalctl --user -u ${r.service}\n`).join("\n") : "No routines. See ghost help timers.\n");
+  }
   return 0;
 }

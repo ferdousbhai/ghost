@@ -59,6 +59,33 @@ read-only by the HUD, the tailnet viewer, and `ghost board` through
 `GET /api/board` ([`board.ts`](packages/daemon/src/board.ts)). Background work
 is the shell's: Ghost keeps no job table (see "Background work and hooks").
 
+### Routine inspection and controls
+
+Systemd remains the only schedule store. `ghost routines [list|pause <slug>|resume <slug>|run <slug>]`
+and the HUD and tailnet owner view inspect persistent timers in the configured
+systemd user unit directory, using the exact owning ghost prefix. They expose
+systemd's calendar/monotonic expressions, next trigger and last service start, enablement,
+active state, service command, and latest service result; empty properties are
+unknown, not inferred successes. The daemon projects this native state because the HUD and tailnet viewer cannot
+inspect the systemd user manager directly; no scheduler or job database is added.
+`GET /api/ghosts/:ghost/routines` returns `{ routines }`; each row has `ghost`,
+`slug`, `unit`, `service`, `timerPath`, `servicePath`, `description`, `schedule`,
+`nextRun`, `lastRun`, `enabled`, `active`, `command`, `result`, and `serviceActive`
+(strings; absent next trigger/last service start are null). Owner-only, including reads because
+commands and paths are private. Service command/state/result are unknown and
+`servicePath` is empty for a timer targeting a different service. Result stays
+unknown until systemd reports a service start. `POST …/routines/:slug/:action`, with action
+`pause`, `resume`, or `run`, returns `{ ok: true }` after systemd accepts it.
+Pause disables and stops future timer activations, leaving an already running
+service alone; resume enables and starts the timer, including systemd's normal
+persistent catch-up. Run queues the timer's service without changing enablement
+and returns without waiting for the work. A timer targeting anything except its
+same-name owned service is inspectable but run is refused. Invalid slugs/actions
+are 400, missing timers 404, and systemd failures 503. Ghost lifecycle leases
+cover inspection/control so rename/delete waits for accepted operations.
+Creation, editing, removal, and logs use the existing timer recipe and native
+file/systemd/journal tools; this API neither edits units nor owns run history.
+
 ## Ghost home (`ghost-home/v2`)
 
 The default root is `~/ghosts`; each direct child is one ghost:
@@ -401,6 +428,7 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | Route | Contract |
 |---|---|
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
+| `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
 | `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
 | `GET\|POST /api/ghosts` | List or create ghosts. |

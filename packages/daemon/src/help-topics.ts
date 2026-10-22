@@ -49,6 +49,7 @@ function timers(input: HelpTopicInput): string[] {
     "```",
     "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
+    "Inspect with `ghost routines`; `ghost routines pause <slug>` stops future triggers, `resume <slug>` restores them (persistent timers may catch up), and `run <slug>` queues work without changing the timer. Pause leaves running work alone. Edit the unit files directly and reload systemd; inspect logs with `journalctl --user -u <unit>.service`.",
     "Timers fire only while the owner is logged in (the daemon runs in their graphical session).",
   ];
 }

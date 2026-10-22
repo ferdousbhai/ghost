@@ -14,6 +14,7 @@ import {
   characterCommand,
   readCommand,
   boardCommand,
+  routinesCommand,
   remoteCommand,
   renameCommand,
   harnessCommand,
@@ -202,6 +203,14 @@ export const COMMANDS: readonly Command[] = [
     example: "ghost board",
     positionals: [0, 0],
     run: boardCommand,
+  },
+  {
+    verb: "routines",
+    usage: "routines [list|pause <slug>|resume <slug>|run <slug>] [-g <name>] [--json] [-q]",
+    summary: "Inspect and control this ghost's systemd timers.",
+    example: "ghost routines pause daily-notes",
+    positionals: [0, 2],
+    run: routinesCommand,
   },
   {
     verb: "remote",

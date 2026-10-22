@@ -222,3 +222,9 @@ admitted `hooks.json` as one object and its absolute path. `PUT
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
 `session_stop` changes apply at the next boundary.
+
+Scheduled work is separate from lifecycle hooks: `ghost routines` and the HUD
+and tailnet owner view inspect and control systemd timers, as specified in
+[the routine contract](../CONTRACTS.md#routine-inspection-and-controls). Neither
+routine inspection nor pause/resume sends a prompt or runs a lifecycle hook;
+run now queues the existing service. If it starts a Ghost turn, normal hooks apply.

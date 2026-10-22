@@ -226,3 +226,65 @@ test("the viewer's own script declares every name before using it", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+describe("remote routine controls", () => {
+  function routinePage(api: (path: string, init?: RequestInit) => Promise<unknown>) {
+    const source = REMOTE_VIEWER_HTML.match(/async function showRoutines\(\) \{[\s\S]*?\n {2}\}/u)?.[0];
+    expect(source).toBeDefined();
+    const panel = { open: false, showModal() { this.open = true; } };
+    const makeNode = (tag: string): any => ({
+      tag, textContent: "", children: [], disabled: false,
+      append(...children: unknown[]) { this.children.push(...children); },
+      querySelectorAll(tag: string): any[] {
+        return this.children.flatMap((child: any) => [
+          ...(child.tag === tag ? [child] : []), ...child.querySelectorAll(tag),
+        ]);
+      },
+    });
+    const list = makeNode("div");
+    const page = new Function("api", "seg", "$", "document", `
+      let ghost = "casper", owner = true, routineGeneration = 0;
+      ${source}; return { open: showRoutines, switchGhost() { ghost = "other"; routineGeneration++; }, guest() { owner = false; } };
+    `)(api, encodeURIComponent, (id: string) => id === "routine-panel" ? panel : list, { createElement: makeNode });
+    return { page, panel, list };
+  }
+
+  test("shows routine state as text and routes actions to the owning ghost", async () => {
+    const calls: Array<{ path: string; init?: RequestInit }> = [];
+    const { page, list } = routinePage(async (path, init) => {
+      calls.push({ path, init });
+      return { routines: [{ ghost: "casper", slug: "daily", enabled: "disabled", active: "inactive",
+        schedule: "OnCalendar=daily", nextRun: null, lastRun: null, serviceActive: "inactive", result: "",
+        command: "<script>private command</script>" }] };
+    });
+    await page.open();
+    const [card] = list.children;
+    expect(card.children[1].textContent).toContain("\nNext: unknown\nLast run: never/unknown");
+    expect(card.children[1].textContent).toContain("<script>private command</script>");
+    const buttons = card.querySelectorAll("button");
+    expect(buttons.map((button: any) => button.textContent)).toEqual(["Pause", "Resume", "Run now"]);
+    await buttons[0].onclick();
+    expect(calls[1]).toMatchObject({ path: "/ghosts/casper/routines/daily/pause", init: { method: "POST", body: "{}" } });
+    expect(calls[2]?.path).toBe("/ghosts/casper/routines");
+  });
+
+  test("does not fetch for guests and drops an old ghost's delayed reply", async () => {
+    let resolve!: (body: unknown) => void;
+    let reads = 0;
+    const { page, list } = routinePage(() => { reads++; return new Promise(done => { resolve = done; }); });
+    const pending = page.open();
+    page.switchGhost();
+    resolve({ routines: [] });
+    await pending;
+    expect(list.textContent).toBe("Reading routines…");
+    page.guest();
+    await page.open();
+    expect(reads).toBe(1);
+  });
+
+  test("shows a manager failure instead of an empty list", async () => {
+    const { page, list } = routinePage(async () => { throw new Error("User manager unavailable"); });
+    await page.open();
+    expect(list.textContent).toBe("User manager unavailable");
+  });
+});

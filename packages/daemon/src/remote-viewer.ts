@@ -47,6 +47,10 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   [hidden] { display: none !important; }
   .glyph, .icon { width: 1em; height: 1em; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
+  dialog { max-width: min(46rem, 95vw); max-height: 85dvh; background: var(--deep); color: var(--fg); border: 1px solid var(--line); border-radius: .7rem; overflow: auto; }
+  #routine-list article { border-top: 1px solid var(--line); padding: 1rem 0; overflow-wrap: anywhere; }
+  #routine-list pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  #routine-panel button { padding: .4rem; border: 1px solid var(--line); border-radius: .4rem; margin-right: .4rem; }
   header {
     background: var(--deep); border-bottom: 1px solid var(--line);
     padding: calc(env(safe-area-inset-top) + .5rem) max(.9rem, env(safe-area-inset-right)) .5rem max(.9rem, env(safe-area-inset-left));
@@ -143,11 +147,13 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
+  <button id="routines" type="button" hidden>Routines</button>
   <button id="resources" type="button">Resources</button>
   <div class="pick"><select id="session" aria-label="Conversation"></select></div>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
 <dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
+<dialog id="routine-panel"><button id="routine-close" type="button">Close</button> <button id="routine-refresh" type="button">Refresh</button><h2>Routines</h2><p>Pause stops future triggers; running work continues. Resume may catch up.</p><div id="routine-list" role="status"></div></dialog>
 <main id="log"></main>
 <div id="status" role="status"></div>
 <form id="composer" hidden>
@@ -244,6 +250,50 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     if (!log.childElementCount) empty();
     log.scrollTop = stick ? log.scrollHeight : top;
   }
+
+  let routineGeneration = 0;
+  async function showRoutines() {
+    if (!owner || !ghost) return;
+    const generation = ++routineGeneration, targetGhost = ghost;
+    const panel = $("routine-panel"), list = $("routine-list");
+    if (!panel.open) panel.showModal();
+    list.textContent = "Reading routines…";
+    try {
+      const body = await api("/ghosts/" + seg(targetGhost) + "/routines");
+      if (generation !== routineGeneration || ghost !== targetGhost) return;
+      list.textContent = body.routines.length ? "" : "No routines. Ask your ghost to schedule work, or see ghost help timers.";
+      for (const routine of body.routines) {
+        const card = document.createElement("article"), title = document.createElement("strong"), detail = document.createElement("pre");
+        title.textContent = routine.ghost + "/" + routine.slug + " · " + (routine.enabled || "unknown") + " · " + (routine.active || "unknown");
+        detail.textContent = (routine.schedule || "Schedule unavailable") + "\\nNext: " + (routine.nextRun || "unknown")
+          + "\\nLast run: " + (routine.lastRun || "never/unknown") + "\\nService: " + (routine.serviceActive || "unknown")
+          + " · Result: " + (routine.result || "unknown") + "\\n" + routine.command;
+        card.append(title, detail);
+        for (const [action, label] of [["pause", "Pause"], ["resume", "Resume"], ["run", "Run now"]]) {
+          const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+          button.onclick = async () => {
+            const buttons = list.querySelectorAll("button"); buttons.forEach((b) => { b.disabled = true; });
+            try {
+              await api("/ghosts/" + seg(targetGhost) + "/routines/" + seg(routine.slug) + "/" + action,
+                { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+              if (ghost === targetGhost && panel.open) await showRoutines();
+            } catch (error) {
+              if (ghost === targetGhost && generation === routineGeneration) {
+                const message = document.createElement("p"); message.textContent = error.message; card.append(message);
+              }
+            } finally { buttons.forEach((b) => { b.disabled = false; }); }
+          };
+          card.append(button);
+        }
+        list.append(card);
+      }
+    } catch (error) {
+      if (generation === routineGeneration && ghost === targetGhost) list.textContent = error.message;
+    }
+  }
+  $("routines").onclick = showRoutines;
+  $("routine-refresh").onclick = showRoutines;
+  $("routine-close").onclick = () => { ++routineGeneration; $("routine-panel").close(); };
 
   let resourceGeneration = 0;
   async function showResources() {
@@ -443,7 +493,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("resource-close").onclick = () => $("resource-panel").close();
   $("resource-panel").onclose = () => { resourceGeneration++; };
   $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file").value = ""; };
-  $("ghost").onchange = () => { $("resource-panel").close(); ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
+  $("ghost").onchange = () => { $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
   $("session").onchange = () => { $("resource-panel").close(); session = $("session").value; clearTray(); loadTranscript().catch(show); };
   $("new").onclick = () => {
     $("resource-panel").close();
@@ -457,6 +507,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const who = await api("/remote/whoami");
     owner = who.role !== "guest";
     $("composer").hidden = !owner;
+    $("routines").hidden = !owner;
     refresh();
     const ghosts = await api("/ghosts");
     for (const g of ghosts) { const o = document.createElement("option"); o.value = g.name; o.textContent = g.name; $("ghost").append(o); }
