@@ -205,17 +205,18 @@ async function serveDaemon(
   );
   registry.ensureRoot();
 
+  const remoteServe = new RemoteServe(config.port, config.remote);
   const host = new SessionHost({
     registry,
     ownerHome,
     scheduleUnitDir,
     runningSource,
     bundledSkills: bundledSkillsDir(runningSource),
+    viewerUrl: async () => (await remoteServe.status()).url,
     logger,
     hooks,
   });
   const mcp = new McpCatalog({ registry });
-  const remoteServe = new RemoteServe(config.port, config.remote);
 
   let listening: ListeningServer;
   try {

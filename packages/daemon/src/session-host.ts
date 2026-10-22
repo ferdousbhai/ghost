@@ -6,6 +6,7 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
+import { listResults, publishResult, openResult, revokeResult } from "./results.js";
 import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -102,6 +103,7 @@ export interface SessionHostOptions {
   scheduleJournalRunner?: CommandRunner;
   logger?: Logger;
   hooks?: GhostHookRunner;
+  viewerUrl?: () => Promise<string | null>;
   /**
    * The harnesses a turn may run on, in Omarchy's order; production reads
    * Omarchy's eligibility report. A test supplies its own list and rows.
@@ -248,6 +250,7 @@ export class SessionHost {
   private readonly routineChanges = new Map<string, Promise<unknown>>();
   private readonly logger: Logger;
   private readonly hooks: GhostHookRunner;
+  private readonly viewerUrl: (() => Promise<string | null>) | undefined;
   private readonly eligibleHarnesses: () => Promise<readonly string[]>;
   private readonly harnessReport: () => Promise<HarnessReport>;
   private readonly defaultHarness: () => Promise<string | null>;
@@ -276,6 +279,7 @@ export class SessionHost {
     this.scheduleVerifyRunner = options.scheduleVerifyRunner;
     this.scheduleJournalRunner = options.scheduleJournalRunner;
     this.logger = options.logger ?? silentLogger;
+    this.viewerUrl = options.viewerUrl;
     this.hooks = options.hooks ?? new GhostHookRunner({ logger: this.logger });
     this.env = options.env ?? process.env;
     this.bundledSkills = options.bundledSkills ?? null;
@@ -522,12 +526,28 @@ export class SessionHost {
     }
     const command = ownerCommand(options.prompt);
     if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
-    const controller = new AbortController();
+    const controller = new AbortController(), turnId = randomUUID();
     this.admissions.set(key, controller);
     return {
       run: async (stream) => {
         try {
-          await this.withGhost(ghost.name, () => this.runAdmitted(ghost, id, options.prompt, command, stream, controller.signal, options.promptRecorded));
+          await this.withGhost(ghost.name, async () => {
+            let terminal: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
+            let failure: unknown;
+            const emit = (event: TurnEvent) => {
+              if (event.type === "done" || event.type === "error") terminal = event;
+              else stream.emit(event);
+            };
+            try { await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
+            catch (error) {
+              failure = error;
+              terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
+            }
+            terminal ??= { type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." };
+            await this.turnEnd(ghost, id, terminal, controller.signal, emit, turnId);
+            stream.emit(terminal);
+            if (failure !== undefined) throw failure;
+          });
         } finally {
           this.admissions.delete(key);
           this.announce(ghost.name, id);
@@ -571,6 +591,7 @@ export class SessionHost {
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
     promptRecorded = false,
+    initialTurnId = randomUUID(),
   ): Promise<void> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
@@ -589,7 +610,7 @@ export class SessionHost {
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
-      let turnId = randomUUID();
+      let turnId = initialTurnId;
       let ownerPrompt = prompt;
       while (next && !signal.aborted) {
         const { text, origin }: Pass = next;
@@ -844,6 +865,28 @@ export class SessionHost {
     return { content, error, aborted: false, produced, model, resources: snapshot };
   }
 
+  private async turnEnd(
+    ghost: Ghost, id: string, terminal: Extract<TurnEvent, { type: "done" | "error" }>, signal: AbortSignal, emit: (event: TurnEvent) => void, turnId: string,
+  ): Promise<void> {
+    if (!this.hooks.hasHandlers("turn_end") || signal.aborted || (terminal.type === "error" && terminal.reason === "aborted")) return;
+    try {
+      const { sessionDir } = ghostPaths(ghost.dir), entries = (await readLog(sessionDir, id)) ?? [];
+      const last = entries.findLast(entry => entry.type === "assistant" || entry.type === "command");
+      const text = terminal.type === "error" ? terminal.errorMessage
+        : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
+        : last?.type === "command" ? last.output : "";
+      const base = await this.viewerUrl?.().catch(() => null);
+      const url = base ? new URL(base) : null;
+      if (url) { url.searchParams.set("ghost", ghost.name); url.searchParams.set("session", id); }
+      await this.hooks.emitTurnEnd({
+        type: "turn_end", turn_id: turnId, outcome: terminal.type, title: (logState(entries).title ?? ghost.name).slice(0, 160),
+        excerpt: (text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
+        session_id: id, session_file: logPath(sessionDir, id), signal, ghost_name: ghost.name, ghost_home: ghost.dir,
+        cwd: conversationDir(sessionDir, id), conversation_id: id,
+      }, (name, event, running) => emit({ type: running ? "hook_start" : "hook_end", name, event }));
+    } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
+  }
+
   private async beforePrompt(
     ghost: Ghost,
     id: string,
@@ -1054,10 +1097,11 @@ export class SessionHost {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
       const { sessionDir } = ghostPaths(ghost.dir);
-      const readAt = openedAt.toISOString();
+      let readAt = openedAt.toISOString();
       await serializeByKey(this.metadataWrites, readsPath(sessionDir), async () => {
         const existing = new Set(await this.conversationIds(sessionDir));
         const kept = Object.fromEntries(Object.entries(await readReads(sessionDir)).filter(([read]) => existing.has(read)));
+        readAt = kept[id] && kept[id] > readAt ? kept[id] : readAt;
         await writeReads(sessionDir, { ...kept, [id]: readAt });
       });
       this.announce(ghost.name, id);
@@ -1124,6 +1168,24 @@ export class SessionHost {
     };
   }
 
+  private resultOperation<T>(ghost: string, id: string, action: (dir: string) => Promise<T>): Promise<T> {
+    return this.withGhost(ghost, async () => {
+      const home = this.registry.get(ghost);
+      const conversation = await this.requireConversation(home, id);
+      if (this.reservedSessions.has(keyOf(ghost, conversation))) throw new GhostError("session_busy", "Wait for the conversation's file operation to finish.", 409);
+      return serializeByKey(this.metadataWrites, `results:${keyOf(ghost, conversation)}`, () => action(conversationDir(ghostPaths(home.dir).sessionDir, conversation)));
+    });
+  }
+  results(ghost: string, id: string) { return this.resultOperation(ghost, id, dir => listResults(dir)); }
+  publishResult(ghost: string, id: string, path: string) { return this.resultOperation(ghost, id, dir => publishResult(dir, path)); }
+  withResult<T>(ghost: string, id: string, result: string, consume: (opened: Awaited<ReturnType<typeof openResult>>) => Promise<T>): Promise<T> {
+    return this.resultOperation(ghost, id, async dir => {
+      const opened = await openResult(dir, result);
+      try { return await consume(opened); } finally { await opened.file.close(); }
+    });
+  }
+  revokeResult(ghost: string, id: string, result: string) { return this.resultOperation(ghost, id, dir => revokeResult(dir, result, this.trashEnv())); }
+
   private routineOperation<T>(ghost: string, action: (options: { unitDir: string; run?: CommandRunner; verify?: CommandRunner }) => Promise<T>): Promise<T> {
     return this.withGhost(ghost, () => serializeByKey(this.routineChanges, ghost, async () => {
       this.registry.get(ghost);
@@ -1162,7 +1224,7 @@ export class SessionHost {
       this.reservedSessions.add(key);
       try {
         const { sessionDir } = ghostPaths(ghost.dir);
-        await trashPath(conversationDir(sessionDir, id), this.trashEnv());
+        await serializeByKey(this.metadataWrites, `results:${key}`, () => trashPath(conversationDir(sessionDir, id), this.trashEnv()));
         await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
           const pins = await readPins(sessionDir);
           if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));

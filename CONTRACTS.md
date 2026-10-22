@@ -148,6 +148,45 @@ Disconnecting the bridge or pausing/removing its systemd routine stops intake;
 reconnecting may replay provider history according to that provider's retention.
 No Ghost endpoint needs public exposure. See `docs/events.md`.
 
+### Mobile results and completion delivery
+
+The viewer accepts `?ghost=<name>&session=<id>` links, preserves the selected
+conversation in its URL. Transcript responses carry a server-side `readThrough`
+timestamp, accepted by `PUT …/read` to cap acknowledgement at the read start;
+read timestamps never regress. The viewer marks a displayed owner's reply read only while
+the page is visible and focused. Guests never change owner read state. Failed
+navigation keeps the requested URL and shows an error instead of silently
+opening a different conversation. A completed turn does not imply its result
+was read; reopening the right conversation does.
+
+`turn_end` is an opt-in owner command-hook boundary after a whole conversation
+turn settles, including failure; cancellation is quiet. It cannot continue or
+block a turn. Its bounded payload includes `outcome` (`done`/`error`), `title`,
+`excerpt`, and nullable `url`, plus the ordinary hook identity fields. The URL
+is the active Tailscale viewer with ghost/session parameters, never a bearer
+token. With no handler no provider/network discovery occurs. Commands run
+through the existing hook runner with its timeouts/fail-open logging, before
+the terminal stream event; failure cannot change the conversation's outcome.
+Owner `!commands` use the same boundary. No notification transport, credential
+store, retry queue, or push backend is added: `ghost help notifications` gives
+an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
+boundary. No configured handler means no outbound notification.
+
+Explicitly selected output files are snapshots under
+`sessions/<id>/results/<uuid>/<filename>`, not a filesystem browser or artifact
+index. `POST /sessions/:id/results { path }` needs the machine-local bearer and
+copies one regular file of at most 100 MiB; it returns `201` with id, name,
+bytes, createdAt, and a relative download URL. Files changing during copying
+are refused. `GET /sessions/:id/results` lists those snapshots; owner-only
+`GET /sessions/:id/results/:result` downloads one as an attachment with nosniff
+and no caching. Tailnet owners can list/download; guests cannot. Neither
+listing nor downloading reads the source path. `DELETE` on the same path moves
+the snapshot directory to Trash; native Trash restore is the undo, and deletion
+revokes subsequent downloads. Conversation/home lifecycle moves the snapshots
+with their parent. `ghost results [list|add <path>|get <id> <destination>|remove <id>]`
+uses these routes; HUD and phone show downloads and revocation. Destinations
+are explicit; CLI downloads refuse to overwrite an existing file.
+
 ## Ghost home (`ghost-home/v2`)
 
 The default root is `~/ghosts`; each direct child is one ghost:
@@ -452,8 +491,9 @@ reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
 from a checkout, outside the shipped package: attempts, refusals by kind, exit
 outcomes, unmeasured checks, and limits hit, per harness.
 
-Awaited Ghost hooks are `before_prompt` and `session_stop`, run by ghostd
-around each harness pass, above whatever hooks the harness has of its own.
+Awaited Ghost hooks are `before_prompt`, `session_stop`, and `turn_end`, run by ghostd
+above whatever hooks the harness has of its own.
+The first two surround each pass; `turn_end` observes final success/failure.
 Their JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
 Ghost sets `stop_hook_active` on hook continuation passes and does not impose
@@ -506,7 +546,9 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET /api/ghosts/:name/events` | Conversation invalidation SSE; responses close after about 1 MB or socket backpressure. Clients reconnect and refetch state to cover missed invalidations. |
 | `GET /api/ghosts/:name/sessions` | Conversation rows `{ id, title, preview, harness, model, provider, effort, updatedAt, messageCount, pinned, unread, running }`, pinned first, then newest, for each conversation with a message (an owner `!command` the transcript shows counts), a title, or a run in progress; `running` marks a turn or `!command` in progress, whichever client started it, and a turn's start, each later pass, and its end announce on `/events`; `model`, `provider`, and `effort` are what `harness` last ran on, as far as it said (null otherwise); `updatedAt` is the last owner or ghost entry, which a `handoff` is not. |
 | `PUT /sessions/:id/{pin,read,title}` | Mutate owner-visible conversation metadata. |
-| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET /sessions/:id/transcript` | Paged renderable history projected from the conversation log, `{ id, messages, total, truncated, resources, readThrough }`; an owner or hook message's optional `contentTruncated: true` marks text cut to the log bound, an assistant message's `errorMessage` a failed turn; Historical `handoff` and `auto` messages remain readable. An owner `!command` reads as the owner's `!command` followed by its output. |
+| `GET\|POST /sessions/:id/results` | List selected snapshots as `{ results }`, or machine-local bearer POST `{ path }` → `201` snapshot metadata and scoped downloadUrl. Owner-only; guests refused. |
+| `GET\|DELETE /sessions/:id/results/:result` | Owner-only attachment download or recoverable revocation to Trash. |
 | `POST /sessions/:id/attachments` | An image body (PNG, JPEG, GIF, or WebP by its bytes, at most 20 MiB), or from the machine-local token a JSON `{ path }` naming a local image to copy → `201 { path }`, `attachments/<file>` relative to the conversation directory, which need not hold a turn yet. A message names it on its own line as `![image](attachments/<file>)`; the harness opens it with its own tools and clients show it as a picture. |
 | `GET /sessions/:id/attachments/:file` | The stored image. |
 | `POST /sessions/:id/stop` | Abort the conversation's running turn or `!command`; its stream ends `aborted`. An idle conversation answers `409 session_not_streaming`. |
@@ -650,7 +692,8 @@ runtime preserves owner data.
   The plugin is distributed only by the `ghost` package, never as a
   `omarchy plugin add` git checkout: the window and the daemon are one product
   and must be the same version, and a second channel cannot hold that lock.
-  Desktop toasts belong to the shell service, not stop hooks. Completed turns,
+  Desktop toasts belong to the shell service. Optional mobile delivery uses the
+owner's `turn_end` command hook. Completed turns,
   and terminal failures notify unless their conversation is
   being viewed in the focused, visible chat panel. Only that chat marks replies
   read. Focus is the HUD's own Qt window state, not a compositor title cache.

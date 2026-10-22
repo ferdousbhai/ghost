@@ -163,3 +163,21 @@ describe("ghost CLI against a real daemon server", () => {
   });
 
 });
+
+
+it("shares, downloads without overwriting, lists, and revokes selected result files through the CLI", async () => {
+  const source = join(temp.ownerHome, "report.txt"), destination = join(temp.ownerHome, "saved.txt");
+  writeFileSync(source, "finished report");
+  const target = ["--ghost", "casper", "--session", "conv-1"];
+  const added = await cli(["results", "add", source, ...target, "--json"]);
+  expect(added.code).toBe(0);
+  const { id } = JSON.parse(added.stdout);
+  const listed = await cli(["results", "list", ...target, "--json"]);
+  expect(JSON.parse(listed.stdout).results).toEqual([expect.objectContaining({ id, name: "report.txt" })]);
+  expect((await cli(["results", "get", id, destination, ...target])).code).toBe(0);
+  expect(readFileSync(destination, "utf8")).toBe("finished report");
+  expect((await cli(["results", "get", id, destination, ...target])).code).not.toBe(0);
+  expect(readFileSync(destination, "utf8")).toBe("finished report");
+  expect((await cli(["results", "remove", id, ...target])).code).toBe(0);
+  expect(JSON.parse((await cli(["results", "list", ...target, "--json"])).stdout).results).toEqual([]);
+});

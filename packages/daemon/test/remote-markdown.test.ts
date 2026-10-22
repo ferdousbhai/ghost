@@ -159,7 +159,7 @@ describe("remote viewer transcript", () => {
       return { messages, total, truncated: offset > 0 || offset + messages.length < total };
     };
     let rendered: number[] = [];
-    const loadTranscript = new Function("api", "seg", "render", "ghost", "session", "draft", `${source}; return loadTranscript;`)(
+    const loadTranscript = new Function("api", "seg", "render", "ghost", "session", "draft", `let readThrough; const markDisplayedRead = async () => {}; ${source}; return loadTranscript;`)(
       api, (part: string) => part, (messages: number[]) => { rendered = messages; }, "casper", "c1", null,
     ) as () => Promise<void>;
     await loadTranscript();

@@ -8,7 +8,7 @@
  */
 import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
 
-export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation", "events"] as const;
+export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation", "events", "notifications"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
 
 export interface HelpTopicInput {
@@ -145,6 +145,24 @@ function events(input: HelpTopicInput): string[] {
   ];
 }
 
+function notifications(): string[] {
+  return [
+    "# Mobile completion notifications",
+    "Delivery is opt-in: an existing notification service receives a turn_end command hook. Ghost runs locally; host sleep, lost connectivity, or delivery failure can lose an alert. There is no retry queue. The phone viewer need not stay open.",
+    "For ntfy, subscribe the phone app to your chosen private topic on an existing server. Follow https://docs.ntfy.sh/publish/ for authentication. Keep its URL and Authorization header in a mode-600 curl config at ~/.config/ghost/ntfy.curl; keep credentials out of hooks.json. Test the destination deliberately before enabling alerts.",
+    "Create an executable script at an absolute path, replacing YOUR_PRIVATE_TOPIC:",
+    "```sh",
+    "#!/bin/bash",
+    "set -euo pipefail",
+    `jq '{topic: "YOUR_PRIVATE_TOPIC", title: (.ghost_name + ": " + .title), message: (.outcome + ": " + .excerpt), click: (.url // "")}' |`,
+    '  curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --config "$HOME/.config/ghost/ntfy.curl" -H "Content-Type: application/json" --data-binary @-',
+    "```",
+    'Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array in the current `ghost hooks show` document; preserve existing handlers and apply with `ghost hooks set <file>`. Remove that handler to opt out; no restart is needed.',
+    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the exact conversation link when Tailscale remote access is enabled. Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See docs/hooks.md for the wire protocol.",
+    "Open the alert link to inspect the conversation. Share selected files with `ghost results add <path> --ghost <name> --session <id>` or the HUD Shared results pane; the phone owner can download or remove the copies. Removal moves a copy to Trash and revokes its link; native Trash restore undoes it. Guests cannot access shared results. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
+  ];
+}
+
 function dictation(): string[] {
   return [
     "# Dictation and audio files",
@@ -161,6 +179,6 @@ function dictation(): string[] {
 
 /** One topic's text, as `ghost help <topic>` prints it. */
 export function renderHelpTopic(topic: HelpTopic, input: HelpTopicInput): string {
-  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation, events: () => events(input) }[topic]();
+  const lines = { timers: () => timers(input), self, harnesses, background, memory, dictation, events: () => events(input), notifications }[topic]();
   return `${lines.join("\n")}\n`;
 }

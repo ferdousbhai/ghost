@@ -5,11 +5,14 @@ conversation turn. The harness carrying the turn (Claude Code, Codex, …), and
 any harness the ghost runs from Bash, keeps its own native hook behavior;
 Ghost does not translate, duplicate, or await those hooks.
 
-Ghost supports two events. `before_prompt` runs after the owner submits a prompt
+Ghost supports three events. `before_prompt` runs after the owner submits a prompt
 and before the harness is launched with it. It can add advisory context to that
 prompt without blocking or creating another turn. `session_stop` runs after a
 harness pass ends and before Ghost emits the turn's terminal `done` frame. It
-can accept the pass or return context for a continuation pass.
+can accept the pass or return context for a continuation pass. `turn_end` runs once
+after the whole streamed turn succeeds or fails, including queued passes and owner
+commands; cancelled turns are quiet. It delivers optional completion notifications
+and cannot continue or block the turn.
 
 ## Configuration
 
@@ -221,7 +224,7 @@ admitted `hooks.json` as one object and its absolute path. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
-`session_stop` changes apply at the next boundary.
+`session_stop` and `turn_end` changes apply at the next boundary.
 
 Scheduled work is separate from lifecycle hooks: `ghost routines` and the HUD
 and tailnet owner view inspect and control systemd timers, as specified in
@@ -234,3 +237,29 @@ External events enter through the owner-only delivery contract in
 normal conversation turn with the normal hooks; duplicate delivery runs no
 hook or harness. Provider authentication/retries belong to the installed
 source service or CLI.
+
+## `turn_end` protocol
+
+An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
+`conversation_id`, `session_id`, `session_file`, and `turn_id` fields, plus:
+
+```json
+{
+  "type": "turn_end",
+  "outcome": "done",
+  "title": "Prepare the report",
+  "excerpt": "The report is ready.",
+  "url": "https://ghostbox.example.ts.net/?ghost=casper&session=c1"
+}
+```
+
+`outcome` is `done` or `error`; `title` is at most 160 characters and the
+whitespace-normalized `excerpt` at most 280. The URL is null when remote access
+is unavailable. Failed turns use the failure message. Handlers run in order,
+under the existing timeout/output bounds, before the terminal stream frame.
+Their output cannot change the result; failures fail open and are logged. Ghost
+stores no delivery credentials, retries, or push subscription. Removing the
+handler through `ghost hooks set` or the Hooks pane disables delivery at the
+next boundary. `ghost help notifications` gives a curl/ntfy recipe that works
+with the phone viewer closed. It sends conversation text to the selected
+service, so configure it only when the owner wants that delivery.

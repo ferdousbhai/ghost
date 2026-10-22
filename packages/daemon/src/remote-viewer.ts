@@ -53,6 +53,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   #routine-editor button { padding: .5rem; }
   #routine-list pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   #routine-panel button { padding: .4rem; border: 1px solid var(--line); border-radius: .4rem; margin-right: .4rem; }
+  .tools { position: relative; flex: none; }
+  .tools summary { cursor: pointer; font-size: 1.5rem; list-style: none; padding: 0 .3rem; }
+  .tools > div { position: absolute; top: 100%; left: 0; z-index: 2; padding: .5rem; background: var(--deep); border: 1px solid var(--line); border-radius: .5rem; }
+  .tools button { display: block; padding: .5rem; white-space: nowrap; }
+  #result-panel a, #result-panel button { display: inline-block; padding: .45rem; color: var(--amber); }
   header {
     background: var(--deep); border-bottom: 1px solid var(--line);
     padding: calc(env(safe-area-inset-top) + .5rem) max(.9rem, env(safe-area-inset-right)) .5rem max(.9rem, env(safe-area-inset-left));
@@ -149,14 +154,14 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
-  <button id="routines" type="button" hidden>Routines</button>
-  <button id="resources" type="button">Resources</button>
+  <details class="tools"><summary aria-label="Conversation tools">⋯</summary><div><button id="resources" type="button">Resources</button><button id="routines" type="button" hidden>Routines</button><button id="results" type="button" hidden>Shared results</button></div></details>
   <div class="pick"><select id="session" aria-label="Conversation"></select></div>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
 <dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
 <dialog id="routine-editor"><h2 id="routine-editor-title"></h2><p id="routine-editor-error" role="status"></p><label>Timer unit<textarea id="routine-timer" rows="9"></textarea></label><label>Service unit<textarea id="routine-service" rows="9"></textarea></label><button id="routine-save" type="button">Save and reload</button> <button id="routine-discard" type="button">Discard draft</button></dialog>
 <dialog id="routine-panel"><button id="routine-close" type="button">Close</button> <button id="routine-refresh" type="button">Refresh</button><h2>Routines</h2><p>Pause stops future triggers; running work continues. Resume may catch up.</p><div id="routine-list" role="status"></div></dialog>
+<dialog id="result-panel"><button id="result-close" type="button">Close</button> <button id="result-refresh" type="button">Refresh</button><h2>Shared results</h2><p>Ask your ghost to share a finished file here. Removing a file revokes its download and keeps it in Trash.</p><div id="result-list" role="status"></div></dialog>
 <main id="log"></main>
 <div id="status" role="status"></div>
 <form id="composer" hidden>
@@ -184,6 +189,29 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   const GLYPH = ${JSON.stringify(GLYPH)};
   let ghost = null, session = null, draft = null, events = null, streaming = false, owner = false;
   let pending = [];
+  let selectedUnread = false, readThrough = null, reading = false;
+  const requested = new URL(location.href).searchParams;
+  let requestedSession = requested.get("session");
+  function syncUrl() {
+    const url = new URL(location.href);
+    if (ghost) url.searchParams.set("ghost", ghost);
+    if (session && session !== draft) url.searchParams.set("session", session); else url.searchParams.delete("session");
+    history.replaceState(null, "", url);
+  }
+  async function markDisplayedRead() {
+    if (!owner || !ghost || !session || session === draft || !selectedUnread || !readThrough || reading || document.visibilityState !== "visible" || !document.hasFocus()) return;
+    const targetGhost = ghost, targetSession = session;
+    reading = true;
+    try {
+      await api("/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/read", {
+        method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ readThrough }),
+      });
+      if (ghost === targetGhost && session === targetSession) selectedUnread = false;
+    } finally { reading = false; }
+  }
+  window.addEventListener("focus", () => { if (ghost) loadSessions().catch(show); });
+  document.addEventListener("visibilitychange", () => { if (ghost && document.visibilityState === "visible") loadSessions().catch(show); });
+
 
   const log = $("log"), prompt = $("prompt");
   const nearBottom = () => log.scrollHeight - log.scrollTop - log.clientHeight < 80;
@@ -357,6 +385,38 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("routine-refresh").onclick = showRoutines;
   $("routine-close").onclick = () => { ++routineGeneration; $("routine-panel").close(); };
 
+  let resultGeneration = 0;
+  async function showResults() {
+    if (!owner || !ghost || !session || session === draft) return;
+    const generation = ++resultGeneration, targetGhost = ghost, targetSession = session;
+    const panel = $("result-panel"), list = $("result-list");
+    if (!panel.open) panel.showModal();
+    list.textContent = "Reading shared results…";
+    try {
+      const body = await api("/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/results");
+      if (generation !== resultGeneration || ghost !== targetGhost || session !== targetSession) return;
+      list.textContent = body.results.length ? "" : "No files shared in this conversation yet.";
+      for (const result of body.results) {
+        const row = document.createElement("p"), link = document.createElement("a"), remove = document.createElement("button");
+        link.textContent = result.name + " (" + result.bytes + " bytes)";
+        link.href = "/api/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/results/" + seg(result.id);
+        link.download = result.name;
+        remove.type = "button"; remove.textContent = "Remove";
+        remove.onclick = async () => {
+          remove.disabled = true;
+          try {
+            await api(link.getAttribute("href").slice(4), { method: "DELETE" });
+            if (generation === resultGeneration && ghost === targetGhost && session === targetSession) await showResults();
+          } catch (error) { row.append(String(error.message)); remove.disabled = false; }
+        };
+        row.append(link, remove); list.append(row);
+      }
+    } catch (error) { if (generation === resultGeneration) list.textContent = error.message; }
+  }
+  $("results").onclick = showResults;
+  $("result-refresh").onclick = showResults;
+  $("result-close").onclick = () => { ++resultGeneration; $("result-panel").close(); };
+
   let resourceGeneration = 0;
   async function showResources() {
     const generation = ++resourceGeneration, targetGhost = ghost, targetSession = session;
@@ -375,17 +435,23 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 
   async function loadTranscript(keep = false) {
     if (!ghost || !session || session === draft) return render([]);
-    const path = "/ghosts/" + seg(ghost) + "/sessions/" + seg(session) + "/transcript";
+    const targetGhost = ghost, targetSession = session;
+    const path = "/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/transcript";
     let t = await api(path);
     // A phone shows the newest page; a long conversation's first page is its oldest.
     if (t.truncated) t = await api(path + "?offset=" + (t.total - t.messages.length));
-    render(t.messages, keep);
+    if (ghost !== targetGhost || session !== targetSession) return;
+    render(t.messages, keep); readThrough = t.readThrough || null;
+    await markDisplayedRead();
   }
 
   // An event names one conversation; only that one's transcript is read again.
   async function loadSessions(changed) {
-    const before = session;
-    const { sessions } = await api("/ghosts/" + seg(ghost) + "/sessions");
+    const before = session, targetGhost = ghost;
+    const { sessions } = await api("/ghosts/" + seg(targetGhost) + "/sessions");
+    if (ghost !== targetGhost) return;
+    if (requestedSession && !sessions.some(s => s.id === requestedSession)) throw new Error("The linked conversation is unavailable.");
+    requestedSession = null;
     if (draft && sessions.some((s) => s.id === draft)) draft = null;
     if (!sessions.length && !draft && owner) draft = session = mint();
     const list = draft ? [{ id: draft, title: "New conversation" }, ...sessions] : sessions;
@@ -393,10 +459,12 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     select.textContent = "";
     for (const s of list) {
       const o = document.createElement("option");
-      o.value = s.id; o.textContent = s.title || s.preview || s.id;
+      o.value = s.id; o.textContent = (s.unread ? "● " : "") + (s.title || s.preview || s.id);
       select.append(o);
     }
     if (!list.some((s) => s.id === session)) session = list[0]?.id || null;
+    selectedUnread = sessions.find(s => s.id === session)?.unread === true;
+    syncUrl();
     select.value = session || "";
     select.disabled = list.length < 2;
     if (session !== before) await loadTranscript();
@@ -555,8 +623,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("resource-close").onclick = () => $("resource-panel").close();
   $("resource-panel").onclose = () => { resourceGeneration++; };
   $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file").value = ""; };
-  $("ghost").onchange = () => { $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
-  $("session").onchange = () => { $("resource-panel").close(); session = $("session").value; clearTray(); loadTranscript().catch(show); };
+  $("ghost").onchange = () => { requestedSession = null; readThrough = null; $("result-panel").close(); ++resultGeneration; $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
+  $("session").onchange = () => { requestedSession = null; readThrough = null; $("result-panel").close(); ++resultGeneration; $("resource-panel").close(); session = $("session").value; clearTray(); loadSessions().catch(show); };
   $("new").onclick = () => {
     $("resource-panel").close();
     if (streaming || !ghost) return;
@@ -570,11 +638,16 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     owner = who.role !== "guest";
     $("composer").hidden = !owner;
     $("routines").hidden = !owner;
+    $("results").hidden = !owner;
     refresh();
     const ghosts = await api("/ghosts");
     for (const g of ghosts) { const o = document.createElement("option"); o.value = g.name; o.textContent = g.name; $("ghost").append(o); }
     $("ghost").disabled = ghosts.length < 2;
-    ghost = ghosts[0]?.name || null;
+    const linkedGhost = requested.get("ghost");
+    if (linkedGhost && !ghosts.some(g => g.name === linkedGhost)) throw new Error("The linked ghost is unavailable.");
+    ghost = linkedGhost || ghosts[0]?.name || null;
+    session = requestedSession;
+    $("ghost").value = ghost || "";
     if (ghost) { watch(); await loadSessions(); } else empty();
   })().catch(show);
 })();

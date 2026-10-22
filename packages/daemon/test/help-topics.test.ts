@@ -5,7 +5,7 @@ const INPUT = { ghostName: "aria", unitDir: "/home/owner/.config/systemd/user", 
 
 describe("ghost help topics", () => {
   it("knows its topics", () => {
-    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "memory", "dictation"]);
+    expect(HELP_TOPICS).toEqual(["timers", "self", "harnesses", "background", "memory", "dictation", "events", "notifications"]);
     expect(isHelpTopic("timers")).toBe(true);
     expect(isHelpTopic("status")).toBe(false);
   });

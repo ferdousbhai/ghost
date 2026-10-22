@@ -41,7 +41,15 @@ export interface GhostSessionStopResult {
   reason?: string;
 }
 
-export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent;
+export interface GhostTurnEndEvent extends GhostHookEventBase {
+  type: "turn_end";
+  turn_id: string;
+  outcome: "done" | "error";
+  title: string;
+  excerpt: string;
+  url: string | null;
+}
+export type GhostHookEvent = GhostBeforePromptEvent | GhostSessionStopEvent | GhostTurnEndEvent;
 export type GhostHookResult = GhostBeforePromptResult | GhostSessionStopResult;
 
 /** The admitted `hooks.json` document and where it lives. */
@@ -77,11 +85,11 @@ export function ghostSessionStopContinuation(
 
 
 function defaultHookName(event: GhostHookEvent["type"]): string {
-  return `${event === "before_prompt" ? "Before-prompt" : "Session-stop"} command hook`;
+  return `${event === "before_prompt" ? "Before-prompt" : event === "turn_end" ? "Turn-end" : "Session-stop"} command hook`;
 }
 
 function defaultHookDescription(event: GhostHookEvent["type"]): string {
-  return event === "before_prompt"
+  return event === "turn_end" ? "Observes final turn success or failure without continuing it." : event === "before_prompt"
     ? "Adds context before the owner prompt is sent."
     : "Runs after the assistant pass and may continue it.";
 }
@@ -107,7 +115,7 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
-  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop"]);
+  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop", "turn_end"]);
   for (const eventName of Object.keys(hooks)) {
     if (!supported.has(eventName as GhostHookEvent["type"])) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
@@ -201,6 +209,7 @@ export function parseCommandResult(
     });
     return undefined;
   }
+  if (hook.eventName === "turn_end") return undefined;
   const output = result.stdout.trim();
   if (!output) return undefined;
   try {

@@ -1,3 +1,7 @@
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { appendLog, newConversationEntry } from "../src/conversation-log.js";
+import { ghostPaths } from "../src/ghosts.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
@@ -275,4 +279,27 @@ describe("remote management", () => {
     expect((await fetch(`${base}/api/remote`, { headers })).status).toBe(404);
     expect((await fetch(`${base}/api/remote/qr.svg`, { headers })).status).toBe(404);
   });
+});
+
+
+it("limits shared file publication to local bearer access and downloads/revocation to the owner", async () => {
+  const base = await serve();
+  const source = join(temp!.ownerHome, "report.html"); await writeFile(source, "<h1>ready</h1>");
+  await appendLog(ghostPaths(join(temp!.root, "casper")).sessionDir, "result-session", [newConversationEntry("result-session", new Date())]);
+  const root = "/api/ghosts/casper/sessions/result-session/results";
+  const body = JSON.stringify({ path: source });
+  expect((await fetch(base + root, { method: "POST", headers: asTailnet("owner@example.com", { "content-type": "application/json" }), body })).status).toBe(403);
+  const added = await fetch(base + root, { method: "POST", headers: { authorization: `Bearer ${TOKEN}`, "content-type": "application/json" }, body });
+  expect(added.status).toBe(201);
+  const result = await added.json() as { id: string; downloadUrl: string };
+  expect((await fetch(base + root, { headers: asTailnet("guest@example.com") })).status).toBe(403);
+  expect((await fetch(base + result.downloadUrl, { headers: asTailnet("guest@example.com") })).status).toBe(403);
+  const download = await fetch(base + result.downloadUrl, { headers: asTailnet("owner@example.com") });
+  expect(download.status).toBe(200);
+  expect(download.headers.get("content-disposition")).toContain("attachment;");
+  expect(download.headers.get("cache-control")).toBe("no-store");
+  expect(download.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await download.text()).toBe("<h1>ready</h1>");
+  expect((await fetch(base + result.downloadUrl, { method: "DELETE", headers: asTailnet("owner@example.com") })).status).toBe(200);
+  expect((await fetch(base + result.downloadUrl, { headers: asTailnet("owner@example.com") })).status).toBe(404);
 });

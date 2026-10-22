@@ -32,6 +32,16 @@ try {
     });
   });
 
+  const resultsUrl = `http://127.0.0.1:${port}/api/ghosts/casper/sessions/demo/results`;
+  assert.deepEqual(await (await fetch(resultsUrl)).json(), { results: [] });
+  const sharedResponse = await fetch(resultsUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "/mock/result.txt" }) });
+  assert.equal(sharedResponse.status, 201);
+  const shared = await sharedResponse.json();
+  assert.equal((await (await fetch(resultsUrl)).json()).results[0].id, shared.id);
+  assert.equal(await (await fetch(`http://127.0.0.1:${port}${shared.downloadUrl}`)).text(), "Mock result\n");
+  assert.equal((await fetch(`${resultsUrl}/${shared.id}`, { method: "DELETE" })).status, 200);
+  assert.equal((await fetch(`${resultsUrl}/${shared.id}`)).status, 404);
+
   const routinesUrl = `http://127.0.0.1:${port}/api/ghosts/casper/routines`;
   const routineState = async () => (await (await fetch(routinesUrl)).json()).routines[0];
   assert.equal((await routineState()).enabled, "enabled");

@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { GhostHookEvent } from "../src/hook-policy.js";
+import { parseHooksDocument, type GhostHookEvent } from "../src/hook-policy.js";
 import { conversationDir, logPath, readLog } from "../src/conversation-log.js";
 import { ghostPaths } from "../src/ghosts.js";
 import { GhostHookRunner } from "../src/hooks.js";
@@ -839,3 +839,62 @@ async function waitFor(condition: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
 }
+
+
+describe("completion delivery", () => {
+  function delivery(events: GhostHookEvent[], fail = false): GhostHookRunner {
+    return new GhostHookRunner({
+      ...parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
+      commandRunner: async (_hook, event) => {
+        events.push(event);
+        if (fail) throw new Error("delivery offline");
+        return { exitCode: 0, stdout: '{"continue":true}', stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };
+      },
+    });
+  }
+  it("delivers a final bounded excerpt and exact conversation link once before done", async () => {
+    const notifications: GhostHookEvent[] = [];
+    const fake = harness(replies(`Finished.\n${"a".repeat(400)}`));
+    const sessions = host({ harnesses: [fake], hooks: delivery(notifications), viewerUrl: async () => "https://ghost.example.ts.net/" });
+    const events = await turn(sessions, "Make the report");
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://ghost.example.ts.net/?ghost=casper&session=c1" });
+    expect(notifications[0]?.type === "turn_end" && notifications[0].excerpt.length).toBe(280);
+    expect(events.filter(event => event.type === "done")).toHaveLength(1);
+    expect(events.at(-2)).toMatchObject({ type: "hook_end", event: "turn_end" });
+    expect(events.at(-1)?.type).toBe("done");
+    expect(fake.calls()).toHaveLength(1);
+  });
+  it("reports failed turns and fails open when the delivery service is unavailable", async () => {
+    const notifications: GhostHookEvent[] = [];
+    const sessions = host({ harnesses: [harness([{ exit: 1, stderr: "service unavailable" }])], hooks: delivery(notifications, true) });
+    const events = await turn(sessions, "Try it");
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "error", url: null });
+    expect(events.at(-1)).toMatchObject({ type: "error" });
+  });
+  it("keeps cancelled turns quiet", async () => {
+    const notifications: GhostHookEvent[] = [], fake = harness([]);
+    fake.setTurns([{ gate: fake.gate("never").path }]);
+    const sessions = host({ harnesses: [fake], hooks: delivery(notifications) });
+    const events: TurnEvent[] = [];
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "wait", emit: event => events.push(event) });
+    await waitFor(() => fake.calls().length === 1);
+    sessions.stopTurn("casper", "c1"); await running;
+    expect(events.at(-1)).toMatchObject({ type: "error", reason: "aborted" });
+    expect(notifications).toEqual([]);
+  });
+  it("does no remote discovery when notification delivery is disabled", async () => {
+    let lookups = 0;
+    const sessions = host({ harnesses: [harness(replies("done"))], viewerUrl: async () => { lookups++; return null; } });
+    await turn(sessions, "Do it");
+    expect(lookups).toBe(0);
+  });
+  it("does not let a late read receipt move the read watermark backwards", async () => {
+    const sessions = host({ harnesses: [harness(replies("done"))] });
+    await turn(sessions, "Do it");
+    const latest = new Date(); await sessions.markRead("casper", "c1", latest);
+    await sessions.markRead("casper", "c1", new Date(0));
+    expect((await readReads(sessionDir())).c1).toBe(latest.toISOString());
+  });
+});

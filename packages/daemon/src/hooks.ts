@@ -7,7 +7,7 @@ import {
   type CommandHook, type CommandResult, type GhostBeforePromptEvent,
   type GhostBeforePromptResult, type GhostHookCommandConfig, type GhostHookEvent,
   type GhostHookResult, type GhostSessionStopEvent,
-  type GhostSessionStopResult,
+  type GhostSessionStopResult, type GhostTurnEndEvent,
 } from "./hook-policy.js";
 import { runHarness } from "./harness-process.js";
 import type { Logger } from "./log.js";
@@ -155,6 +155,11 @@ export class GhostHookRunner {
 
   hasHandlers(event: GhostHookEvent["type"]): boolean {
     return this.commands.some((hook) => hook.eventName === event);
+  }
+
+  async emitTurnEnd(event: GhostTurnEndEvent, onHook?: HookObserver): Promise<void> {
+    const run = this.observed(onHook);
+    for (const hook of this.commands.filter(hook => hook.eventName === "turn_end")) await run(hook, event);
   }
 
   async emitBeforePrompt(

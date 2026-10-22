@@ -1,9 +1,10 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { GhostHookRunner } from "../src/hooks.js";
-import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent } from "../src/hook-policy.js";
+import { ghostSessionStopContinuation, type GhostBeforePromptEvent, type GhostSessionStopEvent, type GhostTurnEndEvent } from "../src/hook-policy.js";
 import { recordingLogger } from "./helpers/recording-logger.js";
 
 const directories: string[] = [];
@@ -507,4 +508,28 @@ describe("GhostHookRunner", () => {
     writeFileSync(config, JSON.stringify({ hooks: { conversation_idle: [] } }));
     expect(() => GhostHookRunner.fromConfig(config)).toThrow(/unsupported hook event/);
   });
+});
+
+
+it("delivers turn completion to a local notification endpoint and honors live opt-out", async () => {
+  const received: unknown[] = [];
+  const server = createServer(async (request, response) => {
+    const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk));
+    received.push(JSON.parse(Buffer.concat(chunks).toString()));
+    response.writeHead(200); response.end("ok");
+  });
+  await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const port = (server.address() as { port: number }).port;
+    const directory = temporaryDirectory(), config = join(directory, "hooks.json");
+    const command = `jq '{topic:"scratch",title:.title,message:.excerpt,click:.url}' | curl --fail --silent --show-error --noproxy 127.0.0.1 --max-time 3 -H 'Content-Type: application/json' --data-binary @- http://127.0.0.1:${port}/`;
+    writeFileSync(config, JSON.stringify({ hooks: { turn_end: [{ hooks: [{ type: "command", command, timeout: 5 }] }] } }));
+    const runner = GhostHookRunner.fromConfig(config);
+    const notification: GhostTurnEndEvent = { ...beforePromptEvent({ cwd: directory }), type: "turn_end", outcome: "done", title: "Report ready", excerpt: "Finished the report.", url: "https://example.ts.net/?ghost=casper&session=c1" };
+    await runner.emitTurnEnd(notification);
+    expect(received).toEqual([{ topic: "scratch", title: notification.title, message: notification.excerpt, click: notification.url }]);
+    await runner.replaceConfig({ hooks: {} });
+    await runner.emitTurnEnd(notification);
+    expect(received).toHaveLength(1);
+  } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });
