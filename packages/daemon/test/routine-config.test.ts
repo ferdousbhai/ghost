@@ -32,7 +32,7 @@ describe("native routine source edits and recovery", () => {
     const result = await saveRoutineConfig("casper", "daily", changed, options);
     expect(await readFile(join(options.unitDir, timer), "utf8")).toBe(changed.timer);
     expect((await lstat(join(options.unitDir, timer))).mode & 0o777).toBe(0o600);
-    expect(calls.slice(-3)).toEqual([["--user", "stop", timer], ["--user", "daemon-reload"], ["--user", "start", timer]]);
+    expect(calls.filter(call => !call.includes("show")).slice(-3)).toEqual([["--user", "stop", timer], ["--user", "daemon-reload"], ["--user", "start", timer]]);
     expect(await listRoutineRecoveries("casper", options)).toMatchObject([{ id: result.recovery, slug: "daily", reason: "edit", applicable: true }]);
     const restored = await restoreRoutine("casper", result.recovery, options);
     expect((await readRoutineConfig("casper", "daily", options)).timer).toBe(originalTimer);
@@ -58,7 +58,8 @@ describe("native routine source edits and recovery", () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
     const saved = await removeRoutine("casper", "daily", config.revision, options);
     await restoreRoutine("casper", saved.recovery, { ...options, run: async (args) => {
-      if (args.includes("show")) return { ...ok, code: 4, stderr: "Unit not found" };
+      if (args.includes("show") && !(await readdir(options.unitDir)).includes(timer)) return { ...ok, code: 4, stderr: "Unit not found" };
+      if (args.includes("show")) return options.run(args);
       return ok;
     } });
     expect((await readRoutineConfig("casper", "daily", options)).timer).toBe(originalTimer);
@@ -94,7 +95,10 @@ describe("native routine source edits and recovery", () => {
   });
   it("rejects links, drop-ins, redirected targets, invalid sources and cross-ghost recovery", async () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
-    await expect(saveRoutineConfig("casper", "daily", { ...config, timer: "[Timer]\nUnit=other.service\nOnCalendar=daily" }, options)).rejects.toMatchObject({ status: 400 });
+    await expect(saveRoutineConfig("casper", "daily", { ...config, timer: "[Timer]\nUnit=other.service\nOnCalendar=daily" }, { ...options, run: async args => {
+      const result = await options.run(args);
+      return args.includes("show") && (await readFile(join(options.unitDir, timer), "utf8")).includes("Unit=other.service") ? { ...ok, stdout: `Id=${timer}\nUnit=other.service\n` } : result;
+    } })).rejects.toMatchObject({ status: 400 });
     await expect(saveRoutineConfig("casper", "daily", { ...config, service: "\0" }, options)).rejects.toMatchObject({ status: 400 });
     const withDropIn = { ...options, run: async () => ({ ...ok, stdout: `Id=${timer}\nDropInPaths=/owner/override.conf\n` }) };
     await expect(saveRoutineConfig("casper", "daily", config, withDropIn)).rejects.toThrow("drop-ins");
@@ -110,6 +114,27 @@ describe("native routine source edits and recovery", () => {
     const latest = await readRoutineConfig("casper", "daily", options);
     await expect(saveRoutineConfig("casper", "daily", { ...latest, timer: "[Timer]\nOnCalendar=definitely-not-a-calendar\n" }, { ...options, verify: undefined })).rejects.toMatchObject({ status: 400 });
     expect((await readRoutineConfig("casper", "daily", options)).timer).toBe(latest.timer);
+  });
+  it("does not overwrite a native save when stopping fails or source changes during stop", async () => {
+    for (const fail of [true, false]) {
+      const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
+      const native = "[Timer]\nOnCalendar=hourly\n";
+      await expect(saveRoutineConfig("casper", "daily", config, { ...options, run: async args => {
+        if (args.includes("stop")) {
+          await writeFile(join(options.unitDir, timer), native);
+          return fail ? { ...ok, code: 1, stderr: "stop failed" } : ok;
+        }
+        return options.run(args);
+      } })).rejects.toMatchObject({ status: fail ? 503 : 409 });
+      expect(await readFile(join(options.unitDir, timer), "utf8")).toBe(native);
+    }
+  });
+  it("can remove and recover a bounded empty unit source", async () => {
+    const { options } = await setup();
+    await writeFile(join(options.unitDir, service), "");
+    const config = await readRoutineConfig("casper", "daily", options);
+    const saved = await removeRoutine("casper", "daily", config.revision, options);
+    expect((await listRoutineRecoveries("casper", options))[0]?.id).toBe(saved.recovery);
   });
   it("checks a native editor's save made while verification was running", async () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);

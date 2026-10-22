@@ -317,9 +317,7 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
         }
         list.append(card);
       }
-      const recovered = await api("/ghosts/" + seg(targetGhost) + "/routines/recoveries");
-      if (generation !== routineGeneration || ghost !== targetGhost) return;
-      for (const checkpoint of recovered.recoveries) {
+      for (const checkpoint of body.recoveries) {
         const card = document.createElement("article"), label = document.createElement("p"), restore = document.createElement("button");
         label.textContent = checkpoint.slug + " · " + checkpoint.reason + " · " + checkpoint.createdAt;
         restore.textContent = checkpoint.applicable ? "Restore paused" : "Source changed";

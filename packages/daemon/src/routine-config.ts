@@ -28,8 +28,8 @@ function names(ghost: string, slug: string, options: ScheduleOptions) {
 function revision(sources: Sources): string {
   return createHash("sha256").update(JSON.stringify([sources.timer, sources.service])).digest("hex");
 }
-function validateSource(source: unknown): asserts source is string {
-  if (typeof source !== "string" || !source.trim() || source.includes("\0") || Buffer.from(source).toString("utf8") !== source || Buffer.byteLength(source) > MAX_SOURCE_BYTES) {
+function validateSource(source: unknown, empty = false): asserts source is string {
+  if (typeof source !== "string" || (!empty && !source.trim()) || source.includes("\0") || Buffer.from(source).toString("utf8") !== source || Buffer.byteLength(source) > MAX_SOURCE_BYTES) {
     throw new GhostError("invalid_routine", "Each unit source must be nonempty UTF-8 text of at most 128 KiB without NUL bytes.", 400);
   }
 }
@@ -41,7 +41,7 @@ async function readSource(path: string): Promise<string | null> {
     throw error;
   }
   const source = readPrivateFileText(path);
-  validateSource(source);
+  validateSource(source, true);
   return source;
 }
 async function readSources(ghost: string, slug: string, options: ScheduleOptions): Promise<RoutineConfig> {
@@ -51,7 +51,7 @@ async function readSources(ghost: string, slug: string, options: ScheduleOptions
 }
 export async function readRoutineConfig(ghost: string, slug: string, options: ScheduleOptions): Promise<RoutineConfig> {
   const sources = await readSources(ghost, slug, options);
-  if (sources.timer === null) throw new GhostError("not_found", "A same-name timer/service pair is required.", 404);
+  if (sources.timer === null) throw new GhostError("not_found", "No such routine timer.", 404);
   return sources;
 }
 function recoveryDir(options: ScheduleOptions): string { return join(options.unitDir, ".ghost-routine-recovery"); }
@@ -64,7 +64,7 @@ async function readCheckpoint(ghost: string, id: string, options: ScheduleOption
   if (!saved || saved.ghost !== ghost) throw new GhostError("not_found", "No such routine checkpoint for this ghost.", 404);
   if (typeof saved.slug !== "string") throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400);
   names(ghost, saved.slug, options);
-  for (const source of [saved.timer, saved.service]) if (source !== null) validateSource(source);
+  for (const source of [saved.timer, saved.service]) if (source !== null) validateSource(source, true);
   if (typeof saved.expectedRevision !== "string" || typeof saved.createdAt !== "string" || typeof saved.reason !== "string") {
     throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400);
   }
@@ -101,10 +101,6 @@ async function verifySources(ghost: string, slug: string, sources: Sources, opti
   if (sources.timer === null && sources.service === null) return;
   validateSource(sources.timer); validateSource(sources.service);
   const paths = names(ghost, slug, options);
-  for (const line of sources.timer.split("\n")) {
-    const target = /^\s*Unit\s*=(.*)$/u.exec(line);
-    if (target && target[1]?.trim() !== paths.service) throw new GhostError("invalid_routine", "The timer must target its same-name service.", 400);
-  }
   const temporary = await mkdtemp(join(options.unitDir, ".ghost-routine-verify-"));
   try {
     await writeFile(join(temporary, paths.timer), sources.timer, { mode: 0o600 });
@@ -117,16 +113,22 @@ async function verifySources(ghost: string, slug: string, sources: Sources, opti
 }
 async function replaceRoutine(ghost: string, slug: string, expected: string, next: Sources, reason: string, options: RoutineConfigOptions, paused: boolean) {
   const current = await readSources(ghost, slug, options);
+  if (reason !== "restore" && current.timer === null) throw new GhostError("not_found", "No such routine timer.", 404);
   if (current.revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed. Reload before saving or restoring.", 409);
   const paths = names(ghost, slug, options), run = options.run ?? commandRunner("systemctl");
   await verifySources(ghost, slug, next, options);
-  const state = current.timer === null ? new Map<string, Record<string, string>>() : unitProperties(await scheduleCommand(run, [
-    "show", "--all", "--property=Id,Unit,UnitFileState,ActiveState,DropInPaths", paths.timer, ...(current.service === null ? [] : [paths.service]),
+  const inspect = async (includeService = true) => unitProperties(await scheduleCommand(run, [
+    "show", "--all", "--property=Id,Unit,UnitFileState,ActiveState,DropInPaths", paths.timer, ...(includeService ? [paths.service] : []),
   ]));
+  const requireDirect = (state: Map<string, Record<string, string>>, required = false) => {
+    const target = state.get(paths.timer)?.Unit;
+    if ((required ? target !== paths.service : target && target !== paths.service) || [...state.values()].some(unit => unit.DropInPaths)) {
+      throw new GhostError("invalid_routine", "Use native tools for redirected timers or units with drop-ins.", 400);
+    }
+  };
+  const state = current.timer === null ? new Map<string, Record<string, string>>() : await inspect(current.service !== null);
+  if (current.timer !== null) requireDirect(state);
   const timer = state.get(paths.timer) ?? {};
-  if ((timer.Unit && timer.Unit !== paths.service) || [...state.values()].some((unit) => unit.DropInPaths)) {
-    throw new GhostError("invalid_routine", "Use native tools for redirected timers or units with drop-ins.", 400);
-  }
   // Recheck after validation, which can take long enough for a native editor to save.
   if ((await readSources(ghost, slug, options)).revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed during validation.", 409);
   const id = randomUUID(), checkpointPath = join(recoveryDir(options), `${id}.json`);
@@ -134,16 +136,22 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   await writePrivateJsonAtomic(checkpointPath, { ghost, slug, timer: current.timer, service: current.service,
     createdAt: new Date().toISOString(), reason, expectedRevision: revision(next) } satisfies Checkpoint);
   const wasActive = timer.ActiveState === "active", enabled = timer.UnitFileState;
+  let wroteSources = false;
   try {
     if (current.timer !== null) await scheduleCommand(run, [paused ? "disable" : "stop", ...(paused ? ["--now"] : []), paths.timer]);
+    if ((await readSources(ghost, slug, options)).revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed while stopping the timer.", 409);
+    wroteSources = true;
     await writeSources(ghost, slug, next, options);
     await scheduleCommand(run, ["daemon-reload"]);
+    if (next.timer !== null) requireDirect(await inspect(), true);
     if (paused && next.timer !== null) await scheduleCommand(run, ["disable", "--now", paths.timer]);
     if (!paused && wasActive) await scheduleCommand(run, ["start", paths.timer]);
   } catch (error) {
     try {
-      await writeSources(ghost, slug, current, options);
-      await scheduleCommand(run, ["daemon-reload"]);
+      if (wroteSources) {
+        await writeSources(ghost, slug, current, options);
+        await scheduleCommand(run, ["daemon-reload"]);
+      }
       if (paused && (enabled === "enabled" || enabled === "enabled-runtime")) {
         await scheduleCommand(run, ["enable", ...(enabled === "enabled-runtime" ? ["--runtime"] : []), paths.timer]);
       }
@@ -157,12 +165,9 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   return { recovery: id };
 }
 export async function saveRoutineConfig(ghost: string, slug: string, config: RoutineConfig, options: RoutineConfigOptions) {
-  await readRoutineConfig(ghost, slug, options);
-  validateSource(config.timer); validateSource(config.service);
   return replaceRoutine(ghost, slug, config.revision, config, "edit", options, false);
 }
 export async function removeRoutine(ghost: string, slug: string, expected: string, options: RoutineConfigOptions) {
-  await readRoutineConfig(ghost, slug, options);
   return replaceRoutine(ghost, slug, expected, { timer: null, service: null }, "remove", options, true);
 }
 export async function restoreRoutine(ghost: string, id: string, options: RoutineConfigOptions) {

@@ -755,7 +755,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
     route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
-      jsonResponse(response, 200, { routines: await options.host.routines(ghost) });
+      jsonResponse(response, 200, await options.host.routines(ghost));
     })),
     route("GET", "api/ghosts/:ghost/routines/recoveries", ownerOnly(async ({ ghost, response }) => {
       jsonResponse(response, 200, { recoveries: await options.host.routineRecoveries(ghost) });

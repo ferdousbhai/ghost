@@ -68,7 +68,7 @@ systemd's calendar/monotonic expressions, next trigger and last service start, e
 active state, service command, and latest service result; empty properties are
 unknown, not inferred successes. The daemon projects this native state because the HUD and tailnet viewer cannot
 inspect the systemd user manager directly; no scheduler or job database is added.
-`GET /api/ghosts/:ghost/routines` returns `{ routines }`; each row has `ghost`,
+`GET /api/ghosts/:ghost/routines` returns `{ routines, recoveries }`; each routine row has `ghost`,
 `slug`, `unit`, `service`, `timerPath`, `servicePath`, `description`, `schedule`,
 `nextRun`, `lastRun`, `enabled`, `active`, `command`, `result`, and `serviceActive`
 (strings; absent next trigger/last service start are null). Owner-only, including reads because
@@ -84,7 +84,7 @@ same-name owned service is inspectable but run is refused. Invalid slugs/actions
 are 400, missing timers 404, and systemd failures 503. Ghost lifecycle leases
 cover inspection/control so rename/delete waits for accepted operations.
 `GET …/routines/:slug/config` returns `{ timer, service, revision }`, the two
-bounded UTF-8 unit sources and their SHA-256 revision (service is null if
+UTF-8 unit sources (at most 128 KiB each) and their SHA-256 revision (service is null if
 missing). `PUT` accepts the same
 shape, verifies both sources with systemd-analyze, checks the revision, pauses
 the timer while replacing files, reloads systemd, and restores its prior active
@@ -94,7 +94,9 @@ native tools handle other arrangements. Invalid source is 400, stale source is
 its pair, leaving any running service alone. Both mutations checkpoint the
 previous source under the private `.ghost-routine-recovery/` directory beside
 the units and return `{ recovery }`. No mutation discards an earlier checkpoint.
-Failures roll back source and timer state; a rollback failure names the retained
+The effective reloaded target and drop-ins are checked before restarting;
+no partial INI parser substitutes for systemd. Source is rechecked after stop,
+and failures before writes leave source untouched. Failures roll back changed source and timer state; a rollback failure names the retained
 checkpoint. `GET …/routines/recoveries` returns `{ recoveries }` with id, slug,
 createdAt, reason, and whether the current source matches the checkpoint's
 expected revision. `POST …/routines/recoveries/:recovery/restore` restores a

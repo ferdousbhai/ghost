@@ -458,7 +458,6 @@ Singleton {
         root.retire(root, "hookConfigRequest");
         root.retire(root, "routinesRequest");
         root.retire(root, "routineActionRequest");
-        root.retire(root, "routineRecoveryRequest");
         root.retire(root, "routineConfigRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
@@ -567,15 +566,15 @@ Singleton {
     property var routines: []
     property string routinesGhost: ""
     property string routinesError: ""
+    property string routineWriteError: ""
     property var routinesRequest: null
     property var routineActionRequest: null
     property var routineRecoveries: []
-    property var routineRecoveryRequest: null
     property var routineConfigRequest: null
     signal routineConfigReady(string ghost, string slug, var config)
     signal routineMutationFinished(bool ok)
     signal routineLogsReady(string ghost, var logs)
-    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineConfigRequest !== null || routineRecoveryRequest !== null
+    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineConfigRequest !== null
 
     function refreshRoutines(): void {
         if (root.routinesRequest || root.activeGhost === "") return;
@@ -583,21 +582,12 @@ Singleton {
         if (root.routinesGhost !== ghost) root.routines = [];
         root.request(root, "routinesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines", null, function (xhr, body) {
             if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
-            if (xhr.status === 200 && body && Array.isArray(body.routines)) {
+            if (xhr.status === 200 && body && Array.isArray(body.routines) && Array.isArray(body.recoveries)) {
                 root.routinesGhost = ghost;
                 root.routines = body.routines;
+                root.routineRecoveries = body.recoveries;
                 root.routinesError = "";
             } else root.routinesError = root.describeError(xhr, "Read routines");
-        });
-    }
-
-    function refreshRoutineRecoveries(): void {
-        if (root.routineRecoveryRequest || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "routineRecoveryRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/recoveries", null, function (xhr, body) {
-            if (root.activeGhost !== ghost) return;
-            if (xhr.status === 200 && body && Array.isArray(body.recoveries)) root.routineRecoveries = body.recoveries;
-            else root.routinesError = root.describeError(xhr, "Read routine recovery");
         });
     }
 
@@ -618,6 +608,7 @@ Singleton {
             if (root.activeGhost !== ghost) return;
             if (xhr.status === 200 && body && typeof body.revision === "string" && typeof body.timer === "string") {
                 root.routinesError = "";
+                root.routineWriteError = "";
                 root.routineConfigReady(ghost, slug, body);
             } else root.routinesError = root.describeError(xhr, "Read routine sources");
         });
@@ -628,8 +619,8 @@ Singleton {
         root.request(root, "routineActionRequest", method, "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + suffix, payload, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             const ok = xhr.status === 200;
-            if (ok) { root.routinesError = ""; root.refreshRoutines(); root.refreshRoutineRecoveries(); }
-            else root.routinesError = root.describeError(xhr, "Change routine");
+            if (ok) { root.routinesError = ""; root.refreshRoutines(); }
+            root.routineWriteError = ok ? "" : root.describeError(xhr, "Change routine");
             root.routineMutationFinished(ok);
         });
     }

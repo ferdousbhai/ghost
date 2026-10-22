@@ -23,6 +23,7 @@ TestCase {
         Ghostd.activeGhost = "casper";
         Ghostd.routinesGhost = "casper";
         Ghostd.routinesError = "";
+        Ghostd.routineWriteError = "";
         Ghostd.routines = [];
         Ghostd.routineRecoveries = [];
     }
@@ -34,8 +35,7 @@ TestCase {
         const pane = createTemporaryObject(paneComponent, tc);
         verify(pane !== null);
         for (const xhr of tc.requests) {
-            if (xhr.url.endsWith("/recoveries")) xhr.complete(200, { recoveries: [] });
-            else xhr.complete(200, { routines: [] });
+            xhr.complete(200, { routines: [], recoveries: [] });
         }
         tc.requests.splice(0, tc.requests.length);
         return pane;
@@ -54,7 +54,7 @@ TestCase {
         compare(JSON.parse(xhr.body).revision, "original");
         compare(JSON.parse(xhr.body).timer, timer.text);
         xhr.complete(409, { error: { message: "Source changed" } });
-        verify(Ghostd.routinesError.indexOf("Source changed") >= 0);
+        verify(Ghostd.routineWriteError.indexOf("Source changed") >= 0);
         compare(editor.visible, true);
         compare(timer.text, "[Timer]\nOnCalendar=weekly");
         findChild(pane, "routineDiscard").clicked();
@@ -68,7 +68,7 @@ TestCase {
         findChild(pane, "routineSave").clicked();
         tc.requests[0].complete(200, { recovery: "saved" });
         tryCompare(editor, "visible", false);
-        verify(tc.requests.some(xhr => xhr.url.endsWith("/recoveries")));
+        verify(tc.requests.some(xhr => xhr.url.endsWith("/routines")));
     }
     function test_removedRoutineCanBeRestoredThroughOwnerRoute(): void {
         const pane = loadedPane();

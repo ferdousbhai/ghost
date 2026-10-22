@@ -855,7 +855,11 @@ const mockServer = createServer(async (req, res) => {
       }
       return json(res, 200, { recovery });
     }
-    if (parts.length === 4 && req.method === "GET") return json(res, 200, { routines: routine ? [routine] : [] });
+    if (parts.length === 4 && req.method === "GET") return json(res, 200, {
+      routines: routine ? [routine] : [], recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
+        id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
+      })),
+    });
     if (!routine || parts[4] !== routine.slug) return json(res, 404, { error: { message: "No such routine" } });
     if (parts.length === 6 && parts[5] === "logs" && req.method === "GET") return json(res, 200, { text: "Mock routine journal: completed successfully.", truncated: false, sessions: [] });
     if (parts.length === 6 && parts[5] === "config" && req.method === "GET") return json(res, 200, { ...config, revision: routineRevision(config) });

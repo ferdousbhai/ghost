@@ -259,7 +259,7 @@ describe("remote routine controls", () => {
     const { page, list } = routinePage(async (path, init) => {
       calls.push({ path, init });
       if (path.endsWith("/recoveries")) return { recoveries: [] };
-      return { routines: [{ ghost: "casper", slug: "daily", enabled: "disabled", active: "inactive",
+      return { recoveries: [], routines: [{ ghost: "casper", slug: "daily", enabled: "disabled", active: "inactive",
         schedule: "OnCalendar=daily", nextRun: null, lastRun: null, serviceActive: "inactive", result: "",
         command: "<script>private command</script>" }] };
     });
@@ -270,8 +270,8 @@ describe("remote routine controls", () => {
     const buttons = card.querySelectorAll("button");
     expect(buttons.map((button: any) => button.textContent)).toEqual(["Pause", "Resume", "Run now", "Logs", "Edit", "Remove"]);
     await buttons[0].onclick();
-    expect(calls[2]).toMatchObject({ path: "/ghosts/casper/routines/daily/pause", init: { method: "POST", body: "{}" } });
-    expect(calls[3]?.path).toBe("/ghosts/casper/routines");
+    expect(calls[1]).toMatchObject({ path: "/ghosts/casper/routines/daily/pause", init: { method: "POST", body: "{}" } });
+    expect(calls[2]?.path).toBe("/ghosts/casper/routines");
   });
 
   test("editing preserves the draft on conflict and closes only after an accepted save", async () => {
@@ -285,7 +285,7 @@ describe("remote routine controls", () => {
       }
       if (path.endsWith("/config")) return { timer: "[Timer]\nOnCalendar=daily", service: "[Service]\nExecStart=/usr/bin/true", revision: "original" };
       if (path.endsWith("/recoveries")) return { recoveries: [] };
-      return { routines: [{ ghost: "casper", slug: "daily", enabled: "enabled", active: "active", schedule: "daily", command: "" }] };
+      return { recoveries: [], routines: [{ ghost: "casper", slug: "daily", enabled: "enabled", active: "active", schedule: "daily", command: "" }] };
     });
     await page.open();
     await list.children[0].querySelectorAll("button").find((button: any) => button.textContent === "Edit").onclick();

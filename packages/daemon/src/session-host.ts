@@ -1132,7 +1132,11 @@ export class SessionHost {
   }
 
   routineLogs(ghost: string, slug: string) { return this.routineOperation(ghost, (options) => readRoutineLogs(ghost, slug, options, this.scheduleJournalRunner)); }
-  routines(ghost: string) { return this.routineOperation(ghost, (options) => listGhostRoutines(ghost, options)); }
+  routines(ghost: string) {
+    return this.routineOperation(ghost, async options => ({
+      routines: await listGhostRoutines(ghost, options), recoveries: await listRoutineRecoveries(ghost, options),
+    }));
+  }
   controlRoutine(ghost: string, slug: string, action: string) {
     return this.routineOperation(ghost, (options) => controlGhostRoutine(ghost, slug, action, options));
   }

@@ -14,7 +14,7 @@ Rectangle {
     property string pendingRevision: ""
     property string logGhost: ""
     property var logSessions: []
-    function refresh(): void { Ghostd.refreshRoutines(); Ghostd.refreshRoutineRecoveries(); }
+    function refresh(): void { Ghostd.refreshRoutines(); }
 
     color: Theme.background
     clip: true
@@ -72,8 +72,8 @@ Rectangle {
         Text {
             textFormat: Text.PlainText
             Layout.fillWidth: true
-            text: Ghostd.routinesError || "Systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
-            color: Ghostd.routinesError ? Theme.danger : Theme.foregroundDim
+            text: Ghostd.routineWriteError || Ghostd.routinesError || "Systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
+            color: (Ghostd.routineWriteError || Ghostd.routinesError) ? Theme.danger : Theme.foregroundDim
             wrapMode: Text.Wrap
             font.pixelSize: Theme.fontSizeSmall
         }
@@ -183,7 +183,7 @@ Rectangle {
                             objectName: "routineEdit"
                             label: "Edit sources"
                             enabled: !Ghostd.routinesLoading && root.editSlug === ""
-                            onClicked: Ghostd.fetchRoutineConfig(card.modelData.slug)
+                            onClicked: { root.pendingRemove = ""; Ghostd.fetchRoutineConfig(card.modelData.slug); }
                         }
                         ActionButton {
                             objectName: "routineRemove"
@@ -208,7 +208,7 @@ Rectangle {
         body: "Disable and remove “" + root.pendingRemove + "”? Running work continues. A recoverable checkpoint is kept."
         confirmText: "Remove"
         busy: Ghostd.routinesLoading
-        error: Ghostd.routinesError
+        error: Ghostd.routineWriteError
         onDismissed: { open = false; root.pendingRemove = ""; }
         onConfirmed: Ghostd.mutateRoutine(Ghostd.activeGhost, encodeURIComponent(root.pendingRemove) + "?revision=" + encodeURIComponent(root.pendingRevision), "DELETE", null)
         Connections {
@@ -232,8 +232,8 @@ Rectangle {
             Text {
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
-                text: Ghostd.routinesError || "Save verifies both units and reloads systemd. Previous sources remain recoverable."
-                color: Ghostd.routinesError ? Theme.danger : Theme.foregroundDim
+                text: Ghostd.routineWriteError || "Save verifies both units and reloads systemd. Previous sources remain recoverable."
+                color: Ghostd.routineWriteError ? Theme.danger : Theme.foregroundDim
                 wrapMode: Text.Wrap
             }
             Text { textFormat: Text.PlainText; text: "Timer unit"; color: Theme.foreground }
