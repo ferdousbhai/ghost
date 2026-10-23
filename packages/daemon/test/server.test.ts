@@ -1242,7 +1242,7 @@ describe("GET /api/ghosts/:name/sessions/:id/transcript", () => {
     const base = await serve();
     const response = await fetch(`${base}/api/ghosts/casper/sessions/nope/transcript`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ id: "nope", resources: null, messages: [], total: 0, truncated: false });
+    expect(await response.json()).toEqual({ id: "nope", resources: null, messages: [], total: 0, truncated: false, readThrough: expect.any(String) });
     expect((await fetch(`${base}/api/ghosts/nobody/sessions/nope/transcript`)).status).toBe(404);
   });
 });
