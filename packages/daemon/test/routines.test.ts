@@ -1,6 +1,7 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { listRoutineRecoveries } from "../src/routine-config.js";
 import { controlGhostRoutine, listGhostRoutines, readRoutineLogs } from "../src/schedules.js";
 import { SessionHost } from "../src/session-host.js";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
@@ -78,6 +79,10 @@ describe("systemd routine inspection and controls", () => {
     expect(calls).toHaveLength(1);
     const [row] = await listGhostRoutines("casper", { unitDir, run });
     expect(row).toMatchObject({ service: "unrelated.service", command: "", servicePath: "", result: "" });
+    await rm(join(unitDir, service));
+    const direct: string[][] = [];
+    await expect(controlGhostRoutine("casper", "daily", "run", { unitDir, run: manager(direct) })).rejects.toMatchObject({ status: 400 });
+    expect(direct.some(call => call.includes("start"))).toBe(false);
   });
   it("propagates a systemd failure rather than presenting empty or successful state", async () => {
     const unitDir = await setup();
@@ -109,6 +114,16 @@ describe("systemd routine inspection and controls", () => {
     expect(temp.registry.get("casper").name).toBe("casper");
     release(); await resume; await rename;
     expect(temp.registry.get("new-name").name).toBe("new-name");
+  });
+  it("retires a renamed ghost's checkpoints with its units", async () => {
+    const unitDir = await setup();
+    host = new SessionHost({ registry: temp.registry, ownerHome: temp.ownerHome, scheduleUnitDir: unitDir,
+      env: { ...process.env, GHOST_DESKTOP: "/usr/bin/false" }, scheduleCommandRunner: manager([]), scheduleVerifyRunner: async () => ok });
+    const config = await host.routineConfig("casper", "daily");
+    await host.removeRoutine("casper", "daily", config.revision);
+    expect(await listRoutineRecoveries("casper", { unitDir })).toHaveLength(1);
+    await host.renameGhost("casper", "new-name");
+    expect(await listRoutineRecoveries("casper", { unitDir })).toEqual([]);
   });
   it("bounds journal reads to the owned service and links accepted event conversations", async () => {
     const unitDir = await setup(), eventId = "event-" + "a".repeat(64);
@@ -158,10 +173,10 @@ describe("systemd routine inspection and controls", () => {
     const removed = await fetch(`${path}/daily?revision=${updated.revision}`, { method: "DELETE", headers: owner });
     expect(removed.status).toBe(200);
     const { recovery } = await removed.json() as { recovery: string };
-    expect(await (await fetch(`${path}/recoveries`, { headers: owner })).json()).toMatchObject({ recoveries: expect.arrayContaining([expect.objectContaining({ id: recovery, applicable: true })]) });
+    expect(await (await fetch(path, { headers: owner })).json()).toMatchObject({ recoveries: expect.arrayContaining([expect.objectContaining({ id: recovery, applicable: true })]) });
     expect((await fetch(`${path}/recoveries/${recovery}/restore`, { method: "POST", headers: owner, body: "{}" })).status).toBe(200);
     const count = calls.length;
-    for (const [url, method] of [[path, "GET"], [`${path}/daily/config`, "GET"], [`${path}/recoveries`, "GET"], [`${path}/daily/logs`, "GET"], [`${path}/daily/config`, "PUT"], [`${path}/daily`, "DELETE"], [`${path}/daily/pause`, "POST"]]) {
+    for (const [url, method] of [[path, "GET"], [`${path}/daily/config`, "GET"], [`${path}/daily/logs`, "GET"], [`${path}/daily/config`, "PUT"], [`${path}/daily`, "DELETE"], [`${path}/daily/pause`, "POST"]]) {
       expect((await fetch(url as string, { method, headers: { "tailscale-user-login": "guest@example.com" } })).status).toBe(403);
     }
     expect(calls).toHaveLength(count);

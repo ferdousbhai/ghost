@@ -1,6 +1,8 @@
-import { open, rm } from "node:fs/promises";
-import { resolve } from "node:path";
-import { ArgsError, type ParsedCliArgs } from "./args.js";
+import { randomUUID } from "node:crypto";
+import { lstat, open, rename, rm } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
+import { trashPath } from "../trash.js";
+import { ArgsError, flagBoolean, type ParsedCliArgs } from "./args.js";
 import { resolveTarget } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
@@ -24,10 +26,19 @@ export async function resultsCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
     emit(ctx, body, () => "Result moved to Trash; its download is revoked.\n");
   } else {
     const bytes = await ctx.client.download(`${root}/${encodeURIComponent(input as string)}`);
-    const file = await open(destination as string, "wx", 0o600);
+    // --replace writes beside the destination, then trashes the old file (recoverable) before the rename.
+    const replace = flagBoolean(parsed, "replace"), target = destination as string;
+    const written = replace ? join(dirname(target), `.${basename(target)}.${randomUUID()}.part`) : target;
+    const file = await open(written, "wx", 0o600);
     try { await file.writeFile(bytes); }
-    catch (error) { await rm(destination as string, { force: true }); throw error; }
-    finally { await file.close(); }
+    catch (error) { await file.close(); await rm(written, { force: true }); throw error; }
+    await file.close();
+    if (replace) {
+      try {
+        if (await lstat(target).then(() => true, () => false)) await trashPath(target, ctx.runtime.env);
+        await rename(written, target);
+      } catch (error) { await rm(written, { force: true }); throw error; }
+    }
     emit(ctx, { path: resolve(destination as string) }, () => `Saved ${destination}\n`);
   }
   return 0;

@@ -852,23 +852,42 @@ describe("completion delivery", () => {
       },
     });
   }
-  it("delivers a final bounded excerpt and exact conversation link once before done", async () => {
+  it("delivers a final bounded excerpt and exact conversation link once after done", async () => {
     const notifications: GhostHookEvent[] = [];
     const fake = harness(replies(`Finished.\n${"a".repeat(400)}`));
     const sessions = host({ harnesses: [fake], hooks: delivery(notifications), viewerUrl: async () => "https://ghost.example.ts.net/" });
     const events = await turn(sessions, "Make the report");
+    await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "done", title: "Make the report", url: "https://ghost.example.ts.net/?ghost=casper&session=c1" });
     expect(notifications[0]?.type === "turn_end" && notifications[0].excerpt.length).toBe(280);
     expect(events.filter(event => event.type === "done")).toHaveLength(1);
-    expect(events.at(-2)).toMatchObject({ type: "hook_end", event: "turn_end" });
+    expect(events.filter(event => event.type === "hook_start")).toEqual([]);
     expect(events.at(-1)?.type).toBe("done");
     expect(fake.calls()).toHaveLength(1);
+  });
+  it("lets the owner prompt again while a slow notifier is still delivering", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; }), notifications: GhostHookEvent[] = [];
+    const hooks = new GhostHookRunner({
+      ...parseHooksDocument({ hooks: { turn_end: [{ hooks: [{ type: "command", command: "notify" }] }] } }, "test"),
+      commandRunner: async (_hook, event) => {
+        notifications.push(event); await held;
+        return { exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };
+      },
+    });
+    const sessions = host({ harnesses: [harness([...replies("One."), ...replies("Two.")])], hooks });
+    await turn(sessions, "First");
+    await waitFor(() => notifications.length === 1);
+    expect((await turn(sessions, "Second")).at(-1)?.type).toBe("done");
+    release();
+    await waitFor(() => notifications.length === 2);
   });
   it("reports failed turns and fails open when the delivery service is unavailable", async () => {
     const notifications: GhostHookEvent[] = [];
     const sessions = host({ harnesses: [harness([{ exit: 1, stderr: "service unavailable" }])], hooks: delivery(notifications, true) });
     const events = await turn(sessions, "Try it");
+    await waitFor(() => notifications.length > 0);
     expect(notifications).toHaveLength(1);
     expect(notifications[0]).toMatchObject({ type: "turn_end", outcome: "error", url: null });
     expect(events.at(-1)).toMatchObject({ type: "error" });

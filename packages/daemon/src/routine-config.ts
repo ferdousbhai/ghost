@@ -79,14 +79,18 @@ export async function listRoutineRecoveries(ghost: string, options: ScheduleOpti
   const rows = [];
   for (const file of files.sort()) {
     if (!file.endsWith(".json") || !RECOVERY_ID.test(file.slice(0, -5))) continue;
+    // One unreadable checkpoint or unit hides only its own row, never the list.
     let checkpoint: Checkpoint;
     try { checkpoint = await readCheckpoint(ghost, file.slice(0, -5), options); } catch (error) {
-      if (error instanceof GhostError && error.status === 404) continue;
+      if (error instanceof GhostError) continue;
       throw error;
     }
-    const current = await readSources(ghost, checkpoint.slug, options);
+    const current = await readSources(ghost, checkpoint.slug, options).catch((error: unknown) => {
+      if (error instanceof GhostError) return null;
+      throw error;
+    });
     rows.push({ id: file.slice(0, -5), slug: checkpoint.slug, createdAt: checkpoint.createdAt,
-      reason: checkpoint.reason, applicable: current.revision === checkpoint.expectedRevision });
+      reason: checkpoint.reason, applicable: current?.revision === checkpoint.expectedRevision });
   }
   return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
@@ -116,7 +120,8 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   if (reason !== "restore" && current.timer === null) throw new GhostError("not_found", "No such routine timer.", 404);
   if (current.revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed. Reload before saving or restoring.", 409);
   const paths = names(ghost, slug, options), run = options.run ?? commandRunner("systemctl");
-  await verifySources(ghost, slug, next, options);
+  // A restore puts back bytes that were already installed, so undo never depends on them verifying.
+  if (reason !== "restore") await verifySources(ghost, slug, next, options);
   const inspect = async (includeService = true) => unitProperties(await scheduleCommand(run, [
     "show", "--all", "--property=Id,Unit,UnitFileState,ActiveState,DropInPaths", paths.timer, ...(includeService ? [paths.service] : []),
   ]));
@@ -149,6 +154,8 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   } catch (error) {
     try {
       if (wroteSources) {
+        // A native save since our write wins; the checkpoint below keeps the original.
+        if ((await readSources(ghost, slug, options)).revision !== revision(next)) throw new Error("native edit");
         await writeSources(ghost, slug, current, options);
         await scheduleCommand(run, ["daemon-reload"]);
       }
@@ -173,4 +180,19 @@ export async function removeRoutine(ghost: string, slug: string, expected: strin
 export async function restoreRoutine(ghost: string, id: string, options: RoutineConfigOptions) {
   const saved = await readCheckpoint(ghost, id, options);
   return replaceRoutine(ghost, saved.slug, saved.expectedRevision, saved, "restore", options, true);
+}
+/** Drop a retired ghost's checkpoints with its units, so a later ghost of that name inherits none. */
+export async function discardRoutineRecoveries(ghost: string, options: ScheduleOptions) {
+  let files: string[];
+  try { files = await readdir(recoveryDir(options)); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  for (const file of files) {
+    if (!file.endsWith(".json") || !RECOVERY_ID.test(file.slice(0, -5))) continue;
+    const path = join(recoveryDir(options), file);
+    let owner: unknown;
+    try { owner = JSON.parse(readPrivateFileText(path) ?? "null")?.ghost; } catch { continue; }
+    if (owner === ghost) await unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
+  }
 }

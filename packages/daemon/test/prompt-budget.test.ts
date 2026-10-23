@@ -74,7 +74,7 @@ const CEILINGS: Record<string, number> = {
   "Computer use": 301,
   "Other harnesses": 273,
   "Background work": 216,
-  "Owner context": 715,
+  "Owner context": 711,
   "Scheduled work": 221,
   "Self-maintenance": 390,
   "First meeting": 317,

@@ -153,7 +153,7 @@ export async function routinesCommand(parsed: ParsedCliArgs, ctx: CliContext): P
     const result = (await request("GET", `${target}/config`)).body;
     emit(ctx, result, () => `${JSON.stringify(result, null, 2)}\n`);
   } else if (action === "recoveries") {
-    const result = (await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", `${path}/recoveries`)).body;
+    const { recoveries } = (await request<{ recoveries: Array<{ id: string; slug: string; reason: string; createdAt: string; applicable: boolean }> }>("GET", path)).body, result = { recoveries };
     emit(ctx, result, () => result.recoveries.map(r => `${r.id} ${r.slug} ${r.reason} ${r.createdAt} ${r.applicable ? "restorable" : "source changed"}`).join("\n") + "\n");
   } else {
     let result: unknown;

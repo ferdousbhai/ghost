@@ -57,7 +57,7 @@ needs a restart. Groups and handlers run in file order.
 Configured command strings must be non-empty and contain no NUL byte, and a
 command's `timeout` (seconds, default 30) must be greater than 0 and at most
 600. `name` (≤ 80 chars) and `description` (≤ 240) are optional, default per
-event, and are what the Hooks pane shows. While a handler runs, the turn
+event, and are what the Hooks pane shows. While a `before_prompt` or `session_stop` handler runs, the turn
 stream carries `hook_start`/`hook_end` with its `name` and `event`. The HUD
 shows a `before_prompt` hook's name as the turn's activity, so give a slow one
 a name that says what it is doing. A `session_stop` hook runs out of sight:
@@ -256,7 +256,8 @@ An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
 `outcome` is `done` or `error`; `title` is at most 160 characters and the
 whitespace-normalized `excerpt` at most 280. The URL is null when remote access
 is unavailable. Failed turns use the failure message. Handlers run in order,
-under the existing timeout/output bounds, before the terminal stream frame.
+under the existing timeout/output bounds, after the terminal stream frame and
+outside the conversation's busy state, so they never delay the next prompt.
 Their output cannot change the result; failures fail open and are logged. Ghost
 stores no delivery credentials, retries, or push subscription. Removing the
 handler through `ghost hooks set` or the Hooks pane disables delivery at the

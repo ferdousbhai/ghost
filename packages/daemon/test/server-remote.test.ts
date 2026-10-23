@@ -303,3 +303,15 @@ it("limits shared file publication to local bearer access and downloads/revocati
   expect((await fetch(base + result.downloadUrl, { method: "DELETE", headers: asTailnet("owner@example.com") })).status).toBe(200);
   expect((await fetch(base + result.downloadUrl, { headers: asTailnet("owner@example.com") })).status).toBe(404);
 });
+
+it("keeps the result list answering while a download is still being read", async () => {
+  await serve();
+  const source = join(temp!.ownerHome, "big.bin"); await writeFile(source, "payload");
+  await appendLog(ghostPaths(join(temp!.root, "casper")).sessionDir, "result-session", [newConversationEntry("result-session", new Date())]);
+  const result = await host!.publishResult("casper", "result-session", source);
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => { release = resolve; });
+  const download = host!.withResult("casper", "result-session", result.id, async () => { await held; });
+  expect(await host!.results("casper", "result-session")).toMatchObject([{ id: result.id }]);
+  release(); await download;
+});

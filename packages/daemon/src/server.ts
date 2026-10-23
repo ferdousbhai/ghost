@@ -553,8 +553,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       // Keep the HTTP seam honest even if a runtime regresses: every client
       // gets a terminal; after the turn's own, this is a no-op.
       () => append({ type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." }),
-      // runAdmitted emits a terminal for anything inside its own try; this is
-      // a failure outside it (the first log write, or an owner command).
+      // The admitted run emits its own error terminal before rethrowing, so
+      // this too is a no-op unless a runtime regresses.
       (error: unknown) => append({ type: "error", reason: "error", errorMessage: errorMessage(error) }),
     ).finally(() => {
       if (!turnLogs.has(log.id)) return;
@@ -762,9 +762,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
       jsonResponse(response, 200, await options.host.routines(ghost));
-    })),
-    route("GET", "api/ghosts/:ghost/routines/recoveries", ownerOnly(async ({ ghost, response }) => {
-      jsonResponse(response, 200, { recoveries: await options.host.routineRecoveries(ghost) });
     })),
     route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", ownerOnly(async ({ ghost, params, response, body }) => {
       await body();

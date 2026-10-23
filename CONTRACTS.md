@@ -93,14 +93,16 @@ native tools handle other arrangements. Invalid source is 400, stale source is
 409. `DELETE …/routines/:slug?revision=…` disables/stops the timer and removes
 its pair, leaving any running service alone. Both mutations checkpoint the
 previous source under the private `.ghost-routine-recovery/` directory beside
-the units and return `{ recovery }`. No mutation discards an earlier checkpoint.
+the units and return `{ recovery }`. No mutation discards an earlier checkpoint;
+rename/delete discards the ghost's checkpoints with its units.
 The effective reloaded target and drop-ins are checked before restarting;
 no partial INI parser substitutes for systemd. Source is rechecked after stop,
-and failures before writes leave source untouched. Failures roll back changed source and timer state; a rollback failure names the retained
-checkpoint. `GET …/routines/recoveries` returns `{ recoveries }` with id, slug,
-createdAt, reason, and whether the current source matches the checkpoint's
-expected revision. `POST …/routines/recoveries/:recovery/restore` restores a
-checkpoint only against that expected revision, checkpoints the replaced source,
+and failures before writes leave source untouched. Failures roll back changed source and timer state, unless a native save replaced the written
+source; a rollback failure or a kept native save names the retained checkpoint. The `recoveries` of `GET …/routines` give each checkpoint's id, slug,
+createdAt, reason, and whether the current source matches its expected revision; an unreadable checkpoint is left out, and an unreadable current
+source is not applicable. `POST …/routines/recoveries/:recovery/restore` restores a
+checkpoint only against that expected revision, without re-verifying the bytes it
+puts back, checkpoints the replaced source,
 and leaves the restored timer paused. Restore never silently re-enables work.
 CLI `routines config <slug>` prints editable JSON; `routines edit <slug> <file>`
 saves it, `remove <slug>` reads/checks the current revision before deletion,
@@ -165,8 +167,10 @@ block a turn. Its bounded payload includes `outcome` (`done`/`error`), `title`,
 `excerpt`, and nullable `url`, plus the ordinary hook identity fields. The URL
 is the active Tailscale viewer with ghost/session parameters, never a bearer
 token. With no handler no provider/network discovery occurs. Commands run
-through the existing hook runner with its timeouts/fail-open logging, before
-the terminal stream event; failure cannot change the conversation's outcome.
+through the existing hook runner with its timeouts/fail-open logging, after
+the terminal stream event and outside the conversation's busy state, so a slow
+handler never delays the owner's next prompt; failure cannot change the
+conversation's outcome.
 Owner `!commands` use the same boundary. No notification transport, credential
 store, retry queue, or push backend is added: `ghost help notifications` gives
 an opt-in curl/ntfy recipe. Removing its `turn_end` handler opts out at the next
@@ -185,7 +189,8 @@ the snapshot directory to Trash; native Trash restore is the undo, and deletion
 revokes subsequent downloads. Conversation/home lifecycle moves the snapshots
 with their parent. `ghost results [list|add <path>|get <id> <destination>|remove <id>]`
 uses these routes; HUD and phone show downloads and revocation. Destinations
-are explicit; CLI downloads refuse to overwrite an existing file.
+are explicit; CLI downloads refuse to overwrite an existing file unless
+`--replace`, which moves it to Trash first (the HUD's confirmed Save as).
 
 ## Ghost home (`ghost-home/v2`)
 
@@ -569,7 +574,7 @@ types. See [`turn-events.ts`](packages/daemon/src/turn-events.ts). A turn
 emits `start`, then ordered `harness` (a pass starting on that harness, again
 on each fallback), `resources` (a successful pass's final resource snapshot, display-only), `text_*`, `thinking` (the harness's reasoning, as
 far as it shows it; never logged), `tool_execution_*`, `queue` (the follow-ups still
-waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (an owner command hook
+waiting, on every change), `owner_message` (a queued follow-up starting its pass), `hook_start`/`hook_end` (a `before_prompt` or `session_stop` command hook
 running, by its `name` and `event`; clients show a `session_stop` one as a settled turn), and `session_stop_continued` events, and exactly one
 terminal `done` or `error`. A quota refusal is a typed `limit_reached`
 event (harness, kind) sent before that `error`; the classifier is

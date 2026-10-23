@@ -103,7 +103,7 @@ describe("external event admission", () => {
     const env = { ...process.env, PATH: `${bin}:/usr/bin`, TMPDIR: scratch, NOTIFICATIONS: fixture, CALLS: calls, PAYLOADS: payload };
     const result = spawnSync("/bin/bash", ["-c", recipe], { env, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);
-    expect(readFileSync(calls, "utf8")).toContain("event\ngithub\n42:2026-10-22\n--ghost\ncasper");
+    expect(readFileSync(calls, "utf8")).toContain("event\ngithub:OWNER/REPO\n42:2026-10-22\n--ghost\ncasper");
     expect(readFileSync(payload, "utf8")).toContain('"title":"test"');
     expect(readFileSync(payload, "utf8")).not.toContain("ignore");
     expect(readdirSync(scratch)).toEqual([]);

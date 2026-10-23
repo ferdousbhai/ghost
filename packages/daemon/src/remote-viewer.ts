@@ -383,7 +383,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   };
   $("routines").onclick = showRoutines;
   $("routine-refresh").onclick = showRoutines;
-  $("routine-close").onclick = () => { ++routineGeneration; $("routine-panel").close(); };
+  $("routine-close").onclick = () => $("routine-panel").close();
+  $("routine-panel").onclose = () => { ++routineGeneration; };
 
   let resultGeneration = 0;
   async function showResults() {
@@ -415,7 +416,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   }
   $("results").onclick = showResults;
   $("result-refresh").onclick = showResults;
-  $("result-close").onclick = () => { ++resultGeneration; $("result-panel").close(); };
+  $("result-close").onclick = () => $("result-panel").close();
+  $("result-panel").onclose = () => { ++resultGeneration; };
 
   let resourceGeneration = 0;
   async function showResources() {
@@ -450,10 +452,11 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     const before = session, targetGhost = ghost;
     const { sessions } = await api("/ghosts/" + seg(targetGhost) + "/sessions");
     if (ghost !== targetGhost) return;
-    if (requestedSession && !sessions.some(s => s.id === requestedSession)) throw new Error("The linked conversation is unavailable.");
-    requestedSession = null;
+    // A dead link opens nothing else: it keeps its URL and error until the owner picks from the list.
+    const missing = !!requestedSession && !sessions.some(s => s.id === requestedSession);
+    if (missing) session = null; else requestedSession = null;
     if (draft && sessions.some((s) => s.id === draft)) draft = null;
-    if (!sessions.length && !draft && owner) draft = session = mint();
+    if (!sessions.length && !draft && owner && !missing) draft = session = mint();
     const list = draft ? [{ id: draft, title: "New conversation" }, ...sessions] : sessions;
     const select = $("session");
     select.textContent = "";
@@ -462,11 +465,12 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
       o.value = s.id; o.textContent = (s.unread ? "● " : "") + (s.title || s.preview || s.id);
       select.append(o);
     }
-    if (!list.some((s) => s.id === session)) session = list[0]?.id || null;
+    if (!missing && !list.some((s) => s.id === session)) session = list[0]?.id || null;
     selectedUnread = sessions.find(s => s.id === session)?.unread === true;
-    syncUrl();
     select.value = session || "";
-    select.disabled = list.length < 2;
+    select.disabled = list.length < (missing ? 1 : 2);
+    if (missing) { render([]); throw new Error("The linked conversation is unavailable."); }
+    syncUrl();
     if (session !== before) await loadTranscript();
     else if (changed === undefined || changed === session) await loadTranscript(changed !== undefined);
   }
@@ -642,9 +646,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     refresh();
     const ghosts = await api("/ghosts");
     for (const g of ghosts) { const o = document.createElement("option"); o.value = g.name; o.textContent = g.name; $("ghost").append(o); }
-    $("ghost").disabled = ghosts.length < 2;
-    const linkedGhost = requested.get("ghost");
-    if (linkedGhost && !ghosts.some(g => g.name === linkedGhost)) throw new Error("The linked ghost is unavailable.");
+    const linkedGhost = requested.get("ghost"), ghostMissing = !!linkedGhost && !ghosts.some(g => g.name === linkedGhost);
+    $("ghost").disabled = ghosts.length < (ghostMissing ? 1 : 2);
+    if (ghostMissing) { $("ghost").value = ""; throw new Error("The linked ghost is unavailable."); }
     ghost = linkedGhost || ghosts[0]?.name || null;
     session = requestedSession;
     $("ghost").value = ghost || "";

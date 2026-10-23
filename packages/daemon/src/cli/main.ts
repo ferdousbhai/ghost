@@ -225,10 +225,11 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "results",
-    usage: "results [list|add <path>|get <id> <destination>|remove <id>] [-g <name>] [-s <id>] [--json] [-q]",
+    usage: "results [list|add <path>|get <id> <destination> [--replace]|remove <id>] [-g <name>] [-s <id>] [--json] [-q]",
     summary: "Share, download, or revoke selected conversation results.",
     example: "ghost results add ~/Documents/report.pdf",
     positionals: [0, 3],
+    flags: { boolean: ["replace"] },
     run: resultsCommand,
   },
   {

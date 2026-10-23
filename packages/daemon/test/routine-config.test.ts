@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { which } from "../src/harnesses.js";
-import { listRoutineRecoveries, readRoutineConfig, removeRoutine, restoreRoutine, saveRoutineConfig } from "../src/routine-config.js";
+import { discardRoutineRecoveries, listRoutineRecoveries, readRoutineConfig, removeRoutine, restoreRoutine, saveRoutineConfig } from "../src/routine-config.js";
 import type { CommandRunner } from "../src/tailscale-identity.js";
 
 const roots: string[] = [];
@@ -134,7 +134,37 @@ describe("native routine source edits and recovery", () => {
     await writeFile(join(options.unitDir, service), "");
     const config = await readRoutineConfig("casper", "daily", options);
     const saved = await removeRoutine("casper", "daily", config.revision, options);
-    expect((await listRoutineRecoveries("casper", options))[0]?.id).toBe(saved.recovery);
+    expect((await listRoutineRecoveries("casper", options))[0]).toMatchObject({ id: saved.recovery, applicable: true });
+    await restoreRoutine("casper", saved.recovery, options);
+    expect(await readRoutineConfig("casper", "daily", options)).toMatchObject({ timer: originalTimer, service: "" });
+  });
+  it("lists the readable checkpoints beside a malformed one or a linked unit", async () => {
+    const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
+    const saved = await saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, options);
+    await writeFile(join(options.unitDir, ".ghost-routine-recovery", "00000000-0000-0000-0000-000000000000.json"), "{");
+    await rm(join(options.unitDir, service));
+    await symlink(join(options.unitDir, timer), join(options.unitDir, service));
+    expect(await listRoutineRecoveries("casper", options)).toMatchObject([{ id: saved.recovery, applicable: false }]);
+  });
+  it("discards only the retired ghost's checkpoints", async () => {
+    const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
+    await removeRoutine("casper", "daily", config.revision, options);
+    const other = "ghost-timer-v1-5-aria1-daily";
+    await writeFile(join(options.unitDir, `${other}.timer`), originalTimer); await writeFile(join(options.unitDir, `${other}.service`), originalService);
+    const kept = await removeRoutine("aria1", "daily", (await readRoutineConfig("aria1", "daily", options)).revision, options);
+    await discardRoutineRecoveries("casper", options);
+    expect(await listRoutineRecoveries("casper", options)).toEqual([]);
+    expect(await listRoutineRecoveries("aria1", options)).toMatchObject([{ id: kept.recovery }]);
+  });
+  it("keeps a native save made after the write when a later step fails", async () => {
+    const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
+    const native = "[Timer]\nOnCalendar=hourly\n";
+    await expect(saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, { ...options, run: async args => {
+      if (!args.includes("daemon-reload")) return options.run(args);
+      await writeFile(join(options.unitDir, timer), native);
+      return { ...ok, code: 1, stderr: "manager failed" };
+    } })).rejects.toMatchObject({ code: "routine_recovery_required" });
+    expect(await readFile(join(options.unitDir, timer), "utf8")).toBe(native);
   });
   it("checks a native editor's save made while verification was running", async () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);

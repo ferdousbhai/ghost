@@ -1,3 +1,23 @@
+/**
+ * Scheduled work is a systemd user timer, and the timer is the only record of it.
+ *
+ * Ghost writes no scheduler. A schedule the owner can see in
+ * `systemctl --user list-timers`, disable with `systemctl --user disable --now`,
+ * and edit in an ordinary text file is more legible than one that lives inside
+ * ghostd and is invisible until the HUD is open. Omarchy reaches the same
+ * conclusion for its own artifacts: `omarchy-games-retro-install` writes one
+ * `.desktop` file into the standard user directory, tells the system that owns
+ * that directory, and stops — no daemon reconciles it afterwards.
+ *
+ * So a ghost authors its own units through `bash`, and the daemon only projects
+ * and controls them for the owner. It keeps one obligation the desktop-file
+ * precedent does not have: a stray `.desktop` file is inert, but a stray
+ * `.timer` fires. Deletion removes the timers owned by that ghost before
+ * deletion or rename publishes a reusable name.
+ *
+ * The versioned, length-delimited prefix and slug grammar are the ownership
+ * contract. Units are swept by name, never by pattern-matching content.
+ */
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { GhostError, isValidGhostName } from "./ghosts.js";
@@ -214,15 +234,15 @@ export async function controlGhostRoutine(
   if (!isValidScheduleSlug(slug) || !["pause", "resume", "run"].includes(action)) {
     throw new GhostError("invalid_routine", "Use a valid routine slug and pause, resume, or run.", 400);
   }
-  const unit = `${scheduleUnitPrefix(ghost)}${slug}.timer`;
-  if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(unit)) {
+  const unit = `${scheduleUnitPrefix(ghost)}${slug}.timer`, service = unit.replace(/\.timer$/u, ".service");
+  const units = await listGhostScheduleUnits(ghost, options.unitDir);
+  if (!units.includes(unit)) {
     throw new GhostError("not_found", "No such routine for this ghost.", 404);
   }
   const run = options.run ?? commandRunner("systemctl");
   if (action === "run") {
     const target = (await scheduleCommand(run, ["show", "--property=Unit", "--value", unit])).trim();
-    const service = unit.replace(/\.timer$/u, ".service");
-    if (target !== service) throw new GhostError("invalid_routine", "Run requires the timer's same-name owned service.", 400);
+    if (target !== service || !units.includes(service)) throw new GhostError("invalid_routine", "Run requires the timer's same-name owned service.", 400);
     await scheduleCommand(run, ["start", "--no-block", service]);
   } else {
     await scheduleCommand(run, [action === "pause" ? "disable" : "enable", "--now", unit]);

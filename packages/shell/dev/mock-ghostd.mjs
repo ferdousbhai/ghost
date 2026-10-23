@@ -834,11 +834,6 @@ const mockServer = createServer(async (req, res) => {
         config: config ? { ...config } : null, routine: routine ? { ...routine } : null, expectedRevision: routineRevision(next) });
       return id;
     };
-    if (parts.length === 5 && parts[4] === "recoveries" && req.method === "GET") {
-      return json(res, 200, { recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
-        id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
-      })) });
-    }
     if (parts.length === 7 && parts[4] === "recoveries" && parts[6] === "restore" && req.method === "POST") {
       await readBody(req);
       const saved = mockRoutineRecoveries.get(parts[5]);

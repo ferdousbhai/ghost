@@ -60,6 +60,14 @@ TestCase {
         findChild(pane, "routineDiscard").clicked();
         tryCompare(editor, "visible", false);
     }
+    function test_switchingGhostDropsTheOtherGhostsRowsAndErrors(): void {
+        Ghostd.routineWriteError = "Change routine failed";
+        Ghostd.routineRecoveries = [{ id: "checkpoint", slug: "daily", reason: "remove", createdAt: "now", applicable: true }];
+        Ghostd.activeGhost = "aria";
+        Ghostd.refreshRoutines();
+        compare(Ghostd.routineWriteError, "");
+        compare(Ghostd.routineRecoveries.length, 0);
+    }
     function test_successfulSaveClosesEditorAndRefreshesRecovery(): void {
         const pane = loadedPane();
         Ghostd.routineConfigReady("casper", "daily", { timer: "[Timer]\nOnCalendar=daily", service: "[Service]\nExecStart=/usr/bin/true", revision: "original" });

@@ -88,6 +88,27 @@ describe("remote viewer invalidations", () => {
   });
 });
 
+describe("remote viewer deep links", () => {
+  test("a deleted linked conversation opens nothing else but leaves the picker usable", async () => {
+    const source = REMOTE_VIEWER_HTML.match(/async function loadSessions\(changed\) \{[\s\S]*?\n {2}\}/)?.[0];
+    const options: Array<{ value: string; textContent: string }> = [];
+    const select = { textContent: "", value: "", disabled: false, append: (option: { value: string; textContent: string }) => options.push(option) };
+    let synced = 0, transcripts = 0;
+    const context = {
+      ghost: "casper", session: "gone", draft: null, owner: true, requestedSession: "gone", selectedUnread: false,
+      api: async () => ({ sessions: [{ id: "c1", title: "Only one" }] }), seg: encodeURIComponent, mint: () => "draft",
+      $: () => select, document: { createElement: () => ({ value: "", textContent: "" }) },
+      syncUrl: () => { synced++; }, loadTranscript: async () => { transcripts++; }, render() {},
+    };
+    const page = new Function(...Object.keys(context), `${source}; return { loadSessions, state: () => ({ session, requestedSession }) };`)(...Object.values(context));
+    await expect(page.loadSessions()).rejects.toThrow("The linked conversation is unavailable.");
+    expect(page.state()).toEqual({ session: null, requestedSession: "gone" });
+    expect(options.map(option => option.value)).toEqual(["c1"]);
+    expect(select).toMatchObject({ value: "", disabled: false });
+    expect({ synced, transcripts }).toEqual({ synced: 0, transcripts: 0 });
+  });
+});
+
 describe("remote viewer transcript", () => {
   test("resource metadata stays out of chat across continued runs", async () => {
     const source = REMOTE_VIEWER_HTML.match(/async function send\(\) \{[\s\S]*?\n {2}\}/)?.[0];

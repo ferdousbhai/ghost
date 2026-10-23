@@ -157,9 +157,8 @@ export class GhostHookRunner {
     return this.commands.some((hook) => hook.eventName === event);
   }
 
-  async emitTurnEnd(event: GhostTurnEndEvent, onHook?: HookObserver): Promise<void> {
-    const run = this.observed(onHook);
-    for (const hook of this.commands.filter(hook => hook.eventName === "turn_end")) await run(hook, event);
+  async emitTurnEnd(event: GhostTurnEndEvent): Promise<void> {
+    for (const hook of this.commands.filter(hook => hook.eventName === "turn_end")) await this.runCommandFailOpen(hook, event);
   }
 
   async emitBeforePrompt(

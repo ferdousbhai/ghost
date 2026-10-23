@@ -71,7 +71,7 @@ import {
   resolveScheduleUnitDirectory,
   sweepGhostSchedules,
 } from "./schedules.js";
-import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, type RoutineConfig } from "./routine-config.js";
+import { readRoutineConfig, saveRoutineConfig, removeRoutine, listRoutineRecoveries, restoreRoutine, discardRoutineRecoveries, type RoutineConfig } from "./routine-config.js";
 import type { CommandRunner } from "./tailscale-identity.js";
 import { renderSelfMaintenancePolicy } from "./self-maintenance.js";
 import { trashPath } from "./trash.js";
@@ -530,6 +530,7 @@ export class SessionHost {
     this.admissions.set(key, controller);
     return {
       run: async (stream) => {
+        let settled: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
         try {
           await this.withGhost(ghost.name, async () => {
             let terminal: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
@@ -544,13 +545,16 @@ export class SessionHost {
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
             terminal ??= { type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." };
-            await this.turnEnd(ghost, id, terminal, controller.signal, emit, turnId);
             stream.emit(terminal);
+            settled = terminal;
             if (failure !== undefined) throw failure;
           });
         } finally {
           this.admissions.delete(key);
           this.announce(ghost.name, id);
+          // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
+          const ended = settled;
+          if (ended) void this.withGhost(ghost.name, () => this.turnEnd(ghost, id, ended, controller.signal, turnId)).catch(() => {});
         }
       },
     };
@@ -605,7 +609,9 @@ export class SessionHost {
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
     const blocks = { next: 0 };
-    const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
+    const onHook: HookObserver = (name, event, running) => {
+      if (event !== "turn_end") stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
+    };
     let terminal: TurnEvent = { type: "done" };
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
@@ -866,7 +872,7 @@ export class SessionHost {
   }
 
   private async turnEnd(
-    ghost: Ghost, id: string, terminal: Extract<TurnEvent, { type: "done" | "error" }>, signal: AbortSignal, emit: (event: TurnEvent) => void, turnId: string,
+    ghost: Ghost, id: string, terminal: Extract<TurnEvent, { type: "done" | "error" }>, signal: AbortSignal, turnId: string,
   ): Promise<void> {
     if (!this.hooks.hasHandlers("turn_end") || signal.aborted || (terminal.type === "error" && terminal.reason === "aborted")) return;
     try {
@@ -883,7 +889,7 @@ export class SessionHost {
         excerpt: (text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
         session_id: id, session_file: logPath(sessionDir, id), signal, ghost_name: ghost.name, ghost_home: ghost.dir,
         cwd: conversationDir(sessionDir, id), conversation_id: id,
-      }, (name, event, running) => emit({ type: running ? "hook_start" : "hook_end", name, event }));
+      });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
   }
 
@@ -1179,8 +1185,9 @@ export class SessionHost {
   results(ghost: string, id: string) { return this.resultOperation(ghost, id, dir => listResults(dir)); }
   publishResult(ghost: string, id: string, path: string) { return this.resultOperation(ghost, id, dir => publishResult(dir, path)); }
   withResult<T>(ghost: string, id: string, result: string, consume: (opened: Awaited<ReturnType<typeof openResult>>) => Promise<T>): Promise<T> {
-    return this.resultOperation(ghost, id, async dir => {
-      const opened = await openResult(dir, result);
+    // Only the open is serialized: the handle outlives a revoke, so a slow download blocks no other result operation.
+    return this.withGhost(ghost, async () => {
+      const opened = await this.resultOperation(ghost, id, dir => openResult(dir, result));
       try { return await consume(opened); } finally { await opened.file.close(); }
     });
   }
@@ -1209,7 +1216,6 @@ export class SessionHost {
   removeRoutine(ghost: string, slug: string, expected: string) {
     return this.routineOperation(ghost, (options) => removeRoutine(ghost, slug, expected, options));
   }
-  routineRecoveries(ghost: string) { return this.routineOperation(ghost, (options) => listRoutineRecoveries(ghost, options)); }
   restoreRoutine(ghost: string, id: string) { return this.routineOperation(ghost, (options) => restoreRoutine(ghost, id, options)); }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
@@ -1295,6 +1301,7 @@ export class SessionHost {
         ...(this.scheduleCommandRunner ? { run: this.scheduleCommandRunner } : {}),
         logger: this.logger,
       });
+      await discardRoutineRecoveries(ghost.name, { unitDir: this.scheduleUnitDir });
     } catch (error) {
       this.logger.error(`could not clean up a ghost's schedules before it was ${outcome}`, { ghost: ghost.name, error: errorMessage(error) });
       throw new GhostError(

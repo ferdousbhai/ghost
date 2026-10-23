@@ -178,6 +178,12 @@ it("shares, downloads without overwriting, lists, and revokes selected result fi
   expect(readFileSync(destination, "utf8")).toBe("finished report");
   expect((await cli(["results", "get", id, destination, ...target])).code).not.toBe(0);
   expect(readFileSync(destination, "utf8")).toBe("finished report");
+  writeFileSync(destination, "older copy");
+  const trashHome = { ...env, HOME: temp.ownerHome, XDG_DATA_HOME: join(temp.ownerHome, ".local", "share") };
+  mkdirSync(trashHome.XDG_DATA_HOME, { recursive: true });
+  expect(await cli(["results", "get", id, destination, "--replace", ...target], { env: trashHome })).toMatchObject({ code: 0, stderr: "" });
+  expect(readFileSync(destination, "utf8")).toBe("finished report");
+  expect(readFileSync(join(temp.ownerHome, ".local", "share", "Trash", "files", "saved.txt"), "utf8")).toBe("older copy");
   expect((await cli(["results", "remove", id, ...target])).code).toBe(0);
   expect(JSON.parse((await cli(["results", "list", ...target, "--json"])).stdout).results).toEqual([]);
 });

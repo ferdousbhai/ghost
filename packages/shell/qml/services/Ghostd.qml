@@ -581,7 +581,11 @@ Singleton {
     function refreshRoutines(): void {
         if (root.routinesRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        if (root.routinesGhost !== ghost) root.routines = [];
+        if (root.routinesGhost !== ghost) {
+            // Another ghost's rows, checkpoints, and errors never show under this one.
+            root.routines = []; root.routineRecoveries = [];
+            root.routinesError = ""; root.routineWriteError = "";
+        }
         root.request(root, "routinesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines", null, function (xhr, body) {
             if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
             if (xhr.status === 200 && body && Array.isArray(body.routines) && Array.isArray(body.recoveries)) {
@@ -670,7 +674,8 @@ Singleton {
     function downloadResult(id: string, destination: string, ghost: string, session: string): void {
         if (root.resultsBusy || destination === "") return;
         root.resultsError = ""; root.resultsStatus = "Saving file…";
-        resultDownload.command = ["ghost", "results", "get", id, destination, "--ghost", ghost, "--session", session];
+        // The save dialog already confirmed any overwrite; --replace trashes the old file.
+        resultDownload.command = ["ghost", "results", "get", id, destination, "--replace", "--ghost", ghost, "--session", session];
         resultDownload.ghost = ghost; resultDownload.session = session;
         resultDownload.errorText = ""; resultDownload.didStart = false;
         resultDownload.running = true;

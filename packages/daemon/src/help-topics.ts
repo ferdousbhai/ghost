@@ -116,8 +116,8 @@ function memory(): string[] {
     "Conflicting notes: read the current files; a later dated correction or the source evidence settles it, then fix the stale note rather than adding another. If neither does, keep both claims and tell the owner which is uncertain; never pick one arbitrarily.",
     "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
     "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the existing folder it belongs to, updating the note that covers it and dating what you add; start a folder only for a new project or topic.",
-    "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; rewrite superseded facts as what is current (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note, a duplicate you merged, or a finished task. Then report each merged, rewritten, and trashed path.",
-    "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) whose prompt is `Tidy my notes (ghost help memory).`: when the owner has none, offer one once; never install it unasked.",
+    "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
+    "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-timers --all '*-tidy-notes.timer'` lists none; never install it unasked.",
     "A workflow you finished and will repeat (its steps, commands, and pitfalls) is a skill, not a note: write `skills/<name>/SKILL.md`, with `name` and `description` frontmatter, beside your character file; it is available from your next turn.",
   ];
 }
@@ -137,7 +137,7 @@ function events(input: HelpTopicInput): string[] {
     `jq -c '.[][] | select(.repository.full_name == "OWNER/REPO") | {id: (.id + ":" + .updated_at), payload: {reason, repository: .repository.full_name, subject}}' "$work/raw.json" > "$work/events.jsonl"`,
     "while IFS= read -r event; do",
     `  id=$(jq -r '.id' <<< "$event")`,
-    `  jq -c '.payload' <<< "$event" | ghost event github "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' -`,
+    `  jq -c '.payload' <<< "$event" | ghost event github:OWNER/REPO "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' -`,
     'done < "$work/events.jsonl"',
     "```",
     "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: failures fail the systemd unit, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
