@@ -610,9 +610,7 @@ export class SessionHost {
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
     this.live.set(key, turn);
     const blocks = { next: 0 };
-    const onHook: HookObserver = (name, event, running) => {
-      if (event !== "turn_end") stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
-    };
+    const onHook: HookObserver = (name, event, running) => stream.emit({ type: running ? "hook_start" : "hook_end", name, event: event as "before_prompt" | "session_stop" });
     let terminal: TurnEvent = { type: "done" };
     // The id of the owner request the final pass answered, which `turn_end` reports.
     let turnId = initialTurnId;

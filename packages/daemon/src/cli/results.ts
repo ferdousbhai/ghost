@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { lstat, open, rename, rm } from "node:fs/promises";
+import { open, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { trashPath } from "../trash.js";
 import { ArgsError, flagBoolean, type ParsedCliArgs } from "./args.js";
@@ -28,6 +28,9 @@ export async function resultsCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
     const bytes = await ctx.client.download(`${root}/${encodeURIComponent(input as string)}`);
     // --replace writes beside the destination, then trashes the old file (recoverable) before the rename.
     const replace = flagBoolean(parsed, "replace"), target = destination as string;
+    // Only an existing regular file may be replaced; a directory or anything else is refused untouched.
+    const existing = replace ? await stat(target).catch(() => null) : null;
+    if (existing && !existing.isFile()) throw new ArgsError(`${target} is not a file; give the file path to save to.`);
     const written = replace ? join(dirname(target), `.${basename(target)}.${randomUUID()}.part`) : target;
     const file = await open(written, "wx", 0o600);
     try { await file.writeFile(bytes); }
@@ -35,7 +38,7 @@ export async function resultsCommand(parsed: ParsedCliArgs, ctx: CliContext): Pr
     await file.close();
     if (replace) {
       try {
-        if (await lstat(target).then(() => true, () => false)) await trashPath(target, ctx.runtime.env);
+        if (existing) await trashPath(target, ctx.runtime.env);
         await rename(written, target);
       } catch (error) { await rm(written, { force: true }); throw error; }
     }

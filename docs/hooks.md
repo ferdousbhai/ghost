@@ -68,7 +68,8 @@ handler that requests a continuation wins.
 Ghost registers no built-in hooks and starts no idle handoff or next-work turns.
 Legacy top-level `builtin` settings are ignored.
 
-`ghost hooks show` prints it and `ghost hooks set <file>` replaces it, so a
+`ghost hooks show` prints `{ path, document }` and `ghost hooks set <file>` replaces the
+document with the file, which must be the document itself (`hooks` at its top level), so a
 ghost asked for a hook can write one. This file configures Ghost's machine-level
 awaited command hooks. They run for every principal conversation, above the
 harness, and commands run with the daemon user's permissions. It is therefore

@@ -53,6 +53,12 @@ export function scheduleUnitPrefix(ghostName: string): string {
   return `${SCHEDULE_UNIT_PREFIX}${ghostName.length}-${ghostName}-`;
 }
 
+/** One routine's unit-name stem, refusing an invalid slug. */
+export function routineStem(ghost: string, slug: string): string {
+  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
+  return `${scheduleUnitPrefix(ghost)}${slug}`;
+}
+
 function isOwnedScheduleUnit(name: string, prefix: string): boolean {
   if (!name.startsWith(prefix)) return false;
   return UNIT_SUFFIXES.some((suffix) => (
@@ -231,10 +237,8 @@ export async function listGhostRoutines(ghost: string, options: ScheduleOptions)
 export async function controlGhostRoutine(
   ghost: string, slug: string, action: string, options: ScheduleOptions,
 ): Promise<void> {
-  if (!isValidScheduleSlug(slug) || !["pause", "resume", "run"].includes(action)) {
-    throw new GhostError("invalid_routine", "Use a valid routine slug and pause, resume, or run.", 400);
-  }
-  const unit = `${scheduleUnitPrefix(ghost)}${slug}.timer`, service = unit.replace(/\.timer$/u, ".service");
+  if (!["pause", "resume", "run"].includes(action)) throw new GhostError("invalid_routine", "Use pause, resume, or run.", 400);
+  const stem = routineStem(ghost, slug), unit = `${stem}.timer`, service = `${stem}.service`;
   const units = await listGhostScheduleUnits(ghost, options.unitDir);
   if (!units.includes(unit)) {
     throw new GhostError("not_found", "No such routine for this ghost.", 404);
@@ -250,8 +254,7 @@ export async function controlGhostRoutine(
 }
 
 export async function readRoutineLogs(ghost: string, slug: string, options: ScheduleOptions, journal: CommandRunner = commandRunner("journalctl")) {
-  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
-  const stem = `${scheduleUnitPrefix(ghost)}${slug}`;
+  const stem = routineStem(ghost, slug);
   if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(`${stem}.timer`)) throw new GhostError("not_found", "No such routine.", 404);
   let output: string;
   try {

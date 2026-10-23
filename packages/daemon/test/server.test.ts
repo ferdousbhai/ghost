@@ -229,6 +229,14 @@ describe("/api/hooks/config", () => {
       error: { code: "invalid_request", message: `${path} must contain a JSON object.` },
     });
 
+    const wrapped = await fetch(`${base}/api/hooks/config`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ path, document: next, hooks: {} }),
+    });
+    expect(wrapped.status).toBe(400);
+    expect(replaceConfig).toHaveBeenCalledTimes(2);
+
     const posted = await fetch(`${base}/api/hooks/config`, { method: "POST" });
     expect(posted.status).toBe(405);
   });

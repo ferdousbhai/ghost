@@ -184,6 +184,11 @@ it("shares, downloads without overwriting, lists, and revokes selected result fi
   expect(await cli(["results", "get", id, destination, "--replace", ...target], { env: trashHome })).toMatchObject({ code: 0, stderr: "" });
   expect(readFileSync(destination, "utf8")).toBe("finished report");
   expect(readFileSync(join(temp.ownerHome, ".local", "share", "Trash", "files", "saved.txt"), "utf8")).toBe("older copy");
+  const folder = join(temp.ownerHome, "Documents"); mkdirSync(folder);
+  for (const path of [folder, `${folder}/`]) {
+    expect((await cli(["results", "get", id, path, "--replace", ...target], { env: trashHome })).code).not.toBe(0);
+    expect(statSync(folder).isDirectory()).toBe(true);
+  }
   expect((await cli(["results", "remove", id, ...target])).code).toBe(0);
   expect(JSON.parse((await cli(["results", "list", ...target, "--json"])).stdout).results).toEqual([]);
 });

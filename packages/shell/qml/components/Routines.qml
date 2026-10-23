@@ -211,10 +211,6 @@ Rectangle {
         error: Ghostd.routineWriteError
         onDismissed: { open = false; root.pendingRemove = ""; }
         onConfirmed: Ghostd.mutateRoutine(Ghostd.activeGhost, encodeURIComponent(root.pendingRemove) + "?revision=" + encodeURIComponent(root.pendingRevision), "DELETE", null)
-        Connections {
-            target: Ghostd
-            function onRoutineMutationFinished(ok: bool): void { if (ok) removeDialog.open = false; }
-        }
     }
     Popup {
         id: editor

@@ -99,7 +99,7 @@ describe("external event admission", () => {
     writeFileSync(join(bin, "gh"), '#!/bin/bash\n[[ $GH_FAIL != 1 ]] || exit 1\ncat "$NOTIFICATIONS"\n');
     writeFileSync(join(bin, "ghost"), '#!/bin/bash\nprintf "%s\\n" "$@" >> "$CALLS"\ncat >> "$PAYLOADS"\n');
     chmodSync(join(bin, "gh"), 0o700); chmodSync(join(bin, "ghost"), 0o700);
-    const recipe = renderHelpTopic("events", { ghostName: "casper", unitDir: "/tmp/units", cliPath: "/usr/bin/ghost" }).match(/```bash\n([\s\S]*?)\n```/u)![1]!;
+    const recipe = renderHelpTopic("events", { ghostName: "casper", unitDir: "/tmp/units", cliPath: join(bin, "ghost") }).match(/```bash\n([\s\S]*?)\n```/u)![1]!;
     const env = { ...process.env, PATH: `${bin}:/usr/bin`, TMPDIR: scratch, NOTIFICATIONS: fixture, CALLS: calls, PAYLOADS: payload };
     const result = spawnSync("/bin/bash", ["-c", recipe], { env, encoding: "utf8" });
     expect(result.status, result.stderr).toBe(0);

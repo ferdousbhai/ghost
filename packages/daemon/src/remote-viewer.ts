@@ -329,8 +329,9 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
                 return;
               }
               if (action === "remove") {
-                if (!confirm("Remove " + routine.slug + "? Running work continues. A recovery checkpoint is kept.")) return;
+                // The revision is read before asking, so a change made while the owner decides is refused.
                 const config = await api(path + "/config");
+                if (!confirm("Remove " + routine.slug + "? Running work continues. A recovery checkpoint is kept.")) return;
                 await api(path + "?revision=" + seg(config.revision), { method: "DELETE" });
               } else await api(path + "/" + action,
                 { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });

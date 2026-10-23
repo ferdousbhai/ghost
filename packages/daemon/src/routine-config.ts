@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { GhostError } from "./ghosts.js";
 import { readPrivateFileText, writePrivateJsonAtomic, writePrivateTextAtomic } from "./private-file.js";
 import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
-import { isValidScheduleSlug, scheduleCommand, scheduleUnitPrefix, unitProperties, type ScheduleOptions } from "./schedules.js";
+import { routineStem, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";
 
 const MAX_SOURCE_BYTES = 131072;
 const RECOVERY_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
@@ -20,8 +20,7 @@ interface Checkpoint extends Sources {
 export interface RoutineConfigOptions extends ScheduleOptions { verify?: CommandRunner }
 
 function names(ghost: string, slug: string, options: ScheduleOptions) {
-  if (!isValidScheduleSlug(slug)) throw new GhostError("invalid_routine", "Invalid routine slug.", 400);
-  const stem = `${scheduleUnitPrefix(ghost)}${slug}`;
+  const stem = routineStem(ghost, slug);
   return { timer: `${stem}.timer`, service: `${stem}.service`,
     timerPath: join(options.unitDir, `${stem}.timer`), servicePath: join(options.unitDir, `${stem}.service`) };
 }

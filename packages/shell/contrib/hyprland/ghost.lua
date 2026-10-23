@@ -7,8 +7,8 @@
 -- is what `omarchy menu keybindings` shows, so give it a real one.
 
 -- Ghost's HUD is an omarchy-shell plugin, so summoning it is a shell IPC call
--- into the shell that is already running. `toggle` opens it when shut and
--- hides it when open. Leave Omarchy's SUPER+G window-grouping shortcut intact.
+-- into the shell that is already running. `toggle` raises it when shut or
+-- unfocused and hides it only when it is the focused window. Leave Omarchy's SUPER+G window-grouping shortcut intact.
 o.bind("SUPER + CTRL + G", "Summon ghost", "omarchy-shell shell toggle ferdousbhai.ghost")
 
 -- Summon a named ghost directly.

@@ -86,8 +86,8 @@ cover inspection/control so rename/delete waits for accepted operations.
 `GET …/routines/:slug/config` returns `{ timer, service, revision }`, the two
 UTF-8 unit sources (at most 128 KiB each) and their SHA-256 revision (service is null if
 missing). `PUT` accepts the same
-shape, verifies both sources with systemd-analyze, checks the revision, pauses
-the timer while replacing files, reloads systemd, and restores its prior active
+shape with both sources nonempty, verifies them with systemd-analyze, checks the revision, stops
+the timer (enablement unchanged) while replacing files, reloads systemd, and restores its prior active
 state. Only regular, same-name unit pairs without drop-ins may be edited here;
 native tools handle other arrangements. Invalid source is 400, stale source is
 409. `DELETE …/routines/:slug?revision=…` disables/stops the timer and removes
@@ -99,7 +99,7 @@ The effective reloaded target and drop-ins are checked before restarting;
 no partial INI parser substitutes for systemd. Source is rechecked after stop,
 and failures before writes leave source untouched. Failures roll back changed source and timer state, unless a native save replaced the written
 source; a rollback failure or a kept native save names the retained checkpoint. The `recoveries` of `GET …/routines` give each checkpoint's id, slug,
-createdAt, reason, and whether the current source matches its expected revision; an unreadable checkpoint is left out, and an unreadable current
+createdAt, reason, and `applicable` (the current source matches its expected revision); an unreadable checkpoint is left out, and an unreadable current
 source is not applicable. `POST …/routines/recoveries/:recovery/restore` restores a
 checkpoint only against that expected revision, without re-verifying the bytes it
 puts back, checkpoints the replaced source,
@@ -496,9 +496,10 @@ reads it back. The owner's summary of it is `bun scripts/handoff-report.ts`
 from a checkout, outside the shipped package: attempts, refusals by kind, exit
 outcomes, unmeasured checks, and limits hit, per harness.
 
-Awaited Ghost hooks are `before_prompt`, `session_stop`, and `turn_end`, run by ghostd
+Ghost hooks are `before_prompt`, `session_stop`, and `turn_end`, run by ghostd
 above whatever hooks the harness has of its own.
-The first two surround each pass; `turn_end` observes final success/failure.
+The first two are awaited around each pass; `turn_end` runs detached after the
+terminal frame, bounded by its own timeout (a daemon stop does not wait for it).
 Their JSON protocol, failure behavior, and settings are defined in
 [`docs/hooks.md`](docs/hooks.md). A stop hook owns its continuation policy;
 Ghost sets `stop_hook_active` on hook continuation passes and does not impose
