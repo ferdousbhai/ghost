@@ -19,8 +19,8 @@ pragma ComponentBehavior: Bound
 //                         just doubles the edge.
 //
 // Summon is launch-or-focus, not overlay-toggle: `open` reveals the window and
-// focuses it; `toggle` (SUPER+CTRL+G) hides it only when it is already the
-// focused window, otherwise it reveals+focuses.
+// focuses it; the host's toggle (SUPER+CTRL+G, the bar mark) hides it only
+// when it is already the focused window (Panel.qml's `opened`).
 import Quickshell
 import Quickshell.Hyprland
 import QtQuick
@@ -109,17 +109,10 @@ FloatingWindow {
         hud.shown = false;
     }
 
-    /**
-     * Launch-or-focus on a single bind (SUPER+CTRL+G). Reveal+focus when hidden
-     * or when open but not the focused window; hide only when it is already the
-     * focused window.
-     */
-    function toggle(): void {
-        if (!hud.shown || !hud.focused())
-            hud.open();
-        else
-            hud.close();
-    }
+    // The compositor can close the window itself (SUPER+W). Without this,
+    // `shown` stays true, the host takes the hidden HUD for open, and the next
+    // summon only "hides" it.
+    onVisibleChanged: if (!hud.visible) hud.shown = false
 
     function focused(): bool {
         return hud.contentItem.Window.active;

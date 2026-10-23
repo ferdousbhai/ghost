@@ -13,8 +13,12 @@ Item {
 
     readonly property string selfId: "ferdousbhai.ghost"
 
-    /** The host reads this to know whether the panel is showing. */
-    property bool opened: hud.shown
+    /**
+     * The host's `toggle` hides the panel when this is true and summons it
+     * otherwise, so it means "shown and focused": a HUD open behind other
+     * windows or on another workspace is raised by toggle, not hidden.
+     */
+    property bool opened: hud.shown && hud.focused()
     /** Injected by the host once the Loader resolves. */
     property var shell: null
 
