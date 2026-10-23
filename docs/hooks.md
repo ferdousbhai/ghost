@@ -241,7 +241,8 @@ source service or CLI.
 ## `turn_end` protocol
 
 An opt-in command receives the usual `ghost_name`, `ghost_home`, `cwd`,
-`conversation_id`, `session_id`, `session_file`, and `turn_id` fields, plus:
+`conversation_id`, `session_id`, `session_file`, and `turn_id` fields (the
+`turn_id` of the owner request the final pass answered), plus:
 
 ```json
 {

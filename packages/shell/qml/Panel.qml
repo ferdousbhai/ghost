@@ -58,5 +58,11 @@ Item {
 
     GhostHud {
         id: hud
+        // However the window went away (SUPER+W included), the host's own open
+        // flag goes too, so a panel rebuild does not reopen what the owner closed.
+        // A rebuild's teardown hides the window too; that is not the owner closing it.
+        onShownChanged: if (!hud.shown && !root.retiring && root.shell && root.shell.hide) root.shell.hide(root.selfId)
     }
+    property bool retiring: false
+    Component.onDestruction: root.retiring = true
 }

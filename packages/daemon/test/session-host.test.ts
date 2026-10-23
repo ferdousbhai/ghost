@@ -866,6 +866,29 @@ describe("completion delivery", () => {
     expect(events.at(-1)?.type).toBe("done");
     expect(fake.calls()).toHaveLength(1);
   });
+  it("reports the turn id of the owner request the final pass answered", async () => {
+    const seen: GhostHookEvent[] = [];
+    const hooks = new GhostHookRunner({
+      ...parseHooksDocument({ hooks: {
+        before_prompt: [{ hooks: [{ type: "command", command: "record" }] }],
+        turn_end: [{ hooks: [{ type: "command", command: "notify" }] }],
+      } }, "test"),
+      commandRunner: async (_hook, event) => {
+        seen.push(event);
+        return { exitCode: 0, stdout: "", stderr: "", aborted: false, timedOut: false, overflowed: false, executionFailed: false };
+      },
+    });
+    const fake = harness([]), gate = fake.gate("first");
+    fake.setTurns([{ events: [{ type: "text", block: "a", delta: "first" }], gate: gate.path }, ...replies("second")]);
+    const sessions = host({ harnesses: [fake], hooks });
+    const running = sessions.runTurn("casper", { sessionId: "c1", prompt: "one", emit: () => {} });
+    await waitFor(() => fake.calls().length === 1);
+    await sessions.queueMessage("casper", "c1", "two");
+    gate.release(); await running;
+    await waitFor(() => seen.some(event => event.type === "turn_end"));
+    const followUp = seen.find(event => event.type === "before_prompt" && event.prompt === "two");
+    expect(seen.find(event => event.type === "turn_end")).toMatchObject({ turn_id: followUp?.turn_id, excerpt: "second" });
+  });
   it("lets the owner prompt again while a slow notifier is still delivering", async () => {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; }), notifications: GhostHookEvent[] = [];
@@ -880,8 +903,9 @@ describe("completion delivery", () => {
     await turn(sessions, "First");
     await waitFor(() => notifications.length === 1);
     expect((await turn(sessions, "Second")).at(-1)?.type).toBe("done");
-    release();
     await waitFor(() => notifications.length === 2);
+    await sessions.renameGhost("casper", "renamed");
+    release();
   });
   it("reports failed turns and fails open when the delivery service is unavailable", async () => {
     const notifications: GhostHookEvent[] = [];

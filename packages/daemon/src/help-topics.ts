@@ -49,8 +49,7 @@ function timers(input: HelpTopicInput): string[] {
     "```",
     "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
-    "Edit with `ghost routines config <slug> > routine.json`, then `ghost routines edit <slug> routine.json`. Removal keeps a checkpoint: `ghost routines remove <slug>`; inspect `recoveries` and `restore <id>` to restore paused. The HUD and phone owner view provide the same actions. `ghost help events` connects selected external events with installed CLIs/services.",
-    "Inspect with `ghost routines`; `ghost routines pause <slug>` stops future triggers, `resume <slug>` restores them (persistent timers may catch up), and `run <slug>` queues work without changing the timer. Pause leaves running work alone. Edit the unit files directly and reload systemd; inspect logs with `journalctl --user -u <unit>.service`.",
+    "Inspect with `ghost routines` and `ghost routines logs <slug>`. `pause <slug>` stops future triggers, leaving running work alone; `resume <slug>` restores them (persistent timers may catch up); `run <slug>` queues work without changing the timer. Edit with `ghost routines config <slug> > routine.json`, then `ghost routines edit <slug> routine.json`; edit unit files directly only for arrangements it refuses. `remove <slug>` keeps a checkpoint: `recoveries` lists them and `restore <id>` restores one paused. `ghost help events` connects selected external events with installed CLIs/services.",
     "Timers fire only while the owner is logged in (the daemon runs in their graphical session).",
   ];
 }
@@ -117,7 +116,7 @@ function memory(): string[] {
     "Never preload the directory, read it wholesale, or keep an index or memory store of your own. A Recall index over folders the owner chose, the whole directory included, is theirs to search.",
     "Saving: put a stable fact, decision, correction, or dead end (what was tried, why it failed) in the existing folder it belongs to, updating the note that covers it and dating what you add; start a folder only for a new project or topic.",
     "Tidying, only when the owner asks or a timer they approved runs it, is the one time you read a folder whole: one folder per pass, the one the owner named or else the most cluttered. Before changing a note, keep its original restorable: `cp -p \"$f\" \"$f~\" && gio trash \"$f~\"`. Merge notes on one subject into the one that covers it, keeping every dated claim and dead end; mark a superseded fact with what replaced it and when (settle conflicts as above); cut repetition without changing meaning. Trash with `gio trash`, never `rm`, only an empty note or a duplicate you merged. Then report each changed and trashed path.",
-    "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-timers --all '*-tidy-notes.timer'` lists none; never install it unasked.",
+    "A recurring tidy is a daily timer (`ghost help timers`, `OnCalendar=daily`) with slug `tidy-notes` whose prompt is `Tidy my notes (ghost help memory).`. Every ghost shares the directory, so offer one, when the owner asks for a tidy, only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked.",
     "A workflow you finished and will repeat (its steps, commands, and pitfalls) is a skill, not a note: write `skills/<name>/SKILL.md`, with `name` and `description` frontmatter, beside your character file; it is available from your next turn.",
   ];
 }
@@ -135,13 +134,15 @@ function events(input: HelpTopicInput): string[] {
     "since=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ)",
     `gh api --paginate --slurp -X GET notifications -f all=true -f participating=true -f since="$since" > "$work/raw.json"`,
     `jq -c '.[][] | select(.repository.full_name == "OWNER/REPO") | {id: (.id + ":" + .updated_at), payload: {reason, repository: .repository.full_name, subject}}' "$work/raw.json" > "$work/events.jsonl"`,
+    "failed=0",
     "while IFS= read -r event; do",
     `  id=$(jq -r '.id' <<< "$event")`,
-    `  jq -c '.payload' <<< "$event" | ghost event github:OWNER/REPO "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' -`,
+    `  jq -c '.payload' <<< "$event" | ghost event github:OWNER/REPO "$id" --ghost ${input.ghostName} --instructions 'Summarize this notification and identify any action I need to take.' - || failed=1`,
     'done < "$work/events.jsonl"',
+    'exit "$failed"',
     "```",
-    "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: failures fail the systemd unit, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
-    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Pause/remove the source's systemd routine or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See docs/events.md in the checkout or project documentation.",
+    "Start no faster than every five minutes and honor GitHub's X-Poll-Interval/rate limits. The seven-day overlap is deliberate catch-up: a refused event fails the systemd unit without stopping the rest, the next run retries unaccepted events, and accepted events deduplicate. Notifications coalesce thread updates; this is not a complete per-comment event log. Increase the window before reconnecting after longer downtime, within provider retention.",
+    "Slack: an existing authenticated Events API/Socket Mode bridge can forward event_id and the selected event JSON with fixed owner instructions. That bridge owns scopes, verification, acknowledgement, retries, filters, and catch-up. No Slack app/bridge is bundled. Pause/remove the source's systemd routine or disconnect the bridge to stop intake. Never expose ghostd publicly for it. See /usr/share/doc/ghost/docs/events.md (docs/events.md in a checkout).",
   ];
 }
 
@@ -149,7 +150,7 @@ function notifications(): string[] {
   return [
     "# Mobile completion notifications",
     "Delivery is opt-in: an existing notification service receives a turn_end command hook. Ghost runs locally; host sleep, lost connectivity, or delivery failure can lose an alert. There is no retry queue. The phone viewer need not stay open.",
-    "For ntfy, subscribe the phone app to your chosen private topic on an existing server. Follow https://docs.ntfy.sh/publish/ for authentication. Keep its URL and Authorization header in a mode-600 curl config at ~/.config/ghost/ntfy.curl; keep credentials out of hooks.json. Test the destination deliberately before enabling alerts.",
+    "For ntfy, subscribe the phone app to your chosen private topic on an existing server. Follow https://docs.ntfy.sh/publish/ for authentication. Keep the server's root URL (not the topic URL; the JSON body names the topic) and Authorization header in a mode-600 curl config at ~/.config/ghost/ntfy.curl; keep credentials out of hooks.json. Test the destination deliberately before enabling alerts.",
     "Create an executable script at an absolute path, replacing YOUR_PRIVATE_TOPIC:",
     "```sh",
     "#!/bin/bash",
@@ -158,7 +159,7 @@ function notifications(): string[] {
     '  curl --fail --silent --show-error --connect-timeout 5 --max-time 10 --config "$HOME/.config/ghost/ntfy.curl" -H "Content-Type: application/json" --data-binary @-',
     "```",
     'Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array in the current `ghost hooks show` document; preserve existing handlers and apply with `ghost hooks set <file>`. Remove that handler to opt out; no restart is needed.',
-    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the exact conversation link when Tailscale remote access is enabled. Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See docs/hooks.md for the wire protocol.",
+    "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the exact conversation link when Tailscale remote access is enabled. Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
     "Open the alert link to inspect the conversation. Share selected files with `ghost results add <path> --ghost <name> --session <id>` or the HUD Shared results pane; the phone owner can download or remove the copies. Removal moves a copy to Trash and revokes its link; native Trash restore undoes it. Guests cannot access shared results. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
   ];
 }

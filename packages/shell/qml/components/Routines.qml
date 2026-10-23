@@ -15,6 +15,7 @@ Rectangle {
     property string logGhost: ""
     property var logSessions: []
     function refresh(): void { Ghostd.refreshRoutines(); }
+    readonly property var recoveries: Ghostd.routinesGhost === Ghostd.activeGhost ? Ghostd.routineRecoveries : []
 
     color: Theme.background
     clip: true
@@ -24,7 +25,6 @@ Rectangle {
     Connections {
         target: Ghostd
         function onActiveGhostChanged(): void {
-            Ghostd.routineRecoveries = [];
             root.pendingRemove = ""; removeDialog.open = false;
             if (root.visible) root.refresh();
         }
@@ -88,13 +88,13 @@ Rectangle {
         ScrollView {
             Layout.fillWidth: true
             Layout.preferredHeight: Math.min(140, recoveryRows.implicitHeight)
-            visible: Ghostd.routineRecoveries.length > 0
+            visible: root.recoveries.length > 0
             clip: true
             Column {
                 id: recoveryRows
                 width: parent.width
                 Repeater {
-                    model: Ghostd.routineRecoveries
+                    model: root.recoveries
                     delegate: RowLayout {
                         id: recoveryRow
                         required property var modelData
@@ -160,17 +160,17 @@ Rectangle {
                         ActionButton {
                             label: "Pause"
                             enabled: !Ghostd.routinesLoading
-                            onClicked: Ghostd.controlRoutine(card.modelData.slug, "pause")
+                            onClicked: Ghostd.mutateRoutine(Ghostd.activeGhost, encodeURIComponent(card.modelData.slug) + "/pause", "POST", {})
                         }
                         ActionButton {
                             label: "Resume"
                             enabled: !Ghostd.routinesLoading
-                            onClicked: Ghostd.controlRoutine(card.modelData.slug, "resume")
+                            onClicked: Ghostd.mutateRoutine(Ghostd.activeGhost, encodeURIComponent(card.modelData.slug) + "/resume", "POST", {})
                         }
                         ActionButton {
                             label: "Run now"
                             enabled: !Ghostd.routinesLoading
-                            onClicked: Ghostd.controlRoutine(card.modelData.slug, "run")
+                            onClicked: Ghostd.mutateRoutine(Ghostd.activeGhost, encodeURIComponent(card.modelData.slug) + "/run", "POST", {})
                         }
                     }
                     RowLayout {

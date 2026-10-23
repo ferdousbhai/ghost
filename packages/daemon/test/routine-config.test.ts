@@ -142,9 +142,17 @@ describe("native routine source edits and recovery", () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
     const saved = await saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, options);
     await writeFile(join(options.unitDir, ".ghost-routine-recovery", "00000000-0000-0000-0000-000000000000.json"), "{");
+    await writeFile(join(options.unitDir, ".ghost-routine-recovery", "00000000-0000-0000-0000-000000000001.json"), Buffer.from([0xff, 0xfe]));
     await rm(join(options.unitDir, service));
     await symlink(join(options.unitDir, timer), join(options.unitDir, service));
     expect(await listRoutineRecoveries("casper", options)).toMatchObject([{ id: saved.recovery, applicable: false }]);
+  });
+  it("marks a checkpoint inapplicable when its current unit is not valid UTF-8", async () => {
+    const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
+    const saved = await saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, options);
+    await writeFile(join(options.unitDir, timer), Buffer.from([0xff, 0xfe]));
+    expect(await listRoutineRecoveries("casper", options)).toMatchObject([{ id: saved.recovery, applicable: false }]);
+    await expect(readRoutineConfig("casper", "daily", options)).rejects.toMatchObject({ status: 400 });
   });
   it("discards only the retired ghost's checkpoints", async () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);

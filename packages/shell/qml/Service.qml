@@ -16,16 +16,6 @@ Item {
     /** Injected by the host; used to summon and hide this plugin's own panel. */
     property var shell: null
 
-    /**
-     * Whether the window is up, asked of the host at the moment it matters.
-     * The third-party facade exposes this as a call rather than a property
-     * (PluginShellApi), so it cannot be a binding; every caller here is an
-     * event handler, which is the only place the answer is needed.
-     */
-    function panelShown(): bool {
-        return Boolean(root.shell && root.shell.isPluginOpen && root.shell.isPluginOpen(root.selfId));
-    }
-
     function summon(payload: var): void {
         if (root.shell && root.shell.summon) root.shell.summon(root.selfId, JSON.stringify(payload || ({})));
     }
@@ -58,7 +48,7 @@ Item {
         function status(): string {
             return JSON.stringify({
                 ghost: Ghostd.activeGhost,
-                shown: root.panelShown(),
+                shown: Ghostd.hudVisible,
                 streaming: Ghostd.streaming,
                 reachable: Ghostd.reachable,
                 activity: Ghostd.activity,

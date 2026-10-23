@@ -458,7 +458,7 @@ Singleton {
         root.retire(root, "hookConfigRequest");
         root.retire(root, "routinesRequest");
         root.retire(root, "routineActionRequest");
-        root.retire(root, "routineConfigRequest");
+        root.retire(root, "routineReadRequest");
         root.retire(root, "resultsRequest");
         root.retire(root, "resultWriteRequest");
     }
@@ -572,11 +572,11 @@ Singleton {
     property var routinesRequest: null
     property var routineActionRequest: null
     property var routineRecoveries: []
-    property var routineConfigRequest: null
+    property var routineReadRequest: null
     signal routineConfigReady(string ghost, string slug, var config)
     signal routineMutationFinished(bool ok)
     signal routineLogsReady(string ghost, var logs)
-    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineConfigRequest !== null
+    readonly property bool routinesLoading: routinesRequest !== null || routineActionRequest !== null || routineReadRequest !== null
 
     function refreshRoutines(): void {
         if (root.routinesRequest || root.activeGhost === "") return;
@@ -598,9 +598,9 @@ Singleton {
     }
 
     function fetchRoutineLogs(slug: string): void {
-        if (root.routineConfigRequest || root.activeGhost === "") return;
+        if (root.routineReadRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        root.request(root, "routineConfigRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
+        root.request(root, "routineReadRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             if (xhr.status === 200 && body && typeof body.text === "string" && Array.isArray(body.sessions)) root.routineLogsReady(ghost, body);
             else root.routinesError = root.describeError(xhr, "Read routine logs");
@@ -608,9 +608,9 @@ Singleton {
     }
 
     function fetchRoutineConfig(slug: string): void {
-        if (root.routineConfigRequest || root.activeGhost === "") return;
+        if (root.routineReadRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        root.request(root, "routineConfigRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
+        root.request(root, "routineReadRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             if (xhr.status === 200 && body && typeof body.revision === "string" && typeof body.timer === "string") {
                 root.routinesError = "";
@@ -631,16 +631,6 @@ Singleton {
         });
     }
 
-    function controlRoutine(slug: string, action: string): void {
-        if (root.routineActionRequest || root.activeGhost === "") return;
-        const ghost = root.activeGhost;
-        root.request(root, "routineActionRequest", "POST", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/routines/" + encodeURIComponent(slug) + "/" + action, {}, function (xhr, body) {
-            if (root.activeGhost !== ghost) return;
-            if (xhr.status === 200) root.refreshRoutines();
-            else root.routinesError = root.describeError(xhr, "Control routine");
-        });
-    }
 
     property var sharedResults: []
     property string resultsError: ""
@@ -656,7 +646,8 @@ Singleton {
         if (root.resultsRequest || root.activeGhost === "" || root.currentSessionId === "") return;
         const ghost = root.activeGhost, session = root.currentSessionId;
         root.request(root, "resultsRequest", "GET", root.resultRoot(ghost, session), null, function (xhr, body) {
-            if (root.activeGhost !== ghost || root.currentSessionId !== session) return;
+            // A switch while this was in flight skipped its own read; take it now.
+            if (root.activeGhost !== ghost || root.currentSessionId !== session) { root.refreshResults(); return; }
             if (xhr.status === 200 && body && Array.isArray(body.results)) { root.sharedResults = body.results; root.resultsError = ""; }
             else { root.sharedResults = []; root.resultsError = root.describeError(xhr, "Read shared results"); }
         });

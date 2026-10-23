@@ -526,7 +526,8 @@ export class SessionHost {
     }
     const command = ownerCommand(options.prompt);
     if (command?.command === "") throw new GhostError("invalid_request", "Write a command after ! or !!.", 400);
-    const controller = new AbortController(), turnId = randomUUID();
+    const controller = new AbortController();
+    let turnId: string = randomUUID();
     this.admissions.set(key, controller);
     return {
       run: async (stream) => {
@@ -539,7 +540,7 @@ export class SessionHost {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
-            try { await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
+            try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
             catch (error) {
               failure = error;
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
@@ -554,7 +555,7 @@ export class SessionHost {
           this.announce(ghost.name, id);
           // Delivery observes a settled turn; a slow notifier never holds the conversation busy.
           const ended = settled;
-          if (ended) void this.withGhost(ghost.name, () => this.turnEnd(ghost, id, ended, controller.signal, turnId)).catch(() => {});
+          if (ended) void this.turnEnd(ghost, id, ended, controller.signal, turnId);
         }
       },
     };
@@ -595,15 +596,15 @@ export class SessionHost {
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
     promptRecorded = false,
-    initialTurnId = randomUUID(),
-  ): Promise<void> {
+    initialTurnId: string = randomUUID(),
+  ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);
     stream.emit({ type: "start" });
     if (command) {
       this.announce(ghost.name, id);
       await this.runOwnerCommand(ghost, id, command.command, command.excluded, stream, signal);
-      return;
+      return initialTurnId;
     }
     const key = keyOf(ghost.name, id);
     const turn: LiveTurn = { followUps: [], emit: stream.emit };
@@ -613,10 +614,11 @@ export class SessionHost {
       if (event !== "turn_end") stream.emit({ type: running ? "hook_start" : "hook_end", name, event });
     };
     let terminal: TurnEvent = { type: "done" };
+    // The id of the owner request the final pass answered, which `turn_end` reports.
+    let turnId = initialTurnId;
     try {
       type Pass = { text: string; origin?: "follow_up" | "hook" };
       let next: Pass | undefined = { text: prompt };
-      let turnId = initialTurnId;
       let ownerPrompt = prompt;
       while (next && !signal.aborted) {
         const { text, origin }: Pass = next;
@@ -664,6 +666,7 @@ export class SessionHost {
       this.live.delete(key);
       stream.emit(terminal);
     }
+    return turnId;
   }
 
   /**
@@ -876,19 +879,23 @@ export class SessionHost {
   ): Promise<void> {
     if (!this.hooks.hasHandlers("turn_end") || signal.aborted || (terminal.type === "error" && terminal.reason === "aborted")) return;
     try {
-      const { sessionDir } = ghostPaths(ghost.dir), entries = (await readLog(sessionDir, id)) ?? [];
-      const last = entries.findLast(entry => entry.type === "assistant" || entry.type === "command");
-      const text = terminal.type === "error" ? terminal.errorMessage
-        : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
-        : last?.type === "command" ? last.output : "";
+      // The lease covers reading the home, not the handlers, so a slow notifier never holds up a rename or delete.
+      const event = await this.withGhost(ghost.name, async () => {
+        const { sessionDir } = ghostPaths(ghost.dir), entries = (await readLog(sessionDir, id)) ?? [];
+        const last = entries.findLast(entry => entry.type === "assistant" || entry.type === "command");
+        const text = terminal.type === "error" ? terminal.errorMessage
+          : last?.type === "assistant" ? last.content.flatMap(part => part.type === "text" ? [part.text] : []).join("\n")
+          : last?.type === "command" ? last.output : "";
+        return { title: (logState(entries).title ?? ghost.name).slice(0, 160), text, sessionDir };
+      });
       const base = await this.viewerUrl?.().catch(() => null);
       const url = base ? new URL(base) : null;
       if (url) { url.searchParams.set("ghost", ghost.name); url.searchParams.set("session", id); }
       await this.hooks.emitTurnEnd({
-        type: "turn_end", turn_id: turnId, outcome: terminal.type, title: (logState(entries).title ?? ghost.name).slice(0, 160),
-        excerpt: (text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
-        session_id: id, session_file: logPath(sessionDir, id), signal, ghost_name: ghost.name, ghost_home: ghost.dir,
-        cwd: conversationDir(sessionDir, id), conversation_id: id,
+        type: "turn_end", turn_id: turnId, outcome: terminal.type, title: event.title,
+        excerpt: (event.text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
+        session_id: id, session_file: logPath(event.sessionDir, id), signal, ghost_name: ghost.name, ghost_home: ghost.dir,
+        cwd: conversationDir(event.sessionDir, id), conversation_id: id,
       });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
   }
@@ -1184,12 +1191,11 @@ export class SessionHost {
   }
   results(ghost: string, id: string) { return this.resultOperation(ghost, id, dir => listResults(dir)); }
   publishResult(ghost: string, id: string, path: string) { return this.resultOperation(ghost, id, dir => publishResult(dir, path)); }
-  withResult<T>(ghost: string, id: string, result: string, consume: (opened: Awaited<ReturnType<typeof openResult>>) => Promise<T>): Promise<T> {
-    // Only the open is serialized: the handle outlives a revoke, so a slow download blocks no other result operation.
-    return this.withGhost(ghost, async () => {
-      const opened = await this.resultOperation(ghost, id, dir => openResult(dir, result));
-      try { return await consume(opened); } finally { await opened.file.close(); }
-    });
+  async withResult<T>(ghost: string, id: string, result: string, consume: (opened: Awaited<ReturnType<typeof openResult>>) => Promise<T>): Promise<T> {
+    // Only the open holds the lease and lock: the handle outlives a revoke or a home move,
+    // so a slow download blocks no other result operation, rename, or delete.
+    const opened = await this.resultOperation(ghost, id, dir => openResult(dir, result));
+    try { return await consume(opened); } finally { await opened.file.close(); }
   }
   revokeResult(ghost: string, id: string, result: string) { return this.resultOperation(ghost, id, dir => revokeResult(dir, result, this.trashEnv())); }
 

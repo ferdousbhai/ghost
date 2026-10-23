@@ -33,6 +33,12 @@ function validateSource(source: unknown, empty = false): asserts source is strin
     throw new GhostError("invalid_routine", "Each unit source must be nonempty UTF-8 text of at most 128 KiB without NUL bytes.", 400);
   }
 }
+/** Too large, undecodable, or unreadable files are refusals the list can skip, not daemon faults. */
+function readText(path: string): string | null {
+  try { return readPrivateFileText(path); } catch (error) {
+    throw new GhostError("invalid_routine", error instanceof Error ? error.message : String(error), 400);
+  }
+}
 async function readSource(path: string): Promise<string | null> {
   try {
     if (!(await lstat(path)).isFile()) throw new GhostError("invalid_routine", "Use native tools for linked or non-regular unit files.", 400);
@@ -40,7 +46,7 @@ async function readSource(path: string): Promise<string | null> {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
-  const source = readPrivateFileText(path);
+  const source = readText(path);
   validateSource(source, true);
   return source;
 }
@@ -57,7 +63,7 @@ export async function readRoutineConfig(ghost: string, slug: string, options: Sc
 function recoveryDir(options: ScheduleOptions): string { return join(options.unitDir, ".ghost-routine-recovery"); }
 async function readCheckpoint(ghost: string, id: string, options: ScheduleOptions): Promise<Checkpoint> {
   if (!RECOVERY_ID.test(id)) throw new GhostError("invalid_recovery", "Invalid recovery id.", 400);
-  const text = readPrivateFileText(join(recoveryDir(options), `${id}.json`));
+  const text = readText(join(recoveryDir(options), `${id}.json`));
   if (text === null) throw new GhostError("not_found", "No such routine checkpoint.", 404);
   let saved: Checkpoint;
   try { saved = JSON.parse(text); } catch { throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400); }
@@ -155,7 +161,9 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
     try {
       if (wroteSources) {
         // A native save since our write wins; the checkpoint below keeps the original.
-        if ((await readSources(ghost, slug, options)).revision !== revision(next)) throw new Error("native edit");
+        // The timer is written first, so a write that failed midway leaves only the timer changed.
+        const onDisk = (await readSources(ghost, slug, options)).revision;
+        if (onDisk !== revision(next) && onDisk !== revision({ timer: next.timer, service: current.service })) throw new Error("native edit");
         await writeSources(ghost, slug, current, options);
         await scheduleCommand(run, ["daemon-reload"]);
       }

@@ -88,7 +88,7 @@ describe("ghost help topics", () => {
     expect(text).toContain("mark a superseded fact with what replaced it and when");
     expect(text).toContain("only an empty note or a duplicate you merged. Then report each changed and trashed path");
     expect(text).toContain("daily timer (`ghost help timers`, `OnCalendar=daily`)");
-    expect(text).toContain("only if `systemctl --user list-timers --all '*-tidy-notes.timer'` lists none; never install it unasked");
+    expect(text).toContain("only if `systemctl --user list-unit-files '*-tidy-notes.timer'` lists none; never install it unasked");
     expect(text).toContain("Never preload the directory, read it wholesale, or keep an index or memory store of your own");
     expect(text).toContain("A Recall index over folders the owner chose, the whole directory included, is theirs to search");
     expect(text).toContain("`skills/<name>/SKILL.md`");
