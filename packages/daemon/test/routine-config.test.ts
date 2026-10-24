@@ -1,3 +1,4 @@
+import { execFile } from "node:child_process";
 import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -110,9 +111,12 @@ describe("native routine source edits and recovery", () => {
   });
   it.skipIf(which("systemd-analyze", process.env) === null)("uses native offline verification before changing real unit source files", async () => {
     const { options } = await setup(), config = await readRoutineConfig("casper", "daily", options);
-    await saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, { ...options, verify: undefined });
+    // A build chroot has no user runtime dir, which `systemd-analyze --user` creates state under.
+    const runtime = await mkdtemp(join(tmpdir(), "ghost-routine-runtime-")); roots.push(runtime);
+    const verify: CommandRunner = args => new Promise(resolve => execFile("systemd-analyze", [...args], { env: { ...process.env, XDG_RUNTIME_DIR: runtime } }, (error, stdout, stderr) => resolve({ stdout, stderr, code: error ? 1 : 0 })));
+    await saveRoutineConfig("casper", "daily", { ...config, timer: originalTimer.replace("daily", "weekly") }, { ...options, verify });
     const latest = await readRoutineConfig("casper", "daily", options);
-    await expect(saveRoutineConfig("casper", "daily", { ...latest, timer: "[Timer]\nOnCalendar=definitely-not-a-calendar\n" }, { ...options, verify: undefined })).rejects.toMatchObject({ status: 400 });
+    await expect(saveRoutineConfig("casper", "daily", { ...latest, timer: "[Timer]\nOnCalendar=definitely-not-a-calendar\n" }, { ...options, verify })).rejects.toMatchObject({ status: 400 });
     expect((await readRoutineConfig("casper", "daily", options)).timer).toBe(latest.timer);
   });
   it("does not overwrite a native save when stopping fails or source changes during stop", async () => {
