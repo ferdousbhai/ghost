@@ -175,30 +175,6 @@ FocusScope {
                 }
 
                 Rectangle {
-                    visible: destinationButton.destination.id === "hooks"
-                        && root.activeHookCount > 0
-                    anchors.right: parent.right
-                    anchors.rightMargin: 3
-                    anchors.top: parent.top
-                    anchors.topMargin: 3
-                    width: Math.max(height, hookCount.implicitWidth + 6)
-                    height: hookCount.implicitHeight + 2
-                    radius: height / 2
-                    color: Theme.ghostAmberBright
-
-                    Text {
-                        id: hookCount
-                        anchors.centerIn: parent
-                        text: String(root.activeHookCount)
-                        textFormat: Text.PlainText
-                        color: Theme.background
-                        font.family: Theme.fontFamily
-                        font.pixelSize: Theme.fontSizeCaption
-                        font.weight: Font.Bold
-                    }
-                }
-
-                Rectangle {
                     id: tooltip
 
                     anchors.right: parent.left
