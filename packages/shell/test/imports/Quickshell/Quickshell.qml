@@ -3,6 +3,8 @@ pragma Singleton
 import QtQml
 
 QtObject {
+    property string clipboardText: ""
+
     function env(name: string): string {
         // Destination port 0 cannot have a listener. Keep singleton startup
         // deterministic without probing either the owner's daemon or another

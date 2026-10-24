@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import Quickshell
 import "../qml/components"
 import "../qml/services"
 
@@ -118,17 +119,17 @@ TestCase {
                 + (topLeft.x + row.width + overhang) + " > " + hoverRegion.width);
     }
 
-    function test_aTurnWithNoTextStillShowsItsTrail(): void {
-        // A turn spent entirely on tool calls has no text to hover over. The
-        // count is the only thing in the row, so hiding it leaves a strip that
-        // reserves height, paints nothing, and strands the trail.
+    function test_aTurnWithNoTextHidesItsTrailUntilHoveredLikeAnyOther(): void {
+        // Calls with no text before them keep the count's line, so the
+        // pointer still has somewhere to find it.
         reply.body = "";
         reply.toolsOpen = false;
         wait(120);
         const trail = findChild(reply, "trailToggle");
         verify(reply.hasActions);
         verify(trail.visible);
-        compare(trail.opacity, 1);
+        verify(findChild(reply, "messageHoverArea").height >= trail.height);
+        compare(trail.opacity, 0);
         reply.body = "short one";
     }
 
@@ -193,5 +194,19 @@ TestCase {
         wait(120);
         verify(!prompt.hasActions);
         verify(!findChild(prompt, "messageActions").visible);
+    }
+
+    function test_aPromptCopiesFromBesideItsCapsuleOnHover(): void {
+        prompt.body = "why did you reply 4 times";
+        wait(120);
+        const copy = findChild(prompt, "promptCopy");
+        verify(copy.visible);
+        compare(copy.opacity, 0);
+        verify(copy.x + copy.width <= findChild(prompt, "messageHoverArea").mapToItem(prompt, 0, 0).x);
+        mouseMove(prompt, copy.x + copy.width / 2, copy.y + copy.height / 2);
+        tryCompare(copy, "opacity", 1);
+        mouseClick(prompt, copy.x + copy.width / 2, copy.y + copy.height / 2);
+        compare(Quickshell.clipboardText, "why did you reply 4 times");
+        verify(!findChild(reply, "promptCopy").visible);
     }
 }

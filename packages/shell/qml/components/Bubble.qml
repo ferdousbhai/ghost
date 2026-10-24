@@ -114,6 +114,33 @@ Item {
         }
     }
 
+    // Rows are not selectable, so a message's words copy from here.
+    component CopyAction: Item {
+        id: copyAction
+
+        objectName: "copyAction"
+        width: 16
+        height: 16
+        Accessible.role: Accessible.Button
+        Accessible.name: "Copy message"
+
+        CopyGlyph {
+            anchors.fill: parent
+            size: copyAction.width
+            tint: copyArea.containsMouse
+                ? Theme.foreground : Theme.foregroundFaint
+        }
+
+        MouseArea {
+            id: copyArea
+            anchors.fill: parent
+            anchors.margins: -Theme.gap / 2
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: Quickshell.clipboardText = root.body
+        }
+    }
+
     /**
      * Which tool cards this row shows. Which tools ran is not what a reply is
      * about — the orb narrated that while it happened, and then it stopped
@@ -212,6 +239,23 @@ Item {
             target: root; property: "scale"; from: 0.95; to: 1
             duration: Theme.durMed; easing.type: Easing.OutCubic
         }
+    }
+
+    // A prompt's copy sits beside its capsule: inside, it would reserve a
+    // blank line under every prompt. The row's hover reaches across the gap.
+    HoverHandler {
+        id: rowHover
+        acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+    }
+
+    CopyAction {
+        objectName: "promptCopy"
+        visible: root.mine && root.hasBody
+        opacity: rowHover.hovered ? 1 : 0
+        anchors.right: card.left
+        anchors.rightMargin: Theme.gap
+        anchors.bottom: card.bottom
+        anchors.bottomMargin: root.contentInset
     }
 
     Item {
@@ -378,31 +422,9 @@ Item {
                     x: Theme.gap / 2
                     y: root.hasBody ? bodyView.implicitHeight + Theme.gap / 2 : 0
 
-                    Item {
-                        id: copyAction
-
+                    CopyAction {
                         visible: root.hasBody
                         opacity: messageHover.hovered ? 1 : 0
-                        width: 16
-                        height: 16
-                        Accessible.role: Accessible.Button
-                        Accessible.name: "Copy message"
-
-                        CopyGlyph {
-                            anchors.fill: parent
-                            size: copyAction.width
-                            tint: copyArea.containsMouse
-                                ? Theme.foreground : Theme.foregroundFaint
-                        }
-
-                        MouseArea {
-                            id: copyArea
-                            anchors.fill: parent
-                            anchors.margins: -Theme.gap / 2
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: Quickshell.clipboardText = root.body
-                        }
                     }
 
                     // The trail, for when something did need checking after
@@ -413,14 +435,11 @@ Item {
                         objectName: "trailToggle"
 
                         visible: root.quietToolCount > 0
-                        // Hover-revealed like its neighbours, with two cases
-                        // that must stay painted: an open trail keeps its own
-                        // way shut, and a turn that spent itself entirely on
-                        // tool calls has no text to hover over — hiding the
-                        // count there leaves a row that reserves height and
-                        // draws nothing, with the trail unreachable.
-                        opacity: messageHover.hovered || root.toolsOpen
-                            || !root.hasBody ? 1 : 0
+                        // Hover-revealed like its neighbours, text or not: a
+                        // row of calls alone still keeps this line's height
+                        // inside `message`, so the pointer finds it there. An
+                        // open trail stays painted to keep its own way shut.
+                        opacity: messageHover.hovered || root.toolsOpen ? 1 : 0
                         text: root.toolsOpen
                             ? "hide"
                             : root.quietToolCount + (root.quietToolCount === 1 ? " step" : " steps")
