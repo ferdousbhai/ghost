@@ -20,6 +20,11 @@ Item {
         if (root.shell && root.shell.summon) root.shell.summon(root.selfId, JSON.stringify(payload || ({})));
     }
 
+    onShellChanged: if (root.shell && Ghostd.reopenAfterReload) {
+        Ghostd.reopenAfterReload = false;
+        root.summon(({}));
+    }
+
     // `omarchy-shell ghost <verb>`; the shell's own `toggle ferdousbhai.ghost`
     // covers the plain summon, so these are the verbs that carry an argument.
     IpcHandler {

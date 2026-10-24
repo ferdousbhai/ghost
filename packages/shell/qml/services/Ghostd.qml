@@ -324,6 +324,8 @@ Singleton {
     property var harnessMutation: null
     property var harnessSessionRequest: null
     property bool hudVisible: false
+    /** A host plugin reload closed the open HUD; the reloaded Service reopens it. */
+    property bool reopenAfterReload: false
     property bool hudChatFocused: false
     onHudChatFocusedChanged: if (root.hudChatFocused) root.markCurrentConversationRead()
 

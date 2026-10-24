@@ -53,6 +53,9 @@ Item {
     }
 
     function close(): void {
+        // A host plugin reload hides every panel before rebuilding it. The
+        // owner did not close this one, so the reloaded Service reopens it.
+        if (hud.shown && root.shell && root.shell.pluginReloading === true) Ghostd.reopenAfterReload = true;
         hud.close();
     }
 
