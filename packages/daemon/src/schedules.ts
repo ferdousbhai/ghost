@@ -63,6 +63,13 @@ export function routineStem(ghost: string, slug: string): string {
   return `${scheduleUnitPrefix(ghost)}${slug}`;
 }
 
+/** A routine's timer and same-name service, by name and by path in `unitDir`. */
+export function routineUnits(ghost: string, slug: string, unitDir: string) {
+  const stem = routineStem(ghost, slug);
+  return { timer: `${stem}.timer`, service: `${stem}.service`,
+    timerPath: join(unitDir, `${stem}.timer`), servicePath: join(unitDir, `${stem}.service`) };
+}
+
 function isOwnedScheduleUnit(name: string, prefix: string): boolean {
   if (!name.startsWith(prefix)) return false;
   return UNIT_SUFFIXES.some((suffix) => (
@@ -217,19 +224,19 @@ export async function listGhostRoutines(ghost: string, options: ScheduleOptions)
   const timerProps = unitProperties(await scheduleCommand(run, [
     "show", "--all", "--property=Id,Description,Unit,UnitFileState,ActiveState,TimersCalendar,TimersMonotonic,NextElapseUSecRealtime", ...timers,
   ]));
-  const services = timers.map((unit) => unit.replace(/\.timer$/u, ".service"));
+  const routines = timers.map((unit) => routineUnits(ghost, unit.slice(prefix.length, -".timer".length), options.unitDir));
+  const services = routines.map((routine) => routine.service);
   const serviceProps = unitProperties(await scheduleCommand(run, [
     "show", "--all", "--property=Id,ExecStart,Result,ActiveState,ExecMainStartTimestamp", ...services,
   ]));
-  return timers.map((unit, index) => {
+  return routines.map(({ timer: unit, service, timerPath, servicePath }) => {
     const timer = timerProps.get(unit) ?? {};
-    const service = services[index] as string;
     const state = (!timer.Unit || timer.Unit === service) ? serviceProps.get(service) ?? {} : {};
     const timestamp = (value: string | undefined) => !value || value === "0" || value === "n/a" ? null : value;
     return {
-      ghost, slug: unit.slice(prefix.length, -6), unit,
+      ghost, slug: unit.slice(prefix.length, -".timer".length), unit,
       service: timer.Unit || service,
-      timerPath: join(options.unitDir, unit), servicePath: timer.Unit && timer.Unit !== service ? "" : join(options.unitDir, service),
+      timerPath, servicePath: timer.Unit && timer.Unit !== service ? "" : servicePath,
       description: timer.Description ?? "", schedule: [timer.TimersCalendar, timer.TimersMonotonic].filter(Boolean).join("; "),
       nextRun: timestamp(timer.NextElapseUSecRealtime), lastRun: timestamp(state.ExecMainStartTimestamp),
       enabled: timer.UnitFileState ?? "", active: timer.ActiveState ?? "",
@@ -242,7 +249,7 @@ export async function controlGhostRoutine(
   ghost: string, slug: string, action: string, options: ScheduleOptions,
 ): Promise<void> {
   if (!["pause", "resume", "run"].includes(action)) throw new GhostError("invalid_routine", "Use pause, resume, or run.", 400);
-  const stem = routineStem(ghost, slug), unit = `${stem}.timer`, service = `${stem}.service`;
+  const { timer: unit, service } = routineUnits(ghost, slug, options.unitDir);
   const units = await listGhostScheduleUnits(ghost, options.unitDir);
   if (!units.includes(unit)) {
     throw new GhostError("not_found", "No such routine for this ghost.", 404);
@@ -258,11 +265,11 @@ export async function controlGhostRoutine(
 }
 
 export async function readRoutineLogs(ghost: string, slug: string, options: ScheduleOptions, journal: CommandRunner = commandRunner("journalctl")) {
-  const stem = routineStem(ghost, slug);
-  if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(`${stem}.timer`)) throw new GhostError("not_found", "No such routine.", 404);
+  const { timer, service } = routineUnits(ghost, slug, options.unitDir);
+  if (!(await listGhostScheduleUnits(ghost, options.unitDir)).includes(timer)) throw new GhostError("not_found", "No such routine.", 404);
   let output: string;
   try {
-    const result = await journal(["--user", "--unit", `${stem}.service`, "--no-pager", "--output=short-iso", "--lines=100"]);
+    const result = await journal(["--user", "--unit", service, "--no-pager", "--output=short-iso", "--lines=100"]);
     requireCommandSuccess(result, "journalctl"); output = result.stdout;
   } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${errorMessage(error)}`, 503); }
   const text = output.slice(-64000), sessions = new Set<string>();

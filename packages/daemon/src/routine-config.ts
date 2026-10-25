@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { errorMessage, GhostError } from "./errors.js";
 import { readPrivateFileText, writePrivateJsonAtomic, writePrivateTextAtomic } from "./private-file.js";
 import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
-import { routineStem, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";
+import { routineUnits, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";
 
 const MAX_SOURCE_BYTES = 131072;
 const RECOVERY_ID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
@@ -19,11 +19,6 @@ interface Checkpoint extends Sources {
 }
 export interface RoutineConfigOptions extends ScheduleOptions { verify?: CommandRunner }
 
-function names(ghost: string, slug: string, options: ScheduleOptions) {
-  const stem = routineStem(ghost, slug);
-  return { timer: `${stem}.timer`, service: `${stem}.service`,
-    timerPath: join(options.unitDir, `${stem}.timer`), servicePath: join(options.unitDir, `${stem}.service`) };
-}
 function revision(sources: Sources): string {
   return createHash("sha256").update(JSON.stringify([sources.timer, sources.service])).digest("hex");
 }
@@ -50,7 +45,7 @@ async function readSource(path: string): Promise<string | null> {
   return source;
 }
 async function readSources(ghost: string, slug: string, options: ScheduleOptions): Promise<RoutineConfig> {
-  const paths = names(ghost, slug, options);
+  const paths = routineUnits(ghost, slug, options.unitDir);
   const timer = await readSource(paths.timerPath), service = await readSource(paths.servicePath);
   return { timer, service, revision: revision({ timer, service }) };
 }
@@ -78,7 +73,7 @@ async function readCheckpoint(ghost: string, id: string, options: ScheduleOption
   try { saved = JSON.parse(text); } catch { throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400); }
   if (!saved || saved.ghost !== ghost) throw new GhostError("not_found", "No such routine checkpoint for this ghost.", 404);
   if (typeof saved.slug !== "string") throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400);
-  names(ghost, saved.slug, options);
+  routineUnits(ghost, saved.slug, options.unitDir);
   for (const source of [saved.timer, saved.service]) if (source !== null) validateSource(source, true);
   if (typeof saved.expectedRevision !== "string" || typeof saved.createdAt !== "string" || typeof saved.reason !== "string") {
     throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400);
@@ -104,7 +99,7 @@ export async function listRoutineRecoveries(ghost: string, options: ScheduleOpti
   return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 async function writeSources(ghost: string, slug: string, sources: Sources, options: ScheduleOptions) {
-  const paths = names(ghost, slug, options);
+  const paths = routineUnits(ghost, slug, options.unitDir);
   for (const [path, text] of [[paths.timerPath, sources.timer], [paths.servicePath, sources.service]] as const) {
     if (text !== null) await writePrivateTextAtomic(path, text);
     else await unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
@@ -113,7 +108,7 @@ async function writeSources(ghost: string, slug: string, sources: Sources, optio
 async function verifySources(ghost: string, slug: string, sources: Sources, options: RoutineConfigOptions) {
   if (sources.timer === null && sources.service === null) return;
   validateSource(sources.timer); validateSource(sources.service);
-  const paths = names(ghost, slug, options);
+  const paths = routineUnits(ghost, slug, options.unitDir);
   const temporary = await mkdtemp(join(options.unitDir, ".ghost-routine-verify-"));
   try {
     await writeFile(join(temporary, paths.timer), sources.timer, { mode: 0o600 });
@@ -128,7 +123,7 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   const current = await readSources(ghost, slug, options);
   if (reason !== "restore" && current.timer === null) throw new GhostError("not_found", "No such routine timer.", 404);
   if (current.revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed. Reload before saving or restoring.", 409);
-  const paths = names(ghost, slug, options), run = options.run ?? commandRunner("systemctl");
+  const paths = routineUnits(ghost, slug, options.unitDir), run = options.run ?? commandRunner("systemctl");
   // A restore puts back bytes that were already installed, so undo never depends on them verifying.
   if (reason !== "restore") await verifySources(ghost, slug, next, options);
   const inspect = async (includeService = true) => unitProperties(await scheduleCommand(run, [

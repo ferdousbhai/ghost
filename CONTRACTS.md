@@ -581,7 +581,8 @@ period (once attached readers finish) or server shutdown, and are not history.
 The terminal client never edits a ghost home; every command that changes ghost
 state goes through the daemon. Its command catalog is defined in
 [`cli/main.ts`](packages/daemon/src/cli/main.ts). Every daemon capability the
-HUD reaches is a named verb there (ghost list, rename, character, sessions
+HUD reaches, except attaching a photo and reading the follow-up queue, is a
+named verb there (ghost list, rename, character, sessions
 and their title/pin/read/delete/stop, the agent a ghost prefers (`ghost harness`)
 and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
 status), so a
