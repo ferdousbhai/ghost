@@ -211,8 +211,9 @@ export OMARCHY_PATH=$omarchy_path
 # preview that blanks itself while you look at it is not a preview. The bar
 # widget is flanked by two of the host's own icon buttons: a bar module is
 # sized against its neighbours, and a lone widget has none to be wrong beside.
-# The plugin directory is a symlink to the checkout, which is what
-# makes an edit-and-rescan loop work against the tree you are editing.
+# The plugin directory is a symlink to the checkout, so the preview runs the
+# tree you are editing; an edit is live only after the preview restarts (a
+# rescan keeps the QML already loaded).
 mkdir -p "$HOME/.config/omarchy/plugins"
 ln -sfn "$plugin_dir" "$HOME/.config/omarchy/plugins/$plugin_id"
 cat > "$HOME/.config/omarchy/shell.json" <<JSON
