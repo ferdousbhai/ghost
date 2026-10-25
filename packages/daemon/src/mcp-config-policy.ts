@@ -18,7 +18,7 @@ export interface MCPHttpServerConfig extends MCPServerConfigBase {
   type: "http";
   url: string;
   headers?: Record<string, string>;
-  /** Send `headers` only to the configured origin, never across a redirect. */
+  /** Pass `headers` values verbatim, without `${VAR}` expansion. */
   headerPolicy?: "origin-locked";
 }
 
@@ -30,6 +30,20 @@ export interface MCPSseServerConfig extends MCPServerConfigBase {
 }
 
 export type MCPServerConfig = MCPStdioServerConfig | MCPHttpServerConfig | MCPSseServerConfig;
+
+/**
+ * Expand `${VAR}` throughout a row, except the `env` (stdio, `envPolicy:
+ * "literal"`) or `headers` (remote, `headerPolicy: "origin-locked"`) map its
+ * policy keeps verbatim.
+ */
+export function expandMcpServerConfig(config: MCPServerConfig, environment: Readonly<Record<string, string | undefined>>): MCPServerConfig {
+  const literal = (config.type ?? "stdio") === "stdio"
+    ? ((config as MCPStdioServerConfig).envPolicy === "literal" ? "env" : null)
+    : ((config as MCPHttpServerConfig | MCPSseServerConfig).headerPolicy === "origin-locked" ? "headers" : null);
+  if (literal === null) return expandEnvVarsDeep(config, environment);
+  const { [literal]: kept, ...ordinary } = config as unknown as Record<string, unknown>;
+  return { ...expandEnvVarsDeep(ordinary, environment), ...(kept === undefined ? {} : { [literal]: kept }) } as unknown as MCPServerConfig;
+}
 
 function validateServerName(name: string): string | undefined {
   if (!name) return "Server name cannot be empty";
@@ -48,7 +62,7 @@ function expandEnvVars(value: string, environment: Readonly<Record<string, strin
     environment[name] ?? fallback ?? "");
 }
 
-export function expandEnvVarsDeep<T>(value: T, environment: Readonly<Record<string, string | undefined>>): T {
+function expandEnvVarsDeep<T>(value: T, environment: Readonly<Record<string, string | undefined>>): T {
   if (typeof value === "string") return expandEnvVars(value, environment) as T;
   if (Array.isArray(value)) return value.map((item) => expandEnvVarsDeep(item, environment)) as T;
   if (value !== null && typeof value === "object") {
@@ -87,10 +101,7 @@ function isStringRecord(value: unknown): value is Record<string, string> {
   return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
-/**
- * Validate Ghost's owned MCP boundary before the MCP manager or an HTTP sanitizer sees a
- * value.
- */
+/** Validate a row against the fields some harness dialect can carry. */
 function ownedMcpValidationErrors(value: unknown): string[] {
   if (!isRecord(value)) return ["MCP server configuration must be a JSON object."];
   const type = value.type === undefined ? "stdio" : value.type;

@@ -36,7 +36,8 @@ export function codexSkillNames(body: unknown): string[] | null {
   return resourceNames(names);
 }
 
-export function resourceSummary(harness: string, resources: RunResources): string {
+/** One line per kind of resource the harness named, or "" when it named none. */
+export function resourceSummary(resources: RunResources): string {
   const lines = [
     ["Instructions/context files", resources.contextFiles],
     ["Skills", resources.skills],
@@ -45,7 +46,7 @@ export function resourceSummary(harness: string, resources: RunResources): strin
     ["Tools", resources.tools],
     ["Prompt templates", resources.promptTemplates],
   ].flatMap(([label, names]) => Array.isArray(names) && names.length ? [`${label}: ${names.join(", ")}`] : []);
-  return lines.length ? `${harness} · Run resources\n${lines.join("\n")}` : "";
+  return lines.join("\n");
 }
 
 export interface RunResourceSnapshot {
@@ -66,7 +67,7 @@ export function snapshotSummary(snapshot: RunResourceSnapshot): string {
     ].filter(Boolean);
     if (lines.length) sections.push(`Supplied by Ghost\n${lines.join("\n")}`);
   }
-  const reported = resourceSummary(snapshot.harness, snapshot.resources).split("\n").slice(1).join("\n");
+  const reported = resourceSummary(snapshot.resources);
   sections.push(reported ? `Reported by harness\n${reported}` : "No named resources reported by this run.");
   return sections.join("\n\n");
 }

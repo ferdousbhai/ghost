@@ -7,6 +7,7 @@
 import { mkdir, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { writePrivateJsonAtomic } from "./private-file.js";
+import { isRecord } from "./record.js";
 
 const VERSION = 2;
 
@@ -40,7 +41,7 @@ export function writePins(sessionDir: string, ids: readonly string[]): Promise<v
 /** Read times by id, as ISO timestamps; an entry without a parseable time is dropped. */
 export async function readReads(sessionDir: string): Promise<Record<string, string>> {
   const reads = await readField(readsPath(sessionDir), "reads");
-  if (!reads || typeof reads !== "object" || Array.isArray(reads)) return {};
+  if (!isRecord(reads)) return {};
   const kept: Record<string, string> = {};
   for (const [id, timestamp] of Object.entries(reads)) {
     const milliseconds = typeof timestamp === "string" ? Date.parse(timestamp) : Number.NaN;

@@ -10,10 +10,10 @@ describe("run resources", () => {
     for (const invalid of [[""], ["\nsecret"], ["a".repeat(257)], Array(257).fill("mail"), [{}]]) {
       expect(resourceNames(invalid)).toBeNull();
     }
-    expect(resourceSummary("pi", unreportedResources())).toBe("");
-    expect(resourceSummary("pi", { skills: [], extensions: [], mcpServers: [] })).toBe("");
-    expect(resourceSummary("claude", { skills: [], extensions: ["review"], mcpServers: [] }))
-      .toBe("claude · Run resources\nExtensions/plugins: review");
+    expect(resourceSummary(unreportedResources())).toBe("");
+    expect(resourceSummary({ skills: [], extensions: [], mcpServers: [] })).toBe("");
+    expect(resourceSummary({ skills: [], extensions: ["review"], mcpServers: [] }))
+      .toBe("Extensions/plugins: review");
   });
 
   it("extracts only names in Codex's rendered catalog section", () => {

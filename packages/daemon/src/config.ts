@@ -89,7 +89,7 @@ function readConfigFile(path: string): DaemonConfigFile | null {
   if (!isRecord(parsed)) {
     throw new Error(`${path} must contain a JSON object.`);
   }
-  const file = parsed as Record<string, unknown>;
+  const file = parsed;
   const config: DaemonConfigFile = {};
   if (file.port !== undefined) {
     if (typeof file.port !== "number") throw new Error(`${path}: "port" must be a number.`);
@@ -109,7 +109,7 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     if (!isRecord(file.remote)) {
       throw new Error(`${path}: "remote" must be a JSON object.`);
     }
-    const raw = file.remote as Record<string, unknown>;
+    const raw = file.remote;
     const remote: RemoteConfigFile = {};
     if (raw.owner !== undefined) {
       if (typeof raw.owner !== "string" || !raw.owner.trim()) throw new Error(`${path}: "remote.owner" must be a login.`);

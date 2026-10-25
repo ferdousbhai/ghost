@@ -36,7 +36,7 @@ import {
   type LogEntry,
   type TranscriptMessage,
 } from "./conversation-log.js";
-import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
+import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
@@ -55,8 +55,7 @@ import {
   OMARCHY_COMPUTER_USE_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import type { MCPServerConfig } from "./mcp-config-policy.js";
-import { expandMcpServerConfig } from "./mcp-catalog-policy.js";
+import { expandMcpServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
 import { pinsPath, readPins, readReads, readsPath, writePins, writeReads } from "./sidecars.js";
@@ -363,7 +362,7 @@ export class SessionHost {
     try {
       for (const server of readEnabledMcp(ghost.dir)) {
         if (server.name === GHOST_MCP_SERVER) continue;
-        const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, process.env), ghost.dir);
+        const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);
         servers.push({ name: server.name, config });
       }
     } catch (error) {
@@ -443,7 +442,7 @@ export class SessionHost {
    */
   private async harnessCandidates(ghost: Ghost, current: string | null): Promise<string[]> {
     const [eligible, omarchyDefault] = await Promise.all([this.eligibleHarnesses(), this.defaultHarness()]);
-    return orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, loadGhostSettings(ghost.dir).getString("harness") ?? null, omarchyDefault]);
+    return orderHarnesses(eligible.filter((id) => this.rowOf(id) !== null), [current, readHarnessSetting(ghost.dir), omarchyDefault]);
   }
 
   // ── Agent choice ──────────────────────────────────────────────────────
@@ -463,7 +462,7 @@ export class SessionHost {
         const row = this.rowOf(harness.id);
         return row ? [{ ...harness, effort: row.effort ?? null }] : [];
       }),
-      ghostDefault: loadGhostSettings(ghost.dir).getString("harness") ?? null,
+      ghostDefault: readHarnessSetting(ghost.dir),
       omarchyDefault,
     };
   }
@@ -585,7 +584,7 @@ export class SessionHost {
     }));
   }
 
-  /** One whole turn, as the server runs it; a failure outside its passes throws instead of emitting. */
+  /** admitTurn then run, in one call, for tests; a failure outside its passes throws instead of emitting. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     await (await this.admitTurn(ghostName, options)).run(options);
   }
@@ -598,7 +597,7 @@ export class SessionHost {
     stream: AdmittedTurnOptions,
     signal: AbortSignal,
     promptRecorded = false,
-    initialTurnId: string = randomUUID(),
+    initialTurnId: string,
   ): Promise<string> {
     const { sessionDir } = ghostPaths(ghost.dir);
     if (!existsSync(logPath(sessionDir, id))) await appendLog(sessionDir, id, [newConversationEntry(id, new Date())]);

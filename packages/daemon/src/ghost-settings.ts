@@ -8,31 +8,11 @@ import { ghostPaths } from "./ghosts.js";
 import { isRecord } from "./record.js";
 import { readPrivateFileText, writePrivateTextAtomic } from "./private-file.js";
 
-export interface GhostSettings {
-  getString(path: string): string | undefined;
-}
-
-function ghostSettingsFrom(document: unknown): GhostSettings {
-  const root = isRecord(document) ? document : {};
-  const get = (path: string): unknown => {
-    let current: unknown = root;
-    for (const segment of path.split(".")) {
-      if (!isRecord(current) || !Object.hasOwn(current, segment)) return undefined;
-      current = current[segment];
-    }
-    return current;
-  };
-  return {
-    getString: (path) => {
-      const value = get(path);
-      return typeof value === "string" ? value : undefined;
-    },
-  };
-}
-
-export function loadGhostSettings(homeDir: string): GhostSettings {
+/** The ghost's `harness` setting, or null when it names none. */
+export function readHarnessSetting(homeDir: string): string | null {
   const text = readPrivateFileText(ghostPaths(homeDir).settingsFile);
-  return ghostSettingsFrom(text === null ? {} : parseYaml(text));
+  const document: unknown = text === null ? null : parseYaml(text);
+  return isRecord(document) && typeof document.harness === "string" ? document.harness : null;
 }
 
 /**

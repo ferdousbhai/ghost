@@ -384,7 +384,6 @@ interface IndexedLogSnapshot {
   total: number;
   resources: RunResourceSnapshot | null;
   entries: readonly IndexedEntry[] | undefined;
-  entryCount: number;
 }
 // Summaries remain cheap for long lists; only sixteen logs retain historical offsets.
 const logIndexes = new BoundedCache<string, LogIndex>();
@@ -392,7 +391,7 @@ const offsetIndexes = new BoundedCache<string, { index: LogIndex; entries: Index
 
 function indexSnapshot(index: LogIndex, entries?: IndexedEntry[]): IndexedLogSnapshot {
   return { info: index.info, state: index.summary.value(), total: index.total,
-    resources: index.resources.value(), entries, entryCount: entries?.length ?? 0 };
+    resources: index.resources.value(), entries };
 }
 const indexing = new Map<string, Promise<IndexedLogSnapshot | null>>();
 
@@ -511,14 +510,14 @@ export async function readTranscriptPage(sessionDir: string, id: string, offset:
     const messages: TranscriptMessage[] = [];
     const entries = index.entries ?? [];
     let low = 0;
-    let high = index.entryCount;
+    let high = entries.length;
     while (low < high) {
       const middle = Math.floor((low + high) / 2);
       const entry = entries[middle] as IndexedEntry;
       if (entry.first + entry.count <= offset) low = middle + 1;
       else high = middle;
     }
-    for (let n = low; n < index.entryCount; n++) {
+    for (let n = low; n < entries.length; n++) {
       const record = entries[n] as IndexedEntry;
       if (record.first >= offset + limit) break;
       const bytes = Buffer.alloc(record.end - record.start);

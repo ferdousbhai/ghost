@@ -169,7 +169,7 @@ export interface CommandResult {
   stderr: string;
   aborted: boolean;
   timedOut: boolean;
-  /** Stopped for writing more than 1 MB to stdout or stderr. */
+  /** Stopped for writing more than 1 MB to stdout. */
   overflowed: boolean;
   executionFailed: boolean;
 }

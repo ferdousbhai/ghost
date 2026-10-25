@@ -208,7 +208,7 @@ export class DaemonClient {
           .filter((line) => line.startsWith("data:"))
           .map((line) => line.slice(5).trimStart())
           .join("\n");
-        if (!data || data === "[DONE]") continue;
+        if (!data) continue;
         try {
           const keepGoing = await onEvent(JSON.parse(data) as unknown);
           if (keepGoing === false) {

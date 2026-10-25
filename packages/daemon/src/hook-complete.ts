@@ -7,7 +7,7 @@
 import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import { loadGhostSettings } from "./ghost-settings.js";
+import { readHarnessSetting } from "./ghost-settings.js";
 import { isGhostHome } from "./ghosts.js";
 import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
@@ -38,7 +38,7 @@ async function candidates(home: string, env: NodeJS.ProcessEnv, options: HookCom
       : readHarnessReport(env, homedir()).then(eligibleIds).catch(() => SUPPORTED_HARNESSES),
     options.harnesses ? null : omarchyDefaultAgent(env),
   ]);
-  const preferred = [loadGhostSettings(home).getString("harness") ?? null, omarchyDefault];
+  const preferred = [readHarnessSetting(home), omarchyDefault];
   return orderHarnesses(eligible.filter((id) => rows(id) !== null), preferred);
 }
 
