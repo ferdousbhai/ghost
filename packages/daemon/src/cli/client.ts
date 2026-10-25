@@ -1,7 +1,6 @@
 import { apiTokenPath, readApiToken } from "../token-store.js";
 import { loadConfig } from "../config.js";
 import { SSE_KEEPALIVE_INTERVAL_MS } from "../turn-events.js";
-import { describeErrorBody } from "./output.js";
 import type { CliRuntime } from "./types.js";
 import { errorMessage } from "../errors.js";
 
@@ -28,9 +27,13 @@ export class CliError extends Error {
   }
 }
 
-function daemonErrorCode(body: unknown): string | undefined {
-  const error = (body as { error?: { code?: unknown } } | null)?.error;
-  return typeof error?.code === "string" ? error.code : undefined;
+/** ghostd's `{ error: { message, code } }` envelope, field by field. */
+function daemonError(body: unknown): { message?: string; code?: string } {
+  const error = (body as { error?: { message?: unknown; code?: unknown } } | null)?.error;
+  return {
+    ...(typeof error?.message === "string" && error.message.trim() ? { message: error.message } : {}),
+    ...(typeof error?.code === "string" ? { code: error.code } : {}),
+  };
 }
 
 export const EXIT_CODE = {
@@ -76,8 +79,7 @@ function statusError(status: number, body: unknown, tokenPath: string): CliError
       `unauthorized; run \`ghostd api-token\` as the machine owner (token file: ${tokenPath})`,
     );
   }
-  const message = describeErrorBody(body, `daemon returned HTTP ${status}`);
-  const code = daemonErrorCode(body);
+  const { message = `daemon returned HTTP ${status}`, code } = daemonError(body);
   if (status === 404) return new CliError(EXIT_CODE.notFound, message, code);
   if (status === 409) return new CliError(EXIT_CODE.conflict, message, code);
   return new CliError(EXIT_CODE.failure, message, code);

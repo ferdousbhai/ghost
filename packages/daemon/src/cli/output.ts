@@ -60,17 +60,3 @@ export function table(rows: readonly (readonly string[])[], headers?: readonly s
 export function dim(text: string, enabled: boolean): string {
   return enabled ? `\u001b[2m${text}\u001b[22m` : text;
 }
-
-export function describeErrorBody(body: unknown, fallback: string): string {
-  if (body && typeof body === "object") {
-    const error = (body as { error?: unknown }).error;
-    if (error && typeof error === "object") {
-      const message = (error as { message?: unknown }).message;
-      if (typeof message === "string" && message.trim()) return message;
-    }
-    if (typeof error === "string" && error.trim()) return error;
-    const message = (body as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) return message;
-  }
-  return fallback;
-}
