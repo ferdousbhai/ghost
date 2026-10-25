@@ -2,8 +2,7 @@
 // A dynamically-filled ListModel has no schema, so a role the rows stop
 // carrying does not fail the build, or qmllint, or any test — the delegate
 // simply cannot be created and the conversation renders empty at runtime.
-// qmllint is already told to expect these as unbound, so this is the only
-// thing standing between a removed row field and a blank HUD.
+// This probe is what stands between a removed row field and a blank HUD.
 import { readFileSync } from "node:fs";
 
 const hud = readFileSync(new URL("../../qml/GhostHud.qml", import.meta.url), "utf8");
