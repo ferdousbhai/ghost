@@ -587,8 +587,9 @@ and a conversation runs on (`ghost switch`), MCP, hooks, remote, and
 status), so a
 ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 <topic>` prints the recipes the system prompt only points at (`timers`,
-`self`, `harnesses`, `background`, `memory`) and optional ones it does not
-(`dictation`; [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
+`self`, `harnesses`, `background`, `memory`) and ones it does not
+(`dictation`, `events`, `notifications`;
+[`help-topics.ts`](packages/daemon/src/help-topics.ts)),
 rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
 and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the

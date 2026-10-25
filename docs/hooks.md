@@ -210,18 +210,13 @@ stop-hook reviewer marks its call (keep-going sets `KEEP_GOING_REVIEWING`) so
 the harness's own stop hook does not review the review. An older `role` field
 is ignored.
 
-## Status
+## Status and editing
 
 The hooks that run are exactly the handlers in the `hooks.json` the daemon
-admitted, which the owner-only `GET /api/hooks/config` returns as
-`{ path, document }`; `ghost hooks` and the HUD's Hooks pane read it there.
-A handler without a `name` or `description` is shown with the defaults
-above.
-
-## Editing
-
-Authenticated `GET /api/hooks/config` returns `{ path, document }`: the
-admitted `hooks.json` as one object and its absolute path. `PUT
+admitted. The owner-only `GET /api/hooks/config` returns `{ path, document }`:
+that file as one object and its absolute path; `ghost hooks` and the HUD's
+Hooks pane read it there, showing a handler without a `name` or
+`description` with the defaults above. `PUT
 /api/hooks/config` with a whole document validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and

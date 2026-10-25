@@ -11,6 +11,3 @@ dist/
 
 # Machine-local Quickshell per-run symlink (points into /run/user VFS)
 packages/shell/qml/.qmlls.ini
-# Python bytecode (tray helper)
-__pycache__/
-*.pyc

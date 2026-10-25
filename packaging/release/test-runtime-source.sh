@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
-test_parent="${GHOST_RUNTIME_SOURCE_TEST_ROOT:-${TMPDIR:-/tmp}}"
+test_parent="${TMPDIR:-/tmp}"
 mkdir -p "$test_parent"
 work="$(mktemp -d "$test_parent/ghost-runtime-source.XXXXXX")"
 cleanup() {

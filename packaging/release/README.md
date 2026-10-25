@@ -41,9 +41,9 @@ The v3 runtime archive records `bun_build_version` separately from
 `bun_runtime_min`, fixes `bundle_target=bun`, and binds every launcher, bundle,
 license, and license-manifest byte to the exact `source_commit` through
 `PAYLOAD.SHA256`. The stable recipe verifies the source/runtime checksums, exact
-layout and modes, payload and bundled-license closure,
-declared/current Bun compatibility, and each launcher's `--help`/`--version`
-plus scratch-daemon behavior before installation.
+layout and modes, payload and bundled-license closure, declared/current Bun
+compatibility, and each launcher's `--help`/`--version` before installation;
+`publish.sh` also runs a scratch daemon from the archive before tagging.
 
 ## Cutting a release
 

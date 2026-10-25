@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 
-# Keep commands used by package checks, PKGBUILD metadata, generated .SRCINFO,
-# and the CI dependency installer in agreement.
+# Keep commands used by package checks, PKGBUILD metadata, the generated
+# .SRCINFO, and the stable recipe's dependencies in agreement.
 
 set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
 for script in arch-run.sh build-native.sh; do bash -n "$script_dir/$script"; done
-temp_base="${GHOST_ARCH_DEPENDENCY_TEST_ROOT:-${TMPDIR:-/tmp}}"
+temp_base="${TMPDIR:-/tmp}"
 mkdir -p "$temp_base"
 work="$(mktemp -d "$temp_base/ghost-arch-dependencies.XXXXXX")"
 cleanup() {
@@ -88,7 +88,7 @@ bash "$source_root/packaging/omarchy/test-contribution.sh"
 # file; an unreferenced test-* file is a suite that silently never runs.
 while IFS= read -r suite; do
   name="$(basename -- "$suite")"
-  if ! grep -rFq --exclude="$name" --exclude-dir=__pycache__ \
+  if ! grep -rFq --exclude="$name" \
     --exclude='README.md' "$name" \
     "$source_root/packaging" "$source_root/.github"; then
     printf 'orphaned packaging test suite: %s is referenced nowhere\n' \
@@ -96,8 +96,7 @@ while IFS= read -r suite; do
     exit 1
   fi
 done < <(find "$source_root/packaging" \
-  -name __pycache__ -prune \
-  -o -name 'test-*' -type f -print | sort)
+  -name 'test-*' -type f -print | sort)
 
 (
   CDPATH= cd -- "$script_dir"
@@ -117,19 +116,14 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
   0.0.1 \
   0000000000000000000000000000000000000000000000000000000000000000 \
   0000000000000000000000000000000000000000000000000000000000000000
-require_srcinfo_entry checkdepends jq "$work/ghost/.SRCINFO"
-require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
-require_srcinfo_entry checkdepends ripgrep "$work/ghost/.SRCINFO"
-require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
-require_srcinfo_dependency bun "$work/ghost/.SRCINFO"
-require_srcinfo_entry optdepends 'npm: npx-launched MCP servers' "$work/ghost/.SRCINFO"
-require_srcinfo_dependency systemd "$work/ghost/.SRCINFO"
-sed -n 's/^	depends = //p' "$work/ghost-dev.SRCINFO" \
-  | sed '/^ghost-runtime/d' | LC_ALL=C sort > "$work/development-depends"
-sed -n 's/^	depends = //p' "$work/ghost/.SRCINFO" \
-  | sed '/^ghost-runtime/d' | LC_ALL=C sort > "$work/stable-depends"
-if ! cmp "$work/development-depends" "$work/stable-depends"; then
-  printf 'stable and development runtime dependencies differ\n' >&2
+# The stable recipe needs what the development one does at run and check
+# time; only the development build itself needs git and pnpm.
+dependencies() {
+  sed -En 's/^\t(depends|checkdepends|optdepends) = /\1 /p' "$1" \
+    | sed '/^depends ghost-runtime/d' | LC_ALL=C sort
+}
+if ! cmp <(dependencies "$work/ghost-dev.SRCINFO") <(dependencies "$work/ghost/.SRCINFO"); then
+  printf 'stable and development dependencies differ\n' >&2
   exit 1
 fi
 

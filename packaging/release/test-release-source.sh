@@ -3,7 +3,7 @@ set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
-test_parent="${GHOST_RELEASE_SOURCE_TEST_ROOT:-${TMPDIR:-/tmp}}"
+test_parent="${TMPDIR:-/tmp}"
 mkdir -p "$test_parent"
 work="$(mktemp -d "$test_parent/ghost-release-source.XXXXXX")"
 cleanup() {
@@ -21,14 +21,7 @@ SOURCE_DATE_EPOCH="$epoch" \
 tar -xf "$archive" -C "$work"
 extracted="$work/ghost-$version"
 
-[[ ! -e "$extracted/.git" && ! -L "$extracted/.git" \
-  && ! -e "$extracted/CLAUDE.md" && ! -L "$extracted/CLAUDE.md" \
-  && -f "$extracted/CONTRACTS.md" ]]
-if find "$extracted" \( -type f -o -type l \) \
-  \( -name AGENTS.md -o -name CLAUDE.md \) -print -quit | grep -q .; then
-  printf 'source archive retained private instruction files or aliases\n' >&2
-  exit 1
-fi
+[[ ! -e "$extracted/.git" && ! -L "$extracted/.git" && -f "$extracted/CONTRACTS.md" ]]
 bash "$script_dir/verify-release-source.sh" \
   "$extracted" "$version" "$commit" "$epoch"
 
@@ -52,6 +45,7 @@ rm "$extracted/nested/AGENTS.md"
 
 # The stable package invokes this shared check from an extracted source archive,
 # where Git metadata is deliberately absent.
-GHOST_ARCH_DEPENDENCY_TEST_ROOT="$work/stable-check-work" \
+mkdir "$work/stable-check-work"
+TMPDIR="$work/stable-check-work" \
   bash "$extracted/packaging/arch/test-check-dependencies.sh"
 printf 'Release source privacy regression passed\n'

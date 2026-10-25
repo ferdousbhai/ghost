@@ -3,7 +3,7 @@
 set -euo pipefail
 
 script_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-temp_base="${GHOST_OMARCHY_TEST_ROOT:-${TMPDIR:-/tmp}}"
+temp_base="${TMPDIR:-/tmp}"
 mkdir -p -- "$temp_base"
 work="$(mktemp -d "$temp_base/ghost-omarchy-contribution.XXXXXXXXXX")"
 cleanup() {

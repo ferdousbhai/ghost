@@ -4,7 +4,7 @@ set -euo pipefail
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
 checker="$script_dir/verify-release-version.sh"
-test_parent="${GHOST_RELEASE_VERSION_TEST_ROOT:-${TMPDIR:-/tmp}}"
+test_parent="${TMPDIR:-/tmp}"
 mkdir -p "$test_parent"
 work="$(mktemp -d "$test_parent/ghost-release-version.XXXXXX")"
 cleanup() {
@@ -12,12 +12,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-manifests=(
-  package.json
-  packages/daemon/package.json
-  packages/shell/package.json
-  packages/shell/qml/manifest.json
-)
+mapfile -t manifests < <(bash "$checker" --manifests)
 
 expected="$(bash "$checker" "$source_root")"
 
