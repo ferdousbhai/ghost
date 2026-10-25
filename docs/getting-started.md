@@ -289,7 +289,7 @@ and any skill you installed untouched.
 |---|---|
 | `cannot reach ghostd` / "ghostd is not answering" | `systemctl --user status ghostd.service`; `journalctl --user -u ghostd -e` |
 | `unauthorized` (exit 4) | `ghostd api-token` as the machine owner; the HUD and CLI read `~/.local/state/ghost/api-token` |
-| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, rerun the installer to link it, wait for discovery, and enable it. |
+| The HUD never appears | `omarchy plugin list` should show `ferdousbhai.ghost` enabled; if not, run the link, rescan, and enable lines in [Confirm setup](#3-confirm-setup). |
 | A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
