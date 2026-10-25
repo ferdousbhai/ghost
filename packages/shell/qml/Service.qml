@@ -26,8 +26,8 @@ Item {
         root.summon(({}));
     }
 
-    // `omarchy-shell ghost <verb>`; the shell's own `toggle ferdousbhai.ghost`
-    // covers the plain summon, so these are the verbs that carry an argument.
+    // `omarchy-shell ghost <verb>`; the plain toggle is the shell's own
+    // `toggle ferdousbhai.ghost`.
     IpcHandler {
         target: "ghost"
 
