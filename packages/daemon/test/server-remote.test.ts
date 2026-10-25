@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startDaemonServer, type ListeningServer } from "../src/server.js";
 import { RemoteServe, type RemoteStatus } from "../src/remote-serve.js";
 import { REMOTE_MANIFEST } from "../src/remote-viewer.js";
@@ -121,9 +124,22 @@ describe("tailnet identity", () => {
     expect(await guestGhosts.json()).toEqual([{ name: "casper" }]);
     const ownerGhosts = await (await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).json() as unknown[];
     expect(ownerGhosts[0]).toHaveProperty("dir");
-    const guestBoard = await (await fetch(`${base}/api/board`, { headers: asTailnet("guest@example.com") })).json();
-    expect(guestBoard).not.toHaveProperty("path");
-    expect(await (await fetch(`${base}/api/board`, { headers: asTailnet("owner@example.com") })).json()).toHaveProperty("path");
+    // A scratch Documents directory: the board route must never read the owner's.
+    const documents = mkdtempSync(join(tmpdir(), "ghost-remote-board-"));
+    vi.stubEnv("XDG_DOCUMENTS_DIR", documents);
+    try {
+      writeFileSync(join(documents, "board.md"), "## Doing\n\n- [ ] Draft the brief\n");
+      const guestBoard = await fetch(`${base}/api/board`, { headers: asTailnet("guest@example.com") });
+      expect(guestBoard.status).toBe(200);
+      const board = await guestBoard.json() as Record<string, unknown>;
+      expect(board).toMatchObject({ exists: true, columns: [{ title: "Doing" }] });
+      expect(board).not.toHaveProperty("path");
+      expect(await (await fetch(`${base}/api/board`, { headers: asTailnet("owner@example.com") })).json())
+        .toMatchObject({ path: join(documents, "board.md") });
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(documents, { recursive: true, force: true });
+    }
     const write = await fetch(`${base}/api/ghosts`, {
       method: "POST",
       headers: { ...asTailnet("guest@example.com"), "content-type": "application/json" },

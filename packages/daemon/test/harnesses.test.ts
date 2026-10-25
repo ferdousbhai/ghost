@@ -176,11 +176,18 @@ describe("ghost harnesses", () => {
     expect(result.stdout).toContain("refresh: omarchy agent usage update");
   });
 
-  it("lists what is installed, not an error, when omarchy is missing", async () => {
+  it("lists the installed agents Ghost has a row for, not an error, when omarchy is missing", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-harnesses-"));
-    const result = await runCli(["harnesses", "--json"], { env: { PATH: join(root, "nowhere") }, home: root });
-    expect(result.code, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({ harnesses: [] });
+    const bin = join(root, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+    const env = { PATH: bin };
+    const json = await runCli(["harnesses", "--json"], { env, home: root });
+    expect(json.code, json.stderr).toBe(0);
+    expect(JSON.parse(json.stdout)).toMatchObject({ harnesses: [{ id: "claude" }], refresh: null });
+    const human = await runCli(["harnesses"], { env, home: root });
+    expect(human.stdout).toContain("claude");
+    expect(human.stdout).not.toContain("refresh:");
   });
 });
 
