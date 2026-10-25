@@ -60,9 +60,19 @@ export async function readRoutineConfig(ghost: string, slug: string, options: Sc
   return sources;
 }
 function recoveryDir(options: ScheduleOptions): string { return join(options.unitDir, ".ghost-routine-recovery"); }
+function checkpointPath(options: ScheduleOptions, id: string): string { return join(recoveryDir(options), `${id}.json`); }
+/** Every checkpoint's id: the `<uuid>.json` files in the recovery directory, none when it is absent. */
+async function checkpointIds(options: ScheduleOptions): Promise<string[]> {
+  let files: string[];
+  try { files = await readdir(recoveryDir(options)); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw error;
+  }
+  return files.filter(file => file.endsWith(".json") && RECOVERY_ID.test(file.slice(0, -5))).map(file => file.slice(0, -5));
+}
 async function readCheckpoint(ghost: string, id: string, options: ScheduleOptions): Promise<Checkpoint> {
   if (!RECOVERY_ID.test(id)) throw new GhostError("invalid_recovery", "Invalid recovery id.", 400);
-  const text = readText(join(recoveryDir(options), `${id}.json`));
+  const text = readText(checkpointPath(options, id));
   if (text === null) throw new GhostError("not_found", "No such routine checkpoint.", 404);
   let saved: Checkpoint;
   try { saved = JSON.parse(text); } catch { throw new GhostError("invalid_recovery", "Malformed routine checkpoint.", 400); }
@@ -76,17 +86,11 @@ async function readCheckpoint(ghost: string, id: string, options: ScheduleOption
   return saved;
 }
 export async function listRoutineRecoveries(ghost: string, options: ScheduleOptions) {
-  let files: string[];
-  try { files = await readdir(recoveryDir(options)); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
   const rows = [];
-  for (const file of files.sort()) {
-    if (!file.endsWith(".json") || !RECOVERY_ID.test(file.slice(0, -5))) continue;
+  for (const id of (await checkpointIds(options)).sort()) {
     // One unreadable checkpoint or unit hides only its own row, never the list.
     let checkpoint: Checkpoint;
-    try { checkpoint = await readCheckpoint(ghost, file.slice(0, -5), options); } catch (error) {
+    try { checkpoint = await readCheckpoint(ghost, id, options); } catch (error) {
       if (error instanceof GhostError) continue;
       throw error;
     }
@@ -94,7 +98,7 @@ export async function listRoutineRecoveries(ghost: string, options: ScheduleOpti
       if (error instanceof GhostError) return null;
       throw error;
     });
-    rows.push({ id: file.slice(0, -5), slug: checkpoint.slug, createdAt: checkpoint.createdAt,
+    rows.push({ id, slug: checkpoint.slug, createdAt: checkpoint.createdAt,
       reason: checkpoint.reason, applicable: current?.revision === checkpoint.expectedRevision });
   }
   return rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -141,9 +145,9 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
   const timer = state.get(paths.timer) ?? {};
   // Recheck after validation, which can take long enough for a native editor to save.
   if ((await readSources(ghost, slug, options)).revision !== expected) throw new GhostError("routine_conflict", "The unit sources changed during validation.", 409);
-  const id = randomUUID(), checkpointPath = join(recoveryDir(options), `${id}.json`);
+  const id = randomUUID(), checkpoint = checkpointPath(options, id);
   await mkdir(recoveryDir(options), { recursive: true, mode: 0o700 });
-  await writePrivateJsonAtomic(checkpointPath, { ghost, slug, timer: current.timer, service: current.service,
+  await writePrivateJsonAtomic(checkpoint, { ghost, slug, timer: current.timer, service: current.service,
     createdAt: new Date().toISOString(), reason, expectedRevision: revision(next) } satisfies Checkpoint);
   const wasActive = timer.ActiveState === "active", enabled = timer.UnitFileState;
   let wroteSources = false;
@@ -170,9 +174,9 @@ async function replaceRoutine(ghost: string, slug: string, expected: string, nex
         await scheduleCommand(run, ["enable", ...(enabled === "enabled-runtime" ? ["--runtime"] : []), paths.timer]);
       }
       if (wasActive) await scheduleCommand(run, ["start", paths.timer]);
-      await unlink(checkpointPath);
+      await unlink(checkpoint);
     } catch {
-      throw new GhostError("routine_recovery_required", `Routine change and rollback failed. Recover the original sources from ${checkpointPath}.`, 503);
+      throw new GhostError("routine_recovery_required", `Routine change and rollback failed. Recover the original sources from ${checkpoint}.`, 503);
     }
     throw error;
   }
@@ -190,14 +194,8 @@ export async function restoreRoutine(ghost: string, id: string, options: Routine
 }
 /** Drop a retired ghost's checkpoints with its units, so a later ghost of that name inherits none. */
 export async function discardRoutineRecoveries(ghost: string, options: ScheduleOptions) {
-  let files: string[];
-  try { files = await readdir(recoveryDir(options)); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
-    throw error;
-  }
-  for (const file of files) {
-    if (!file.endsWith(".json") || !RECOVERY_ID.test(file.slice(0, -5))) continue;
-    const path = join(recoveryDir(options), file);
+  for (const id of await checkpointIds(options)) {
+    const path = checkpointPath(options, id);
     let owner: unknown;
     try { owner = JSON.parse(readPrivateFileText(path) ?? "null")?.ghost; } catch { continue; }
     if (owner === ghost) await unlink(path).catch((error: NodeJS.ErrnoException) => { if (error.code !== "ENOENT") throw error; });
