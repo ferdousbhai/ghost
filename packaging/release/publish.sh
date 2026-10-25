@@ -18,11 +18,12 @@ set -euo pipefail
 usage='publish.sh <version> [--dry-run]'
 version="${1:?usage: $usage}"
 dry_run=0
-[[ "${2:-}" != "--dry-run" ]] || dry_run=1
-[[ "$#" -le 2 ]] || {
-  printf 'usage: %s\n' "$usage" >&2
-  exit 1
-}
+# Anything but exactly --dry-run is refused: a typo must not publish.
+case "$#:${2-}" in
+  1:) ;;
+  2:--dry-run) dry_run=1 ;;
+  *) printf 'usage: %s\n' "$usage" >&2; exit 1 ;;
+esac
 
 script_root="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_root/../..")"
@@ -43,6 +44,8 @@ if (( ! dry_run )) && git rev-parse -q --verify "refs/tags/$tag" >/dev/null; the
   printf 'tag %s already exists\n' "$tag" >&2
   exit 1
 fi
+# Before anything is committed or pushed: a release ends in `gh release`.
+(( dry_run )) || gh auth status >/dev/null
 # The version lives in several manifests; a release starts by making them agree.
 current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
 if [[ "$current" != "$version" ]]; then
@@ -71,8 +74,6 @@ if (( ! dry_run )); then
     git push origin master # the pre-push hook runs the gate
   fi
 fi
-(( dry_run )) || gh auth status >/dev/null
-
 commit="$(git rev-parse 'HEAD^{commit}')"
 epoch="$(git show -s --format=%ct "$commit")"
 work="$script_root/work"
