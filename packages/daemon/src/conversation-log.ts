@@ -53,7 +53,7 @@ export type LogEntry =
    */
   | { readonly type: "harness"; readonly at: string; readonly harness: string; readonly session: string | null; readonly dir?: string }
   | { readonly type: "title"; readonly at: string; readonly title: string | null }
-  /** The idle handoff pass: its one-line reply, or why it failed. */
+  /** Historical: an idle-handoff reply, or why it failed. Read, never written. */
   | { readonly type: "handoff"; readonly at: string; readonly harness: string; readonly text: string; readonly error?: string };
 
 const CONVERSATION_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/u;

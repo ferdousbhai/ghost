@@ -119,20 +119,13 @@ export class GhostRegistry {
     return ghosts.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  find(name: string): Ghost | null {
-    if (!isValidGhostName(name)) return null;
-    const dir = join(this.root, name);
-    if (!isGhostHome(dir)) return null;
-    return { name, dir };
-  }
-
   get(name: string): Ghost {
     assertValidGhostName(name);
-    const ghost = this.find(name);
-    if (!ghost) {
+    const dir = join(this.root, name);
+    if (!isGhostHome(dir)) {
       throw new GhostError("not_found", `No ghost named ${JSON.stringify(name)}.`, 404);
     }
-    return ghost;
+    return { name, dir };
   }
 
   /**
