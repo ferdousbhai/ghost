@@ -82,6 +82,9 @@ TestCase {
         Ghostd.handleTurnEvent(turn.state, { type: "text_start", contentIndex: 0 });
         Ghostd.handleTurnEvent(turn.state, { type: "text_delta", contentIndex: 0, delta: "Answer" });
         Ghostd.handleTurnEvent(turn.state, { type: "resources", run: "r1", summary: "Skills: mail" });
+        // The inspector takes the streamed snapshot as is, without a refetch.
+        compare(Ghostd.runResources.summary, "Skills: mail");
+        compare(Ghostd.runResources.type, undefined);
         Ghostd.flushTurn(turn.state, true);
         compare(turn.state.rows.length, 2);
         compare(turn.state.rows[1].text, "Answer");

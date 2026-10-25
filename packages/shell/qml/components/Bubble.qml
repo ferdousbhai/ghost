@@ -118,7 +118,6 @@ Item {
     component CopyAction: Item {
         id: copyAction
 
-        objectName: "copyAction"
         width: 16
         height: 16
         Accessible.role: Accessible.Button

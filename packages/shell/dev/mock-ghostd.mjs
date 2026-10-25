@@ -668,7 +668,7 @@ async function streamTurn(res, name, body) {
     if (reply !== null && !failing) reportResources();
   };
   const reportResources = () => {
-    const harness = existing?.harness ?? draftHarness.get(key) ?? "claude";
+    const harness = existing?.harness ?? draftHarness.get(key) ?? OMARCHY_DEFAULT_HARNESS;
     const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
     const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
       supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
@@ -1217,8 +1217,7 @@ const mockServer = createServer(async (req, res) => {
       return json(res, 200, snapshot());
     }
   }
-  // Renaming one conversation. An empty title is how the HUD clears it back to
-  // its own "New conversation" label, so it stores as null rather than "".
+  // Renaming one conversation.
   if (parts[3] === "sessions" && parts.length === 6 && parts[5] === "title" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
     const raw = body?.title;

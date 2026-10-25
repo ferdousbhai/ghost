@@ -146,7 +146,6 @@ Rectangle {
         spacing: Theme.gap / 3
 
         Text {
-            objectName: "remoteTitle"
             width: parent.width
             text: "Reach me from another device"
             textFormat: Text.PlainText

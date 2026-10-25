@@ -319,7 +319,6 @@ Item {
 
     Rectangle {
         id: inspector
-        objectName: "resourceInspector"
         visible: root.resourcesOpen
         focus: root.resourcesOpen
         anchors.top: parent.bottom

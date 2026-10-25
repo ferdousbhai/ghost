@@ -197,7 +197,6 @@ Rectangle {
                 spacing: Theme.gap / 3
 
                 Text {
-                    objectName: "hooksTitle"
                     width: parent.width
                     text: "Hooks"
                     textFormat: Text.PlainText
@@ -208,7 +207,6 @@ Rectangle {
                 }
 
                 Text {
-                    objectName: "hooksSummary"
                     width: parent.width
                     text: root.busy ? "Saving…"
                         : Ghostd.activeHookCount === 0
@@ -239,7 +237,6 @@ Rectangle {
                 }
 
                 ActionButton {
-                    objectName: "hooksRefreshButton"
                     label: Ghostd.hookConfigLoading ? "Refreshing" : "Refresh"
                     enabled: !Ghostd.hookConfigLoading && !root.editing
                     Accessible.description: "Reload hooks.json"
@@ -262,7 +259,6 @@ Rectangle {
 
     Rectangle {
         id: errorBanner
-        objectName: "hooksErrorBanner"
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
         anchors.right: parent.right
@@ -295,7 +291,6 @@ Rectangle {
 
     Text {
         id: initialState
-        objectName: "hooksInitialState"
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad * 2
         anchors.right: parent.right
@@ -317,7 +312,6 @@ Rectangle {
 
     Text {
         id: emptyState
-        objectName: "hooksEmptyState"
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad * 2
         anchors.right: parent.right
@@ -338,7 +332,6 @@ Rectangle {
 
     ListView {
         id: hookList
-        objectName: "hooksList"
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
         anchors.right: parent.right
@@ -491,7 +484,6 @@ Rectangle {
             // ---- edit view
             Loader {
                 id: editor
-                objectName: "hookEditor"
                 anchors.left: parent.left
                 anchors.leftMargin: Theme.pad
                 anchors.right: parent.right
@@ -502,7 +494,6 @@ Rectangle {
                 visible: active
 
                 sourceComponent: Column {
-                    objectName: "hookForm"
                     width: editor.width
                     spacing: Theme.gap
 
@@ -609,7 +600,6 @@ Rectangle {
 
     Text {
         id: privacyNote
-        objectName: "hooksPrivacyNote"
         anchors.left: parent.left
         anchors.leftMargin: Theme.pad
         anchors.right: parent.right

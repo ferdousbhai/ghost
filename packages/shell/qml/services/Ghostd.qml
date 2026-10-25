@@ -234,8 +234,8 @@ Singleton {
     /** The daemon's character cap, echoed in its responses; 0 until heard.
         Never pinned here — the daemon may change it. */
     property int characterLimit: 0
-    property bool characterLoading: false
-    property bool characterSaving: false
+    readonly property bool characterLoading: root.characterRequest !== null
+    readonly property bool characterSaving: root.characterWriteRequest !== null
     property string characterError: ""
     property string characterGhost: ""
 
@@ -269,8 +269,8 @@ Singleton {
     // The active ghost's `<ghost-home>/mcp.json` servers, as stored.
     property var mcpServers: []
     property var mcpSkipped: []
-    property bool mcpLoading: false
-    property bool mcpMutating: false
+    readonly property bool mcpLoading: root.mcpRequest !== null
+    readonly property bool mcpMutating: root.mcpMutationRequest !== null
     property string mcpError: ""
     property string mcpNotice: ""
     property string mcpGhost: ""
@@ -287,10 +287,15 @@ Singleton {
     /** The agent CLI carrying the open conversation: the owner's unconfirmed
         pick, else its listing row; "" when unknown (a draft runs on whatever
         the daemon picks). */
+    /** The active ghost's listing row for `id`, or undefined. */
+    function sessionRow(id: string): var {
+        return root.sessions.find(session => session && session.id === id);
+    }
+    readonly property var currentSessionRow: root.sessionRow(root.currentSessionId)
     readonly property string currentHarness: {
         const pending = root.pendingHarnesses[root.conversationKey(root.activeGhost, root.currentSessionId)];
         if (typeof pending === "string") return pending;
-        const row = root.sessions.find(session => session && session.id === root.currentSessionId);
+        const row = root.currentSessionRow;
         return row && typeof row.harness === "string" ? row.harness : "";
     }
     /** What a conversation not yet bound starts on: the ghost's default, else
@@ -307,7 +312,7 @@ Singleton {
     /** What that harness last ran on, pi-style — "(provider) model • effort" —
         or "" when it is a pick not yet run or said nothing. */
     readonly property string currentModel: {
-        const row = root.sessions.find(session => session && session.id === root.currentSessionId);
+        const row = root.currentSessionRow;
         if (!row || row.harness !== root.currentHarness) return "";
         const model = (row.provider ? "(" + row.provider + ") " : "") + (row.model || "");
         return [model, row.effort || ""].filter(part => part !== "").join(" • ");
@@ -635,7 +640,7 @@ Singleton {
     // read-only. Polled while its pane is up; edits happen in the file.
     property var board: null
     property string boardError: ""
-    property bool boardLoading: false
+    readonly property bool boardLoading: root.boardRequest !== null
     property var boardRequest: null
 
     /** The daemon's Board, or null when the body is not one. */
@@ -669,9 +674,7 @@ Singleton {
 
     function refreshBoard(): void {
         if (root.boardRequest) return;
-        root.boardLoading = true;
         root.request(root, "boardRequest", "GET", "/api/board", null, function (xhr, body) {
-            root.boardLoading = false;
             const parsed = xhr.status === 200 ? root.boardFrom(body) : null;
             if (parsed !== null) {
                 // The pane polls every few seconds; an unchanged board keeps its cards.
@@ -917,14 +920,13 @@ Singleton {
 
     property bool inspectingResources: false
     property var runResources: null
-    property bool resourcesLoading: false
+    readonly property bool resourcesLoading: root.resourcesRequest !== null
     property string resourcesError: ""
     property var resourcesRequest: null
 
     function clearRunResources(): void {
         root.retire(root, "resourcesRequest");
         root.runResources = null;
-        root.resourcesLoading = false;
         root.resourcesError = "";
         root.inspectingResources = false;
     }
@@ -935,11 +937,9 @@ Singleton {
         root.runResources = null;
         root.resourcesError = "";
         root.retire(root, "resourcesRequest");
-        if (ghost === "" || session === "") { root.resourcesLoading = false; return; }
-        root.resourcesLoading = true;
+        if (ghost === "" || session === "") return;
         root.request(root, "resourcesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(session) + "/transcript?limit=1", null, function (xhr, body) {
-                root.resourcesLoading = false;
                 if (xhr.status === 200 && body) root.runResources = body.resources || null;
                 else root.resourcesError = "Could not load resources. Try refreshing.";
             }, () => ghost === root.activeGhost && session === root.currentSessionId);
@@ -994,7 +994,7 @@ Singleton {
     function chooseHarness(harness: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || harness === "") return;
-        if (root.currentSessionId === "") root.finishNewConversation();
+        if (root.currentSessionId === "") root.newConversation();
         const id = root.currentSessionId;
         if (id === "") return;
         const key = root.conversationKey(ghost, id);
@@ -1011,18 +1011,12 @@ Singleton {
     }
 
     function selectGhost(name: string): void {
-        if (name === root.activeGhost) return;
-        root.finishSelectGhost(name);
-    }
-
-    function finishSelectGhost(name: string): void {
-        if (!root.switchGhost(name)) return;
-        root.fetchSessions(name);
+        if (root.switchGhost(name)) root.fetchSessions(name);
     }
 
     /**
      * Make `name` the active ghost and drop the previous one's state, without
-     * fetching; finishSelectGhost fetches, and a create lets refresh()'s
+     * fetching; selectGhost fetches, and a create lets refresh()'s
      * listing do it. False when there is nothing to switch.
      */
     function switchGhost(name: string): bool {
@@ -1045,7 +1039,7 @@ Singleton {
     /** Open one conversation of any ghost; Panel's summon payload names both. */
     function openConversationForGhost(name: string, id: string): void {
         if (name === "" || id === "") return;
-        if (name !== root.activeGhost) root.finishSelectGhost(name);
+        root.selectGhost(name);
         root.finishOpenConversation(id);
     }
 
@@ -1160,7 +1154,7 @@ Singleton {
      */
     function captureActiveTurn(state: var): void {
         if (!root.isActiveTurn(state)) return;
-        const listed = root.sessions.find(session => session.id === state.sessionId);
+        const listed = root.sessionRow(state.sessionId);
         if (listed) state.title = listed.title || "";
     }
 
@@ -1269,8 +1263,6 @@ Singleton {
         root.retire(root, "characterWriteRequest");
         root.characterBody = "";
         root.characterLimit = 0;
-        root.characterLoading = false;
-        root.characterSaving = false;
         root.characterError = "";
         root.characterGhost = "";
     }
@@ -1290,11 +1282,9 @@ Singleton {
             if (!force) return;
             root.retire(root, "characterRequest");
         }
-        root.characterLoading = true;
         root.characterError = "";
         root.request(root, "characterRequest", "GET",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/character", null, function (xhr, body) {
-                root.characterLoading = false;
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.characterError = root.describeError(xhr, "GET character");
@@ -1319,11 +1309,9 @@ Singleton {
     function writeCharacter(body: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || root.characterSaving) return;
-        root.characterSaving = true;
         root.characterError = "";
         root.request(root, "characterWriteRequest", "PUT",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/character", { body: body }, function (xhr, result) {
-                root.characterSaving = false;
                 if (ghost !== root.activeGhost) return;
                 const ok = xhr.status === 200 && !!result && result.ok === true;
                 if (ok) {
@@ -1347,8 +1335,6 @@ Singleton {
         root.retire(root, "mcpMutationRequest");
         root.mcpServers = [];
         root.mcpSkipped = [];
-        root.mcpLoading = false;
-        root.mcpMutating = false;
         root.mcpError = "";
         root.mcpNotice = "";
         root.mcpGhost = "";
@@ -1383,12 +1369,10 @@ Singleton {
             if (!force) return;
             root.retire(root, "mcpRequest");
         }
-        root.mcpLoading = true;
         root.mcpError = "";
         root.mcpNotice = "";
         root.request(root, "mcpRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/mcp",
             null, function (xhr, body) {
-                root.mcpLoading = false;
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.mcpError = root.describeError(xhr, "GET MCP servers");
@@ -1405,13 +1389,10 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "" || root.mcpMutating) return;
         root.retire(root, "mcpRequest");
-        root.mcpLoading = false;
-        root.mcpMutating = true;
         root.mcpError = "";
         root.mcpNotice = "";
         root.request(root, "mcpMutationRequest", method, "/api/ghosts/" + encodeURIComponent(ghost)
             + "/mcp" + suffix, body, function (xhr, catalog) {
-                root.mcpMutating = false;
                 if (ghost !== root.activeGhost) return;
                 const answered = xhr.status === 200 || xhr.status === 201;
                 const ok = answered && root.applyMcpSnapshot(catalog, ghost);
@@ -1454,12 +1435,8 @@ Singleton {
 
     function connectConversationEvents(ghost: string): void {
         const previous = root.eventsRequest;
-        if (previous && previous.readyState !== 4) {
-            if (root.eventsGhost === ghost) return;
-            root.eventsRequest = null;
-            previous.onreadystatechange = function () {};
-            previous.abort();
-        }
+        if (previous && previous.readyState !== 4 && root.eventsGhost === ghost) return;
+        root.retire(root, "eventsRequest");
         eventsWatchdog.stop();
         eventsReconnect.stop();
         root.eventsGhost = ghost;
@@ -1473,7 +1450,7 @@ Singleton {
         };
         eventsWatchdog.restart();
         root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/events", ({ "Accept": "text/event-stream" }), null);
+            + "/events", ({ "Accept": "text/event-stream" }), null, () => xhr === root.eventsRequest);
     }
 
     function readConversationEvents(xhr: var, ghost: string): void {
@@ -1533,13 +1510,8 @@ Singleton {
     }
 
     function expireConversationEvents(): void {
-        const xhr = root.eventsRequest;
-        root.eventsRequest = null;
+        root.retire(root, "eventsRequest");
         eventsWatchdog.stop();
-        if (xhr && xhr.readyState !== 4) {
-            xhr.onreadystatechange = function () {};
-            xhr.abort();
-        }
         if (root.activeGhost !== "") eventsReconnect.restart();
     }
 
@@ -1583,7 +1555,7 @@ Singleton {
                 root.syncDetachedTurns(g, valid);
                 root.settlePendingHarnesses(g, valid);
                 root.sessionsError = "";
-                const current = root.sessions.find(session => session && session.id === root.currentSessionId);
+                const current = root.currentSessionRow;
                 if (root.hudChatFocused && current && current.unread === true)
                     root.markConversationRead(g, current.id);
             });
@@ -1621,41 +1593,28 @@ Singleton {
      * daemon creates the transcript lazily on the first turn and titles it
      * afterwards; until then the row is local to the HUD.
      */
-    function newConversation(): void {
-        if (root.activeGhost === "") return;
-        root.finishNewConversation();
-    }
-
     function isUnstartedSession(session: var): bool {
         return !!session && session.messageCount === 0
             && (session.title === null || session.title === ""
                 || session.title === undefined);
     }
 
-    function conversationHasOwnerText(id: string): bool {
-        const listed = root.sessions.find(function (session) {
-            return session && session.id === id;
-        });
-        if (listed && typeof listed.messageCount === "number"
-                && listed.messageCount > 0)
-            return true;
-        const state = root.turnStates[root.conversationKey(root.activeGhost, id)];
-        if (state && state.transcriptLoad) return true;
-        if (state && state.hydratedRowCount > 0) return true;
-        if (state && Array.isArray(state.rows) && state.rows.some(function (row) {
-            return row && row.role === "user"
-                && typeof row.text === "string" && row.text !== "";
-        })) return true;
-        return false;
-    }
-
+    /** The open conversation has no owner text yet, listed or local. */
     function isCurrentConversationUnstarted(): bool {
         const id = root.currentSessionId;
         if (id === "") return false;
-        return !root.conversationHasOwnerText(id);
+        const listed = root.sessionRow(id);
+        if (listed && typeof listed.messageCount === "number" && listed.messageCount > 0)
+            return false;
+        const state = root.turnStates[root.conversationKey(root.activeGhost, id)];
+        if (!state) return true;
+        return !state.transcriptLoad && !(state.hydratedRowCount > 0)
+            && !(Array.isArray(state.rows) && state.rows.some(function (row) {
+                return row && row.role === "user" && typeof row.text === "string" && row.text !== "";
+            }));
     }
 
-    function finishNewConversation(): void {
+    function newConversation(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
         if (root.isCurrentConversationUnstarted()) {
@@ -1678,9 +1637,7 @@ Singleton {
      */
     function ensureLocalSessionRow(ghost: string, id: string, messageCount: int): void {
         if (ghost !== root.activeGhost || id === "") return;
-        const existing = root.sessions.find(function (session) {
-            return session && session.id === id;
-        });
+        const existing = root.sessionRow(id);
         if (existing) {
             root.sessions = root.orderSessions(root.sessions);
             return;
@@ -1754,9 +1711,7 @@ Singleton {
                 ? Object.assign({}, session, { pinned: pinned })
                 : session;
         }));
-        const local = root.sessions.find(function (session) {
-            return session && session.id === id;
-        });
+        const local = root.sessionRow(id);
         if (local && local.localOnly === true) return;
         root.request(root, "pinSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
             + "/sessions/" + encodeURIComponent(id) + "/pin", { pinned: pinned }, function (xhr) {
@@ -1782,9 +1737,7 @@ Singleton {
         const ghost = root.activeGhost;
         const next = title.trim();
         if (ghost === "" || id === "" || next === "") return;
-        const row = root.sessions.find(function (session) {
-            return session && session.id === id;
-        });
+        const row = root.sessionRow(id);
         if (!row) return;
         const previous = typeof row.title === "string" ? row.title : null;
         if (previous === next) return;
@@ -1906,9 +1859,7 @@ Singleton {
 
     function markConversationRead(ghost: string, id: string): void {
         if (ghost === "" || id === "") return;
-        const local = ghost === root.activeGhost ? root.sessions.find(function (session) {
-            return session && session.id === id;
-        }) : null;
+        const local = ghost === root.activeGhost ? root.sessionRow(id) : null;
         if (ghost === root.activeGhost) {
             root.sessions = root.sessions.map(function (session) {
                 return session && session.id === id
@@ -2187,7 +2138,7 @@ Singleton {
         root.projectTurnFields(state);
         xhr.onreadystatechange = function () {
             if (xhr.readyState === 4 && xhr.status === 409 && xhr === state.request
-                    && root.errorCode(xhr) === "session_busy") {
+                    && (root.errorBody(xhr).error || {}).code === "session_busy") {
                 root.joinRunningTurn(state, prompt);
                 return;
             }
@@ -2198,7 +2149,7 @@ Singleton {
         root.dispatch(xhr, "POST",
             "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
-            JSON.stringify({ prompt: prompt, sessionId: state.sessionId }));
+            JSON.stringify({ prompt: prompt, sessionId: state.sessionId }), () => xhr === state.request);
     }
 
     /**
@@ -2232,11 +2183,10 @@ Singleton {
     }
 
     function cancelTurn(state: var): void {
-        const xhr = state.request;
-        // Retire the callback before abort(), because Qt may synchronously run
-        // readyState 4 from inside abort(). That is our cancellation, not a
-        // transport failure and not evidence that ghostd is unreachable.
-        state.request = null;
+        // Qt may run readyState 4 from inside abort(); retire empties the slot
+        // first, so that is our cancellation, not a transport failure and not
+        // evidence that ghostd is unreachable.
+        root.retire(state, "request");
         state.streaming = false;
         root.settleToolActivityFor(state, true);
         root.flushTurn(state, true);
@@ -2253,7 +2203,6 @@ Singleton {
         state.assistantRow = -1;
         root.updateLiveConversationKeys();
         root.projectTurnFields(state);
-        if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
     function beginTurnFor(state: var): void {
@@ -2335,16 +2284,15 @@ Singleton {
         xhr.onreadystatechange = function () {
             root.readTurnStream(xhr, state.key, "GET " + path, "the stream ended mid-turn");
         };
-        root.dispatch(xhr, "GET", path, ({ "Accept": "text/event-stream" }), null);
+        root.dispatch(xhr, "GET", path, ({ "Accept": "text/event-stream" }), null,
+            () => xhr === state.request);
     }
 
     function expireTurnStream(state: var): void {
         if (!state.streaming) return;
-        const xhr = state.request;
-        state.request = null;
+        root.retire(state, "request");
         root.reachable = false;
         root.endTurnState(state, "the stream stopped responding");
-        if (xhr && xhr.readyState !== 4) xhr.abort();
     }
 
     /**
@@ -2401,7 +2349,14 @@ Singleton {
             state.activity = "starting:" + (event.harness || "");
             break;
         case "resources":
-            if (root.inspectingResources) root.fetchRunResources();
+            // The streamed snapshot is the one the transcript would report.
+            if (root.isActiveTurn(state)) {
+                root.retire(root, "resourcesRequest");
+                const snapshot = Object.assign({}, event);
+                delete snapshot.type;
+                root.runResources = snapshot;
+                root.resourcesError = "";
+            }
             break;
         case "text_start":
             root.textPart(state, event.contentIndex);
@@ -2426,7 +2381,8 @@ Singleton {
             root.applyQueueFor(state, event);
             break;
         case "owner_message":
-            root.receiveOwnerMessageFor(state, event.text || "");
+            // The `queue` event just before this one already took its chip away.
+            root.insertTurnBreakFor(state, "user", event.text);
             break;
         case "hook_start":
             if (event.event === "session_stop") {
@@ -2442,7 +2398,7 @@ Singleton {
             if (event.event !== "session_stop") state.activity = "";
             break;
         case "session_stop_continued":
-            root.receiveSessionStopContinuedFor(state, event.reason || "");
+            root.insertTurnBreakFor(state, "hook", event.reason);
             break;
         case "thinking":
             // Reasoning stays out of the transcript; the activity line reads
@@ -2568,7 +2524,7 @@ Singleton {
 
     function notificationTitle(state: var): string {
         const listed = state.ghost === root.activeGhost
-            ? root.sessions.find(session => session.id === state.sessionId) : null;
+            ? root.sessionRow(state.sessionId) : null;
         const title = (listed && listed.title) || state.title;
         if (title) return String(title);
         const first = state.rows.find(row => row.role === "user" && row.text);
@@ -2614,24 +2570,14 @@ Singleton {
             root.markConversationRead(state.ghost, state.sessionId);
     }
 
-    function receiveOwnerMessageFor(state: var, text: string): void {
-        const message = text.trim();
-        if (!state.streaming || message === "") return;
-        // The `queue` event just before this one already took its chip away.
-        root.insertTurnBreakFor(state, "user", message);
-    }
-
-    function receiveSessionStopContinuedFor(state: var, reason: string): void {
-        const notice = String(reason || "").trim();
-        if (!state.streaming || notice === "") return;
-        root.insertTurnBreakFor(state, "hook", notice);
-    }
-
     /**
      * End the current assistant segment where a `role` row enters mid-turn,
-     * append that row, and open a fresh assistant segment after it.
+     * append that row, and open a fresh assistant segment after it. Blank
+     * text, or a turn no longer streaming, adds nothing.
      */
-    function insertTurnBreakFor(state: var, role: string, text: string): void {
+    function insertTurnBreakFor(state: var, role: string, raw: var): void {
+        const text = String(raw || "").trim();
+        if (!state.streaming || text === "") return;
         const hasAssistant = state.assistantRow >= 0
             && state.assistantRow < state.rows.length;
         const emptyPlaceholder = hasAssistant
@@ -2745,27 +2691,23 @@ Singleton {
     }
 
 
-    /** The daemon's own presentable message for a failure, or "". */
-    function errorDetail(xhr: var): string {
+    /** A failure's JSON body, or {} when it has none. */
+    function errorBody(xhr: var): var {
         try {
             const body = JSON.parse(xhr.responseText);
-            const detail = body.error && body.error.message
-                ? body.error.message
-                : (body.error || body.message || "");
-            return typeof detail === "string" ? detail : "";
+            return body && typeof body === "object" ? body : ({});
         } catch (error) {
-            return "";
+            return ({});
         }
     }
 
-    /** The daemon's error code for a failure, or "". */
-    function errorCode(xhr: var): string {
-        try {
-            const body = JSON.parse(xhr.responseText);
-            return body.error && typeof body.error.code === "string" ? body.error.code : "";
-        } catch (error) {
-            return "";
-        }
+    /** The daemon's own presentable message for a failure, or "". */
+    function errorDetail(xhr: var): string {
+        const body = root.errorBody(xhr);
+        const detail = body.error && body.error.message
+            ? body.error.message
+            : (body.error || body.message || "");
+        return typeof detail === "string" ? detail : "";
     }
 
     /** A refusal as the daemon words it, else as describeError would. */

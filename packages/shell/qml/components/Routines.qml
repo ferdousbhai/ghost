@@ -186,7 +186,6 @@ Rectangle {
                             onClicked: { root.pendingRemove = ""; Ghostd.fetchRoutineConfig(card.modelData.slug); }
                         }
                         ActionButton {
-                            objectName: "routineRemove"
                             label: "Remove"
                             danger: true
                             enabled: !Ghostd.routinesLoading
@@ -202,7 +201,6 @@ Rectangle {
     }
     ConfirmDialog {
         id: removeDialog
-        objectName: "routineRemoveDialog"
         anchors.fill: parent
         title: "Remove routine?"
         body: "Disable and remove “" + root.pendingRemove + "”? Running work continues. A recoverable checkpoint is kept."
@@ -242,7 +240,7 @@ Rectangle {
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                TextArea { id: serviceSource; objectName: "routineServiceSource"; readOnly: Ghostd.routineActionRequest !== null; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.Wrap }
+                TextArea { id: serviceSource; readOnly: Ghostd.routineActionRequest !== null; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.Wrap }
             }
             RowLayout {
                 ActionButton {
