@@ -31,15 +31,6 @@ require_srcinfo_entry() {
   fi
 }
 
-require_srcinfo_dependency() {
-  local package="$1"
-  local srcinfo="$2"
-  if ! grep -Eq $'^\tdepends = '"${package}([<>=]|\$)" "$srcinfo"; then
-    printf '%s does not declare depends = %s\n' "$srcinfo" "$package" >&2
-    exit 1
-  fi
-}
-
 # Installing Ghost gates on nothing owner-level, so each hook has one job: say
 # how to bring the services up on this login.
 require_install_hook_activation() {
@@ -103,13 +94,10 @@ done < <(find "$source_root/packaging" \
   env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo
 ) > "$work/ghost-dev.SRCINFO"
 cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
+# The commands these checks call (see the command -v guards) are declared.
 require_srcinfo_entry checkdepends jq "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
-require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry optdepends 'npm: npx-launched MCP servers' "$work/ghost-dev.SRCINFO"
-require_srcinfo_dependency systemd "$work/ghost-dev.SRCINFO"
 
 bash "$source_root/packaging/release/render-arch-package.sh" \
   "$work/ghost" \

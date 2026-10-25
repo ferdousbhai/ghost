@@ -80,7 +80,7 @@ mkdir -p -- "$out" "$work"
 
 bash "$script_root/prepare-pnpm-engine.sh" "$source_root"
 pnpm fetch --frozen-lockfile
-SOURCE_DATE_EPOCH="$epoch" \
+SOURCE_DATE_EPOCH="$epoch" GHOST_RELEASE_WORK_ROOT="$work" \
   bash "$script_root/build-runtime-source.sh" \
     "$source_root" "$out" "$version" any "$commit"
 SOURCE_DATE_EPOCH="$epoch" \
@@ -94,10 +94,10 @@ GHOST_RELEASE_WORK_ROOT="$work" \
     "$out/ghost-runtime-$version-linux-any.tar.zst" \
     "$source_root" "$version" any "$commit" "$epoch"
 rm -rf -- "$work"
-bash "$script_root/write-sha256sums.sh" "$out"
+(cd -- "$out" && sha256sum -- "ghost-$version.tar.gz" "ghost-runtime-$version-linux-any.tar.zst" > SHA256SUMS)
 
-source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
-runtime_sha="$(sha256sum "$out/ghost-runtime-$version-linux-any.tar.zst" | cut -d' ' -f1)"
+source_sha="$(sed -n 1p "$out/SHA256SUMS" | cut -d' ' -f1)"
+runtime_sha="$(sed -n 2p "$out/SHA256SUMS" | cut -d' ' -f1)"
 bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
 # Omarchy's recipe is the one rendered here (pkgbuilds/ghost in
 # omacom/omarchy-pkgs); building it from the archives beside it, rather than
