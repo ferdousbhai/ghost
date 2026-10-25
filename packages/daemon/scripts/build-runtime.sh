@@ -39,7 +39,6 @@ build_bundle() {
     --minify \
     --keep-names \
     "$@" \
-    --external fsevents \
     --metafile="$meta_root/$name.json" \
     --outfile="$runtime_root/lib/$name.js" \
     "$entry"

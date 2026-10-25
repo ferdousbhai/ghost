@@ -388,9 +388,6 @@ const json = (res, status, body) => {
   res.end(payload);
 };
 
-// The daemon's hooks.json, kept as one document the way ghostd does, with
-// its status projection derived from it. The loader's shape check is the
-// small subset a pane edit can plausibly trip, worded the way ghostd words it.
 /** `GET /api/status` reports the running source. */
 const MOCK_VERSION = "0.0.0-mock";
 
@@ -407,6 +404,9 @@ const MOCK_BOARD = {
   truncated: false,
 };
 
+// The daemon's hooks.json, kept as one document the way ghostd does. The
+// loader's shape check is the small subset a pane edit can plausibly trip,
+// worded the way ghostd words it.
 const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
 const HOOK_EVENTS = ["before_prompt", "session_stop"];
 let hooksDocument = {

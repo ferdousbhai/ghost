@@ -99,15 +99,13 @@ bash "$script_root/write-sha256sums.sh" "$out"
 
 source_sha="$(sha256sum "$out/ghost-$version.tar.gz" | cut -d' ' -f1)"
 runtime_sha="$(sha256sum "$out/ghost-runtime-$version-linux-any.tar.zst" | cut -d' ' -f1)"
-GHOST_RELEASE_REPOSITORY="$repository" \
-  bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
+bash "$script_root/smoke-rendered-package.sh" "$version" "$source_sha" "$runtime_sha"
 # Omarchy's recipe is the one rendered here (pkgbuilds/ghost in
 # omacom/omarchy-pkgs); building it from the archives beside it, rather than
 # the release URLs that do not exist yet, proves the release builds there.
 mkdir -p -- "$work"
 build="$(mktemp -d "$work/package-build.XXXXXX")"
-GHOST_RELEASE_REPOSITORY="$repository" \
-  bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha" "$runtime_sha"
+bash "$script_root/render-arch-package.sh" "$build/ghost" "$version" "$source_sha" "$runtime_sha"
 cp -- "$out/ghost-$version.tar.gz" "$out/ghost-runtime-$version-linux-any.tar.zst" "$build/ghost/"
 (
   cd -- "$build/ghost"

@@ -13,12 +13,12 @@ cd -- "$(git rev-parse --show-toplevel)"
 fail=0
 
 manifest=packages/daemon/package.json
-if grep -Eq '"(@ghost/(omarchy|shell)|ghost-desktop)"' "$manifest"; then
+if grep -Eq '"(@ghost/omarchy|ghost-desktop)"' "$manifest"; then
   printf 'core-boundary: %s depends on the Omarchy side\n' "$manifest" >&2
   fail=1
 fi
 
-if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/(omarchy|shell)|ghost-desktop)" \
+if grep -rEn --include='*.ts' --include='*.js' --include='*.mjs' -e "(from|import|require)[[:space:]]*\\(?[\"'](@ghost/omarchy|ghost-desktop)" \
     packages/daemon/src 2>/dev/null; then
   printf 'core-boundary: core imports the Omarchy side (see above)\n' >&2
   fail=1

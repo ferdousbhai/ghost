@@ -323,7 +323,7 @@ if (( plugin_ready == 0 )); then
   exit 1
 fi
 qs -p "$config_path" ipc call shell summon "$plugin_id" '{}' >/dev/null
-sleep "${GHOST_PREVIEW_SETTLE_SECONDS:-1}"
+sleep 1
 
 echo "preview: nested HUD is ready"
 echo "  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
