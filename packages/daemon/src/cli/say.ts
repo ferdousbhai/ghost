@@ -10,7 +10,7 @@ interface StreamEvent {
   [key: string]: unknown;
 }
 
-export function newConversationId(now = Date.now()): string {
+function newConversationId(now = Date.now()): string {
   return `cli-${now.toString(36)}-${randomBytes(4).toString("hex")}`;
 }
 

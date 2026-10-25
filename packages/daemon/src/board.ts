@@ -10,7 +10,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
-export const BOARD_FILE_NAME = "board.md";
+const BOARD_FILE_NAME = "board.md";
 export const BOARD_MAX_BYTES = 256 * 1024;
 export const BOARD_MAX_CARDS = 500;
 

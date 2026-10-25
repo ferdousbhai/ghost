@@ -9,11 +9,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { CHARACTER_FILENAME } from "./home.js";
-import { SEEDED_CHARACTER } from "./persona.js";
+import { CHARACTER_FILENAME, SEEDED_CHARACTER } from "./persona.js";
 import { GhostError } from "./errors.js";
-
-export { GhostError };
 
 export interface Ghost {
   name: string;
@@ -74,14 +71,12 @@ export function isGhostHome(dir: string): boolean {
 }
 
 export function ghostPaths(dir: string): {
-  home: string;
   settingsFile: string;
   sessionDir: string;
   characterFile: string;
 } {
   const home = resolve(dir);
   return {
-    home,
     settingsFile: join(home, GHOST_SETTINGS_FILENAME),
     sessionDir: join(home, GHOST_SESSIONS_DIRNAME),
     characterFile: join(home, CHARACTER_FILENAME),

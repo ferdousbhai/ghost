@@ -17,14 +17,12 @@ import { requireConversationId } from "./conversation-log.js";
 import type {
   McpCatalog,
 } from "./mcp-catalog.js";
-import { MAX_CHARACTER_BODY_LENGTH, openGhostHome } from "./home.js";
+import { readCharacter, writeCharacter } from "./home.js";
+import { MAX_CHARACTER_BODY_LENGTH } from "./persona.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, GhostError } from "./errors.js";
 import { isRecord } from "./record.js";
-import {
-  GhostError,
-  type GhostRegistry,
-} from "./ghosts.js";
+import type { GhostRegistry } from "./ghosts.js";
 import type { GhostHookRunner } from "./hooks.js";
 import type { GhostHookCommandConfig } from "./hook-policy.js";
 import { silentLogger, type Logger } from "./log.js";
@@ -191,10 +189,6 @@ function decodePathSegment(segment: string): string {
     if (error instanceof URIError) throw new GhostError("invalid_request", "URL path segments must use valid percent-encoding.", 400);
     throw error;
   }
-}
-
-function decodeConversationId(segment: string): string {
-  return requireConversationId(decodePathSegment(segment));
 }
 
 interface Route<C> {
@@ -521,7 +515,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   };
 
   const handleReadAttachment = async ({ ghost, id, params, response }: RequestContext): Promise<void> => {
-    const { bytes, type } = await options.host.readAttachment(ghost, id, decodePathSegment(params.file ?? ""));
+    const { bytes, type } = await options.host.readAttachment(ghost, id, params.file ?? "");
     response.writeHead(200, {
       "content-type": type,
       "content-length": bytes.length,
@@ -654,7 +648,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       sessionId: parsed.sessionId,
       prompt: parsed.prompt,
     });
-    const log = startTurnLog(ghost.name, parsed.sessionId ?? "default", (emit) => admission.run({ emit }));
+    const log = startTurnLog(ghost.name, admission.sessionId, (emit) => admission.run({ emit }));
     await followTurn(request, response, log, 0);
   };
 
@@ -680,7 +674,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (!remoteServe) throw new GhostError("not_found", "Remote access is not available.", 404);
     return remoteServe;
   };
-  const serverOf = (params: Record<string, string>) => decodePathSegment(params.server ?? "");
   /** A route a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. */
   const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
     if (context.admission.identity?.role === "guest") {
@@ -751,12 +744,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("DELETE", "api/ghosts/:ghost", handleDeleteGhost),
     route("GET", "api/ghosts/:ghost/character", async ({ ghost, response }) => {
       const character = await options.host.withGhost(ghost, () =>
-        openGhostHome(options.registry.get(ghost).dir).readCharacter({ enforceLimit: false }));
+        readCharacter(options.registry.get(ghost).dir, { enforceLimit: false }));
       jsonResponse(response, 200, { body: character?.body ?? "", limit: MAX_CHARACTER_BODY_LENGTH });
     }),
     route("PUT", "api/ghosts/:ghost/character", async ({ ghost, response, body }) => {
       const text = stringField(await body(), "body");
-      await options.host.withGhost(ghost, () => openGhostHome(options.registry.get(ghost).dir).writeCharacter({ body: text }));
+      await options.host.withGhost(ghost, () => writeCharacter(options.registry.get(ghost).dir, text));
       jsonResponse(response, 200, { ok: true, limit: MAX_CHARACTER_BODY_LENGTH });
     }),
     route("GET", "api/ghosts/:ghost/routines", ownerOnly(async ({ ghost, response }) => {
@@ -764,13 +757,13 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     })),
     route("POST", "api/ghosts/:ghost/routines/recoveries/:recovery/restore", ownerOnly(async ({ ghost, params, response, body }) => {
       await body();
-      jsonResponse(response, 200, await options.host.restoreRoutine(ghost, decodePathSegment(params.recovery ?? "")));
+      jsonResponse(response, 200, await options.host.restoreRoutine(ghost, params.recovery ?? ""));
     })),
     route("GET", "api/ghosts/:ghost/routines/:slug/logs", ownerOnly(async ({ ghost, params, response }) => {
-      jsonResponse(response, 200, await options.host.routineLogs(ghost, decodePathSegment(params.slug ?? "")));
+      jsonResponse(response, 200, await options.host.routineLogs(ghost, params.slug ?? ""));
     })),
     route("GET PUT", "api/ghosts/:ghost/routines/:slug/config", ownerOnly(async ({ ghost, params, method, response, body }) => {
-      const slug = decodePathSegment(params.slug ?? "");
+      const slug = params.slug ?? "";
       if (method === "GET") jsonResponse(response, 200, await options.host.routineConfig(ghost, slug));
       else {
         const input = await body();
@@ -780,11 +773,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       }
     })),
     route("DELETE", "api/ghosts/:ghost/routines/:slug", ownerOnly(async ({ ghost, params, url, response }) => {
-      jsonResponse(response, 200, await options.host.removeRoutine(ghost, decodePathSegment(params.slug ?? ""), url.searchParams.get("revision") ?? ""));
+      jsonResponse(response, 200, await options.host.removeRoutine(ghost, params.slug ?? "", url.searchParams.get("revision") ?? ""));
     })),
     route("POST", "api/ghosts/:ghost/routines/:slug/:action", ownerOnly(async ({ ghost, params, response, body }) => {
       await body();
-      await options.host.controlRoutine(ghost, decodePathSegment(params.slug ?? ""), decodePathSegment(params.action ?? ""));
+      await options.host.controlRoutine(ghost, params.slug ?? "", params.action ?? "");
       jsonResponse(response, 200, { ok: true });
     })),
     route("GET", "api/ghosts/:ghost/harness", async ({ ghost, response }) => {
@@ -868,16 +861,16 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("PUT", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response, body }) => {
       const mcp = requireMcp();
       const { config } = await body();
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.updateLeased(ghost, serverOf(params), config)));
+      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.updateLeased(ghost, params.server ?? "", config)));
     }),
     route("DELETE", "api/ghosts/:ghost/mcp/:server", async ({ ghost, params, response }) => {
       const mcp = requireMcp();
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.removeLeased(ghost, serverOf(params))));
+      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.removeLeased(ghost, params.server ?? "")));
     }),
     route("PUT", "api/ghosts/:ghost/mcp/:server/enabled", async ({ ghost, params, response, body }) => {
       const mcp = requireMcp();
       const enabled = booleanField(await body(), "enabled");
-      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.setEnabledLeased(ghost, serverOf(params), enabled)));
+      jsonResponse(response, 200, await options.host.withGhost(ghost, () => mcp.setEnabledLeased(ghost, params.server ?? "", enabled)));
     }),
   ];
 
@@ -916,11 +909,12 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
           errorResponse(response, 405, "method_not_allowed", `${method} is not allowed here.`);
           return;
         }
-        const { params } = matched;
+        const params = Object.fromEntries(Object.entries(matched.params)
+          .map(([name, segment]) => [name, decodePathSegment(segment)]));
         await matched.route.handle({
           method, request, response, url, admission, params,
-          ghost: params.ghost === undefined ? "" : decodePathSegment(params.ghost),
-          id: params.id === undefined ? "" : decodeConversationId(params.id),
+          ghost: params.ghost ?? "",
+          id: params.id === undefined ? "" : requireConversationId(params.id),
           body: () => readJsonObjectBody(request, maxBodyBytes),
         });
       } catch (error) {

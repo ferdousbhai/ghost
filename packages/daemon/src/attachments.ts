@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const DIRNAME = "attachments";

@@ -5,7 +5,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 
 const exec = promisify(execFile);
 

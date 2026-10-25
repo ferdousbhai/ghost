@@ -1,4 +1,4 @@
-import { GhostError } from "../src/ghosts.js";
+import { GhostError } from "../src/errors.js";
 import { describe, expect, it } from "vitest";
 import {
   classifyLimitMessage,

@@ -50,7 +50,7 @@ export function resolveRunningSource(version: string, startDir: string): Running
 }
 
 /** Where the package installs the skills Ghost ships. */
-export const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
+const PACKAGED_SKILLS = "/usr/lib/ghost/skills";
 
 /** The skills Ghost ships: the checkout's `skills/`, else the package's. */
 export function bundledSkillsDir(running: RunningSource): string {

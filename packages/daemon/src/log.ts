@@ -50,9 +50,9 @@ export function stderrLogSink(journal = stderrIsJournal()): LogSink {
   };
 }
 
-export const stderrSink: LogSink = stderrLogSink(false);
+const stderrSink: LogSink = stderrLogSink(false);
 
-export function formatLogMessage(
+function formatLogMessage(
   message: string,
   fields?: Record<string, unknown>,
 ): string {

@@ -13,9 +13,9 @@ import { mkdir, readdir, readlink, rm, symlink, writeFile } from "node:fs/promis
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { buildGhostSystemPrompt, FIRST_MEETING_SECTION, isSeededCharacter } from "./persona.js";
-import { openGhostHome } from "./home.js";
+import { readCharacter } from "./home.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
-import { errorMessage } from "./errors.js";
+import { errorMessage, GhostError } from "./errors.js";
 import { readAttachment, saveAttachment } from "./attachments.js";
 import { ghostSessionStopContinuation } from "./hook-policy.js";
 import {
@@ -37,7 +37,7 @@ import {
   type TranscriptMessage,
 } from "./conversation-log.js";
 import { loadGhostSettings, writeGhostSetting } from "./ghost-settings.js";
-import { assertValidGhostName, GhostError, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
+import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
 import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
@@ -78,7 +78,7 @@ import { snapshotSummary, unreportedResources, type RunResourceSnapshot } from "
 
 
 /** Same prefix Claude Code and Codex put on Stop-hook continuation prompts. */
-export const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
+const STOP_HOOK_FEEDBACK_PREFIX = "Stop hook feedback:\n";
 
 /** How long one read of Omarchy's harness report is reused. */
 const HARNESS_REPORT_TTL_MS = 60_000;
@@ -90,7 +90,7 @@ const TOOL_SUMMARY_MAX = 800;
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 /** The MCP server name `ghost-desktop` is served under; its tools are `mcp__ghost__desktop_*`. */
-export const GHOST_MCP_SERVER = "ghost";
+const GHOST_MCP_SERVER = "ghost";
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
@@ -131,6 +131,8 @@ export interface AdmittedTurnOptions {
 
 /** An admitted turn: the conversation is held until `run` settles. */
 export interface TurnAdmission {
+  /** The conversation the turn runs in, "default" when the request named none. */
+  readonly sessionId: string;
   run(options: AdmittedTurnOptions): Promise<void>;
 }
 
@@ -167,8 +169,8 @@ export interface Transcript {
   truncated: boolean;
 }
 
-export const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
-export const MAX_TRANSCRIPT_LIMIT = 2_000;
+const DEFAULT_TRANSCRIPT_LIMIT = 1_000;
+const MAX_TRANSCRIPT_LIMIT = 2_000;
 
 export interface ConversationUpdatedEvent {
   type: "conversation-updated";
@@ -337,7 +339,7 @@ export class SessionHost {
    * owner) rewrote is who it is on the next one.
    */
   async renderPersona(ghost: Ghost): Promise<string> {
-    const character = await openGhostHome(ghost.dir).readCharacter();
+    const character = await readCharacter(ghost.dir);
     return buildGhostSystemPrompt({
       ghostName: ghost.name,
       character,
@@ -529,6 +531,7 @@ export class SessionHost {
     let turnId: string = randomUUID();
     this.admissions.set(key, controller);
     return {
+      sessionId: id,
       run: async (stream) => {
         let settled: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
         try {
@@ -998,16 +1001,16 @@ export class SessionHost {
       : { type: "done" });
   }
 
-  queuedMessages(ghostName: string, sessionId?: string | null): QueuedMessages {
+  queuedMessages(ghostName: string, sessionId: string): QueuedMessages {
     this.registry.get(ghostName);
-    const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
+    const turn = this.live.get(keyOf(ghostName, requireConversationId(sessionId)));
     return { streaming: turn !== undefined, followUp: [...(turn?.followUps ?? [])] };
   }
 
   /** Abort the conversation's running turn or owner command; its stream ends `aborted`. */
-  stopTurn(ghostName: string, sessionId?: string | null): void {
+  stopTurn(ghostName: string, sessionId: string): void {
     this.registry.get(ghostName);
-    const controller = this.admissions.get(keyOf(ghostName, requireConversationId(sessionId ?? "default")));
+    const controller = this.admissions.get(keyOf(ghostName, requireConversationId(sessionId)));
     if (!controller) {
       throw new GhostError("session_not_streaming", "This conversation is not currently streaming.", 409);
     }
@@ -1015,9 +1018,9 @@ export class SessionHost {
   }
 
   /** Queue text for after the current pass; a harness takes no input mid-run. */
-  async queueMessage(ghostName: string, sessionId: string | null | undefined, text: string): Promise<QueuedMessages> {
+  async queueMessage(ghostName: string, sessionId: string, text: string): Promise<QueuedMessages> {
     this.registry.get(ghostName);
-    const key = keyOf(ghostName, requireConversationId(sessionId ?? "default"));
+    const key = keyOf(ghostName, requireConversationId(sessionId));
     const turn = this.live.get(key);
     if (!turn) {
       // A running `!command` has no passes to queue after.
@@ -1080,15 +1083,15 @@ export class SessionHost {
     return rows.sort((a, b) => (a.pinned === b.pinned ? b.updatedAt.localeCompare(a.updatedAt) : (a.pinned ? -1 : 1)));
   }
 
-  private async requireConversation(ghost: Ghost, sessionId: string | null | undefined): Promise<string> {
-    const id = requireConversationId(sessionId ?? "default");
+  private async requireConversation(ghost: Ghost, sessionId: string): Promise<string> {
+    const id = requireConversationId(sessionId);
     if (!existsSync(logPath(ghostPaths(ghost.dir).sessionDir, id))) {
       throw new GhostError("not_found", `This ghost has no conversation ${JSON.stringify(id)}.`, 404);
     }
     return id;
   }
 
-  async setPinned(ghostName: string, sessionId: string | null | undefined, pinned: boolean): Promise<void> {
+  async setPinned(ghostName: string, sessionId: string, pinned: boolean): Promise<void> {
     await this.withGhost(ghostName, async () => {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
@@ -1102,7 +1105,7 @@ export class SessionHost {
     });
   }
 
-  async markRead(ghostName: string, sessionId: string | null | undefined, openedAt = new Date()): Promise<string> {
+  async markRead(ghostName: string, sessionId: string, openedAt = new Date()): Promise<string> {
     return this.withGhost(ghostName, async () => {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);
@@ -1119,7 +1122,7 @@ export class SessionHost {
     });
   }
 
-  async renameConversation(ghostName: string, sessionId: string | null | undefined, title: string): Promise<string> {
+  async renameConversation(ghostName: string, sessionId: string, title: string): Promise<string> {
     const trimmed = title.trim();
     if (trimmed.length === 0) throw new GhostError("invalid_request", "\"title\" must not be empty.", 400);
     if (trimmed.length > MAX_CONVERSATION_TITLE_LENGTH) {
@@ -1152,7 +1155,7 @@ export class SessionHost {
 
   readTranscript(
     ghostName: string,
-    sessionId: string | null | undefined,
+    sessionId: string,
     options: { limit?: number; offset?: number } = {},
   ): Promise<Transcript> {
     return this.withGhost(ghostName, () => this.readTranscriptLeased(ghostName, sessionId, options));
@@ -1160,11 +1163,11 @@ export class SessionHost {
 
   private async readTranscriptLeased(
     ghostName: string,
-    sessionId: string | null | undefined,
+    sessionId: string,
     options: { limit?: number; offset?: number },
   ): Promise<Transcript> {
     const ghost = this.registry.get(ghostName);
-    const id = requireConversationId(sessionId ?? "default");
+    const id = requireConversationId(sessionId);
     const limit = Math.max(1, clamp(options.limit, DEFAULT_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT));
     const requestedOffset = clamp(options.offset, 0, Number.MAX_SAFE_INTEGER);
     const { messages, total, resources } = await readTranscriptPage(ghostPaths(ghost.dir).sessionDir, id, requestedOffset, limit);
@@ -1204,7 +1207,7 @@ export class SessionHost {
   restoreRoutine(ghost: string, id: string) { return this.routineOperation(ghost, (options) => restoreRoutine(ghost, id, options)); }
 
   /** Move the conversation's directory, log and all, to recoverable Trash. */
-  async deleteSession(ghostName: string, sessionId: string | null | undefined): Promise<void> {
+  async deleteSession(ghostName: string, sessionId: string): Promise<void> {
     return this.withGhost(ghostName, async () => {
       const ghost = this.registry.get(ghostName);
       const id = await this.requireConversation(ghost, sessionId);

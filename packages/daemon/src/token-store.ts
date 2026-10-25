@@ -28,6 +28,8 @@ export function tokenMatches(expected: string, presented: string): boolean {
 export function apiTokenPath(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): string {
   const explicit = env.GHOSTD_API_TOKEN_FILE?.trim();
   if (explicit) return explicit;
+  // xdgBaseDir's rule, inline: this module imports no sibling, so a test can
+  // load it in plain Node processes racing to mint the token.
   const xdg = env.XDG_STATE_HOME?.trim();
   return join(xdg && isAbsolute(xdg) ? xdg : join(home, ".local", "state"), "ghost", "api-token");
 }

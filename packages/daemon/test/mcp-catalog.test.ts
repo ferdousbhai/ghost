@@ -6,7 +6,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GhostError } from "../src/ghosts.js";
+import { GhostError } from "../src/errors.js";
 import { McpCatalog, normalizeMcpStdioCwd } from "../src/mcp-catalog.js";
 import { expandMcpServerConfig as expandWithEnvironment } from "../src/mcp-catalog-policy.js";
 

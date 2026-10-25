@@ -8,7 +8,7 @@ const exec = promisify(execFile);
 
 /** A usage record older than this is reported stale; nothing refreshes it implicitly. */
 export const STALE_AFTER_MS = 15 * 60_000;
-export const REFRESH_COMMAND = "omarchy agent usage update";
+const REFRESH_COMMAND = "omarchy agent usage update";
 
 export interface UsageWindow {
   label: string;
@@ -115,7 +115,7 @@ async function succeeds(file: string, args: string[], env: NodeJS.ProcessEnv): P
  * line) only once `mise where <package>` finds some installed version, so a
  * pending update is not a cold install; anything else on PATH is the owner's own.
  */
-export async function isInstalled(id: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+async function isInstalled(id: string, env: NodeJS.ProcessEnv): Promise<boolean> {
   const path = which(id, env);
   if (path === null) return false;
   const installer = which(`omarchy-install-${id}-cli`, env);
@@ -134,7 +134,7 @@ export async function isInstalled(id: string, env: NodeJS.ProcessEnv): Promise<b
 }
 
 /** `$XDG_STATE_HOME/omarchy/agents/usage`, falling back to `~/.local/state`. */
-export function omarchyUsageDirectory(env: NodeJS.ProcessEnv, home: string): string {
+function omarchyUsageDirectory(env: NodeJS.ProcessEnv, home: string): string {
   return join(xdgBaseDir(env, "XDG_STATE_HOME", home), "omarchy", "agents", "usage");
 }
 

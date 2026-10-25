@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
 import { errorMessage } from "./errors.js";
-import { xdgBaseDir } from "./xdg-user-dirs.js";
+import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
 import { isRecord } from "./record.js";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests">;
@@ -124,12 +124,6 @@ function readConfigFile(path: string): DaemonConfigFile | null {
     config.remote = remote;
   }
   return config;
-}
-
-function expandHome(path: string, home: string): string {
-  if (path === "~") return home;
-  if (path.startsWith("~/")) return join(home, path.slice(2));
-  return path;
 }
 
 export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig {

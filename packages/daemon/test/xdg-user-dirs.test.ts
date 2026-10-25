@@ -28,3 +28,11 @@ it("resolves the owner's documents directory the way the desktop does", async ()
   // A systemd user unit inherits no XDG desktop variables, so the file decides.
   expect(resolveDocumentsDirectory({}, workspace.dir)).toBe(join(workspace.dir, "Notes"));
 });
+
+it("reads user-dirs.dirs from XDG_CONFIG_HOME, and an empty variable defers to it", async () => {
+  const config = join(workspace.dir, "elsewhere");
+  await mkdir(config, { recursive: true });
+  await writeFile(join(config, "user-dirs.dirs"), 'XDG_DOCUMENTS_DIR="$HOME/Papers"\n');
+  expect(resolveDocumentsDirectory({ XDG_CONFIG_HOME: config, XDG_DOCUMENTS_DIR: " " }, workspace.dir))
+    .toBe(join(workspace.dir, "Papers"));
+});

@@ -1,12 +1,13 @@
 import { createServer, type Server } from "node:net";
 
+/** The peer addresses a loopback connection arrives from. */
+export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
 /**
  * Ports handed out to a process that binds them later. Drawn at random from
  * below the ephemeral range (Linux: 32768+), so a port-0 listener elsewhere
  * cannot be given the same number between our probe and their bind.
  */
-export const LOOPBACK_ADDRESSES: ReadonlySet<string> = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
-
 const PORT_FLOOR = 20_000;
 const PORT_CEILING = 29_999;
 

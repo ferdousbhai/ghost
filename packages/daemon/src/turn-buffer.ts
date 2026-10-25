@@ -1,10 +1,10 @@
 import { closeSync, mkdirSync, mkdtempSync, openSync, readSync, rmdirSync, unlinkSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { join } from "node:path";
+import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 function temporaryFile(): number {
-  const configured = process.env.XDG_CACHE_HOME?.trim() ?? "";
-  const root = join(isAbsolute(configured) ? configured : join(homedir(), ".cache"), "ghost");
+  const root = join(xdgBaseDir(process.env, "XDG_CACHE_HOME", homedir()), "ghost");
   mkdirSync(root, { recursive: true, mode: 0o700 });
   const dir = mkdtempSync(join(root, "ghost-turn-"));
   const path = join(dir, "replay");

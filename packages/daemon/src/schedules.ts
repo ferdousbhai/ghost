@@ -20,7 +20,8 @@
  */
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { GhostError, isValidGhostName } from "./ghosts.js";
+import { GhostError } from "./errors.js";
+import { isValidGhostName } from "./ghosts.js";
 import { which } from "./harnesses.js";
 import {
   commandRunner,

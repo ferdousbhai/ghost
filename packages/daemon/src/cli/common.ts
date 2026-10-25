@@ -65,7 +65,7 @@ export function preferredGhostName(
 }
 
 /** The tail of the addressing order: the sole ghost, or make the owner choose. */
-export function soleGhostName(names: readonly string[]): string {
+function soleGhostName(names: readonly string[]): string {
   const only = names[0];
   if (names.length === 1 && only) return only;
   if (names.length === 0) throw new ArgsError("No ghosts exist. Create one with `ghost new <name>`.");

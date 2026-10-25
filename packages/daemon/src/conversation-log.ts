@@ -10,10 +10,10 @@ import { appendFile, mkdir, open, type FileHandle } from "node:fs/promises";
 import type { Stats } from "node:fs";
 import { join } from "node:path";
 import { BoundedCache } from "./bounded-cache.js";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 import { snapshotSummary, type RunResourceSnapshot } from "./run-resources.js";
 
-export const LOG_VERSION = 1;
+const LOG_VERSION = 1;
 /** A stored text is cut here; the transcript marks a cut owner or hook message `contentTruncated`. */
 export const MAX_LOG_TEXT = 200_000;
 const PREVIEW_MAX = 120;
@@ -274,6 +274,44 @@ function commandText(entry: Extract<LogEntry, { type: "command" }>): string {
   return `${fence}\n${entry.output.trimEnd()}\n${fence}${status}`;
 }
 
+/**
+ * One entry's renderable messages from its `skip`th, at most `take` of them;
+ * `entryId` names the entry, e<ordinal>.
+ */
+function entryMessages(entry: LogEntry, entryId: string, skip: number, take: number): TranscriptMessage[] {
+  if (entry.type === "user") {
+    return [{
+      role: entry.origin === "hook" || entry.origin === "auto" ? entry.origin : "user",
+      content: [{ type: "text", text: entry.text }],
+      entryId,
+      ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
+    }];
+  }
+  if (entry.type === "assistant") {
+    return [{
+      role: "assistant",
+      content: entry.content,
+      entryId,
+      ...(entry.error ? { errorMessage: entry.error } : {}),
+    }];
+  }
+  if (entry.type === "handoff") {
+    return [{
+      role: "handoff",
+      content: [{ type: "text", text: entry.error ? `Failed: ${entry.error}` : entry.text }],
+      entryId,
+    }];
+  }
+  if (entry.type === "command" && !entry.excluded) {
+    // The owner's `!command`, then its output, as the live turn showed them.
+    const messages: TranscriptMessage[] = [];
+    if (skip === 0) messages.push({ role: "user", content: [{ type: "text", text: `!${entry.command}` }], entryId });
+    if (skip + take > 1) messages.push({ role: "assistant", content: [{ type: "text", text: commandText(entry) }], entryId: `${entryId}o` });
+    return messages;
+  }
+  return [];
+}
+
 /** The renderable messages, in order; harness and title records are not messages. */
 export function transcriptPage(entries: readonly LogEntry[], offset = 0, limit = Infinity): { messages: TranscriptMessage[]; total: number } {
   const messages: TranscriptMessage[] = [];
@@ -283,39 +321,7 @@ export function transcriptPage(entries: readonly LogEntry[], offset = 0, limit =
     const first = total;
     total += count;
     if (count === 0 || first >= offset + limit || total <= offset) return;
-    const entryId = `e${index}`;
-    let message: TranscriptMessage | null = null;
-    if (entry.type === "user") {
-      message = {
-        role: entry.origin === "hook" || entry.origin === "auto" ? entry.origin : "user",
-        content: [{ type: "text", text: entry.text }],
-        entryId,
-        ...(entry.text.length >= MAX_LOG_TEXT ? { contentTruncated: true as const } : {}),
-      };
-    } else if (entry.type === "assistant") {
-      message = {
-        role: "assistant",
-        content: entry.content,
-        entryId,
-        ...(entry.error ? { errorMessage: entry.error } : {}),
-      };
-    } else if (entry.type === "handoff") {
-      message = {
-        role: "handoff",
-        content: [{ type: "text", text: entry.error ? `Failed: ${entry.error}` : entry.text }],
-        entryId,
-      };
-    } else if (entry.type === "command" && !entry.excluded) {
-      // The owner's `!command`, then its output, as the live turn showed them.
-      if (first >= offset) messages.push({ role: "user", content: [{ type: "text", text: `!${entry.command}` }], entryId });
-      if (first + 1 >= offset + limit) return;
-      message = {
-        role: "assistant",
-        content: [{ type: "text", text: commandText(entry) }],
-        entryId: `${entryId}o`,
-      };
-    }
-    if (message) messages.push(message);
+    messages.push(...entryMessages(entry, `e${index}`, Math.max(0, offset - first), offset + limit - Math.max(offset, first)));
   });
   return { messages, total };
 }
@@ -519,8 +525,8 @@ export async function readTranscriptPage(sessionDir: string, id: string, offset:
       const { bytesRead } = await file.read(bytes, 0, bytes.length, record.start);
       const entry = parseEntry(bytes.subarray(0, bytesRead));
       if (!entry) continue;
-      const page = transcriptPage([entry], Math.max(0, offset - record.first), offset + limit - Math.max(offset, record.first));
-      messages.push(...page.messages.map((message) => ({ ...message, entryId: message.entryId.replace(/^e0/u, `e${record.ordinal}`) })));
+      messages.push(...entryMessages(entry, `e${record.ordinal}`, Math.max(0, offset - record.first),
+        offset + limit - Math.max(offset, record.first)));
     }
     return { messages, total: index.total, resources: index.resources };
   } finally {

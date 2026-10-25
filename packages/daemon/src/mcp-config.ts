@@ -5,7 +5,7 @@
  */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 import { readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { MCPServerConfig } from "./mcp-config-policy.js";

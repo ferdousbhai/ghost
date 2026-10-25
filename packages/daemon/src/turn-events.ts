@@ -4,7 +4,7 @@
  * size. Clients ignore event types they do not know.
  */
 import { requireConversationId } from "./conversation-log.js";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 import type { RunResourceSnapshot } from "./run-resources.js";
 
 export type TurnEvent =

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 import { readPrivateFileText, writePrivateJsonAtomic, writePrivateTextAtomic } from "./private-file.js";
 import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
 import { routineStem, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";

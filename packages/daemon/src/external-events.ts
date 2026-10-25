@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { MAX_LOG_TEXT } from "./conversation-log.js";
-import { GhostError } from "./ghosts.js";
+import { GhostError } from "./errors.js";
 
 export interface ExternalEvent { source: string; id: string; instructions: string; payload: string }
 export function parseExternalEvent(input: Record<string, unknown>): ExternalEvent {

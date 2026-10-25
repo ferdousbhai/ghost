@@ -329,9 +329,9 @@ const EVERY_ARG = argsWith({
 });
 
 export const USAGE = renderUsage(COMMANDS);
-export const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
+const EXIT_CODES_TEXT = renderExitCodes(EXIT_CODES);
 
-export function commandHelp(verb: string): string {
+function commandHelp(verb: string): string {
   const command = COMMANDS.find((candidate) => candidate.verb === verb);
   return command ? renderCommandHelp(command) : USAGE;
 }

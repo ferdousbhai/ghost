@@ -86,7 +86,7 @@ export interface RemoteAccessOptions {
 }
 
 /** The login this node is signed in as, or null when Tailscale does not say. */
-export async function tailscaleSelfLogin(): Promise<string | null> {
+async function tailscaleSelfLogin(): Promise<string | null> {
   try {
     return (await readTailscaleNode()).login;
   } catch {

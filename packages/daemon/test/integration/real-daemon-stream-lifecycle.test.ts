@@ -121,6 +121,7 @@ describe("real ghostd streaming lifecycle", () => {
     daemon.host.admitTurn = async (ghostName, options) => {
       const admission = await originalAdmitTurn(ghostName, options);
       return {
+        sessionId: admission.sessionId,
         async run(streamOptions) {
           await admission.run({
             ...streamOptions,
