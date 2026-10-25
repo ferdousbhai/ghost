@@ -16,13 +16,12 @@ _runtime_depends=(
   'glib2'
   'grim>=1.5'
   'hyprland>=0.56'
-  'libnotify>=0.8'
   'qrencode'
   'systemd'
   'wl-clipboard'
   'wtype>=0.4'
 )
-_ui_depends=('qt6-5compat>=6.8' 'quickshell>=0.3' 'xdg-utils>=1.2')
+_ui_depends=('libnotify>=0.8' 'qt6-5compat>=6.8' 'quickshell>=0.3' 'xdg-utils>=1.2')
 depends=("${_runtime_depends[@]}" "${_ui_depends[@]}")
 makedepends=(
   'bun>=1.4.0'

@@ -17,11 +17,11 @@ pkgbase = ghost-dev
 	depends = glib2
 	depends = grim>=1.5
 	depends = hyprland>=0.56
-	depends = libnotify>=0.8
 	depends = qrencode
 	depends = systemd
 	depends = wl-clipboard
 	depends = wtype>=0.4
+	depends = libnotify>=0.8
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = xdg-utils>=1.2
@@ -38,7 +38,6 @@ pkgname = ghost-runtime-dev
 	depends = glib2
 	depends = grim>=1.5
 	depends = hyprland>=0.56
-	depends = libnotify>=0.8
 	depends = qrencode
 	depends = systemd
 	depends = wl-clipboard
@@ -52,6 +51,7 @@ pkgname = ghost-dev
 	pkgdesc = An orchestration layer for all your agent harnesses
 	install = ghost-dev.install
 	depends = ghost-runtime-dev=0.0.1.r100.g0c04ce7-1
+	depends = libnotify>=0.8
 	depends = qt6-5compat>=6.8
 	depends = quickshell>=0.3
 	depends = xdg-utils>=1.2

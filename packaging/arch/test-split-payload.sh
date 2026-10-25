@@ -58,7 +58,7 @@ verify_recipe() (
   bash() { printf '%s\n' "$*" > "$work/assembly"; }
   pkgname="ghost-runtime$suffix"
   "package_$pkgname"
-  [[ " ${depends[*]} " != *quickshell* && " ${depends[*]} " != *qt6-5compat* ]]
+  [[ " ${depends[*]} " != *quickshell* && " ${depends[*]} " != *qt6-5compat* && " ${depends[*]} " != *libnotify* ]]
   [[ " ${depends[*]} " == *' bun>='* && " ${depends[*]} " == *' hyprland>='* ]]
   [[ "$(cat "$work/assembly")" == *' runtime' ]]
   pkgname="ghost$suffix"
