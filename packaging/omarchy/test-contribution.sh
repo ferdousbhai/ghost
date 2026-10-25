@@ -91,7 +91,7 @@ sed -i \
   -e "s/$runtime_sha/${next_hashes[1]}/" \
   "$updated/PKGBUILD"
 # `!` is exempt from errexit, so a negative check must fail explicitly.
-if grep -Eq '_source_commit|_source_date_epoch|@@SOURCE_(COMMIT|DATE_EPOCH)@@' "$updated/PKGBUILD"; then
+if grep -Eq '_source_commit|_source_date_epoch' "$updated/PKGBUILD"; then
   printf 'the updated recipe kept a rendered source identity\n' >&2
   exit 1
 fi

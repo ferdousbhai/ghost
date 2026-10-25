@@ -99,7 +99,7 @@ that has already exited and the preview keeps running.
 - On `open`: a 998×620 window that Hyprland tiles into the
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
-  `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
+  `moaning-myrtle`; `+` in its Ghosts header), transcript in the middle, composer at the
   bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
   rail floating at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already

@@ -57,7 +57,7 @@ QtObject {
     /**
      * Losing the keyboard commits — but a re-list destroys the field and
      * builds a new one, and that is not the owner clicking away. So the field
-     * asks a tick later (Qt.callLater at the onFocusLost site): if nothing has
+     * asks a tick later (Qt.callLater in InlineRename's onActiveFocusChanged): if nothing has
      * taken the keyboard back by then, they really did leave.
      */
     function commitOnBlur(): void {

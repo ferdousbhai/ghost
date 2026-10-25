@@ -375,7 +375,7 @@ function recordTurn(name, id, prompt) {
   publishConversationUpdated(name, id, s.updatedAt);
 }
 
-/** Ghosts that have no character yet; their scripted turn writes one. */
+/** Ghosts whose scripted turn rewrites character.md, to show a Write tool card. */
 const ONBOARDING = new Set(["moaning-myrtle"]);
 
 const json = (res, status, body) => {
@@ -513,8 +513,8 @@ function* ownerCommand(command) {
 }
 
 /**
- * A scripted pass: the ghost narrating itself, one tool call — two for a ghost
- * still being written — then a two-paragraph answer. Follow-ups queued while
+ * A scripted pass: the ghost narrating itself, one tool call — two for an
+ * ONBOARDING ghost — then a two-paragraph answer. Follow-ups queued while
  * it runs are drained by `pump` before the terminal event.
  */
 function* script(name, prompt) {
@@ -531,7 +531,7 @@ function* script(name, prompt) {
     yield* toolCall(`call_long_${step}`, toolName,
       { step: step + 1, file_path: join(SESSION_CWD, `step-${step + 1}.md`) }, `Completed step ${step + 1}`);
   }
-  // A ghost with no character writes one during the turn with the same
+  // An ONBOARDING ghost rewrites its character during the turn with the same
   // native file tool the real harnesses use.
   if (ONBOARDING.has(name)) {
     const content = `# ${name}\n\nDrafted in the dev harness, from: ${prompt.slice(0, 40)}`;

@@ -214,8 +214,8 @@ TestCase {
     }
 
     function test_totalBeyondPageBudgetStopsAtThePageCap(): void {
-        // No total pre-check pins pageLimit × maxPages any more (a clamping
-        // daemon would break it); the page-count guard is the single cap.
+        // transcriptMaxPages is the only cap; a daemon that clamps its page
+        // size must not trip a total pre-check.
         const state = activeState("runaway");
         Ghostd.loadConversationTranscript(state, false);
         for (let pageIndex = 0; pageIndex < 10; pageIndex++) {

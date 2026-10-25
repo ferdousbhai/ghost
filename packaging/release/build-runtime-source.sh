@@ -11,7 +11,7 @@ source_root="$(realpath "$source_root")"
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
-# The payload is Bun-target JavaScript (plus wasm) with no native modules, so
+# The payload is Bun-target JavaScript with no native modules, so
 # one archive serves every Linux architecture Bun runs on; "any" is the only
 # architecture token (proved on aarch64 under emulation, ghost#52).
 [[ "$arch" == any ]] || {
