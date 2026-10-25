@@ -106,10 +106,6 @@ try {
   assert.equal(badPin.status, 400);
   assert.equal((await badPin.json()).error.code, "invalid_request");
 
-  const status = await (await fetch(`http://127.0.0.1:${port}/api/status`)).json();
-  assert.deepEqual(Object.keys(status), ["version", "source"]);
-  assert.deepEqual(Object.keys(status.source), ["commit", "root"]);
-
   const board = await (await fetch(`http://127.0.0.1:${port}/api/board`)).json();
   assert.deepEqual(Object.keys(board), ["path", "exists", "modified", "title", "columns", "truncated"]);
   assert.ok(board.columns.every((column) => column.cards.every((card) => Array.isArray(card.notes))));

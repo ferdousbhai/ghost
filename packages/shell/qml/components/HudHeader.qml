@@ -261,9 +261,7 @@ Item {
                     anchors.rightMargin: Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
                     elide: Text.ElideRight
-                    text: "new chats: " + (picker.ghostDefault !== "" ? picker.ghostDefault
-                        : "automatic" + (picker.choice && picker.choice.omarchyDefault
-                            ? " (" + picker.choice.omarchyDefault + ")" : ""))
+                    text: "new chats: " + Ghostd.draftHarness
                     color: Theme.foregroundDim
                     font.family: Theme.fontFamily
                     font.pixelSize: Theme.fontSizeCaption

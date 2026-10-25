@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
- * In-memory shell demo backend. Only an owned temporary Markdown fixture
- * touches disk, and it is removed on exit. Authentication is intentionally not
- * enforced here; auth behavior is tested against the real daemon.
+ * Shell demo backend. State lives in memory, except what the HUD reads back
+ * as files: ghost homes (a temporary root it removes on exit, unless
+ * GHOSTS_ROOT names one, in which case it seeds and rewrites no
+ * character.md), routine units under that root, and copied attachments.
+ * Authentication is intentionally not enforced here; auth behavior is tested
+ * against the real daemon.
  *
  * A prompt starting with "!" runs as the owner's own command, the way the
  * daemon streams one: a `bash` tool card and no reply.
@@ -387,9 +390,6 @@ const json = (res, status, body) => {
   });
   res.end(payload);
 };
-
-/** `GET /api/status` reports the running source. */
-const MOCK_VERSION = "0.0.0-mock";
 
 /** `GET /api/board`: readBoard's shape for a small Documents/board.md. */
 const MOCK_BOARD = {
@@ -779,12 +779,6 @@ const mockServer = createServer(async (req, res) => {
     return svg(res, REMOTE_QR_SVG);
   }
 
-  if (parts.length === 2 && parts[0] === "api" && parts[1] === "status" && req.method === "GET") {
-    return json(res, 200, {
-      version: MOCK_VERSION,
-      source: { commit: null, root: null },
-    });
-  }
   if (parts.length === 2 && parts[0] === "api" && parts[1] === "board" && req.method === "GET") {
     return json(res, 200, MOCK_BOARD);
   }

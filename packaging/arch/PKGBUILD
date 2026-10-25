@@ -65,10 +65,9 @@ build() {
 check() {
   cd -- "$srcdir/ghost"
 
-  # Builds the sanitized source archive and reruns the packaging checks
-  # inside it, so it stays out of test-check-dependencies.sh.
+  # Builds the sanitized source archive and runs the packaging checks
+  # (test-check-dependencies.sh) inside it.
   bash packaging/release/test-release-source.sh
-  bash packaging/arch/test-check-dependencies.sh
   pnpm test
   bun test scripts
   pnpm typecheck

@@ -5,7 +5,8 @@
 # skip a suite that already passed on exactly what is being pushed.
 #
 #   pnpm verify        run the gate (what CI runs), remember a green clean tree
-#   .githooks/verify --check   exit 0 only if HEAD's tree is remembered green
+#   .githooks/verify --check [commit]   exit 0 only if that commit's tree
+#                      (default HEAD) is remembered green
 set -euo pipefail
 cd -- "$(git rev-parse --show-toplevel)"
 
@@ -14,7 +15,8 @@ marker="$gitdir/ghost-verified-tree"
 tree="$(git rev-parse 'HEAD^{tree}')"
 
 if [[ "${1:-}" == --check ]]; then
-  [[ -f "$marker" && "$(cat "$marker")" == "$tree" ]]
+  checked="$(git rev-parse "${2:-HEAD}^{tree}")"
+  [[ -f "$marker" && "$(cat "$marker")" == "$checked" ]]
   exit
 fi
 

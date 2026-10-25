@@ -3,11 +3,16 @@
 # (`pnpm verify`). Branches push freely.
 set -euo pipefail
 hooks="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-while read -r _local_ref _local_sha remote_ref _remote_sha; do
+while read -r _local_ref local_sha remote_ref _remote_sha; do
   [[ "$remote_ref" == refs/heads/master ]] || continue
-  if "$hooks/verify" --check; then
+  if "$hooks/verify" --check "$local_sha"; then
     printf 'pre-push: this tree already passed the gate\n' >&2
     continue
+  fi
+  # The gate runs on the working tree, so it can only vouch for HEAD.
+  if [[ "$local_sha" != "$(git rev-parse HEAD)" ]]; then
+    printf 'pre-push: %s is not checked out; check it out and run `pnpm verify` first\n' "$local_sha" >&2
+    exit 1
   fi
   printf 'pre-push: running the gate before master takes this push\n' >&2
   "$hooks/verify"

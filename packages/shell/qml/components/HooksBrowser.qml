@@ -160,7 +160,7 @@ Rectangle {
                 font.family: field.mono ? Theme.fontFamilyMono : Theme.fontFamily
                 Accessible.name: field.label
 
-                onEdited: value => { if (value !== (root.fields[field.name] || "")) root.setField(field.name, value); }
+                onTextChanged: if (input.text !== (root.fields[field.name] || "")) root.setField(field.name, input.text)
                 onCancelled: root.endEdit()
                 Keys.onPressed: event => {
                     if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)

@@ -206,7 +206,7 @@ TestCase {
 
     function test_theFooterMakesThisHarnessTheDefaultAndHandsItBack(): void {
         const header = openPicker(null);
-        compare(findChild(header, "harnessNewConversations").text, "new chats: automatic (claude)");
+        compare(findChild(header, "harnessNewConversations").text, "new chats: auto (claude)");
         verify(!findChild(header, "harnessAutomatic").visible);
 
         // This conversation runs on claude; "use claude" makes it the ghost's default.
@@ -223,7 +223,7 @@ TestCase {
         tc.click(header, "harnessAutomatic");
         compare(JSON.parse(tc.requests[2].body), { harness: null });
         tc.requests[2].complete(200, tc.choice());
-        compare(findChild(header, "harnessNewConversations").text, "new chats: automatic (claude)");
+        compare(findChild(header, "harnessNewConversations").text, "new chats: auto (claude)");
         verify(!findChild(header, "harnessAutomatic").visible);
     }
 

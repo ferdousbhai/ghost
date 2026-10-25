@@ -30,11 +30,8 @@ TextInput {
         speaks to the session. */
     property bool live: false
 
-    signal committed()
+    /** Esc: the edit is thrown away. */
     signal cancelled()
-    signal edited(string value)
-    signal focusGained()
-    signal focusLost()
 
     function begin(draft: string): void {
         field.text = draft;
@@ -50,14 +47,8 @@ TextInput {
     selectedTextColor: Theme.foregroundBright
     clip: true
 
-    onTextChanged: {
-        field.edited(field.text);
-        if (field.session && field.live) field.session.draft = field.text;
-    }
-    onAccepted: {
-        field.committed();
-        if (field.session) field.session.commitRename();
-    }
+    onTextChanged: if (field.session && field.live) field.session.draft = field.text
+    onAccepted: if (field.session) field.session.commitRename()
 
     Keys.onEscapePressed: event => {
         event.accepted = true;
@@ -66,13 +57,9 @@ TextInput {
     }
 
     onActiveFocusChanged: {
-        if (field.activeFocus) {
-            field.focusGained();
-            if (field.session) field.session.editor = field;
-        } else {
-            field.focusLost();
-            if (field.session) Qt.callLater(field.session.commitOnBlur);
-        }
+        if (!field.session) return;
+        if (field.activeFocus) field.session.editor = field;
+        else Qt.callLater(field.session.commitOnBlur);
     }
 
     Text {
