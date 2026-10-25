@@ -126,6 +126,12 @@ describe("ghost CLI against a real daemon server", () => {
     expect(temp.registry.get("casper").name).toBe("casper");
   });
 
+  it("refuses a flag on a verb that does not take it", async () => {
+    const result = await cli(["list", "--keep"]);
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain("keep");
+  });
+
   it("maps a wrong token to exit 4 with the owner hint", async () => {
     writeFileSync(tokenFile, `${"b".repeat(64)}\n`, { mode: 0o600 });
     const result = await cli(["status"]);

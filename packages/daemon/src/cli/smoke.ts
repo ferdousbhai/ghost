@@ -75,10 +75,7 @@ interface SmokeSession {
 }
 
 function sessionRows(stdout: string): SmokeSession[] {
-  const parsed = JSON.parse(stdout) as unknown;
-  const rows = Array.isArray(parsed)
-    ? parsed
-    : (parsed as { sessions?: unknown }).sessions;
+  const rows = (JSON.parse(stdout) as { sessions?: unknown }).sessions;
   if (!Array.isArray(rows)) throw new Error("ghost sessions --json returned no list");
   return rows.map((row) => {
     const record = row as { id?: unknown; messageCount?: unknown };

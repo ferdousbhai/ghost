@@ -349,7 +349,7 @@ export class SessionHost {
         BACKGROUND_WORK_POLICY,
         renderOwnerContextPolicy(resolveDocumentsDirectory(this.env, this.ownerHome)),
         SCHEDULED_WORK_POLICY,
-        renderSelfMaintenancePolicy({ ghostName: ghost.name, running: this.runningSource }),
+        renderSelfMaintenancePolicy(this.runningSource),
         ...(isSeededCharacter(ghost.name, character?.body ?? null) ? [FIRST_MEETING_SECTION] : []),
       ],
     });

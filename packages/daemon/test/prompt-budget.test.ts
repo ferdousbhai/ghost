@@ -60,10 +60,7 @@ function renderStablePolicy(): Record<string, string> {
     "Background work": BACKGROUND_WORK_POLICY,
     "Owner context": renderOwnerContextPolicy(DOCUMENTS),
     "Scheduled work": SCHEDULED_WORK_POLICY,
-    "Self-maintenance": renderSelfMaintenancePolicy({
-      ghostName: GHOST_NAME,
-      running: RUNNING,
-    }),
+    "Self-maintenance": renderSelfMaintenancePolicy(RUNNING),
     "First meeting": FIRST_MEETING_SECTION,
   };
 }

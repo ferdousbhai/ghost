@@ -12,7 +12,7 @@ const PACKAGED: RunningSource = { version: "1.4.0", commit: null, root: null };
 
 describe("renderSelfMaintenancePolicy", () => {
   it("names the running clone as the one checkout and points at the recipes", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: RUNNING });
+    const policy = renderSelfMaintenancePolicy(RUNNING);
     expect(policy.startsWith("## Self-maintenance")).toBe(true);
     expect(policy).not.toContain(RUNNING.commit ?? "");
     expect(policy).toContain(`Your checkout is ${JSON.stringify(CHECKOUT)}`);
@@ -25,7 +25,7 @@ describe("renderSelfMaintenancePolicy", () => {
   });
 
   it("gives a packaged install no checkout and no edit loop", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: PACKAGED });
+    const policy = renderSelfMaintenancePolicy(PACKAGED);
     expect(policy).toContain("/usr/lib/ghost/runtime");
     expect(policy).toContain("there is no checkout");
     expect(policy).toContain("https://github.com/ferdousbhai/ghost");
@@ -34,7 +34,7 @@ describe("renderSelfMaintenancePolicy", () => {
   });
 
   it("says the source is unknown when nothing resolved it", () => {
-    const policy = renderSelfMaintenancePolicy({ ghostName: "aria", running: null });
+    const policy = renderSelfMaintenancePolicy(null);
     expect(policy).not.toContain("packaged install under");
     expect(policy).toContain("No checkout is known to this process");
     expect(policy).not.toContain("packaged install.");

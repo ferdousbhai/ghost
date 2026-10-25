@@ -52,17 +52,8 @@ interface Command extends CommandDocumentation {
 }
 
 const CLI_ARGS: ArgsSpec = {
-  boolean: [
-    "version",
-    "new",
-    "follow-up",
-    "yes",
-    "exit-on-first",
-    "keep",
-    "no-turn",
-    "none",
-  ],
-  value: ["ghost", "session", "message", "limit", "offset", "harness"],
+  boolean: ["version"],
+  value: ["ghost", "session"],
 };
 
 export const COMMANDS: readonly Command[] = [
@@ -72,6 +63,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Send a turn, or follow up on one.",
     example: 'ghost say --new "Start fresh"',
     positionals: [0, Number.POSITIVE_INFINITY],
+    flags: { boolean: ["new", "follow-up"], value: ["message"] },
     run: sayCommand,
   },
   {
@@ -104,6 +96,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Move a ghost or conversation to recoverable Trash.",
     example: "ghost rm sage --yes",
     positionals: [0, 1],
+    flags: { boolean: ["yes"] },
     run: (parsed, ctx) => ghostsCommand("rm", parsed, ctx),
   },
   {
@@ -125,7 +118,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "show",
-    flags: { boolean: ["resources"] },
+    flags: { boolean: ["resources"], value: ["limit", "offset"] },
     usage: "show [-g <name>] [-s <id>] [--limit <n>] [--offset <n>] [--resources] [--json] [-q]",
     summary: "Print a conversation transcript as Markdown.",
     example: "ghost show -s cli-abc",
@@ -235,6 +228,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Stream conversation invalidations as JSON lines.",
     example: "ghost watch --exit-on-first",
     positionals: [0, 0],
+    flags: { boolean: ["exit-on-first"] },
     run: watchCommand,
   },
   {
@@ -259,6 +253,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Show or set the agent a ghost prefers (--none: automatic).",
     example: "ghost harness claude",
     positionals: [0, 1],
+    flags: { boolean: ["none"] },
     run: harnessCommand,
   },
   {
@@ -284,6 +279,7 @@ export const COMMANDS: readonly Command[] = [
     summary: "Exercise a throwaway daemon and ghost home.",
     example: "ghost smoke --no-turn --json",
     positionals: [0, 0],
+    flags: { boolean: ["keep", "no-turn"], value: ["harness"] },
     run: smokeCommand,
   },
   {
@@ -354,8 +350,8 @@ function runtimeOptions(options: GhostCliOptions): CliRuntime {
 
 async function dispatch(argv: readonly string[], runtime: CliRuntime): Promise<number> {
   // Two passes: the first knows every verb's flags and is trusted only for the
-  // verb, the second holds that verb to its own, so a sign-in flag on any other
-  // verb is the unknown option it is.
+  // verb, the second holds that verb to its own, so `--keep` on any verb but
+  // smoke is the unknown option it is.
   const scouted = parseArgs(argv, EVERY_ARG);
   if (flagBoolean(scouted, "version")) {
     runtime.stdout.write(`${version(runtime)}\n`);

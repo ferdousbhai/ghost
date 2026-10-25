@@ -9,13 +9,8 @@ import type { RunningSource } from "./running-source.js";
 const GHOST_SOURCE_URL = "https://github.com/ferdousbhai/ghost";
 const PACKAGED_ROOT = "/usr/lib/ghost/runtime";
 
-export interface SelfMaintenanceInput {
-  readonly ghostName: string;
-  readonly running: RunningSource | null;
-  readonly sessionId?: string;
-}
-
-function checkoutLines(checkout: string | null, running: RunningSource | null): string[] {
+function checkoutLines(running: RunningSource | null): string[] {
+  const checkout = running?.root ?? null;
   if (checkout === null) {
     return [
       `${running ? `You run from a packaged install under ${PACKAGED_ROOT}; there is no checkout.` : "No checkout is known to this process."} Your source is ${GHOST_SOURCE_URL}; a ghost works on its own code only when the owner runs ghostd from a clone. Never edit a checkout you were not given.`,
@@ -27,11 +22,10 @@ function checkoutLines(checkout: string | null, running: RunningSource | null): 
 }
 
 /** The exact policy a ghost is given for changing and restarting its own software. */
-export function renderSelfMaintenancePolicy(input: SelfMaintenanceInput): string {
-  const checkout = input.running?.root ?? null;
+export function renderSelfMaintenancePolicy(running: RunningSource | null): string {
   return [
     "## Self-maintenance",
-    ...checkoutLines(checkout, input.running),
+    ...checkoutLines(running),
     "Read `ghost help self` before editing, restarting, or updating yourself; `ghost help` lists the rest of your CLI (hooks, MCP servers, timers).",
   ].join("\n");
 }

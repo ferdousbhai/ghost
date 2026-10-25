@@ -1,7 +1,7 @@
 /**
- * MCP server configuration as Ghost stores it: the `mcp.json` row shape, its
- * validation, `${VAR}` expansion, and the serialized read-modify-write of the
- * file. The `mcpServers` shape is the Claude Code dialect most harnesses read.
+ * The serialized read-modify-write of a ghost's `mcp.json`, whose
+ * `mcpServers` shape is the Claude Code dialect most harnesses read. The
+ * catalog validates rows (mcp-config-policy.ts) before they reach it.
  */
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";

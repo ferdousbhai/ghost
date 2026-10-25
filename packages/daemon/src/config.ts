@@ -38,7 +38,6 @@ export interface DaemonConfigFile {
 
 export interface DaemonConfigOverrides {
   port?: number;
-  host?: string;
   ghostsRoot?: string;
   configPath?: string;
   env?: NodeJS.ProcessEnv;
@@ -143,7 +142,7 @@ export function loadConfig(overrides: DaemonConfigOverrides = {}): DaemonConfig 
     ?? (envPort ? parsePort(envPort, "GHOSTD_PORT") : undefined)
     ?? file?.port
     ?? DEFAULT_PORT;
-  const host = overrides.host ?? (envHost || undefined) ?? file?.host ?? DEFAULT_HOST;
+  const host = (envHost || undefined) ?? file?.host ?? DEFAULT_HOST;
   const rawRoot = overrides.ghostsRoot
     ?? (envRoot || undefined)
     ?? file?.ghostsRoot
