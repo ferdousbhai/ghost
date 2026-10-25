@@ -24,7 +24,7 @@ export interface DaemonConfig {
    * says what other tailnet members may do (default read-only).
    */
   remote: RemoteConfig;
-  /** The config file read, or the one that would be written; it need not exist. */
+  /** The config file read; it need not exist. */
   configPath: string;
   hooksPath: string;
 }

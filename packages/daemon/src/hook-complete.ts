@@ -13,6 +13,7 @@ import { accountEnv, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarne
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import { harnessRow, SUPPORTED_HARNESSES, type HarnessRow } from "./harness-table.js";
 import { errorMessage } from "./errors.js";
+import { isRecord } from "./record.js";
 
 const HOOK_COMPLETE_MAX_STDIN_BYTES = 1024 * 1024;
 const HOOK_COMPLETE_TIMEOUT_MS = 180_000;
@@ -101,7 +102,7 @@ export function parseHookCompleteInput(raw: string): HookCompleteInput {
     throw new Error(`stdin is not valid JSON: ${errorMessage(error)}`);
   }
   const input = value as Partial<HookCompleteInput> | null;
-  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("stdin must contain a JSON object.");
+  if (!isRecord(input)) throw new Error("stdin must contain a JSON object.");
   if (typeof input.ghost_home !== "string" || typeof input.prompt !== "string") {
     throw new Error("stdin must contain string ghost_home and prompt fields.");
   }

@@ -134,7 +134,7 @@ export async function startTestDaemon(options: StartTestDaemonOptions = {}): Pro
 /**
  * Parse an SSE body according to Ghost's turn wire: split on a
  * blank line, take the first `data:` line of each
- * frame, ignore `[DONE]`, ignore frames with no data line (keepalives).
+ * frame, ignore frames with no data line (keepalives).
  */
 export function parseSseStream(body: string): TurnEvent[] {
   const events: TurnEvent[] = [];
@@ -145,7 +145,7 @@ export function parseSseStream(body: string): TurnEvent[] {
       .find((line) => line.startsWith("data:"))
       ?.slice(5)
       .trim();
-    if (!data || data === "[DONE]") continue;
+    if (!data) continue;
     events.push(JSON.parse(data) as TurnEvent);
   }
   return events;

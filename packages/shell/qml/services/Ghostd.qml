@@ -1473,7 +1473,7 @@ Singleton {
             // Keepalives are bare `: comment` frames with no data line.
             const line = frame.split("\n").find(value => value.startsWith("data:"));
             const payload = line ? line.slice(5).trim() : "";
-            if (payload !== "" && payload !== "[DONE]") payloads.push(payload);
+            if (payload !== "") payloads.push(payload);
         }
         return { rest: rest, payloads: payloads };
     }

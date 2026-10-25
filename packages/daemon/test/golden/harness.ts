@@ -73,20 +73,6 @@ const ENTRY_ID_KEYS = new Set(["entryId"]);
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
 
 /**
- * Today, plus its neighbours, as `YYYY-MM-DD`. Three days rather than one so a
- * run that straddles midnight — or a writer that stamps UTC while the machine
- * is not on it — still normalises to the same placeholder.
- */
-function todayish(): ReadonlySet<string> {
-  const now = Date.now();
-  return new Set([-86_400_000, 0, 86_400_000].map((offset) => {
-    const date = new Date(now + offset);
-    const pad = (value: number) => String(value).padStart(2, "0");
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-  }));
-}
-
-/**
  * Rewrites the volatile parts of one run into placeholders. One instance per
  * fixture, so the entry-id ordinals are scoped to that conversation.
  */
@@ -164,8 +150,7 @@ export class Normalizer {
  * rendered transcript covers the same ground in a stable shape. Listing the
  * names still pins that conversations live inside the ghost home.
  *
- * The remaining visible files pin this fixture's ghost-owned persona, memory,
- * and policy state. The owner's own documents and Claude's native transcript
+ * The remaining visible files pin this fixture's ghost-owned persona. The owner's own documents and Claude's native transcript
  * have separate lifecycles and deliberately are not represented here.
  */
 export function ghostHomeSnapshot(
@@ -180,12 +165,7 @@ export function ghostHomeSnapshot(
       const full = join(current, entry);
       const isDir = statSync(full).isDirectory();
       if (isDir && current === dir && opaqueDirs.includes(entry)) {
-        // SQLite's -wal/-shm sidecars come and go with checkpointing, so their
-        // presence is not behaviour; everything else in these directories is.
-        const names = readdirSync(full)
-          .filter((name) => !/-(?:wal|shm|journal)$/.test(name))
-          .sort()
-          .join(", ");
+        const names = readdirSync(full).sort().join(", ");
         blocks.push(`--- ${entry}/ (contents not compared) ---\n${names || "(empty)"}`);
         continue;
       }
@@ -199,15 +179,7 @@ export function ghostHomeSnapshot(
   walk(dir);
   for (const full of files.sort()) {
     const rel = relative(dir, full).split(sep).join("/");
-    // Normalize dated metadata from runtime sidecars. Memory files contain only
-    // their fact, so no writer-stamped frontmatter date exists here.
-    const content = normalizer
-      .text(readFileSync(full, "utf8"))
-      .replace(
-        /^(updated|created|date):[ \t]*(\d{4}-\d{2}-\d{2})(.*)$/gm,
-        (whole, key: string, date: string, rest: string) =>
-          (todayish().has(date) ? `${key}: <today>${rest}` : whole),
-      );
+    const content = normalizer.text(readFileSync(full, "utf8"));
     blocks.push(`--- ${rel} ---\n${content}`);
   }
   return blocks.length > 0 ? blocks.join("\n") : "(empty)";

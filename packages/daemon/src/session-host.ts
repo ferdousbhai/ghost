@@ -780,8 +780,8 @@ export class SessionHost {
     let produced = false;
     let thoughtBlock: string | null = null;
     let model: Extract<HarnessEvent, { type: "model" }> | null = null;
-    let session = turn.sessionId;
-    let reportedSession = false;
+    /** The harness session this pass reported, if it reported one. */
+    let reported: string | null = null;
     const writes: Promise<void>[] = [];
     const closeBlock = () => {
       if (!open) return;
@@ -834,8 +834,7 @@ export class SessionHost {
           model = event;
           return;
         case "session":
-          reportedSession = true;
-          session = event.id;
+          reported = event.id;
           writes.push(appendLog(sessionDir, id, [{ type: "harness", at: new Date().toISOString(), harness: row.id, session: event.id, dir }]));
           return;
         case "error":
@@ -859,8 +858,8 @@ export class SessionHost {
     closeBlock();
     // The session record lands before the pass's assistant entry.
     await Promise.all(writes);
-    if (reportedSession && session !== null && row.inspectSession && !exit.spawnError && !signal.aborted) {
-      for (const fact of await row.inspectSession(session, env, at).catch(() => [])) {
+    if (reported !== null && row.inspectSession && !exit.spawnError && !signal.aborted) {
+      for (const fact of await row.inspectSession(reported, env, at).catch(() => [])) {
         if (fact.type === "resources" || model === null) onEvent(fact);
       }
     }

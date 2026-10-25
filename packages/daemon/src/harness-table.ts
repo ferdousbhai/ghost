@@ -646,7 +646,7 @@ function writeJson(value: unknown): string {
 // conversation, and the owner's own setting is tuned for coding. Copilot's
 // `auto` model refuses an effort, opencode's variants are provider-specific,
 // and cursor-agent sets effort only inside a model name, so those keep the
-// owner's.
+// owner's; so does omp, whose effort flag has not been checked.
 const EFFORT = "low";
 
 const ROWS: readonly HarnessRow[] = [

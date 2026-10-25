@@ -16,8 +16,8 @@ describe("SSE framing", () => {
       { type: "text_delta", contentIndex: 0, delta: "hi\n\nthere" },
       { type: "done" },
     ];
-    // Keepalive comments and a trailing [DONE] must be invisible.
-    const body = `: keepalive\n\n${events.map(encodeSseEvent).join("")}data: [DONE]\n\n`;
+    // Keepalive comments must be invisible.
+    const body = `: keepalive\n\n${events.map(encodeSseEvent).join("")}`;
     expect(parseSseStream(body)).toEqual(events);
   });
 });

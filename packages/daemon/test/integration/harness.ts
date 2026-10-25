@@ -184,9 +184,7 @@ export class RealSseClient {
     const frame: SseWireFrame = {
       raw,
       ...(data ? { data } : {}),
-      ...(data && data !== "[DONE]"
-        ? { event: JSON.parse(data) as TurnEvent }
-        : {}),
+      ...(data ? { event: JSON.parse(data) as TurnEvent } : {}),
     };
     this.frames.push(frame);
     for (let index = this.waiters.length - 1; index >= 0; index -= 1) {
