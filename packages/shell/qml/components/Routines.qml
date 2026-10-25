@@ -107,6 +107,7 @@ Rectangle {
                             elide: Text.ElideMiddle
                         }
                         ActionButton {
+                            objectName: "routineRestore"
                             label: recoveryRow.modelData.applicable ? "Restore paused" : "Source changed"
                             enabled: recoveryRow.modelData.applicable && !Ghostd.routinesLoading
                             onClicked: Ghostd.mutateRoutine(Ghostd.activeGhost, "recoveries/" + recoveryRow.modelData.id + "/restore", "POST", {})

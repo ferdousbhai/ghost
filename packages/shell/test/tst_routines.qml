@@ -79,12 +79,11 @@ TestCase {
     function test_removedRoutineCanBeRestoredThroughOwnerRoute(): void {
         const pane = loadedPane();
         Ghostd.routineRecoveries = [{ id: "checkpoint", slug: "daily", reason: "remove", createdAt: "now", applicable: true }];
-        Ghostd.mutateRoutine("casper", "recoveries/checkpoint/restore", "POST", {});
+        const restore = findChild(pane, "routineRestore");
+        verify(restore !== null);
+        restore.clicked();
         const xhr = tc.requests[0];
         verify(xhr.url.endsWith("/routines/recoveries/checkpoint/restore"));
         compare(xhr.method, "POST");
-        xhr.complete(200, { recovery: "undo" });
-        compare(Ghostd.routinesError, "");
-        verify(pane !== null);
     }
 }

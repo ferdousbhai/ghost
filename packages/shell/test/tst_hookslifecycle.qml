@@ -174,8 +174,7 @@ TestCase {
                 }
             });
             compare(finished, [true, false]);
-            verify(Ghostd.hookConfigError.indexOf("hooks.session_stop[0].hooks[0]") === 0
-                || Ghostd.hookConfigError.indexOf("hooks.json: hooks.session_stop[0]") > 0);
+            compare(Ghostd.hookConfigError, "/owner/.config/ghost/hooks.json: hooks.session_stop[0].hooks[0] must be a command hook with a non-empty NUL-free command.");
             compare(Object.keys(Ghostd.hookConfig.hooks).length, 0);
             compare(requests.length, 3);
         } finally {

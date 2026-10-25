@@ -9,15 +9,6 @@ TestCase {
 
     property var requests: []
     property var deleteRequests: []
-    property string deleteSettlementError: ""
-
-    Connections {
-        target: Ghostd
-        function onDeletingSessionIdChanged(): void {
-            if (Ghostd.deletingSessionId === "")
-                tc.deleteSettlementError = Ghostd.sessionsError;
-        }
-    }
 
     function messages(first: int, count: int): var {
         const result = [];
@@ -63,7 +54,6 @@ TestCase {
         Ghostd.apiToken = "test-token";
         requests = [];
         deleteRequests = [];
-        deleteSettlementError = "";
         Ghostd.requestFactory = function () {
             return FakeXhr.make((method, url) => url.indexOf("/transcript") >= 0 ? tc.requests
                 : (method === "DELETE" ? tc.deleteRequests : []));

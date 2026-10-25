@@ -31,7 +31,6 @@ Item {
     property var conflictText: null
     property string notice: ""
     property bool readable: false
-    property bool readFailed: false
 
     readonly property bool dirty: root.markdown && editor.dirty
 
@@ -151,13 +150,12 @@ Item {
         printErrors: false
 
         onLoaded: {
+            // A successful read after a failed one clears its notice.
+            if (!root.readable) root.notice = "";
             root.readable = true;
-            if (root.readFailed) root.notice = "";
-            root.readFailed = false;
             root.absorb(file.text());
         }
         onLoadFailed: {
-            root.readFailed = true;
             root.readable = false;
             root.notice = "Could not read this file — your edits are still here.";
         }
