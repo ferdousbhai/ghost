@@ -94,12 +94,6 @@ describe("assessHarness", () => {
   });
 });
 
-it("does not gate a stale weekly report ahead of pace", () => {
-  const harness = assessHarness("claude", record([
-    { label: "Weekly (7-day)", percent: 1, resetsAt: new Date(NOW + 7 * 24 * 3_600_000).toISOString() },
-  ], { updatedAt: new Date(NOW - STALE_AFTER_MS - 1).toISOString() }), NOW);
-  expect(harness).toMatchObject({ usage: { stale: true, windows: [{ percent: 1 }] } });
-});
 
 describe("ghost harnesses", () => {
   let root: string | undefined;

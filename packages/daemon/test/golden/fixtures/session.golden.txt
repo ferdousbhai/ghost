@@ -167,7 +167,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
           "type": "text"
         }
       ],
-      "entryId": "#1",
+      "entryId": "e1",
       "role": "user"
     },
     {
@@ -186,7 +186,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
           "type": "text"
         }
       ],
-      "entryId": "#2",
+      "entryId": "e4",
       "role": "assistant"
     },
     {
@@ -196,7 +196,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
           "type": "text"
         }
       ],
-      "entryId": "#3",
+      "entryId": "e6",
       "role": "user"
     },
     {
@@ -206,7 +206,7 @@ Read `ghost help self` before editing, restarting, or updating yourself; `ghost 
           "type": "text"
         }
       ],
-      "entryId": "#4",
+      "entryId": "e7",
       "role": "assistant"
     }
   ],

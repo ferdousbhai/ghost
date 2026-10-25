@@ -22,9 +22,7 @@
  *
  * - **Conversation logs** under `sessions/`: full of clock values; the
  *   rendered transcript is the same information in a stable shape.
- * - **Wall-clock everything**: entry timestamps, `createdAt`/`updatedAt`.
- * - **Entry ids** are re-mapped to first-seen ordinals `#1`, `#2`, … which
- *   still pins the parent/child shape of the conversation.
+ * - **Wall-clock everything**: timestamps in text and `updatedAt`.
  * - **Absolute paths**: the temp ghosts root is a fresh mkdtemp every run.
  *
  * Tool-call ids and harness session ids come from the scripted harness, so a
@@ -55,44 +53,16 @@ function updating(): boolean {
 }
 
 
-const CLOCK_KEYS = new Set([
-  "timestamp",
-  "timestamps",
-  "createdAt",
-  "updatedAt",
-  "startedAt",
-  "finishedAt",
-  "expires",
-  "expiresAt",
-]);
-
-const DURATION_KEYS = new Set(["durationMs", "elapsedMs", "tookMs", "latencyMs"]);
-
-const ENTRY_ID_KEYS = new Set(["entryId"]);
-
 const ISO_TIMESTAMP = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g;
 
-/**
- * Rewrites the volatile parts of one run into placeholders. One instance per
- * fixture, so the entry-id ordinals are scoped to that conversation.
- */
+/** Rewrites the volatile parts of one run into placeholders. */
 export class Normalizer {
   private readonly paths: Array<[string, string]> = [];
-  private readonly entryIds = new Map<string, string>();
 
   path(absolute: string, placeholder: string): this {
     this.paths.push([absolute, placeholder]);
     this.paths.sort((a, b) => b[0].length - a[0].length);
     return this;
-  }
-
-  entryId(raw: string | null): string {
-    if (raw === null) return "<none>";
-    const existing = this.entryIds.get(raw);
-    if (existing) return existing;
-    const label = `#${this.entryIds.size + 1}`;
-    this.entryIds.set(raw, label);
-    return label;
   }
 
   text(value: string): string {
@@ -117,14 +87,10 @@ export class Normalizer {
     for (const key of Object.keys(source).sort()) {
       const raw = source[key];
       if (raw === undefined) continue;
-      if (CLOCK_KEYS.has(key)) {
+      if (key === "updatedAt") {
         out[key] = "<time>";
-      } else if (DURATION_KEYS.has(key)) {
-        out[key] = "<duration>";
       } else if (key === "run") {
         out[key] = "<run>";
-      } else if (ENTRY_ID_KEYS.has(key)) {
-        out[key] = typeof raw === "string" ? this.entryId(raw) : this.entryId(null);
       } else {
         out[key] = this.value(raw);
       }
