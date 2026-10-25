@@ -50,8 +50,6 @@ export function stderrLogSink(journal = stderrIsJournal()): LogSink {
   };
 }
 
-const stderrSink: LogSink = stderrLogSink(false);
-
 function formatLogMessage(
   message: string,
   fields?: Record<string, unknown>,
@@ -70,8 +68,8 @@ const LEVEL_ORDER: Record<LogLevel, number> = {
 };
 
 export function createLogger(
-  minLevel: LogLevel = "info",
-  sink: LogSink = stderrSink,
+  minLevel: LogLevel,
+  sink: LogSink,
   boundFields: Record<string, unknown> = {},
 ): Logger {
   const threshold = LEVEL_ORDER[minLevel];

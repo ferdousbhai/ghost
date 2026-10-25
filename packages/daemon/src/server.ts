@@ -96,11 +96,11 @@ interface TurnLog {
 }
 
 /**
- * Same-origin is the intended deployment (the Omarchy webapp wraps
- * `http://127.0.0.1:<port>` directly), but a UI running on a dev server is a
- * different origin on the same loopback interface. Allow exactly that, and
- * nothing else — a page on a remote origin must not be able to read a
- * ghost's memory through the user's own browser.
+ * The HUD is not a web page, and the viewer the daemon serves at `/` is same
+ * origin; a local UI on another loopback port is a different origin on the
+ * same interface. Allow exactly that, and nothing else — a page on a remote
+ * origin must not be able to read a ghost's memory through the user's own
+ * browser.
  */
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
 

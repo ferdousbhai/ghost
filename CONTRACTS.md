@@ -211,7 +211,7 @@ skills only the shipped `skills/` do (see "Ghost-home resources").
 
 `character.md` is plain Markdown with no frontmatter; by convention it opens
 with a heading naming the persona. Its complete body, bounded by
-`MAX_CHARACTER_BODY_LENGTH` in [`home.ts`](packages/daemon/src/home.ts),
+`MAX_CHARACTER_BODY_LENGTH` in [`persona.ts`](packages/daemon/src/persona.ts),
 is the persona. A seeded or blank character marks onboarding; the ghost shows
 the owner a draft and waits for confirmation before replacing it.
 
