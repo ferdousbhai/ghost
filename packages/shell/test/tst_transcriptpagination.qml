@@ -141,7 +141,7 @@ TestCase {
 
         compare(state.rows.length, 1);
         compare(state.rows[0].text,
-            "bounded text\n\n*[Saved message truncated]*");
+            "bounded text\n\n[Saved message truncated]");
     }
 
     function test_emptyPageCompletesAndClearsOldRows(): void {

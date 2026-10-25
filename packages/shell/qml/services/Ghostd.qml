@@ -1800,7 +1800,6 @@ Singleton {
     function leaveConversation(state: var): void {
         root.cancelTranscriptLoad(state);
         if (state.streaming || state.detached || state.queueSubmitting || state.handedBack !== "") {
-            root.captureActiveTurn(state);
             return;
         }
         const kept = Object.assign({}, root.turnStates);
@@ -1987,7 +1986,7 @@ Singleton {
             hydrated.push({
                 role: row.role,
                 text: row.text + (row.contentTruncated
-                    ? "\n\n*[Saved message truncated]*" : ""),
+                    ? "\n\n[Saved message truncated]" : ""),
                 toolActivity: row.role === "assistant"
                     ? root.messageTools(row.parts) : [],
                 error: row.error || "",
@@ -2101,7 +2100,6 @@ Singleton {
         const state = root.ensureTurnState(ghost, sessionId);
         if (!state || sessionId === "") return;
         root.ensureLocalSessionRow(ghost, sessionId, 1);
-        root.captureActiveTurn(state);
 
         root.beginTurnFor(state);
         root.appendTurnRow(state, {
@@ -2150,7 +2148,6 @@ Singleton {
     function cancel(): void {
         const state = root.activeTurnState(false);
         if (!state) return;
-        root.captureActiveTurn(state);
         root.request(state, "stopRequest", "POST", root.sessionPath(state.ghost, state.sessionId) + "/stop", {}, function () {});
         // Another client's turn still shows until the listing ends it, which
         // reloads what it left.
@@ -2272,17 +2269,10 @@ Singleton {
     /**
      * The active session id for a ghost, minting one on first use. A conversation
      * is created lazily by the daemon on the first turn; until then it lives only
-     * as this id, which `sessionId` carries into the POST. Reuses the
-     * current unstarted draft so New and Send cannot mint a second blank chat.
+     * as this id, which `sessionId` carries into the POST.
      */
     function ensureSession(ghost: string): string {
-        if (!root.sessionIds[ghost]) {
-            if (ghost === root.activeGhost && root.isCurrentConversationUnstarted()) {
-                root.sessionIds[ghost] = root.currentSessionId;
-            } else {
-                root.sessionIds[ghost] = root.mintConversationId();
-            }
-        }
+        if (!root.sessionIds[ghost]) root.sessionIds[ghost] = root.mintConversationId();
         if (ghost === root.activeGhost) root.currentSessionId = root.sessionIds[ghost];
         root.ensureTurnState(ghost, root.sessionIds[ghost]);
         return root.sessionIds[ghost];
@@ -2630,7 +2620,6 @@ Singleton {
     function queueMessage(text: string): void {
         const state = root.activeTurnState(false);
         if (!state) return;
-        root.captureActiveTurn(state);
         root.queueFor(state, text.trim());
     }
 

@@ -69,7 +69,9 @@ Never launch a plain development Quickshell process on the owner's session bus.
 Use the isolated nested compositor:
 
 ```sh
-packages/shell/dev/preview.sh
+# from packages/shell, in two terminals (see dev/README.md)
+node dev/mock-ghostd.mjs --port 17719
+bash dev/preview.sh qml 17719
 ```
 
 Run lint and the QML suite with:
