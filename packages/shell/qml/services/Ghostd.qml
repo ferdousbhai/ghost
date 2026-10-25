@@ -1015,9 +1015,8 @@ Singleton {
             root.cancelTranscriptLoad(previous);
         }
         root.activeGhost = name;
-        // Conversations are per ghost; restore this ghost's last-active session
-        // id (if any) and list its conversations. The transcript view stays
-        // empty until the user opens one — a switch shows the list, not a body.
+        // Restore this ghost's last-active session id (if any) and show
+        // whatever turn state is still kept for it, a running turn included.
         root.currentSessionId = root.sessionIds[name] || "";
         root.showTurnState(name, root.currentSessionId);
         root.clearGhostScopedState();
