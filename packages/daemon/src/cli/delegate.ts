@@ -81,8 +81,9 @@ export const DELEGATE_ARGS: ArgsSpec = { boolean: ["owner-named"], value: [] };
 /**
  * The harness's arguments plus `ghost-desktop` (the `desktop` command) as its
  * `ghost` MCP server, for the harnesses whose way to load one is known. Left
- * alone without `ghost-desktop`, when the run already names an MCP config, or
- * (claude) when a `--` would make the flags text.
+ * alone without `ghost-desktop`, when the run already configures it (claude:
+ * any `--mcp-config`; codex: an `mcp_servers.ghost` override), or (claude)
+ * when a `--` would make the flags text.
  */
 export function withGhostTools(id: string, args: readonly string[], desktop: string | null): string[] {
   if (!desktop) return [...args];

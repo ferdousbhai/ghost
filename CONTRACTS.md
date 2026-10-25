@@ -453,7 +453,8 @@ when a signal ended it, 127 when it could not start).
 
 A delegated harness gets the same `ghost` server: `ghost delegate` adds
 `ghost-desktop` to the two harnesses whose flags for it are known, unless it
-is not installed or the run already names an MCP config: `claude` gets
+is not installed or the run already configures it (claude: any
+`--mcp-config`; codex: an `mcp_servers.ghost` override): `claude` gets
 `--allowedTools mcp__ghost --mcp-config <ghost server>` after its own
 arguments (both flags take lists, and a `--` in them leaves the run alone),
 `codex` gets a `-c mcp_servers.ghost.command` override ahead of them. That table is a deliberate exception to
