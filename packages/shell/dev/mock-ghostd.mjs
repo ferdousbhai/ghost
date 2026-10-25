@@ -260,6 +260,9 @@ if (OWNS_GHOSTS_ROOT) {
 /** @type {Map<string, Map<string, { id, title, harness, updatedAt, messages }>>} */
 const sessionStore = new Map();
 
+/** Every per-ghost store: re-keyed when a ghost is renamed, dropped when it is banished. */
+const perGhostStores = [sessionStore, writtenCharacter, mcpStore, ghostDefaultHarness];
+
 // Persisted messages carry an `entryId`; opaque and monotonic here, as in a
 // real transcript.
 let entrySeq = 0;
@@ -352,7 +355,8 @@ const sessionSummary = (name) => (s) => {
   return {
     id: s.id,
     title: s.title ?? null,
-    preview: s.preview ?? (first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null),
+    // As in ghostd, the first owner text logged previews it, a `!command` included.
+    preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
     harness: s.harness ?? null,
     updatedAt: s.updatedAt,
     messageCount: s.messages.length,
@@ -362,12 +366,15 @@ const sessionSummary = (name) => (s) => {
   };
 };
 
+/** The harness a turn runs on: the conversation's, its draft choice, the ghost's default, then Omarchy's. */
+const turnHarness = (name, id, s) => s?.harness ?? draftHarness.get(turnKey(name, id))
+  ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
+
 /** A finished turn's conversation takes its harness, its time, and a title from its prompt. */
 function recordTurn(name, id, prompt) {
   const s = ghostSessions(name).get(id);
   if (!s) return;
-  s.harness = s.harness ?? draftHarness.get(turnKey(name, id))
-    ?? ghostDefaultHarness.get(name) ?? OMARCHY_DEFAULT_HARNESS;
+  s.harness = turnHarness(name, id, s);
   draftHarness.delete(turnKey(name, id));
   s.updatedAt = new Date().toISOString();
   // The first owner message titles it; a `!command` never does, as in ghostd.
@@ -646,8 +653,6 @@ async function streamTurn(res, name, body) {
     store.set(sessionId, existing);
   }
   if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
-  // As in ghostd, the first owner text previews it, a `!command` included.
-  if (existing) existing.preview ??= firstLine(prompt);
   if (existing) publishConversationUpdated(name, sessionId);
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
@@ -659,7 +664,7 @@ async function streamTurn(res, name, body) {
     if (reply !== null && !failing) reportResources();
   };
   const reportResources = () => {
-    const harness = existing?.harness ?? draftHarness.get(key) ?? OMARCHY_DEFAULT_HARNESS;
+    const harness = turnHarness(name, sessionId, existing);
     const resources = { skills: ["calendar", "mail"], extensions: ["review"], mcpServers: ["ghost"] };
     const snapshot = { run: randomUUID(), at: new Date().toISOString(), harness, resources,
       supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
@@ -798,14 +803,15 @@ const mockServer = createServer(async (req, res) => {
   if (parts[3] === "routines") {
     const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
     if (!mockRoutines.has(name)) {
+      const execStart = `/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"`;
       const routine = {
         ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
         timerPath: join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath: join(GHOSTS_ROOT, "units", `${unit}.service`),
         description: "Daily notes", schedule: "OnCalendar=daily", nextRun: "Fri 2026-10-23 00:00:00 EEST",
-        lastRun: null, enabled: "enabled", active: "active", command: "ghost say --new 'Tidy my notes'", result: "", serviceActive: "inactive",
+        lastRun: null, enabled: "enabled", active: "active", command: execStart, result: "", serviceActive: "inactive",
       };
       const config = { timer: "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n",
-        service: `[Service]\nType=oneshot\nExecStart=/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"\n` };
+        service: `[Service]\nType=oneshot\nExecStart=${execStart}\n` };
       mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
       writeFileSync(routine.timerPath, config.timer); writeFileSync(routine.servicePath, config.service);
       mockRoutines.set(name, routine); mockRoutineConfigs.set(name, config);
@@ -932,10 +938,7 @@ const mockServer = createServer(async (req, res) => {
     }
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
-    sessionStore.delete(name);
-    writtenCharacter.delete(name);
-    ghostDefaultHarness.delete(name);
-    mcpStore.delete(name);
+    for (const store of perGhostStores) store.delete(name);
     return json(res, 200, { ok: true, trash: join(TRASH_ROOT, name) });
   }
 
@@ -957,7 +960,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
       });
     }
-    for (const store of [sessionStore, writtenCharacter, mcpStore, ghostDefaultHarness]) {
+    for (const store of perGhostStores) {
       if (store.has(name)) {
         store.set(next, store.get(name));
         store.delete(name);

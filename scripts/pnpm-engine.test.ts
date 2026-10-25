@@ -7,10 +7,9 @@ import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
-test("packaging accepts a delegating pnpm launcher and rejects the wrong resolved engine", async () => {
+test("prepare-pnpm-engine accepts the packageManager pnpm and rejects another version", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ghost-pnpm-engine-"));
   try {
-    // A newer launcher delegates --version but remains what `pnpm exec` finds.
     await writeFile(join(dir, "pnpm"), `#!/bin/sh
 [ "$1" = --version ] || exit 9
 printf '%s\\n' "\${TEST_PNPM_VERSION}"
