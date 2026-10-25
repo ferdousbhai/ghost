@@ -35,10 +35,12 @@ TestCase {
         compare(JSON.parse(Mcp.template(null, "stdio")).command, "npx");
     }
 
-    function test_validatesTransportAndRequiredFields(): void {
+    function test_checksJsonAndTheSelectedTransportOnly(): void {
         verify(Mcp.parse('{"type":"stdio","command":"node"}', "stdio").ok);
+        verify(Mcp.parse('{"command":"node"}', "stdio").ok);
         verify(Mcp.parse('{"type":"http","url":"https://example.com/mcp"}', "http").ok);
-        verify(!Mcp.parse('{"type":"http"}', "http").ok);
+        // Required fields are the daemon's to refuse, in its own words.
+        verify(Mcp.parse('{"type":"http"}', "http").ok);
         verify(!Mcp.parse('{"type":"http","url":"x"}', "sse").ok);
         verify(!Mcp.parse("[]", "stdio").ok);
     }

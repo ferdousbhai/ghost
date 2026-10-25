@@ -35,6 +35,8 @@ function template(server, type) {
     return JSON.stringify(config, null, 2);
 }
 
+// Only what the editor itself needs: a JSON object in the selected
+// transport. The daemon validates the row and its refusal is shown as is.
 function parse(textValue, expectedType) {
     let config;
     try {
@@ -44,16 +46,8 @@ function parse(textValue, expectedType) {
     }
     if (!config || typeof config !== "object" || Array.isArray(config))
         return { ok: false, error: "Configuration must be a JSON object." };
-    const type = text(config.type || "stdio").toLowerCase();
-    if (["stdio", "http", "sse"].indexOf(type) < 0)
-        return { ok: false, error: "Type must be stdio, http, or sse." };
-    if (expectedType && type !== expectedType)
+    if (expectedType && (config.type === undefined ? "stdio" : config.type) !== expectedType)
         return { ok: false, error: "The JSON type must match the selected transport." };
-    if (type === "stdio" && text(config.command).trim() === "")
-        return { ok: false, error: "A stdio server needs a command." };
-    if ((type === "http" || type === "sse") && text(config.url).trim() === "")
-        return { ok: false, error: "A remote server needs a URL." };
-    config.type = type;
     return { ok: true, config: config, error: "" };
 }
 
