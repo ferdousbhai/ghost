@@ -806,18 +806,26 @@ const mockServer = createServer(async (req, res) => {
 
   if (parts[3] === "routines") {
     const unit = `ghost-timer-v1-${name.length}-${name}-daily-notes`;
+    const timerPath = join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath = join(GHOSTS_ROOT, "units", `${unit}.service`);
+    /** The unit files on disk follow the stored sources; none when the routine is removed. */
+    const writeUnits = (sources) => {
+      if (!sources) {
+        rmSync(timerPath, { force: true }); rmSync(servicePath, { force: true });
+        return;
+      }
+      mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
+      writeFileSync(timerPath, sources.timer); writeFileSync(servicePath, sources.service);
+    };
     if (!mockRoutines.has(name)) {
       const execStart = `/usr/bin/ghost say --new --ghost ${name} "Tidy my notes"`;
       const routine = {
         ghost: name, slug: "daily-notes", unit: `${unit}.timer`, service: `${unit}.service`,
-        timerPath: join(GHOSTS_ROOT, "units", `${unit}.timer`), servicePath: join(GHOSTS_ROOT, "units", `${unit}.service`),
-        description: "Daily notes", schedule: "OnCalendar=daily", nextRun: "Fri 2026-10-23 00:00:00 EEST",
-        lastRun: null, enabled: "enabled", active: "active", command: execStart, result: "", serviceActive: "inactive",
+        timerPath, servicePath, description: "Daily notes", nextRun: "Fri 2026-10-23 00:00:00 EEST",
+        lastRun: null, enabled: "enabled", active: "active", result: "", serviceActive: "inactive",
       };
       const config = { timer: "[Timer]\nOnCalendar=daily\n[Install]\nWantedBy=timers.target\n",
         service: `[Service]\nType=oneshot\nExecStart=${execStart}\n` };
-      mkdirSync(join(GHOSTS_ROOT, "units"), { recursive: true });
-      writeFileSync(routine.timerPath, config.timer); writeFileSync(routine.servicePath, config.service);
+      writeUnits(config);
       mockRoutines.set(name, routine); mockRoutineConfigs.set(name, config);
     }
     const routine = mockRoutines.get(name), config = mockRoutineConfigs.get(name);
@@ -835,17 +843,13 @@ const mockServer = createServer(async (req, res) => {
       const recovery = checkpoint(saved.config, "restore");
       mockRoutineConfigs.set(name, saved.config);
       mockRoutines.set(name, saved.routine ? { ...saved.routine, enabled: "disabled", active: "inactive", nextRun: null } : null);
-      if (saved.config) {
-        writeFileSync(join(GHOSTS_ROOT, "units", `${unit}.timer`), saved.config.timer);
-        writeFileSync(join(GHOSTS_ROOT, "units", `${unit}.service`), saved.config.service);
-      } else {
-        rmSync(join(GHOSTS_ROOT, "units", `${unit}.timer`), { force: true });
-        rmSync(join(GHOSTS_ROOT, "units", `${unit}.service`), { force: true });
-      }
+      writeUnits(saved.config);
       return json(res, 200, { recovery });
     }
     if (parts.length === 4 && req.method === "GET") return json(res, 200, {
-      routines: routine ? [routine] : [], recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
+      // As ghostd reads them from the units: the schedule and command are the sources'.
+      routines: routine ? [{ ...routine, schedule: config.timer.match(/^OnCalendar=.*$/m)?.[0] ?? "Schedule unavailable",
+        command: config.service.match(/^ExecStart=(.*)$/m)?.[1] ?? "" }] : [], recoveries: [...mockRoutineRecoveries].filter(([, row]) => row.ghost === name).map(([id, row]) => ({
         id, slug: row.slug, createdAt: row.createdAt, reason: row.reason, applicable: row.expectedRevision === routineRevision(config),
       })),
     });
@@ -858,16 +862,14 @@ const mockServer = createServer(async (req, res) => {
       if (typeof input.timer !== "string" || typeof input.service !== "string" || !input.timer.trim() || !input.service.trim()) return json(res, 400, { error: { message: "Invalid unit sources" } });
       const next = { timer: input.timer, service: input.service }, recovery = checkpoint(next, "edit");
       mockRoutineConfigs.set(name, next);
-      routine.schedule = input.timer.match(/^OnCalendar=.*$/m)?.[0] ?? "Schedule unavailable";
-      routine.command = input.service.match(/^ExecStart=(.*)$/m)?.[1] ?? "";
-      writeFileSync(routine.timerPath, input.timer); writeFileSync(routine.servicePath, input.service);
+      writeUnits(next);
       return json(res, 200, { recovery });
     }
     if (parts.length === 5 && req.method === "DELETE") {
       if (url.searchParams.get("revision") !== routineRevision(config)) return json(res, 409, { error: { message: "Source changed" } });
       const recovery = checkpoint(null, "remove");
       mockRoutineConfigs.set(name, null); mockRoutines.set(name, null);
-      rmSync(routine.timerPath, { force: true }); rmSync(routine.servicePath, { force: true });
+      writeUnits(null);
       return json(res, 200, { recovery });
     }
     const action = parts[5];
