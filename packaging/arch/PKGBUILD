@@ -33,7 +33,6 @@ makedepends=(
 checkdepends=(
   'jq'
   'nodejs'
-  'python-yaml'
   'ripgrep'
 )
 _runtime_optdepends=(
@@ -66,6 +65,8 @@ build() {
 check() {
   cd -- "$srcdir/ghost"
 
+  # Builds the sanitized source archive and reruns the packaging checks
+  # inside it, so it stays out of test-check-dependencies.sh.
   bash packaging/release/test-release-source.sh
   bash packaging/arch/test-check-dependencies.sh
   pnpm test

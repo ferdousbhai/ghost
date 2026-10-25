@@ -102,7 +102,7 @@ fi
 
 if [[ "$component" == ui ]]; then
   desktop-file-validate "$root/usr/share/applications/ghost.desktop"
-  python -m json.tool "$root/usr/share/ghost/plugin/manifest.json" >/dev/null
+  bun -e 'await Bun.file(process.argv[1]).json()' "$root/usr/share/ghost/plugin/manifest.json"
 else
   GHOST_BUN_EXECUTABLE="$(command -v bun)" \
     "$root/usr/bin/ghostd" --version | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'

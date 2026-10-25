@@ -29,7 +29,6 @@ makedepends=(
 checkdepends=(
   'jq'
   'nodejs'
-  'python-yaml'
   'ripgrep'
 )
 _runtime_optdepends=(

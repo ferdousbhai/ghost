@@ -31,13 +31,6 @@ failures remain visible and work is not silently resubmitted to another host.
 
 ## Remote desktop is separate
 
-Ghost does not stream the desktop or add remote input routes. Existing VNC
-software is the first candidate for a separately requested takeover workflow:
-[wayvnc](https://github.com/any1/wayvnc) attaches to compatible Wayland sessions,
-serves one display, and supports virtual input. Its upstream recommendation is
-loopback access through an SSH tunnel; authentication and compositor protocol
-compatibility need their own validation. No remote-desktop server was installed
-or enabled for this work, and Hyprland compatibility is not asserted. Before
-adopting one, verify observation and input against nested Hyprland, then check
-the phone client and explicit disconnect/disable behavior. Keep that facility's
-access controls independent of Ghost's read-only guests.
+Ghost does not stream the desktop or accept remote input. Use existing VNC
+software such as [wayvnc](https://github.com/any1/wayvnc) for that, with its
+own access controls.

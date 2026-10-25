@@ -125,8 +125,6 @@ that has already exited and the preview keeps running.
   `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
   on title (`^Ghost( — .*)?$`), not on class. `SHIFT+SUPER+<n>` moves it between workspaces.
 
-`dev/evidence/ghost-hud.png` is a nested-preview capture of the HUD against
-the mock, opened on `casper`.
 
 ## Validation
 

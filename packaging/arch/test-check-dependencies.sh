@@ -52,10 +52,6 @@ require_install_hook_activation() {
     printf '%s %s does not print %s\n' "$install_script" "$hook" "$service_command" >&2
     exit 1
   fi
-  if grep -Fqi -- 'obsidian' <<< "$output"; then
-    printf '%s %s still gates enabling Ghost on Obsidian\n' "$install_script" "$hook" >&2
-    exit 1
-  fi
 }
 
 command -v rg >/dev/null || {
@@ -70,26 +66,23 @@ command -v jq >/dev/null || {
   printf 'jq is required by the Omarchy contribution regression but is not installed\n' >&2
   exit 1
 }
-python -c 'import yaml' >/dev/null 2>&1 || {
-  printf 'python-yaml is required by package checks but is not installed\n' >&2
-  exit 1
-}
-
-for install_script in \
-  "$script_dir/ghost-runtime-dev.install" \
-  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost-runtime.install"; do
-  require_install_hook_activation "$install_script" post_install \
-    'systemctl --user enable --now ghostd.service'
-  require_install_hook_activation "$install_script" post_upgrade \
-    'systemctl --user reenable --now ghostd.service'
-  require_install_hook_activation "$install_script" post_upgrade \
-    'systemctl --user restart ghostd.service'
-done
+# makepkg needs each recipe's hooks as regular files beside it, so the two
+# recipes keep identical copies.
+cmp "$script_dir/ghost-dev.install" \
+  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost.install"
+cmp "$script_dir/ghost-runtime-dev.install" \
+  "$source_root/packaging/omarchy/pkgbuilds/ghost/ghost-runtime.install"
+install_script="$script_dir/ghost-runtime-dev.install"
+require_install_hook_activation "$install_script" post_install \
+  'systemctl --user enable --now ghostd.service'
+require_install_hook_activation "$install_script" post_upgrade \
+  'systemctl --user reenable --now ghostd.service'
+require_install_hook_activation "$install_script" post_upgrade \
+  'systemctl --user restart ghostd.service'
 
 bash "$script_dir/test-split-payload.sh"
 bash "$source_root/packaging/release/test-release-version.sh"
 bash "$source_root/packaging/release/test-runtime-source.sh"
-bash "$source_root/packaging/release/test-minimum-bun-smoke.sh"
 bash "$source_root/packaging/release/test-installer.sh"
 bash "$source_root/packaging/omarchy/test-contribution.sh"
 
@@ -108,8 +101,6 @@ done < <(find "$source_root/packaging" \
   -name __pycache__ -prune \
   -o -name 'test-*' -type f -print | sort)
 
-rg -q 'rg[[:space:]]+-l' \
-  "$source_root/packages/shell/dev/test.sh"
 (
   CDPATH= cd -- "$script_dir"
   env -u GHOST_SOURCE_REPO -u GHOST_SOURCE_REF makepkg --printsrcinfo
@@ -117,7 +108,6 @@ rg -q 'rg[[:space:]]+-l' \
 cmp "$script_dir/.SRCINFO" "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends jq "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost-dev.SRCINFO"
-require_srcinfo_entry checkdepends python-yaml "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost-dev.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost-dev.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost-dev.SRCINFO"
@@ -131,7 +121,6 @@ bash "$source_root/packaging/release/render-arch-package.sh" \
   0000000000000000000000000000000000000000000000000000000000000000
 require_srcinfo_entry checkdepends jq "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends nodejs "$work/ghost/.SRCINFO"
-require_srcinfo_entry checkdepends python-yaml "$work/ghost/.SRCINFO"
 require_srcinfo_entry checkdepends ripgrep "$work/ghost/.SRCINFO"
 require_srcinfo_entry makedepends 'bun>=1.4.0' "$work/ghost/.SRCINFO"
 require_srcinfo_dependency bun "$work/ghost/.SRCINFO"

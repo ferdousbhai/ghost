@@ -21,9 +21,9 @@ The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
 [the install choices](../arch/README.md#runtime-with-your-own-ui)).
 
 The v3 runtime archive is a package *source*, not an installed pacman package.
-Its payload contains `bin/ghostd`, `bin/ghost`, `lib/ghostd.js`, `lib/ghost.js`,
-required static assets, and the exact licenses for the bundled application
-closure. Ghost and its MCP support remain bundled for offline use.
+Its payload contains the `ghostd`, `ghost`, and `ghost-desktop` launchers in
+`bin/` and their bundles in `lib/`, required static assets, and the exact
+licenses for the bundled application closure. Ghost and its MCP support remain bundled for offline use.
 Bundles are minified with function and class names preserved for diagnostics;
 the full license closure stays in the payload.
 QML, the desktop
@@ -42,7 +42,7 @@ The v3 runtime archive records `bun_build_version` separately from
 license, and license-manifest byte to the exact `source_commit` through
 `PAYLOAD.SHA256`. The stable recipe verifies the source/runtime checksums, exact
 layout and modes, payload and bundled-license closure, Agent SDK exclusion,
-declared/current Bun compatibility, and both launchers' `--help`/`--version`
+declared/current Bun compatibility, and each launcher's `--help`/`--version`
 plus scratch-daemon behavior before installation.
 
 ## Cutting a release
@@ -55,7 +55,7 @@ packaging/release/publish.sh 0.1.1 --dry-run   # build, verify, build the packag
 packaging/release/publish.sh 0.1.1             # bump, push, tag, publish
 ```
 
-`publish.sh` bumps the five manifests `verify-release-version.sh` reads when
+`publish.sh` bumps the manifests `verify-release-version.sh` lists when
 they do not say the version yet and commits `release: <version>` (a dry run
 does this too); a real run then pushes, and the `pre-push` hook runs the
 whole gate. It builds the runtime and source archives with

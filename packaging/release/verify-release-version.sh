@@ -1,19 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source_root="${1:?usage: verify-release-version.sh <source-root>}"
+# Every manifest that carries the release version, package.json first.
+manifests=(
+  package.json
+  packages/daemon/package.json
+  packages/shell/package.json
+  packages/shell/qml/manifest.json
+)
+if [[ "${1:-}" == --manifests ]]; then
+  printf '%s\n' "${manifests[@]}"
+  exit
+fi
+source_root="${1:?usage: verify-release-version.sh <source-root> | --manifests}"
 source_root="$(realpath -e -- "$source_root")"
 
 bun -e '
 import { join } from "node:path";
 
-const sourceRoot = process.argv[1];
-const manifests = [
-  "package.json",
-  "packages/daemon/package.json",
-  "packages/shell/package.json",
-  "packages/shell/qml/manifest.json",
-];
+const [sourceRoot, ...manifests] = process.argv.slice(1);
 
 const versions = [];
 for (const manifest of manifests) {
@@ -59,4 +64,4 @@ for (const [manifest, version] of versions.slice(1)) {
 }
 if (mismatched) process.exit(1);
 process.stdout.write(`${releaseVersion}\n`);
-' "$source_root"
+' "$source_root" "${manifests[@]}"

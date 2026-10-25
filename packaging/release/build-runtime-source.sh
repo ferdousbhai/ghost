@@ -90,10 +90,8 @@ mkdir -p "$runtime_root"
   pnpm build
   pnpm --filter @ghost/daemon build:runtime
 )
+# build-runtime.sh already set the payload's modes; cp -a keeps them.
 cp -a "$source_root/packages/daemon/dist/runtime/." "$runtime_root/"
-find -P "$runtime_root" -type d -exec chmod 755 {} +
-find -P "$runtime_root" -type f ! -path "$runtime_root/bin/*" -exec chmod 644 {} +
-chmod 755 "$runtime_root/bin/ghostd" "$runtime_root/bin/ghost" "$runtime_root/bin/ghost-desktop"
 
 (
   cd "$runtime_root"

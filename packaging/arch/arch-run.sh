@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a command in a disposable native Arch root (CI and installer checks).
+# Run a command in a disposable native Arch root (the Native packages CI).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 (( EUID == 0 )) || { echo 'Run with sudo; arch-chroot needs mount privileges.' >&2; exit 1; }

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # A master push runs the whole gate unless this exact tree already passed it
-# (`pnpm verify`). Branches push freely; `git push --no-verify` is the escape
-# hatch, and it is typed on purpose.
+# (`pnpm verify`). Branches push freely.
 set -euo pipefail
 hooks="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 while read -r _local_ref _local_sha remote_ref _remote_sha; do
