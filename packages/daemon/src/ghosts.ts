@@ -45,14 +45,6 @@ export function assertValidGhostName(name: string): void {
   }
 }
 
-export function isDirectory(path: string): boolean {
-  try {
-    return statSync(path).isDirectory();
-  } catch {
-    return false;
-  }
-}
-
 function isFile(path: string): boolean {
   try {
     return statSync(path).isFile();
@@ -62,12 +54,12 @@ function isFile(path: string): boolean {
 }
 
 /**
- * A directory is a ghost home when it exists and holds a `character.md`.
- * The persona file is the one thing a ghost cannot be without — memory and
- * runtime state are optional and may be empty.
+ * A directory is a ghost home when it holds a `character.md` (which also
+ * proves it is a directory). The persona file is the one thing a ghost cannot
+ * be without; everything else in a home is optional.
  */
 export function isGhostHome(dir: string): boolean {
-  return isDirectory(dir) && isFile(join(dir, CHARACTER_FILENAME));
+  return isFile(join(dir, CHARACTER_FILENAME));
 }
 
 export function ghostPaths(dir: string): {

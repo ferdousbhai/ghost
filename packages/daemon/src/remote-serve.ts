@@ -113,7 +113,8 @@ export class RemoteServe {
     this.target = `http://127.0.0.1:${port}`;
     this.run = options.run ?? commandRunner("tailscale");
     this.qrRun = options.qrRun ?? commandRunner("qrencode");
-    this.owner = options.owner?.trim() || null;
+    // Lowercased as RemoteAccess compares it, so what is reported is what is enforced.
+    this.owner = options.owner?.trim().toLowerCase() || null;
     this.guests = options.guests ?? "read-only";
   }
 
@@ -142,7 +143,7 @@ export class RemoteServe {
     const known: RemoteStatus = {
       ...off,
       hostname: node.hostname,
-      owner: this.owner ?? node.login,
+      owner: this.owner ?? node.login?.toLowerCase() ?? null,
       tailscale: {
         ...off.tailscale,
         running: node.backendState === "Running",

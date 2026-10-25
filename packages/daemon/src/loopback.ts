@@ -25,12 +25,12 @@ function closeServer(server: Server): Promise<void> {
   });
 }
 
-/** A loopback port on `host` that was bindable a moment ago. */
-export async function freePort(host = "127.0.0.1"): Promise<number> {
+/** A loopback port that was bindable a moment ago. */
+export async function freePort(): Promise<number> {
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const port = PORT_FLOOR + Math.floor(Math.random() * (PORT_CEILING - PORT_FLOOR + 1));
     try {
-      await closeServer(await listenOnce(host, port));
+      await closeServer(await listenOnce("127.0.0.1", port));
       return port;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;

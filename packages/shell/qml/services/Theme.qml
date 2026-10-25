@@ -74,8 +74,6 @@ Singleton {
     readonly property var fallback: ({
         "mode": "dark",
         "background": "#1a1b26",
-        "dark_background": "#13141c",
-        "lighter_background": "#24283b",
         "foreground": "#a9b1d6",
         "bright_foreground": "#c0caf5",
         "accent": "#7aa2f7",

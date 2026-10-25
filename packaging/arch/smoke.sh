@@ -87,8 +87,8 @@ for path in "${executables[@]}"; do
   [[ "$(stat -c '%a' "$root$path")" == 755 ]] || exit 1
 done
 
-# Numeric ownership is checked on the package archive itself. An unprivileged
-# extraction deliberately owns its materialized tree and cannot preserve root.
+# Root ownership comes from install-payload.sh's chown under fakeroot; an
+# unprivileged extraction owns its tree, so only the modes are checked here.
 if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q .; then
   printf 'package payload contains a group/world-writable path\n' >&2
   exit 1

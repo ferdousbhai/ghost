@@ -1328,8 +1328,8 @@ Singleton {
         root.mcpLoaded = false;
     }
 
-    /** Adopt a `{ servers, skipped }` catalog for `ghost`; false when the body is not one. */
-    function applyMcpSnapshot(body: var, ghost: string): bool {
+    /** Adopt a `{ servers, skipped }` catalog for the active ghost; false when the body is not one. */
+    function applyMcpSnapshot(body: var): bool {
         if (!body || !Array.isArray(body.servers) || !Array.isArray(body.skipped))
             return false;
         root.mcpServers = body.servers.filter(function (server) {
@@ -1364,7 +1364,7 @@ Singleton {
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.mcpError = root.describeError(xhr, "GET MCP servers");
-                } else if (!root.applyMcpSnapshot(body, ghost)) {
+                } else if (!root.applyMcpSnapshot(body)) {
                     root.mcpServers = [];
                     root.mcpSkipped = [];
                     root.mcpError = "ghostd sent a malformed MCP catalog";
@@ -1383,7 +1383,7 @@ Singleton {
             + "/mcp" + suffix, body, function (xhr, catalog) {
                 if (ghost !== root.activeGhost) return;
                 const answered = xhr.status === 200 || xhr.status === 201;
-                const ok = answered && root.applyMcpSnapshot(catalog, ghost);
+                const ok = answered && root.applyMcpSnapshot(catalog);
                 if (ok)
                     root.mcpNotice = action === "delete" ? "Server deleted."
                         : (action === "toggle" ? "Server state updated."

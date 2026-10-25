@@ -168,15 +168,6 @@ TestCase {
         compare(JSON.parse(tc.requests[1].body), configDocument());
     }
 
-    function hookCards(browser: var): var {
-        const cards = [];
-        function collect(item) {
-            if (item.objectName === "hookCard") cards.push(item);
-            for (let i = 0; i < item.children.length; i += 1) collect(item.children[i]);
-        }
-        collect(browser);
-        return cards;
-    }
 
     function test_navigationContainsKeyboardActivatableHooksDestination(): void {
         const navigation = createTemporaryObject(navigationComponent, tc);

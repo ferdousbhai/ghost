@@ -35,9 +35,9 @@ Item {
     readonly property var images: root.promptParts.images
     readonly property int imageSize: 180
     readonly property string displayBody: {
-        const raw = root.speaker === "handoff" ? "Handoff · " + (root.body || "done")
+        const raw = root.speaker === "handoff" ? "Handoff · " + root.body
             : root.speaker === "auto" ? "Auto · " + root.body
-            : root.hookNotice ? (root.body !== "" ? "Stop hook · " + root.body : "Stop hook continued")
+            : root.hookNotice ? "Stop hook · " + root.body
             : root.promptParts.text;
         // A trailing newline is a POSIX terminator, not a blank line. Qt's
         // PlainText path paints it as one, which is the empty band under a

@@ -2,7 +2,7 @@
 
 ## Lucide
 
-The shell assets use Lucide's `ghost`, `copy`, and `pencil` glyphs.
+The shell assets use Lucide's `ghost`, `copy`, and `mic` glyphs.
 
 ISC License
 
