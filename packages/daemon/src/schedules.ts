@@ -36,7 +36,9 @@ const SCHEDULE_UNIT_PREFIX = "ghost-timer-v1-";
 export const MAX_SCHEDULE_SLUG_LENGTH = 64;
 
 const UNIT_SUFFIXES = [".timer", ".service"] as const;
-const SCHEDULE_SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+/** A routine slug's grammar, as the ghost's help recipe states it. */
+export const SCHEDULE_SLUG_GRAMMAR = "[a-z0-9]+(?:-[a-z0-9]+)*";
+const SCHEDULE_SLUG_PATTERN = new RegExp(`^${SCHEDULE_SLUG_GRAMMAR}$`, "u");
 
 export function isValidScheduleSlug(slug: string): boolean {
   return slug.length >= 1
@@ -264,7 +266,7 @@ export async function readRoutineLogs(ghost: string, slug: string, options: Sche
   } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${errorMessage(error)}`, 503); }
   const text = output.slice(-64000), sessions = new Set<string>();
   for (const line of text.split("\n")) {
-    const match = /(?:Already accepted|Accepted): ([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/(event-[a-f0-9]{64})(?:\s|$)/u.exec(line);
+    const match = /(?:Already accepted|Accepted): ([^/\s]+)\/(event-[a-f0-9]{64})(?:\s|$)/u.exec(line);
     if (match?.[1] === ghost && match[2]) sessions.add(match[2]);
   }
   return { text, truncated: output.length > text.length, sessions: [...sessions] };

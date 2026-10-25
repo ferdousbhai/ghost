@@ -6,7 +6,7 @@
  * every turn of every ghost. The text is still contract text the ghost acts
  * on: keep it exact, and keep the prompt's pointer sentences in step.
  */
-import { MAX_SCHEDULE_SLUG_LENGTH, scheduleUnitPrefix } from "./schedules.js";
+import { MAX_SCHEDULE_SLUG_LENGTH, SCHEDULE_SLUG_GRAMMAR, scheduleUnitPrefix } from "./schedules.js";
 
 export const HELP_TOPICS = ["timers", "self", "harnesses", "background", "memory", "dictation", "events", "notifications"] as const;
 export type HelpTopic = (typeof HELP_TOPICS)[number];
@@ -28,7 +28,7 @@ function timers(input: HelpTopicInput): string[] {
   return [
     "# Timers",
     "Clock work is a systemd user timer: a text file the owner can edit and stop with `systemctl --user disable --now`. Ghost has no scheduler.",
-    `Write both units in ${JSON.stringify(input.unitDir)}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`[a-z0-9]+(?:-[a-z0-9]+)*\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
+    `Write both units in ${JSON.stringify(input.unitDir)}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`${SCHEDULE_SLUG_GRAMMAR}\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
     "The `ghost` CLI authenticates itself:",
     "```ini",
     `# ${unit}.service`,
