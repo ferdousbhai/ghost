@@ -233,14 +233,8 @@ Item {
                             visible: entry.editing
                             width: parent.width - 14 - Theme.gap
                             placeholder: "Name this ghost"
-                            // Every row carries one of these, and an idle one
-                            // reports its own empty text on creation; only the
-                            // live one speaks.
-                            onEdited: value => { if (entry.editing) root.rename.draft = value; }
-                            onCommitted: root.rename.commitRename()
-                            onCancelled: root.rename.cancel()
-                            onFocusGained: root.rename.editor = renameField
-                            onFocusLost: Qt.callLater(root.rename.commitOnBlur)
+                            session: root.rename
+                            live: entry.editing
                         }
 
                         RowDeleteButton {

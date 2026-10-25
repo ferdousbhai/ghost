@@ -7,11 +7,9 @@ pragma Singleton
 // not ours. `filePath` is always absolute once set, so every consumer can treat
 // it as a real path rather than re-deriving a base.
 //
-// Ghost-owned context paths are relative to the active ghost home. Model tool
-// paths are different: their activity carries the cwd in effect when the call
-// ran, and ToolCard supplies that base explicitly. Keeping those two bases
-// separate is what lets `!cd` move a conversation without making character.md
-// or memory follow it.
+// Every path arrives absolute: a model tool path is resolved first against the
+// cwd its activity carries (ToolCard), so `!cd` moving a conversation never
+// moves what an earlier call meant.
 //
 // The one thing here that does touch the disk is "open this in a real editor",
 // at the bottom: answering it means asking the filesystem where the project
@@ -44,7 +42,7 @@ Singleton {
     }
 
     /**
-     * Open `path` beside the chat. Absolute or ghost-home-relative. A path no
+     * Open the absolute `path` beside the chat. A path no
      * pane can render is ignored rather than opened blank, so `filePath` is
      * always a path `canOpen` accepts.
      */
@@ -70,11 +68,11 @@ Singleton {
 
     /**
      * `path` as an absolute, dot-free path, or "" when it cannot be made one.
-     * Accepts a file:// URL and a leading `~` because both reach us from
-     * outside; anything else relative needs `home` to be known.
+     * Accepts a file:// URL and a leading `~`; a relative path names no base
+     * here, so it is refused.
      */
     function absolute(path: string): string {
-        return root.absoluteFrom(path, root.home);
+        return root.absoluteFrom(path, "");
     }
 
     /**

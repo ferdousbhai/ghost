@@ -1819,9 +1819,9 @@ Singleton {
     function openConversation(id: string): void {
         const ghost = root.activeGhost;
         if (ghost === "" || id === "") return;
-        // Clicking the selected title is navigation, not an interrupt button.
-        // In particular it must not abort the XHR and then report that
-        // client-initiated abort as ghostd becoming unreachable.
+        // Clicking the selected title of a running turn changes nothing: it
+        // is already shown. A summon payload (openConversationForGhost) does
+        // reopen it, so a running turn's queue is read again.
         if (id === root.currentSessionId && root.streaming) return;
         root.finishOpenConversation(id);
     }

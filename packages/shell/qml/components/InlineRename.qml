@@ -23,6 +23,12 @@ TextInput {
     id: field
 
     required property string placeholder
+    /** The list's rename state, when this field renames one of its rows. */
+    property RenameSession session: null
+    /** This row is the one being renamed. Every row carries a field, and an
+        idle one reports its own empty text on creation; only the live one
+        speaks to the session. */
+    property bool live: false
 
     signal committed()
     signal cancelled()
@@ -44,17 +50,29 @@ TextInput {
     selectedTextColor: Theme.foregroundBright
     clip: true
 
-    onTextChanged: field.edited(field.text)
-    onAccepted: field.committed()
+    onTextChanged: {
+        field.edited(field.text);
+        if (field.session && field.live) field.session.draft = field.text;
+    }
+    onAccepted: {
+        field.committed();
+        if (field.session) field.session.commitRename();
+    }
 
     Keys.onEscapePressed: event => {
         event.accepted = true;
         field.cancelled();
+        if (field.session) field.session.cancel();
     }
 
     onActiveFocusChanged: {
-        if (field.activeFocus) field.focusGained();
-        else field.focusLost();
+        if (field.activeFocus) {
+            field.focusGained();
+            if (field.session) field.session.editor = field;
+        } else {
+            field.focusLost();
+            if (field.session) Qt.callLater(field.session.commitOnBlur);
+        }
     }
 
     Text {

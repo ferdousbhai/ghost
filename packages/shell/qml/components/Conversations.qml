@@ -243,13 +243,8 @@ Item {
                     anchors.right: parent.right
                     anchors.verticalCenter: parent.verticalCenter
                     placeholder: "Name this conversation"
-                    // Every row carries one of these, and an idle one reports
-                    // its own empty text on creation; only the live one speaks.
-                    onEdited: value => { if (entry.editing) root.rename.draft = value; }
-                    onCommitted: root.rename.commitRename()
-                    onCancelled: root.rename.cancel()
-                    onFocusGained: root.rename.editor = titleEdit
-                    onFocusLost: Qt.callLater(root.rename.commitOnBlur)
+                    session: root.rename
+                    live: entry.editing
                 }
 
                 Item {
