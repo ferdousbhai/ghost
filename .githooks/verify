@@ -24,7 +24,8 @@ fi
 # above this line so a probe never truncates the log.
 exec > >(tee "$gitdir/ghost-verify-last.log") 2>&1
 
-# The package build is part of what a release needs to work.
+# The daemon's tsc output is what a checkout's dev launcher runs; a build
+# break fails the gate here rather than on the owner's machine.
 pnpm build
 pnpm typecheck
 pnpm lint

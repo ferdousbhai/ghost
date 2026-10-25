@@ -90,8 +90,11 @@ sed -i \
   -e "s/$source_sha/${next_hashes[0]}/" \
   -e "s/$runtime_sha/${next_hashes[1]}/" \
   "$updated/PKGBUILD"
-! grep -Eq '_source_commit|_source_date_epoch|@@SOURCE_(COMMIT|DATE_EPOCH)@@' \
-  "$updated/PKGBUILD"
+# `!` is exempt from errexit, so a negative check must fail explicitly.
+if grep -Eq '_source_commit|_source_date_epoch|@@SOURCE_(COMMIT|DATE_EPOCH)@@' "$updated/PKGBUILD"; then
+  printf 'the updated recipe kept a rendered source identity\n' >&2
+  exit 1
+fi
 updated_srcinfo="$work/updated.SRCINFO"
 (
   cd -- "$updated"
@@ -103,8 +106,6 @@ grep -Fxq $'\tsha256sums = '"${next_hashes[1]}" "$updated_srcinfo"
 grep -Fq '/releases/download/v2.0.0/ghost-2.0.0.tar.gz' "$updated_srcinfo"
 
 srcdir="$work/update-src"
-CARCH=x86_64
-# The runtime archive is architecture-independent; the recipe never uses CARCH.
 # shellcheck disable=SC1090
 source "$updated/PKGBUILD"
 source_root="$srcdir/ghost-$pkgver"
@@ -233,8 +234,11 @@ grep -Fq 'systemctl --user enable --now ghostd.service' "$script_root/bin/omarch
 grep -Fq 'omarchy plugin enable ferdousbhai.ghost' "$script_root/bin/omarchy-install-ai-ghost"
 # -T or the link lands *inside* an existing directory and the HUD never loads.
 grep -Fq 'ln -sfnT /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
-! grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost" \
-  "$script_root/pkgbuilds/ghost/ghost.install"
+if grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost" \
+    "$script_root/pkgbuilds/ghost/ghost.install"; then
+  printf 'plain ln -sfn onto the plugin link would nest it inside an existing directory\n' >&2
+  exit 1
+fi
 grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"

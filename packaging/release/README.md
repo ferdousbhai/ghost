@@ -13,23 +13,18 @@ The inputs:
    architecture Bun runs on; the payload has no native code), containing the ordinary
    Bun-target `ghostd`, `ghost`, and `ghost-desktop` bundles, fixed launchers,
    and exact bundled-package license closure; and
-3. their checksums and release metadata.
+3. `SHA256SUMS`.
 
 The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
 `ghost` contains only the Omarchy UI and depends on the exact runtime version;
 `ghost-runtime` is independently installable for apps with their own UI (see
 [the install choices](../arch/README.md#runtime-with-your-own-ui)).
 
-The v3 runtime archive is a package *source*, not an installed pacman package.
-Its payload contains the `ghostd`, `ghost`, and `ghost-desktop` launchers in
-`bin/` and their bundles in `lib/`, and the exact licenses for the bundled
-application closure. Ghost and its MCP support remain bundled for offline use.
-Bundles are minified with function and class names preserved for diagnostics;
-the full license closure stays in the payload.
-QML, the desktop
-helper, services, launchers, licenses, and docs come from the
-same sanitized source snapshot, so a stable package cannot mix an old UI with a
-new daemon or client.
+The v3 runtime archive is a package *source*, not an installed pacman package;
+its bundles are minified with function and class names preserved for
+diagnostics. The UI, unit, skills, and docs come from the source snapshot, and
+the runtime archive is verified against the same commit, so a stable package
+cannot mix an old UI with a new daemon or client.
 
 Installed launchers use `/usr/bin/bun`, so the stable `ghost-runtime` package and the
 checkout-only `ghost-runtime-dev` recipe require system Bun 1.3.14 or newer. The current
