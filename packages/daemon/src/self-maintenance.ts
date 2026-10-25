@@ -17,7 +17,7 @@ function checkoutLines(running: RunningSource | null): string[] {
     ];
   }
   return [
-    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine. Edit it directly after reading its \`CLAUDE.md\` and \`CONTRACTS.md\`; never edit a checkout you were not given.`,
+    `Your checkout is ${JSON.stringify(checkout)}: the clone this daemon was built from, shared by every ghost on this machine. Edit it directly after reading its \`AGENTS.md\` and \`CONTRACTS.md\`; never edit a checkout you were not given.`,
   ];
 }
 
