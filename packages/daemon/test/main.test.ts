@@ -108,11 +108,8 @@ describe("waitForShutdownSignal", () => {
       import { waitForShutdownSignal } from ${JSON.stringify(mainUrl)};
       const holdProcess = setInterval(() => {}, 1_000);
       const waiting = waitForShutdownSignal({
-        listening: {
-          server: { close() { console.log("CLOSED"); }, closeIdleConnections() {} },
-          close: async () => { console.log("LISTENER"); },
-        },
-        host: { beginShutdown() { console.log("ABORTED"); }, disposeAll: async () => {} },
+        listening: { close: async () => { console.log("LISTENER"); } },
+        host: { disposeAll: async () => { console.log("DISPOSED"); } },
         logger: { info() {}, warn() {} },
       });
       console.log("READY");
@@ -129,7 +126,7 @@ describe("waitForShutdownSignal", () => {
     await output.waitFor("READY");
     expect(spawnSync("/usr/bin/kill", ["-TERM", String(child.pid)]).status).toBe(0);
     await output.waitFor("DONE");
-    for (const step of ["CLOSED", "ABORTED", "LISTENER"]) expect(output.read()).toContain(step);
+    for (const step of ["DISPOSED", "LISTENER"]) expect(output.read()).toContain(step);
     await expect(exited).resolves.toBe(0);
   });
 });
@@ -139,11 +136,9 @@ describe("closeDaemonResources", () => {
     const events: string[] = [];
     await closeDaemonResources({
       listening: {
-        server: {} as never,
         close: async () => { events.push("listener"); },
       },
       host: {
-        beginShutdown() {},
         disposeAll: async () => { events.push("host"); },
       },
     });
@@ -155,14 +150,12 @@ describe("closeDaemonResources", () => {
     const events: string[] = [];
     const closing = closeDaemonResources({
       listening: {
-        server: {} as never,
         close: async () => {
           events.push("listener");
           throw new Error("listener close failed");
         },
       },
       host: {
-        beginShutdown() {},
         disposeAll: async () => {
           events.push("host");
           throw new Error("host close failed");

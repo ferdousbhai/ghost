@@ -1328,13 +1328,9 @@ export class SessionHost {
 
   // ── Shutdown ──────────────────────────────────────────────────────────
 
-  beginShutdown(): void {
+  async disposeAll(): Promise<void> {
     this.shuttingDown = true;
     for (const controller of this.admissions.values()) controller.abort();
-  }
-
-  async disposeAll(): Promise<void> {
-    this.beginShutdown();
     for (const ghostName of [...this.listeners.keys()]) this.closeConversationEventStreams(ghostName);
   }
 }

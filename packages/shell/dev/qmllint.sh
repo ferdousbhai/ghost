@@ -27,10 +27,4 @@ esac
 # Direct-file linting needs the singleton registrations explicitly; -I alone
 # finds imports but does not register the file being linted as a singleton.
 echo "$QMLLINT ($version)"
-exec "$QMLLINT" -i qml/services/qmldir \
-  qml/GhostHud.qml \
-  qml/Panel.qml \
-  qml/Service.qml \
-  qml/GhostBarWidget.qml \
-  qml/components/*.qml \
-  qml/services/*.qml
+exec "$QMLLINT" -i qml/services/qmldir qml/*.qml qml/components/*.qml qml/services/*.qml

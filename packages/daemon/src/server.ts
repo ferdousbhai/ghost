@@ -991,11 +991,8 @@ export async function startDaemonServer(
           if (!stream.writableEnded) stream.end();
         }
         server.close((error) => {
-          if (!error || (error as NodeJS.ErrnoException).code === "ERR_SERVER_NOT_RUNNING") {
-            resolvePromise();
-          } else {
-            rejectPromise(error);
-          }
+          if (error) rejectPromise(error);
+          else resolvePromise();
         });
         // Keep-alive sockets would otherwise hold the close open until they
         // time out; a local daemon should exit when it is told to.

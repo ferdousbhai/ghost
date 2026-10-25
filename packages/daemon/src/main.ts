@@ -63,8 +63,8 @@ export interface ParsedArgs {
 }
 
 export interface ShutdownSignalOptions {
-  listening: Pick<ListeningServer, "server" | "close">;
-  host: Pick<SessionHost, "beginShutdown" | "disposeAll">;
+  listening: Pick<ListeningServer, "close">;
+  host: Pick<SessionHost, "disposeAll">;
   logger: Pick<Logger, "info" | "warn">;
 }
 
@@ -100,9 +100,6 @@ export async function waitForShutdownSignal(options: ShutdownSignalOptions): Pro
   process.removeAllListeners("SIGINT");
   process.removeAllListeners("SIGTERM");
   options.logger.info("shutting down", { signal });
-  options.listening.server.close();
-  options.listening.server.closeIdleConnections();
-  options.host.beginShutdown();
   try {
     await closeDaemonResources(options);
   } catch (error) {
