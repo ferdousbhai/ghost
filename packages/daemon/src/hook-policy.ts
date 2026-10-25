@@ -84,15 +84,12 @@ export function ghostSessionStopContinuation(
 }
 
 
-function defaultHookName(event: GhostHookEvent["type"]): string {
-  return `${event === "before_prompt" ? "Before-prompt" : event === "turn_end" ? "Turn-end" : "Session-stop"} command hook`;
-}
-
-function defaultHookDescription(event: GhostHookEvent["type"]): string {
-  return event === "turn_end" ? "Observes final turn success or failure without continuing it." : event === "before_prompt"
-    ? "Adds context before the owner prompt is sent."
-    : "Runs after the assistant pass and may continue it.";
-}
+/** Every hook event, in the order hooks are loaded, with a handler's default name and description. */
+const HOOK_EVENTS: Record<GhostHookEvent["type"], { name: string; description: string }> = {
+  before_prompt: { name: "Before-prompt command hook", description: "Adds context before the owner prompt is sent." },
+  session_stop: { name: "Session-stop command hook", description: "Runs after the assistant pass and may continue it." },
+  turn_end: { name: "Turn-end command hook", description: "Observes final turn success or failure without continuing it." },
+};
 
 function displayText(value: unknown, fallback: string, label: string, maximum: number): string {
   if (value === undefined) return fallback;
@@ -115,15 +112,14 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
   const hooks = parsed.hooks;
   if (hooks === undefined) return [];
   if (!isRecord(hooks)) throw new Error(`${path}: "hooks" must be an object.`);
-  const supported = new Set<GhostHookEvent["type"]>(["before_prompt", "session_stop", "turn_end"]);
   for (const eventName of Object.keys(hooks)) {
-    if (!supported.has(eventName as GhostHookEvent["type"])) {
+    if (!Object.hasOwn(HOOK_EVENTS, eventName)) {
       throw new Error(`${path}: unsupported hook event ${JSON.stringify(eventName)}.`);
     }
   }
 
   const result: CommandHook[] = [];
-  for (const eventName of supported) {
+  for (const eventName of Object.keys(HOOK_EVENTS) as GhostHookEvent["type"][]) {
     const groups = hooks[eventName];
     if (groups === undefined) continue;
     if (!Array.isArray(groups)) throw new Error(`${path}: "hooks.${eventName}" must be an array.`);
@@ -141,10 +137,10 @@ function parseCommandHooks(parsed: Record<string, unknown>, path: string): Comma
         if (typeof timeoutSeconds !== "number" || !Number.isFinite(timeoutSeconds) || timeoutSeconds <= 0 || timeoutSeconds > 600) {
           throw new Error(`${path}: ${label}.timeout must be a number in (0, 600].`);
         }
-        const name = displayText(raw.name, defaultHookName(eventName), `${path}: ${label}.name`, 80);
+        const name = displayText(raw.name, HOOK_EVENTS[eventName].name, `${path}: ${label}.name`, 80);
         const description = displayText(
           raw.description,
-          defaultHookDescription(eventName),
+          HOOK_EVENTS[eventName].description,
           `${path}: ${label}.description`,
           240,
         );

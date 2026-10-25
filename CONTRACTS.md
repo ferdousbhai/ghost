@@ -196,7 +196,7 @@ filesystem.
 Deletion is `gio trash` into freedesktop Trash, a rename that refuses rather
 than copies; Ghost never recursively removes a home. Machine credentials, owner
 documents, screenshots, downloads, and timers are not moved with it.
-The lifecycle implementation and crash recovery are in
+The lifecycle implementation is in
 [`session-host.ts`](packages/daemon/src/session-host.ts).
 
 The checkout a ghost may edit is the clone the daemon was built from

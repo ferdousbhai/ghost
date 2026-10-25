@@ -1,4 +1,5 @@
-import { closeSync, mkdirSync, mkdtempSync, openSync, readSync, rmdirSync, unlinkSync, writeSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { closeSync, mkdirSync, openSync, readSync, unlinkSync, writeSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
@@ -6,19 +7,16 @@ import { xdgBaseDir } from "./xdg-user-dirs.js";
 function temporaryFile(): number {
   const root = join(xdgBaseDir(process.env, "XDG_CACHE_HOME", homedir()), "ghost");
   mkdirSync(root, { recursive: true, mode: 0o700 });
-  const dir = mkdtempSync(join(root, "ghost-turn-"));
-  const path = join(dir, "replay");
-  let fd: number | undefined;
+  // An exclusive create under a random name; unlinked at once, so only the descriptor holds it.
+  const path = join(root, `ghost-turn-${randomUUID()}`);
+  const fd = openSync(path, "wx+", 0o600);
   try {
-    fd = openSync(path, "wx+", 0o600);
     unlinkSync(path);
-    return fd;
   } catch (error) {
-    if (fd !== undefined) closeSync(fd);
+    closeSync(fd);
     throw error;
-  } finally {
-    rmdirSync(dir);
   }
+  return fd;
 }
 
 function read(fd: number, buffer: Buffer, position: number): void {
