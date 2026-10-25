@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# The whole gate, once: typecheck, lint, every package's tests. A green run
+# The whole gate, once: build, typecheck, lint, every package's tests, the
+# owner scripts' tests, and the packaging suites. A green run
 # on a clean tree is remembered by that tree's hash, so the pre-push hook can
 # skip a suite that already passed on exactly what is being pushed.
 #

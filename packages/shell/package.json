@@ -5,10 +5,6 @@
   "license": "Apache-2.0",
   "type": "module",
   "description": "Omarchy-native Quickshell surfaces for ghostd: summonable HUD, roster, bar indicator",
-  "files": [
-    "qml",
-    "contrib"
-  ],
   "engines": {
     "node": ">=22.19.0"
   },

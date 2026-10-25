@@ -70,6 +70,7 @@ check() {
   bash packaging/release/test-release-source.sh
   bash packaging/arch/test-check-dependencies.sh
   pnpm test
+  bun test scripts
   pnpm typecheck
   pnpm lint
 }

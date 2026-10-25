@@ -83,10 +83,7 @@ const GHOSTS_ROOT = process.env.GHOSTS_ROOT
   || mkdtempSync(join(tmpdir(), "ghost-shell-mock-"));
 const TRASH_ROOT = join(process.env.XDG_DATA_HOME || join(homedir(), ".local", "share"), "Trash", "files");
 const REMOTE_HOSTNAME = "omarchy-thinkpad.tail58bdd3.ts.net";
-const REMOTE_PROBLEM = opt(
-  "--remote-problem",
-  process.env.GHOST_REMOTE_PROBLEM ?? process.env.REMOTE_PROBLEM ?? "",
-);
+const REMOTE_PROBLEM = opt("--remote-problem", "");
 
 // Each problem breaks the Tailscale capability ladder at one rung; the rungs
 // below it stay true.

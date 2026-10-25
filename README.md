@@ -40,9 +40,3 @@ desktop/browser automation without the HUD (`packaging/arch/README.md`,
 `/usr/share/doc/ghost/ARCH.md` once installed).
 
 License: Apache-2.0
-
-## Optional Recall search
-
-Use `ghost sessions --semantic QUERY` to rank the current ghost’s conversation titles and previews. Transcripts and notes are not indexed by this command.
-
-Recall is optional and never installed or contacted otherwise; without it, plain title/preview matching still works. See `CONTRACTS.md` for the details.
