@@ -145,7 +145,7 @@ export async function smokeCommand(
   let step = "daemon";
   try {
     if (child.pid === undefined) throw new Error(`could not start ${command[0]}`);
-    await waitUntilServing(port, child, 10_000);
+    await waitUntilServing(port, child);
     const options = {
       env,
       home: scratch,

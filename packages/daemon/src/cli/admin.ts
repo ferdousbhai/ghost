@@ -5,6 +5,9 @@ import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
 import type { RemoteStatus } from "../remote-serve.js";
+import type { Board } from "../board.js";
+import { acceptedEventLine } from "../external-events.js";
+import type { HarnessChoices } from "../session-host.js";
 
 
 /** `ghost rename <new-name>`: move the whole ghost home under the new spelling. */
@@ -45,13 +48,7 @@ export async function readCommand(parsed: ParsedCliArgs, ctx: CliContext): Promi
 export async function boardCommand(_parsed: ParsedCliArgs, ctx: CliContext): Promise<number> {
   const body = (await ctx.client.request("GET", "/api/board")).body;
   emit(ctx, body, (result) => {
-    const board = result as {
-      path: string;
-      exists: boolean;
-      title: string | null;
-      columns: Array<{ title: string; cards: Array<{ text: string; done?: boolean; notes: string[] }> }>;
-      truncated: boolean;
-    };
+    const board = result as Board;
     if (!board.exists) return `no board yet: create ${board.path} with ## columns and - cards\n`;
     const lines: string[] = [];
     if (board.title) lines.push(board.title);
@@ -83,10 +80,7 @@ export async function remoteCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   return 0;
 }
 
-interface HarnessChoicesBody {
-  ghostDefault: string | null;
-  omarchyDefault: string | null;
-}
+type HarnessChoicesBody = Pick<HarnessChoices, "ghostDefault" | "omarchyDefault">;
 
 /** The preference only; `ghost harnesses` lists installed agents and usage. */
 function harnessChoicesText(name: string, body: HarnessChoicesBody): string {
@@ -129,7 +123,7 @@ export async function eventCommand(parsed: ParsedCliArgs, ctx: CliContext): Prom
   const payload = input && input !== "-" ? input : await stdinText(ctx.runtime.stdin);
   const ghost = await resolveGhost(ctx.client, ctx.runtime, flagString(parsed, "ghost"));
   const result = (await ctx.client.request<{ sessionId: string; duplicate: boolean }>("POST", ghostPath(ghost, "/events"), { source, id, instructions, payload })).body;
-  emit(ctx, result, () => `${result.duplicate ? "Already accepted" : "Accepted"}: ${ghost}/${result.sessionId}\n`);
+  emit(ctx, result, () => `${acceptedEventLine(ghost, result.sessionId, result.duplicate)}\n`);
   return 0;
 }
 

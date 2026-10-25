@@ -21,7 +21,6 @@ TestCase {
         tc.requests = [];
         Ghostd.requestFactory = FakeXhr.factory(tc.requests, /\/routines/);
         Ghostd.activeGhost = "casper";
-        Ghostd.routinesGhost = "casper";
         Ghostd.routinesError = "";
         Ghostd.routineWriteError = "";
         Ghostd.routines = [];
@@ -63,8 +62,7 @@ TestCase {
     function test_switchingGhostDropsTheOtherGhostsRowsAndErrors(): void {
         Ghostd.routineWriteError = "Change routine failed";
         Ghostd.routineRecoveries = [{ id: "checkpoint", slug: "daily", reason: "remove", createdAt: "now", applicable: true }];
-        Ghostd.activeGhost = "aria";
-        Ghostd.refreshRoutines();
+        Ghostd.switchGhost("aria");
         compare(Ghostd.routineWriteError, "");
         compare(Ghostd.routineRecoveries.length, 0);
     }

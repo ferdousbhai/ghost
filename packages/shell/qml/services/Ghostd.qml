@@ -576,7 +576,6 @@ Singleton {
 
 
     property var routines: []
-    property string routinesGhost: ""
     property string routinesError: ""
     property string routineWriteError: ""
     property var routinesRequest: null
@@ -591,15 +590,9 @@ Singleton {
     function refreshRoutines(): void {
         if (root.routinesRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        if (root.routinesGhost !== ghost) {
-            // Another ghost's rows, checkpoints, and errors never show under this one.
-            root.routines = []; root.routineRecoveries = [];
-            root.routinesError = ""; root.routineWriteError = "";
-        }
         root.request(root, "routinesRequest", "GET", root.ghostPath(ghost) + "/routines", null, function (xhr, body) {
             if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
             if (xhr.status === 200 && body && Array.isArray(body.routines) && Array.isArray(body.recoveries)) {
-                root.routinesGhost = ghost;
                 root.routines = body.routines;
                 root.routineRecoveries = body.recoveries;
                 root.routinesError = "";
@@ -876,6 +869,12 @@ Singleton {
         root.clearCharacter();
         root.clearMcp();
         root.clearHarnessChoice();
+        // Another ghost's routines, checkpoints, and errors never show under
+        // this one; a reply still in flight for it re-reads for the new ghost.
+        root.routines = [];
+        root.routineRecoveries = [];
+        root.routinesError = "";
+        root.routineWriteError = "";
     }
 
     function clearHarnessChoice(): void {

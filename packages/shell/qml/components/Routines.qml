@@ -15,7 +15,7 @@ Rectangle {
     property string logGhost: ""
     property var logSessions: []
     function refresh(): void { Ghostd.refreshRoutines(); }
-    readonly property var recoveries: Ghostd.routinesGhost === Ghostd.activeGhost ? Ghostd.routineRecoveries : []
+    readonly property var recoveries: Ghostd.routineRecoveries
 
     color: Theme.background
     clip: true
@@ -120,7 +120,7 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             spacing: Theme.gap
-            model: Ghostd.routinesGhost === Ghostd.activeGhost ? Ghostd.routines : []
+            model: Ghostd.routines
             delegate: Rectangle {
                 id: card
                 required property var modelData

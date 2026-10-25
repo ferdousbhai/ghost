@@ -21,6 +21,7 @@
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { errorMessage, GhostError } from "./errors.js";
+import { ACCEPTED_EVENT_LINE } from "./external-events.js";
 import { isValidGhostName } from "./ghosts.js";
 import { which } from "./harnesses.js";
 import {
@@ -266,7 +267,7 @@ export async function readRoutineLogs(ghost: string, slug: string, options: Sche
   } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${errorMessage(error)}`, 503); }
   const text = output.slice(-64000), sessions = new Set<string>();
   for (const line of text.split("\n")) {
-    const match = /(?:Already accepted|Accepted): ([^/\s]+)\/(event-[a-f0-9]{64})(?:\s|$)/u.exec(line);
+    const match = ACCEPTED_EVENT_LINE.exec(line);
     if (match?.[1] === ghost && match[2]) sessions.add(match[2]);
   }
   return { text, truncated: output.length > text.length, sessions: [...sessions] };

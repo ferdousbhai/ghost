@@ -42,11 +42,10 @@ export async function freePort(host = "127.0.0.1"): Promise<number> {
 export async function waitUntilServing(
   port: number,
   child: { exitCode: number | null },
+): Promise<void> {
   // Generous on purpose: a cold start on a slow or emulated machine (the
   // aarch64 proof for ghost#52 took eight seconds) must not read as failure.
-  timeoutMs = 30_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
+  const deadline = Date.now() + 30_000;
   while (Date.now() < deadline) {
     if (child.exitCode !== null) {
       throw new Error(`daemon exited before listening (${child.exitCode})`);

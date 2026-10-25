@@ -27,7 +27,7 @@ function timers(input: HelpTopicInput): string[] {
   const unit = `${scheduleUnitPrefix(input.ghostName)}<slug>`;
   return [
     "# Timers",
-    "Clock work is a systemd user timer: a text file the owner can edit and stop with `systemctl --user disable --now`. Ghost has no scheduler.",
+    "A timer is a text file the owner can edit and stop with `systemctl --user disable --now`.",
     `Write both units in ${JSON.stringify(input.unitDir)}, named \`${unit}\`, \`<slug>\` 1–${MAX_SCHEDULE_SLUG_LENGTH} characters matching \`${SCHEDULE_SLUG_GRAMMAR}\`; that versioned prefix is what is swept when your ghost is deleted or renamed, nothing else.`,
     "The `ghost` CLI authenticates itself:",
     "```ini",
@@ -50,7 +50,6 @@ function timers(input: HelpTopicInput): string[] {
     "`Persistent=true` runs one catch-up however many slots were missed; `Persistent=false` drops them. Running every missed slot is not a timer primitive; the service would have to track its own watermark.",
     "Then `systemctl --user daemon-reload && systemctl --user enable --now <unit>.timer`; confirm with `systemctl --user list-timers`.",
     "Inspect with `ghost routines` and `ghost routines logs <slug>`. `pause <slug>` stops future triggers, leaving running work alone; `resume <slug>` restores them (persistent timers may catch up); `run <slug>` queues work without changing the timer. Edit with `ghost routines config <slug> > routine.json`, then `ghost routines edit <slug> routine.json`; edit unit files directly only for arrangements it refuses. `remove <slug>` keeps a checkpoint: `recoveries` lists them and `restore <id>` restores one paused. `ghost help events` connects selected external events with installed CLIs/services.",
-    "Timers fire only while the owner is logged in (the daemon runs in their graphical session).",
   ];
 }
 
