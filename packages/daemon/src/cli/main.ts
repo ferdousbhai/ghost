@@ -284,7 +284,7 @@ export const COMMANDS: readonly Command[] = [
   },
   {
     verb: "help",
-    usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}] [-g <name>] [-s <id>]`,
+    usage: `help [command|exit-codes|${HELP_TOPICS.join("|")}] [-g <name>]`,
     summary: "Show command help, the exit-code table, or one recipe the ghost's prompt points at.",
     example: "ghost help timers",
     positionals: [0, 1],

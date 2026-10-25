@@ -49,7 +49,7 @@ function promptSection(heading: string): string {
     .split(/\n\n(?=## )/u)
     .find((candidate) => candidate.startsWith(heading));
   if (section === undefined) throw new Error(`The system prompt no longer renders ${heading}.`);
-  return section.split("\n\n<untrusted")[0] ?? section;
+  return section;
 }
 
 function renderStablePolicy(): Record<string, string> {

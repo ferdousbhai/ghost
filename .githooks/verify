@@ -37,8 +37,9 @@ bun test scripts
 # publishes).
 bash packaging/arch/test-check-dependencies.sh
 
-# A dirty tree was not what the suite proved; only a clean HEAD earns the marker.
-if [[ -z "$(git status --porcelain)" ]]; then
+# A dirty tree was not what the suite proved, and neither is a HEAD a peer
+# moved mid-run; only the clean tree the run started on earns the marker.
+if [[ -z "$(git status --porcelain)" && "$(git rev-parse 'HEAD^{tree}')" == "$tree" ]]; then
   printf '%s\n' "$tree" > "$marker"
 else
   rm -f "$marker"

@@ -39,9 +39,7 @@ done
 for command in bash cat grep jq ln mkdir rm; do
   ln -s "$(command -v "$command")" "$work/bin/$command"
 done
-# Never invoke the machine's upstream installer or privilege helper.
-printf '#!/usr/bin/env bash\nexit 0\n' > "$work/bin/sudo"
-chmod +x "$work/bin/omarchy" "$work/bin/sudo"
+chmod +x "$work/bin/omarchy"
 for command in omarchy-pkg-add systemctl omarchy-shell sleep; do
   chmod +x "$work/bin/$command"
 done

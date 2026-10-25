@@ -590,8 +590,7 @@ ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 `self`, `harnesses`, `background`, `memory`) and ones it does not
 (`dictation`, `events`, `notifications`;
 [`help-topics.ts`](packages/daemon/src/help-topics.ts)),
-rendered for the ghost and session the shell's `$GHOST`/`$GHOST_SESSION` name
-and needing no daemon; they are prompt-visible contract text like the policy
+rendered for the ghost the shell's `$GHOST` names and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
 --json`) that Omarchy's own `agent_present` test would call installed, in

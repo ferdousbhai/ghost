@@ -2,7 +2,6 @@
  * Temp-directory fixtures: a ghosts root, a ghost home, and the SSE reader
  * used by Ghost's daemon/client conformance tests.
  */
-import { afterEach } from "vitest";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -61,27 +60,20 @@ export function makeTempGhosts(): TempGhosts {
 export interface SeedGhostOptions {
   name?: string;
   character?: string;
-  docs?: Record<string, string>;
 }
 
-/** A ghost home with a persona and optional retained docs. */
+/** A ghost home with a persona. */
 export function seedGhost(root: string, options: SeedGhostOptions = {}): string {
   const name = options.name ?? "casper";
   const dir = join(root, name);
   const paths = ghostPaths(dir);
   mkdirSync(dir, { recursive: true });
-  if (options.docs) mkdirSync(join(dir, "docs"), { recursive: true });
   writeFileSync(
     paths.characterFile,
     options.character
       ?? `# ${name}\n\nYou are ${name}, a letterpress printer.\n`,
     "utf8",
   );
-  for (const [path, content] of Object.entries(options.docs ?? {})) {
-    const full = join(dir, "docs", path);
-    mkdirSync(join(full, ".."), { recursive: true });
-    writeFileSync(full, content, "utf8");
-  }
   return dir;
 }
 
@@ -157,15 +149,6 @@ export function parseSseStream(body: string): TurnEvent[] {
     events.push(JSON.parse(data) as TurnEvent);
   }
   return events;
-}
-
-/** A LIFO cleanup stack drained after each test in the calling file. */
-export function useCleanups(): { push(cleanup: () => void | Promise<void>): void } {
-  const cleanups: Array<() => void | Promise<void>> = [];
-  afterEach(async () => {
-    for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
-  });
-  return { push: (cleanup) => cleanups.push(cleanup) };
 }
 
 /** A private temporary directory, removed by `cleanup`. */
