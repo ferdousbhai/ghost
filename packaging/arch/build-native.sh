@@ -14,7 +14,6 @@ mapfile -t constraints < <(cd /build/packaging/arch && bash -c "source PKGBUILD;
 nodeps=()
 if [[ $BUILD_ARCH == aarch64 ]]; then
   install -Dm755 /source/.ci/bun/bun /usr/local/bin/bun
-  ln -s bun /usr/local/bin/bunx
   # pacman cannot see the upstream bun, so makepkg skips its
   # dependency check here and every other entry is checked below.
   nodeps=(--nodeps)
@@ -27,6 +26,6 @@ fi
 pacman -S --needed --noconfirm "${constraints[@]%%[<>=]*}"
 pacman -T "${constraints[@]}"
 bun --version
-chown -R builder:builder /build /output /cache/pnpm /cache/bun
+chown -R builder:builder /build /output /cache/pnpm
 su builder -c "cd /build/packaging/arch && GHOST_SOURCE_REPO=file:///build GHOST_SOURCE_REF=commit=$commit PKGDEST=/output PKGEXT=.pkg.tar.zst makepkg --force ${nodeps[*]}"
 printf "%s\n" "$commit" > /output/source-commit.txt

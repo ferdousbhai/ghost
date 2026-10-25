@@ -23,14 +23,13 @@ root="$work/root"
 unshare --mount --propagation private bash -euo pipefail -s -- "$root" "$PWD" "$architecture" "$@" <<'CHROOT'
 root=$1 source=$2 architecture=$3; shift 3
 mount --bind "$root" "$root"
-mkdir -p "$root/source" "$root/output" "$root/cache/pnpm" "$root/cache/bun"
+mkdir -p "$root/source" "$root/output" "$root/cache/pnpm"
 cache="$source/.cache/native/$architecture"
-mkdir -p "$source/dist" "$cache/pnpm" "$cache/bun" "$cache/pacman"
+mkdir -p "$source/dist" "$cache/pnpm" "$cache/pacman"
 mount --bind "$source" "$root/source"
 mount -o remount,bind,ro "$root/source"
 mount --bind "$source/dist" "$root/output"
 mount --bind "$cache/pnpm" "$root/cache/pnpm"
-mount --bind "$cache/bun" "$root/cache/bun"
 mount --bind "$cache/pacman" "$root/var/cache/pacman/pkg"
 if [[ $architecture == x86_64 ]]; then
   printf 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch\n' > "$root/etc/pacman.d/mirrorlist"
@@ -45,10 +44,10 @@ arch-chroot "$root" bash -euc '
   if [[ $(uname -m) == aarch64 ]]; then pacman-key --populate archlinuxarm; else pacman-key --populate archlinux; fi
   pacman -Syu --noconfirm --needed curl gnupg shadow diffutils
   useradd -m builder
-  chown -R builder:builder /output /cache/pnpm /cache/bun
+  chown -R builder:builder /output /cache/pnpm
 '
 # arch-chroot creates a PID namespace after mounting /proc. D-Bus needs the
 # process IDs in /proc to match that namespace, notably for daemon tests.
-arch-chroot "$root" unshare --mount --mount-proc env -u SUDO_USER -u SUDO_UID -u SUDO_GID GHOST_ARCH_ROOT=1 npm_config_store_dir=/cache/pnpm BUN_INSTALL_CACHE_DIR=/cache/bun HOME=/root USER=root \
+arch-chroot "$root" unshare --mount --mount-proc env -u SUDO_USER -u SUDO_UID -u SUDO_GID GHOST_ARCH_ROOT=1 npm_config_store_dir=/cache/pnpm HOME=/root USER=root \
   bash -c 'cd /source; exec "$@"' arch-run "$@"
 CHROOT
