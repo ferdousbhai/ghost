@@ -313,7 +313,17 @@ fi
 qs -p "$config_path" ipc call shell summon "$plugin_id" '{}' >/dev/null
 sleep 1
 
+# Everything that makes this session private, for a second terminal to source;
+# the runtime root and this file go with the preview's cleanup.
+env_file=$runtime_root/preview.env
+for name in HOME XDG_CONFIG_HOME XDG_STATE_HOME XDG_DATA_HOME XDG_CACHE_HOME \
+    XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS GHOSTD_PORT GHOSTS_ROOT \
+    QT_QPA_PLATFORM OMARCHY_PATH WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE; do
+  printf 'export %s=%q\n' "$name" "${!name}"
+done > "$env_file"
+
 echo "preview: nested HUD is ready"
+echo "  environment: source $env_file"
 echo "  XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
 echo "  WAYLAND_DISPLAY=$WAYLAND_DISPLAY"
 echo "  HYPRLAND_INSTANCE_SIGNATURE=$HYPRLAND_INSTANCE_SIGNATURE"

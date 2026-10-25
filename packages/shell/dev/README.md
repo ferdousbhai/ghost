@@ -53,9 +53,10 @@ cleanup: Quickshell and nested-Hyprland process groups, their helpers, the
 private bus, IPC sockets, Wayland socket, and temporary files are removed. The
 already-running mock is intentionally not owned by the preview script.
 
-The ready message prints `XDG_RUNTIME_DIR`, `WAYLAND_DISPLAY`, and
-`HYPRLAND_INSTANCE_SIGNATURE`. Export those three values in another terminal to
-drive that exact nested instance:
+The ready message names an env file holding the whole private environment
+(home, XDG dirs, runtime dir, D-Bus bus, mock port, and the nested Wayland and
+Hyprland instance). Source it in another terminal to drive that exact nested
+instance:
 
 ```sh
 omarchy-shell ghost section hooks
@@ -120,8 +121,8 @@ that has already exited and the preview keeps running.
 - A finished turn or failure raises a desktop toast unless
   its conversation is being viewed in the focused chat panel. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
-- `Esc` cancels a running turn (nothing when idle — a normal window is not
-  dismissed with Esc).
+- `Esc` behaves as getting-started's key table says; it never closes the
+  window.
 - `hyprctl clients -j` lists it as a real toplevel — it is NOT in
   `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
   on title (`^Ghost( — .*)?$`), not on class.
@@ -133,8 +134,8 @@ that has already exited and the preview keeps running.
 pnpm --filter @ghost/omarchy lint     # qmllint over every QML file under qml/
 ```
 
-With the preview's private environment exported and its window visible, run
-the native focus regression from `packages/shell`:
+With that env file sourced and the preview's window visible, run the native
+focus regression from `packages/shell`:
 
 ```sh
 quickshell -p "$PWD/focus-probe.qml"
