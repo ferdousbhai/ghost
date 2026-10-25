@@ -23,6 +23,11 @@ TestCase {
         Theme.shell = tc.savedShell;
     }
 
+    function test_readsTheThemeWhereOmarchyWritesIt(): void {
+        // The stub sets both; omarchy-theme-set ignores XDG_STATE_HOME.
+        compare(Theme.stateDir, "/tmp/ghost-shell-test-home/.local/state/omarchy/current");
+    }
+
     function test_flatColoursParse(): void {
         const parsed = Theme.parseToml(
             "# Tokyo Night\nmode = \"dark\"\nbackground = \"#1a1b26\"\n"

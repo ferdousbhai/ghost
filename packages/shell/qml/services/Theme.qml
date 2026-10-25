@@ -59,8 +59,9 @@ import QtQuick
 Singleton {
     id: root
 
-    readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
-        + "/omarchy/current"
+    // $HOME-relative, not XDG_STATE_HOME-relative: omarchy-theme-set writes
+    // the theme there whatever XDG_STATE_HOME says.
+    readonly property string stateDir: (Quickshell.env("HOME") || "") + "/.local/state/omarchy/current"
 
     property var colors: ({})
     property var shell: ({})
