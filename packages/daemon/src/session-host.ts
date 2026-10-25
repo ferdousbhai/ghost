@@ -381,13 +381,10 @@ export class SessionHost {
   private async mcpServers(ghost: Ghost): Promise<HarnessMcpServer[]> {
     const desktop = desktopCommand(this.env);
     const servers: HarnessMcpServer[] = desktop ? [{ name: GHOST_MCP_SERVER, config: { command: desktop } }] : [];
-    try {
-      for (const server of readEnabledMcp(ghost.dir)) {
-        const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);
-        servers.push({ name: server.name, config });
-      }
-    } catch (error) {
-      this.logger.warn("ghost mcp.json unreadable; turn runs without its own MCP servers", { ghost: ghost.name, error: errorMessage(error) });
+    // An unreadable file or row is skipped, not thrown; GET …/mcp shows why.
+    for (const server of readEnabledMcp(ghost.dir)) {
+      const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);
+      servers.push({ name: server.name, config });
     }
     return servers;
   }

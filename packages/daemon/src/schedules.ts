@@ -95,8 +95,8 @@ export function resolveScheduleUnitDirectory(
 /**
  * The `ghost` executable a timer unit must name. systemd needs an absolute
  * path and the packaged install puts it at /usr/bin/ghost, but a checkout
- * install runs a launcher elsewhere on PATH, so the running daemon's PATH is
- * consulted first.
+ * install runs a launcher elsewhere on PATH, so the caller's PATH is consulted
+ * first.
  */
 export function ghostCliPath(env: NodeJS.ProcessEnv): string {
   return which("ghost", env) ?? "/usr/bin/ghost";
