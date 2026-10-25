@@ -26,8 +26,8 @@ Item {
     signal refocused()
 
     // The rename state lives on the list rather than on the row, and has to:
-    // the listing is replaced wholesale on every re-list (a finished turn does
-    // one), which rebuilds every delegate underneath a half-typed name.
+    // the ListView destroys and recreates a delegate that scrolls out of its
+    // cache, underneath a half-typed name.
     readonly property RenameSession rename: RenameSession {
         commit: (id, draft) => Ghostd.renameConversation(id, draft)
         onFinished: root.refocused()
@@ -157,7 +157,7 @@ Item {
             }
 
             // Both paths matter: the row may already exist when the rename
-            // starts, or be rebuilt by a re-list while it is running.
+            // starts, or be recreated by the ListView while it is running.
             onEditingChanged: if (entry.editing) titleEdit.begin(root.rename.draft)
             Component.onCompleted: if (entry.editing) titleEdit.begin(root.rename.draft)
 
