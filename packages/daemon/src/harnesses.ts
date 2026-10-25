@@ -94,6 +94,9 @@ export function which(name: string, env: NodeJS.ProcessEnv): string | null {
   return null;
 }
 
+/** The MCP server name `ghost-desktop` is served under; its tools are `mcp__ghost__desktop_*`. */
+export const GHOST_MCP_SERVER = "ghost";
+
 /** `ghost-desktop` as a turn's MCP server runs it: `$GHOST_DESKTOP`, else from PATH; null means no desktop tools. */
 export function desktopCommand(env: NodeJS.ProcessEnv): string | null {
   return env.GHOST_DESKTOP || which("ghost-desktop", env);

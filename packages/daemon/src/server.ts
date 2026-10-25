@@ -508,7 +508,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       if (!isAbsolute(path)) throw new GhostError("invalid_request", "\"path\" must be absolute.", 400);
       const size = await stat(path).then((s) => s.isFile() ? s.size : -1, () => -1);
       if (size < 0) throw new GhostError("not_found", `No file at ${path}.`, 404);
-      if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", "An attachment is at most 20 MiB.", 413);
+      if (size > MAX_ATTACHMENT_BYTES) throw new GhostError("payload_too_large", `An attachment is at most ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MiB.`, 413);
       bytes = await readFile(path);
     }
     jsonResponse(response, 201, { path: await options.host.saveAttachment(ghost, id, bytes) });

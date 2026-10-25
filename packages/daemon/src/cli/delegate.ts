@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
-import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
+import { desktopCommand, eligibleIds, GHOST_MCP_SERVER, readHarnessReport } from "../harnesses.js";
 import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
@@ -90,17 +90,17 @@ export function withGhostTools(id: string, args: readonly string[], desktop: str
   if (id === "claude" && terminator < 0
     && !options.some((arg) => arg === "--mcp-config" || arg.startsWith("--mcp-config="))) {
     // Both flags take a list, so they go last, after the task.
-    return [...args, "--allowedTools", "mcp__ghost", "--mcp-config", JSON.stringify({ mcpServers: { ghost: { command: desktop } } })];
+    return [...args, "--allowedTools", `mcp__${GHOST_MCP_SERVER}`, "--mcp-config", JSON.stringify({ mcpServers: { [GHOST_MCP_SERVER]: { command: desktop } } })];
   }
   const hasGhostConfig = options.some((arg, index) => {
     const value = arg === "-c" || arg === "--config"
       ? options[index + 1]
       : /^(?:-c|--config)=(.*)$/u.exec(arg)?.[1];
-    return value !== undefined && /^mcp_servers\.ghost(?:\.|\s*=)/u.test(value);
+    return value !== undefined && new RegExp(`^mcp_servers\\.${GHOST_MCP_SERVER}(?:\\.|\\s*=)`, "u").test(value);
   });
   if (id === "codex" && !hasGhostConfig) {
     // A JSON string is a TOML basic string.
-    return ["-c", `mcp_servers.ghost.command=${JSON.stringify(desktop)}`, ...args];
+    return ["-c", `mcp_servers.${GHOST_MCP_SERVER}.command=${JSON.stringify(desktop)}`, ...args];
   }
   return [...args];
 }

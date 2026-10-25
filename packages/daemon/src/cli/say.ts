@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";
-import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSessionPrefix, resolveTarget, sessionPath, stdinIsTty, stdinText } from "./common.js";
+import { ghostPath, latestSession, listSessions, preferredSessionId, resolveGhost, resolveSession, resolveSessionPrefix, sessionPath, stdinIsTty, stdinText } from "./common.js";
 import { dim, emit, truncate, type RenderedOutput } from "./output.js";
 import type { CliContext, CliStdin } from "./types.js";
 
@@ -66,7 +66,8 @@ export async function sayCommand(
   // The conversation an idle --follow-up turns into a fresh turn of.
   let idleFollowUp: string | undefined;
   if (followUp) {
-    const { session, path } = await resolveTarget(ctx.client, ctx, parsed);
+    const session = await resolveSession(ctx.client, name, requestedSession);
+    const path = sessionPath(name, session.id);
     try {
       const response = await ctx.client.request("POST", `${path}/queue`, { text });
       emit(ctx, response.body);

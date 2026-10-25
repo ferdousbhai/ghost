@@ -121,11 +121,16 @@ export async function resolveTarget(
   parsed: ParsedCliArgs,
 ): Promise<{ name: string; session: SessionSummary; path: string }> {
   const name = await resolveGhost(client, ctx.runtime, flagString(parsed, "ghost"));
-  const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
+  const session = await resolveSession(client, name, preferredSessionId(ctx.runtime, flagString(parsed, "session")));
+  return { name, session, path: sessionPath(name, session.id) };
+}
+
+/** `requested` (an id or unique prefix) among the ghost's sessions, else its latest. */
+export async function resolveSession(client: DaemonClient, name: string, requested: string | undefined): Promise<SessionSummary> {
   const sessions = await listSessions(client, name);
   const session = requested ? resolveSessionPrefix(sessions, requested) : latestSession(sessions);
   if (!session) throw notFound(`a session for ghost ${JSON.stringify(name)}`);
-  return { name, session, path: sessionPath(name, session.id) };
+  return session;
 }
 
 export function ghostPath(ghost: string, suffix = ""): string {

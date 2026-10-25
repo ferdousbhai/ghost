@@ -17,7 +17,7 @@ import { readCharacter } from "./home.js";
 import { resolveDocumentsDirectory } from "./xdg-user-dirs.js";
 import { errorMessage, GhostError } from "./errors.js";
 import { readAttachment, saveAttachment } from "./attachments.js";
-import { ghostSessionStopContinuation } from "./hook-policy.js";
+import { ghostSessionStopContinuation, type GhostHookEventBase } from "./hook-policy.js";
 import {
   appendLog,
   conversationDir,
@@ -38,7 +38,7 @@ import {
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, desktopCommand, GHOST_MCP_SERVER, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   harnessRow,
@@ -88,8 +88,6 @@ const TOOL_SUMMARY_MAX = 800;
  * generous for a sentence and short enough to stay a label.
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
-/** The MCP server name `ghost-desktop` is served under; its tools are `mcp__ghost__desktop_*`. */
-const GHOST_MCP_SERVER = "ghost";
 
 export interface SessionHostOptions {
   registry: GhostRegistry;
@@ -236,6 +234,14 @@ function keyOf(ghostName: string, id: string): string {
 
 function ghostOfKey(key: string): string {
   return (JSON.parse(key) as [string, string])[0];
+}
+
+/** The fields every hook event carries (docs/hooks.md). */
+function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: AbortSignal): GhostHookEventBase {
+  return {
+    session_id: id, session_file: logPath(sessionDir, id), signal, ghost_name: ghost.name,
+    ghost_home: ghost.dir, cwd: conversationDir(sessionDir, id), conversation_id: id,
+  };
 }
 
 export class SessionHost {
@@ -890,8 +896,7 @@ export class SessionHost {
       await this.hooks.emitTurnEnd({
         type: "turn_end", turn_id: turnId, outcome: terminal.type, title: event.title,
         excerpt: (event.text ?? "").replace(/\s+/gu, " ").trim().slice(0, 280), url: url?.href ?? null,
-        session_id: id, session_file: logPath(event.sessionDir, id), signal, ghost_name: ghost.name, ghost_home: ghost.dir,
-        cwd: conversationDir(event.sessionDir, id), conversation_id: id,
+        ...hookEventBase(ghost, id, event.sessionDir, signal),
       });
     } catch { this.logger.warn("turn_end delivery failed open", { ghost: ghost.name, conversation: id }); }
   }
@@ -911,13 +916,7 @@ export class SessionHost {
       type: "before_prompt",
       prompt,
       turn_id: turnId,
-      session_id: id,
-      session_file: logPath(sessionDir, id),
-      signal,
-      ghost_name: ghost.name,
-      ghost_home: ghost.dir,
-      cwd: conversationDir(sessionDir, id),
-      conversation_id: id,
+      ...hookEventBase(ghost, id, sessionDir, signal),
       ...(harness ? { harness } : {}),
     }, onHook);
     return result?.additionalContext || null;
@@ -943,16 +942,10 @@ export class SessionHost {
       messages: [message],
       turn_id: turnId,
       last_assistant_message: message,
-      session_id: id,
-      session_file: logPath(sessionDir, id),
+      ...hookEventBase(ghost, id, sessionDir, signal),
       transcript_path: logPath(sessionDir, id),
       stop_hook_active: active,
       owner_prompt: ownerPrompt,
-      signal,
-      ghost_name: ghost.name,
-      ghost_home: ghost.dir,
-      cwd: conversationDir(sessionDir, id),
-      conversation_id: id,
       harness,
     }, onHook);
     return ghostSessionStopContinuation(result) ?? null;

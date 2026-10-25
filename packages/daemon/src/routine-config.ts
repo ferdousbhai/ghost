@@ -29,7 +29,7 @@ function revision(sources: Sources): string {
 }
 function validateSource(source: unknown, empty = false): asserts source is string {
   if (typeof source !== "string" || (!empty && !source.trim()) || source.includes("\0") || Buffer.from(source).toString("utf8") !== source || Buffer.byteLength(source) > MAX_SOURCE_BYTES) {
-    throw new GhostError("invalid_routine", "Each unit source must be nonempty UTF-8 text of at most 128 KiB without NUL bytes.", 400);
+    throw new GhostError("invalid_routine", `Each unit source must be nonempty UTF-8 text of at most ${MAX_SOURCE_BYTES / 1024} KiB without NUL bytes.`, 400);
   }
 }
 /** Too large, undecodable, or unreadable files are refusals the list can skip, not daemon faults. */

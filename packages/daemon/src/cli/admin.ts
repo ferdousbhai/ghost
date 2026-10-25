@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { stdinText, ghostPath, preferredSessionId, resolveGhost, resolveTarget, sessionPath } from "./common.js";
+import { stdinText, ghostPath, preferredSessionId, resolveGhost, resolveSession, resolveTarget, sessionPath } from "./common.js";
 import { emit } from "./output.js";
 import type { CliContext } from "./types.js";
 import type { Routine } from "../schedules.js";
@@ -110,7 +110,7 @@ export async function switchCommand(parsed: ParsedCliArgs, ctx: CliContext): Pro
   const requested = preferredSessionId(ctx.runtime, flagString(parsed, "session"));
   const path = requested
     ? sessionPath(name, requested)
-    : (await resolveTarget(ctx.client, ctx, parsed)).path;
+    : sessionPath(name, (await resolveSession(ctx.client, name, undefined)).id);
   const body = (await ctx.client.request("PUT", `${path}/harness`, { harness: id })).body as { id: string; harness: string };
   emit(ctx, body, () => `Conversation ${body.id} now runs on ${body.harness}.\n`);
   return 0;
