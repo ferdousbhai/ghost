@@ -356,7 +356,6 @@ Singleton {
     property var createGhostRequest: null
     property var deleteGhostRequest: null
     property var renameGhostRequest: null
-    property var renameGhostSnapshot: null
     property var renameSessionRequest: null
     property var sessionsRequest: null
     property var eventsRequest: null
@@ -794,14 +793,12 @@ Singleton {
             return false;
         }
         root.ghostRenameError = "";
-        root.renameGhostSnapshot = transaction.before;
+        const before = transaction.before;
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
         root.request(root, "renameGhostRequest", "PUT", root.ghostPath(from) + "/name",
             { name: next }, function (xhr, body) {
                 if (xhr.status === 200) {
-                    root.renameGhostSnapshot = null;
-                    root.ghostRenameError = "";
                     // The daemon has the last word on the name it actually wrote.
                     const settled = body && typeof body.name === "string" && body.name !== ""
                         ? body.name : next;
@@ -809,11 +806,8 @@ Singleton {
                     root.refresh();
                     return;
                 }
-                if (root.renameGhostSnapshot) {
-                    root.moveTurnStates(next, from);
-                    root.installGhostRenameState(root.renameGhostSnapshot);
-                }
-                root.renameGhostSnapshot = null;
+                root.moveTurnStates(next, from);
+                root.installGhostRenameState(before);
                 root.ghostRenameError = root.refusal(xhr, "PUT ghost name");
             });
         return true;
@@ -1530,12 +1524,7 @@ Singleton {
         return list.filter(session => session && root.validConversationId(session.id));
     }
 
-    function fetchSessions(ghost: string): void {
-        const g = ghost || root.activeGhost;
-        if (g === "") {
-            root.sessions = [];
-            return;
-        }
+    function fetchSessions(g: string): void {
         root.request(root, "sessionsRequest", "GET",
             root.ghostPath(g) + "/sessions", null, function (xhr, body) {
                 // A reply for a ghost the user has since switched away from is stale.

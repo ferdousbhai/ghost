@@ -132,10 +132,9 @@ Item {
                     anchors.margins: 1
                     // The daemon's copy once it holds one: a pasted file is
                     // removed as soon as it is uploaded.
-                    source: chip.modelData.path !== "" && Workbench.home !== ""
-                        ? "file://" + Workbench.home + "/sessions/" + chip.modelData.sessionId
-                            + "/" + chip.modelData.path
-                        : chip.modelData.local
+                    readonly property string stored: chip.modelData.path === ""
+                        ? "" : Workbench.sessionFile(chip.modelData.sessionId, chip.modelData.path)
+                    source: stored !== "" ? "file://" + stored : chip.modelData.local
                     sourceSize.width: tray.height * 2
                     sourceSize.height: tray.height * 2
                     fillMode: Image.PreserveAspectCrop

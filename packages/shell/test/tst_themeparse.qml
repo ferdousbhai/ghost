@@ -85,7 +85,7 @@ TestCase {
         compare(Theme.shellNumber("font.base-size", 12), 16);
         compare(Theme.shellNumber("font.missing", 11), 11);
         verify(!Theme.shellFlag("spacing.scale-with-font", true));
-        compare(Theme.panelPadding, 20);
+        compare(Theme.pad, 20);
 
         const border = Theme.shellColor("popups.border", "#000000");
         compare(Math.round(border.r * 255), 255);

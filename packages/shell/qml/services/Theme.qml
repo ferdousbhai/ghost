@@ -178,10 +178,7 @@ Singleton {
     function spaceFor(token: string, base: real): int {
         return Math.max(0, Math.round(root.shellNumber("spacing." + token, base * root.spacingScale)));
     }
-    readonly property int spaceHuge: root.spaceFor("huge", 18)
-    readonly property int controlGap: root.spaceFor("control-gap", 8)
     readonly property int controlPaddingX: root.spaceFor("control-padding-x", 10)
-    readonly property int panelPadding: root.spaceFor("panel-padding", 18)
 
     // [controls] — Omarchy publishes one chrome colour and one border colour
     // per state, and separates the states by alpha. Every fill below is
@@ -304,10 +301,10 @@ Singleton {
     readonly property int bubbleRadiusSmall: 12
     readonly property int bubbleTailRadius: 4
 
-    // The names the HUD already uses, pointed at their published equivalents.
-    readonly property int pad: root.panelPadding
-    readonly property int gap: root.controlGap
-    readonly property int sectionGap: root.spaceHuge
+    // Spacing, each under the token omarchy-shell publishes it as.
+    readonly property int pad: root.spaceFor("panel-padding", 18)
+    readonly property int gap: root.spaceFor("control-gap", 8)
+    readonly property int sectionGap: root.spaceFor("huge", 18)
     readonly property int controlHeight: root.spaceFor("control-height", 28)
 
     // omarchy.org moves everything on one 150ms ease-out; the longer two keep

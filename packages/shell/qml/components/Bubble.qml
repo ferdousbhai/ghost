@@ -199,7 +199,7 @@ Item {
 
     Component.onCompleted: {
         // A row the list hands a body before this point — every restored row —
-        // has already missed onBodyChanged.
+        // has already missed onDisplayBodyChanged.
         root.renderBody();
         if (Theme.reducedMotion || !root.atLiveEnd())
             return;
@@ -313,8 +313,7 @@ Item {
 
                         required property string modelData
                         // An attached image, read from the conversation directory.
-                        readonly property string path: Workbench.home === "" || Ghostd.currentSessionId === ""
-                            ? "" : Workbench.home + "/sessions/" + Ghostd.currentSessionId + "/" + picture.modelData
+                        readonly property string path: Workbench.sessionFile(Ghostd.currentSessionId, picture.modelData)
 
                         source: picture.path === "" ? "" : "file://" + picture.path
                         width: Math.min(root.imageSize, pictures.width)

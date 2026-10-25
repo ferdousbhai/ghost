@@ -20,11 +20,9 @@ Item {
     property string title: ""
     property string body: ""
     property string confirmText: "Delete"
-    property string cancelText: "Cancel"
     property bool busy: false
     /** The failure to show in place of nothing happening, or "". */
     property string error: ""
-    property bool destructive: true
     /** When set, the confirm stays locked until this exact string is typed
         back — the gate an erased home directory earns over a stray Return. */
     property string challenge: ""
@@ -205,15 +203,14 @@ Item {
                     spacing: Theme.gap
 
                     ActionButton {
-                        label: root.cancelText
+                        label: "Cancel"
                         enabled: !root.busy
                         onClicked: root.reject()
                     }
 
                     ActionButton {
                         label: root.busy ? "…" : root.confirmText
-                        primary: !root.destructive
-                        danger: root.destructive
+                        danger: true
                         enabled: !root.busy && root.answered
                         onClicked: root.accept()
                     }

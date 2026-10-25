@@ -38,6 +38,11 @@ Singleton {
         return "";
     }
 
+    /** `name` in conversation `sessionId`'s directory, or "" while either is unknown. */
+    function sessionFile(sessionId: string, name: string): string {
+        return root.home === "" || sessionId === "" ? "" : root.home + "/sessions/" + sessionId + "/" + name;
+    }
+
     /**
      * Open `path` beside the chat. Absolute or ghost-home-relative. A path no
      * pane can render is ignored rather than opened blank, so `filePath` is

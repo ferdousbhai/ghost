@@ -44,7 +44,7 @@ Rectangle {
 
     Component.onCompleted: root.seed()
     // A ghost switch clears the character state without re-reading it; a
-    // visible pane fetches for itself, the way McpBrowser and CommandsBrowser
+    // visible pane fetches for itself, the way McpBrowser and HooksBrowser
     // do, so returning here never shows a permanently blank persona.
     onVisibleChanged: if (root.visible && Ghostd.activeGhost !== "") Ghostd.fetchCharacter(false)
 

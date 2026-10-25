@@ -32,10 +32,7 @@ Rectangle {
     clip: true
 
     function findServer(name: string): var {
-        for (let i = 0; i < root.servers.length; i++) {
-            if (root.servers[i] && root.servers[i].name === name) return root.servers[i];
-        }
-        return null;
+        return root.servers.find(server => server && server.name === name) || null;
     }
 
     function ensureSelection(): void {
