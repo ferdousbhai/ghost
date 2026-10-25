@@ -24,10 +24,6 @@ TestCase {
         verify(!transaction.ok);
         compare(transaction.code, "already_exists");
         compare(JSON.stringify(original), before);
-        compare(transaction.before.ghosts[0].name, "Casper");
-        compare(transaction.before.ghosts[1].name, "Wendy");
-        compare(transaction.before.sessionIds.Casper, "casper-chat");
-        compare(transaction.before.sessionIds.Wendy, "wendy-chat");
     }
 
     function test_failedNonCollisionRestoresExactState(): void {

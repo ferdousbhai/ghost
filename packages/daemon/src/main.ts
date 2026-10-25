@@ -46,7 +46,7 @@ Options:
   -p, --port <port>        TCP port to bind on 127.0.0.1 (default 7717)
       --ghosts-root <dir>  Directory holding one sub-directory per ghost
       --config <file>      Config file (default ~/.config/ghost/config.json)
-      --log-level <level>  debug | info | warn | error (default info)
+      --log-level <level>  info | warn | error (default info)
   -h, --help               Show this message
   -v, --version            Show the version
 
@@ -139,7 +139,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   if (values["ghosts-root"] !== undefined) overrides.ghostsRoot = values["ghosts-root"];
   if (values.config !== undefined) overrides.configPath = values.config;
   const logLevel = values["log-level"] ?? "info";
-  if (!["debug", "info", "warn", "error"].includes(logLevel)) throw new UsageError(`Invalid log level: ${logLevel}`);
+  if (!["info", "warn", "error"].includes(logLevel)) throw new UsageError(`Invalid log level: ${logLevel}`);
   return { overrides, logLevel: logLevel as LogLevel, help: values.help === true, version: values.version === true };
 }
 

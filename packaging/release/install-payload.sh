@@ -67,9 +67,6 @@ if [[ "$component" == runtime ]]; then
     "$pkgdir/usr/share/licenses/$pkgname/runtime/BUNDLED-LICENSES"
   install_tree "$runtime_root/licenses" \
     "$pkgdir/usr/share/licenses/$pkgname/runtime/licenses"
-  # The installed docs link the notices next to the docs directory.
-  ln -s "/usr/share/licenses/$pkgname/THIRD_PARTY_NOTICES.md" \
-    "$pkgdir/usr/share/doc/ghost/THIRD_PARTY_NOTICES.md"
 else
   # The HUD is an omarchy-shell plugin. The package owns the files; the per-user
   # symlink into ~/.config/omarchy/plugins belongs to the install script, because

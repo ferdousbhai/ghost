@@ -5,10 +5,9 @@
  */
 import { fstatSync } from "node:fs";
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = "info" | "warn" | "error";
 
 export interface Logger {
-  debug(message: string, fields?: Record<string, unknown>): void;
   info(message: string, fields?: Record<string, unknown>): void;
   warn(message: string, fields?: Record<string, unknown>): void;
   error(message: string, fields?: Record<string, unknown>): void;
@@ -23,7 +22,7 @@ export interface LogRecord {
 
 export type LogSink = (record: LogRecord) => void;
 
-const JOURNAL_PRIORITY: Record<LogLevel, number> = { debug: 7, info: 6, warn: 4, error: 3 };
+const JOURNAL_PRIORITY: Record<LogLevel, number> = { info: 6, warn: 4, error: 3 };
 
 /** True when stderr is the journal stream systemd handed this process, not one a child inherited. */
 export function stderrIsJournal(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -61,7 +60,6 @@ function formatLogMessage(
 }
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
-  debug: 10,
   info: 20,
   warn: 30,
   error: 40,
@@ -83,7 +81,6 @@ export function createLogger(
     sink({ level, message, ...(recordFields ? { fields: recordFields } : {}) });
   };
   return {
-    debug: (message, fields) => emit("debug", message, fields),
     info: (message, fields) => emit("info", message, fields),
     warn: (message, fields) => emit("warn", message, fields),
     error: (message, fields) => emit("error", message, fields),
@@ -92,7 +89,6 @@ export function createLogger(
 }
 
 export const silentLogger: Logger = {
-  debug: () => {},
   info: () => {},
   warn: () => {},
   error: () => {},

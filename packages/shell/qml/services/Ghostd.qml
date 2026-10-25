@@ -1048,7 +1048,6 @@ Singleton {
 
     function cancelTranscriptLoad(state: var): void {
         if (!state) return;
-        state.transcriptGeneration = Number(state.transcriptGeneration || 0) + 1;
         state.transcriptLoad = null;
         root.retire(state, "transcriptRequest");
     }
@@ -1108,7 +1107,6 @@ Singleton {
             queueStatusRequest: null,
             stopRequest: null,
             transcriptRequest: null,
-            transcriptGeneration: 0,
             transcriptLoad: null
         };
     }
@@ -1855,8 +1853,7 @@ Singleton {
     }
 
     function transcriptLoadIsCurrent(state: var, load: var): bool {
-        return !!state && !!load && state.transcriptLoad === load
-            && state.transcriptGeneration === load.generation && !state.streaming;
+        return !!state && !!load && state.transcriptLoad === load && !state.streaming;
     }
 
     /**
@@ -1869,7 +1866,6 @@ Singleton {
         if (!state || state.streaming) return;
         root.cancelTranscriptLoad(state);
         const load = {
-            generation: state.transcriptGeneration,
             allowNotFound: allowNotFound,
             total: -1,
             nextOffset: 0,
@@ -1882,8 +1878,7 @@ Singleton {
     }
 
     function failTranscriptLoad(state: var, load: var, message: string, unreachable: bool): void {
-        if (!state || state.transcriptLoad !== load
-                || state.transcriptGeneration !== load.generation) return;
+        if (!state || state.transcriptLoad !== load) return;
         state.transcriptLoad = null;
         if (!root.isActiveTurn(state)) return;
         root.sessionsError = message;

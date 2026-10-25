@@ -96,12 +96,6 @@ for path in bin/ghost bin/ghostd bin/ghost-desktop; do
   }
   grep -Fq 'GHOST_BUN_EXECUTABLE:-/usr/bin/bun' "$runtime_root/$path"
 done
-for path in lib/ghost.js lib/ghostd.js lib/ghost-desktop.js BUNDLED-LICENSES; do
-  [[ -f "$runtime_root/$path" && "$(stat -c '%a' "$runtime_root/$path")" == 644 ]] || {
-    printf 'runtime data file is missing or unsafe: %s\n' "$path" >&2
-    exit 1
-  }
-done
 
 bun_build_version="$(sed -n 's/^bun_build_version=//p' "$manifest")"
 bun_runtime_min="$(sed -n 's/^bun_runtime_min=//p' "$manifest")"

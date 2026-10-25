@@ -55,8 +55,8 @@ function move(state, from, to) {
 function prepare(state, from, to) {
     var before = snapshot(state);
     if (!hasGhost(before.ghosts, from))
-        return { ok: false, code: "not_found", before: before };
+        return { ok: false, code: "not_found" };
     if (hasGhost(before.ghosts, to))
-        return { ok: false, code: "already_exists", before: before };
+        return { ok: false, code: "already_exists" };
     return { ok: true, before: before, after: move(before, from, to) };
 }

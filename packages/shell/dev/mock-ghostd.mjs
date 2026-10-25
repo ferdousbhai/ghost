@@ -355,7 +355,7 @@ const sessionSummary = (name) => (s) => {
     preview: s.preview ?? (first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null),
     harness: s.harness ?? null,
     updatedAt: s.updatedAt,
-    messageCount: s.messages.filter((message) => message.role !== "resources").length,
+    messageCount: s.messages.length,
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
     running: answering.has(turnKey(name, s.id)),

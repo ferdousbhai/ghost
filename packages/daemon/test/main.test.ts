@@ -22,14 +22,14 @@ describe("parseArgs", () => {
       "--port", "7788",
       "--ghosts-root", "/tmp/ghosts",
       "--config", "/tmp/config.json",
-      "--log-level", "debug",
+      "--log-level", "warn",
     ]);
     expect(parsed.overrides).toEqual({
       port: 7788,
       ghostsRoot: "/tmp/ghosts",
       configPath: "/tmp/config.json",
     });
-    expect(parsed.logLevel).toBe("debug");
+    expect(parsed.logLevel).toBe("warn");
   });
 
   it("accepts the short port flag", () => {

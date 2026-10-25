@@ -443,11 +443,11 @@ describe("GhostHookRunner", () => {
         executionFailed: false,
       });
     const logs: Array<{
-      level: "debug" | "info" | "warn" | "error";
+      level: "info" | "warn" | "error";
       message: string;
       fields?: Record<string, unknown>;
     }> = [];
-    const record = (level: "debug" | "info" | "warn" | "error") =>
+    const record = (level: "info" | "warn" | "error") =>
       (message: string, fields?: Record<string, unknown>) => {
         logs.push({ level, message, fields });
       };
@@ -455,7 +455,6 @@ describe("GhostHookRunner", () => {
       commandRunner,
       logger: {
         child() { return this; },
-        debug: record("debug"),
         info: record("info"),
         warn: record("warn"),
         error: record("error"),

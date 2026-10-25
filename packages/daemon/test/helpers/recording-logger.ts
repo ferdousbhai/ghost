@@ -9,7 +9,7 @@ export interface RecordingLogger extends Logger {
   readonly records: LogRecord[];
 }
 
-export function recordingLogger(level: LogLevel = "debug"): RecordingLogger {
+export function recordingLogger(level: LogLevel = "info"): RecordingLogger {
   const records: LogRecord[] = [];
   return Object.assign(createLogger(level, (record) => records.push(record)), { records });
 }
