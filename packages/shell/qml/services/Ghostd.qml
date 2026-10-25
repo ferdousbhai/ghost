@@ -155,8 +155,8 @@ Singleton {
     // ghost or conversation.
 
     /** Take the daemon's `{ path, document }` as the current hooks.json; false when the body is not that. */
-    function adoptHookConfig(xhr: var): bool {
-        const config = HookConfig.parseConfig(xhr.responseText);
+    function adoptHookConfig(body: var): bool {
+        const config = HookConfig.parseConfig(body);
         if (config === null) {
             root.hookConfigError = "ghostd sent a malformed hook configuration";
             return false;
@@ -189,9 +189,9 @@ Singleton {
         root.retire(root, "hookConfigRequest");
         const epoch = root.hooksEpoch;
         root.hookConfigError = "";
-        root.request(root, "hookConfigRequest", "GET", "/api/hooks/config", null, function (xhr) {
+        root.request(root, "hookConfigRequest", "GET", "/api/hooks/config", null, function (xhr, body) {
             if (xhr.status === 200) {
-                if (!root.adoptHookConfig(xhr)) return;
+                if (!root.adoptHookConfig(body)) return;
                 root.hookConfigLoaded = true;
                 root.reachable = true;
             } else if (xhr.status === 404) {
@@ -215,9 +215,9 @@ Singleton {
         if (root.hookConfigBusy || !root.hookConfigAvailable) return;
         const epoch = root.hooksEpoch;
         root.hookConfigError = "";
-        root.request(root, "hookConfigMutation", "PUT", "/api/hooks/config", document, function (xhr) {
+        root.request(root, "hookConfigMutation", "PUT", "/api/hooks/config", document, function (xhr, body) {
             if (epoch !== root.hooksEpoch) return;
-            const ok = xhr.status === 200 && root.adoptHookConfig(xhr);
+            const ok = xhr.status === 200 && root.adoptHookConfig(body);
             // A 400 is the loader's message naming the field; that is the whole story.
             if (xhr.status === 400) root.hookConfigError = root.refusal(xhr, "PUT hooks config");
             else if (xhr.status !== 200) root.hookConfigError = root.describeError(xhr, "PUT hooks config");

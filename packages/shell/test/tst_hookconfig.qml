@@ -22,10 +22,10 @@ TestCase {
     }
 
     function test_parseConfigAcceptsOnlyPathAndObjectDocument(): void {
-        compare(HookConfig.parseConfig(JSON.stringify({ path: "/p/hooks.json", document: {} })).path, "/p/hooks.json");
-        compare(HookConfig.parseConfig(JSON.stringify({ path: "", document: {} })), null);
-        compare(HookConfig.parseConfig(JSON.stringify({ path: "/p", document: [] })), null);
-        compare(HookConfig.parseConfig("not json"), null);
+        compare(HookConfig.parseConfig({ path: "/p/hooks.json", document: {} }).path, "/p/hooks.json");
+        compare(HookConfig.parseConfig({ path: "", document: {} }), null);
+        compare(HookConfig.parseConfig({ path: "/p", document: [] }), null);
+        compare(HookConfig.parseConfig(undefined), null);
     }
 
     function test_cardsFollowTheDocumentWithTheDaemonsDefaults(): void {

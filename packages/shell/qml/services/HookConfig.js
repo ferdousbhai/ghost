@@ -47,17 +47,11 @@ function clone(document) {
     return isObject(document) ? JSON.parse(JSON.stringify(document)) : {};
 }
 
-/** `{ path, document }` from a config response body, or null when it is not that. */
+/** `{ path, document }` from a parsed config reply, or null when it is not that. */
 function parseConfig(body) {
-    let parsed;
-    try {
-        parsed = JSON.parse(body);
-    } catch (error) {
-        return null;
-    }
-    if (!isObject(parsed) || typeof parsed.path !== "string" || parsed.path === ""
-            || !isObject(parsed.document)) return null;
-    return { path: parsed.path, document: parsed.document };
+    if (!isObject(body) || typeof body.path !== "string" || body.path === ""
+            || !isObject(body.document)) return null;
+    return { path: body.path, document: body.document };
 }
 
 /** The document's handlers in the daemon's own order: event order, then file order. */
