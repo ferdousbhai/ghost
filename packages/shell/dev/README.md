@@ -101,9 +101,10 @@ that has already exited and the preview keeps running.
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`; `+` in its Ghosts header), transcript in the middle, composer at the
   bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
-  rail floating at the right edge. `SUPER+CTRL+G` is
-  launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
-  focused. Character edits `character.md`. Hooks shows the
+  rail floating at the right edge. The nested session binds no keys (the
+  summon key would reach the owner's own HUD); toggle the preview with
+  `omarchy-shell shell toggle ferdousbhai.ghost` under the exported variables.
+  Character edits `character.md`. Hooks shows the
   owner's `hooks.json` handlers with their lifecycle triggers and the loaded
   count, and opening it does not create a conversation. MCP lists stdio, HTTP,
   and SSE fixtures as stored and exercises add, full replacement,
@@ -120,10 +121,10 @@ that has already exited and the preview keeps running.
   its conversation is being viewed in the focused chat panel. Clicking the toast
   opens that conversation; subsequent toasts replace it while it remains live.
 - `Esc` cancels a running turn (nothing when idle — a normal window is not
-  dismissed with Esc; use `SUPER+CTRL+G`).
+  dismissed with Esc).
 - `hyprctl clients -j` lists it as a real toplevel — it is NOT in
   `hyprctl layers`. A plugin window carries the host shell's app-id, so match it
-  on title (`^Ghost( — .*)?$`), not on class. `SHIFT+SUPER+<n>` moves it between workspaces.
+  on title (`^Ghost( — .*)?$`), not on class.
 
 
 ## Validation

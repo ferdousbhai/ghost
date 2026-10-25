@@ -15,10 +15,12 @@ The stable `ghost` release-source machinery lives under `packaging/release/`; it
 v3 runtime source carries the same bundles, launchers, and exact bundled-license
 closure.
 
-Build the checkout package without installing it:
+Build the checkout package without installing it (a plain `makepkg` builds
+origin `master`; these variables point it at this checkout's HEAD):
 
 ```sh
-makepkg --cleanbuild
+GHOST_SOURCE_REPO="file://$(git rev-parse --show-toplevel)" \
+  GHOST_SOURCE_REF="commit=$(git rev-parse HEAD)" makepkg --cleanbuild
 # CI uses a disposable native Arch root (requires arch-install-scripts and root):
 sudo packaging/arch/arch-run.sh packaging/arch/build-native.sh
 ```
