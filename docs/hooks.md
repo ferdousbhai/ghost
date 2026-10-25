@@ -87,7 +87,7 @@ reason. A hook ends with its own process: output still arriving 2 s
 after it exits is dropped, so a descendant that left the group (`setsid job &`)
 and still holds the pipes cannot hold the daemon's hook promise open. Synchronous spawn failures, process-start
 errors, and unexpected command-runner rejection are generically logged and
-fail open for both events; they never fail the owner turn or expose the
+fail open for every event; they never fail the owner turn or expose the
 command/error payload.
 
 ## `before_prompt` protocol

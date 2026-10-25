@@ -20,16 +20,16 @@ install_tree() {
   local destination_dir="$2"
   local directory file relative mode
 
-  install -d -m755 -o root -g root "$destination_dir"
+  install -d -m755 "$destination_dir"
   while IFS= read -r -d '' directory; do
     relative="${directory#"$source_dir"/}"
-    install -d -m755 -o root -g root "$destination_dir/$relative"
+    install -d -m755 "$destination_dir/$relative"
   done < <(find "$source_dir" -mindepth 1 -type d -print0)
   while IFS= read -r -d '' file; do
     relative="${file#"$source_dir"/}"
     mode=644
     [[ -x "$file" ]] && mode=755
-    install -Dm"$mode" -o root -g root "$file" "$destination_dir/$relative"
+    install -Dm"$mode" "$file" "$destination_dir/$relative"
   done < <(find "$source_dir" -type f -print0)
 }
 
