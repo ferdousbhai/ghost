@@ -620,18 +620,23 @@ function followTurn(res, log, from) {
 }
 
 /**
- * Drive scripted events into the turn. Returns the reply text, or null if
- * the turn was stopped.
+ * Drive scripted events into the turn. Returns the pass as ghostd logs it —
+ * its text and tool-call parts in order — or null if the turn was stopped.
  */
 async function pump(log, events) {
-  let reply = "";
+  const parts = [];
   for (const event of events) {
     if (log.stopped) return null;
-    if (event.type === "text_end") reply = event.content;
+    if (event.type === "text_end") parts.push({ type: "text", text: event.content });
+    if (event.type === "tool_execution_start") parts.push({ type: "toolCall", id: event.id, name: event.toolName, arguments: event.arguments });
+    if (event.type === "tool_execution_end" && event.isError) {
+      const index = parts.findIndex((part) => part.type === "toolCall" && part.id === event.id);
+      if (index >= 0) parts[index] = { ...parts[index], failed: true };
+    }
     send(log, event);
     await new Promise((r) => setTimeout(r, event.type === "text_delta" ? DELTA_MS : 220));
   }
-  return reply;
+  return parts;
 }
 
 async function streamTurn(res, name, body) {
@@ -661,7 +666,7 @@ async function streamTurn(res, name, body) {
   const logReply = (reply) => {
     append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
-    : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
+    : { role: "assistant", content: reply, ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
     if (reply !== null && !failing) reportResources();
   };
   const reportResources = () => {

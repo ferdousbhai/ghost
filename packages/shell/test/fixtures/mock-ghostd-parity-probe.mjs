@@ -176,6 +176,10 @@ try {
   assert.equal((await gone.json()).error.code, "turn_not_found");
   const turnEvents = JSON.stringify(frames);
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
+  // The pass is logged as ghostd logs it: narration, its calls, then the reply.
+  const logged = await (await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/sessions/mock-trace-probe/transcript`)).json();
+  assert.deepEqual(logged.messages.find((message) => message.role === "assistant").content.map((part) => part.type),
+    ["text", "toolCall", "toolCall", "text"]);
 
   // A stop during a stop hook is accepted and the turn settles.
   const stoppedId = "mock-stopped-hook";
