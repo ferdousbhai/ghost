@@ -4,11 +4,6 @@
 # The important part is finding the right binary. On Arch (and so on Omarchy)
 # `/usr/bin/qmllint` is a **Qt 5 stub that exits 0 on any input** — it accepts
 # misspelled properties and unknown types without a word. Always the Qt 6 one.
-#
-# `-I .qmllint` resolves the `qs.services` / `qs.components` module URIs.
-# Quickshell synthesises a `qs` module rooted at the config directory at
-# runtime; qmllint knows nothing about that, so `.qmllint/qs` is a symlink back
-# to `qml/` that gives the same mapping through a normal import path.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -32,7 +27,7 @@ esac
 # Direct-file linting needs the singleton registrations explicitly; -I alone
 # finds imports but does not register the file being linted as a singleton.
 echo "$QMLLINT ($version)"
-exec "$QMLLINT" -I .qmllint -i qml/services/qmldir \
+exec "$QMLLINT" -i qml/services/qmldir \
   qml/GhostHud.qml \
   qml/Panel.qml \
   qml/Service.qml \

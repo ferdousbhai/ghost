@@ -55,7 +55,7 @@ if [[ ! -s $sse_url_file ]]; then
 fi
 read -r sse_url < "$sse_url_file"
 QT_QPA_PLATFORM=offscreen \
-  "$QML" -I test/imports -I qml -I .qmllint \
+  "$QML" -I test/imports -I qml \
     test/xhr-sse-unicode-probe.qml -- "$sse_url"
 
 kill "$sse_pid"
@@ -64,12 +64,12 @@ sse_pid=""
 rmdir "$sse_tmp"
 trap - EXIT
 
-# Loading qs.services materializes the Ghostd singleton, whose startup refresh
+# Loading the services materializes the Ghostd singleton, whose startup refresh
 # is real I/O. The test-only Quickshell import maps GHOSTD_PORT to destination
 # port 0, which cannot have a listener and therefore cannot reach an owner or
 # unrelated process.
 QT_QPA_PLATFORM=offscreen \
-  "$QMLTESTRUNNER" -input test -import test/imports -import qml -import .qmllint -o -,txt
+  "$QMLTESTRUNNER" -input test -import test/imports -import qml -o -,txt
 
 mapfile -t xdg_open_owners < <(rg -l '"xdg-open"' qml | sort)
 if [[ ${#xdg_open_owners[@]} -ne 1 || ${xdg_open_owners[0]} != qml/services/ExternalLinks.qml ]]; then

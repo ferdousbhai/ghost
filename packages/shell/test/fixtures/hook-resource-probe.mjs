@@ -23,7 +23,6 @@ const fixtureUrl = `http://127.0.0.1:${address.port}`;
 const child = spawn(qml, [
   "-I", "test/imports",
   "-I", "qml",
-  "-I", ".qmllint",
   "test/hook-resource-probe.qml",
   "--",
   fixtureUrl,

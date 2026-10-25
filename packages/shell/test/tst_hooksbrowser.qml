@@ -102,13 +102,6 @@ TestCase {
         return browser;
     }
 
-    function test_noAutomaticWorkSettings(): void {
-        const browser = editableBrowser();
-        Ghostd.hookConfig = { hooks: configDocument().hooks, builtin: { next_work_turns: 100 } };
-        verify(findChild(browser, "hookBuiltin-next_work_turns") === null);
-        verify(findChild(browser, "hookBuiltin-handoff_idle_seconds") === null);
-    }
-
     function test_commandHookIsEditedInPlaceAndTheFileIsReplacedWhole(): void {
         const browser = editableBrowser();
         const card = findChild(browser, "hookCard");

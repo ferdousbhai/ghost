@@ -27,4 +27,5 @@ Glow 1.0 Glow.qml
 HudHeader 1.0 HudHeader.qml
 Sidebar 1.0 Sidebar.qml
 Welcome 1.0 Welcome.qml
+Routines 1.0 Routines.qml
 RowDeleteButton 1.0 RowDeleteButton.qml

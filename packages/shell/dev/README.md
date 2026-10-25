@@ -144,9 +144,7 @@ unfocused Chat, and focused Board. It refuses a non-preview runtime or live port
 Unlike a mocked compositor title, Qt's own window focus reflects actual input
 focus even when Hyprland's client cache has not populated its title.
 
-`qmllint` needs the `qs.*` modules Quickshell synthesises at runtime resolved
-by hand, which is what the `.qmllint/qs -> ../qml` symlink and `-I .qmllint`
-are for. Use `/usr/lib/qt6/bin/qmllint`, never `/usr/bin/qmllint` — on Arch the
+Use `/usr/lib/qt6/bin/qmllint`, never `/usr/bin/qmllint` — on Arch the
 latter is a **Qt 5 stub that exits 0 on any input**, including files with
 misspelled properties.
 

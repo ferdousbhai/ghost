@@ -348,9 +348,8 @@ Singleton {
     readonly property int readingMeasure: root.ch(92)
 
     /**
-     * The HUD's one list column — the roster stacked over the conversations,
-     * and the delegated-task list that stands in the same relation to its
-     * detail pane. Four columns wider than the 26 a name needs, because the
+     * The HUD's one list column: the roster stacked over the conversations.
+     * Four columns wider than the 26 a name needs, because the
      * longest thing read down it is a conversation title and a title that wraps
      * costs a whole row of the list. The roster takes the same measure to stay
      * flush with the conversations under it, not because a ghost name needs it.
