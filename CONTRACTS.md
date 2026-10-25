@@ -723,8 +723,8 @@ owner's `turn_end` command hook. Completed turns,
   refreshes enablement and explicitly restarts an active daemon to load its bundle. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
-  archive, runtime archive, and `SHA256SUMS` that Omarchy's package hook
-  reads. The only install path for owners is Omarchy's package repository.
+  archive, runtime archive, and `SHA256SUMS`; Omarchy's sync reads GitHub's
+  asset digests. The only install path for owners is Omarchy's package repository.
 
 Protocols implemented by a sidecar have one detailed document:
 [`docs/hooks.md`](docs/hooks.md), and ghost-desktop's [README](https://github.com/ferdousbhai/ghost-desktop#readme).

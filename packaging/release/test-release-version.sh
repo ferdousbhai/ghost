@@ -54,6 +54,15 @@ for invalid in 1.2.3.alpha 01.2.3 65536.0.0 0.0.0; do
     "$work/rejected.out"
 done
 
+# publish.sh asks the same rule of a requested version before it bumps.
+for invalid in 1.2.3.alpha 01.2.3 65536.0.0 0.0.0; do
+  if bash "$checker" --valid "$invalid" 2>/dev/null; then
+    printf 'release version checker accepted invalid requested version %s\n' "$invalid" >&2
+    exit 1
+  fi
+done
+bash "$checker" --valid 65535.0.1
+
 set_common_version 65535.0.1
 [[ "$(bash "$checker" "$fixture")" == 65535.0.1 ]]
 for manifest in "${manifests[@]}"; do

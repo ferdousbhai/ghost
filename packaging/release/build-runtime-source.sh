@@ -11,10 +11,6 @@ source_root="$(realpath "$source_root")"
 mkdir -p "$output_dir"
 output_dir="$(realpath "$output_dir")"
 
-[[ "$version" =~ ^[0-9]+([.][0-9]+){2}([.][a-z0-9]+)*$ ]] || {
-  printf 'invalid release version: %s\n' "$version" >&2
-  exit 1
-}
 # The payload is Bun-target JavaScript (plus wasm) with no native modules, so
 # one archive serves every Linux architecture Bun runs on; "any" is the only
 # architecture token (proved on aarch64 under emulation, ghost#52).
@@ -116,8 +112,4 @@ find "$runtime_root" -exec touch -h -d "@$epoch" {} +
 
 archive="$output_dir/$name.tar.zst"
 bash "$source_root/packaging/release/pack-runtime-source.sh" "$runtime_root" "$archive"
-(
-  cd "$output_dir"
-  sha256sum "$(basename "$archive")" > "$(basename "$archive").sha256"
-)
 printf '%s\n' "$archive"

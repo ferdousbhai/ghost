@@ -4,10 +4,6 @@ dist/
 *.log
 .env
 .env.*
-.dev.vars
-.dev.vars.*
-!.env.example
-!.dev.vars.example
 
 # Machine-local Quickshell per-run symlink (points into /run/user VFS)
 packages/shell/qml/.qmlls.ini

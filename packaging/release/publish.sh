@@ -49,10 +49,8 @@ fi
 # The version lives in several manifests; a release starts by making them agree.
 current="$(bash "$script_root/verify-release-version.sh" "$source_root")"
 if [[ "$current" != "$version" ]]; then
-  [[ "$version" =~ ^[0-9]+[.][0-9]+[.][0-9]+$ ]] || {
-    printf 'not a release version: %s\n' "$version" >&2
-    exit 1
-  }
+  # Refused before any manifest is touched, so a typo leaves a clean tree.
+  bash "$script_root/verify-release-version.sh" --valid "$version"
   mapfile -t manifests < <(bash "$script_root/verify-release-version.sh" --manifests)
   for manifest in "${manifests[@]}"; do
     sed -i "s/\"version\": \"$current\"/\"version\": \"$version\"/" "$manifest"
@@ -130,7 +128,6 @@ gh release create "$tag" \
   -- \
   "$out/ghost-$version.tar.gz" \
   "$out/ghost-runtime-$version-linux-any.tar.zst" \
-  "$out/ghost-runtime-$version-linux-any.tar.zst.sha256" \
   "$out/SHA256SUMS"
 
 printf '\npublished https://github.com/%s/releases/tag/%s\n' "$repository" "$tag"

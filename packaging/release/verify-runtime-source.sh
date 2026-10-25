@@ -161,7 +161,6 @@ require_identical "$temporary/MANIFEST.expected" "$manifest" \
 ) > "$temporary/PAYLOAD.expected"
 require_identical "$temporary/PAYLOAD.expected" "$runtime_root/PAYLOAD.SHA256" \
   'runtime payload hashes or file closure do not match'
-(cd "$runtime_root" && sha256sum -c PAYLOAD.SHA256)
 
 bun "$source_root/packages/daemon/scripts/verify-runtime-licenses.ts" "$runtime_root"
 bash "$source_root/packaging/release/smoke-binary-runtime.sh" \

@@ -67,8 +67,9 @@ do not exist yet), creates the annotated tag, and publishes the GitHub
 release carrying:
 
 - `ghost-<version>.tar.gz`;
-- `ghost-runtime-<version>-linux-any.tar.zst` and its `.sha256`;
-- `SHA256SUMS`.
+- `ghost-runtime-<version>-linux-any.tar.zst`;
+- `SHA256SUMS`, for checking a download by hand (Omarchy's sync uses
+  GitHub's own asset digests).
 
 Users install the `ghost` package from Omarchy's repository. The
 Install → AI → Ghost entry contributed to Omarchy is
