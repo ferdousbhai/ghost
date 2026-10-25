@@ -137,21 +137,20 @@ TestCase {
         verify(Ghostd.working);
     }
 
-    // A turn's own tool events clear `activity` between every lifecycle step,
-    // which is what used to make the copy flicker. The call itself is the
-    // steady thing, so it holds the line for the whole of its run.
+    // The running call is the steady thing: it names the line whether the
+    // turn's `activity` holds the raw tool name or has been cleared, so the
+    // copy does not flicker between them.
     function test_theLineHoldsAcrossOneCallsLifecycle(): void {
         const line = createTemporaryObject(lineComponent, tc);
         verify(line !== null);
         Ghostd.streaming = true;
-        const args = { path: "notes.md" };
 
         Ghostd.toolActivities = [tool("write", "running", ({}))];
         compare(line.phrase, "Writing a file");
-        Ghostd.toolActivities = [tool("write", "running", args)];
-        Ghostd.activity = "";
+        Ghostd.toolActivities = [tool("write", "running", { path: "notes.md" })];
+        Ghostd.activity = "write";
         compare(line.phrase, "Writing notes.md");
-        Ghostd.toolActivities = [tool("write", "running", args)];
+        Ghostd.activity = "";
         compare(line.phrase, "Writing notes.md");
     }
 

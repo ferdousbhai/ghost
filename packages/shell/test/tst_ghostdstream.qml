@@ -244,9 +244,10 @@ TestCase {
         compare(turn.state.activity, "limit reached");
         Ghostd.handleTurnEvent(turn.state, { type: "error", errorMessage: "the provider ended the turn." });
         compare(turn.state.lastError, "claude usage limit reached");
-        // The next turn starts without the stale notice.
-        const next = openTurn("after-limit", null);
-        compare(next.state.limitNotice, "");
+        verify(turn.state.limitNotice !== "");
+        // The conversation's next turn starts without the stale notice.
+        Ghostd.beginTurnFor(turn.state);
+        compare(turn.state.limitNotice, "");
     }
 
     function test_watchdogSettlesAndRetiresThePartialStream(): void {
