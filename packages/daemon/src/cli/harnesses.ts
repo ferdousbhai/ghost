@@ -24,8 +24,8 @@ export async function harnessesCommand(_parsed: ParsedCliArgs, ctx: CliContext):
   emit(ctx, report, (body) => {
     const rows = body.harnesses.map((harness) => [harness.id, windows(harness)]);
     const human = rows.length === 0
-      ? "No agent CLI Omarchy knows is installed.\n"
-      : `${table(rows)}\nrefresh: ${body.refresh}\n`;
+      ? "No agent CLI is installed.\n"
+      : `${table(rows)}\n${body.refresh ? `refresh: ${body.refresh}\n` : ""}`;
     const quiet = body.harnesses.map((harness) => `${harness.id}\n`).join("");
     return { human, quiet };
   });

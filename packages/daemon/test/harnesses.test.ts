@@ -43,6 +43,8 @@ describe("readHarnessReport", () => {
       writeFileSync(join(bin, "claude"), "#!/bin/sh\n", { mode: 0o755 });
       const report = await readHarnessReport({ PATH: bin }, root);
       expect(report.harnesses.map((harness) => harness.id)).toEqual(["claude"]);
+      // There is no Omarchy command to refresh usage with.
+      expect(report.refresh).toBeNull();
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -508,8 +508,9 @@ status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary. The configured owner has full access; admitted guests are read-only,
-are shown no filesystem path, and are refused the routes marked owner-only,
-which show file paths, hook commands, or MCP credentials.
+are refused the routes marked owner-only, which show file paths, hook
+commands, or MCP credentials, and see no path in the ghost list or board;
+conversations, tool calls included, are shown to them as recorded.
 Remote access never broadens a ghost's local tool authority.
 
 Route parsing, validation, status codes, and reverse states are executable in
@@ -611,7 +612,8 @@ regardless of usage.
 A record's `ready` only says Omarchy has data to show, so it
 decides nothing. A window whose reset has
 passed is dropped. `stale` marks a record older than 15 minutes; the verb never
-refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
+refreshes one, and `refresh` is the Omarchy command that does (null without
+Omarchy). `-q` prints the
 eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
 `-g`, then `$GHOST`, then the `ghost use` default, then the sole ghost, and
 `-s`, then

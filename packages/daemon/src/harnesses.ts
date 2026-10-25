@@ -34,7 +34,8 @@ export interface Harness {
 
 export interface HarnessReport {
   harnesses: Harness[];
-  refresh: string;
+  /** The Omarchy command that refreshes usage records; null without Omarchy. */
+  refresh: string | null;
 }
 
 /**
@@ -158,14 +159,15 @@ export async function readHarnessReport(
   home: string,
 ): Promise<HarnessReport> {
   const directory = omarchyUsageDirectory(env, home);
-  const ids = which("omarchy", env) === null
+  const omarchy = which("omarchy", env) !== null;
+  const ids = !omarchy
     ? SUPPORTED_HARNESSES
     : parseOmarchyAgents((await exec("omarchy", ["commands", "--json"], { env, maxBuffer: 16 * 1024 * 1024 })).stdout);
   const installed = await Promise.all(ids.map((id) => isInstalled(id, env)));
   const harnesses = ids
     .filter((_, index) => installed[index])
     .map((id) => assessHarness(id, readRecord(directory, id), Date.now()));
-  return { harnesses, refresh: REFRESH_COMMAND };
+  return { harnesses, refresh: omarchy ? REFRESH_COMMAND : null };
 }
 
 /**
