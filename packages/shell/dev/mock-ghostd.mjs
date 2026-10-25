@@ -326,18 +326,10 @@ function ghostSessions(name) {
   return sessionStore.get(name);
 }
 
+/** The route has already refused a non-numeric `limit` or `offset`. */
 const transcriptOf = (s, params) => {
-  const limitValue = params?.get("limit");
-  const offsetValue = params?.get("offset");
-  const requestedLimit = limitValue === null || limitValue === undefined
-    ? undefined : Number(limitValue);
-  const requestedOffset = offsetValue === null || offsetValue === undefined
-    ? undefined : Number(offsetValue);
-  const limit = requestedLimit === undefined ? 1000
-    : Math.max(1, Math.min(2000, Math.floor(requestedLimit)));
-  const offset = Math.min(s.messages.length,
-    requestedOffset === undefined || requestedOffset < 0
-      ? 0 : Math.floor(requestedOffset));
+  const limit = params.has("limit") ? Math.max(1, Math.min(2000, Math.floor(Number(params.get("limit"))))) : 1000;
+  const offset = Math.min(s.messages.length, Math.max(0, Math.floor(Number(params.get("offset") ?? 0))));
   const messages = s.messages.slice(offset, offset + limit);
   return {
     id: s.id,
@@ -521,8 +513,7 @@ function* ownerCommand(command) {
 
 /**
  * A scripted pass: the ghost narrating itself, one tool call — two for an
- * ONBOARDING ghost — then a two-paragraph answer. Follow-ups queued while
- * it runs are drained by `pump` before the terminal event.
+ * ONBOARDING ghost — then a two-paragraph answer.
  */
 function* script(name, prompt) {
   let contentIndex = 0;
@@ -645,20 +636,20 @@ async function streamTurn(res, name, body) {
   // Like ghostd, a turn creates its conversation and logs its prompt as it
   // starts (an owner command logs when it ends), so another client sees what
   // is running.
+  // The route has already refused an invalid conversation id.
   const store = ghostSessions(name);
   let existing = store.get(sessionId);
-  if (!existing && validConversationId(sessionId)) {
-    const now = new Date().toISOString();
-    existing = { id: sessionId, title: null, updatedAt: now, messages: [] };
+  if (!existing) {
+    existing = { id: sessionId, title: null, updatedAt: new Date().toISOString(), messages: [] };
     store.set(sessionId, existing);
   }
-  if (existing && !prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
-  if (existing) publishConversationUpdated(name, sessionId);
+  if (!prompt.startsWith("!")) append(existing, { role: "user", content: textParts(prompt) });
+  publishConversationUpdated(name, sessionId);
   const failing = flag("--fail") && !flag("--omit-terminal");
   // Each pass's reply is logged as it ends, as ghostd does: a stopped one as
   // "Turn aborted.", a --fail one with its error.
   const logReply = (reply) => {
-    if (existing) append(existing, reply === null
+    append(existing, reply === null
     ? { role: "assistant", content: [], errorMessage: "Turn aborted." }
     : { role: "assistant", content: textParts(reply), ...(failing ? { errorMessage: "mock-ghostd --fail" } : {}) });
     if (reply !== null && !failing) reportResources();
@@ -670,7 +661,7 @@ async function streamTurn(res, name, body) {
       supplied: { instructions: ["Ghost character and policy"], mcpServers: ["ghost"] },
       summary: `Last successful run: ${harness}\n\nSupplied by Ghost\nInstructions: Ghost character and policy\nMCP toolsets: ghost\n\nReported by harness\nSkills: calendar, mail\nExtensions/plugins: review\nConnected MCP servers: ghost` };
     send(log, { type: "resources", ...snapshot });
-    if (existing) existing.resources = snapshot;
+    existing.resources = snapshot;
   };
   let stopped = false;
   try {
@@ -679,12 +670,10 @@ async function streamTurn(res, name, body) {
       const ran = await pump(log, ownerCommand(command)) !== null;
       // ghostd logs the command as it ends; the transcript shows the owner's
       // `!command`, then its output as the ghost's message.
-      if (existing) {
-        append(existing, { role: "user", content: textParts(prompt) });
-        append(existing, { role: "assistant", content: textParts(ran
-          ? `\`\`\`\nmock output of ${command}\n\`\`\``
-          : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
-      }
+      append(existing, { role: "user", content: textParts(prompt) });
+      append(existing, { role: "assistant", content: textParts(ran
+        ? `\`\`\`\nmock output of ${command}\n\`\`\``
+        : `\`\`\`\n\n\`\`\`\n\n(exit signal)`) });
     } else {
       let reply = await pump(log, script(name, prompt));
       logReply(reply);
@@ -701,7 +690,7 @@ async function streamTurn(res, name, body) {
         if (log.stopped) break;
         if (turn.followUp.length === 0) break;
         const text = turn.followUp.shift();
-        if (existing) append(existing, { role: "user", content: textParts(text) });
+        append(existing, { role: "user", content: textParts(text) });
         publishConversationUpdated(name, sessionId);
         send(log, { type: "queue", followUp: turn.followUp });
         send(log, { type: "owner_message", text });
@@ -727,7 +716,7 @@ async function streamTurn(res, name, body) {
     turn.streaming = false;
     activeTurns.delete(key);
     // Every end announces, as ghostd's does: stopped, failed, or done.
-    if (existing) publishConversationUpdated(name, sessionId);
+    publishConversationUpdated(name, sessionId);
   }
   recordTurn(name, sessionId, prompt);
 }
