@@ -81,15 +81,14 @@ Item {
         root.notice = "Changed on disk while you were editing.";
     }
 
-    /** Write the buffer; true when a write was started. Nothing is written
-        when nothing changed or a conflict has not been settled yet. */
-    function save(): bool {
-        if (!root.readable || !root.dirty || root.conflictText !== null) return false;
+    /** Write the buffer. Nothing is written when nothing changed or a
+        conflict has not been settled yet. */
+    function save(): void {
+        if (!root.readable || !root.dirty || root.conflictText !== null) return;
         autosave.stop();
         root.preWriteDisk = root.diskText;
         root.diskText = editor.buffer;
         file.setText(editor.buffer);
-        return true;
     }
 
     /** Save now and wait for it — for closing, hiding, and rebinding, where

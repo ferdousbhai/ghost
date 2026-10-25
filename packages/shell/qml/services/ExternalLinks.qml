@@ -7,15 +7,14 @@ import "ExternalLinkPolicy.js" as Policy
 Singleton {
     id: root
 
-    function openModelUrl(url: string): bool {
+    function openModelUrl(url: string): void {
         if (!Policy.isModelUrl(url)) {
             console.warn("ghost shell rejected an unsafe model-authored URL");
-            return false;
+            return;
         }
         // Allowed URLs begin with a scheme, so none can be parsed as an option
         // by xdg-open (which does not portably support a `--` separator).
         Quickshell.execDetached(["xdg-open", url]);
-        return true;
     }
 
     /**
@@ -23,12 +22,11 @@ Singleton {
      * desktop has registered for it. Used by Workbench's editor fallback and
      * for a prompt's attached image; model-authored strings never reach here.
      */
-    function openPath(path: string): bool {
+    function openPath(path: string): void {
         if (!Policy.isLocalPath(path)) {
             console.warn("ghost shell rejected an unopenable local path");
-            return false;
+            return;
         }
         Quickshell.execDetached(["xdg-open", path]);
-        return true;
     }
 }

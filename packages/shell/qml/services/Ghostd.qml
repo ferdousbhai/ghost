@@ -1080,7 +1080,6 @@ Singleton {
             sessionId: sessionId,
             title: "",
             rows: [],
-            hydratedRowCount: 0,
             streaming: false,
             // ghostd runs this conversation's turn for another client, or for
             // this HUD before a reload: shown as running, with no stream here.
@@ -1584,10 +1583,8 @@ Singleton {
             return false;
         const state = root.turnStates[root.conversationKey(root.activeGhost, id)];
         if (!state) return true;
-        return !state.transcriptLoad && !(state.hydratedRowCount > 0)
-            && !(Array.isArray(state.rows) && state.rows.some(function (row) {
-                return row && row.role === "user" && typeof row.text === "string" && row.text !== "";
-            }));
+        // Every row a conversation gets, hydrated or sent, follows owner text.
+        return !state.transcriptLoad && state.rows.length === 0;
     }
 
     /**
@@ -1975,7 +1972,6 @@ Singleton {
         state.activity = "";
         state.limitNotice = "";
         const rows = TurnBlocks.rows(messages);
-        state.hydratedRowCount = rows.length;
         const hydrated = [];
         for (const row of rows) {
             hydrated.push({

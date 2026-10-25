@@ -221,7 +221,6 @@ try {
     await new Promise((resolveWait) => setTimeout(resolveWait, 20));
   }
 
-  // Removed routes stay removed.
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
   await new Promise((resolveExit) => {
