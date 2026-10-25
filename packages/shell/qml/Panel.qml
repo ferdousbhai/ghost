@@ -7,11 +7,12 @@
 // the host's contract and the HUD's own.
 import QtQuick
 import "services"
+import "services/Plugin.js" as Plugin
 
 Item {
     id: root
 
-    readonly property string selfId: "ferdousbhai.ghost"
+    readonly property string selfId: Plugin.ID
 
     /**
      * The host's `toggle` hides the panel when this is true and summons it

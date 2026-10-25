@@ -7,11 +7,12 @@
 import QtQuick
 import Quickshell.Io
 import "services"
+import "services/Plugin.js" as Plugin
 
 Item {
     id: root
 
-    readonly property string selfId: "ferdousbhai.ghost"
+    readonly property string selfId: Plugin.ID
 
     /** Injected by the host; used to summon and hide this plugin's own panel. */
     property var shell: null

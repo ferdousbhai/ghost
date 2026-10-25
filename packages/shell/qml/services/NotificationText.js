@@ -1,3 +1,5 @@
+.import "Plugin.js" as Plugin
+
 // A notification shows plain text, so markdown keeps its words and loses its
 // syntax: emphasis, code marks, headings, list and quote markers, and links.
 function plain(text) {
@@ -18,7 +20,7 @@ function excerpt(text, limit) {
 
 function command(ghost, sessionId, title, body, urgency, replaceId) {
     const payload = JSON.stringify({ ghost: ghost, sessionId: sessionId, section: "chat" });
-    const action = ["omarchy-shell", "shell", "summon", "ferdousbhai.ghost", payload];
+    const action = ["omarchy-shell", "shell", "summon", Plugin.ID, payload];
     return [
         "notify-send",
         "--app-name=ghost",

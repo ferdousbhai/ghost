@@ -15,6 +15,7 @@
 // not by a separate indicator.
 import QtQuick
 import "services"
+import "services/Plugin.js" as Plugin
 import "components"
 
 Item {
@@ -28,7 +29,7 @@ Item {
      */
     property var bar: null
 
-    readonly property string selfId: "ferdousbhai.ghost"
+    readonly property string selfId: Plugin.ID
 
     function triggerPress(button: int): void {
         if (button !== Qt.LeftButton || !root.bar) return;
