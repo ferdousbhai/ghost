@@ -1,6 +1,4 @@
 import { parseExternalEvent } from "./external-events.js";
-import type { SharedResult } from "./results.js";
-import { pipeline } from "node:stream/promises";
 import { TurnBuffer } from "./turn-buffer.js";
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
@@ -691,10 +689,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     return handle(context);
   };
 
-  const resultBody = (ghost: string, session: string, result: SharedResult) => ({
-    ...result, downloadUrl: `/api/ghosts/${encodeURIComponent(ghost)}/sessions/${encodeURIComponent(session)}/results/${result.id}`,
-  });
-
   const routes: Route<RequestContext>[] = [
     route("GET", "", ({ response }) => {
       response.writeHead(200, {
@@ -843,28 +837,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     route("POST", "api/ghosts/:ghost/sessions/:id/attachments", handleSaveAttachment),
     route("GET", "api/ghosts/:ghost/sessions/:id/attachments/:file", handleReadAttachment),
     route("GET", "api/ghosts/:ghost/sessions/:id/stream", handleTurnStream),
-    route("GET", "api/ghosts/:ghost/sessions/:id/results", ownerOnly(async ({ ghost, id, response }) => {
-      jsonResponse(response, 200, { results: (await options.host.results(ghost, id)).map(result => resultBody(ghost, id, result)) });
-    })),
-    route("POST", "api/ghosts/:ghost/sessions/:id/results", ownerOnly(async ({ ghost, id, body, response, admission }) => {
-      if (admission.identity) throw new GhostError("machine_local_only", "Select result sources through the machine-local CLI.", 403);
-      jsonResponse(response, 201, resultBody(ghost, id, await options.host.publishResult(ghost, id, stringField(await body(), "path"))));
-    })),
-    route("DELETE", "api/ghosts/:ghost/sessions/:id/results/:result", ownerOnly(async ({ ghost, id, params, response }) => {
-      await options.host.revokeResult(ghost, id, decodePathSegment(params.result ?? ""));
-      jsonResponse(response, 200, { ok: true });
-    })),
-    route("GET", "api/ghosts/:ghost/sessions/:id/results/:result", ownerOnly(async ({ ghost, id, params, response }) => {
-      await options.host.withResult(ghost, id, decodePathSegment(params.result ?? ""), async ({ file, result }) => {
-        response.writeHead(200, {
-          "content-type": "application/octet-stream", "content-length": result.bytes,
-          "content-disposition": `attachment; filename="download"; filename*=UTF-8''${encodeURIComponent(result.name).replace(/['()*]/gu, char => `%${char.charCodeAt(0).toString(16)}`)}`,
-          "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "sandbox",
-        });
-        if (!result.bytes) response.end();
-        else await pipeline(file.createReadStream({ end: result.bytes - 1 }), response);
-      });
-    })),
     route("GET", "api/ghosts/:ghost/sessions/:id/transcript", async ({ ghost, id, url, response }) => {
       const readThrough = new Date().toISOString();
       jsonResponse(response, 200, { ...await options.host.readTranscript(ghost, id, { limit: numberParam(url, "limit"), offset: numberParam(url, "offset") }), readThrough });

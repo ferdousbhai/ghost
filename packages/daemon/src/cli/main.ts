@@ -28,7 +28,6 @@ import { harnessesCommand } from "./harnesses.js";
 import { HELP_TOPICS, isHelpTopic, renderHelpTopic } from "../help-topics.js";
 import { ghostCliPath, resolveScheduleUnitDirectory } from "../schedules.js";
 import { preferredGhostName } from "./common.js";
-import { resultsCommand } from "./results.js";
 import { hooksCommand } from "./hooks.js";
 import { mcpCommand } from "./mcp.js";
 import { sayCommand } from "./say.js";
@@ -222,15 +221,6 @@ export const COMMANDS: readonly Command[] = [
     positionals: [2, 3],
     flags: { value: ["instructions"] },
     run: eventCommand,
-  },
-  {
-    verb: "results",
-    usage: "results [list|add <path>|get <id> <destination> [--replace]|remove <id>] [-g <name>] [-s <id>] [--json] [-q]",
-    summary: "Share, download, or revoke selected conversation results.",
-    example: "ghost results add ~/Documents/report.pdf",
-    positionals: [0, 3],
-    flags: { boolean: ["replace"] },
-    run: resultsCommand,
   },
   {
     verb: "remote",

@@ -461,8 +461,6 @@ Singleton {
         root.retire(root, "routinesRequest");
         root.retire(root, "routineActionRequest");
         root.retire(root, "routineReadRequest");
-        root.retire(root, "resultsRequest");
-        root.retire(root, "resultWriteRequest");
     }
     onActiveGhostChanged: root.connectConversationEvents(root.activeGhost)
 
@@ -631,65 +629,6 @@ Singleton {
             root.routineWriteError = ok ? "" : root.describeError(xhr, "Change routine");
             root.routineMutationFinished(ok);
         });
-    }
-
-
-    property var sharedResults: []
-    property string resultsError: ""
-    property string resultsStatus: ""
-    property var resultsRequest: null
-    property var resultWriteRequest: null
-    readonly property bool resultsBusy: resultsRequest !== null || resultWriteRequest !== null || resultDownload.running
-
-    function resultRoot(ghost: string, session: string): string {
-        return "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/" + encodeURIComponent(session) + "/results";
-    }
-    function refreshResults(): void {
-        if (root.resultsRequest || root.activeGhost === "" || root.currentSessionId === "") return;
-        const ghost = root.activeGhost, session = root.currentSessionId;
-        root.request(root, "resultsRequest", "GET", root.resultRoot(ghost, session), null, function (xhr, body) {
-            // A switch while this was in flight skipped its own read; take it now.
-            if (root.activeGhost !== ghost || root.currentSessionId !== session) { root.refreshResults(); return; }
-            if (xhr.status === 200 && body && Array.isArray(body.results)) { root.sharedResults = body.results; root.resultsError = ""; }
-            else { root.sharedResults = []; root.resultsError = root.describeError(xhr, "Read shared results"); }
-        });
-    }
-    function changeResult(method: string, suffix: string, payload: var): void {
-        if (root.resultWriteRequest || root.activeGhost === "" || root.currentSessionId === "") return;
-        const ghost = root.activeGhost, session = root.currentSessionId;
-        root.request(root, "resultWriteRequest", method, root.resultRoot(ghost, session) + suffix, payload, function (xhr, body) {
-            if (root.activeGhost !== ghost || root.currentSessionId !== session) return;
-            if (xhr.status === 200 || xhr.status === 201) {
-                root.resultsError = ""; root.resultsStatus = method === "DELETE" ? "Moved to Trash; download revoked." : "File shared."; root.refreshResults();
-            } else root.resultsError = root.describeError(xhr, "Change shared result");
-        });
-    }
-    function downloadResult(id: string, destination: string, ghost: string, session: string): void {
-        if (root.resultsBusy || destination === "") return;
-        root.resultsError = ""; root.resultsStatus = "Saving file…";
-        // The save dialog already confirmed any overwrite; --replace trashes the old file.
-        resultDownload.command = ["ghost", "results", "get", id, destination, "--replace", "--ghost", ghost, "--session", session];
-        resultDownload.ghost = ghost; resultDownload.session = session;
-        resultDownload.errorText = ""; resultDownload.didStart = false;
-        resultDownload.running = true;
-    }
-    Process {
-        id: resultDownload
-        property string ghost: ""
-        property string session: ""
-        readonly property bool current: ghost === root.activeGhost && session === root.currentSessionId
-        property string errorText: ""
-        property bool didStart: false
-        stderr: SplitParser { onRead: data => resultDownload.errorText += data }
-        onStarted: resultDownload.didStart = true
-        onRunningChanged: {
-            if (!running && !didStart && current) { root.resultsStatus = ""; root.resultsError = "Could not start ghost to save the file."; }
-        }
-        onExited: (exitCode, exitStatus) => {
-            if (!resultDownload.current) return;
-            root.resultsStatus = exitCode === 0 ? "File saved." : "";
-            root.resultsError = exitCode === 0 ? "" : resultDownload.errorText.trim() || "Could not save the result.";
-        }
     }
 
     // The owner's board: Documents/board.md, parsed by the daemon and shown

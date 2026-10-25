@@ -6,7 +6,6 @@
  * no model, agent loop, or credentials; it owns the persona, the log, the
  * owner's hooks, the choice of harness, and the ghost's lifecycle.
  */
-import { listResults, publishResult, openResult, revokeResult } from "./results.js";
 import { eventConversationId, eventPrompt, type ExternalEvent } from "./external-events.js";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
@@ -1179,24 +1178,6 @@ export class SessionHost {
     };
   }
 
-  private resultOperation<T>(ghost: string, id: string, action: (dir: string) => Promise<T>): Promise<T> {
-    return this.withGhost(ghost, async () => {
-      const home = this.registry.get(ghost);
-      const conversation = await this.requireConversation(home, id);
-      if (this.reservedSessions.has(keyOf(ghost, conversation))) throw new GhostError("session_busy", "Wait for the conversation's file operation to finish.", 409);
-      return serializeByKey(this.metadataWrites, `results:${keyOf(ghost, conversation)}`, () => action(conversationDir(ghostPaths(home.dir).sessionDir, conversation)));
-    });
-  }
-  results(ghost: string, id: string) { return this.resultOperation(ghost, id, dir => listResults(dir)); }
-  publishResult(ghost: string, id: string, path: string) { return this.resultOperation(ghost, id, dir => publishResult(dir, path)); }
-  async withResult<T>(ghost: string, id: string, result: string, consume: (opened: Awaited<ReturnType<typeof openResult>>) => Promise<T>): Promise<T> {
-    // Only the open holds the lease and lock: the handle outlives a revoke or a home move,
-    // so a slow download blocks no other result operation, rename, or delete.
-    const opened = await this.resultOperation(ghost, id, dir => openResult(dir, result));
-    try { return await consume(opened); } finally { await opened.file.close(); }
-  }
-  revokeResult(ghost: string, id: string, result: string) { return this.resultOperation(ghost, id, dir => revokeResult(dir, result, this.trashEnv())); }
-
   private routineOperation<T>(ghost: string, action: (options: { unitDir: string; run?: CommandRunner; verify?: CommandRunner }) => Promise<T>): Promise<T> {
     return this.withGhost(ghost, () => serializeByKey(this.routineChanges, ghost, async () => {
       this.registry.get(ghost);
@@ -1234,7 +1215,7 @@ export class SessionHost {
       this.reservedSessions.add(key);
       try {
         const { sessionDir } = ghostPaths(ghost.dir);
-        await serializeByKey(this.metadataWrites, `results:${key}`, () => trashPath(conversationDir(sessionDir, id), this.trashEnv()));
+        await trashPath(conversationDir(sessionDir, id), this.trashEnv());
         await serializeByKey(this.metadataWrites, pinsPath(sessionDir), async () => {
           const pins = await readPins(sessionDir);
           if (pins.includes(id)) await writePins(sessionDir, pins.filter((pin) => pin !== id));

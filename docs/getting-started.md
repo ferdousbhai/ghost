@@ -212,7 +212,7 @@ up, it stays put and shows **↓ Jump to latest message**; its scrollbar
 appears only while it moves or under the pointer.
 
 The rail on the right switches sections: **Chat**, **Board**, **Routines**,
-**Shared results**, **Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
+**Character**, **Hooks**, **MCP**, and **Remote access**. Clicking the ghost
 mark in the Omarchy bar toggles the HUD.
 
 ## 7. The same ghost from the terminal

@@ -417,8 +417,6 @@ FloatingWindow {
                     onCloseRequested: hud.showSection("chat")
                 }
 
-                Results {}
-
                 // Character replaces chat rather than nesting its roster/conversation
                 // sidebar inside its own surface. The persona edits through the
                 // daemon's validating writer rather than the workbench's direct

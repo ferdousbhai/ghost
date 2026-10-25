@@ -4,10 +4,10 @@ Enable the existing Tailscale viewer with `ghost remote on`; open the URL from
 `ghost remote status` on a phone signed into the tailnet. The host must remain
 awake, logged in, and connected. A missing host cannot run work or deliver alerts.
 
-The conversation tools menu contains resources, routines, and shared results.
+The conversation tools menu contains resources and routines.
 Owners can edit, pause/resume, run, remove, and recover routines. Guests retain
-read-only conversation access and cannot access routine controls, shared files,
-or machine-local tool routes. See `CONTRACTS.md` for the wire contract.
+read-only conversation access and cannot access routine controls or
+machine-local tool routes. See `CONTRACTS.md` for the wire contract.
 
 ## Completion alerts
 
@@ -28,22 +28,6 @@ The viewer marks a reply read only after displaying its transcript while visible
 and focused. Opening an unrelated conversation does not acknowledge it. Missing
 linked conversations produce an error, preserving the requested URL. Network
 failures remain visible and work is not silently resubmitted to another host.
-
-## Finished files
-
-From the HUD Shared results pane, or locally:
-
-```sh
-ghost results add /absolute/path/to/report.pdf --ghost casper --session <id>
-ghost results list --ghost casper --session <id>
-```
-
-Open Shared results on the phone to download the selected copies. The source
-file stays private to the local machine; copying does not expose its directory.
-Remove a copy to revoke future downloads and move it to Trash. Restoring that
-snapshot directory through native Trash restores its link. A download already
-received cannot be recalled. The CLI also supports `get <id> <destination>` and
-`remove <id>` with the same ghost/session selectors.
 
 ## Remote desktop is separate
 

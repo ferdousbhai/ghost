@@ -100,7 +100,7 @@ that has already exited and the preview keeps running.
   layout like any app. The HUD uses a neutral reading canvas with the current
   Omarchy accent and semantic status colours. Roster on the left (`casper`,
   `moaning-myrtle`, `+ new ghost`), transcript in the middle, composer at the
-  bottom, and the Chat / Board / Routines / Shared results / Character / Hooks / MCP / Remote access
+  bottom, and the Chat / Board / Routines / Character / Hooks / MCP / Remote access
   rail floating at the right edge. `SUPER+CTRL+G` is
   launch-or-focus: reveal+focus when hidden/unfocused, hide only when already
   focused. Character edits `character.md`. Hooks shows the

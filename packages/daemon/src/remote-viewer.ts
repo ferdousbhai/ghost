@@ -57,7 +57,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   .tools summary { cursor: pointer; font-size: 1.5rem; list-style: none; padding: 0 .3rem; }
   .tools > div { position: absolute; top: 100%; left: 0; z-index: 2; padding: .5rem; background: var(--deep); border: 1px solid var(--line); border-radius: .5rem; }
   .tools button { display: block; padding: .5rem; white-space: nowrap; }
-  #result-panel a, #result-panel button { display: inline-block; padding: .45rem; color: var(--amber); }
   header {
     background: var(--deep); border-bottom: 1px solid var(--line);
     padding: calc(env(safe-area-inset-top) + .5rem) max(.9rem, env(safe-area-inset-right)) .5rem max(.9rem, env(safe-area-inset-left));
@@ -154,14 +153,13 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
 </style>
 <header>
   ${GLYPH}
-  <details class="tools"><summary aria-label="Conversation tools">⋯</summary><div><button id="resources" type="button">Resources</button><button id="routines" type="button" hidden>Routines</button><button id="results" type="button" hidden>Shared results</button></div></details>
+  <details class="tools"><summary aria-label="Conversation tools">⋯</summary><div><button id="resources" type="button">Resources</button><button id="routines" type="button" hidden>Routines</button></div></details>
   <div class="pick"><select id="session" aria-label="Conversation"></select></div>
   <div class="pick"><select id="ghost" aria-label="Ghost"></select></div>
 </header>
 <dialog id="resource-panel"><button id="resource-close" type="button">Close</button><pre id="resource-text"></pre></dialog>
 <dialog id="routine-editor"><h2 id="routine-editor-title"></h2><p id="routine-editor-error" role="status"></p><label>Timer unit<textarea id="routine-timer" rows="9"></textarea></label><label>Service unit<textarea id="routine-service" rows="9"></textarea></label><button id="routine-save" type="button">Save and reload</button> <button id="routine-discard" type="button">Discard draft</button></dialog>
 <dialog id="routine-panel"><button id="routine-close" type="button">Close</button> <button id="routine-refresh" type="button">Refresh</button><h2>Routines</h2><p>Pause stops future triggers; running work continues. Resume may catch up.</p><div id="routine-list" role="status"></div></dialog>
-<dialog id="result-panel"><button id="result-close" type="button">Close</button> <button id="result-refresh" type="button">Refresh</button><h2>Shared results</h2><p>Ask your ghost to share a finished file here. Removing a file revokes its download and keeps it in Trash.</p><div id="result-list" role="status"></div></dialog>
 <main id="log"></main>
 <div id="status" role="status"></div>
 <form id="composer" hidden>
@@ -387,39 +385,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("routine-close").onclick = () => $("routine-panel").close();
   $("routine-panel").onclose = () => { ++routineGeneration; };
 
-  let resultGeneration = 0;
-  async function showResults() {
-    if (!owner || !ghost || !session || session === draft) return;
-    const generation = ++resultGeneration, targetGhost = ghost, targetSession = session;
-    const panel = $("result-panel"), list = $("result-list");
-    if (!panel.open) panel.showModal();
-    list.textContent = "Reading shared results…";
-    try {
-      const body = await api("/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/results");
-      if (generation !== resultGeneration || ghost !== targetGhost || session !== targetSession) return;
-      list.textContent = body.results.length ? "" : "No files shared in this conversation yet.";
-      for (const result of body.results) {
-        const row = document.createElement("p"), link = document.createElement("a"), remove = document.createElement("button");
-        link.textContent = result.name + " (" + result.bytes + " bytes)";
-        link.href = "/api/ghosts/" + seg(targetGhost) + "/sessions/" + seg(targetSession) + "/results/" + seg(result.id);
-        link.download = result.name;
-        remove.type = "button"; remove.textContent = "Remove";
-        remove.onclick = async () => {
-          remove.disabled = true;
-          try {
-            await api(link.getAttribute("href").slice(4), { method: "DELETE" });
-            if (generation === resultGeneration && ghost === targetGhost && session === targetSession) await showResults();
-          } catch (error) { row.append(String(error.message)); remove.disabled = false; }
-        };
-        row.append(link, remove); list.append(row);
-      }
-    } catch (error) { if (generation === resultGeneration) list.textContent = error.message; }
-  }
-  $("results").onclick = showResults;
-  $("result-refresh").onclick = showResults;
-  $("result-close").onclick = () => $("result-panel").close();
-  $("result-panel").onclose = () => { ++resultGeneration; };
-
   let resourceGeneration = 0;
   async function showResources() {
     const generation = ++resourceGeneration, targetGhost = ghost, targetSession = session;
@@ -628,8 +593,8 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
   $("resource-close").onclick = () => $("resource-panel").close();
   $("resource-panel").onclose = () => { resourceGeneration++; };
   $("file").onchange = () => { for (const f of $("file").files) attach(f); $("file").value = ""; };
-  $("ghost").onchange = () => { requestedSession = null; readThrough = null; $("result-panel").close(); ++resultGeneration; $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
-  $("session").onchange = () => { requestedSession = null; readThrough = null; $("result-panel").close(); ++resultGeneration; $("resource-panel").close(); session = $("session").value; clearTray(); loadSessions().catch(show); };
+  $("ghost").onchange = () => { requestedSession = null; readThrough = null; $("resource-panel").close(); $("routine-panel").close(); ++routineGeneration; ghost = $("ghost").value; session = draft = null; clearTray(); watch(); loadSessions().catch(show); };
+  $("session").onchange = () => { requestedSession = null; readThrough = null; $("resource-panel").close(); session = $("session").value; clearTray(); loadSessions().catch(show); };
   $("new").onclick = () => {
     $("resource-panel").close();
     if (streaming || !ghost) return;
@@ -643,7 +608,6 @@ export const REMOTE_VIEWER_HTML = `<!doctype html>
     owner = who.role !== "guest";
     $("composer").hidden = !owner;
     $("routines").hidden = !owner;
-    $("results").hidden = !owner;
     refresh();
     const ghosts = await api("/ghosts");
     for (const g of ghosts) { const o = document.createElement("option"); o.value = g.name; o.textContent = g.name; $("ghost").append(o); }

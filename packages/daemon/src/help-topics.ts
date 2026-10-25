@@ -160,7 +160,7 @@ function notifications(): string[] {
     "```",
     'Add {"hooks":[{"type":"command","command":"/absolute/path/to/script","timeout":15}]} to the hooks.turn_end array of the current document (`ghost hooks show | jq .document > hooks.json`); preserve existing handlers and apply with `ghost hooks set hooks.json`. Remove that handler to opt out; no restart is needed.',
     "Each final successful or failed turn supplies outcome, title, a 280-character excerpt, and the exact conversation link when Tailscale remote access is enabled. Cancelled turns stay quiet. Delivery is awaited within the hook timeout, fails open, and cannot ask for another pass. See /usr/share/doc/ghost/docs/hooks.md (docs/hooks.md in a checkout) for the wire protocol.",
-    "Open the alert link to inspect the conversation. Share selected files with `ghost results add <path> --ghost <name> --session <id>` or the HUD Shared results pane; the phone owner can download or remove the copies. Removal moves a copy to Trash and revokes its link; native Trash restore undoes it. Guests cannot access shared results. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
+    "Open the alert link to inspect the conversation. Enable remote access with `ghost remote on`; work cannot run while the host is asleep or off.",
   ];
 }
 

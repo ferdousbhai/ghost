@@ -20,7 +20,6 @@ import { createServer } from "node:http";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-const mockResults = new Map();
 const mockRoutines = new Map();
 const mockRoutineConfigs = new Map();
 const mockRoutineRecoveries = new Map();
@@ -1068,28 +1067,6 @@ const mockServer = createServer(async (req, res) => {
     if (harness === null) ghostDefaultHarness.delete(name);
     else ghostDefaultHarness.set(name, harness);
     return json(res, 200, harnessSnapshot(name));
-  }
-  if (parts[3] === "sessions" && parts[5] === "results") {
-    const conversation = routeConversation(parts);
-    if (!conversation) return json(res, 400, { error: { message: "Invalid conversation" } });
-    const key = turnKey(name, conversation);
-    if (!mockResults.has(key)) mockResults.set(key, []);
-    const results = mockResults.get(key);
-    if (parts.length === 6 && req.method === "GET") return json(res, 200, { results });
-    if (parts.length === 6 && req.method === "POST") {
-      const body = await readBody(req).catch(() => ({}));
-      // Never read an owner's source file in a preview: this one canned source
-      // is enough to exercise the controls; daemon tests cover actual copying.
-      if (body.path !== "/mock/result.txt") return json(res, 400, { error: { message: "Preview source: /mock/result.txt" } });
-      const id = randomUUID(), result = { id, name: "result.txt", bytes: 12, createdAt: new Date().toISOString(), downloadUrl: `/api/ghosts/${encodeURIComponent(name)}/sessions/${encodeURIComponent(conversation)}/results/${id}` };
-      results.push(result); return json(res, 201, result);
-    }
-    const index = results.findIndex(row => row.id === parts[6]);
-    if (parts.length === 7 && index >= 0 && req.method === "DELETE") { results.splice(index, 1); return json(res, 200, { ok: true }); }
-    if (parts.length === 7 && index >= 0 && req.method === "GET") {
-      res.writeHead(200, { "content-type": "application/octet-stream", "content-disposition": 'attachment; filename="result.txt"', "cache-control": "no-store", "x-content-type-options": "nosniff" }); return res.end("Mock result\n");
-    }
-    return json(res, 404, { error: { message: "No such shared result" } });
   }
   // The machine-local `{ path }` form of an attachment: the file is copied
   // into the conversation directory, created if the draft has none yet.

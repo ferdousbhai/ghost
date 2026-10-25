@@ -164,31 +164,3 @@ describe("ghost CLI against a real daemon server", () => {
 
 });
 
-
-it("shares, downloads without overwriting, lists, and revokes selected result files through the CLI", async () => {
-  const source = join(temp.ownerHome, "report.txt"), destination = join(temp.ownerHome, "saved.txt");
-  writeFileSync(source, "finished report");
-  const target = ["--ghost", "casper", "--session", "conv-1"];
-  const added = await cli(["results", "add", source, ...target, "--json"]);
-  expect(added.code).toBe(0);
-  const { id } = JSON.parse(added.stdout);
-  const listed = await cli(["results", "list", ...target, "--json"]);
-  expect(JSON.parse(listed.stdout).results).toEqual([expect.objectContaining({ id, name: "report.txt" })]);
-  expect((await cli(["results", "get", id, destination, ...target])).code).toBe(0);
-  expect(readFileSync(destination, "utf8")).toBe("finished report");
-  expect((await cli(["results", "get", id, destination, ...target])).code).not.toBe(0);
-  expect(readFileSync(destination, "utf8")).toBe("finished report");
-  writeFileSync(destination, "older copy");
-  const trashHome = { ...env, HOME: temp.ownerHome, XDG_DATA_HOME: join(temp.ownerHome, ".local", "share") };
-  mkdirSync(trashHome.XDG_DATA_HOME, { recursive: true });
-  expect(await cli(["results", "get", id, destination, "--replace", ...target], { env: trashHome })).toMatchObject({ code: 0, stderr: "" });
-  expect(readFileSync(destination, "utf8")).toBe("finished report");
-  expect(readFileSync(join(temp.ownerHome, ".local", "share", "Trash", "files", "saved.txt"), "utf8")).toBe("older copy");
-  const folder = join(temp.ownerHome, "Documents"); mkdirSync(folder);
-  for (const path of [folder, `${folder}/`]) {
-    expect((await cli(["results", "get", id, path, "--replace", ...target], { env: trashHome })).code).not.toBe(0);
-    expect(statSync(folder).isDirectory()).toBe(true);
-  }
-  expect((await cli(["results", "remove", id, ...target])).code).toBe(0);
-  expect(JSON.parse((await cli(["results", "list", ...target, "--json"])).stdout).results).toEqual([]);
-});

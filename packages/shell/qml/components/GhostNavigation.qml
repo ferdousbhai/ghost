@@ -32,11 +32,6 @@ FocusScope {
             icon: "M12 8v4l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0"
         },
         {
-            id: "results",
-            label: "Shared results",
-            icon: "M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5"
-        },
-        {
             id: "character",
             label: "Character",
             icon: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 9h3M16 13h3M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4M6 17a4 4 0 0 1 8 0"
