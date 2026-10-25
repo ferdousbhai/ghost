@@ -133,7 +133,7 @@ export async function resolveSession(client: DaemonClient, name: string, request
   return session;
 }
 
-export function ghostPath(ghost: string, suffix = ""): string {
+export function ghostPath(ghost: string, suffix: string): string {
   return `/api/ghosts/${encodeURIComponent(ghost)}${suffix}`;
 }
 

@@ -129,7 +129,7 @@ that has already exited and the preview keeps running.
 ## Validation
 
 ```sh
-pnpm --filter @ghost/omarchy lint     # qmllint over every QML file
+pnpm --filter @ghost/omarchy lint     # qmllint over every QML file under qml/
 ```
 
 With the preview's private environment exported and its window visible, run

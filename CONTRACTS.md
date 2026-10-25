@@ -719,7 +719,7 @@ owner's `turn_end` command hook. Completed turns,
   No `ghost-desktop` means no desktop tools.
 - [`packaging`](packaging) owns package assembly, smoke tests, and release
   inputs, not user data or service activation policy. Upgrade guidance
-  refreshes enablement and explicitly restarts an active daemon to load its bundle. A release is cut locally
+  prints the daemon restart that loads the new bundle. A release is cut locally
   by [`packaging/release/publish.sh`](packaging/release/publish.sh): a
   `vX.Y.Z` tag on `ferdousbhai/ghost` whose GitHub release carries the source
   archive, runtime archive, and `SHA256SUMS`; Omarchy's sync reads GitHub's

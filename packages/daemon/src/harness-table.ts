@@ -76,6 +76,16 @@ function record(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
+/**
+ * The `name`s of rows whose `status` is `loaded`; null, an unknown inventory,
+ * unless every row names itself and carries a status of `loaded`'s type.
+ */
+function loadedNames(rows: unknown, name: string, status: string, loaded: string | boolean): string[] | null {
+  if (!Array.isArray(rows) || resourceNames(rows.map((row) => record(row)[name])) === null
+    || !rows.every((row) => typeof record(row)[status] === typeof loaded)) return null;
+  return resourceNames(rows.filter((row) => record(row)[status] === loaded).map((row) => record(row)[name]));
+}
+
 function str(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
@@ -166,11 +176,7 @@ function anthropicStreamParser(): (line: string) => HarnessEvent[] {
           skills: resourceNames(event.skills),
           ...(event.tools !== undefined ? { tools: resourceNames(event.tools) } : {}),
           extensions: resourceNames(Array.isArray(event.plugins) ? event.plugins.map((plugin) => record(plugin).name) : undefined),
-          mcpServers: resourceNames(Array.isArray(event.mcp_servers)
-            && resourceNames(event.mcp_servers.map((server) => record(server).name)) !== null
-            && event.mcp_servers.every((server) => typeof record(server).status === "string")
-            ? event.mcp_servers.filter((server) => record(server).status === "connected").map((server) => record(server).name)
-            : undefined),
+          mcpServers: loadedNames(event.mcp_servers, "name", "status", "connected"),
         } });
       }
     }
@@ -541,10 +547,7 @@ function copilotParser(): (line: string) => HarnessEvent[] {
       const inventory = Object.hasOwn(inventories, str(event.type)) ? inventories[event.type as keyof typeof inventories] : undefined;
       if (inventory) {
         const [field, rows, name, status, loaded] = inventory;
-        const names = Array.isArray(rows) && resourceNames(rows.map((row) => record(row)[name])) !== null
-          && rows.every((row) => typeof record(row)[status] === typeof loaded)
-          ? resourceNames(rows.filter((row) => record(row)[status] === loaded).map((row) => record(row)[name])) : null;
-        resources = { ...resources, [field]: names };
+        resources = { ...resources, [field]: loadedNames(rows, name, status, loaded) };
         return [{ type: "resources", resources }];
       }
       if (resources.mcpServers !== null && ["session.mcp_server_status_changed", "session.mcp_server_removed", "session.mcp_server_needs_reconnect"].includes(str(event.type))) {

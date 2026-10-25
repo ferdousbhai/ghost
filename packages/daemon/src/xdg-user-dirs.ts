@@ -1,6 +1,5 @@
 /** freedesktop user directories, resolved the way Omarchy's own scripts do. */
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
 const XDG_BASE_DEFAULTS = {
@@ -43,8 +42,8 @@ function readUserDir(name: string, env: NodeJS.ProcessEnv, home: string): string
  * matters as much as the environment. A relative value is under `home`.
  */
 export function resolveDocumentsDirectory(
-  env: NodeJS.ProcessEnv = process.env,
-  home: string = homedir(),
+  env: NodeJS.ProcessEnv,
+  home: string,
 ): string {
   const configured = env.XDG_DOCUMENTS_DIR?.trim() || readUserDir("XDG_DOCUMENTS_DIR", env, home);
   return configured ? resolve(home, expandHome(configured, home)) : join(home, "Documents");

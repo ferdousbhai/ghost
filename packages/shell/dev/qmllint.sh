@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lint every QML file in the package.
+# Lint every QML file under qml/.
 #
 # The important part is finding the right binary. On Arch (and so on Omarchy)
 # `/usr/bin/qmllint` is a **Qt 5 stub that exits 0 on any input** — it accepts

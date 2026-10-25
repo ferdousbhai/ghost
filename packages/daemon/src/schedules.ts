@@ -91,7 +91,7 @@ export function resolveScheduleUnitDirectory(
  * install runs a launcher elsewhere on PATH, so the running daemon's PATH is
  * consulted first.
  */
-export function ghostCliPath(env: NodeJS.ProcessEnv = process.env): string {
+export function ghostCliPath(env: NodeJS.ProcessEnv): string {
   return which("ghost", env) ?? "/usr/bin/ghost";
 }
 

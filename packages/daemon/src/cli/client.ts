@@ -118,8 +118,8 @@ export class DaemonClient {
   async #fetch(
     path: string,
     init: RequestInit,
-    retry = true,
-    timeoutMs = CONTROL_REQUEST_TIMEOUT_MS,
+    retry: boolean,
+    timeoutMs: number,
   ): Promise<Response> {
     const headers = new Headers(init.headers);
     headers.set("accept", headers.get("accept") ?? "application/json");

@@ -10,8 +10,8 @@ interface StreamEvent {
   [key: string]: unknown;
 }
 
-function newConversationId(now = Date.now()): string {
-  return `cli-${now.toString(36)}-${randomBytes(4).toString("hex")}`;
+function newConversationId(): string {
+  return `cli-${Date.now().toString(36)}-${randomBytes(4).toString("hex")}`;
 }
 
 async function messageText(

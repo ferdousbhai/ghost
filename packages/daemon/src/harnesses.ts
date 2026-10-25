@@ -155,7 +155,6 @@ function readRecord(directory: string, id: string): unknown {
 export async function readHarnessReport(
   env: NodeJS.ProcessEnv,
   home: string,
-  now = Date.now(),
 ): Promise<HarnessReport> {
   const { stdout } = await exec("omarchy", ["commands", "--json"], { env, maxBuffer: 16 * 1024 * 1024 });
   const directory = omarchyUsageDirectory(env, home);
@@ -163,7 +162,7 @@ export async function readHarnessReport(
   const installed = await Promise.all(ids.map((id) => isInstalled(id, env)));
   const harnesses = ids
     .filter((_, index) => installed[index])
-    .map((id) => assessHarness(id, readRecord(directory, id), now));
+    .map((id) => assessHarness(id, readRecord(directory, id), Date.now()));
   return { harnesses, refresh: REFRESH_COMMAND };
 }
 
