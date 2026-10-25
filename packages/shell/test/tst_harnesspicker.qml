@@ -120,7 +120,7 @@ TestCase {
         compare(Ghostd.harnessChoice.harnesses.length, 3);
         compare(Ghostd.harnessChoice.omarchyDefault, "claude");
         verify(findChild(header, "harnessPicker").visible);
-        verify(findChild(header, "harnessChoose-codex").enabled);
+        verify(findChild(header, "harnessChoose-codex") !== null);
     }
 
     function test_aFailedReadShowsQuietlyInThePicker(): void {

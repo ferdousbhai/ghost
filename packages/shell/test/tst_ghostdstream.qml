@@ -387,8 +387,10 @@ TestCase {
             readyState: 3,
             status: 0,
             responseText: "",
+            // Like Qt's, abort() finishes the request (readyState 4) and runs its callback.
             abort: function () {
                 aborts += 1;
+                xhr.readyState = 4;
                 Ghostd.readTurnStream(xhr, state.key, "turn", "missing terminal");
             }
         };
