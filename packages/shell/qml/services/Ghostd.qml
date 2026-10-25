@@ -237,7 +237,8 @@ Singleton {
     readonly property bool characterLoading: root.characterRequest !== null
     readonly property bool characterSaving: root.characterWriteRequest !== null
     property string characterError: ""
-    property string characterGhost: ""
+    /** The active ghost's persona has been read (cleared on every switch). */
+    property bool characterLoaded: false
 
     /** The daemon's RemoteStatus, `{}` until read. */
     property var remoteStatus: ({})
@@ -271,7 +272,8 @@ Singleton {
     readonly property bool mcpMutating: root.mcpMutationRequest !== null
     property string mcpError: ""
     property string mcpNotice: ""
-    property string mcpGhost: ""
+    /** The active ghost's MCP catalog has been read (cleared on every switch). */
+    property bool mcpLoaded: false
 
     // A ghost owns many conversations. The daemon persists them;
     // the HUD lists them per ghost, resumes one by loading its transcript, and
@@ -808,18 +810,14 @@ Singleton {
         return {
             ghosts: root.ghosts,
             sessionIds: root.sessionIds,
-            mcpGhost: root.mcpGhost,
-            activeGhost: root.activeGhost,
-            characterGhost: root.characterGhost
+            activeGhost: root.activeGhost
         };
     }
 
     function installGhostRenameState(state: var): void {
         root.ghosts = state.ghosts;
         root.sessionIds = state.sessionIds;
-        root.mcpGhost = state.mcpGhost;
         root.activeGhost = state.activeGhost;
-        root.characterGhost = state.characterGhost;
     }
 
     function applyGhostRename(from: string, to: string): void {
@@ -1254,7 +1252,7 @@ Singleton {
         root.characterBody = "";
         root.characterLimit = 0;
         root.characterError = "";
-        root.characterGhost = "";
+        root.characterLoaded = false;
     }
 
     /**
@@ -1267,7 +1265,7 @@ Singleton {
             root.clearCharacter();
             return;
         }
-        if (!force && root.characterGhost === ghost) return;
+        if (!force && root.characterLoaded) return;
         if (root.characterRequest) {
             if (!force) return;
             root.retire(root, "characterRequest");
@@ -1283,7 +1281,7 @@ Singleton {
                 } else {
                     root.characterBody = body.body;
                     root.characterLimit = body.limit;
-                    root.characterGhost = ghost;
+                    root.characterLoaded = true;
                     root.characterError = "";
                     root.reachable = true;
                 }
@@ -1307,7 +1305,7 @@ Singleton {
                 if (ok) {
                     root.characterBody = body;
                     if (result.limit > 0) root.characterLimit = result.limit;
-                    root.characterGhost = ghost;
+                    root.characterLoaded = true;
                     root.reachable = true;
                 } else {
                     root.characterError = xhr.status === 200 ? "ghostd sent a malformed character result"
@@ -1327,7 +1325,7 @@ Singleton {
         root.mcpSkipped = [];
         root.mcpError = "";
         root.mcpNotice = "";
-        root.mcpGhost = "";
+        root.mcpLoaded = false;
     }
 
     /** Adopt a `{ servers, skipped }` catalog for `ghost`; false when the body is not one. */
@@ -1342,7 +1340,7 @@ Singleton {
         root.mcpSkipped = body.skipped.filter(function (entry) {
             return entry && typeof entry === "object";
         });
-        root.mcpGhost = ghost;
+        root.mcpLoaded = true;
         root.mcpError = "";
         root.reachable = true;
         return true;
@@ -1354,7 +1352,7 @@ Singleton {
             root.clearMcp();
             return;
         }
-        if (!force && root.mcpGhost === ghost) return;
+        if (!force && root.mcpLoaded) return;
         if (root.mcpRequest) {
             if (!force) return;
             root.retire(root, "mcpRequest");

@@ -12,9 +12,7 @@ TestCase {
                 { name: "Wendy", dir: "/tmp/ghosts/Wendy" }
             ],
             sessionIds: { Casper: "casper-chat", Wendy: "wendy-chat" },
-            mcpGhost: "Casper",
-            activeGhost: "Casper",
-            characterGhost: "Casper"
+            activeGhost: "Casper"
         };
     }
 
@@ -55,8 +53,6 @@ TestCase {
 
         compare(Object.keys(renamed.sessionIds).join(","), "Spooky");
         compare(renamed.ghosts[0].dir, "/tmp/ghosts/Spooky");
-        for (const owner of [
-            "mcpGhost", "activeGhost", "characterGhost"
-        ]) compare(renamed[owner], "Spooky");
+        compare(renamed.activeGhost, "Spooky");
     }
 }

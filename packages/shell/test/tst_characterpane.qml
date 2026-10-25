@@ -64,7 +64,7 @@ TestCase {
         verify(!Ghostd.characterLoading);
         compare(Ghostd.characterBody, "# Casper\n\nKind and curious.");
         compare(Ghostd.characterLimit, 20000);
-        compare(Ghostd.characterGhost, "casper");
+        verify(Ghostd.characterLoaded);
         compare(Ghostd.characterError, "");
 
         // The per-ghost cache holds: a second unforced fetch sends nothing.
@@ -80,7 +80,7 @@ TestCase {
 
         verify(!Ghostd.characterLoading);
         compare(Ghostd.characterBody, "");
-        compare(Ghostd.characterGhost, "");
+        verify(!Ghostd.characterLoaded);
         compare(Ghostd.characterLimit, 0);
     }
 

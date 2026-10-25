@@ -4,12 +4,6 @@
 // so an optimistic update has an exact rollback state instead of attempting a
 // second, lossy rename when the daemon refuses the request.
 
-var ownerKeys = [
-    "mcpGhost",
-    "activeGhost",
-    "characterGhost"
-];
-
 function cloneMap(value) {
     return Object.assign({}, value && typeof value === "object" ? value : {});
 }
@@ -17,9 +11,9 @@ function cloneMap(value) {
 function snapshot(state) {
     var copy = {
         ghosts: Array.isArray(state.ghosts) ? state.ghosts.slice() : [],
-        sessionIds: cloneMap(state.sessionIds)
+        sessionIds: cloneMap(state.sessionIds),
+        activeGhost: String(state.activeGhost || "")
     };
-    for (var key of ownerKeys) copy[key] = String(state[key] || "");
     return copy;
 }
 
@@ -54,9 +48,7 @@ function move(state, from, to) {
     var next = snapshot(state);
     next.ghosts = renamedGhosts(next.ghosts, from, to);
     next.sessionIds = rekeyMap(next.sessionIds, from, to);
-    for (var key of ownerKeys) {
-        if (next[key] === from) next[key] = to;
-    }
+    if (next.activeGhost === from) next.activeGhost = to;
     return next;
 }
 
