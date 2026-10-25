@@ -678,9 +678,10 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     if (!remoteServe) throw new GhostError("not_found", "Remote access is not available.", 404);
     return remoteServe;
   };
+  const isGuest = (context: RequestContext): boolean => context.admission.identity?.role === "guest";
   /** A route a tailnet guest is refused: it shows file paths, hook commands, or MCP credentials. */
   const ownerOnly = <C extends RequestContext>(handle: (context: C) => unknown) => (context: C) => {
-    if (context.admission.identity?.role === "guest") {
+    if (isGuest(context)) {
       throw new GhostError("owner_only", "Only the owner may see this.", 403);
     }
     return handle(context);
@@ -729,9 +730,11 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     }),
     route("GET PUT", "api/hooks/config", ownerOnly(handleHookConfig)),
     // The owner's board.md, parsed. Guests may read it: it is the one owner
-    // document meant to be looked at, and it is read-only here.
-    route("GET", "api/board", async ({ response }) => {
-      jsonResponse(response, 200, await readBoard(resolveDocumentsDirectory(process.env, homedir())));
+    // document meant to be looked at, and it is read-only here. A guest is
+    // shown no filesystem path.
+    route("GET", "api/board", async (context) => {
+      const { path, ...board } = await readBoard(resolveDocumentsDirectory(process.env, homedir()));
+      jsonResponse(context.response, 200, isGuest(context) ? board : { path, ...board });
     }),
     route("GET", "api/status", ownerOnly(({ response }) => {
       jsonResponse(response, 200, {
@@ -739,7 +742,8 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
         source: { commit: options.runningSource?.commit ?? null, root: options.runningSource?.root ?? null },
       });
     })),
-    route("GET", "api/ghosts", ({ response }) => jsonResponse(response, 200, options.registry.list())),
+    route("GET", "api/ghosts", (context) => jsonResponse(context.response, 200,
+      isGuest(context) ? options.registry.list().map(({ name }) => ({ name })) : options.registry.list())),
     route("POST", "api/ghosts", async ({ response, body }) => {
       const ghost = options.host.createGhost(stringField(await body(), "name"));
       logger.info("ghost created", { ghost: ghost.name });

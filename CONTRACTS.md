@@ -508,8 +508,8 @@ status. Request bodies and control files are bounded before allocation.
 
 Tailnet identity is accepted only from Tailscale Serve's verified local proxy
 boundary. The configured owner has full access; admitted guests are read-only,
-and are refused the routes marked owner-only, which show file paths, hook
-commands, or MCP credentials.
+are shown no filesystem path, and are refused the routes marked owner-only,
+which show file paths, hook commands, or MCP credentials.
 Remote access never broadens a ghost's local tool authority.
 
 Route parsing, validation, status codes, and reverse states are executable in
@@ -523,9 +523,9 @@ Rows beginning `/sessions/` are relative to `/api/ghosts/:name`.
 | `GET\|PUT /api/hooks/config` | Owner-only. Read or atomically replace the admitted `hooks.json`. |
 | `GET /api/ghosts/:ghost/routines`, `POST /api/ghosts/:ghost/routines/:slug/:action` | Owner-only [routine inspection and controls](#routine-inspection-and-controls). |
 | `POST /api/ghosts/:ghost/events` | Owner-only [external event intake](#external-events); the GET event stream remains conversation invalidations. |
-| `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests; never written through the API. |
+| `GET /api/board` | The owner's `board.md`, parsed to columns and cards; bounded; readable by tailnet guests, without its `path`; never written through the API. |
 | `GET /api/status` | Owner-only `{ version, source: { commit, root } }`. `root` is the git root of the running entry script, or `null` for the packaged install; a guest is refused the row rather than shown a filesystem path. Updates belong to Omarchy's package manager; Ghost neither polls releases nor applies updates. |
-| `GET\|POST /api/ghosts` | List or create ghosts. |
+| `GET\|POST /api/ghosts` | List or create ghosts; a tailnet guest's list carries only names. |
 | `PUT /api/ghosts/:name/name` | Rename a ghost and its whole home. |
 | `DELETE /api/ghosts/:name?confirm=:name` | Move a ghost home to recoverable Trash. |
 | `GET\|PUT /api/ghosts/:name/character` | Read or atomically replace the persona file; the write refuses an oversize body, the read serves one so it can be shortened. |
@@ -769,7 +769,10 @@ browser. Setup and recovery are in `skills/web-browser/SKILL.md`.
 - Reversible by default. Disable before delete, Trash instead of `rm`,
   checkpoint before rewrite. Every destructive move has a named way back and a
   way to see it; an audit record of an unrecoverable action is not a substitute
-  for undo.
+  for undo. The one exception: a ghost's rename or delete removes its timer
+  units and routine checkpoints outright, because a timer that outlived its
+  ghost would fire for a name that is gone or belongs to a later ghost;
+  restoring the home from Trash restores the ghost, not its routines.
 - Self-restart is a systemd handoff. The daemon never restarts itself in
   process, and there is no guardian process and no rebuild-and-restart tool. A
   ghost restarts ghostd by scheduling `systemctl --user restart ghostd.service`
