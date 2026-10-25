@@ -194,7 +194,7 @@ function logStateAccumulator() {
   let preview: string | null = null;
   let derived: string | null = null;
   let ownerWrote = false;
-  let messageCount = 0;
+  let count = 0;
   let harness: string | null = null;
   let harnessSession: string | null = null;
   let harnessDir: string | null = null;
@@ -202,13 +202,13 @@ function logStateAccumulator() {
   let ran: Pick<LogState, "model" | "provider" | "effort"> = { model: null, provider: null, effort: null };
   let activeAt: string | null = null;
   const append = (entry: LogEntry) => {
+    count += messageCount(entry);
     if (entry.type !== "conversation" && entry.type !== "handoff" && entry.type !== "harness" && entry.type !== "resources") activeAt = entry.at;
     switch (entry.type) {
       case "title":
         title = entry.title;
         break;
       case "user":
-        messageCount += 1;
         // The first owner message titles the conversation, even after a `!command` previewed it.
         if (!ownerWrote && entry.origin === undefined) {
           ownerWrote = true;
@@ -218,21 +218,14 @@ function logStateAccumulator() {
         }
         break;
       case "assistant":
-        messageCount += 1;
         // A turn that failed before saying or doing anything left nothing to continue.
         if (entry.harness === harness && entry.content.length > 0) harnessStarted = true;
         if (entry.harness === harness && (entry.model ?? entry.effort) !== undefined) {
           ran = { model: entry.model ?? null, provider: entry.provider ?? null, effort: entry.effort ?? null };
         }
         break;
-      case "handoff":
-        messageCount += 1;
-        break;
       case "command":
-        // A `!command` the transcript shows is two messages, the owner's words and its output.
-        if (entry.excluded) break;
-        messageCount += 2;
-        preview ??= firstLine(`!${entry.command}`);
+        if (!entry.excluded) preview ??= firstLine(`!${entry.command}`);
         break;
       case "harness":
         if (entry.harness !== harness || (entry.dir !== undefined && entry.dir !== harnessDir)) {
@@ -248,7 +241,7 @@ function logStateAccumulator() {
         break;
     }
   };
-  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
+  return { append, value: (): LogState => ({ title: title ?? derived, preview, messageCount: count, harness, harnessSession, harnessDir, harnessStarted, ...ran, activeAt }) };
 }
 
 export function logState(entries: readonly LogEntry[]): LogState {
@@ -398,6 +391,7 @@ const indexing = new Map<string, Promise<IndexedLogSnapshot | null>>();
 function sameFile(a: Stats, b: Stats): boolean {
   return a.ino === b.ino && a.dev === b.dev;
 }
+/** How many transcript messages an entry shows: a `!command` is two, the owner's words and its output. */
 function messageCount(entry: LogEntry): number {
   return entry.type === "command" ? (entry.excluded ? 0 : 2)
     : entry.type === "user" || entry.type === "assistant" || entry.type === "handoff" ? 1 : 0;
