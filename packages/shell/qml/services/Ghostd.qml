@@ -2,9 +2,8 @@ pragma Singleton
 
 // Streaming: Qt's QML XMLHttpRequest fires onreadystatechange repeatedly at
 // readyState 3 (LOADING), once per network chunk, and exposes the *cumulative*
-// partial body in responseText. That was measured on this stack (Quickshell
-// 0.3.0 / Qt 6.11.2) against a chunked SSE server, both GET and POST — see
-// dev/README.md. So SSE needs no helper process: we track a consumed offset,
+// partial body in responseText; test/xhr-sse-unicode-probe.qml pins it
+// against a chunked SSE server. So SSE needs no helper process: we track a consumed offset,
 // buffer the trailing partial frame, and parse `data:` frames ourselves.
 // Rebuilding that body costs more the longer it grows, so ghostd cuts a turn's
 // response at about 1 MB and the HUD resumes it (resumeTurnStream).
