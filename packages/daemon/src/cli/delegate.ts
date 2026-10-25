@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import { constants } from "node:os";
 import { appendHandoff, handoffLogPath, type HandoffOutcome, type HandoffReceipt } from "../handoffs.js";
-import { desktopCommand, eligibleIds, GHOST_MCP_SERVER, readHarnessReport } from "../harnesses.js";
+import { desktopCommand, eligibleIds, readHarnessReport } from "../harnesses.js";
+import { GHOST_MCP_SERVER } from "../mcp-config-policy.js";
 import { classifyLimitMessage } from "../turn-events.js";
 import { flagBoolean, type ArgsSpec, type ParsedCliArgs } from "./args.js";
 import { CliError, EXIT_CODE } from "./client.js";

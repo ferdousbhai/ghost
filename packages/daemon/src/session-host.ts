@@ -38,7 +38,7 @@ import {
 } from "./conversation-log.js";
 import { readHarnessSetting, writeGhostSetting } from "./ghost-settings.js";
 import { assertValidGhostName, ghostPaths, type Ghost, type GhostRegistry } from "./ghosts.js";
-import { accountEnv, desktopCommand, GHOST_MCP_SERVER, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
+import { accountEnv, desktopCommand, eligibleIds, omarchyDefaultAgent, orderHarnesses, readHarnessReport, type Harness, type HarnessReport } from "./harnesses.js";
 import { runHarness, writeLaunchFiles } from "./harness-process.js";
 import {
   harnessRow,
@@ -55,7 +55,7 @@ import {
   OMARCHY_COMPUTER_USE_POLICY,
   renderOwnerContextPolicy,
 } from "./prompt-policy.js";
-import { expandMcpServerConfig, type MCPServerConfig } from "./mcp-config-policy.js";
+import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
 import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
 import { pinsPath, readPins, readReads, readsPath, writePins, writeReads } from "./sidecars.js";
@@ -367,7 +367,6 @@ export class SessionHost {
     const servers: HarnessMcpServer[] = desktop ? [{ name: GHOST_MCP_SERVER, config: { command: desktop } }] : [];
     try {
       for (const server of readEnabledMcp(ghost.dir)) {
-        if (server.name === GHOST_MCP_SERVER) continue;
         const config = normalizeMcpStdioCwd(expandMcpServerConfig(server.config as MCPServerConfig, this.env), ghost.dir);
         servers.push({ name: server.name, config });
       }

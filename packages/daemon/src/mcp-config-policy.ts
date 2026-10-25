@@ -45,8 +45,12 @@ export function expandMcpServerConfig(config: MCPServerConfig, environment: Read
   return { ...expandEnvVarsDeep(ordinary, environment), ...(kept === undefined ? {} : { [literal]: kept }) } as unknown as MCPServerConfig;
 }
 
+/** The MCP server name `ghost-desktop` is served under; its tools are `mcp__ghost__desktop_*`. */
+export const GHOST_MCP_SERVER = "ghost";
+
 function validateServerName(name: string): string | undefined {
   if (!name) return "Server name cannot be empty";
+  if (name === GHOST_MCP_SERVER) return `"${GHOST_MCP_SERVER}" is reserved for ghost-desktop`;
   if (name.length > 100) return "Server name is too long (max 100 characters)";
   if (!/^[a-zA-Z0-9_.:-]+$/.test(name)) {
     return "Server name can only contain letters, numbers, dash, underscore, dot, and colon";

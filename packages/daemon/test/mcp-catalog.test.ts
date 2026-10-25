@@ -163,6 +163,18 @@ describe("McpCatalog ghost-only discovery", () => {
     expect(snapshot.skipped.every((entry) => entry.reason.length > 0)).toBe(true);
   });
 
+  it("reserves the ghost-desktop server name: refused on add, a hand-written row skipped with the reason", async () => {
+    const { catalog, home } = setup();
+    await expect(catalog.addLeased("casper", "ghost", { type: "stdio", command: "x" }))
+      .rejects.toMatchObject({ code: "invalid_mcp_server", status: 400 });
+    writeJson(home, "mcp.json", { mcpServers: { ghost: { type: "stdio", command: "mine", enabled: true } } });
+    const snapshot = await catalog.listLeased("casper");
+    expect(snapshot.servers).toEqual([]);
+    expect(snapshot.skipped).toEqual([
+      expect.objectContaining({ path: "mcp.json#mcpServers.ghost", reason: expect.stringContaining("reserved for ghost-desktop") }),
+    ]);
+  });
+
   it("rejects invalid UTF-8 inside an otherwise valid MCP JSON string", async () => {
     const { catalog, home } = setup();
     writeFileSync(
