@@ -730,10 +730,10 @@ async function streamTurn(res, name, body) {
   } finally {
     turn.streaming = false;
     activeTurns.delete(key);
-    // Every end announces, as ghostd's does: stopped, failed, or done.
-    publishConversationUpdated(name, sessionId);
+    // Every end records the turn and announces it once, as ghostd's does:
+    // stopped, failed, stalled, or done.
+    recordTurn(name, sessionId, prompt);
   }
-  recordTurn(name, sessionId, prompt);
 }
 
 const mockServer = createServer(async (req, res) => {
