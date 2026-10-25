@@ -1069,7 +1069,6 @@ Singleton {
     function cloneTranscriptRow(row: var): var {
         return {
             role: String(row.role || ""),
-            entryId: String(row.entryId || ""),
             text: String(row.text || ""),
             toolActivity: Array.isArray(row.toolActivity) ? row.toolActivity.slice() : [],
             error: String(row.error || ""),

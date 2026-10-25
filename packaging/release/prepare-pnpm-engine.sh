@@ -19,6 +19,4 @@ actual="$(
   exit 1
 }
 
-# The launcher may delegate to the pinned engine. Its own path/version need
-# not match: pnpm 12's `exec` resolves the launcher, not the delegated binary.
-printf 'Prepared pnpm %s\n' "$actual"
+printf 'pnpm %s matches packageManager\n' "$actual"

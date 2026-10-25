@@ -20,7 +20,7 @@ printf '%s\\n' "\${TEST_PNPM_VERSION}"
     const run = (version: string) => exec("bash", [new URL("../packaging/release/prepare-pnpm-engine.sh", import.meta.url).pathname, dir], {
       env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TEST_PNPM_VERSION: version },
     });
-    expect((await run("10.12.2")).stdout).toContain("Prepared pnpm 10.12.2");
+    expect((await run("10.12.2")).stdout).toContain("pnpm 10.12.2 matches packageManager");
     await expect(run("12.13.0")).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining("ghost requires pnpm 10.12.2, resolved 12.13.0") });
   } finally {
     await rm(dir, { recursive: true, force: true });

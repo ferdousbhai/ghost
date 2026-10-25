@@ -11,17 +11,10 @@
  * `--since` drops receipts whose `at` is before that instant; a bare date is UTC midnight.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { handoffLogPath, type HandoffReceipt } from "../packages/daemon/src/handoffs.ts";
 
-interface Receipt {
-  at: string;
-  harness: string;
-  /** Absent before receipts recorded who picked. */
-  pick?: "owner" | "ghost";
-  status: string | null;
-  outcome: { refused: string } | { exit: number | null; signal: string | null; durationMs: number; limit: string | null };
-}
+/** `pick` is absent from receipts written before they recorded who picked. */
+type Receipt = Pick<HandoffReceipt, "at" | "harness" | "status" | "outcome"> & Partial<Pick<HandoffReceipt, "pick">>;
 
 interface Row {
   attempts: number;
@@ -126,8 +119,7 @@ export function report(text: string, options: { since?: number } = {}): string {
 }
 
 function defaultFiles(env: NodeJS.ProcessEnv): string[] {
-  const xdg = env.XDG_STATE_HOME?.trim();
-  const base = join(xdg && isAbsolute(xdg) ? xdg : join(homedir(), ".local", "state"), "ghost", "handoffs.jsonl");
+  const base = handoffLogPath(env);
   return [`${base}.1`, base].filter((path) => existsSync(path));
 }
 

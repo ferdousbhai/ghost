@@ -404,7 +404,7 @@ const MOCK_BOARD = {
 // loader's shape check is the small subset a pane edit can plausibly trip,
 // worded the way ghostd words it.
 const HOOKS_CONFIG_PATH = "/home/owner/.config/ghost/hooks.json";
-const HOOK_EVENTS = ["before_prompt", "session_stop"];
+const HOOK_EVENTS = ["before_prompt", "session_stop", "turn_end"];
 let hooksDocument = {
   hooks: {
     before_prompt: [{ hooks: [{

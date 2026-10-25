@@ -137,8 +137,8 @@ header, type a name, press Enter.
 
 Either route posts to the same daemon route, which creates `~/ghosts/sage/`
 with a seeded `character.md`.
-Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, and may not
-start with a dot. The directory name *is* the ghost's name.
+Names are 1–64 characters of letters, digits, `.`, `_`, or `-`, starting with
+a letter or digit. The directory name *is* the ghost's name.
 
 While `character.md` is still the seed, the ghost knows it has not met you: it
 helps with what you asked first, learns about you in the gaps, and offers a
@@ -234,9 +234,9 @@ command reports back.
 The CLI picks its ghost in this order: `-g/--ghost`, `$GHOST`, the default
 saved by `ghost use`, then the sole installed ghost; the session is `-s`,
 then `$GHOST_SESSION`, then the most recently updated one. A ghost's own shell
-carries both variables. It is an HTTP client and
-nothing else — it never edits a ghost home directly, so the HUD sees everything
-it does immediately, and the reverse.
+carries both variables. It never edits a ghost home directly: every change to
+a ghost goes through the daemon, so the HUD sees everything it does
+immediately, and the reverse.
 
 `--json` gives you the raw API shape (one event object per line for streams),
 `-q` drops secondary output, and `ghost help exit-codes` lists the stable exit
