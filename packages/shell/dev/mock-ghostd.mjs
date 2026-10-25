@@ -350,6 +350,10 @@ const sessionSummary = (name) => (s) => {
     // As in ghostd, the first owner text logged previews it, a `!command` included.
     preview: first ? firstLine(first.content.map((part) => part.text ?? "").join("")) : null,
     harness: s.harness ?? null,
+    // What the harness reported it ran on; the mock's scripted turns report none.
+    model: null,
+    provider: null,
+    effort: null,
     updatedAt: s.updatedAt,
     messageCount: s.messages.length,
     pinned: s.pinned === true,
@@ -547,6 +551,12 @@ function* script(name, prompt) {
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
 const ghostIsAnswering = (name) => [...activeTurns.keys()].some((key) => JSON.parse(key)[0] === name);
+/** Banishing and renaming both refuse while the ghost is answering. */
+const ghostBusy = (res, name) => json(res, 409, {
+  error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
+});
+/** The ghost-name grammar creation and rename share. */
+const validGhostName = (name) => /^[a-z0-9][a-z0-9-]*$/iu.test(name);
 
 /** Each turn's events by turn id, kept as ghostd keeps them so a cut response can resume. */
 const turnLogs = new Map();
@@ -777,7 +787,7 @@ const mockServer = createServer(async (req, res) => {
   if (parts.length === 2 && req.method === "POST") {
     const body = await readBody(req).catch(() => null);
     const name = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!/^[a-z0-9][a-z0-9-]*$/iu.test(name)) return json(res, 400, { error: { code: "invalid_request", message: "invalid name" } });
+    if (!validGhostName(name)) return json(res, 400, { error: { code: "invalid_request", message: "invalid name" } });
     if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: { code: "already_exists", message: "already exists" } });
     const ghost = { name, dir: join(GHOSTS_ROOT, name) };
     ghosts.push(ghost);
@@ -920,11 +930,7 @@ const mockServer = createServer(async (req, res) => {
         error: { message: "type the ghost's name to confirm", code: "confirmation_required" },
       });
     }
-    if (ghostIsAnswering(name)) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
-      });
-    }
+    if (ghostIsAnswering(name)) return ghostBusy(res, name);
     if (OWNS_GHOSTS_ROOT) rmSync(ghost.dir, { recursive: true, force: true });
     ghosts.splice(ghosts.indexOf(ghost), 1);
     for (const store of perGhostStores) store.delete(name);
@@ -937,18 +943,14 @@ const mockServer = createServer(async (req, res) => {
   if (parts.length === 4 && parts[3] === "name" && req.method === "PUT") {
     const body = await readBody(req).catch(() => ({}));
     const next = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!/^[a-z0-9][a-z0-9-]*$/iu.test(next)) {
+    if (!validGhostName(next)) {
       return json(res, 400, { error: { message: `${next || "that"} is not a usable ghost name`, code: "invalid_request" } });
     }
     if (next === name) return json(res, 200, { ok: true, name });
     if (ghosts.some((g) => g.name === next)) {
       return json(res, 409, { error: { message: `there is already a ghost called ${next}`, code: "already_exists" } });
     }
-    if (ghostIsAnswering(name)) {
-      return json(res, 409, {
-        error: { message: `${name} is still answering — stop the turn first`, code: "ghost_busy" },
-      });
-    }
+    if (ghostIsAnswering(name)) return ghostBusy(res, name);
     for (const store of perGhostStores) {
       if (store.has(name)) {
         store.set(next, store.get(name));

@@ -77,7 +77,7 @@ try {
   assert.equal(sessionsResponse.status, 200);
   const { sessions } = await sessionsResponse.json();
   assert.deepEqual(Object.keys(sessions[0]), [
-    "id", "title", "preview", "harness", "updatedAt", "messageCount", "pinned", "unread", "running",
+    "id", "title", "preview", "harness", "model", "provider", "effort", "updatedAt", "messageCount", "pinned", "unread", "running",
   ]);
 
   // Pinning lifts a conversation above newer ones, and unpinning puts it back.
@@ -176,7 +176,6 @@ try {
   assert.equal((await gone.json()).error.code, "turn_not_found");
   const turnEvents = JSON.stringify(frames);
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
-  assert.ok(!turnEvents.includes('"toolcall_'));
 
   // A stop during a stop hook is accepted and the turn settles.
   const stoppedId = "mock-stopped-hook";

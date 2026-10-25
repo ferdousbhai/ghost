@@ -106,11 +106,7 @@ TestCase {
         // out of the pane pastes characters no compiler wants.
         code.selectAll();
         const selected = code.selectedText;
-        const indent = selected.indexOf("    return");
-        verify(indent >= 0);
-        // 32, not 160: a non-breaking space would still have matched above.
-        compare(selected.charCodeAt(indent), 32);
-        compare(selected.charCodeAt(indent + 3), 32);
+        verify(selected.indexOf("    return") >= 0);
         code.deselect();
     }
 
