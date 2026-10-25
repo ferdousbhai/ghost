@@ -298,7 +298,6 @@ Item {
                 onActivated: {
                     root.closePicker();
                     root.resourcesOpen = true;
-                    Ghostd.inspectingResources = true;
                     Ghostd.fetchRunResources();
                     inspector.forceActiveFocus();
                 }

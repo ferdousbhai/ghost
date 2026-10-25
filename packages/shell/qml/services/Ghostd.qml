@@ -55,7 +55,7 @@ Singleton {
     /** Human-readable last failure, or "". */
     property string lastError: ""
     property string deletingGhost: ""
-    property string renamingGhost: ""
+    readonly property bool renamingGhost: root.renameGhostRequest !== null
     property string ghostDeleteError: ""
     /** Why the last ghost rename was refused, or "". Presentable as-is. Kept
         apart from `ghostDeleteError`: that one renders inside the banish
@@ -264,8 +264,6 @@ Singleton {
     readonly property bool hookConfigBusy: root.hookConfigMutation !== null
     property string hookConfigError: ""
 
-    property bool establishedConnection: false
-
     // The active ghost's `<ghost-home>/mcp.json` servers, as stored.
     property var mcpServers: []
     property var mcpSkipped: []
@@ -284,14 +282,14 @@ Singleton {
     /** Non-empty when a sessions/transcript fetch failed. */
     property string sessionsError: ""
     property string deletingSessionId: ""
-    /** The agent CLI carrying the open conversation: the owner's unconfirmed
-        pick, else its listing row; "" when unknown (a draft runs on whatever
-        the daemon picks). */
     /** The active ghost's listing row for `id`, or undefined. */
     function sessionRow(id: string): var {
         return root.sessions.find(session => session && session.id === id);
     }
     readonly property var currentSessionRow: root.sessionRow(root.currentSessionId)
+    /** The agent CLI carrying the open conversation: the owner's unconfirmed
+        pick, else its listing row; "" when unknown (a draft runs on whatever
+        the daemon picks). */
     readonly property string currentHarness: {
         const pending = root.pendingHarnesses[root.conversationKey(root.activeGhost, root.currentSessionId)];
         if (typeof pending === "string") return pending;
@@ -449,12 +447,12 @@ Singleton {
     Component.onDestruction: root.retireClientRequests()
 
     onReachableChanged: {
+        // reachable starts false, so a change to false always follows a connection.
         if (root.reachable) {
-            root.establishedConnection = true;
             Qt.callLater(function () {
                 if (root.reachable) root.fetchHookConfig(false);
             });
-        } else if (root.establishedConnection) {
+        } else {
             root.beginHooksConnectionEpoch();
         }
     }
@@ -518,6 +516,14 @@ Singleton {
             inner();
         };
         root.deliver(xhr, method, url, headers, body);
+    }
+
+    /** The API path of a ghost, and of one of its conversations. */
+    function ghostPath(ghost: string): string {
+        return "/api/ghosts/" + encodeURIComponent(ghost);
+    }
+    function sessionPath(ghost: string, id: string): string {
+        return root.ghostPath(ghost) + "/sessions/" + encodeURIComponent(id);
     }
 
     function newRequest(): var {
@@ -591,7 +597,7 @@ Singleton {
             root.routines = []; root.routineRecoveries = [];
             root.routinesError = ""; root.routineWriteError = "";
         }
-        root.request(root, "routinesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines", null, function (xhr, body) {
+        root.request(root, "routinesRequest", "GET", root.ghostPath(ghost) + "/routines", null, function (xhr, body) {
             if (root.activeGhost !== ghost) { root.refreshRoutines(); return; }
             if (xhr.status === 200 && body && Array.isArray(body.routines) && Array.isArray(body.recoveries)) {
                 root.routinesGhost = ghost;
@@ -605,7 +611,7 @@ Singleton {
     function fetchRoutineLogs(slug: string): void {
         if (root.routineReadRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        root.request(root, "routineReadRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
+        root.request(root, "routineReadRequest", "GET", root.ghostPath(ghost) + "/routines/" + encodeURIComponent(slug) + "/logs", null, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             if (xhr.status === 200 && body && typeof body.text === "string" && Array.isArray(body.sessions)) root.routineLogsReady(ghost, body);
             else root.routinesError = root.describeError(xhr, "Read routine logs");
@@ -615,7 +621,7 @@ Singleton {
     function fetchRoutineConfig(slug: string): void {
         if (root.routineReadRequest || root.activeGhost === "") return;
         const ghost = root.activeGhost;
-        root.request(root, "routineReadRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
+        root.request(root, "routineReadRequest", "GET", root.ghostPath(ghost) + "/routines/" + encodeURIComponent(slug) + "/config", null, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             if (xhr.status === 200 && body && typeof body.revision === "string" && typeof body.timer === "string") {
                 root.routinesError = "";
@@ -627,7 +633,7 @@ Singleton {
 
     function mutateRoutine(ghost: string, suffix: string, method: string, payload: var): void {
         if (root.routineActionRequest || ghost === "") return;
-        root.request(root, "routineActionRequest", method, "/api/ghosts/" + encodeURIComponent(ghost) + "/routines/" + suffix, payload, function (xhr, body) {
+        root.request(root, "routineActionRequest", method, root.ghostPath(ghost) + "/routines/" + suffix, payload, function (xhr, body) {
             if (root.activeGhost !== ghost) return;
             const ok = xhr.status === 200;
             if (ok) { root.routinesError = ""; root.refreshRoutines(); }
@@ -750,7 +756,7 @@ Singleton {
         if (name === "" || root.deletingGhost !== "") return;
         root.deletingGhost = name;
         root.ghostDeleteError = "";
-        root.request(root, "deleteGhostRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(name)
+        root.request(root, "deleteGhostRequest", "DELETE", root.ghostPath(name)
             + "?confirm=" + encodeURIComponent(name), null, function (xhr) {
                 root.deletingGhost = "";
                 if (xhr.status !== 200) {
@@ -779,7 +785,7 @@ Singleton {
     function renameGhost(from: string, to: string): bool {
         const next = to.trim();
         if (from === "" || next === "" || next === from) return false;
-        if (root.renamingGhost !== "" || root.deletingGhost !== "") return false;
+        if (root.renamingGhost || root.deletingGhost !== "") return false;
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
@@ -787,14 +793,12 @@ Singleton {
                 : "The ghost being renamed is no longer available.";
             return false;
         }
-        root.renamingGhost = from;
         root.ghostRenameError = "";
         root.renameGhostSnapshot = transaction.before;
         root.installGhostRenameState(transaction.after);
         root.moveTurnStates(from, next);
-        root.request(root, "renameGhostRequest", "PUT", "/api/ghosts/" + encodeURIComponent(from) + "/name",
+        root.request(root, "renameGhostRequest", "PUT", root.ghostPath(from) + "/name",
             { name: next }, function (xhr, body) {
-                root.renamingGhost = "";
                 if (xhr.status === 200) {
                     root.renameGhostSnapshot = null;
                     root.ghostRenameError = "";
@@ -918,7 +922,6 @@ Singleton {
         return true;
     }
 
-    property bool inspectingResources: false
     property var runResources: null
     readonly property bool resourcesLoading: root.resourcesRequest !== null
     property string resourcesError: ""
@@ -928,7 +931,6 @@ Singleton {
         root.retire(root, "resourcesRequest");
         root.runResources = null;
         root.resourcesError = "";
-        root.inspectingResources = false;
     }
 
     function fetchRunResources(): void {
@@ -938,8 +940,7 @@ Singleton {
         root.resourcesError = "";
         root.retire(root, "resourcesRequest");
         if (ghost === "" || session === "") return;
-        root.request(root, "resourcesRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(session) + "/transcript?limit=1", null, function (xhr, body) {
+        root.request(root, "resourcesRequest", "GET", root.sessionPath(ghost, session) + "/transcript?limit=1", null, function (xhr, body) {
                 if (xhr.status === 200 && body) root.runResources = body.resources || null;
                 else root.resourcesError = "Could not load resources. Try refreshing.";
             }, () => ghost === root.activeGhost && session === root.currentSessionId);
@@ -949,7 +950,7 @@ Singleton {
         const ghost = root.activeGhost;
         if (ghost === "" || root.harnessMutation !== null) return;
         root.retire(root, "harnessRequest");
-        root.request(root, "harnessRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+        root.request(root, "harnessRequest", "GET", root.ghostPath(ghost) + "/harness",
             null, (xhr, body) => root.adoptHarnessChoice(xhr, body, ghost, "GET harnesses"));
     }
 
@@ -962,7 +963,7 @@ Singleton {
         const before = root.harnessChoice;
         if (before) root.harnessChoice = Object.assign({}, before, { ghostDefault: next });
         root.harnessError = "";
-        root.request(root, "harnessMutation", "PUT", "/api/ghosts/" + encodeURIComponent(ghost) + "/harness",
+        root.request(root, "harnessMutation", "PUT", root.ghostPath(ghost) + "/harness",
             { harness: next }, function (xhr, body) {
                 if (!root.adoptHarnessChoice(xhr, body, ghost, "PUT default harness")
                         && ghost === root.activeGhost && before) root.harnessChoice = before;
@@ -1001,8 +1002,7 @@ Singleton {
         const before = root.pendingHarnesses[key];
         root.setPendingHarness(key, harness);
         root.harnessError = "";
-        root.request(root, "harnessSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/harness", { harness: harness }, function (xhr) {
+        root.request(root, "harnessSessionRequest", "PUT", root.sessionPath(ghost, id) + "/harness", { harness: harness }, function (xhr) {
                 if (xhr.status === 200) return;
                 if (root.pendingHarnesses[key] === harness) root.setPendingHarness(key, before);
                 if (ghost === root.activeGhost)
@@ -1284,7 +1284,7 @@ Singleton {
         }
         root.characterError = "";
         root.request(root, "characterRequest", "GET",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", null, function (xhr, body) {
+            root.ghostPath(ghost) + "/character", null, function (xhr, body) {
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.characterError = root.describeError(xhr, "GET character");
@@ -1311,7 +1311,7 @@ Singleton {
         if (ghost === "" || root.characterSaving) return;
         root.characterError = "";
         root.request(root, "characterWriteRequest", "PUT",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/character", { body: body }, function (xhr, result) {
+            root.ghostPath(ghost) + "/character", { body: body }, function (xhr, result) {
                 if (ghost !== root.activeGhost) return;
                 const ok = xhr.status === 200 && !!result && result.ok === true;
                 if (ok) {
@@ -1371,7 +1371,7 @@ Singleton {
         }
         root.mcpError = "";
         root.mcpNotice = "";
-        root.request(root, "mcpRequest", "GET", "/api/ghosts/" + encodeURIComponent(ghost) + "/mcp",
+        root.request(root, "mcpRequest", "GET", root.ghostPath(ghost) + "/mcp",
             null, function (xhr, body) {
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
@@ -1391,7 +1391,7 @@ Singleton {
         root.retire(root, "mcpRequest");
         root.mcpError = "";
         root.mcpNotice = "";
-        root.request(root, "mcpMutationRequest", method, "/api/ghosts/" + encodeURIComponent(ghost)
+        root.request(root, "mcpMutationRequest", method, root.ghostPath(ghost)
             + "/mcp" + suffix, body, function (xhr, catalog) {
                 if (ghost !== root.activeGhost) return;
                 const answered = xhr.status === 200 || xhr.status === 201;
@@ -1449,7 +1449,7 @@ Singleton {
             root.readConversationEvents(xhr, ghost);
         };
         eventsWatchdog.restart();
-        root.dispatch(xhr, "GET", "/api/ghosts/" + encodeURIComponent(ghost)
+        root.dispatch(xhr, "GET", root.ghostPath(ghost)
             + "/events", ({ "Accept": "text/event-stream" }), null, () => xhr === root.eventsRequest);
     }
 
@@ -1537,7 +1537,7 @@ Singleton {
             return;
         }
         root.request(root, "sessionsRequest", "GET",
-            "/api/ghosts/" + encodeURIComponent(g) + "/sessions", null, function (xhr, body) {
+            root.ghostPath(g) + "/sessions", null, function (xhr, body) {
                 // A reply for a ghost the user has since switched away from is stale.
                 if (g !== root.activeGhost) return;
                 if (xhr.status !== 200 || !body || !Array.isArray(body.sessions)) {
@@ -1587,12 +1587,6 @@ Singleton {
         }
     }
 
-    /**
-     * Start a fresh conversation for the active ghost. An already-blank draft
-     * is reused — there is only ever one unstarted "New conversation". The
-     * daemon creates the transcript lazily on the first turn and titles it
-     * afterwards; until then the row is local to the HUD.
-     */
     function isUnstartedSession(session: var): bool {
         return !!session && session.messageCount === 0
             && (session.title === null || session.title === ""
@@ -1614,6 +1608,12 @@ Singleton {
             }));
     }
 
+    /**
+     * Start a fresh conversation for the active ghost. An already-blank draft
+     * is reused — there is only ever one unstarted "New conversation". The
+     * daemon creates the transcript lazily on the first turn and titles it
+     * afterwards; until then the row is local to the HUD.
+     */
     function newConversation(): void {
         const ghost = root.activeGhost;
         if (ghost === "") return;
@@ -1666,8 +1666,7 @@ Singleton {
         }
         root.deletingSessionId = id;
         root.sessionsError = "";
-        root.request(root, "deleteSessionRequest", "DELETE", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id), null, function (xhr) {
+        root.request(root, "deleteSessionRequest", "DELETE", root.sessionPath(ghost, id), null, function (xhr) {
                 if (xhr.status === 200) {
                     const key = root.conversationKey(ghost, id);
                     const kept = Object.assign({}, root.turnStates);
@@ -1713,8 +1712,7 @@ Singleton {
         }));
         const local = root.sessionRow(id);
         if (local && local.localOnly === true) return;
-        root.request(root, "pinSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/pin", { pinned: pinned }, function (xhr) {
+        root.request(root, "pinSessionRequest", "PUT", root.sessionPath(ghost, id) + "/pin", { pinned: pinned }, function (xhr) {
                 if (ghost !== root.activeGhost || xhr.status === 200) return;
                 root.sessionsError = root.describeError(xhr, "PUT pin conversation");
                 // The optimistic reorder is now a lie; take the server's truth.
@@ -1743,8 +1741,7 @@ Singleton {
         if (previous === next) return;
         root.sessionsError = "";
         root.applySessionTitle(id, next);
-        root.request(root, "renameSessionRequest", "PUT", "/api/ghosts/" + encodeURIComponent(ghost)
-            + "/sessions/" + encodeURIComponent(id) + "/title", { title: next }, function (xhr, body) {
+        root.request(root, "renameSessionRequest", "PUT", root.sessionPath(ghost, id) + "/title", { title: next }, function (xhr, body) {
                 if (ghost !== root.activeGhost) return;
                 if (xhr.status !== 200) {
                     root.applySessionTitle(id, previous);
@@ -1838,10 +1835,7 @@ Singleton {
         // Clicking the selected title is navigation, not an interrupt button.
         // In particular it must not abort the XHR and then report that
         // client-initiated abort as ghostd becoming unreachable.
-        if (id === root.currentSessionId) {
-            if (!root.streaming) root.finishOpenConversation(id);
-            return;
-        }
+        if (id === root.currentSessionId && root.streaming) return;
         root.finishOpenConversation(id);
     }
 
@@ -1870,7 +1864,7 @@ Singleton {
         // The completion path marks it again after the persisted row arrives.
         if (local && local.localOnly === true) return;
         root.request(root.readSessionRequests, root.conversationKey(ghost, id), "PUT",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/" + encodeURIComponent(id) + "/read",
+            root.sessionPath(ghost, id) + "/read",
             {}, function (xhr) {
                 if (ghost === root.activeGhost && xhr.status !== 200) root.fetchSessions(ghost);
             });
@@ -1938,8 +1932,7 @@ Singleton {
         }
         const requestedOffset = load.nextOffset;
         load.pageCount += 1;
-        root.request(state, "transcriptRequest", "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/transcript"
+        root.request(state, "transcriptRequest", "GET", root.sessionPath(state.ghost, state.sessionId) + "/transcript"
             + "?limit=" + root.transcriptPageLimit + "&offset=" + requestedOffset, null, function (xhr, body) {
             if (xhr.status === 404 && requestedOffset === 0 && load.allowNotFound) {
                 load.messages = [];
@@ -2066,8 +2059,7 @@ Singleton {
             local: "file://" + localPath, temporary: temporary, path: "", error: ""
         }]);
         root.request(root.attachmentRequests, id, "POST",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/sessions/"
-                + encodeURIComponent(sessionId) + "/attachments",
+            root.sessionPath(ghost, sessionId) + "/attachments",
             { path: localPath },
             function (xhr, body) {
                 const stored = xhr.status === 201 && body && Attachments.isAttachmentPath(body.path)
@@ -2147,7 +2139,7 @@ Singleton {
                 "the stream ended mid-turn");
         };
         root.dispatch(xhr, "POST",
-            "/api/ghosts/" + encodeURIComponent(ghost) + "/messages",
+            root.ghostPath(ghost) + "/messages",
             ({ "Content-Type": "application/json", "Accept": "text/event-stream" }),
             JSON.stringify({ prompt: prompt, sessionId: state.sessionId }), () => xhr === state.request);
     }
@@ -2175,8 +2167,7 @@ Singleton {
         const state = root.activeTurnState(false);
         if (!state) return;
         root.captureActiveTurn(state);
-        root.request(state, "stopRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/stop", {}, function () {});
+        root.request(state, "stopRequest", "POST", root.sessionPath(state.ghost, state.sessionId) + "/stop", {}, function () {});
         // Another client's turn still shows until the listing ends it, which
         // reloads what it left.
         root.cancelTurn(state);
@@ -2273,8 +2264,7 @@ Singleton {
 
     /** Read on where ghostd cut the turn's response (CONTRACTS.md, "Turn wire"). */
     function resumeTurnStream(state: var): void {
-        const path = "/api/ghosts/" + encodeURIComponent(state.ghost) + "/sessions/"
-            + encodeURIComponent(state.sessionId) + "/stream?turn=" + encodeURIComponent(state.resume.turn)
+        const path = root.sessionPath(state.ghost, state.sessionId) + "/stream?turn=" + encodeURIComponent(state.resume.turn)
             + "&from=" + state.resume.from;
         state.resume = null;
         state.consumed = 0;
@@ -2643,8 +2633,7 @@ Singleton {
 
     function fetchQueueFor(state: var): void {
         if (!(state.streaming || state.detached) || state.queueStatusRequest) return;
-        root.request(state, "queueStatusRequest", "GET", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", null, function (xhr, body) {
+        root.request(state, "queueStatusRequest", "GET", root.sessionPath(state.ghost, state.sessionId) + "/queue", null, function (xhr, body) {
                 if (xhr.status === 200) {
                     if (body) root.applyQueueFor(state, body);
                     else state.queueError = "ghostd sent malformed queue state";
@@ -2668,8 +2657,7 @@ Singleton {
         // Show the chip immediately; the stream's `queue` event removes it
         // once the daemon starts the pass that carries it.
         state.followUpQueue = state.followUpQueue.concat([prompt]);
-        root.request(state, "queueRequest", "POST", "/api/ghosts/" + encodeURIComponent(state.ghost)
-            + "/sessions/" + encodeURIComponent(state.sessionId) + "/queue", { text: prompt },
+        root.request(state, "queueRequest", "POST", root.sessionPath(state.ghost, state.sessionId) + "/queue", { text: prompt },
             function (xhr, body) {
                 state.queueSubmitting = false;
                 if (xhr.status !== 200) {

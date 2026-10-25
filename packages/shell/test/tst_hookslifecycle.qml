@@ -40,7 +40,6 @@ TestCase {
         // no socket of its own either.
         Ghostd.listRequest = null;
         Ghostd.cancelAllTranscriptLoads();
-        Ghostd.establishedConnection = false;
         Ghostd.reachable = false;
         Ghostd.activeGhost = "casper";
         Ghostd.currentSessionId = "";
