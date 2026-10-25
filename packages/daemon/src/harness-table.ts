@@ -755,6 +755,7 @@ const ROWS: readonly HarnessRow[] = [
   },
   {
     id: "omp",
+    // Like pi, Ghost's MCP servers are not forwarded.
     launch: (turn) => ({
       argv: ["omp", "-p", "--mode", "json", ...(turn.resume ? ["--continue"] : []), turn.prompt],
     }),
@@ -807,6 +808,7 @@ const ROWS: readonly HarnessRow[] = [
     id: "muse",
     effort: EFFORT,
     // `muse exec` starts fresh unless named; the first turn reports its session.
+    // Ghost's MCP servers are not forwarded.
     launch: (turn) => ({
       argv: [
         "muse", "exec", "--json", "--yolo", "--reasoning-effort", EFFORT,

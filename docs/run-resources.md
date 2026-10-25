@@ -13,8 +13,8 @@ failed attempts retain the dated last successful run. A catalog is availability,
 not proof of loaded skill bodies or a complete prompt/token-cost report.
 Legacy resource records remain inspectable but never render as chat messages.
 The MCP navbar manages only this ghost's additional configuration; it does not
-edit harness-owned settings or prove a server connected. Pi/OMP forwarding
-behavior is unchanged.
+edit harness-owned settings or prove a server connected. Pi, OMP, and Muse
+turns receive none of it.
 
 ## Parser evidence
 

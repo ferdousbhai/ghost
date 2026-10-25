@@ -1346,6 +1346,9 @@ describe("attachments", () => {
     writeFileSync(local, PNG);
     const copied = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: local }) });
     expect(copied.status).toBe(201);
+    // The media type is matched as the CORS gate matches it: case and parameters aside.
+    const cased = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "Application/JSON; charset=utf-8" }, body: JSON.stringify({ path: local }) });
+    expect(cased.status).toBe(201);
 
     const text = await fetch(url(base, "c1"), { method: "POST", headers: { "content-type": "image/png" }, body: "not an image" });
     expect(text.status).toBe(415);

@@ -1,4 +1,3 @@
-import { existsSync, readFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import {
@@ -12,7 +11,7 @@ import {
 import { runHarness } from "./harness-process.js";
 import type { Logger } from "./log.js";
 import { silentLogger } from "./log.js";
-import { writePrivateJsonAtomic } from "./private-file.js";
+import { readPrivateFileText, writePrivateJsonAtomic } from "./private-file.js";
 import { serializeByKey } from "./promise-chain.js";
 import { errorMessage } from "./errors.js";
 
@@ -29,9 +28,8 @@ interface GhostHookRunnerOptions {
 
 /** The parsed file, unvalidated: `parseHooksDocument` admits it. */
 function readCommandHooksDocument(path: string): unknown {
-  if (!existsSync(path)) return {};
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readPrivateFileText(path) ?? "{}");
   } catch (error) {
     throw new Error(`Cannot load Ghost hooks from ${path}: ${errorMessage(error)}`);
   }

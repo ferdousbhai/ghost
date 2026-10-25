@@ -31,6 +31,11 @@ describe("pins.json", () => {
     expect(await readPins(root)).toEqual(["conv-1", "conv-2"]);
   });
 
+  it("reads a file over the control-file bound as empty without loading it", async () => {
+    writeFileSync(pinsPath(root), JSON.stringify({ pinned: ["conv-1"], pad: "x".repeat(1024 * 1024) }));
+    expect(await readPins(root)).toEqual([]);
+  });
+
   it("replaces atomically: concurrent writers leave one whole file, no debris", async () => {
     await Promise.all([writePins(root, ["a"]), writePins(root, ["b"]), writePins(root, ["c"])]);
     expect(readdirSync(root)).toEqual(["pins.json"]);

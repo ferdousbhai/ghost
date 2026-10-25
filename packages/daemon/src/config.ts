@@ -2,12 +2,12 @@
  * A missing config file is not an error; a malformed one is. Falling back to
  * defaults would silently move the owner's ghosts instead of telling them.
  */
-import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import type { RemoteAccessOptions } from "./tailscale-identity.js";
 import { errorMessage } from "./errors.js";
 import { expandHome, xdgBaseDir } from "./xdg-user-dirs.js";
+import { readPrivateFileText } from "./private-file.js";
 import { isRecord } from "./record.js";
 
 export type RemoteConfig = Pick<RemoteAccessOptions, "owner" | "guests">;
@@ -72,13 +72,13 @@ function parsePort(raw: string, source: string): number {
 }
 
 function readConfigFile(path: string): DaemonConfigFile | null {
-  let text: string;
+  let text: string | null;
   try {
-    text = readFileSync(path, "utf8");
+    text = readPrivateFileText(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw new Error(`Cannot read ${path}: ${errorMessage(error)}`);
   }
+  if (text === null) return null;
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);

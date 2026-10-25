@@ -393,8 +393,8 @@ mcp_servers.*` overrides, `OPENCODE_CONFIG_CONTENT`, or a project config file
 in the conversation directory. A row is a stdio `command`/`args`/`env`/`cwd`
 or a remote `url`/`headers`, plus `enabled` and the `envPolicy`/`headerPolicy`
 expansion switches; any other field makes it invalid, since no harness dialect
-carries it. The current pi row does not forward Ghost's MCP servers; Pi 1.2
-itself supports MCP configured by the owner.
+carries it. The pi, omp, and muse rows forward none of these, `ghost-desktop`
+included; Pi 1.2 itself supports MCP configured by the owner.
 
 Which harness answers is decided per turn
 ([`session-host.ts`](packages/daemon/src/session-host.ts)): the one already

@@ -99,7 +99,7 @@ interface TurnLog {
  * The HUD is not a web page, and the viewer the daemon serves at `/` is same
  * origin; a local UI on another loopback port is a different origin on the
  * same interface. Allow exactly that, and nothing else — a page on a remote
- * origin must not be able to read a ghost's memory through the user's own
+ * origin must not be able to read a ghost's conversations through the user's own
  * browser.
  */
 const LOOPBACK_ORIGIN = /^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?$/;
@@ -238,8 +238,13 @@ function bearerToken(header: string | string[] | undefined): string {
  * cross-site request.
  */
 function isPreflightedContentType(header: string | string[] | undefined): boolean {
-  const type = typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
+  const type = mediaType(header);
   return type === "application/json" || type.startsWith("image/");
+}
+
+/** A Content-Type header's media type, lowercased and without parameters. */
+function mediaType(header: string | string[] | undefined): string {
+  return typeof header === "string" ? (header.split(";")[0] ?? "").trim().toLowerCase() : "";
 }
 
 function applyCors(request: IncomingMessage, response: ServerResponse): void {
@@ -430,7 +435,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
    * Trash one ghost. `?confirm=<name>` must repeat the name exactly: a DELETE
    * is one path segment away from every other ghost route, and this is the
    * API-level guard against an accidental or scripted one taking a persona and
-   * its memory with it. The deletion itself is a move into the
+   * its conversations with it. The deletion itself is a move into the
    * system trash, never an erase.
    */
   const handleDeleteGhost = async ({ ghost: ghostName, url, response }: RequestContext): Promise<void> => {
@@ -442,7 +447,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       );
     }
     await options.host.deleteGhost(ghostName);
-    logger.info("ghost deleted", { ghost: ghostName });
     jsonResponse(response, 200, { ok: true });
   };
 
@@ -500,7 +504,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
    */
   const handleSaveAttachment = async ({ ghost, id, request, response, admission }: RequestContext): Promise<void> => {
     let bytes: Uint8Array;
-    if (!String(request.headers["content-type"] ?? "").startsWith("application/json")) {
+    if (mediaType(request.headers["content-type"]) !== "application/json") {
       bytes = await readBody(request, MAX_ATTACHMENT_BYTES);
     } else {
       if (admission.identity) throw new GhostError("local_only", "Only the machine-local token attaches a local file.", 403);
@@ -798,7 +802,6 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
     // and every other route's `:ghost` changes with it.
     route("PUT", "api/ghosts/:ghost/name", async ({ ghost, response, body }) => {
       const renamed = await options.host.renameGhost(ghost, stringField(await body(), "name"));
-      logger.info("ghost renamed", { ghost, name: renamed.name });
       jsonResponse(response, 200, { ok: true, name: renamed.name });
     }),
     route("GET", "api/ghosts/:ghost/sessions", async ({ ghost, response }) => {

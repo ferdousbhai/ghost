@@ -142,7 +142,7 @@ export class GhostRegistry {
   /**
    * Rename `<root>/<name>/` to `<root>/<nextName>/` — which renames the ghost,
    * because the directory name is the name. One same-filesystem rename carries
-   * the persona, memory, sessions, and owner state together, and leaves every
+   * the persona, sessions, and owner state together, and leaves every
    * conversation id (a conversation directory name inside the home) valid. Machine
    * credentials are service/account scoped and are not renamed.
    *

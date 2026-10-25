@@ -1,5 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync } from "node:fs";
-import { writePrivateJsonAtomic } from "../private-file.js";
+import { chmodSync, mkdirSync } from "node:fs";
+import { readPrivateFileText, writePrivateJsonAtomic } from "../private-file.js";
 import { dirname, join } from "node:path";
 import type { Ghost } from "../ghosts.js";
 import type { SessionSummary } from "../session-host.js";
@@ -29,10 +29,11 @@ export function cliConfigPath(runtime: Pick<CliRuntime, "env" | "home">): string
 export function readDefaultGhost(runtime: Pick<CliRuntime, "env" | "home">): string | undefined {
   const path = cliConfigPath(runtime);
   try {
-    const parsed = JSON.parse(readFileSync(path, "utf8")) as CliConfigFile;
+    const text = readPrivateFileText(path);
+    if (text === null) return undefined;
+    const parsed = JSON.parse(text) as CliConfigFile;
     return typeof parsed.ghost === "string" && parsed.ghost.trim() ? parsed.ghost : undefined;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
     if (error instanceof SyntaxError) throw new CliError(EXIT_CODE.usage, `${path} is not valid JSON`);
     throw new CliError(EXIT_CODE.failure, `cannot read ${path}: ${errorMessage(error)}`);
   }
