@@ -178,7 +178,7 @@ try {
   assert.ok(turnEvents.includes(join(homedir(), "step-2.md")));
   assert.ok(!turnEvents.includes('"toolcall_'));
 
-  // Stopping during a stop hook must end the turn without starting another pass.
+  // A stop during a stop hook is accepted and the turn settles.
   const stoppedId = "mock-stopped-hook";
   let stoppedResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/messages`, {
     method: "POST",

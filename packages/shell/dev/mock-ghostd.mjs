@@ -358,7 +358,7 @@ const sessionSummary = (name) => (s) => {
     messageCount: s.messages.length,
     pinned: s.pinned === true,
     unread: !s.readAt || s.updatedAt > s.readAt,
-    running: answering.has(turnKey(name, s.id)),
+    running: activeTurns.has(turnKey(name, s.id)),
   };
 };
 
@@ -546,10 +546,9 @@ function* script(name, prompt) {
   yield* textBlock(contentIndex++, reply);
 }
 
-const answering = new Set();
 const activeTurns = new Map();
 const turnKey = (name, sessionId) => JSON.stringify([name, sessionId]);
-const ghostIsAnswering = (name) => [...answering].some((key) => JSON.parse(key)[0] === name);
+const ghostIsAnswering = (name) => [...activeTurns.keys()].some((key) => JSON.parse(key)[0] === name);
 
 /** Each turn's events by turn id, kept as ghostd keeps them so a cut response can resume. */
 const turnLogs = new Map();
@@ -636,7 +635,6 @@ async function streamTurn(res, name, body) {
   // An owner command has no passes, so nothing queues into it.
   const turn = { streaming: !prompt.startsWith("!"), followUp: [], log };
   activeTurns.set(key, turn);
-  answering.add(key);
   // Like ghostd, a turn creates its conversation and logs its prompt as it
   // starts (an owner command logs when it ends), so another client sees what
   // is running.
@@ -721,7 +719,6 @@ async function streamTurn(res, name, body) {
       }
     }
   } finally {
-    answering.delete(key);
     turn.streaming = false;
     activeTurns.delete(key);
     // Every end announces, as ghostd's does: stopped, failed, or done.
@@ -978,7 +975,7 @@ const mockServer = createServer(async (req, res) => {
     if (!validConversationId(sessionId)) {
       return json(res, 400, { error: { message: "sessionId is not a conversation id", code: "invalid_conversation_id" } });
     }
-    if (answering.has(turnKey(name, sessionId))) {
+    if (activeTurns.has(turnKey(name, sessionId))) {
       return json(res, 409, {
         error: {
           message: "This ghost is already answering in this conversation",
