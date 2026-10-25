@@ -62,7 +62,7 @@ Rectangle {
         ColorAnimation { duration: Theme.durFast; easing.type: Easing.OutQuad }
     }
 
-    // Declared before the action row so its smaller MouseAreas win hit-testing.
+    // Declared before the file chip so its smaller MouseArea wins hit-testing.
     MouseArea {
         id: cardHover
         anchors.fill: parent
