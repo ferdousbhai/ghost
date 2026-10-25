@@ -54,7 +54,6 @@ ColumnLayout {
         id: conversations
         Layout.fillWidth: true
         Layout.fillHeight: true
-        onPicked: root.refocused()
         onRefocused: root.refocused()
         onDeleteRequested: (sessionId, title) => root.conversationDeleteRequested(sessionId, title)
     }

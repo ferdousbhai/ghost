@@ -17,10 +17,6 @@ import "../services"
 Item {
     id: root
 
-    /** Emitted after a conversation is opened or a new one is started, so the
-        HUD can return focus to the composer. */
-    signal picked()
-
     /** The × was clicked: the HUD raises the modal confirmation. Deleting is
         never one click, and the question is worth more room than a list row. */
     signal deleteRequested(string sessionId, string title)
@@ -319,7 +315,7 @@ Item {
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
                     Ghostd.openConversation(entry.sessionData.id);
-                    root.picked();
+                    root.refocused();
                 }
                 // The first click of the pair still opens the conversation.
                 // That is what a single click there does anyway, and it is the

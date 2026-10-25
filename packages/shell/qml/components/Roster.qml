@@ -10,6 +10,7 @@ import "../services"
 Item {
     id: root
 
+    /** A ghost was switched to or created: what belonged to the one left goes. */
     signal picked()
 
     /** The × was clicked: the HUD raises the modal, which asks for the name
@@ -18,7 +19,8 @@ Item {
     signal deleteRequested(string name)
 
     /** The keyboard has nowhere to be, but nothing about the view changed —
-        a rename that ended, or a click on the ghost already selected. */
+        a rename that ended, a cancelled summon, or a click on the ghost
+        already selected. */
     signal refocused()
 
     // Every way out of the summon row, a rename included, drops the draft.
@@ -110,7 +112,7 @@ Item {
                     onClicked: {
                         if (root.naming) {
                             root.naming = false;
-                            root.picked();
+                            root.refocused();
                         } else {
                             root.naming = true;
                             nameField.forceActiveFocus();
@@ -324,6 +326,7 @@ Item {
 
             TextInput {
                 id: nameField
+                objectName: "summonName"
                 anchors.fill: parent
                 anchors.margins: Theme.gap
                 verticalAlignment: TextInput.AlignVCenter
@@ -339,7 +342,7 @@ Item {
                 }
                 Keys.onEscapePressed: {
                     root.naming = false;
-                    root.picked();
+                    root.refocused();
                 }
             }
         }

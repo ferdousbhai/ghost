@@ -9,8 +9,6 @@ import "NotificationText.js" as NotificationText
 Singleton {
     id: root
 
-    property bool enabled: true
-
     property var notificationIds: ({})
     property var pending: []
     property string sendingKey: ""
@@ -38,7 +36,6 @@ Singleton {
     }
 
     function send(ghost: string, sessionId: string, title: string, body: string, urgency: string): void {
-        if (!root.enabled) return;
         root.pending = root.pending.filter(item => item.ghost !== ghost || item.sessionId !== sessionId);
         root.pending.push({ ghost: ghost, sessionId: sessionId, title: title, body: body, urgency: urgency });
         root.drain();

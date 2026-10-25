@@ -30,9 +30,8 @@ pragma ComponentBehavior: Bound
 // word names which one is showing. Do not reintroduce editable MarkdownText
 // without re-running that probe.
 //
-// Plain TextEdit rather than QtQuick.Controls TextArea, as everywhere else in
-// this shell: Controls would drag in a style whose colours compete with the
-// shared design tokens.
+// Plain TextEdit rather than QtQuick.Controls TextArea: Controls would drag in
+// a style whose colours compete with the shared design tokens.
 import QtQuick
 import "../services"
 import "MarkdownCompat.js" as MarkdownCompat

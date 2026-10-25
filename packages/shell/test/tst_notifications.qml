@@ -14,7 +14,6 @@ TestCase {
         sender.running = false;
         Notifier.pending = [];
         Notifier.notificationIds = ({});
-        Notifier.enabled = true;
         Ghostd.activeGhost = "casper";
         Ghostd.currentSessionId = "one";
         Ghostd.hudChatFocused = true;

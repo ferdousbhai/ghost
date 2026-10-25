@@ -698,9 +698,7 @@ Singleton {
         root.retire(root, "listRequest");
         root.request(root, "listRequest", "GET", "/api/ghosts", null, function (xhr, list) {
             if (xhr.status !== 200) {
-                root.fail(xhr.status === 0
-                    ? "ghostd is not answering on " + root.baseUrl
-                    : "GET /api/ghosts → " + xhr.status);
+                root.fail(root.describeError(xhr, "GET /api/ghosts"));
                 return;
             }
             if (list === undefined) {
