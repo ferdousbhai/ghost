@@ -384,8 +384,6 @@ Item {
                     spacing: Theme.markdownBlockGap
 
                     Repeater {
-                        id: settledBlocks
-                        visible: settledBlocks.count > 0
                         model: bodyBlocks
                         // Named so a test can watch that a block already on
                         // screen is the same object, with the same text, after
@@ -467,13 +465,8 @@ Item {
             }
 
             Repeater {
-                id: activityCards
                 // A row's text comes before its calls (text after a call
                 // opens the next row), so the cards follow the text.
-                // A zero-item Repeater is still a Column child of height 0,
-                // and Column still puts spacing around it — a phantom gap
-                // above every prompt that has no tool cards.
-                visible: activityCards.count > 0
                 model: root.shownActivities
                 delegate: ToolCard {
                     required property var modelData
