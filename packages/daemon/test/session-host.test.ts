@@ -724,12 +724,12 @@ describe("choosing the agent", () => {
     await running;
     expect((await sessions.listSessions("casper"))[0]?.harness).toBe("first");
   });
-  it("does not block a switch based on reported usage", async () => {
+  it("lets the owner choose a harness the report lists", async () => {
     const fake = harness(replies("x"));
     const sessions = host({
       harnesses: [fake],
       harnessReport: async () => ({
-        harnesses: [{ id: "fake", eligible: false, reason: "Weekly at 95%", usage: null }],
+        harnesses: [{ id: "fake", usage: null }],
         refresh: "omarchy agent usage update",
       }),
     });

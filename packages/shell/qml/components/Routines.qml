@@ -124,7 +124,6 @@ Rectangle {
             delegate: Rectangle {
                 id: card
                 required property var modelData
-                required property int index
                 width: ListView.view.width
                 height: content.implicitHeight + Theme.pad * 2
                 color: Qt.alpha(Theme.foreground, 0.04)

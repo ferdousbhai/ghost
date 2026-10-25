@@ -40,6 +40,18 @@ describe("ghost smoke", () => {
       { step: "turn", ok: true, detail: "skipped (--no-turn)" },
     ]);
   }, 20_000);
+
+  it.skipIf(process.platform === "win32")("sets --harness through the daemon, which refuses an id it has no row for", async () => {
+    home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-harness-"));
+    const env = { ...process.env, GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}` };
+    const chosen = await runCli(["smoke", "--no-turn", "--harness", "claude", "--json"], { env, home });
+    expect(chosen.code, chosen.stderr).toBe(0);
+    expect(chosen.stdout.trim().split("\n").map((line) => JSON.parse(line))).toContainEqual(
+      { step: "harness", ok: true, detail: "claude" });
+    const refused = await runCli(["smoke", "--no-turn", "--harness", "nope", "--json"], { env, home });
+    expect(refused.code).not.toBe(0);
+    expect(refused.stdout).toContain('"step":"harness"');
+  }, 40_000);
 });
 
 describe("DaemonClient request budgets", () => {

@@ -75,9 +75,9 @@ Item {
     implicitWidth: 420
     implicitHeight: 240
 
-    // The reading column, measured rather than guessed: ~72 monospace columns
-    // of source, ~68 of proportional prose. Wider than that and the eye loses
-    // the line start on the way back.
+    // The reading column, measured rather than guessed: ~72 columns of
+    // source, ~68 of rendered prose, each in its own font token. Wider than
+    // that and the eye loses the line start on the way back.
     TextMetrics {
         id: column
         font.family: root.reading ? Theme.fontFamily : Theme.fontFamilyMono

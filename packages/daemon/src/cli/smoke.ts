@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { freePort, waitUntilServing } from "../loopback.js";
@@ -160,7 +160,8 @@ export async function smokeCommand(
     const harness = flagString(parsed, "harness");
     if (harness) {
       step = "harness";
-      writeFileSync(join(scratch, "ghosts", "probe", "settings.yml"), `harness: ${harness}\n`);
+      // Through the daemon, as every CLI change to a ghost goes (CONTRACTS.md).
+      await runScratchCli(["harness", harness, "-g", "probe", "-q"], options);
       report("harness", true, harness);
     }
     step = "turn";

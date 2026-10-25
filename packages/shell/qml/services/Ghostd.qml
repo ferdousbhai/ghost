@@ -774,16 +774,16 @@ Singleton {
      * the edit not having taken. A refusal — `409 ghost_busy` most often — puts
      * every one of those keys back and says why in `ghostRenameError`.
      */
-    function renameGhost(from: string, to: string): bool {
+    function renameGhost(from: string, to: string): void {
         const next = to.trim();
-        if (from === "" || next === "" || next === from) return false;
-        if (root.renamingGhost || root.deletingGhost !== "") return false;
+        if (from === "" || next === "" || next === from) return;
+        if (root.renamingGhost || root.deletingGhost !== "") return;
         const transaction = GhostRename.prepare(root.ghostRenameState(), from, next);
         if (!transaction.ok) {
             root.ghostRenameError = transaction.code === "already_exists"
                 ? "A ghost named “" + next + "” already exists."
                 : "The ghost being renamed is no longer available.";
-            return false;
+            return;
         }
         root.ghostRenameError = "";
         const before = transaction.before;
@@ -803,7 +803,6 @@ Singleton {
                 root.installGhostRenameState(before);
                 root.ghostRenameError = root.refusal(xhr, "PUT ghost name");
             });
-        return true;
     }
 
     function ghostRenameState(): var {

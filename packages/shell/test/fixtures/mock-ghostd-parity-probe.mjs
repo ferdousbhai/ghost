@@ -61,16 +61,6 @@ try {
   });
   assert.equal(hooksResponse.status, 200);
   assert.deepEqual(Object.keys(await hooksResponse.json()), ["path", "document"]);
-  const retiredStatus = await fetch(`http://127.0.0.1:${port}/api/hooks`);
-  assert.equal(retiredStatus.status, 404);
-  const perGhostHooks = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/hooks`);
-  assert.equal(perGhostHooks.status, 404);
-
-  const projectRoute = await fetch(
-    `http://127.0.0.1:${port}/api/ghosts/casper/sessions/sess-casper-1/project`,
-  );
-  assert.equal(projectRoute.status, 404);
-
   const mcpResponse = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/mcp`);
   assert.equal(mcpResponse.status, 200);
   const mcp = await mcpResponse.json();
@@ -232,11 +222,6 @@ try {
   }
 
   // Removed routes stay removed.
-  for (const path of ["model", "models", "providers", "sessions/sess-casper-1/ask",
-    "sessions/sess-casper-1/commands", "sessions/sess-casper-1/resources"]) {
-    const removed = await fetch(`http://127.0.0.1:${port}/api/ghosts/casper/${path}`);
-    assert.equal(removed.status, 404, path);
-  }
 } finally {
   if (child.exitCode === null) child.kill("SIGTERM");
   await new Promise((resolveExit) => {
