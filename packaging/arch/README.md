@@ -100,25 +100,21 @@ it, not only Ghost.
 ## Desktop boundary
 
 The supported release target is Omarchy. Ghost depends on Omarchy's Hyprland
-and Quickshell desktop shape, and carries its Lua keybinding and optional native
-bar integration under `/usr/share/doc/ghost/shell-contrib/` for the owner to
-enable. There is no generic Arch/Hyprland support promise. Packaging never
+and Quickshell desktop shape, and carries its keybinding samples under
+`/usr/share/doc/ghost/shell-contrib/` for the owner to enable. There is no generic Arch/Hyprland support promise. Packaging never
 edits `~/.config/hypr` or `~/.config/omarchy`.
 
 ## Upgrades, rollback, and uninstall
 
 The package owns only files under `/usr`; the HUD's per-user link is the
-owner's, and `smoke.sh` fails the build if
-a system Quickshell link reappears. It does not create or own `~/ghosts`,
+owner's. It does not create or own `~/ghosts`,
 `~/.config/ghost`, or `~/.local/state/ghost`. Upgrading or removing it therefore
 leaves personas, documents, sessions, provider credentials, and API tokens
 untouched. Its removal hook likewise leaves owner documents and any
 owner-installed machine skill untouched.
 
-A runtime upgrade requires `systemctl --user reenable --now ghostd.service`
-followed by `systemctl --user restart ghostd.service` to load the new bundle;
-an installed HUD also needs `omarchy-restart-shell`. Re-enabling moves an installation made with the old
-daemon unit away from `default.target` and into the graphical-session lifecycle.
+A runtime upgrade requires `systemctl --user restart ghostd.service` to load
+the new bundle; an installed HUD also needs `omarchy-restart-shell`.
 A rescan will not do here: the plugin's entry point is unchanged, so the shell
 keeps the widget it already loaded and the owner runs a new daemon behind an
 old HUD.
@@ -155,6 +151,6 @@ For a real service-context check on a graphical Arch login, run:
 /usr/lib/ghost/package-smoke/service-smoke.sh
 ```
 
-It uses `/usr/bin/ghost status --json` to verify that the terminal client can
+It uses `/usr/bin/ghost status` to verify that the terminal client can
 authenticate to the active packaged daemon. CI chroots do not run a graphical
 user manager, so this stays a release-machine check.

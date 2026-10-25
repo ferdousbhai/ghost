@@ -26,7 +26,7 @@ offline_env=(
   XDG_CACHE_HOME="$scratch/cache"
   NO_PROXY="127.0.0.1,localhost"
   no_proxy="127.0.0.1,localhost"
-  GHOST_BUN_EXECUTABLE="${GHOST_RUNTIME_SMOKE_BUN:-$(command -v bun)}"
+  GHOST_BUN_EXECUTABLE="$(command -v bun)"
 )
 
 help_output="$(env "${offline_env[@]}" timeout 20 "$daemon_binary" --help)"

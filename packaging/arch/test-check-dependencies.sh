@@ -7,7 +7,7 @@ set -euo pipefail
 
 script_dir="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source_root="$(realpath -e -- "$script_dir/../..")"
-bash -n "$script_dir/arch-run.sh" "$script_dir/build-native.sh"
+for script in arch-run.sh build-native.sh; do bash -n "$script_dir/$script"; done
 temp_base="${GHOST_ARCH_DEPENDENCY_TEST_ROOT:-${TMPDIR:-/tmp}}"
 mkdir -p "$temp_base"
 work="$(mktemp -d "$temp_base/ghost-arch-dependencies.XXXXXX")"
@@ -75,8 +75,6 @@ cmp "$script_dir/ghost-runtime-dev.install" \
 install_script="$script_dir/ghost-runtime-dev.install"
 require_install_hook_activation "$install_script" post_install \
   'systemctl --user enable --now ghostd.service'
-require_install_hook_activation "$install_script" post_upgrade \
-  'systemctl --user reenable --now ghostd.service'
 require_install_hook_activation "$install_script" post_upgrade \
   'systemctl --user restart ghostd.service'
 

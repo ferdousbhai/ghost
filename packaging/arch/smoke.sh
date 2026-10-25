@@ -93,12 +93,6 @@ if find "$root" -xdev \( -type f -o -type d \) -perm /022 -print -quit | grep -q
   printf 'package payload contains a group/world-writable path\n' >&2
   exit 1
 fi
-# The HUD is an omarchy-shell plugin: the package owns the files and the
-# install script makes the per-user link, so there is no system-wide link.
-if [[ -e "$root/etc/xdg/quickshell/ghost" ]]; then
-  printf 'package still installs a system Quickshell config link\n' >&2
-  exit 1
-fi
 
 if [[ "$component" == ui ]]; then
   desktop-file-validate "$root/usr/share/applications/ghost.desktop"

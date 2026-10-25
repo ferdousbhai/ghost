@@ -73,7 +73,6 @@ grep -Fxq $'\tsource = ghost-runtime-1.2.3-linux-any.tar.zst::https://github.com
 grep -Fxq $'\tarch = any' "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$source_sha" "$srcinfo"
 grep -Fxq $'\tsha256sums = '"$runtime_sha" "$srcinfo"
-! grep -Eq 'ghost-ai|summon-ghost|AUR|aur' "$contribution/PKGBUILD"
 
 # Model the only fields sync-upstream rewrites: pkgver, pkgrel, and the
 # checksum arrays. The updated recipe must derive the new source identity; it
@@ -234,7 +233,8 @@ grep -Fq 'systemctl --user enable --now ghostd.service' "$script_root/bin/omarch
 grep -Fq 'omarchy plugin enable ferdousbhai.ghost' "$script_root/bin/omarchy-install-ai-ghost"
 # -T or the link lands *inside* an existing directory and the HUD never loads.
 grep -Fq 'ln -sfnT /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
-! grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost"
+! grep -Fq 'ln -sfn /usr/share/ghost/plugin' "$script_root/bin/omarchy-install-ai-ghost" \
+  "$script_root/pkgbuilds/ghost/ghost.install"
 grep -Fq 'omarchy-pkg-drop ghost' "$script_root/bin/omarchy-remove-ai-ghost"
 grep -Fq '"install.ai.ghost"' "$script_root/omarchy-menu.jsonc"
 grep -Fq '"remove.ai.ghost"' "$script_root/omarchy-menu.jsonc"

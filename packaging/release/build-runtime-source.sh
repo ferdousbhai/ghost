@@ -47,13 +47,11 @@ head_commit="$(git -C "$source_root" rev-parse HEAD)"
   printf 'source checkout is %s, not requested commit %s\n' "$head_commit" "$commit" >&2
   exit 1
 }
-if [[ "${GHOST_ALLOW_DIRTY_SOURCE:-0}" != 1 ]]; then
-  dirty="$(git -C "$source_root" status --porcelain --untracked-files=normal)"
-  if [[ -n "$dirty" ]]; then
-    printf 'release runtime source is dirty; build from a clean tag checkout\n%s\n' \
-      "$dirty" >&2
-    exit 1
-  fi
+dirty="$(git -C "$source_root" status --porcelain --untracked-files=normal)"
+if [[ -n "$dirty" ]]; then
+  printf 'release runtime source is dirty; build from a clean tag checkout\n%s\n' \
+    "$dirty" >&2
+  exit 1
 fi
 epoch="${SOURCE_DATE_EPOCH:-$(git -C "$source_root" show -s --format=%ct "$commit")}"
 [[ "$epoch" =~ ^[0-9]+$ ]] || {

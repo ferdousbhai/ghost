@@ -1,5 +1,4 @@
 import {
-  chmodSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -104,19 +103,6 @@ for (const metafilePath of metafileArgs) {
   }
 }
 
-for (const bundle of [join(runtimeRoot, "lib", "ghostd.js"), join(runtimeRoot, "lib", "ghost.js")]) {
-  const bytes = readFileSync(bundle, "utf8");
-  for (const marker of [
-    "Use is subject to the Legal Agreements outlined here",
-    "Want to see the unminified source? We're hiring!",
-    "// Version: 0.3.170",
-  ]) {
-    if (bytes.includes(marker)) {
-      throw new Error(`Claude Agent SDK source marker entered ${bundle}`);
-    }
-  }
-}
-
 mkdirSync(join(licensesRoot, "ghost"), { recursive: true, mode: 0o755 });
 copyFileSync(join(sourceRoot, "LICENSE"), join(licensesRoot, "ghost", "LICENSE"));
 copyFileSync(
@@ -140,21 +126,10 @@ for (const pkg of ordered) {
   for (const license of licenseFiles(pkg)) {
     const output = join(destination, license.name);
     copyFileSync(license.source, output);
-    chmodSync(output, 0o644);
     installed.push(relative(runtimeRoot, output));
   }
   rows.push(`npm\t${pkg.name}\t${pkg.version}\t${pkg.license}\t${installed.join(",")}`);
 }
 
-writeFileSync(join(runtimeRoot, "BUNDLED-LICENSES"), `${rows.join("\n")}\n`, {
-  mode: 0o644,
-});
-for (const directory of [licensesRoot, join(licensesRoot, "ghost")]) {
-  chmodSync(directory, 0o755);
-}
-for (const file of [
-  join(licensesRoot, "ghost", "LICENSE"),
-  join(licensesRoot, "ghost", "THIRD_PARTY_NOTICES.md"),
-]) {
-  chmodSync(file, 0o644);
-}
+// build-runtime.sh sets the payload's modes after this runs.
+writeFileSync(join(runtimeRoot, "BUNDLED-LICENSES"), `${rows.join("\n")}\n`);

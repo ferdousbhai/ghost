@@ -11,8 +11,8 @@ The inputs:
 1. `ghost-<version>.tar.gz`, a deterministic sanitized source snapshot;
 2. `ghost-runtime-<version>-linux-any.tar.zst` (one archive for every Linux
    architecture Bun runs on; the payload has no native code), containing the ordinary
-   Bun-target `ghostd` and `ghost` bundles, required static assets, fixed
-   launchers, and exact bundled-package license closure; and
+   Bun-target `ghostd`, `ghost`, and `ghost-desktop` bundles, fixed launchers,
+   and exact bundled-package license closure; and
 3. their checksums and release metadata.
 
 The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
@@ -22,8 +22,8 @@ The stable recipe builds `ghost-runtime` and `ghost` from the same inputs.
 
 The v3 runtime archive is a package *source*, not an installed pacman package.
 Its payload contains the `ghostd`, `ghost`, and `ghost-desktop` launchers in
-`bin/` and their bundles in `lib/`, required static assets, and the exact
-licenses for the bundled application closure. Ghost and its MCP support remain bundled for offline use.
+`bin/` and their bundles in `lib/`, and the exact licenses for the bundled
+application closure. Ghost and its MCP support remain bundled for offline use.
 Bundles are minified with function and class names preserved for diagnostics;
 the full license closure stays in the payload.
 QML, the desktop
@@ -41,7 +41,7 @@ The v3 runtime archive records `bun_build_version` separately from
 `bun_runtime_min`, fixes `bundle_target=bun`, and binds every launcher, bundle,
 license, and license-manifest byte to the exact `source_commit` through
 `PAYLOAD.SHA256`. The stable recipe verifies the source/runtime checksums, exact
-layout and modes, payload and bundled-license closure, Agent SDK exclusion,
+layout and modes, payload and bundled-license closure,
 declared/current Bun compatibility, and each launcher's `--help`/`--version`
 plus scratch-daemon behavior before installation.
 

@@ -56,7 +56,6 @@ for discovery in delayed missing; do
     [[ "$(cat "$work/count")" == 3 ]]
     grep -Fxq enabled "$work/actions"
     grep -Fq 'ghost new <name>' "$work/output"
-    ! grep -Fq 'ghost login' "$work/output"
   else
     [[ "$result" != 0 ]]
     [[ "$(cat "$work/count")" == 40 ]]

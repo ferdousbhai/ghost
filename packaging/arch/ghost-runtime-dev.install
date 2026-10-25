@@ -19,7 +19,6 @@ post_upgrade() {
   cat <<'TEXT'
 Ghost runtime was upgraded. Restart it in the graphical user's session:
 
-  systemctl --user reenable --now ghostd.service
   systemctl --user restart ghostd.service
 
 Ghost homes, credentials, and state were preserved.

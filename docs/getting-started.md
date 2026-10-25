@@ -293,11 +293,9 @@ and any skill you installed untouched.
 | A turn fails at once | `ghost harnesses` — is any supported agent installed? Run that agent by hand once to confirm it is signed in |
 | You want a check that touches nothing | `ghost smoke --no-turn` runs a throwaway daemon on a free port against a temporary ghost home and reports each stage; drop `--no-turn` (and add `--harness <id>`) for a real two-turn check |
 
-After an upgrade, re-enable to migrate older unit enablement, then restart
-the active daemon to load the new bundle:
+After an upgrade, restart the daemon to load the new bundle:
 
 ```sh
-systemctl --user reenable --now ghostd.service
 systemctl --user restart ghostd.service
 omarchy-restart-shell
 ```
