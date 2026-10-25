@@ -119,8 +119,8 @@ describe("tailnet identity", () => {
     expect(guestGhosts.status).toBe(200);
     // A guest sees names, never a ghost home's path; the owner sees both.
     expect(await guestGhosts.json()).toEqual([{ name: "casper" }]);
-    expect((await (await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).json())[0])
-      .toHaveProperty("dir");
+    const ownerGhosts = await (await fetch(`${base}/api/ghosts`, { headers: asTailnet("owner@example.com") })).json() as unknown[];
+    expect(ownerGhosts[0]).toHaveProperty("dir");
     const guestBoard = await (await fetch(`${base}/api/board`, { headers: asTailnet("guest@example.com") })).json();
     expect(guestBoard).not.toHaveProperty("path");
     expect(await (await fetch(`${base}/api/board`, { headers: asTailnet("owner@example.com") })).json()).toHaveProperty("path");

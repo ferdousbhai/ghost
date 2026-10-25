@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { accessSync, constants, lstatSync, readFileSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
+import { SUPPORTED_HARNESSES } from "./harness-table.js";
 import { xdgBaseDir } from "./xdg-user-dirs.js";
 
 const exec = promisify(execFile);
@@ -148,15 +149,18 @@ function readRecord(directory: string, id: string): unknown {
 }
 
 /**
- * The agent CLIs Omarchy knows that are installed, each with its usage record. `omarchy`, `mise`, and every harness resolve through `env.PATH`.
+ * The agent CLIs Omarchy knows that are installed, each with its usage record;
+ * without `omarchy` on PATH, the installed ones Ghost has a row for, in table
+ * order. `omarchy`, `mise`, and every harness resolve through `env.PATH`.
  */
 export async function readHarnessReport(
   env: NodeJS.ProcessEnv,
   home: string,
 ): Promise<HarnessReport> {
-  const { stdout } = await exec("omarchy", ["commands", "--json"], { env, maxBuffer: 16 * 1024 * 1024 });
   const directory = omarchyUsageDirectory(env, home);
-  const ids = parseOmarchyAgents(stdout);
+  const ids = which("omarchy", env) === null
+    ? SUPPORTED_HARNESSES
+    : parseOmarchyAgents((await exec("omarchy", ["commands", "--json"], { env, maxBuffer: 16 * 1024 * 1024 })).stdout);
   const installed = await Promise.all(ids.map((id) => isInstalled(id, env)));
   const harnesses = ids
     .filter((_, index) => installed[index])

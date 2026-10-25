@@ -595,8 +595,8 @@ ghost can drive and verify itself from Bash without raw HTTP. `ghost help
 rendered for the ghost the shell's `$GHOST` names and needing no daemon; they are prompt-visible contract text like the policy
 sections. `ghost harnesses` also reads locally, never through the daemon: the
 agent ids in Omarchy's `omarchy default agent` choices (from `omarchy commands
---json`) that Omarchy's own `agent_present` test would call installed, in
-that order: an `omarchy-install-<id>-cli --check` decides when that installer
+--json`; without `omarchy` on `PATH`, the ids Ghost has a row for) that
+Omarchy's own `agent_present` test would call installed, in that order: an `omarchy-install-<id>-cli --check` decides when that installer
 exists, a first-run mise stub on `PATH` counts only once `mise where
 <package>` succeeds for the package its `mise use -g` line names (so a pending
 update is not a cold install), and any other executable on `PATH` is the

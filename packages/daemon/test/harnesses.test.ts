@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { accountEnv, assessHarness, parseOmarchyAgents, STALE_AFTER_MS } from "../src/harnesses.js";
+import { accountEnv, assessHarness, parseOmarchyAgents, readHarnessReport, STALE_AFTER_MS } from "../src/harnesses.js";
 import { runCli } from "./helpers/cli.js";
 
 const NOW = Date.parse("2026-09-26T12:00:00Z");
@@ -31,6 +31,21 @@ describe("parseOmarchyAgents", () => {
 
   it("fails loudly when Omarchy stops naming them", () => {
     expect(() => parseOmarchyAgents(JSON.stringify({ commands: [] }))).toThrow(/default-agent/u);
+  });
+});
+
+describe("readHarnessReport", () => {
+  it("without Omarchy, reports the installed harnesses Ghost has a row for", async () => {
+    const root = mkdtempSync(join(tmpdir(), "ghost-no-omarchy-"));
+    try {
+      const bin = join(root, "bin");
+      mkdirSync(bin);
+      writeFileSync(join(bin, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+      const report = await readHarnessReport({ PATH: bin }, root);
+      expect(report.harnesses.map((harness) => harness.id)).toEqual(["claude"]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -159,11 +174,11 @@ describe("ghost harnesses", () => {
     expect(result.stdout).toContain("refresh: omarchy agent usage update");
   });
 
-  it("fails with a clear message when omarchy is missing", async () => {
+  it("lists what is installed, not an error, when omarchy is missing", async () => {
     root = mkdtempSync(join(tmpdir(), "ghost-harnesses-"));
-    const result = await runCli(["harnesses"], { env: { PATH: join(root, "nowhere") }, home: root });
-    expect(result.code).not.toBe(0);
-    expect(result.stderr).toMatch(/^ghost: cannot list harnesses: /u);
+    const result = await runCli(["harnesses", "--json"], { env: { PATH: join(root, "nowhere") }, home: root });
+    expect(result.code, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ harnesses: [] });
   });
 });
 
