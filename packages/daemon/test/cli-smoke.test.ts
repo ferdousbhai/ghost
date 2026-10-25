@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -43,7 +43,18 @@ describe("ghost smoke", () => {
 
   it.skipIf(process.platform === "win32")("sets --harness through the daemon, which refuses an id it has no row for", async () => {
     home = mkdtempSync(join(tmpdir(), "ghost-cli-smoke-harness-"));
-    const env = { ...process.env, GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}` };
+    // The harness listing asks Omarchy for its agents; a stub answers, so the
+    // test does not depend on what the host has installed.
+    const bin = join(home, "bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "omarchy"), `#!/bin/sh
+if [ "$1" = commands ]; then echo '{"commands":[{"route":"omarchy default agent","args":"[claude]"}]}'; fi
+`, { mode: 0o755 });
+    const env = {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH ?? ""}`,
+      GHOSTD: `bun ${fileURLToPath(new URL("../src/main.ts", import.meta.url))}`,
+    };
     const chosen = await runCli(["smoke", "--no-turn", "--harness", "claude", "--json"], { env, home });
     expect(chosen.code, chosen.stderr).toBe(0);
     expect(chosen.stdout.trim().split("\n").map((line) => JSON.parse(line))).toContainEqual(
