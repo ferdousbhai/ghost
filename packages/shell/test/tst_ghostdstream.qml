@@ -23,7 +23,6 @@ TestCase {
         Ghostd.clearTurnProjection();
         Ghostd.lastError = "";
         Ghostd.reachable = true;
-        Ghostd.hudVisible = false;
     }
 
     function cleanup(): void {

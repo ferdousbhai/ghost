@@ -244,6 +244,26 @@ function hookEventBase(ghost: Ghost, id: string, sessionDir: string, signal: Abo
   };
 }
 
+/**
+ * The policy sections every persona carries after its character, in prompt
+ * order; prompt-budget.test.ts measures exactly this list.
+ */
+export function stablePolicySections(options: {
+  documents: string;
+  runningSource: RunningSource | null;
+  firstMeeting: boolean;
+}): string[] {
+  return [
+    OMARCHY_COMPUTER_USE_POLICY,
+    HARNESS_LIMITS_POLICY,
+    BACKGROUND_WORK_POLICY,
+    renderOwnerContextPolicy(options.documents),
+    SCHEDULED_WORK_POLICY,
+    renderSelfMaintenancePolicy(options.runningSource),
+    ...(options.firstMeeting ? [FIRST_MEETING_SECTION] : []),
+  ];
+}
+
 export class SessionHost {
   private readonly registry: GhostRegistry;
   private readonly ownerHome: string;
@@ -349,15 +369,11 @@ export class SessionHost {
       ghostName: ghost.name,
       character,
       homeDir: ghost.dir,
-      extraSections: [
-        OMARCHY_COMPUTER_USE_POLICY,
-        HARNESS_LIMITS_POLICY,
-        BACKGROUND_WORK_POLICY,
-        renderOwnerContextPolicy(resolveDocumentsDirectory(this.env, this.ownerHome)),
-        SCHEDULED_WORK_POLICY,
-        renderSelfMaintenancePolicy(this.runningSource),
-        ...(isSeededCharacter(ghost.name, character?.body ?? null) ? [FIRST_MEETING_SECTION] : []),
-      ],
+      extraSections: stablePolicySections({
+        documents: resolveDocumentsDirectory(this.env, this.ownerHome),
+        runningSource: this.runningSource,
+        firstMeeting: isSeededCharacter(ghost.name, character?.body ?? null),
+      }),
     });
   }
 

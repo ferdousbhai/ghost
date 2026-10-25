@@ -22,7 +22,6 @@ TestCase {
         Ghostd.sessionIds = ({ casper: "" });
         Ghostd.clearTurnProjection();
         Ghostd.reachable = true;
-        Ghostd.hudVisible = false;
         finishedSpy.clear();
         failedSpy.clear();
         Ghostd.sessions = [];

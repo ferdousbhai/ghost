@@ -10,7 +10,6 @@ TestCase {
         reads = [];
         Ghostd.requestFactory = Xhr.factory(reads, /\/read$/);
         Ghostd.hudChatFocused = false;
-        Ghostd.hudVisible = true;
         Ghostd.activeGhost = "casper";
         Ghostd.currentSessionId = "one";
         Ghostd.sessions = [{ id: "one", unread: true }];

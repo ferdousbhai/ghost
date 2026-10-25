@@ -402,9 +402,9 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
   /**
    * The owner's `hooks.json`, read and replaced whole. Whole-document
    * replacement keeps "groups run in file order" honest: there are no per-hook
-   * ids to invent for a file that has none. The daemon's loader is the only
-   * validator; a client shows its message rather than re-implementing the
-   * schema.
+   * ids to invent for a file that has none. The daemon's loader validates the
+   * schema, after this route refuses stray top-level keys; a client shows the
+   * message rather than re-implementing either.
    */
   const handleHookConfig = async ({ method, request, response }: RequestContext): Promise<void> => {
     const hooks = options.hooks;

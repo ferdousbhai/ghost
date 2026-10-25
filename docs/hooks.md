@@ -217,7 +217,9 @@ admitted. The owner-only `GET /api/hooks/config` returns `{ path, document }`:
 that file as one object and its absolute path; `ghost hooks` and the HUD's
 Hooks pane read it there, showing a handler without a `name` or
 `description` with the defaults above. `PUT
-/api/hooks/config` with a whole document validates it with the same loader,
+/api/hooks/config` with a whole document refuses a top-level key other than
+`hooks`, so a pasted `{ path, document }` reply cannot empty the file, then
+validates it with the same loader,
 writes it atomically, and swaps the live command hooks. A rejected document
 is a 400 naming the offending field and changes nothing. `before_prompt` and
 `session_stop` and `turn_end` changes apply at the next boundary.

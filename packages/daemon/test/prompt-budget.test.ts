@@ -12,16 +12,9 @@
  * the character body is the ghost's own and is out of scope.
  */
 import { describe, expect, it } from "vitest";
-import { buildGhostSystemPrompt, FIRST_MEETING_SECTION } from "../src/persona.js";
-import {
-  BACKGROUND_WORK_POLICY,
-  HARNESS_LIMITS_POLICY,
-  OMARCHY_COMPUTER_USE_POLICY,
-  renderOwnerContextPolicy,
-} from "../src/prompt-policy.js";
-import { SCHEDULED_WORK_POLICY } from "../src/schedules.js";
-import { renderSelfMaintenancePolicy } from "../src/self-maintenance.js";
+import { buildGhostSystemPrompt } from "../src/persona.js";
 import type { RunningSource } from "../src/running-source.js";
+import { stablePolicySections } from "../src/session-host.js";
 
 /** Fixed inputs: every ceiling is only meaningful against the same rendering. */
 const GHOST_NAME = "casper";
@@ -52,17 +45,11 @@ function promptSection(heading: string): string {
   return section;
 }
 
+/** Every stable section, keyed by its heading: the list SessionHost renders, first meeting included. */
 function renderStablePolicy(): Record<string, string> {
-  return {
-    "Character file": promptSection("## Character file"),
-    "Computer use": OMARCHY_COMPUTER_USE_POLICY,
-    "Other harnesses": HARNESS_LIMITS_POLICY,
-    "Background work": BACKGROUND_WORK_POLICY,
-    "Owner context": renderOwnerContextPolicy(DOCUMENTS),
-    "Scheduled work": SCHEDULED_WORK_POLICY,
-    "Self-maintenance": renderSelfMaintenancePolicy(RUNNING),
-    "First meeting": FIRST_MEETING_SECTION,
-  };
+  const sections = stablePolicySections({ documents: DOCUMENTS, runningSource: RUNNING, firstMeeting: true });
+  return Object.fromEntries([promptSection("## Character file"), ...sections]
+    .map((section) => [section.slice("## ".length, section.indexOf("\n")), section]));
 }
 
 /** The exact rendered size of each section when its ceiling was last set. */

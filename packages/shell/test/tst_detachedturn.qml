@@ -19,7 +19,6 @@ TestCase {
         Ghostd.sessionIds = ({ casper: "" });
         Ghostd.clearTurnProjection();
         Ghostd.reachable = true;
-        Ghostd.hudVisible = false;
         Ghostd.sessions = [];
         Ghostd.adoptConversation("casper", "c1");
     }
