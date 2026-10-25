@@ -232,20 +232,16 @@ const CHARACTER_LIMIT = 20000;
 /** Per-ghost owner-written persona, layered over the seeded character.md. */
 const writtenCharacter = new Map();
 
+const seedCharacter = (name) => `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
+
 function characterBodyFor(name) {
-  if (writtenCharacter.has(name)) return writtenCharacter.get(name);
-  // Matches what seedMockHome writes to disk.
-  return `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`;
+  return writtenCharacter.has(name) ? writtenCharacter.get(name) : seedCharacter(name);
 }
 
 function seedMockHome(name) {
   const dir = join(GHOSTS_ROOT, name);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(
-    join(dir, "character.md"),
-    `# ${name}\n\nI am ${name}, a quiet local ghost who answers directly.\n`,
-    "utf8",
-  );
+  writeFileSync(join(dir, "character.md"), seedCharacter(name), "utf8");
 }
 
 if (OWNS_GHOSTS_ROOT) {
@@ -924,8 +920,8 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, { ok: true, limit: CHARACTER_LIMIT });
   }
 
-  // recoverable from the desktop; the mock just drops it from memory, and
-  // answers the same `trash` path so the surfaces see the contract's shape.
+  // Banishing: ghostd moves the home to the XDG trash; the mock deletes its
+  // own scratch copy and answers the same `trash` path.
   if (parts.length === 3 && req.method === "DELETE") {
     if (url.searchParams.get("confirm") !== name) {
       return json(res, 400, {

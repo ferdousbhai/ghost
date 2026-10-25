@@ -1608,13 +1608,10 @@ Singleton {
             root.ensureLocalSessionRow(ghost, root.currentSessionId, 0);
             return;
         }
-        const previous = root.activeTurnState(false);
-        if (previous) root.leaveConversation(previous);
         const id = root.mintConversationId();
-        root.sessionIds[ghost] = id;
-        root.currentSessionId = id;
+        // A state to show, so adopting it clears the last turn's error.
         root.ensureTurnState(ghost, id);
-        root.showTurnState(ghost, id);
+        root.adoptConversation(ghost, id);
         root.ensureLocalSessionRow(ghost, id, 0);
     }
 
@@ -2612,7 +2609,7 @@ Singleton {
     }
 
 
-    /** Both callers project afterwards; an unchanged queue keeps its array so its chips are not rebuilt. */
+    /** Every caller projects afterwards; an unchanged queue keeps its array so its chips are not rebuilt. */
     function applyQueueFor(state: var, body: var): void {
         const next = Array.isArray(body.followUp) ? body.followUp : [];
         if (JSON.stringify(next) !== JSON.stringify(state.followUpQueue)) state.followUpQueue = next;
