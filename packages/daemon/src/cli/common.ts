@@ -107,7 +107,7 @@ export function latestSession(rows: readonly SessionSummary[]): SessionSummary |
     !latest || Date.parse(row.updatedAt) > Date.parse(latest.updatedAt) ? row : latest, undefined);
 }
 
-/** `-s`, then `$GHOST_SESSION` (set in a ghost's own shell), else the latest session. */
+/** `-s`, then `$GHOST_SESSION` (set in a ghost's own shell); undefined when neither names one. */
 export function preferredSessionId(
   runtime: Pick<CliRuntime, "env">,
   requested?: string,

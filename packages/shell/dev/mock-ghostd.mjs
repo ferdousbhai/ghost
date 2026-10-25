@@ -789,15 +789,15 @@ const mockServer = createServer(async (req, res) => {
     return json(res, 200, MOCK_BOARD);
   }
 
-  if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: "not found" });
+  if (parts[0] !== "api" || parts[1] !== "ghosts") return json(res, 404, { error: { code: "not_found", message: "Not found." } });
 
   if (parts.length === 2 && req.method === "GET") return json(res, 200, ghosts);
 
   if (parts.length === 2 && req.method === "POST") {
     const body = await readBody(req).catch(() => null);
     const name = typeof body?.name === "string" ? body.name.trim() : "";
-    if (!/^[a-z0-9][a-z0-9-]*$/iu.test(name)) return json(res, 400, { error: "invalid name" });
-    if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: "already exists" });
+    if (!/^[a-z0-9][a-z0-9-]*$/iu.test(name)) return json(res, 400, { error: { code: "invalid_request", message: "invalid name" } });
+    if (ghosts.some((g) => g.name === name)) return json(res, 409, { error: { code: "already_exists", message: "already exists" } });
     const ghost = { name, dir: join(GHOSTS_ROOT, name) };
     ghosts.push(ghost);
     if (OWNS_GHOSTS_ROOT) seedMockHome(name);
@@ -1235,7 +1235,7 @@ const mockServer = createServer(async (req, res) => {
     publishConversationUpdated(name, s.id, s.updatedAt);
     return json(res, 200, { ok: true, title: s.title });
   }
-  return json(res, 404, { error: "not found" });
+  return json(res, 404, { error: { code: "not_found", message: "Not found." } });
 });
 mockServer.listen(PORT, HOST, () => {
   const address = mockServer.address();

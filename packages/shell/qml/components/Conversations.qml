@@ -170,8 +170,7 @@ Item {
             // edge of the sidebar. The star is the watchlist pattern — always
             // there, hollow until you star it, filled amber once you have —
             // so starring is one click and the list says what is starred
-            // without a hover. The close only takes its width while the
-            // pointer is on the row, and takes it back smoothly.
+            // without a hover.
             Item {
                 z: 1
                 anchors.fill: parent
@@ -267,11 +266,6 @@ Item {
                     width: 16
                     height: Theme.controlHeight
                     clip: true
-
-                    Behavior on width {
-                        enabled: !Theme.reducedMotion
-                        NumberAnimation { duration: Theme.durFast; easing.type: Easing.OutCubic }
-                    }
 
                     Rectangle {
                         id: stateMarker

@@ -94,7 +94,7 @@ that has already exited and the preview keeps running.
 ### What you should see
 
 - **The component maps nothing until `open`.** The HUD is a `FloatingWindow`
-  bound to `visible: false`; `preview.sh` calls the IPC `open` method after the
+  bound to `visible: false`; `preview.sh` calls the IPC `summon` method after the
   isolated shell is ready.
 - On `open`: a 998×620 window that Hyprland tiles into the
   layout like any app. The HUD uses a neutral reading canvas with the current

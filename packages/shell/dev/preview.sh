@@ -89,27 +89,6 @@ fi
 
 preview_root=""
 runtime_root=""
-cleanup_roots() {
-  local status=$?
-  trap - EXIT
-  if [[ -n $preview_root && $preview_root == "/tmp/ghost-shell-preview."* ]]; then
-    rm -rf -- "$preview_root"
-  fi
-  if [[ -n $runtime_root && $runtime_root == "/tmp/ghp."* ]]; then
-    rm -rf -- "$runtime_root"
-  fi
-  exit "$status"
-}
-trap cleanup_roots EXIT
-
-# Wayland and Hyprland IPC use AF_UNIX paths capped at 108 bytes. Keep this
-# runtime root short even when the caller has a deeply nested TMPDIR.
-preview_root=$(mktemp -d "/tmp/ghost-shell-preview.XXXXXX")
-runtime_root=$(mktemp -d "/tmp/ghp.XXXXXX")
-chmod 700 "$preview_root"
-chmod 700 "$runtime_root"
-mkdir -p "$preview_root"/{home,config,state,data,cache,ghosts}
-
 hypr_pid=""
 quickshell_pid=""
 dbus_pid=""
@@ -166,6 +145,14 @@ cleanup() {
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Wayland and Hyprland IPC use AF_UNIX paths capped at 108 bytes. Keep this
+# runtime root short even when the caller has a deeply nested TMPDIR.
+preview_root=$(mktemp -d "/tmp/ghost-shell-preview.XXXXXX")
+runtime_root=$(mktemp -d "/tmp/ghp.XXXXXX")
+chmod 700 "$preview_root"
+chmod 700 "$runtime_root"
+mkdir -p "$preview_root"/{home,config,state,data,cache,ghosts}
 
 # A session bus with no service directories: nothing can be dbus-activated
 # on it. With the stock session config, Quickshell's portal registration

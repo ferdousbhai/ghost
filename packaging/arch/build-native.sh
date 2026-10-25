@@ -28,5 +28,5 @@ pacman -S --needed --noconfirm "${constraints[@]%%[<>=]*}"
 pacman -T "${constraints[@]}"
 bun --version
 chown -R builder:builder /build /output /cache/pnpm /cache/bun
-su builder -c "export npm_config_store_dir=/cache/pnpm BUN_INSTALL_CACHE_DIR=/cache/bun; cd /build/packaging/arch && GHOST_SOURCE_REPO=file:///build GHOST_SOURCE_REF=commit=$commit PKGDEST=/output PKGEXT=.pkg.tar.zst makepkg --force ${nodeps[*]}"
+su builder -c "cd /build/packaging/arch && GHOST_SOURCE_REPO=file:///build GHOST_SOURCE_REF=commit=$commit PKGDEST=/output PKGEXT=.pkg.tar.zst makepkg --force ${nodeps[*]}"
 printf "%s\n" "$commit" > /output/source-commit.txt

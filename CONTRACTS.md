@@ -612,7 +612,8 @@ decides nothing. A window whose reset has
 passed is dropped. `stale` marks a record older than 15 minutes; the verb never
 refreshes one, and `refresh` is the Omarchy command that does. `-q` prints the
 eligible ids, one per line. It keeps no state and throttles nothing. Addressing is
-`-g`, then `$GHOST`, then the `ghost use` default, and `-s`, then
+`-g`, then `$GHOST`, then the `ghost use` default, then the sole ghost, and
+`-s`, then
 `$GHOST_SESSION`, then the latest conversation; a ghost's own shell, and the
 owner's `!` commands in a conversation, carry both variables. Signing in is
 the harness's own (`claude`, `codex login`, …); Ghost has no login or model

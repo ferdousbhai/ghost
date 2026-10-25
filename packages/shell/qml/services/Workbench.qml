@@ -128,10 +128,9 @@ Singleton {
 
     property bool readOk: false
 
-    /** How the PATH answered, once: -1 unknown, 0 no, 1 yes. A machine does
-        not gain or lose Omarchy between two clicks. */
-    property int launcherFound: -1
-    property int codeFound: -1
+    /** How the PATH answered for each program, once. A machine does not gain
+        or lose Omarchy between two clicks. */
+    property var onPathFound: ({})
 
     /**
      * The text of `path`, or "" when it cannot be read — `readOk` tells an
@@ -174,7 +173,7 @@ Singleton {
         // is $HOME-relative and not XDG_STATE_HOME-relative because that is
         // what omarchy-launch-editor itself reads.
         const defaults = root.read(root.absolute("~/.local/state/omarchy/defaults/editor"));
-        const plan = Editor.launchPlan(defaults, root.hasLauncher(), root.hasCode(),
+        const plan = Editor.launchPlan(defaults, root.onPath(Editor.LAUNCHER), root.onPath("code"),
             project, file);
         if (plan.command.length === 0) {
             // Nothing here can open a file at a line. The desktop's own handler
@@ -189,23 +188,15 @@ Singleton {
             : ({ command: plan.command, workingDirectory: plan.workingDirectory }));
     }
 
-    function hasLauncher(): bool {
-        if (root.launcherFound < 0) {
-            root.launcherFound = Editor.onPath(Quickshell.env("PATH") || "",
-                Editor.LAUNCHER, probed => root.exists(probed)) ? 1 : 0;
-        }
-        return root.launcherFound === 1;
-    }
-
     // Probing PATH reads the candidate file, which is only reasonable because
-    // every distribution's `code` on PATH is a small wrapper script, and because
-    // the answer is kept for the life of the shell.
-    function hasCode(): bool {
-        if (root.codeFound < 0) {
-            root.codeFound = Editor.onPath(Quickshell.env("PATH") || "", "code",
-                probed => root.exists(probed)) ? 1 : 0;
+    // the launcher and every distribution's `code` are small wrapper scripts,
+    // and because the answer is kept for the life of the shell.
+    function onPath(program: string): bool {
+        if (!(program in root.onPathFound)) {
+            root.onPathFound[program] = Editor.onPath(Quickshell.env("PATH") || "", program,
+                probed => root.exists(probed));
         }
-        return root.codeFound === 1;
+        return root.onPathFound[program];
     }
 
     FileView {

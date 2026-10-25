@@ -8,5 +8,3 @@ Terminal=false
 Icon=ghost
 Categories=Utility;
 Keywords=AI;Assistant;Chat;
-StartupNotify=true
-StartupWMClass=ghost

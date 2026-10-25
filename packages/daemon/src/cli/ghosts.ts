@@ -1,5 +1,6 @@
 import { ArgsError, flagBoolean, flagString, type ParsedCliArgs } from "./args.js";
-import { cliConfigPath, ghostPath, listGhosts, listSessions, readDefaultGhost, resolveGhost, resolveTarget, writeDefaultGhost } from "./common.js";
+import { cliConfigPath, ghostPath, listGhosts, readDefaultGhost, resolveTarget, writeDefaultGhost } from "./common.js";
+import { notFound } from "./client.js";
 import { emit, table } from "./output.js";
 import type { CliContext } from "./types.js";
 
@@ -33,8 +34,8 @@ export async function ghostsCommand(
       emit(ctx, { ghost }, () => ({ human: `${ghost}\n`, quiet: `${ghost}\n` }));
       return 0;
     }
-    const name = await resolveGhost(ctx.client, ctx.runtime, requested);
-    await listSessions(ctx.client, name);
+    const name = requested.trim();
+    if (!(await listGhosts(ctx.client)).some((ghost) => ghost.name === name)) throw notFound(`ghost ${JSON.stringify(name)}`);
     const path = await writeDefaultGhost(ctx.runtime, name);
     emit(ctx, { ghost: name, path }, () => `${name}\n`);
     return 0;

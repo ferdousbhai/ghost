@@ -52,6 +52,8 @@ describe("ghost CLI against a real daemon server", () => {
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "casper" });
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(JSON.parse((await cli(["use", "--json"])).stdout)).toEqual({ ghost: "casper" });
+    expect(await cli(["use", "nobody"])).toMatchObject({ code: 5, stderr: expect.stringContaining('ghost "nobody" was not found') });
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ ghost: "casper" });
 
     const defaultSessions = await cli(["sessions", "--json"]);
     expect(defaultSessions).toMatchObject({ code: 0 });

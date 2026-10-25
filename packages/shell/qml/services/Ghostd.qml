@@ -2678,11 +2678,8 @@ Singleton {
 
     /** The daemon's own presentable message for a failure, or "". */
     function errorDetail(xhr: var): string {
-        const body = root.errorBody(xhr);
-        const detail = body.error && body.error.message
-            ? body.error.message
-            : (body.error || body.message || "");
-        return typeof detail === "string" ? detail : "";
+        const error = root.errorBody(xhr).error;
+        return error && typeof error.message === "string" ? error.message : "";
     }
 
     /** A refusal as the daemon words it, else as describeError would. */
