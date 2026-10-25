@@ -550,7 +550,7 @@ function createDaemonServer(options: ServerOptions): { server: Server; liveStrea
       // Keep the HTTP seam honest even if a runtime regresses: every client
       // gets a terminal; after the turn's own, this is a no-op.
       () => append({ type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." }),
-      // The admitted run emits its own error terminal before rethrowing, so
+      // The admitted run turns its own failures into an error terminal, so
       // this too is a no-op unless a runtime regresses.
       (error: unknown) => append({ type: "error", reason: "error", errorMessage: errorMessage(error) }),
     ).finally(() => {

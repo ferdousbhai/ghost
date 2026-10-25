@@ -20,7 +20,7 @@
  */
 import { readdir, unlink } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { GhostError } from "./errors.js";
+import { errorMessage, GhostError } from "./errors.js";
 import { isValidGhostName } from "./ghosts.js";
 import { which } from "./harnesses.js";
 import {
@@ -189,7 +189,7 @@ export async function scheduleCommand(run: CommandRunner, args: string[]): Promi
     requireCommandSuccess(result, "systemctl");
     return result.stdout;
   } catch (error) {
-    throw new GhostError("routines_unavailable", `Could not access systemd routines: ${error instanceof Error ? error.message : String(error)}`, 503);
+    throw new GhostError("routines_unavailable", `Could not access systemd routines: ${errorMessage(error)}`, 503);
   }
 }
 
@@ -261,7 +261,7 @@ export async function readRoutineLogs(ghost: string, slug: string, options: Sche
   try {
     const result = await journal(["--user", "--unit", `${stem}.service`, "--no-pager", "--output=short-iso", "--lines=100"]);
     requireCommandSuccess(result, "journalctl"); output = result.stdout;
-  } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${error instanceof Error ? error.message : String(error)}`, 503); }
+  } catch (error) { throw new GhostError("routine_logs_unavailable", `Could not read routine logs: ${errorMessage(error)}`, 503); }
   const text = output.slice(-64000), sessions = new Set<string>();
   for (const line of text.split("\n")) {
     const match = /(?:Already accepted|Accepted): ([A-Za-z0-9][A-Za-z0-9._-]{0,63})\/(event-[a-f0-9]{64})(?:\s|$)/u.exec(line);

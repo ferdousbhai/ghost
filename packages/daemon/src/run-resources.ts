@@ -1,8 +1,6 @@
 /** A harness-reported inventory, not a scan of installed or enabled resources. */
 export interface RunResources {
-  contextFiles?: string[] | null;
   tools?: string[] | null;
-  promptTemplates?: string[] | null;
   skills: string[] | null;
   extensions: string[] | null;
   mcpServers: string[] | null;
@@ -39,12 +37,10 @@ export function codexSkillNames(body: unknown): string[] | null {
 /** One line per kind of resource the harness named, or "" when it named none. */
 export function resourceSummary(resources: RunResources): string {
   const lines = [
-    ["Instructions/context files", resources.contextFiles],
     ["Skills", resources.skills],
     ["Extensions/plugins", resources.extensions],
     ["Connected MCP servers", resources.mcpServers],
     ["Tools", resources.tools],
-    ["Prompt templates", resources.promptTemplates],
   ].flatMap(([label, names]) => Array.isArray(names) && names.length ? [`${label}: ${names.join(", ")}`] : []);
   return lines.join("\n");
 }

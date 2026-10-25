@@ -536,20 +536,17 @@ export class SessionHost {
         try {
           await this.withGhost(ghost.name, async () => {
             let terminal: Extract<TurnEvent, { type: "done" | "error" }> | undefined;
-            let failure: unknown;
             const emit = (event: TurnEvent) => {
               if (event.type === "done" || event.type === "error") terminal = event;
               else stream.emit(event);
             };
             try { turnId = await this.runAdmitted(ghost, id, options.prompt, command, { emit }, controller.signal, options.promptRecorded, turnId); }
             catch (error) {
-              failure = error;
               terminal = { type: "error", reason: controller.signal.aborted ? "aborted" : "error", errorMessage: errorMessage(error) };
             }
             terminal ??= { type: "error", reason: "error", errorMessage: "The turn ended without a terminal event." };
             stream.emit(terminal);
             settled = terminal;
-            if (failure !== undefined) throw failure;
           });
         } finally {
           this.admissions.delete(key);
@@ -584,7 +581,7 @@ export class SessionHost {
     }));
   }
 
-  /** admitTurn then run, in one call, for tests; a failure outside its passes throws instead of emitting. */
+  /** admitTurn then run, in one call, for tests. */
   async runTurn(ghostName: string, options: RunTurnOptions): Promise<void> {
     await (await this.admitTurn(ghostName, options)).run(options);
   }

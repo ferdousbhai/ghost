@@ -3,11 +3,10 @@
 The harness menu's **Resources…**, the tailnet viewer, and `ghost show
 --resources` inspect the latest successful run without adding messages to chat.
 Ghost-supplied instructions and forwarded MCP names are separate from
-harness-reported skills, plugins, tools, connected MCP servers, context files,
-and prompt templates. Only categories with evidence are shown. Current
-parsers report skills/plugins/MCP as described below and compatible Claude
-init tool names; other categories remain unknown until native output supplies
-evidence. No scanner or second discovery process is used.
+harness-reported skills, plugins, tools, and connected MCP servers. Only
+categories with evidence are shown. Current parsers report skills/plugins/MCP
+as described below and compatible Claude init tool names; other categories
+remain unknown until native output supplies evidence. No scanner or second discovery process is used.
 
 Every successful run replaces the snapshot, including unknown inventories;
 failed attempts retain the dated last successful run. A catalog is availability,

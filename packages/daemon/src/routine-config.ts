@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readdir, rm, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { GhostError } from "./errors.js";
+import { errorMessage, GhostError } from "./errors.js";
 import { readPrivateFileText, writePrivateJsonAtomic, writePrivateTextAtomic } from "./private-file.js";
 import { commandRunner, type CommandRunner } from "./tailscale-identity.js";
 import { routineStem, scheduleCommand, unitProperties, type ScheduleOptions } from "./schedules.js";
@@ -35,7 +35,7 @@ function validateSource(source: unknown, empty = false): asserts source is strin
 /** Too large, undecodable, or unreadable files are refusals the list can skip, not daemon faults. */
 function readText(path: string): string | null {
   try { return readPrivateFileText(path); } catch (error) {
-    throw new GhostError("invalid_routine", error instanceof Error ? error.message : String(error), 400);
+    throw new GhostError("invalid_routine", errorMessage(error), 400);
   }
 }
 async function readSource(path: string): Promise<string | null> {

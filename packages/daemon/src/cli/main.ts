@@ -57,13 +57,12 @@ const CLI_ARGS: ArgsSpec = {
     "new",
     "follow-up",
     "yes",
-    "list",
     "exit-on-first",
     "keep",
     "no-turn",
     "none",
   ],
-  value: ["ghost", "session", "message", "limit", "offset", "q", "harness"],
+  value: ["ghost", "session", "message", "limit", "offset", "harness"],
 };
 
 export const COMMANDS: readonly Command[] = [

@@ -7,7 +7,8 @@
  * Each conversation has its own working directory, so "continue the most
  * recent session here" is a per-conversation resume for every harness whose
  * continue is cwd-scoped. A harness whose continue is not names its session
- * in its output, and the host hands that id back (`sessionFrom`).
+ * in its output (a `session` event), and the host hands that id back as
+ * `HarnessTurnInput.sessionId`.
  */
 import { open, readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,7 +27,7 @@ export interface HarnessTurnInput {
   readonly prompt: string;
   /** A turn after the first in this conversation's directory. */
   readonly resume: boolean;
-  /** The harness's own session id, for rows that report one (`sessionFrom`). */
+  /** The harness's own session id, for rows that report one (a `session` event). */
   readonly sessionId: string | null;
   /** The rendered ghost system prompt; most rows read it from `AGENTS.md`. */
   readonly persona: string;

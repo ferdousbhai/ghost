@@ -56,7 +56,7 @@ function validateServerName(name: string): string | undefined {
 
 const ENV_PATTERN = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
-/** Expand `${VAR}` and `${VAR:-default}` from the process environment. */
+/** Expand `${VAR}` and `${VAR:-default}` from `environment`. */
 function expandEnvVars(value: string, environment: Readonly<Record<string, string | undefined>>): string {
   return value.replace(ENV_PATTERN, (_match, name: string, fallback: string | undefined) =>
     environment[name] ?? fallback ?? "");

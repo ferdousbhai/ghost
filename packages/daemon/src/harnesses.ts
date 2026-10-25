@@ -147,8 +147,7 @@ function readRecord(directory: string, id: string): unknown {
 }
 
 /**
- * The agent CLIs Omarchy knows that are installed, each with its usage record
- * and eligibility. `omarchy`, `mise`, and every harness resolve through `env.PATH`.
+ * The agent CLIs Omarchy knows that are installed, each with its usage record. `omarchy`, `mise`, and every harness resolve through `env.PATH`.
  */
 export async function readHarnessReport(
   env: NodeJS.ProcessEnv,

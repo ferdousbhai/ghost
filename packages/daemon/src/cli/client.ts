@@ -162,12 +162,6 @@ export class DaemonClient {
     return { status: response.status, body: parsed as T };
   }
 
-  async download(path: string): Promise<Uint8Array> {
-    const response = await this.#fetch(path, { method: "GET" });
-    if (!response.ok) throw statusError(response.status, await responseBody(response), this.tokenPath);
-    return new Uint8Array(await response.arrayBuffer());
-  }
-
   async optional<T = unknown>(method: string, path: string): Promise<CliResponse<T> | null> {
     try {
       return await this.request<T>(method, path);

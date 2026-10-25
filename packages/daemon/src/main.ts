@@ -175,25 +175,23 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   }
 
   let hooks: GhostHookRunner;
-  const hooksPath = config.hooksPath;
   try {
-    hooks = GhostHookRunner.fromConfig(hooksPath, { logger });
+    hooks = GhostHookRunner.fromConfig(config.hooksPath, { logger });
   } catch (error) {
     logger.error("hook configuration is invalid", {
-      path: hooksPath,
+      path: config.hooksPath,
       error: errorMessage(error),
     });
     return 1;
   }
 
-  return await serveDaemon(config, logger, hooks, hooksPath);
+  return await serveDaemon(config, logger, hooks);
 }
 
 async function serveDaemon(
   config: DaemonConfig,
   logger: ReturnType<typeof createLogger>,
   hooks: GhostHookRunner,
-  hooksPath: string,
 ): Promise<number> {
   const registry = new GhostRegistry(config.ghostsRoot);
   const ownerHome = homedir();
@@ -250,7 +248,7 @@ async function serveDaemon(
     commit: runningSource.commit,
     source: runningSource.root,
     config: config.configPath,
-    hooks: hooksPath,
+    hooks: config.hooksPath,
   });
 
   await waitForShutdownSignal({

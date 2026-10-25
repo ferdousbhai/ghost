@@ -358,8 +358,8 @@ from that inspection enters handoff context. The owner should always be able to 
 harness, completion time, harness-reported name lists, and names supplied by
 Ghost. Unknown inventories replace older evidence; failed attempts leave the
 last successful snapshot. Only names cross the wire. Reported categories are
-skills, extensions/plugins, connected MCP servers, tools, context files, and
-prompt templates where native output provides evidence. Ghost-supplied
+skills, extensions/plugins, connected MCP servers, and tools where native
+output provides evidence. Ghost-supplied
 instructions and forwarded MCP names are separate from reported connections.
 No scan of installed resources or model self-report substitutes for evidence.
 Skill availability does not prove its body entered context. Version coverage
