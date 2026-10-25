@@ -42,13 +42,6 @@ function parse(text: string): { receipts: Receipt[]; malformed: number } {
   return { receipts, malformed };
 }
 
-/** A refusal reason without its numbers, so like refusals count together. */
-function refusalKind(reason: string): string {
-  if (reason.includes("ahead of weekly pace")) return `${reason.replace(/ \d+% used.*$/u, "")} ahead of pace`;
-  const full = / \d+% used/u.exec(reason);
-  return full ? `${reason.slice(0, full.index)} full` : reason;
-}
-
 function median(values: number[]): number | null {
   if (values.length === 0) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -92,7 +85,7 @@ export function report(text: string, options: { since?: number } = {}): string {
     const outcome = receipt.outcome;
     if ("refused" in outcome) {
       row.refused += 1;
-      bump(refusals, `${receipt.harness}: ${refusalKind(outcome.refused)}`);
+      bump(refusals, `${receipt.harness}: ${outcome.refused}`);
       continue;
     }
     if (outcome.exit === 0) row.ok += 1;

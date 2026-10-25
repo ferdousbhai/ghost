@@ -14,8 +14,8 @@ omp      1         0            1        0   0       0           -
 pi       1         0            0        0   1       1           1.2s
 
 Refusals:
-  2  claude: Session (5-hour) full
-  1  codex: Weekly (7-day) ahead of pace
+  2  claude: not installed
+  1  codex: not installed
   1  omp: not installed
 
 Limits hit:
@@ -34,8 +34,8 @@ omp      1         0            1        0   0       0           -
 pi       1         0            0        0   1       1           1.2s
 
 Refusals:
-  1  claude: Session (5-hour) full
-  1  codex: Weekly (7-day) ahead of pace
+  1  claude: not installed
+  1  codex: not installed
   1  omp: not installed
 `);
 });
