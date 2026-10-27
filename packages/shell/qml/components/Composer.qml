@@ -277,8 +277,12 @@ Item {
         Flickable {
             id: scroller
 
-            anchors.fill: parent
-            anchors.margins: Theme.pad / 2
+            // Centred, so a single line sits level with the + button inside
+            // the composer's minimum height; it fills once the text outgrows it.
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.verticalCenter: parent.verticalCenter
+            height: Math.min(contentHeight, parent.height - Theme.pad)
             anchors.leftMargin: composeButton.visible
                 ? composeButton.width + Theme.pad : Theme.pad
             anchors.rightMargin: Theme.pad
