@@ -153,6 +153,17 @@ that has already exited and the preview keeps running.
   the terminal; summoning again works. A scrim click closes it too.
 
 
+## Rendered review
+
+`bash dev/render.sh` renders every surface (the launcher, prompt, presence card
+states, activity line, chat bubbles and code blocks, tool cards, composer,
+welcome, the whole HUD over a pane and over the chat, every pane, the confirm
+dialog, and the bar mark's states) to `dev/render/out/*.png`, offscreen, from
+the fixed sample data in `dev/render/tst_render.qml`. It runs through the test
+runner and its stubs, answering each pane's requests itself, so it touches no
+desktop, daemon, or window, and it shows the fallback (Tokyo Night) palette.
+Look at the PNGs before and after a visual change; the folder is git-ignored.
+
 ## Validation
 
 ```sh

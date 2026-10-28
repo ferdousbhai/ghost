@@ -7,3 +7,4 @@ dist/
 
 # Machine-local Quickshell per-run symlink (points into /run/user VFS)
 packages/shell/qml/.qmlls.ini
+packages/shell/dev/render/out/
