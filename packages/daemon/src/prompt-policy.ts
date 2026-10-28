@@ -35,15 +35,15 @@ export const BACKGROUND_WORK_POLICY = [
 ].join("\n");
 
 /**
- * Questions reach the owner through Ghost, not the harness: a headless run has
- * no one to answer its own question tool. `ghost ask` marks the conversation
- * as waiting, and the owner's next message there is the answer.
+ * Questions reach the owner through Ghost: harnesses withhold their own
+ * question tools when run headless. `ghost ask` marks the conversation as
+ * waiting, and the owner's next message there is the answer.
  */
 export const ASKING_POLICY = [
   "## Asking the owner",
   "When a choice is the owner's, or you would otherwise guess what they want, ask before acting: "
     + "`ghost ask \"<question>\" [<answer>...]` with a few likely answers, then end your turn; their "
-    + "next message is the answer. One question at a time. Your harness's own question tool cannot reach them.",
+    + "next message is the answer. One question at a time.",
 ].join("\n");
 
 /**
