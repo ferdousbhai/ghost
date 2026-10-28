@@ -89,8 +89,10 @@ function rows(query, sessions, ghost, now, hookCount) {
             kind: "session", id: session.id, label: title,
             title: typeof session.title === "string" ? session.title : "",
             // A question is what the owner most needs to read in the row.
+            // A title is often the first message cut short; then the preview only repeats it.
             detail: session.question ? session.question.text
-                : session.title && session.preview && session.preview !== title ? session.preview : "",
+                : session.title && session.preview && !session.preview.toLowerCase().startsWith(title.toLowerCase())
+                    ? session.preview : "",
             asking: !!session.question,
             meta: age(session.updatedAt, now), pinned: session.pinned === true,
             unread: session.unread === true, running: session.running === true

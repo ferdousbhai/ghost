@@ -192,6 +192,34 @@ TestCase {
         compare(asked.length, 1);
     }
 
+    function test_aTitleCutFromThePreviewDoesNotRepeatIt(): void {
+        const rows = Launcher.rows("", [
+            { id: "cut", title: "Remind me to leave", preview: "remind me to leave for home at 3pm" },
+            { id: "named", title: "Taxes", preview: "help me file the return" }
+        ], "casper", now, 0);
+        compare(rows.find(row => row.id === "cut").detail, "");
+        compare(rows.find(row => row.id === "named").detail, "help me file the return");
+    }
+
+    function test_theSelectedConversationOffersTrash(): void {
+        const launcher = createTemporaryObject(launcherComponent, tc);
+        const asked = [];
+        launcher.deleteRequested.connect((id, title) => asked.push([id, title]));
+        launcher.reset();
+        wait(50);
+        // Every row carries one; only the selected row's shows.
+        const shown = [];
+        const walk = item => {
+            if (item.objectName === "trashConversation" && item.visible) shown.push(item);
+            for (const child of item.children) walk(child);
+        };
+        walk(launcher);
+        compare(shown.length, 1);
+        const trash = shown[0];
+        mouseClick(trash);
+        compare(asked, [["a", "Fix the README"]]);
+    }
+
     function test_ctrlRRenamesWhereItIsRead(): void {
         const launcher = createTemporaryObject(launcherComponent, tc);
         launcher.reset();

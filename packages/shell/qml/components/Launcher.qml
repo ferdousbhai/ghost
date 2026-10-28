@@ -369,8 +369,8 @@ FocusScope {
 
                 Text {
                     id: meta
-                    anchors.right: parent.right
-                    anchors.rightMargin: Theme.pad - Theme.gap
+                    anchors.right: trash.visible ? trash.left : parent.right
+                    anchors.rightMargin: trash.visible ? Theme.gap * 1.5 : Theme.pad - Theme.gap
                     anchors.verticalCenter: parent.verticalCenter
                     text: row.modelData.meta || ""
                     color: Theme.foregroundFaint
@@ -384,6 +384,32 @@ FocusScope {
                     cursorShape: Qt.PointingHandCursor
                     onEntered: root.selected = row.index
                     onClicked: root.activate(row.modelData)
+                }
+
+                // On the row under the pointer or keyboard: move it to Trash,
+                // asked first (the Delete key does the same).
+                Text {
+                    id: trash
+                    objectName: "trashConversation"
+                    visible: row.chosen && row.modelData.kind === "session" && !row.editing
+                    anchors.right: parent.right
+                    anchors.rightMargin: Theme.pad - Theme.gap
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: "×"
+                    color: trashArea.containsMouse ? Theme.danger : Theme.foregroundDim
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeTitle
+                    Accessible.role: Accessible.Button
+                    Accessible.name: "Move to Trash"
+
+                    MouseArea {
+                        id: trashArea
+                        anchors.fill: parent
+                        anchors.margins: -Theme.gap
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.deleteRequested(row.modelData.id, row.modelData.label)
+                    }
                 }
             }
         }
