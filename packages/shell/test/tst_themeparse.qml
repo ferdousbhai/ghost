@@ -98,17 +98,18 @@ TestCase {
         compare(Math.round(border.b * 255), 0);
     }
 
-    // Chrome rounds as Hyprland's windows do (square until it reads otherwise),
-    // small controls at most 6px; chat surfaces keep their own shapes.
-    function test_chromeFollowsTheDesktopAndChatSurfacesRound(): void {
+    // Chrome and chat round as Hyprland's windows do (square until it reads
+    // otherwise): controls and chips at most 6px, the speaker tail at most 4.
+    function test_everySurfaceRoundsWithTheDesktop(): void {
         const was = Theme.radius;
         compare(Theme.radius, 0);
         compare(Theme.controlRadius, 0);
+        compare(Theme.bubbleRadius, 0);
         Theme.radius = 10;
         compare(Theme.controlRadius, 6);
-        Theme.radius = was;
-        compare(Theme.bubbleRadius, 16);
-        compare(Theme.bubbleRadiusSmall, 12);
+        compare(Theme.bubbleRadius, 10);
+        compare(Theme.bubbleRadiusSmall, 6);
         compare(Theme.bubbleTailRadius, 4);
+        Theme.radius = was;
     }
 }

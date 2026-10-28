@@ -31,7 +31,6 @@ import QtQuick
 import QtQuick.Layouts
 import "services"
 import "components"
-import "components/Launcher.js" as LauncherRows
 import "services/DesktopKeys.js" as Desk
 
 FloatingWindow {
@@ -343,15 +342,24 @@ FloatingWindow {
             onCloseRequested: hud.close()
         }
 
+        // A pane pads itself, so in a pane only the top bar takes the card's
+        // padding: the ‹, the pane's title and its content share one edge.
+        // The chat view has no padding of its own and takes it all.
         ColumnLayout {
+            // A pane stops inside the card's border, which its own background
+            // would otherwise paint over.
+            readonly property real inset: hud.currentSection === "chat" ? Theme.pad : card.border.width
             anchors.fill: parent
-            anchors.margins: Theme.pad
+            anchors.margins: inset
             visible: !hud.home
             spacing: Theme.gap
 
-            // The way back to the list, and where this view is.
+            // The way back to the list, and out.
             RowLayout {
                 Layout.fillWidth: true
+                Layout.leftMargin: Theme.pad - parent.inset
+                Layout.rightMargin: Theme.pad - parent.inset
+                Layout.topMargin: Theme.pad - parent.inset
                 z: 20
                 spacing: Theme.gap
 
@@ -373,16 +381,10 @@ FloatingWindow {
                     }
                 }
 
-                Text {
+                // A pane titles itself; the bar only holds the way back and out.
+                Item {
                     visible: hud.currentSection !== "chat"
                     Layout.fillWidth: true
-                    text: {
-                        const place = LauncherRows.PLACES.find(entry => entry.id === hud.currentSection);
-                        return place ? place.label : "";
-                    }
-                    color: Theme.menuText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeTitle
                 }
 
                 HudHeader {

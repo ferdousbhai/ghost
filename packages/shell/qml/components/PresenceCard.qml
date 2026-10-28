@@ -119,7 +119,7 @@ Rectangle {
             Text {
                 id: answer
                 width: answerScroll.width
-                text: MarkdownCompat.normalize(Presence.answer, Theme.ghostAmber)
+                text: MarkdownCompat.normalize(Presence.answer, Theme.ghostAmber, Theme.info)
                 textFormat: Text.MarkdownText
                 color: Theme.foregroundBright
                 linkColor: Theme.ghostAmber

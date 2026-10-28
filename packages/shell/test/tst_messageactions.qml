@@ -65,7 +65,7 @@ TestCase {
     // Every painted text block, not the binding the row is positioned by:
     // a change back toward computed placement has to fail this.
     function bodyRects(): var {
-        const view = findChild(reply, "replyTail").parent;
+        const view = findChild(reply, "replyBody");
         const rects = [];
         for (let i = 0; i < view.children.length; i++) {
             const child = view.children[i];

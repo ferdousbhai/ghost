@@ -181,4 +181,18 @@ TestCase {
         compare(step.segments.length, 0);
         compare(step.tail, "");
     }
+
+    // A reply's fenced block is shown as code: the splitter says when a block
+    // is exactly one top-level fence, and what it holds.
+    function test_aFencedBlockIsCode(): void {
+        compare(MarkdownSegments.fencedCode("```sh\nls -la\n```\n\n"), { language: "sh", code: "ls -la" });
+        compare(MarkdownSegments.fencedCode("~~~\na\n\nb\n~~~"), { language: "", code: "a\n\nb" });
+        // Still streaming: what has arrived is code already.
+        compare(MarkdownSegments.fencedCode("```js\nconst x"), { language: "js", code: "const x" });
+        compare(MarkdownSegments.fencedCode("Intro.\n\n"), null);
+        // A fence inside a list item is the item's, not a block of its own.
+        compare(MarkdownSegments.fencedCode("- item\n\n  ```\n  a\n  ```\n\n"), null);
+        // Two fences in one block are not one code block.
+        compare(MarkdownSegments.fencedCode("```\na\n```\ntext\n```\nb\n```"), null);
+    }
 }

@@ -29,3 +29,4 @@ PresenceCard 1.0 PresenceCard.qml
 PresenceEdge 1.0 PresenceEdge.qml
 PresencePrompt 1.0 PresencePrompt.qml
 Launcher 1.0 Launcher.qml
+CodeBlock 1.0 CodeBlock.qml

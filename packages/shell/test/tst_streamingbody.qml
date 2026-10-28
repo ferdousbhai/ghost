@@ -106,7 +106,7 @@ TestCase {
 
     /** The column the blocks are stacked in. */
     function bodyOf(bubble: var): var {
-        return tc.tailOf(bubble).parent;
+        return findChild(bubble, "replyBody");
     }
 
     function cleanup(): void {
@@ -212,5 +212,23 @@ TestCase {
         wait(0);
         compare(tc.blocksOf(reply).length, 0);
         verify(!tc.tailOf(reply).visible);
+    }
+
+    // A reply ending in a fence keeps that block as its tail; it shows as code
+    // there as well as among the settled blocks.
+    function test_fencedBlocksShowAsCode(): void {
+        tc.streamed = "Run this:\n\n```sh\nsystemctl --user list-timers\n```";
+        tc.settled = true;
+        wait(0);
+        waitForRendering(reply);
+        const shown = [];
+        function collect(item) {
+            if (item.code !== undefined && item.language !== undefined && item.visible) shown.push(item);
+            for (let i = 0; i < item.children.length; i += 1) collect(item.children[i]);
+        }
+        collect(reply);
+        compare(shown.length, 1);
+        compare(shown[0].language, "sh");
+        compare(shown[0].code, "systemctl --user list-timers");
     }
 }

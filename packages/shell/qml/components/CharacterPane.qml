@@ -72,36 +72,49 @@ Rectangle {
         }
     }
 
-    Rectangle {
+    // The same header as the other panes: a title and what it is, then the
+    // pane's own actions. Leaving is the HUD's (its ‹ and ×, or Esc).
+    Item {
         id: header
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: Theme.controlHeight + Theme.gap
-        color: Theme.surface
+        height: titles.implicitHeight + Theme.pad * 2
 
-        Row {
+        Column {
+            id: titles
             anchors.left: parent.left
             anchors.leftMargin: Theme.pad
+            anchors.right: actions.left
+            anchors.rightMargin: Theme.gap
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.gap
+            spacing: Theme.gap / 2
 
             Text {
-                anchors.verticalCenter: parent.verticalCenter
                 text: "Character"
                 color: Theme.foregroundBright
                 font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSizeSubtitle
+                font.pixelSize: Theme.fontSizeHeading
                 font.weight: Font.DemiBold
             }
 
             Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: Ghostd.activeGhost === "" ? "" : "· " + Ghostd.activeGhost
+                width: parent.width
+                text: (Ghostd.activeGhost === "" ? "The ghost" : Ghostd.activeGhost)
+                    + "'s persona, read at the start of every turn."
                 color: Theme.foregroundDim
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
+                elide: Text.ElideRight
             }
+        }
+
+        Row {
+            id: actions
+            anchors.right: parent.right
+            anchors.rightMargin: Theme.pad
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Theme.gap * 2
 
             Text {
                 anchors.verticalCenter: parent.verticalCenter
@@ -111,13 +124,6 @@ Rectangle {
                 font.family: Theme.fontFamily
                 font.pixelSize: Theme.fontSizeSmall
             }
-        }
-
-        Row {
-            anchors.right: parent.right
-            anchors.rightMargin: Theme.pad
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Theme.gap
 
             // The count against the daemon's own cap, shown once the daemon
             // has said what it is. Turning rose is the only warning; the
@@ -137,23 +143,6 @@ Rectangle {
                 primary: true
                 enabled: root.canSave
                 onClicked: root.save()
-            }
-
-            Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: "×"
-                color: closeArea.containsMouse ? Theme.foreground : Theme.foregroundFaint
-                font.family: Theme.fontFamily
-                font.pixelSize: Theme.fontSize
-
-                MouseArea {
-                    id: closeArea
-                    anchors.fill: parent
-                    anchors.margins: -Theme.gap / 2
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.closed()
-                }
             }
         }
 

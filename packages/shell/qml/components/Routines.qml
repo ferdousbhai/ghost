@@ -54,30 +54,42 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.pad
         spacing: Theme.gap
+        // The same header as Board's and MCP's: a title, and under it what
+        // the pane is (or what went wrong), so the panes read as one family.
         RowLayout {
             Layout.fillWidth: true
-            Text {
-                textFormat: Text.PlainText
+            spacing: Theme.gap
+            ColumnLayout {
                 Layout.fillWidth: true
-                text: "Routines · " + Ghostd.activeGhost
-                color: Theme.foreground
-                font.pixelSize: Theme.fontSize
+                spacing: Theme.gap / 2
+                Text {
+                    textFormat: Text.PlainText
+                    text: "Routines"
+                    color: Theme.foregroundBright
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeHeading
+                    font.weight: Font.DemiBold
+                }
+                Text {
+                    textFormat: Text.PlainText
+                    Layout.fillWidth: true
+                    text: Ghostd.routineWriteError || Ghostd.routinesError || Ghostd.activeGhost
+                        + "'s systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
+                    color: (Ghostd.routineWriteError || Ghostd.routinesError) ? Theme.danger : Theme.foregroundDim
+                    wrapMode: Text.Wrap
+                    font.family: Theme.fontFamily
+                    font.pixelSize: Theme.fontSizeSmall
+                }
             }
             ActionButton {
+                Layout.alignment: Qt.AlignTop
                 label: Ghostd.routinesLoading ? "Refreshing…" : "Refresh"
                 enabled: !Ghostd.routinesLoading
                 onClicked: root.refresh()
             }
         }
         Text {
-            textFormat: Text.PlainText
-            Layout.fillWidth: true
-            text: Ghostd.routineWriteError || Ghostd.routinesError || "Systemd timers. Pause stops future triggers; running work continues. Resume may catch up."
-            color: (Ghostd.routineWriteError || Ghostd.routinesError) ? Theme.danger : Theme.foregroundDim
-            wrapMode: Text.Wrap
-            font.pixelSize: Theme.fontSizeSmall
-        }
-        Text {
+            font.family: Theme.fontFamily
             textFormat: Text.PlainText
             visible: !Ghostd.routinesLoading && Ghostd.routines.length === 0 && !Ghostd.routinesError
             text: "No routines. Ask your ghost to schedule work, or see ghost help timers."
@@ -100,6 +112,7 @@ Rectangle {
                         required property var modelData
                         width: recoveryRows.width
                         Text {
+                            font.family: Theme.fontFamily
                             textFormat: Text.PlainText
                             Layout.fillWidth: true
                             text: recoveryRow.modelData.slug + " · " + recoveryRow.modelData.reason + " · " + recoveryRow.modelData.createdAt
@@ -127,7 +140,7 @@ Rectangle {
                 required property var modelData
                 width: ListView.view.width
                 height: content.implicitHeight + Theme.pad * 2
-                color: Qt.alpha(Theme.foreground, 0.04)
+                color: Theme.surface
                 radius: Theme.controlRadius
                 ColumnLayout {
                     id: content
@@ -137,13 +150,16 @@ Rectangle {
                     anchors.margins: Theme.pad
                     spacing: Theme.gap
                     Text {
+                        font.family: Theme.fontFamily
                         textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: card.modelData.slug + " · " + (card.modelData.enabled || "unknown") + " · " + (card.modelData.active || "unknown")
-                        color: Theme.foreground
+                        color: Theme.foregroundBright
+                        font.weight: Font.DemiBold
                         wrapMode: Text.Wrap
                     }
                     Text {
+                        font.family: Theme.fontFamily
                         textFormat: Text.PlainText
                         Layout.fillWidth: true
                         text: (card.modelData.schedule || "Schedule unavailable")
@@ -222,21 +238,22 @@ Rectangle {
         background: Rectangle { color: Theme.background; border.color: Theme.border; radius: Theme.controlRadius }
         contentItem: ColumnLayout {
             spacing: Theme.gap
-            Text { textFormat: Text.PlainText; text: "Edit " + root.editGhost + "/" + root.editSlug; color: Theme.foreground }
+            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Edit " + root.editGhost + "/" + root.editSlug; color: Theme.foreground }
             Text {
+                font.family: Theme.fontFamily
                 textFormat: Text.PlainText
                 Layout.fillWidth: true
                 text: Ghostd.routineWriteError || "Save verifies both units and reloads systemd. Previous sources remain recoverable."
                 color: Ghostd.routineWriteError ? Theme.danger : Theme.foregroundDim
                 wrapMode: Text.Wrap
             }
-            Text { textFormat: Text.PlainText; text: "Timer unit"; color: Theme.foreground }
+            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Timer unit"; color: Theme.foreground }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 TextArea { id: timerSource; objectName: "routineTimerSource"; readOnly: Ghostd.routineActionRequest !== null; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.Wrap }
             }
-            Text { textFormat: Text.PlainText; text: "Service unit"; color: Theme.foreground }
+            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Service unit"; color: Theme.foreground }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -267,11 +284,11 @@ Rectangle {
         modal: true
         background: Rectangle { color: Theme.background; border.color: Theme.border }
         contentItem: ColumnLayout {
-            Text { textFormat: Text.PlainText; text: "Routine journal"; color: Theme.foreground }
+            Text { textFormat: Text.PlainText; font.family: Theme.fontFamily; text: "Routine journal"; color: Theme.foreground }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                TextArea { id: journalText; readOnly: true; color: Theme.foreground; wrapMode: TextEdit.WrapAnywhere }
+                TextArea { id: journalText; readOnly: true; color: Theme.foreground; font.family: Theme.fontFamily; wrapMode: TextEdit.WrapAnywhere }
             }
             Repeater {
                 model: root.logSessions

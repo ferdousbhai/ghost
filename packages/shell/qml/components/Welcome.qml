@@ -87,28 +87,19 @@ Column {
         font.weight: Font.Medium
     }
 
-    // The invitation. Amber film, so the ghost's own colour asks the question.
-    Rectangle {
+    // The invitation, as words rather than a box: a bordered panel here read
+    // as a field to type into, and the composer below is that field.
+    Text {
+        id: invitation
         anchors.horizontalCenter: parent.horizontalCenter
         visible: Ghostd.reachable
         width: parent.width
-        height: invitation.implicitHeight + Theme.pad * 2
-        radius: Theme.bubbleRadius
-        color: Theme.amber(0.06)
-        border.width: 1
-        border.color: Theme.amber(0.15)
-
-        Text {
-            id: invitation
-
-            anchors.centerIn: parent
-            width: parent.width - Theme.pad * 2
-            text: "What's on your mind?"
-            color: Theme.foreground
-            font.family: Theme.fontFamily
-            font.pixelSize: Theme.fontSize
-            wrapMode: Text.Wrap
-        }
+        horizontalAlignment: Text.AlignHCenter
+        text: "What's on your mind?"
+        color: Theme.foregroundDim
+        font.family: Theme.fontFamily
+        font.pixelSize: Theme.fontSize
+        wrapMode: Text.Wrap
     }
 
     // The same hero, failed: rose film instead of amber.

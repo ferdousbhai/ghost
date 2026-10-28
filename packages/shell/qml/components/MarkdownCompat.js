@@ -14,6 +14,11 @@
 // the same, so the rewrite goes once no supported Qt is older than 6.12
 // (Arch Linux ARM still ships 6.11).
 //
+// Inline code is the same face as the prose (the whole interface is
+// monospace), so Qt's own rendering leaves `ghost board` indistinguishable
+// from the sentence around it; a code span is drawn in `codeColor` instead,
+// when one is given.
+//
 // Links are painted in the application palette's link colour, a fixed blue,
 // whatever `linkColor` or the item's palette says; inline HTML anchors honour
 // their own style. So `[label](url)`, `<url>`, and bare URLs become
@@ -52,19 +57,21 @@ function rewrite(plain) {
         .replace(/(^|[^\w\\_])_(?=\S)([^_\n]*?\S)_(?![\w_])/g, "$1*$2*");
 }
 
-function protectedSpan(match, linkColor) {
+function protectedSpan(match, linkColor, codeColor) {
+    if (match[1] !== undefined && codeColor)
+        return '<span style="color:' + codeColor + '">' + escaped(match[0].slice(match[1].length, -match[1].length)) + "</span>";
     if (match[3] !== undefined) return anchor(match[3], labelHtml(match[2]), linkColor);
     if (match[4] !== undefined) return anchor(match[4], escaped(match[4]), linkColor);
     if (/^https?:/.test(match[0])) return anchor(match[0], escaped(match[0]), linkColor);
     return match[0];
 }
 
-function line(text, linkColor) {
+function line(text, linkColor, codeColor) {
     let out = "";
     let at = 0;
     PROTECTED.lastIndex = 0;
     for (let match = PROTECTED.exec(text); match !== null; match = PROTECTED.exec(text)) {
-        out += rewrite(text.slice(at, match.index)) + protectedSpan(match, linkColor);
+        out += rewrite(text.slice(at, match.index)) + protectedSpan(match, linkColor, codeColor);
         at = match.index + match[0].length;
     }
     // Emphasis around raw HTML is dropped too, so it moves inside the anchor;
@@ -77,11 +84,12 @@ function line(text, linkColor) {
 }
 
 /**
- * `markdown` with Qt-dropped emphasis rewritten and links drawn in
- * `linkColor`; code is left byte for byte.
+ * `markdown` with Qt-dropped emphasis rewritten, links drawn in `linkColor`,
+ * and, with `codeColor`, inline code drawn in it; fenced code is left byte
+ * for byte.
  */
-function normalize(markdown, linkColor) {
-    if (!/[_~[]|https?:/.test(markdown)) return markdown;
+function normalize(markdown, linkColor, codeColor) {
+    if (!/[_~[`]|https?:/.test(markdown)) return markdown;
     const lines = markdown.split("\n");
     let fence = "";
     for (let index = 0; index < lines.length; index += 1) {
@@ -95,7 +103,7 @@ function normalize(markdown, linkColor) {
             fence = opener[1];
             continue;
         }
-        lines[index] = line(lines[index], linkColor);
+        lines[index] = line(lines[index], linkColor, codeColor);
     }
     return lines.join("\n");
 }

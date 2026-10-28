@@ -149,7 +149,7 @@ Item {
             visible: root.reading
             // Empty while hidden: a hidden Text still parses and lays out, and
             // source-mode typing should not pay for a second document.
-            text: root.reading ? MarkdownCompat.normalize(field.text, Theme.ghostAmber) : ""
+            text: root.reading ? MarkdownCompat.normalize(field.text, Theme.ghostAmber, Theme.info) : ""
             textFormat: Text.MarkdownText
             color: Theme.foreground
             font.family: Theme.fontFamily

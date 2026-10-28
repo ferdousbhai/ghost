@@ -378,6 +378,7 @@ Item {
                 // has to be put back between them here.
                 Column {
                     id: bodyView
+                    objectName: "replyBody"
 
                     width: parent.width
                     visible: root.hasBody
@@ -388,20 +389,62 @@ Item {
                         // Named so a test can watch that a block already on
                         // screen is the same object, with the same text, after
                         // the reply has grown past it.
-                        delegate: BodyBlock {
+                        // A fenced block is code and shows as code; the text
+                        // block stays beside it, hidden, so the reply's blocks
+                        // keep one shape.
+                        delegate: Item {
+                            id: block
                             required property string markdown
-                            objectName: "replyBlock"
+                            readonly property var code: root.plainBody ? null : MarkdownSegments.fencedCode(block.markdown)
                             width: bodyView.width
-                            text: root.plainBody ? markdown : MarkdownCompat.normalize(markdown, Theme.ghostAmber)
+                            height: block.code ? codeView.implicitHeight : blockText.implicitHeight
+
+                            BodyBlock {
+                                id: blockText
+                                objectName: "replyBlock"
+                                visible: !block.code
+                                width: block.width
+                                text: root.plainBody ? block.markdown : MarkdownCompat.normalize(block.markdown, Theme.ghostAmber, Theme.info)
+                            }
+
+                            CodeBlock {
+                                id: codeView
+                                visible: block.code !== null
+                                width: block.width
+                                height: implicitHeight
+                                language: block.code ? block.code.language : ""
+                                code: block.code ? block.code.code : ""
+                            }
                         }
                     }
 
-                    BodyBlock {
-                        id: tailText
-                        objectName: "replyTail"
+                    // The block still being written, or a reply's last: a
+                    // reply that ends in a fence leaves it here, so it is
+                    // shown as code here too.
+                    Item {
+                        id: tail
+                        readonly property var code: root.plainBody || root.liveTail === ""
+                            ? null : MarkdownSegments.fencedCode(root.liveTail)
                         width: bodyView.width
                         visible: root.liveTail !== ""
-                        text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail, Theme.ghostAmber)
+                        height: tail.code ? tailCode.implicitHeight : tailText.implicitHeight
+
+                        BodyBlock {
+                            id: tailText
+                            objectName: "replyTail"
+                            width: tail.width
+                            visible: !tail.code
+                            text: root.plainBody ? root.liveTail : MarkdownCompat.normalize(root.liveTail, Theme.ghostAmber, Theme.info)
+                        }
+
+                        CodeBlock {
+                            id: tailCode
+                            visible: tail.code !== null
+                            width: tail.width
+                            height: implicitHeight
+                            language: tail.code ? tail.code.language : ""
+                            code: tail.code ? tail.code.code : ""
+                        }
                     }
                 }
 

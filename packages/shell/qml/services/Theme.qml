@@ -75,6 +75,7 @@ Singleton {
     readonly property var fallback: ({
         "mode": "dark",
         "background": "#1a1b26",
+        "dark_background": "#13141c",
         "foreground": "#a9b1d6",
         "bright_foreground": "#c0caf5",
         "accent": "#7aa2f7",
@@ -200,6 +201,8 @@ Singleton {
     readonly property color background: root.pick("background")
     readonly property color surface: root.blend(root.background, root.foreground, 0.035)
     readonly property color surfaceDeep: root.blend(root.background, root.foreground, 0.018)
+    /** Omarchy's `dark_background`: a well recessed into the canvas, such as a code block. */
+    readonly property color well: root.pick("dark_background")
     readonly property color foregroundBright: root.pick("bright_foreground")
     readonly property color foreground: root.pick("foreground")
     // Derived rather than taken from `dark_foreground`: that key is a theme's
@@ -313,13 +316,13 @@ Singleton {
     // mirrors `decoration:rounding` (0, square, by default). Ghost's cards,
     // panels and rows follow the same number so they sit beside Omarchy's menu
     // as one family; small controls cap it at 6px, as Omarchy's inner surfaces
-    // do. Chat surfaces keep their own shapes: 16px for capsules and the
-    // composer, 12px for chips, 4px for the speaker tail.
+    // do. Chat surfaces are the same family: capsules and the composer round
+    // with the chrome, chips with the controls, the speaker tail at most 4px.
     property int radius: 0
     readonly property int controlRadius: Math.min(root.radius, 6)
-    readonly property int bubbleRadius: 16
-    readonly property int bubbleRadiusSmall: 12
-    readonly property int bubbleTailRadius: 4
+    readonly property int bubbleRadius: root.radius
+    readonly property int bubbleRadiusSmall: root.controlRadius
+    readonly property int bubbleTailRadius: Math.min(root.radius, 4)
 
     // Spacing, each under the token omarchy-shell publishes it as.
     readonly property int pad: root.spaceFor("panel-padding", 18)
