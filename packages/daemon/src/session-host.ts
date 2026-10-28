@@ -58,7 +58,7 @@ import {
 } from "./prompt-policy.js";
 import { expandMcpServerConfig, GHOST_MCP_SERVER, type MCPServerConfig } from "./mcp-config-policy.js";
 import { normalizeMcpStdioCwd, readEnabledMcp } from "./mcp-catalog.js";
-import { classifyLimitMessage, type TurnEvent } from "./turn-events.js";
+import { classifyLimitMessage, statedReturn, type TurnEvent } from "./turn-events.js";
 import { type OwnerQuestion, pinsPath, questionsPath, readPins, readQuestions, readReads, readsPath, writePins, writeQuestions, writeReads } from "./sidecars.js";
 import { serializeByKey } from "./promise-chain.js";
 import type { RunningSource } from "./running-source.js";
@@ -90,10 +90,10 @@ const TOOL_SUMMARY_MAX = 800;
  */
 const MAX_CONVERSATION_TITLE_LENGTH = 120;
 /**
- * How long a harness that failed before answering is tried last: a limit
- * (quota, rate, credit) for an hour, anything else for a quarter. A retry an
- * hour later costs one failed start; trying it first every turn costs one
- * per turn.
+ * How long a harness that failed before answering is tried last when its
+ * refusal does not say when access returns: a limit (quota, rate, credit) for
+ * an hour, anything else for a quarter. A retry an hour later costs one failed
+ * start; trying it first every turn costs one per turn.
  */
 const REST_AFTER_LIMIT_MS = 60 * 60_000;
 const REST_AFTER_FAILURE_MS = 15 * 60_000;
@@ -525,9 +525,12 @@ export class SessionHost {
     return { until: new Date(rest.until).toISOString(), reason: rest.reason };
   }
 
+  /** Until the refusal says access returns, else for the default span. */
   private rest(id: string, reason: string): void {
-    const span = classifyLimitMessage(reason) ? REST_AFTER_LIMIT_MS : REST_AFTER_FAILURE_MS;
-    this.resting.set(id, { until: Date.now() + span, reason: reason.slice(0, 300) });
+    const now = Date.now();
+    const until = statedReturn(reason, now)
+      ?? now + (classifyLimitMessage(reason) ? REST_AFTER_LIMIT_MS : REST_AFTER_FAILURE_MS);
+    this.resting.set(id, { until, reason: reason.slice(0, 300) });
   }
 
   // ── Agent choice ──────────────────────────────────────────────────────

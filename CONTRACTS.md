@@ -413,8 +413,10 @@ Omarchy's default agent, then every other harness Omarchy reports installed
 before producing anything (not signed in, out of quota, not installed) hands
 the prompt to the next; one that fails after answering ends the turn in an
 error. A harness that failed before producing anything is then tried last,
-machine-wide, for an hour after a limit (`classifyLimitMessage`) and fifteen
-minutes after anything else, so new conversations start on one that answers;
+machine-wide, until the time its refusal says access returns (`statedReturn`:
+a stated UTC date or span, believed up to a month), else for an hour after a
+limit (`classifyLimitMessage`) and fifteen minutes after anything else, so new
+conversations start on one that answers;
 it still runs when everything ahead of it fails. Answering, the owner naming
 it (`ghost harness <id>`, `ghost switch <id>`), or a daemon restart ends that.
 `GET /api/ghosts/:ghost/harness` rows carry `resting: { until, reason }` or

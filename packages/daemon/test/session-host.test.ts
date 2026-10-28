@@ -262,6 +262,16 @@ describe("harness choice", () => {
     expect((await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting).toBeNull();
   });
 
+  it("rests a harness until the time its refusal names", async () => {
+    const back = new Date(Date.now() + 3 * 86_400_000);
+    const day = back.toISOString().slice(0, 10);
+    const spent = harness([{ exit: 1, stderr: `429 monthly API usage threshold. You will regain access on ${day} at 00:00 UTC.` }], "first");
+    const sessions = host({ harnesses: [spent, harness(replies("here"), "second")] });
+    await turn(sessions, "hello");
+    const resting = (await sessions.listHarnesses("casper")).harnesses.find((row) => row.id === "first")?.resting;
+    expect(resting?.until).toBe(`${day}T00:00:00.000Z`);
+  });
+
   it("still tries a resting harness when everything ahead of it fails", async () => {
     const flaky = harness([{ exit: 1, stderr: "Connection error." }, ...replies("back")], "first");
     const broken = harness([{ exit: 1, stderr: "model_not_found" }], "second");

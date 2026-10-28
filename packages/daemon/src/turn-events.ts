@@ -90,6 +90,33 @@ export function classifyLimitMessage(text: string): LimitReachedEvent["kind"] | 
   return null;
 }
 
+/** A date, with an optional time, after words that announce a return: "regain access on 2026-11-01 at 00:00 UTC". */
+const STATED_DATE = /(?:regain access|access (?:returns|resumes)|resets?|available again|try again|retry)\D{0,24}?(\d{4}-\d{2}-\d{2})(?:(?:\s+at\s+|T)(\d{1,2}):(\d{2}))?/iu;
+/** A span: "try again in 30 minutes", "retry after 120 seconds", "resets in 2 hours". */
+const STATED_SPAN = /(?:try again|retry|resets?)\s+(?:in|after)\s+(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\b/iu;
+const SPAN_MS: Readonly<Record<string, number>> = { s: 1_000, m: 60_000, h: 3_600_000, d: 86_400_000 };
+/** No refusal is believed past a month; a wrong parse costs at most that. */
+const MAX_STATED_WAIT_MS = 31 * 86_400_000;
+
+/**
+ * When a refusal says access returns, as epoch milliseconds: a stated date
+ * (read as UTC, the zone providers state) or a stated span from `now`. Null
+ * when it states none, or nothing in the future within a month.
+ */
+export function statedReturn(text: string, now: number): number | null {
+  let at: number | null = null;
+  const date = STATED_DATE.exec(text);
+  if (date) {
+    const [year, month, day] = (date[1] as string).split("-").map(Number) as [number, number, number];
+    at = Date.UTC(year, month - 1, day, Number(date[2] ?? 0), Number(date[3] ?? 0));
+  } else {
+    const span = STATED_SPAN.exec(text);
+    if (span) at = now + Number(span[1]) * (SPAN_MS[(span[2] as string)[0]?.toLowerCase() ?? ""] ?? 0);
+  }
+  if (at === null || !Number.isFinite(at) || at <= now || at - now > MAX_STATED_WAIT_MS) return null;
+  return at;
+}
+
 export function encodeSseEvent(event: unknown): string {
   return `data: ${JSON.stringify(event)}\n\n`;
 }
