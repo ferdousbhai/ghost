@@ -11,7 +11,8 @@
 //                  other shortcut keeps working.
 //
 // Both are withdrawn when the plugin unloads, and made again after a Hyprland
-// config reload, which drops them. `summonKey` says who holds the key; the
+// config reload, which drops them. A .conf config cannot run Lua at all: the
+// owner sources contrib/hyprland/ghost.conf for both instead. `summonKey` says who holds the key; the
 // `ghost status` IPC reports it.
 // Mounted by Service.qml, the half of the plugin that is always loaded.
 import QtQuick
@@ -24,7 +25,10 @@ import "services/DesktopKeys.js" as Desk
 Item {
     id: root
 
-    /** Who holds the summon key: "" until read, then "shell" (this shell bound it), "owner", or "taken". */
+    /**
+     * Who holds the summon key: "" until read, then "shell" (this shell bound
+     * it), "owner", "taken", or "none" (free, on a config the shell cannot bind in).
+     */
     property string summonKey: ""
     /** This shell bound the summon key, so it unbinds it on the way out. */
     property bool boundSummon: false
@@ -33,21 +37,24 @@ Item {
     /** A config reload arrived while the binds were being read. */
     property bool reprobe: false
     property var pending: []
+    /** Hyprland runs a Lua config, so `hyprctl eval` works; false once it says otherwise. */
+    property bool lua: true
 
     Component.onCompleted: root.setUp()
     // Detached: this item, and any Process it owns, is going away. Whatever is
     // still queued goes first, in the same chunk, so the withdrawal lands last.
-    Component.onDestruction: Quickshell.execDetached(["hyprctl", "eval",
+    Component.onDestruction: if (root.lua) Quickshell.execDetached(["hyprctl", "eval",
         root.pending.concat([Desk.withdrawLua(root.token, root.boundSummon)]).join("; ")])
 
     function setUp(): void {
-        root.evaluate(Desk.setUpLua(root.token));
+        if (root.lua) root.evaluate(Desk.setUpLua(root.token));
         if (bindsProbe.running) root.reprobe = true;
         else bindsProbe.running = true;
     }
 
     /** Run Lua in the compositor, one chunk at a time, in order. */
     function evaluate(lua: string): void {
+        if (!root.lua) return;
         root.pending = root.pending.concat([lua]);
         if (!evaluator.running) root.next();
     }
@@ -60,8 +67,9 @@ Item {
     }
 
     function claim(state: string): void {
-        root.boundSummon = state === "free" || state === "shell";
-        root.summonKey = root.boundSummon ? "shell" : state;
+        const free = state === "free" || state === "shell";
+        root.boundSummon = free && root.lua;
+        root.summonKey = root.boundSummon ? "shell" : free ? "none" : state;
         if (root.boundSummon) root.evaluate(Desk.summonBindLua(Plugin.ID));
         else if (state === "taken")
             console.info("ghost: SUPER+CTRL+G is bound to something else; summon with `omarchy-shell shell toggle "
@@ -73,7 +81,20 @@ Item {
         id: evaluator
         objectName: "evaluator"
         stdout: StdioCollector {
-            onStreamFinished: if (text.trim() !== "ok") console.warn("ghost: hyprctl eval refused Ghost's setup: " + text.trim())
+            onStreamFinished: {
+                if (text.trim() === "ok") return;
+                if (!Desk.refusedForConf(text)) {
+                    console.warn("ghost: hyprctl eval refused Ghost's setup: " + text.trim());
+                } else if (root.lua) {
+                    root.lua = false;
+                    root.pending = [];
+                    root.boundSummon = false;
+                    if (root.summonKey === "shell") root.summonKey = "none";
+                    console.warn("ghost: Hyprland's config is .conf, not Lua, so Ghost cannot set its window rules or"
+                        + " summon key at runtime; source contrib/hyprland/ghost.conf (shipped in"
+                        + " /usr/share/doc/ghost/shell-contrib/) from hyprland.conf");
+                }
+            }
         }
         // Once this exit has settled, as the probe's restart below.
         onExited: Qt.callLater(root.next)
@@ -109,6 +130,9 @@ Item {
             // stale (a bind could replace one the owner just added).
             root.pending = [];
             root.boundSummon = false;
+            root.summonKey = "";
+            // The owner may have moved the config to Lua; ask again.
+            root.lua = true;
             root.setUp();
         }
     }

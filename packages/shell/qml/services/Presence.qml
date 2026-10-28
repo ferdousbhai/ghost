@@ -14,12 +14,15 @@ pragma Singleton
 import Quickshell
 import Quickshell.Hyprland
 import QtQuick
+import "DesktopKeys.js" as Desk
 
 Singleton {
     id: root
 
-    /** The prompt is open and holds the keyboard. */
+    /** The prompt is open. */
     property bool composing: false
+    /** The prompt's window is the focused one (PresenceOverlay keeps this). */
+    property bool promptFocused: false
     /**
      * The conversation this presence follows: "" before a send, "working"
      * while it runs, then "answered" or "failed" until dismissed.
@@ -60,6 +63,11 @@ Singleton {
         root.composing = true;
         Dictation.refresh();
         if (Dictation.state === "idle") Dictation.toggle();
+    }
+
+    /** Give the prompt the focus back, when another app took it. */
+    function raise(): void {
+        for (const request of Desk.focusDispatches(Desk.PROMPT_TITLE)) Hyprland.dispatch(request);
     }
 
     /** Close the prompt; a turn it started keeps its ticker or card. */

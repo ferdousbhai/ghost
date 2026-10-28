@@ -102,7 +102,7 @@ FloatingWindow {
 
     /** Give the window the focus: a new one, or one left open behind another app. */
     function raise(): void {
-        Hyprland.dispatch(Desk.focusDispatch(Desk.HUD_TITLE));
+        for (const request of Desk.focusDispatches(Desk.HUD_TITLE)) Hyprland.dispatch(request);
     }
 
     function focused(): bool {

@@ -691,8 +691,9 @@ runtime preserves owner data.
   `bar-widget` (the state dot) kinds. A summon payload with neither `section`
   nor `sessionId` opens the presence: every screen's edges glow and a prompt
   on the focused monitor takes the keyboard (the window instead while no ghost
-  is listed); with the window left open behind another app and no `ghost`
-  named, it refocuses the window as it was. Sending starts a new conversation, or continues the presence's
+  is listed); with the prompt or the window left open behind another app and
+  no `ghost` named, it refocuses that one as it was. Sending starts a new
+  conversation, or continues the presence's
   while its ticker or reply card is up, unless the owner chose new. The prompt then
   closes, the glow thins, and a ticker that takes no keyboard focus
   unclicked shows the turn's activity, then its reply or error, until
@@ -732,7 +733,9 @@ runtime preserves owner data.
   animation, out of Omarchy's default inactive opacity). Both are withdrawn
   when the plugin unloads, only by the shell that last made them, and re-made
   after each Hyprland config reload; the `ghost` IPC's `status` reports
-  `summonKey` (`shell`, `owner`, or `taken`; empty until read). It runs inside Omarchy's own shell
+  `summonKey` (`shell`, `owner`, `taken`, or `none` on a `.conf` config, which
+  runs no Lua, so `contrib/hyprland/ghost.conf` carries the key and the rule;
+  empty until read). It runs inside Omarchy's own shell
   process, so Ghost ships no shell, unit, or tray helper of its own, and its QML
   imports are relative paths: inside the host, `qs.` resolves to Omarchy's shell
   root. The bar widget fills the injected `bar.barSize` across the bar and

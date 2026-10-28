@@ -62,7 +62,7 @@ TestCase {
     }
 
     function test_focusFindsAWindowByItsWholeTitle(): void {
-        compare(Desk.focusDispatch(Desk.HUD_TITLE), 'hl.dsp.focus({ window = "title:^Ghost$" })');
+        compare(Desk.focusDispatches(Desk.HUD_TITLE), ['hl.dsp.focus({ window = "title:^Ghost$" })', "focuswindow title:^Ghost$"]);
         compare(Desk.titlePattern("a.b (c)"), "^a\\.b \\(c\\)$");
     }
 
@@ -134,5 +134,24 @@ TestCase {
         compare(keys.pending, [Desk.summonBindLua(id)]);
         Hyprland.rawEvent({ name: "configreloaded", data: "" });
         compare(keys.pending, [Desk.setUpLua(keys.token)]);
+    }
+
+    // A .conf config refuses Lua: the shell stops asking, and says the key is
+    // free but unbound rather than claiming it holds it.
+    function test_aConfConfigIsNotAskedForLua(): void {
+        const keys = createTemporaryObject(keysComponent, tc);
+        const evaluator = findChild(keys, "evaluator");
+        evaluator.stdout.text = "eval is only supported with the lua config manager";
+        evaluator.stdout.streamFinished();
+        evaluator.simulateExited(0, 0);
+        verify(!keys.lua);
+        answerProbe(keys, []);
+        compare(keys.summonKey, "none");
+        verify(!keys.boundSummon);
+        compare(keys.pending.length, 0);
+        Quickshell.detached = [];
+        keys.destroy();
+        wait(0);
+        compare(Quickshell.detached.length, 0);
     }
 }

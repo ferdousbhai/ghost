@@ -98,7 +98,17 @@ function withdrawLua(token, boundSummon) {
         + ruleLua(false) + "; ghost_shell = nil end";
 }
 
-/** The dispatcher expression focusing the Ghost window with `title`. */
-function focusDispatch(title) {
-    return "hl.dsp.focus({ window = " + luaString("title:" + titlePattern(title)) + " })";
+/**
+ * The dispatches focusing the Ghost window with `title`. A Lua config reads a
+ * dispatch as a Lua expression and a .conf config only as the classic
+ * dispatcher, each refusing the other's, so both are sent and one takes.
+ */
+function focusDispatches(title) {
+    var window = "title:" + titlePattern(title);
+    return ["hl.dsp.focus({ window = " + luaString(window) + " })", "focuswindow " + window];
+}
+
+/** What `hyprctl eval` answers on a .conf config, which has no Lua to run. */
+function refusedForConf(answer) {
+    return String(answer).indexOf("only supported with the lua config manager") >= 0;
 }

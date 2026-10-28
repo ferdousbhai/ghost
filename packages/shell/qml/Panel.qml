@@ -18,10 +18,11 @@ Item {
 
     /**
      * The host's `toggle` hides the panel when this is true and summons it
-     * otherwise. The HUD is a window, so it counts as open only while focused:
-     * one left behind another app is brought back by the toggle, not hidden.
+     * otherwise. The prompt and the HUD are windows, so each counts as open
+     * only while focused: one left behind another app is brought back by the
+     * toggle, not hidden.
      */
-    property bool opened: Presence.composing || hud.shown && hud.focused()
+    property bool opened: Presence.composing && Presence.promptFocused || hud.shown && hud.focused()
     /** Injected by the host once the Loader resolves. */
     property var shell: null
 
@@ -60,10 +61,11 @@ Item {
         if (payload.ghost && payload.sessionId)
             Ghostd.openConversationForGhost(String(payload.ghost), String(payload.sessionId));
         else if (payload.ghost) Ghostd.selectGhost(String(payload.ghost));
-        // The toggle with the window left open behind another app brings it
+        // The toggle with a window left open behind another app brings it
         // back as it was; naming a ghost still asks that ghost.
-        if (!payload.section && !payload.sessionId && !payload.ghost && hud.shown) {
-            hud.raise();
+        if (!payload.section && !payload.sessionId && !payload.ghost && (Presence.composing || hud.shown)) {
+            if (Presence.composing) Presence.raise();
+            else hud.raise();
             return;
         }
         // No ghost to ask (none yet, or ghostd is down): the window says why.

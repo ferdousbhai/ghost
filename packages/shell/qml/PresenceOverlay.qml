@@ -29,6 +29,12 @@ Scope {
         // Hyprland closed it (SUPER+W): that is a dismissal.
         onVisibleChanged: if (!promptWindow.visible && Presence.composing) Presence.dismiss()
 
+        Binding {
+            target: Presence
+            property: "promptFocused"
+            value: promptWindow.visible && promptWindow.contentItem.Window.active
+        }
+
         MouseArea {
             anchors.fill: parent
             onClicked: Presence.dismiss()

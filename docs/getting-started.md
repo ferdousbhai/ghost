@@ -120,8 +120,10 @@ the plugin: Ghost asks Hyprland for the binding at runtime, so nothing in
 already holds that key for something else, Ghost leaves it alone and says so in
 the shell's log; bind another key with a snippet from
 `/usr/share/doc/ghost/shell-contrib/`
-(`hyprland/ghost.lua` for Omarchy 4's Lua config, `hyprland/ghost.conf` for
-plain Hyprland), or summon with `omarchy-shell shell toggle ferdousbhai.ghost`.
+(`hyprland/ghost.lua` for Omarchy 4's Lua config), or summon with
+`omarchy-shell shell toggle ferdousbhai.ghost`. A Hyprland still on a `.conf`
+config cannot run what Ghost asks for at runtime: source `hyprland/ghost.conf`,
+which carries the key and the window rule the prompt and history need.
 
 The summon prompt and history are windows that float over everything, so a
 habitual `SUPER+W` closes Ghost rather than the app behind it, while your other

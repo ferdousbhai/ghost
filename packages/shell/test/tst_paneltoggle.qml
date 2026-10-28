@@ -31,7 +31,7 @@ TestCase {
         panel.open("");
         verify(!Presence.composing);
         compare(hud.currentSection, "routines");
-        compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost$" })']);
+        compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost$" })', "focuswindow title:^Ghost$"]);
     }
 
     // Naming a ghost still asks that ghost, window open or not.
@@ -41,6 +41,18 @@ TestCase {
         panel.open('{"section":"routines"}');
         panel.open('{"ghost":"dous"}');
         verify(Presence.composing);
+    }
+
+    function test_aPlainSummonRefocusesAnOpenPrompt(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = createTemporaryObject(panelComponent, this);
+        panel.open("");
+        verify(Presence.composing);
+        verify(!panel.opened);
+        Hyprland.dispatched = [];
+        panel.open("");
+        verify(Presence.composing);
+        compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost prompt$" })', "focuswindow title:^Ghost prompt$"]);
     }
 
     function test_aPlainSummonWithTheWindowClosedOpensThePrompt(): void {

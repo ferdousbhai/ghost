@@ -461,7 +461,8 @@ Singleton {
     Timer {
         id: roundingLater
         interval: 200
-        onTriggered: roundingProbe.running = true
+        // A read already running began before the reload: read again after it.
+        onTriggered: if (roundingProbe.running) roundingLater.restart(); else roundingProbe.running = true
     }
 
     Connections {
