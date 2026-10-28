@@ -11,7 +11,7 @@
  *
  * See ./harness.ts for the normalisation rules and the regeneration command.
  */
-import { readdirSync } from "node:fs";
+import { chmodSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { conversationDir } from "../../src/conversation-log.js";
@@ -62,12 +62,18 @@ describe("golden: session", () => {
       { events: [{ type: "text", block: "a", delta: "That you want short answers." }] },
     ]);
     const scheduleUnitDir = join(temp.ownerHome, ".xdg-config", "systemd", "user");
+    // Whether Recall is installed changes the prompt; pin it present with a
+    // stub, so the fixture neither depends on the machine nor misses the line.
+    const stubBin = join(temp.ownerHome, ".stub-bin");
+    mkdirSync(stubBin, { recursive: true });
+    writeFileSync(join(stubBin, "recall"), "#!/bin/sh\nexit 0\n");
+    chmodSync(join(stubBin, "recall"), 0o755);
     host = new SessionHost({
       registry: temp.registry,
       ownerHome: temp.ownerHome,
       scheduleUnitDir,
       scheduleCommandRunner: async () => ({ stdout: "", stderr: "", code: 0 }),
-      env: { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: temp.ownerHome },
+      env: { PATH: `${stubBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: temp.ownerHome },
       ...onlyHarnesses(harness),
     });
 
