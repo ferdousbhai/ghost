@@ -178,7 +178,7 @@ Rectangle {
         Text {
             visible: root.expanded
             width: parent.width
-            text: "Tool · " + root.call().name
+            text: root.call().name
             color: root.detailColor
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
@@ -189,7 +189,7 @@ Rectangle {
         Text {
             visible: (root.expanded || root.failed) && root.diagnosticOutput !== ""
             width: parent.width
-            text: "Output · " + root.diagnosticOutput
+            text: root.diagnosticOutput
             color: root.failed ? Theme.ghostRose : root.detailColor
             font.family: Theme.fontFamilyMono
             font.pixelSize: Theme.fontSizeSmall
