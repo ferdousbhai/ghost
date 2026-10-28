@@ -146,26 +146,14 @@ TestCase {
         evaluator.stdout.streamFinished();
         evaluator.simulateExited(0, 0);
         verify(!keys.lua);
-        verify(!keys.confAdvised);
+        verify(keys.confAdvised);
         answerProbe(keys, []);
         compare(keys.summonKey, "none");
-        verify(keys.confAdvised);
         verify(!keys.boundSummon);
         compare(keys.pending.length, 0);
         Quickshell.detached = [];
         keys.destroy();
         wait(0);
         compare(Quickshell.detached.length, 0);
-    }
-
-    // An owner who sourced ghost.conf has done what the advice says.
-    function test_aConfConfigWithGhostConfIsNotAdvised(): void {
-        const keys = createTemporaryObject(keysComponent, tc);
-        const evaluator = findChild(keys, "evaluator");
-        evaluator.stdout.text = "eval is only supported with the lua config manager";
-        evaluator.stdout.streamFinished();
-        answerProbe(keys, [{ modmask: 68, key: "G", submap: "", arg: "omarchy-shell shell toggle ferdousbhai.ghost" }]);
-        compare(keys.summonKey, "owner");
-        verify(!keys.confAdvised);
     }
 }

@@ -76,20 +76,6 @@ Item {
         else if (state === "taken")
             console.info("ghost: SUPER+CTRL+G is bound to something else; summon with `omarchy-shell shell toggle "
                 + Plugin.ID + "` or bind another key (contrib/hyprland)");
-        root.adviseConf();
-    }
-
-    /**
-     * On a .conf config, once the binds are read: say where the key and the
-     * window rule come from instead, unless the owner's ghost.conf is
-     * already sourced (its bind is the owner's).
-     */
-    function adviseConf(): void {
-        if (root.lua || root.confAdvised || root.summonKey === "" || root.summonKey === "owner") return;
-        root.confAdvised = true;
-        console.warn("ghost: Hyprland's config is .conf, not Lua, so Ghost cannot set its window rules or"
-            + " summon key at runtime; source contrib/hyprland/ghost.conf (shipped in"
-            + " /usr/share/doc/ghost/shell-contrib/) from hyprland.conf");
     }
 
     // `hyprctl eval` answers "ok", or why it refused the chunk.
@@ -106,7 +92,13 @@ Item {
                     root.pending = [];
                     root.boundSummon = false;
                     if (root.summonKey === "shell") root.summonKey = "none";
-                    root.adviseConf();
+                    // Whether a sourced ghost.conf carries the window rule
+                    // (an older one did not) cannot be read back, so say it.
+                    if (root.confAdvised) return;
+                    root.confAdvised = true;
+                    console.info("ghost: Hyprland's config is .conf, not Lua, so Ghost cannot set its window rule or"
+                        + " summon key at runtime; source the current contrib/hyprland/ghost.conf, with its"
+                        + " windowrule (shipped in /usr/share/doc/ghost/shell-contrib/), from hyprland.conf");
                 }
             }
         }

@@ -35,6 +35,19 @@ TestCase {
             ["hyprctl", "dispatch", "focuswindow", "title:^Ghost$"]]);
     }
 
+    // Naming a ghost with the prompt left behind another app brings the
+    // prompt back, asking that ghost.
+    function test_summoningANamedGhostRefocusesAnOpenPrompt(): void {
+        Ghostd.activeGhost = "dous";
+        const panel = createTemporaryObject(panelComponent, this);
+        panel.open("");
+        Quickshell.detached = [];
+        panel.open('{"ghost":"dous"}');
+        verify(Presence.composing);
+        compare(Quickshell.detached.length, 2);
+        compare(Quickshell.detached[1], ["hyprctl", "dispatch", "focuswindow", "title:^Ghost prompt$"]);
+    }
+
     // Naming a ghost still asks that ghost, window open or not.
     function test_summoningANamedGhostOpensItsPrompt(): void {
         Ghostd.activeGhost = "dous";
