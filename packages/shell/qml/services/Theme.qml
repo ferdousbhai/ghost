@@ -31,10 +31,10 @@ pragma ComponentBehavior: Bound
 //               system-wide (default/fontconfig/conf.avail/50-omarchy.conf),
 //               so asking for "monospace" is how an Omarchy app gets the
 //               Omarchy face. Naming the family here would pin it instead.
-//   the corners shell.toml publishes no radius, and
-//               default/hypr/looknfeel.lua sets `rounding = 0` for every
-//               window but a popped one. The window frame stays square;
-//               the surfaces inside it round (see `radius`).
+//   the corners shell.toml publishes no radius; Omarchy's chrome rounds
+//               as Hyprland's windows do (`decoration:rounding`, 0 in
+//               default/hypr/looknfeel.lua), and so do Ghost's surfaces
+//               (see `radius`).
 //
 // Only the keys the theme author actually wrote are present in colors.toml —
 // Omarchy derives the rest (color0..15, bg/fg aliases, bright_* mixes) in

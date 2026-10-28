@@ -13,7 +13,7 @@
 // Both are withdrawn when the plugin unloads, and made again after a Hyprland
 // config reload, which drops them. A .conf config cannot run Lua at all: the
 // owner sources contrib/hyprland/ghost.conf for both instead. `summonKey` says
-// who holds the key; the `ghost status` IPC reports it.
+// who holds the key; `omarchy-shell ghost status` reports it.
 // Mounted by Service.qml, the half of the plugin that is always loaded.
 import QtQuick
 import Quickshell
