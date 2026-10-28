@@ -62,7 +62,8 @@ TestCase {
     }
 
     function test_focusFindsAWindowByItsWholeTitle(): void {
-        compare(Desk.focusDispatches(Desk.HUD_TITLE), ['hl.dsp.focus({ window = "title:^Ghost$" })', "focuswindow title:^Ghost$"]);
+        compare(Desk.focusCommands(Desk.HUD_TITLE), [["hyprctl", "dispatch", 'hl.dsp.focus({ window = "title:^Ghost$" })'],
+            ["hyprctl", "dispatch", "focuswindow", "title:^Ghost$"]]);
         compare(Desk.titlePattern("a.b (c)"), "^a\\.b \\(c\\)$");
     }
 

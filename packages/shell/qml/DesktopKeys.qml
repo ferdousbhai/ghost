@@ -12,8 +12,8 @@
 //
 // Both are withdrawn when the plugin unloads, and made again after a Hyprland
 // config reload, which drops them. A .conf config cannot run Lua at all: the
-// owner sources contrib/hyprland/ghost.conf for both instead. `summonKey` says who holds the key; the
-// `ghost status` IPC reports it.
+// owner sources contrib/hyprland/ghost.conf for both instead. `summonKey` says
+// who holds the key; the `ghost status` IPC reports it.
 // Mounted by Service.qml, the half of the plugin that is always loaded.
 import QtQuick
 import Quickshell
@@ -39,6 +39,8 @@ Item {
     property var pending: []
     /** Hyprland runs a Lua config, so `hyprctl eval` works; false once it says otherwise. */
     property bool lua: true
+    /** The .conf advice is in the log already; a theme change reloads often. */
+    property bool confAdvised: false
 
     Component.onCompleted: root.setUp()
     // Detached: this item, and any Process it owns, is going away. Whatever is
@@ -47,7 +49,7 @@ Item {
         root.pending.concat([Desk.withdrawLua(root.token, root.boundSummon)]).join("; ")])
 
     function setUp(): void {
-        if (root.lua) root.evaluate(Desk.setUpLua(root.token));
+        root.evaluate(Desk.setUpLua(root.token));
         if (bindsProbe.running) root.reprobe = true;
         else bindsProbe.running = true;
     }
@@ -90,6 +92,8 @@ Item {
                     root.pending = [];
                     root.boundSummon = false;
                     if (root.summonKey === "shell") root.summonKey = "none";
+                    if (root.confAdvised) return;
+                    root.confAdvised = true;
                     console.warn("ghost: Hyprland's config is .conf, not Lua, so Ghost cannot set its window rules or"
                         + " summon key at runtime; source contrib/hyprland/ghost.conf (shipped in"
                         + " /usr/share/doc/ghost/shell-contrib/) from hyprland.conf");

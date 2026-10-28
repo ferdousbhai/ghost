@@ -1,6 +1,6 @@
 import QtQuick
 import QtTest
-import Quickshell.Hyprland
+import Quickshell
 import "../qml"
 import "../qml/services"
 
@@ -27,11 +27,12 @@ TestCase {
         // Another app has the focus, so the panel does not count as open.
         verify(!panel.opened);
 
-        Hyprland.dispatched = [];
+        Quickshell.detached = [];
         panel.open("");
         verify(!Presence.composing);
         compare(hud.currentSection, "routines");
-        compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost$" })', "focuswindow title:^Ghost$"]);
+        compare(Quickshell.detached, [["hyprctl", "dispatch", 'hl.dsp.focus({ window = "title:^Ghost$" })'],
+            ["hyprctl", "dispatch", "focuswindow", "title:^Ghost$"]]);
     }
 
     // Naming a ghost still asks that ghost, window open or not.
@@ -49,10 +50,11 @@ TestCase {
         panel.open("");
         verify(Presence.composing);
         verify(!panel.opened);
-        Hyprland.dispatched = [];
+        Quickshell.detached = [];
         panel.open("");
         verify(Presence.composing);
-        compare(Hyprland.dispatched, ['hl.dsp.focus({ window = "title:^Ghost prompt$" })', "focuswindow title:^Ghost prompt$"]);
+        compare(Quickshell.detached, [["hyprctl", "dispatch", 'hl.dsp.focus({ window = "title:^Ghost prompt$" })'],
+            ["hyprctl", "dispatch", "focuswindow", "title:^Ghost prompt$"]]);
     }
 
     function test_aPlainSummonWithTheWindowClosedOpensThePrompt(): void {

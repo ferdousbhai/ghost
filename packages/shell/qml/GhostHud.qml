@@ -23,7 +23,6 @@ pragma ComponentBehavior: Bound
 //   hand-offs             opening a link, a file or the external editor closes
 //                         it, or the app it opened would sit underneath.
 import Quickshell
-import Quickshell.Hyprland
 import QtQuick
 import QtQuick.Layouts
 import "services"
@@ -102,7 +101,7 @@ FloatingWindow {
 
     /** Give the window the focus: a new one, or one left open behind another app. */
     function raise(): void {
-        for (const request of Desk.focusDispatches(Desk.HUD_TITLE)) Hyprland.dispatch(request);
+        for (const command of Desk.focusCommands(Desk.HUD_TITLE)) Quickshell.execDetached(command);
     }
 
     function focused(): bool {

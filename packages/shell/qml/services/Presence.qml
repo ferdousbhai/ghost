@@ -67,7 +67,7 @@ Singleton {
 
     /** Give the prompt the focus back, when another app took it. */
     function raise(): void {
-        for (const request of Desk.focusDispatches(Desk.PROMPT_TITLE)) Hyprland.dispatch(request);
+        for (const command of Desk.focusCommands(Desk.PROMPT_TITLE)) Quickshell.execDetached(command);
     }
 
     /** Close the prompt; a turn it started keeps its ticker or card. */

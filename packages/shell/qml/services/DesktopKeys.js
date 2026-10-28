@@ -99,13 +99,15 @@ function withdrawLua(token, boundSummon) {
 }
 
 /**
- * The dispatches focusing the Ghost window with `title`. A Lua config reads a
+ * The commands focusing the Ghost window with `title`. A Lua config reads a
  * dispatch as a Lua expression and a .conf config only as the classic
- * dispatcher, each refusing the other's, so both are sent and one takes.
+ * dispatcher, each refusing the other's, so both are sent, as detached
+ * commands whose refusal goes nowhere, and one takes.
  */
-function focusDispatches(title) {
+function focusCommands(title) {
     var window = "title:" + titlePattern(title);
-    return ["hl.dsp.focus({ window = " + luaString(window) + " })", "focuswindow " + window];
+    return [["hyprctl", "dispatch", "hl.dsp.focus({ window = " + luaString(window) + " })"],
+        ["hyprctl", "dispatch", "focuswindow", window]];
 }
 
 /** What `hyprctl eval` answers on a .conf config, which has no Lua to run. */

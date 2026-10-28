@@ -115,9 +115,9 @@ that has already exited and the preview keeps running.
   offers `Summon <name>`. `preview.sh` summons
   it with `{"section":"home"}`; a plain summon opens the presence instead
   (below).
-  The nested session binds no keys (the summon key would reach the owner's
-  own HUD); drive the preview with `omarchy-shell shell toggle ferdousbhai.ghost`
-  under the exported variables.
+  The nested shell claims SUPER+CTRL+G inside the nested Hyprland, but the
+  owner's compositor sees that key first, so drive the preview with
+  `omarchy-shell shell toggle ferdousbhai.ghost` under the exported variables.
   Character edits `character.md`. Hooks shows the
   owner's `hooks.json` handlers with their lifecycle triggers and the loaded
   count, and opening it does not create a conversation. MCP lists stdio, HTTP,
