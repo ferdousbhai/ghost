@@ -109,7 +109,9 @@ that has already exited and the preview keeps running.
   unread dots, then casper's places (Board,
   Routines, Character, Ghosts, Hooks, MCP servers, Remote access). Typing
   filters; Enter grows the card into the chosen view with a `‹` back to the
-  list; Enter on a filter nothing matches asks casper. `preview.sh` summons
+  list; Enter on a filter nothing matches asks casper. Ghosts keeps the card's
+  size: casper (current, amber) above moaning-myrtle, and a typed free name
+  offers `Summon <name>`. `preview.sh` summons
   it with `{"section":"home"}`; a plain summon opens the presence instead
   (below).
   The nested session binds no keys (the summon key would reach the owner's

@@ -33,11 +33,12 @@ WlrLayershell {
 
     /** Driven by Panel.qml. Bound to `visible`. */
     property bool shown: false
-    /** "home" (the launcher) or one of `sections`. */
+    /** "home" or "ghosts" (the launcher's two lists), or one of `sections`. */
     property string currentSection: "home"
     /** The views a row opens, in the body stack's order. */
-    readonly property var sections: ["chat", "board", "routines", "character", "ghosts", "hooks", "mcp", "remote"]
-    readonly property bool home: hud.currentSection === "home"
+    readonly property var sections: ["chat", "board", "routines", "character", "hooks", "mcp", "remote"]
+    /** The card is a list: the launcher, over conversations or over ghosts. */
+    readonly property bool home: hud.currentSection === "home" || hud.currentSection === "ghosts"
 
     /** The monitor it covers, fixed at open. */
     property string screenName: ""
@@ -101,9 +102,9 @@ WlrLayershell {
 
     /** Each pane fetches its own data when it becomes visible. */
     function showSection(section: string): void {
-        if (section !== "home" && hud.sections.indexOf(section) < 0) return;
+        if (section !== "home" && section !== "ghosts" && hud.sections.indexOf(section) < 0) return;
         hud.currentSection = section;
-        if (section === "home") launcher.reset();
+        if (hud.home) launcher.reset();
         else if (section === "chat") composer.take();
     }
 
@@ -125,6 +126,15 @@ WlrLayershell {
             hud.showSection("chat");
         } else if (row.kind === "place") {
             hud.showSection(row.id);
+        } else if (row.kind === "ghost") {
+            // The open file lives in the ghost being left.
+            if (row.id !== Ghostd.activeGhost) Workbench.close();
+            Ghostd.selectGhost(row.id);
+            hud.showSection("home");
+        } else if (row.kind === "summon") {
+            Workbench.close();
+            Ghostd.createGhost(row.title);
+            hud.showSection("home");
         }
     }
 
@@ -261,7 +271,7 @@ WlrLayershell {
             if (hud.pending !== null) hud.dismissPending();
             else if ((event.modifiers & Qt.ShiftModifier) && Ghostd.working) Ghostd.cancel();
             else if (hud.workbenchOpen) Workbench.close();
-            else if (!hud.home) hud.showSection("home");
+            else if (hud.currentSection !== "home") hud.showSection("home");
             else hud.close();
         }
         // Ctrl+N starts a conversation, as in any chat app. It reaches the card
@@ -314,9 +324,12 @@ WlrLayershell {
             anchors.right: parent.right
             visible: hud.home
             focus: hud.home
+            mode: hud.currentSection === "ghosts" ? "ghosts" : "home"
             maxListHeight: hud.height - card.listTop - card.inset - Theme.controlHeight * 4
             onActivated: row => hud.launch(row)
             onDeleteRequested: (sessionId, title) => hud.ask("conversation", sessionId, title)
+            onBanishRequested: name => hud.ask("ghost", name, "")
+            onBackRequested: hud.showSection("home")
         }
 
         ColumnLayout {
@@ -493,27 +506,6 @@ WlrLayershell {
                 // refused at Save instead of breaking the next cold start.
                 CharacterPane {
                     onClosed: hud.showSection("home")
-                }
-
-                // Every ghost: pick one to make it the list's, summon a new
-                // one, rename, or banish (asked in the dialog below).
-                Flickable {
-                    id: ghostsScroll
-                    contentWidth: width
-                    contentHeight: roster.implicitHeight
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-
-                    Roster {
-                        id: roster
-                        width: Math.min(ghostsScroll.width, Theme.ch(60))
-                        onPicked: {
-                            // The open file lives in the ghost we just left.
-                            Workbench.close();
-                            hud.showSection("home");
-                        }
-                        onDeleteRequested: name => hud.ask("ghost", name, "")
-                    }
                 }
 
                 // Machine-level hook configuration is global: the owner's command

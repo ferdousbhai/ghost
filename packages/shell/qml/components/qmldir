@@ -18,7 +18,6 @@ QueueLine 1.0 QueueLine.qml
 Board 1.0 Board.qml
 RemoteAccess 1.0 RemoteAccess.qml
 RenameSession 1.0 RenameSession.qml
-Roster 1.0 Roster.qml
 SpectralOrb 1.0 SpectralOrb.qml
 ToolCard 1.0 ToolCard.qml
 Glow 1.0 Glow.qml

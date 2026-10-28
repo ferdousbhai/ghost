@@ -12,7 +12,7 @@ var PLACES = [
         icon: "M12 8v4l3 2M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0" },
     { id: "character", label: "Character", hint: "persona",
         icon: "M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM16 9h3M16 13h3M10 12a2 2 0 1 0 0-4 2 2 0 0 0 0 4M6 17a4 4 0 0 1 8 0" },
-    { id: "ghosts", label: "Ghosts", hint: "switch, summon, rename",
+    { id: "ghosts", label: "Ghosts", hint: "switch, summon, rename, banish",
         icon: "M12 2a8 8 0 0 0-8 8v12l3-3 2.5 2.5L12 19l2.5 2.5L17 19l3 3V10a8 8 0 0 0-8-8zM9 10h.01M15 10h.01" },
     { id: "hooks", label: "Hooks", hint: "lifecycle commands",
         icon: "M8 12h8M12 8v8M7 3v4M17 3v4M7 17v4M17 17v4M3 7h4M17 7h4M3 17h4M17 17h4M7 7h10v10H7z" },
@@ -98,6 +98,34 @@ function rows(query, sessions, ghost, now, hookCount) {
         out.push({ kind: "header", id: "h-ask", label: "Ask" });
         out.push(ask);
     }
+    return out;
+}
+
+/** What the daemon accepts as a ghost's name (its directory). */
+var GHOST_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/**
+ * The ghosts list: every ghost matching `query`, the active one first and
+ * marked; a query that is a free, valid name adds a row summoning it. So the
+ * filter is also where a new ghost is named, as the home filter is where a
+ * new conversation starts.
+ */
+function ghostRows(query, ghosts, active) {
+    var typed = String(query || "").trim();
+    var q = typed.toLowerCase();
+    var out = [];
+    var taken = false;
+    var names = (ghosts || []).map(function (ghost) { return ghost && ghost.name; })
+        .filter(function (name) { return typeof name === "string" && name !== ""; });
+    names.sort(function (a, b) { return (b === active) - (a === active) || a.localeCompare(b); });
+    for (var i = 0; i < names.length; i++) {
+        if (names[i].toLowerCase() === q) taken = true;
+        if (q !== "" && !contains(names[i], q)) continue;
+        out.push({ kind: "ghost", id: names[i], label: names[i], title: names[i],
+            detail: names[i] === active ? "current" : "" });
+    }
+    if (typed !== "" && !taken && GHOST_NAME.test(typed))
+        out.push({ kind: "summon", id: "summon", label: "Summon " + typed, title: typed, detail: "a new ghost" });
     return out;
 }
 

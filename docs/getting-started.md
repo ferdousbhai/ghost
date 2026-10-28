@@ -131,8 +131,9 @@ ghost use sage        # save it as your default ghost (~/.config/ghost/cli.json)
 ghost list
 ```
 
-HUD: open the ghost mark in the bar, choose **Ghosts**, click the `+` in its
-header, type a name, press Enter.
+HUD: open the ghost mark in the bar, choose **Ghosts**, type a name, and press
+Enter on **Summon sage**. The same list switches ghosts (Enter), renames one
+(`Ctrl+R`), and banishes one (`Delete`, then type its name to confirm).
 
 Either route posts to the same daemon route, which creates `~/ghosts/sage/`
 with a seeded `character.md`.
@@ -216,8 +217,8 @@ filter on top and the ghost's conversations and places under it.
 | `Esc` | close |
 
 A row grows the card into its view: a conversation, **Board**, **Routines**,
-**Character**, **Ghosts**, **Hooks**, **MCP servers**, or **Remote access**;
-`‹` or `Esc` goes back to the list. An empty conversation shows the ghost's
+**Character**, **Hooks**, **MCP servers**, or **Remote access**; `‹` or `Esc`
+goes back to the list. **Ghosts** stays a list of the same size. An empty conversation shows the ghost's
 glyph, its name, and the static line `What's on your mind?`.
 
 In a conversation, type, and:
