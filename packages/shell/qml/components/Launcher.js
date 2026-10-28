@@ -43,6 +43,13 @@ function age(updatedAt, now) {
         "Oct", "Nov", "Dec"][date.getMonth()];
 }
 
+/** The preview says something the title does not: neither is the other's start. */
+function previewAdds(title, preview) {
+    var a = String(title || "").toLowerCase().trim();
+    var b = String(preview || "").toLowerCase().trim();
+    return b !== "" && b.indexOf(a) !== 0 && a.indexOf(b) !== 0;
+}
+
 function contains(text, query) {
     return String(text || "").toLowerCase().indexOf(query) !== -1;
 }
@@ -89,10 +96,12 @@ function rows(query, sessions, ghost, now, hookCount) {
             kind: "session", id: session.id, label: title,
             title: typeof session.title === "string" ? session.title : "",
             // A question is what the owner most needs to read in the row.
-            // A title is often the first message cut short; then the preview only repeats it.
+            // At rest a row is its title, as the desktop's menu shows one; a
+            // filter brings the preview in to say why it matched. A waiting
+            // question is state, so it always shows. A preview that is only
+            // the title cut short, or the title's own start, repeats it.
             detail: session.question ? session.question.text
-                : session.title && session.preview && !session.preview.toLowerCase().startsWith(title.toLowerCase())
-                    ? session.preview : "",
+                : q !== "" && previewAdds(title, session.preview) ? session.preview : "",
             asking: !!session.question,
             meta: age(session.updatedAt, now), pinned: session.pinned === true,
             unread: session.unread === true, running: session.running === true
@@ -102,7 +111,8 @@ function rows(query, sessions, ghost, now, hookCount) {
     for (var j = 0; j < PLACES.length; j++) {
         var place = PLACES[j];
         if (q !== "" && !contains(place.label, q) && !contains(place.hint, q)) continue;
-        var detail = place.id === "hooks" && hookCount > 0 ? hookCount + " loaded" : place.hint;
+        // The hooks count is state and always shows; a hint only explains a match.
+        var detail = place.id === "hooks" && hookCount > 0 ? hookCount + " loaded" : q !== "" ? place.hint : "";
         places.push({ kind: "place", id: place.id, label: place.label, detail: detail, icon: place.icon });
     }
     var ask = q === "" || ghost === "" ? null

@@ -30,13 +30,16 @@ Column {
     visible: root.question !== null && root.question !== undefined
     spacing: Theme.gap
 
-    Row {
+    // The dot, the question, and `dismiss` held to the right edge whatever
+    // the question's length.
+    Item {
         width: root.width
-        spacing: Theme.gap
+        height: questionText.height
 
         Rectangle {
             id: blockedDot
-            anchors.verticalCenter: questionText.verticalCenter
+            anchors.left: parent.left
+            y: (questionMetrics.height - height) / 2
             width: 6
             height: 6
             radius: 3
@@ -45,16 +48,26 @@ Column {
 
         Text {
             id: questionText
-            width: root.width - blockedDot.width - dismiss.width - Theme.gap * 2
+            anchors.left: blockedDot.right
+            anchors.leftMargin: Theme.gap
+            anchors.right: dismiss.left
+            anchors.rightMargin: Theme.gap * 2
             text: root.question ? root.question.text : ""
             color: Theme.foregroundBright
             font.family: Theme.fontFamily
             font.pixelSize: Theme.fontSize
             wrapMode: Text.Wrap
+
+            FontMetrics {
+                id: questionMetrics
+                font: questionText.font
+            }
         }
 
         Text {
             id: dismiss
+            anchors.right: parent.right
+            anchors.top: parent.top
             text: "dismiss"
             color: dismissArea.containsMouse ? Theme.foregroundBright : Theme.foregroundFaint
             font.family: Theme.fontFamily
@@ -63,6 +76,7 @@ Column {
             MouseArea {
                 id: dismissArea
                 anchors.fill: parent
+                anchors.margins: -Theme.gap
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: root.dismissed()
@@ -85,7 +99,7 @@ Column {
                 required property string modelData
                 required property int index
 
-                width: answerText.implicitWidth + Theme.pad
+                width: answerRow.implicitWidth + Theme.pad
                 height: Theme.controlHeight
                 radius: Theme.controlRadius
                 color: answerArea.containsMouse ? Theme.menuSelectedBackground : Theme.film(0.06)
@@ -94,14 +108,25 @@ Column {
                 Accessible.role: Accessible.Button
                 Accessible.name: answer.modelData
 
-                Text {
-                    id: answerText
+                // The number key that picks it, quieter than the answer itself.
+                Row {
+                    id: answerRow
                     anchors.centerIn: parent
-                    // The number key that picks it (there are at most six).
-                    text: (answer.index + 1) + "  " + answer.modelData
-                    color: answerArea.containsMouse ? Theme.menuSelectedText : Theme.menuText
-                    font.family: Theme.fontFamily
-                    font.pixelSize: Theme.fontSizeSmall
+                    spacing: Theme.gap
+
+                    Text {
+                        text: String(answer.index + 1)
+                        color: Theme.foregroundFaint
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
+
+                    Text {
+                        text: answer.modelData
+                        color: answerArea.containsMouse ? Theme.menuSelectedText : Theme.menuText
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSizeSmall
+                    }
                 }
 
                 MouseArea {

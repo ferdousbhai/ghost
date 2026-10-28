@@ -80,7 +80,10 @@ TestCase {
         compare(untitled.meta, "30m");
         verify(untitled.unread);
         compare(rows.find(row => row.id === "a").meta, "20 Oct");
-        compare(rows.find(row => row.id === "a").detail, "can you fix the readme");
+        // At rest a row is its title; a filter brings in the preview that matched.
+        compare(rows.find(row => row.id === "a").detail, "");
+        compare(Launcher.rows("readme", sessions, "casper", now, 0).find(row => row.id === "a").detail,
+            "can you fix the readme");
         compare(rows.find(row => row.id === "c").meta, "now");
         verify(rows.find(row => row.id === "c").running);
     }
@@ -106,7 +109,9 @@ TestCase {
 
     function test_hooksSayHowManyAreLoaded(): void {
         compare(Launcher.rows("", [], "casper", now, 7).find(row => row.id === "hooks").detail, "7 loaded");
-        compare(Launcher.rows("", [], "casper", now, 0).find(row => row.id === "hooks").detail,
+        // A hint only explains a match; at rest the row is its name.
+        compare(Launcher.rows("", [], "casper", now, 0).find(row => row.id === "hooks").detail, "");
+        compare(Launcher.rows("hook", [], "casper", now, 0).find(row => row.id === "hooks").detail,
             "lifecycle commands");
     }
 
@@ -192,12 +197,15 @@ TestCase {
         compare(asked.length, 1);
     }
 
-    function test_aTitleCutFromThePreviewDoesNotRepeatIt(): void {
-        const rows = Launcher.rows("", [
+    function test_aPreviewThatRepeatsTheTitleIsNotShown(): void {
+        const sessions = [
             { id: "cut", title: "Remind me to leave", preview: "remind me to leave for home at 3pm" },
+            { id: "start", title: "Connectivity check from the owner's coding session", preview: "Connectivity check" },
             { id: "named", title: "Taxes", preview: "help me file the return" }
-        ], "casper", now, 0);
+        ];
+        const rows = Launcher.rows("e", sessions, "casper", now, 0);
         compare(rows.find(row => row.id === "cut").detail, "");
+        compare(rows.find(row => row.id === "start").detail, "");
         compare(rows.find(row => row.id === "named").detail, "help me file the return");
     }
 

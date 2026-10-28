@@ -19,9 +19,9 @@ Rectangle {
     height: Math.min(root.maxHeight, column.implicitHeight + Theme.pad * 2)
     color: Theme.background
     border.width: 1
-    border.color: Presence.phase === "failed" ? Theme.rose(0.6)
-        : Presence.question ? Theme.danger : Theme.film(0.22)
-    radius: Theme.radius * 2
+    // A failure frames the card; a question needs only its own red dot.
+    border.color: Presence.phase === "failed" ? Theme.rose(0.6) : Theme.film(0.22)
+    radius: Theme.radius
     focus: true
 
     Keys.onEscapePressed: Presence.clear()

@@ -15,7 +15,7 @@ Rectangle {
 
     width: Math.min(Theme.ch(72), parent ? parent.width - Theme.pad * 2 : Theme.ch(72))
     height: column.implicitHeight + Theme.pad * 2
-    radius: height / 2 > Theme.controlHeight ? Theme.radius * 2 : height / 2
+    radius: Theme.radius
     color: Theme.background
     border.width: 1
     border.color: Dictation.recording ? Theme.amber(0.7) : Theme.film(0.22)

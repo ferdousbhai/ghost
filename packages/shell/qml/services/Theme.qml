@@ -309,11 +309,14 @@ Singleton {
     readonly property string synKeyword: "#9d8cf5"
     readonly property string synFunction: "#d9c98a"
 
-    // Omarchy publishes no radius in shell.toml, so the chrome's is Ghost's
-    // own: cards and panels round at 8px and small controls at 6px. Chat surfaces: 16px for capsules and
-    // the composer, 12px for chips, 4px for the speaker tail.
-    readonly property int radius: 8
-    readonly property int controlRadius: 6
+    // Omarchy's chrome rounds as Hyprland's windows do: its Style.cornerRadius
+    // mirrors `decoration:rounding` (0, square, by default). Ghost's cards,
+    // panels and rows follow the same number so they sit beside Omarchy's menu
+    // as one family; small controls cap it at 6px, as Omarchy's inner surfaces
+    // do. Chat surfaces keep their own shapes: 16px for capsules and the
+    // composer, 12px for chips, 4px for the speaker tail.
+    property int radius: 0
+    readonly property int controlRadius: Math.min(root.radius, 6)
     readonly property int bubbleRadius: 16
     readonly property int bubbleRadiusSmall: 12
     readonly property int bubbleTailRadius: 4
@@ -433,6 +436,21 @@ Singleton {
         colorsFile.reload();
         shellFile.reload();
         nameFile.reload();
+        if (!roundingProbe.running) roundingProbe.running = true;
+    }
+
+    Component.onCompleted: roundingProbe.running = true
+
+    // Hyprland's window rounding, the number Omarchy's own chrome uses.
+    Process {
+        id: roundingProbe
+        command: ["hyprctl", "getoption", "decoration:rounding", "-j"]
+        stdout: SplitParser {
+            onRead: data => {
+                const match = /"int"\s*:\s*(\d+)/u.exec(data);
+                if (match) root.radius = Number(match[1]);
+            }
+        }
     }
 
     FileView {

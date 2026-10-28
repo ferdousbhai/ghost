@@ -58,6 +58,11 @@ FocusScope {
     }
 
     readonly property int rowHeight: Theme.controlHeight + Theme.gap * 2
+    // Where a row's text starts, inside the list: its mark's slot, then a gap.
+    // Section labels start there too, so a heading lines up with what it heads.
+    readonly property real markInset: Theme.pad - Theme.gap
+    readonly property real markWidth: Theme.fontSize + 6
+    readonly property real textInset: root.markInset + root.markWidth + Theme.gap * 1.5
     readonly property int headerRowHeight: Theme.fontSizeCaption + Theme.gap * 3
 
     implicitHeight: header.height + 1 + list.height + footer.height + Theme.gap * 2
@@ -265,7 +270,7 @@ FocusScope {
             Text {
                 visible: row.header
                 anchors.left: parent.left
-                anchors.leftMargin: Theme.pad - Theme.gap
+                anchors.leftMargin: root.textInset
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Theme.gap / 2
                 text: row.modelData.label.toUpperCase()
@@ -288,9 +293,9 @@ FocusScope {
                 Item {
                     id: mark
                     anchors.left: parent.left
-                    anchors.leftMargin: Theme.pad - Theme.gap
+                    anchors.leftMargin: root.markInset
                     anchors.verticalCenter: parent.verticalCenter
-                    width: Theme.fontSize + 6
+                    width: root.markWidth
                     height: width
 
                     GhostGlyph {

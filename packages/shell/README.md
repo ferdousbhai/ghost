@@ -66,8 +66,17 @@ copy at `~/.local/state/omarchy/current/theme/`:
 
 Two Omarchy decisions live outside those files. Its fontconfig binds
 `monospace` to JetBrainsMono Nerd Font machine-wide, so the shell asks for
-`monospace` rather than pinning a family. And `shell.toml` publishes no radius
-while `default/hypr/looknfeel.lua` rounds nothing, so surfaces are square.
+`monospace` rather than pinning a family. And `shell.toml` publishes no radius:
+Omarchy's chrome rounds as Hyprland's windows do (`decoration:rounding`, read
+with `hyprctl getoption`), square by default, so `Theme.radius` reads the same
+number and Ghost's cards, rows and dialogs match Omarchy's menu. Chat bubbles
+keep their own shapes.
+
+Lists follow the desktop menu's restraint: at rest a launcher row is its title
+and a state mark (pin, unread, waiting, running); a row's detail appears while
+filtering, to say why it matched, except state that always matters (a waiting
+question, the loaded hooks count). Section labels align with the text they
+head.
 
 Because the face is monospace, horizontal measures are quoted in columns:
 `Theme.ch(n)` resolves a character count through the real metrics of whatever
